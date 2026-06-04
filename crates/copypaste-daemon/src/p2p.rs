@@ -25,7 +25,7 @@ use copypaste_p2p::{
     discovery::{DiscoveryService, PeerInfo},
     transport::{DeviceFingerprint, PairedPeers, PeerTransport},
 };
-use copypaste_sync::protocol::WireItem;
+use copypaste_sync::protocol::{ControlMsg, PeerFrame, WireItem};
 
 use crate::keychain;
 
@@ -68,7 +68,7 @@ pub struct P2pConfig {
 /// it has a live, non-closed sender here.  The `last_sync_at` heuristic acts
 /// as a fallback when P2P is disabled or not yet connected.
 pub type LivePeerSinks =
-    Arc<Mutex<HashMap<copypaste_p2p::transport::DeviceFingerprint, mpsc::Sender<WireItem>>>>;
+    Arc<Mutex<HashMap<copypaste_p2p::transport::DeviceFingerprint, mpsc::Sender<PeerFrame>>>>;
 
 /// Live handle to a running P2P subsystem (returned from [`start_p2p`]).
 pub struct P2pHandle {
@@ -82,10 +82,11 @@ pub struct P2pHandle {
     /// every long-running task instead, so one `cancel()` stops them all.
     pub shutdown_token: CancellationToken,
     /// Shared map of currently-connected peer sinks (SINGLE SOURCE OF TRUTH for
-    /// online status). The IPC `list_peers` handler receives this via
-    /// `IpcServer::with_live_peer_sinks` and checks each peer's canonical
-    /// fingerprint: present + non-closed = online.
+    /// online status AND the channel the unpair/revoke handlers use to send a
+    /// `PeerFrame::Control(ControlMsg::Unpair)` to an online peer. Both fields
+    /// are clones of the same underlying map.
     pub live_sinks: LivePeerSinks,
+    pub peer_sinks: PeerSinks,
 }
 
 /// Lightweight, synchronously-constructed P2P state used by the IPC layer.
@@ -168,17 +169,17 @@ pub fn get_own_fingerprint(public_key: &[u8]) -> String {
 
 /// Shared map of currently-connected peer sinks.
 ///
-/// Each entry is a per-connection `mpsc::Sender<WireItem>` that the
+/// Each entry is a per-connection `mpsc::Sender<PeerFrame>` that the
 /// per-connection write task drains, serialises and sends to the peer over
-/// the mTLS Framed stream. The outbound fanout loop writes to every live
-/// sender; closed senders (disconnected peers) are pruned on the next
-/// fanout pass.
+/// the mTLS Framed stream. The outbound fanout loop writes `PeerFrame::Data`
+/// entries; the unpair signal path writes `PeerFrame::Control(ControlMsg::Unpair)`.
+/// Closed senders (disconnected peers) are pruned on the next fanout pass.
 ///
 /// Keyed by the peer's verified **certificate fingerprint** (not its socket
 /// address): a reconnect from a fresh ephemeral source port reuses the same
 /// key, so the new connection replaces the old sink rather than producing a
 /// duplicate that would double-fan-out every item (fix/p2p-c-review #4).
-type PeerSinks = Arc<Mutex<HashMap<DeviceFingerprint, mpsc::Sender<WireItem>>>>;
+pub type PeerSinks = Arc<Mutex<HashMap<DeviceFingerprint, mpsc::Sender<PeerFrame>>>>;
 
 /// Catch-up provider: produces the current local history as `WireItem`s already
 /// re-keyed under the shared sync key, so a freshly-connected peer receives every
@@ -509,6 +510,7 @@ pub async fn start_p2p(
         actual_port,
         shutdown_token,
         live_sinks: Arc::clone(&peer_sinks),
+        peer_sinks,
     })
 }
 
@@ -547,9 +549,9 @@ async fn accept_loop(
                     Ok((peer_addr, peer_fp, framed)) => {
                         tracing::info!(%peer_addr, %peer_fp, "mTLS handshake completed");
 
-                        // Per-peer write channel: the outbound loop sends items here;
+                        // Per-peer write channel: the outbound loop sends frames here;
                         // the write half of the per-connection task drains and serialises them.
-                        let (peer_tx, peer_rx) = mpsc::channel::<WireItem>(64);
+                        let (peer_tx, peer_rx) = mpsc::channel::<PeerFrame>(64);
 
                         // fix/p2p-c-review #4: key by the verified cert fingerprint,
                         // not the ephemeral socket address. A reconnect from a new
@@ -599,8 +601,9 @@ async fn accept_loop(
 
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
+                        let peer_fp_for_task = peer_fp.clone();
                         tokio::spawn(async move {
-                            run_peer_connection(framed, peer_rx, incoming_tx).await;
+                            run_peer_connection(framed, peer_rx, incoming_tx, peer_fp_for_task).await;
                             // Clean up the sink when the connection drops — but only
                             // if it is still *this* connection's sink (a later
                             // reconnect may have replaced it under the same key).
@@ -948,7 +951,7 @@ async fn peer_connector_loop(
                         drop(sinks);
                         drop(stream);
                     } else {
-                        let (peer_tx, peer_rx) = mpsc::channel::<WireItem>(64);
+                        let (peer_tx, peer_rx) = mpsc::channel::<PeerFrame>(64);
                         let cleanup_tx = peer_tx.clone();
                         sinks.insert(peer.fingerprint.clone(), peer_tx);
                         drop(sinks);
@@ -972,8 +975,15 @@ async fn peer_connector_loop(
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
                         let peer_key = peer.fingerprint.clone();
+                        let peer_fp_for_task = peer.fingerprint.clone();
                         tokio::spawn(async move {
-                            run_peer_connection_client(stream, peer_rx, incoming_tx).await;
+                            run_peer_connection_client(
+                                stream,
+                                peer_rx,
+                                incoming_tx,
+                                peer_fp_for_task,
+                            )
+                            .await;
                             let mut sinks = peer_sinks.lock().await;
                             if sinks
                                 .get(&peer_key)
@@ -1055,12 +1065,17 @@ async fn peer_connector_loop(
 }
 
 /// Manage one authenticated **inbound** (accept-side) peer connection.
+///
+/// `peer_fp` is the mTLS-verified certificate fingerprint of the remote peer,
+/// used to authenticate any `ControlMsg::Unpair` signal (see
+/// [`run_peer_connection_framed`]).
 async fn run_peer_connection(
     framed: copypaste_p2p::transport::PeerStream,
-    peer_rx: mpsc::Receiver<WireItem>,
+    peer_rx: mpsc::Receiver<PeerFrame>,
     incoming_tx: mpsc::Sender<WireItem>,
+    peer_fp: DeviceFingerprint,
 ) {
-    run_peer_connection_framed(framed, peer_rx, incoming_tx).await
+    run_peer_connection_framed(framed, peer_rx, incoming_tx, peer_fp).await
 }
 
 /// Manage one authenticated **outbound** (connector-side) peer connection.
@@ -1069,10 +1084,11 @@ async fn run_peer_connection(
 /// stream type returned by [`PeerTransport::connect_with_retry`].
 async fn run_peer_connection_client(
     framed: copypaste_p2p::transport::PeerClientStream,
-    peer_rx: mpsc::Receiver<WireItem>,
+    peer_rx: mpsc::Receiver<PeerFrame>,
     incoming_tx: mpsc::Sender<WireItem>,
+    peer_fp: DeviceFingerprint,
 ) {
-    run_peer_connection_framed(framed, peer_rx, incoming_tx).await
+    run_peer_connection_framed(framed, peer_rx, incoming_tx, peer_fp).await
 }
 
 /// Maximum time a single outbound `framed.send().await` may block before the
@@ -1096,29 +1112,51 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(8);
 /// concurrently via `tokio::select!`; the task exits when either side closes.
 /// Generic over the framed stream so the server-side ([`PeerStream`]) and
 /// client-side ([`PeerClientStream`]) TLS stream types share one implementation.
+///
+/// ## Security — unpair signal eviction
+///
+/// On receiving `PeerFrame::Control(ControlMsg::Unpair)` the local peer
+/// record for `peer_fp` is evicted from `peers.json` and the live mTLS
+/// allowlist.  The eviction is keyed to `peer_fp`, which is the **mTLS
+/// certificate fingerprint verified by the transport layer** before this
+/// function is ever called — it is NOT a field inside the message itself.
+/// This means a misbehaving or compromised peer can only cause its OWN
+/// pairing to be removed, never that of any other peer.
 async fn run_peer_connection_framed<S>(
     mut framed: tokio_util::codec::Framed<S, tokio_util::codec::LengthDelimitedCodec>,
-    mut peer_rx: mpsc::Receiver<WireItem>,
+    mut peer_rx: mpsc::Receiver<PeerFrame>,
     incoming_tx: mpsc::Sender<WireItem>,
+    peer_fp: DeviceFingerprint,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     loop {
         tokio::select! {
-            // Inbound: peer sent a frame — deserialise and forward to sync_orch.
+            // Inbound: peer sent a frame — deserialise and dispatch.
             frame_opt = framed.next() => {
                 match frame_opt {
                     Some(Ok(frame)) => {
-                        match serde_json::from_slice::<WireItem>(&frame) {
-                            Ok(wire) => {
+                        match serde_json::from_slice::<PeerFrame>(&frame) {
+                            Ok(PeerFrame::Data(wire)) => {
                                 if incoming_tx.send(wire).await.is_err() {
                                     // incoming_tx closed means sync_orch shut down.
                                     tracing::debug!("incoming_tx closed, dropping peer connection");
                                     return;
                                 }
                             }
+                            Ok(PeerFrame::Control(ControlMsg::Unpair)) => {
+                                // Security: evict using ONLY the mTLS-authenticated
+                                // peer_fp, never a field from the message body.  This
+                                // ensures a peer can only remove its OWN pairing.
+                                tracing::info!(
+                                    peer = %peer_fp,
+                                    "received unpair signal from authenticated peer — evicting"
+                                );
+                                evict_peer_local(&peer_fp);
+                                return;
+                            }
                             Err(e) => {
-                                tracing::warn!("failed to deserialise WireItem from peer: {e}");
+                                tracing::warn!("failed to deserialise frame from peer: {e}");
                             }
                         }
                     }
@@ -1132,19 +1170,12 @@ async fn run_peer_connection_framed<S>(
                     }
                 }
             }
-            // Outbound: sync_orch wants to push an item to this peer.
-            item_opt = peer_rx.recv() => {
-                match item_opt {
-                    Some(item) => {
-                        match serde_json::to_vec(&item) {
+            // Outbound: sync_orch or the IPC unpair handler wants to push a frame.
+            frame_opt = peer_rx.recv() => {
+                match frame_opt {
+                    Some(frame) => {
+                        match serde_json::to_vec(&frame) {
                             Ok(payload) => {
-                                // Bound the write: a half-closed peer can make this
-                                // send block forever, parking the select! in the write
-                                // arm so the read arm never sees EOF and the sink never
-                                // closes. On timeout or send error, tear the connection
-                                // down so `peer_rx` drops, the sink `Sender` closes, the
-                                // connector re-dials, and the accept loop stops treating
-                                // the peer as connected.
                                 match tokio::time::timeout(
                                     WRITE_TIMEOUT,
                                     framed.send(Bytes::from(payload)),
@@ -1153,7 +1184,7 @@ async fn run_peer_connection_framed<S>(
                                 {
                                     Ok(Ok(())) => {}
                                     Ok(Err(e)) => {
-                                        tracing::warn!("failed to send WireItem to peer: {e}");
+                                        tracing::warn!("failed to send frame to peer: {e}");
                                         return;
                                     }
                                     Err(_elapsed) => {
@@ -1162,16 +1193,15 @@ async fn run_peer_connection_framed<S>(
                                             "peer write timed out — tearing down half-closed connection"
                                         );
                                         return;
-                                    }
-                                }
+                                    }                                }
                             }
                             Err(e) => {
-                                tracing::warn!("failed to serialise WireItem for peer: {e}");
+                                tracing::warn!("failed to serialise frame for peer: {e}");
                             }
                         }
                     }
                     None => {
-                        // peer_rx channel closed — no more outbound items for this peer.
+                        // peer_rx channel closed — no more outbound frames for this peer.
                         return;
                     }
                 }
@@ -1274,7 +1304,7 @@ fn stamp_peer_sync(peers_path: &std::path::Path, peer_fp: &DeviceFingerprint) {
     }
 }
 
-async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<WireItem>) {
+async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<PeerFrame>) {
     let items = catchup();
     if items.is_empty() {
         return;
@@ -1284,7 +1314,7 @@ async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<WireItem>) 
         "P2P sync-on-connect: replaying local history to peer"
     );
     for item in items {
-        if sink.send(item).await.is_err() {
+        if sink.send(PeerFrame::Data(item)).await.is_err() {
             tracing::debug!("P2P sync-on-connect: peer sink closed mid-replay");
             return;
         }
@@ -1308,7 +1338,7 @@ async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<WireItem>) 
 /// must not evict a live peer merely for being momentarily behind.
 async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
     // Snapshot (key, sender) pairs under the lock, then release it before sending.
-    let snapshot: Vec<(DeviceFingerprint, mpsc::Sender<WireItem>)> = {
+    let snapshot: Vec<(DeviceFingerprint, mpsc::Sender<PeerFrame>)> = {
         let sinks = peer_sinks.lock().await;
         sinks
             .iter()
@@ -1318,7 +1348,7 @@ async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
 
     let mut dead_keys: Vec<DeviceFingerprint> = Vec::new();
     for (key, tx) in snapshot {
-        match tx.try_send(item.clone()) {
+        match tx.try_send(PeerFrame::Data(item.clone())) {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Full(_)) => {
                 tracing::warn!(
@@ -1338,6 +1368,37 @@ async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
         for key in dead_keys {
             sinks.remove(&key);
         }
+    }
+}
+
+/// Evict a peer from the local persistent store and live allowlist on receipt
+/// of an authenticated unpair signal.
+///
+/// This is the **receive side** of mutual unpair.  `peer_fp` is the mTLS
+/// certificate fingerprint that the TLS transport verified before any data was
+/// exchanged — it is the only input used for the eviction, so a misbehaving
+/// peer cannot cause another peer's record to be removed.
+///
+/// Best-effort: file-system or parse failures are logged but do not return an
+/// error — the calling connection task exits regardless, ensuring the local
+/// mTLS transport will refuse further reconnects from this peer once the
+/// allowlist entry is gone.
+fn evict_peer_local(peer_fp: &str) {
+    let peers_path = crate::ipc::peers_file_path();
+    let mut peers = crate::peers::load_peers(&peers_path);
+    let before = peers.len();
+    // Normalise stored colon-hex fingerprints before comparing, because the
+    // P2P layer reports colon-free hex (the canonical form used here).
+    let canonical_target = peer_fp.to_ascii_lowercase();
+    peers.retain(|p| crate::ipc::canonical_fingerprint(&p.fingerprint) != canonical_target);
+    let removed = peers.len() < before;
+    if let Err(e) = crate::peers::save_peers(&peers_path, &peers) {
+        tracing::warn!(
+            peer = %peer_fp,
+            "evict_peer_local: failed to save peers.json after unpair signal: {e}"
+        );
+    } else if removed {
+        tracing::info!(peer = %peer_fp, "evict_peer_local: peer removed from peers.json");
     }
 }
 
@@ -2340,5 +2401,133 @@ mod tests {
             Some("10.0.0.1:1000"),
             "unmatched update must not modify any record"
         );
+    }
+
+    // ── Mutual unpair ─────────────────────────────────────────────────────────
+
+    /// `evict_peer_local` removes the matching peer from `peers.json` and
+    /// leaves all other records intact.  The eviction is keyed to the
+    /// mTLS-authenticated fingerprint (canonical, colon-free hex); the function
+    /// must not touch any other record even when the stored form uses colon-hex.
+    #[test]
+    fn evict_peer_local_removes_only_the_authenticated_peer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("peers.json");
+
+        // Store two peers in colon-hex form (the standard peers.json format).
+        crate::peers::save_peers(
+            &path,
+            &[
+                crate::peers::PairedDevice {
+                    fingerprint: "aa:bb:cc".to_string(),
+                    name: "Alice".to_string(),
+                    added_at: 1_000,
+                    address: Some("10.0.0.1:1111".to_string()),
+                    sync_key_b64: None,
+                    model: None,
+                    os_version: None,
+                    app_version: None,
+                    local_ip: None,
+                    public_ip: None,
+                    first_sync_at: None,
+                    last_sync_at: None,
+                },
+                crate::peers::PairedDevice {
+                    fingerprint: "dd:ee:ff".to_string(),
+                    name: "Bob".to_string(),
+                    added_at: 2_000,
+                    address: None,
+                    sync_key_b64: None,
+                    model: None,
+                    os_version: None,
+                    app_version: None,
+                    local_ip: None,
+                    public_ip: None,
+                    first_sync_at: None,
+                    last_sync_at: None,
+                },
+            ],
+        )
+        .unwrap();
+
+        // Set up the env so `evict_peer_local` resolves to our temp dir.
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        // SAFETY: serialised via TEST_ENV_LOCK.
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        // Evict Alice using the canonical (colon-free) form of her fingerprint,
+        // exactly as the mTLS layer would provide it.
+        evict_peer_local("aabbcc");
+
+        // Restore env before any assertions that might panic.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        let loaded = crate::peers::load_peers(&path);
+        assert_eq!(loaded.len(), 1, "Alice must have been removed");
+        assert_eq!(
+            loaded[0].name, "Bob",
+            "Bob must remain untouched after Alice's eviction"
+        );
+    }
+
+    /// Receiving an `Unpair` signal from a peer whose fingerprint does NOT
+    /// match any stored record is a no-op: `peers.json` is unchanged and the
+    /// call does not panic.
+    #[test]
+    fn evict_peer_local_unknown_fp_is_noop() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("peers.json");
+        crate::peers::save_peers(
+            &path,
+            &[crate::peers::PairedDevice {
+                fingerprint: "aa:bb:cc".to_string(),
+                name: "Alice".to_string(),
+                added_at: 1_000,
+                address: None,
+                sync_key_b64: None,
+                model: None,
+                os_version: None,
+                app_version: None,
+                local_ip: None,
+                public_ip: None,
+                first_sync_at: None,
+                last_sync_at: None,
+            }],
+        )
+        .unwrap();
+
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        // "deadbeef" has no stored record — must be a silent no-op.
+        evict_peer_local("deadbeef");
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        let loaded = crate::peers::load_peers(&path);
+        assert_eq!(loaded.len(), 1, "Alice must be untouched");
+        assert_eq!(loaded[0].name, "Alice");
     }
 }

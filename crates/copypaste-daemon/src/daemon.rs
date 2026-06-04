@@ -508,6 +508,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // B1: surfaced out of this block so the P2P subsystem (below) can share
         // the SAME public-IP cache the IPC server reads and the STUN task writes.
         public_ip_cache,
+        // Mutual unpair: shared slot the IPC handlers read to find live peer sinks.
+        p2p_live_sinks_slot,
     ) = {
         let mut server = IpcServer::new(
             db.clone(),
@@ -585,11 +587,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // known; the pairing handlers then send it in-band over the bootstrap
         // channel so the peer can persist it for the Phase 3 connector.
         let sync_addr_slot = server.p2p_sync_addr_slot();
-        // Online-status: grab the shared slot for the live P2P peer-sinks map.
-        // Populated below (after `start_p2p` returns) so `list_peers` always
-        // reads the live connection table as the SINGLE SOURCE OF TRUTH for
-        // the `online` flag.
+        // Online-status slot (list_peers) + mutual-unpair control slot.
         let live_sinks_slot = server.live_peer_sinks_slot();
+        let p2p_unpair_slot = server.p2p_live_sinks_slot();
         // LAN/SAS Phase 2: grab a clone of the shared discovery-pairing
         // coordinator so the standing responder in `start_p2p` routes its SAS
         // through the SAME state machine the IPC handlers observe.
@@ -625,6 +625,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             pairing_coordinator,
             handle,
             public_ip_cache,
+            p2p_unpair_slot,
         )
     };
 
@@ -746,15 +747,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
                         *slot = Some(addr);
                     }
-                    // Wire the live peer-sinks map into the IPC server slot so
-                    // `list_peers` uses the live connection table (SINGLE SOURCE
-                    // OF TRUTH for `online`). A poisoned mutex (prior panic while
-                    // holding the lock) is recovered — slot holds no secret data.
                     {
                         let mut slot = live_sinks_slot
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
                         *slot = Some(std::sync::Arc::clone(&handle.live_sinks));
+                    }
+                    {
+                        let mut slot = p2p_live_sinks_slot
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        *slot = Some(handle.peer_sinks.clone());
                     }
                     Some(handle)
                 }

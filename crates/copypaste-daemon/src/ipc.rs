@@ -847,6 +847,54 @@ pub(crate) fn display_fingerprint(fp: &str) -> String {
         .join(":")
 }
 
+/// Fire-and-forget: send a `ControlMsg::Unpair` signal to the peer identified
+/// by `canonical_fp` if it currently has a live sink in `live_sinks`.
+///
+/// This is the **send side** of mutual unpair.  Called by `unpair_peer`,
+/// `revoke_peer`, and `revoke_all_peers` after the local eviction has already
+/// committed, so the peer learns it has been removed while the connection is
+/// still open rather than waiting for the next mTLS handshake rejection.
+///
+/// Design properties:
+/// - **Non-blocking**: uses `try_send`; a full or closed sink is silently
+///   ignored.  The unpair has already taken effect locally; the signal is
+///   best-effort delivery only.
+/// - **No panic**: all `Mutex::lock` failures (poisoned lock) are silently
+///   swallowed so a prior panic cannot prevent the caller from returning a
+///   success response.
+/// - **Minimal blast radius**: only the specific peer's sink is touched; other
+///   connections are unaffected.
+fn send_unpair_signal_if_connected(
+    live_sinks: &Arc<std::sync::Mutex<Option<crate::p2p::PeerSinks>>>,
+    canonical_fp: &str,
+) {
+    use copypaste_sync::protocol::{ControlMsg, PeerFrame};
+
+    // Acquire the outer Mutex<Option<PeerSinks>> — this holds the Arc to the
+    // inner async Mutex<HashMap> only for the brief clone, never across send.
+    let sinks_arc_opt = match live_sinks.lock() {
+        Ok(guard) => guard.clone(),
+        Err(_) => return, // poisoned — skip silently
+    };
+    let sinks_arc = match sinks_arc_opt {
+        Some(a) => a,
+        None => return, // P2P not started
+    };
+
+    // `try_lock` on the async Mutex: if the map is momentarily locked by an
+    // accept/fanout task we skip — it is only needed to clone the sender.
+    let sender_opt = match sinks_arc.try_lock() {
+        Ok(map) => map.get(canonical_fp).cloned(),
+        Err(_) => return,
+    };
+
+    if let Some(tx) = sender_opt {
+        // `try_send` never blocks; Closed/Full both mean "skip silently".
+        let _ = tx.try_send(PeerFrame::Control(ControlMsg::Unpair));
+        tracing::debug!(peer = %canonical_fp, "mutual unpair: sent Unpair signal to connected peer");
+    }
+}
+
 /// Maximum lifetime of an in-progress PAKE session before it is evicted as
 /// stale (fix/p2p-c-review #1 — DoS). The full 3-message handshake is two
 /// user-driven IPC round-trips; 120 s is generous for a human typing a
@@ -1091,17 +1139,10 @@ pub struct IpcServer {
     /// observe. Always present (the machine is `Idle` when nothing is pairing).
     pairing: Arc<crate::pairing_sm::PairingCoordinator>,
 
-    /// SINGLE SOURCE OF TRUTH for peer online status — the live P2P connection
-    /// table from the running P2P subsystem.
-    ///
-    /// Populated via [`live_peer_sinks_slot`](Self::live_peer_sinks_slot) after
-    /// `start_p2p` returns (the server is already spawned at that point, so a
-    /// shared slot is used — matching the `p2p_sync_addr` pattern). The
-    /// `list_peers` handler locks this slot, and if an inner `LivePeerSinks`
-    /// is present, snapshots the key-set: a peer is online iff its canonical
-    /// fingerprint maps to a non-closed sender. Falls back to `last_sync_at`
-    /// recency only when the inner value is `None` (P2P disabled).
+    /// Online-status source (list_peers).
     live_peer_sinks: Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>>,
+    /// Control channel for mutual-unpair signalling (unpair/revoke handlers).
+    p2p_live_sinks: Arc<std::sync::Mutex<Option<crate::p2p::PeerSinks>>>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
@@ -1153,6 +1194,7 @@ impl IpcServer {
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
             pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
             live_peer_sinks: Arc::new(std::sync::Mutex::new(None)),
+            p2p_live_sinks: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1271,6 +1313,19 @@ impl IpcServer {
         *slot = Some(addr.into());
     }
 
+    /// Return a handle to the shared slot that will hold the live P2P peer-sink
+    /// map once `start_p2p` has started.
+    ///
+    /// The daemon calls this before moving the server into its task, then
+    /// populates the slot with the `PeerSinks` from the returned `P2pHandle`
+    /// after `start_p2p` completes — the same late-wiring pattern used by
+    /// `p2p_sync_addr_slot`. The `unpair_peer` / `revoke_peer` /
+    /// `revoke_all_peers` handlers read through this Arc to send a best-effort
+    /// `ControlMsg::Unpair` signal to any currently-connected peer.
+    pub fn p2p_live_sinks_slot(&self) -> Arc<std::sync::Mutex<Option<crate::p2p::PeerSinks>>> {
+        Arc::clone(&self.p2p_live_sinks)
+    }
+
     /// Wire up shared cloud-sync state created by the daemon before spawning
     /// the IPC server and `start_cloud`.
     ///
@@ -1341,6 +1396,7 @@ impl IpcServer {
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
             pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
             live_peer_sinks: Arc::new(std::sync::Mutex::new(None)),
+            p2p_live_sinks: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -5063,6 +5119,12 @@ impl IpcServer {
                                 if let Some(ref peers) = self.p2p_peers {
                                     peers.remove(&canonical_fingerprint(&fingerprint));
                                 }
+                                // Mutual unpair: best-effort signal the peer if
+                                // it is currently connected over P2P.
+                                send_unpair_signal_if_connected(
+                                    &self.p2p_live_sinks,
+                                    &canonical_fingerprint(&fingerprint),
+                                );
                                 Response::ok(
                                     req.id,
                                     serde_json::json!({ "ok": true, "removed": removed }),
@@ -5161,6 +5223,12 @@ impl IpcServer {
                         if let Some(ref peers) = self.p2p_peers {
                             peers.remove(&canonical_fingerprint(&fingerprint));
                         }
+                        // Mutual unpair: best-effort signal the peer if it is
+                        // currently connected over P2P.
+                        send_unpair_signal_if_connected(
+                            &self.p2p_live_sinks,
+                            &canonical_fingerprint(&fingerprint),
+                        );
                         Response::ok(
                             req.id,
                             serde_json::json!({
@@ -5262,6 +5330,14 @@ impl IpcServer {
                     for (fp, _) in &captured {
                         peers.remove(&canonical_fingerprint(fp));
                     }
+                }
+
+                // Mutual unpair: signal every currently-connected peer.
+                for (fp, _) in &captured {
+                    send_unpair_signal_if_connected(
+                        &self.p2p_live_sinks,
+                        &canonical_fingerprint(fp),
+                    );
                 }
 
                 Response::ok(
@@ -11610,7 +11686,6 @@ mod tests {
     /// map, even if `last_sync_at` is absent or stale.
     #[tokio::test]
     async fn list_peers_online_true_from_live_mtls_allowlist() {
-
         let dir = tempdir().unwrap();
         let sock = dir.path().join("lp_online_mtls.sock");
         let cfg_home = dir.path().join("cfg4");

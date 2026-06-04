@@ -163,6 +163,46 @@ impl WireItem {
     }
 }
 
+/// A control action sent from one peer to another over the live mTLS link.
+///
+/// Control messages are framed identically to [`WireItem`]s (length-prefixed
+/// JSON) but carry a `"control"` field that is absent from `WireItem`.
+/// Older peers that only know `WireItem` will fail to deserialise a control
+/// frame and emit a warning — this is intentional and safe: the local
+/// eviction already happened, so the peer will simply be refused at the next
+/// mTLS handshake.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "control", rename_all = "snake_case")]
+pub enum ControlMsg {
+    /// Sender is unpairing from the receiver.
+    ///
+    /// On receipt the receiver **must** evict the sender using only the
+    /// mTLS-authenticated peer identity (the verified certificate fingerprint
+    /// of the connection the frame arrived on), **never** a field inside the
+    /// message.  This prevents a compromised or misbehaving peer from causing
+    /// arbitrary evictions.
+    Unpair,
+}
+
+/// A frame that may carry either a clipboard-item payload or a control signal.
+///
+/// # Backward compatibility
+///
+/// `#[serde(untagged)]` means the serialised form of `PeerFrame::Data(item)`
+/// is byte-for-byte identical to serialising `item` directly — old peers
+/// (pre-mutual-unpair) that parse raw `WireItem`s continue to work.
+/// `PeerFrame::Control(msg)` serialises to `{"control":"…"}`, which old peers
+/// cannot parse as a `WireItem` (missing required fields) and will log a
+/// warning; that is acceptable — the local eviction already happened.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum PeerFrame {
+    /// A normal clipboard-item payload.
+    Data(WireItem),
+    /// An out-of-band control signal.
+    Control(ControlMsg),
+}
+
 /// Top-level protocol message enum.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "SCREAMING_SNAKE_CASE")]
