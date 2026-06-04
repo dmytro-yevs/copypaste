@@ -81,6 +81,14 @@ export interface HistoryEntry {
    * Optional for back-compat with daemon builds predating this field.
    */
   origin_device_id?: string;
+  /**
+   * Refined content-kind label computed by the daemon's core text-kind
+   * classifier. Values for text items: "TEXT" | "URL" | "EMAIL" | "PHONE" |
+   * "COLOR" | "JSON" | "CODE" | "NUMBER" | "PATH". Non-text: "IMAGE" | "FILE".
+   * Optional for back-compat — older daemon builds do not emit this field.
+   * The UI falls back to a content_type-derived label when absent.
+   */
+  kind?: string;
 }
 
 /**

@@ -3897,6 +3897,22 @@ impl IpcServer {
                                     (preview, vec![])
                                 };
 
+                            // Compute a stable content-kind label for the UI chip.
+                            // For text items we classify the preview string (already
+                            // the decrypted plaintext prefix — no extra decrypt needed).
+                            // Sensitive text items use their redacted placeholder, so
+                            // the classify call sees "" and returns "TEXT" (safe; the
+                            // label never leaks the secret content).
+                            // Image and file items get a fixed label.
+                            let kind: &str = if item.content_type == "text" {
+                                copypaste_core::text_kind::classify_text(&preview).label()
+                            } else if item.content_type == "file" {
+                                "FILE"
+                            } else {
+                                // "image" (legacy) or "image/*" MIME subtypes
+                                "IMAGE"
+                            };
+
                             serde_json::json!({
                                 "id": item.id,
                                 "content_type": item.content_type,
@@ -3918,6 +3934,13 @@ impl IpcServer {
                                 // `own_device_id` (envelope field) to show "This device"
                                 // vs. items synced from a peer.
                                 "origin_device_id": item.origin_device_id,
+                                // Refined content-kind label derived from the core
+                                // text-kind classifier (copypaste_core::text_kind).
+                                // Stable set: TEXT/URL/EMAIL/PHONE/COLOR/JSON/CODE/
+                                // NUMBER/PATH (text items) | IMAGE | FILE.
+                                // Older daemons omit this field; the UI falls back to
+                                // a content_type-derived label for back-compat.
+                                "kind": kind,
                             })
                         })
                         .collect();

@@ -208,6 +208,58 @@ function ContentIcon({ type }: { type: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// KindChip — full-word type chip powered by the daemon's text-kind classifier
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a fallback kind label from content_type when the daemon does not
+ * emit `kind` (older daemon builds). Mirrors the daemon's fixed labels so
+ * the UI is consistent regardless of daemon version.
+ */
+function kindFallback(contentType: string): string {
+  if (contentType === "image" || contentType.startsWith("image/")) return "IMAGE";
+  if (contentType === "file") return "FILE";
+  return "TEXT"; // text or unknown → "TEXT"
+}
+
+/**
+ * Full-word type chip: shows the daemon-computed kind label (e.g. "URL",
+ * "EMAIL", "CODE") or falls back to a content_type-derived label for older
+ * daemon builds that do not emit the `kind` field.
+ *
+ * Replaces the single-letter "T" glyph for text items; image and file items
+ * keep their ContentIcon glyph and do NOT render a KindChip (the icon is
+ * already self-explanatory).
+ */
+function KindChip({ kind, contentType }: { kind: string | undefined; contentType: string }) {
+  const label = kind ?? kindFallback(contentType);
+  // Color the chip based on the kind — each maps to an existing IDE token or
+  // a fixed hex that matches the ContentIcon palette for visual consistency.
+  const colorClass =
+    label === "URL"     ? "text-[#56b6c2] border-[#56b6c2]/40 bg-[#56b6c2]/8"
+    : label === "EMAIL"   ? "text-[#98c379] border-[#98c379]/40 bg-[#98c379]/8"
+    : label === "PHONE"   ? "text-[#98c379] border-[#98c379]/40 bg-[#98c379]/8"
+    : label === "COLOR"   ? "text-[#e5c07b] border-[#e5c07b]/40 bg-[#e5c07b]/8"
+    : label === "JSON"    ? "text-[#e06c75] border-[#e06c75]/40 bg-[#e06c75]/8"
+    : label === "CODE"    ? "text-[#c678dd] border-[#c678dd]/40 bg-[#c678dd]/8"
+    : label === "NUMBER"  ? "text-[#d19a66] border-[#d19a66]/40 bg-[#d19a66]/8"
+    : label === "PATH"    ? "text-[#e5c07b] border-[#e5c07b]/40 bg-[#e5c07b]/8"
+    : /* TEXT / fallback */ "text-ide-accent border-ide-accent/40 bg-ide-accent/8";
+  return (
+    <span
+      className={[
+        "flex shrink-0 items-center rounded border px-1 py-px",
+        "text-[9px] font-semibold leading-none tracking-wide uppercase",
+        colorClass,
+      ].join(" ")}
+      aria-label={`Type: ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Pin indicator (filled amber pin)
 // ---------------------------------------------------------------------------
 
@@ -556,10 +608,17 @@ function HistoryRow({
         </span>
       )}
 
-      {/* Type glyph */}
-      <span className="flex w-4 shrink-0 items-center justify-center">
-        <ContentIcon type={isImage ? "image" : isFile ? "file" : entry.content_type} />
-      </span>
+      {/* Type chip / glyph: image + file use their ContentIcon (visually distinct);
+          text items use a full-word KindChip powered by the daemon's classifier. */}
+      {isImage || isFile ? (
+        <span className="flex w-4 shrink-0 items-center justify-center">
+          <ContentIcon type={isImage ? "image" : "file"} />
+        </span>
+      ) : (
+        <span className="flex shrink-0 items-center">
+          <KindChip kind={entry.kind} contentType={entry.content_type} />
+        </span>
+      )}
 
       {isImage ? (
         // M1: Maccy parity — image rows show ONLY the thumbnail, no text title.
@@ -1939,6 +1998,12 @@ export function HistoryView() {
         </button>
       )}
 
+      {/* Clip count — reactive with the loaded list; hidden while loading */}
+      {loadState === "ready" && items.length > 0 && (
+        <span className="text-[11px] text-ide-faint select-none" aria-label={`${items.length} items`}>
+          {items.length} {items.length === 1 ? "item" : "items"}
+        </span>
+      )}
       <input
         ref={searchRef}
         type="search"
