@@ -165,7 +165,6 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs }: PeerRowP
 
   // Format timestamps only when they have a real value.
   const pairedStr = (peer.added_at ?? 0) > 0 ? formatEpochSecs(peer.added_at) : null;
-  const firstSyncStr = formatEpochSecs(peer.first_sync_at);
   const lastSyncStr = formatEpochSecs(peer.last_sync_at);
 
   return (

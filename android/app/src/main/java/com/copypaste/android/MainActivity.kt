@@ -220,6 +220,14 @@ internal enum class NavTab(@StringRes val labelRes: Int, val icon: ImageVector) 
 @Composable
 private fun MainShell(viewModel: ClipboardViewModel) {
     var selectedTab by rememberSaveable { mutableIntStateOf(NavTab.CLIPS.ordinal) }
+    // Unsaved-changes guard registered by SettingsScreen. When the user has
+    // pending edits and tries to switch tabs via the navbar, we route the tab
+    // change through this guard so the Discard/Keep-editing dialog intercepts it
+    // (parity with the back-press / top-bar back-arrow guard). Null when not on
+    // Settings or when there are no unsaved changes.
+    var settingsNavGuard by remember {
+        mutableStateOf<((proceed: () -> Unit) -> Unit)?>(null)
+    }
 
     Scaffold(
         containerColor = IdeBg,
@@ -239,7 +247,19 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                     val label = stringResource(tab.labelRes)
                     NavigationBarItem(
                         selected = selectedTab == index,
-                        onClick = { selectedTab = index },
+                        onClick = {
+                            val leavingSettings =
+                                NavTab.entries[selectedTab] == NavTab.SETTINGS && index != selectedTab
+                            val guard = settingsNavGuard
+                            if (leavingSettings && guard != null) {
+                                // Intercept: the guard shows the Discard dialog and
+                                // only runs `proceed` if the user confirms (or there
+                                // are no unsaved changes).
+                                guard { selectedTab = index }
+                            } else {
+                                selectedTab = index
+                            }
+                        },
                         icon = { Icon(tab.icon, contentDescription = label) },
                         label = { Text(label) },
                         colors = NavigationBarItemDefaults.colors(
@@ -273,7 +293,8 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                     )
                     NavTab.SETTINGS -> SettingsScreen(
                         showBackButton = false,
-                        onBack = {}
+                        onBack = {},
+                        onRegisterNavGuard = { guard -> settingsNavGuard = guard },
                     )
                 }
             }
