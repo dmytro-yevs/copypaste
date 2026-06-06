@@ -342,9 +342,12 @@ class ClipboardService : Service() {
         val sessionKeys = peers.map {
             PeerSessionKeyInfo(it.fingerprint, settings.sessionKeyFor(it.fingerprint))
         }
-        val localItems = runBlocking {
-            repository.localItemsForSync(key)
-        }
+
+        // C5: localItemsForSync can block for tens–hundreds ms on large history;
+        // running it on the FGS main thread risks ANR. Move the fetch and all
+        // downstream work onto Dispatchers.IO via the service-owned scope.
+        scope.launch(Dispatchers.IO) {
+        val localItems = repository.localItemsForSync(key, limit = FgsSyncLoop.P2P_LOCAL_ITEM_LIMIT)
 
         val handle = try {
             startP2pListener(
@@ -359,7 +362,7 @@ class ClipboardService : Service() {
             )
         } catch (e: Exception) {
             Log.w(TAG, "P2P listener failed to start (${e.javaClass.simpleName}: ${e.message}) — macOS→Android dial-in disabled this session")
-            return
+            return@launch
         }
 
         p2pListener = handle
@@ -419,6 +422,7 @@ class ClipboardService : Service() {
                 delay(FgsSyncLoop.P2P_DIAL_INTERVAL_MS)
             }
         }
+        } // end scope.launch(Dispatchers.IO)
     }
 
     /**
