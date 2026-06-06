@@ -520,9 +520,16 @@ export const api = {
     filename: string,
     mime = "application/octet-stream"
   ): Promise<{ id: string }> => {
-    // btoa + fromCharCode is safe for arbitrary binary; the daemon accepts any
-    // bytes. For large files this may be slow — acceptable for the initial impl.
-    const data_b64 = btoa(String.fromCharCode(...Array.from(bytes)));
+    // Chunk-based btoa avoids RangeError ("Maximum call stack size exceeded")
+    // when spreading a large Uint8Array into String.fromCharCode (C3).
+    const data_b64 = (() => {
+      let bin = "";
+      const CHUNK = 8192;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      return btoa(bin);
+    })();
     return ipcCall<{ id: string }>("add_file_item", { filename, mime, data_b64 });
   },
 };
