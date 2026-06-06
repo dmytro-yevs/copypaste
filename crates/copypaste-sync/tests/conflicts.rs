@@ -84,7 +84,7 @@ fn apply(local: ClipboardItem, remote: &WireItem) -> ClipboardItem {
     match resolve(&local, remote) {
         MergeOutcome::KeepLocal => local,
         MergeOutcome::TakeRemote => ClipboardItem {
-        deleted: false,
+            deleted: false,
             id: remote.id.clone(),
             item_id: remote.item_id.clone(),
             content_type: remote.content_type.clone(),
