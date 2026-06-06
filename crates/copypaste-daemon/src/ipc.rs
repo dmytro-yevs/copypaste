@@ -1045,6 +1045,15 @@ pub struct IpcServer {
     /// inbound pair routes its SAS through the SAME machine the IPC handlers
     /// observe. Always present (the machine is `Idle` when nothing is pairing).
     pairing: Arc<crate::pairing_sm::PairingCoordinator>,
+
+    /// Clone of the running sync orchestrator's `SyncCrypto` context (H8).
+    ///
+    /// Because `SyncCrypto` stores its cached sync key behind an `Arc<Mutex>`,
+    /// this clone shares the SAME backing store as the orchestrator's copy.
+    /// Calling `reload_sync_key()` here after a pairing write propagates to the
+    /// orchestrator immediately without any channel or restart. `None` when P2P
+    /// is disabled (no orchestrator crypto context exists).
+    p2p_sync_crypto: Option<crate::sync_orch::SyncCrypto>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
@@ -1094,6 +1103,7 @@ impl IpcServer {
             core_config: None,
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
             pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
+            p2p_sync_crypto: None,
         }
     }
 
@@ -1131,6 +1141,16 @@ impl IpcServer {
     /// daemon restart.
     pub fn with_p2p_peers(mut self, peers: copypaste_p2p::transport::PairedPeers) -> Self {
         self.p2p_peers = Some(peers);
+        self
+    }
+
+    /// Attach a clone of the running sync orchestrator's `SyncCrypto` context
+    /// (H8 perf fix). Because `SyncCrypto` stores its cached sync key behind an
+    /// `Arc<Mutex>`, this clone shares the SAME backing store as the
+    /// orchestrator's copy; calling `reload_sync_key()` here after a pairing
+    /// write propagates to the orchestrator without any channel or restart.
+    pub fn with_p2p_sync_crypto(mut self, crypto: crate::sync_orch::SyncCrypto) -> Self {
+        self.p2p_sync_crypto = Some(crypto);
         self
     }
 
@@ -1264,6 +1284,7 @@ impl IpcServer {
             core_config: None,
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
             pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
+            p2p_sync_crypto: None,
         }
     }
 
@@ -1764,6 +1785,7 @@ impl IpcServer {
         peer_sync_addr: &str,
         session_key: &copypaste_p2p::pake::SessionKey,
         peer_meta: &copypaste_p2p::bootstrap::PeerMeta,
+        sync_crypto: Option<&crate::sync_orch::SyncCrypto>,
     ) {
         let display = display_fingerprint(peer_fp_canonical);
         let added_at = std::time::SystemTime::now()
@@ -1817,11 +1839,18 @@ impl IpcServer {
         });
 
         match crate::peers::save_peers(&path, &peers) {
-            Ok(()) => tracing::info!(
-                fingerprint = %peer_fp_canonical,
-                addr = %peer_sync_addr,
-                "persisted paired peer to peers.json"
-            ),
+            Ok(()) => {
+                tracing::info!(
+                    fingerprint = %peer_fp_canonical,
+                    addr = %peer_sync_addr,
+                    "persisted paired peer to peers.json"
+                );
+                // H8: refresh the in-memory sync-key cache so the running
+                // orchestrator picks up the new shared key without a restart.
+                if let Some(crypto) = sync_crypto {
+                    crypto.reload_sync_key();
+                }
+            }
             Err(e) => tracing::warn!(
                 fingerprint = %peer_fp_canonical,
                 "failed to persist paired peer to peers.json: {e}"
@@ -2006,6 +2035,7 @@ impl IpcServer {
                     &outcome.peer_sync_addr,
                     &outcome.session_key,
                     &peer_meta,
+                    self.p2p_sync_crypto.as_ref(),
                 );
                 // "QR fully provisions all sync": apply any sync config the peer
                 // advertised that we currently lack (never overwrites existing).
@@ -2083,6 +2113,9 @@ impl IpcServer {
         // task can BUILD our provisioning to advertise and APPLY the peer's.
         #[cfg(feature = "cloud-sync")]
         let sync_key = self.sync_key.clone();
+        // H8: clone before the move so the spawned task can call reload_sync_key
+        // after persist_paired_peer writes peers.json.
+        let spawn_sync_crypto = self.p2p_sync_crypto.clone();
         tokio::spawn(async move {
             // P2P Phase 4: collect our own device metadata to advertise in-band.
             // DeviceMeta::collect spawns child processes (up to ~2 s), so run it
@@ -2134,6 +2167,7 @@ impl IpcServer {
                         &outcome.peer_sync_addr,
                         &outcome.session_key,
                         &peer_meta,
+                        spawn_sync_crypto.as_ref(),
                     );
                     // "QR fully provisions all sync": apply any sync config the
                     // scanning peer advertised that we currently lack.
@@ -2257,6 +2291,7 @@ impl IpcServer {
                     &outcome.peer_sync_addr,
                     &outcome.session_key,
                     &peer_meta,
+                    self.p2p_sync_crypto.as_ref(),
                 );
                 // "QR fully provisions all sync": apply any sync config the
                 // responder advertised that we currently lack.
@@ -11245,7 +11280,7 @@ mod tests {
         let session_key = copypaste_p2p::pake::SessionKey([0u8; 32]);
         let fp = "b3:c4:d5:e6:f7:08:19:2a";
 
-        IpcServer::persist_paired_peer(fp, "127.0.0.1:5001", &session_key, &peer_meta);
+        IpcServer::persist_paired_peer(fp, "127.0.0.1:5001", &session_key, &peer_meta, None);
 
         // Read back the written peers.json and check name.
         let peers_path = peers_file_path();

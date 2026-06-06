@@ -1318,11 +1318,15 @@ async fn standing_pairing_responder_loop(
                     device_name: outcome.peer_device_name.clone(),
                     public_ip: outcome.peer_public_ip.clone(),
                 };
+                // H8: no SyncCrypto handle in this path; the key cache will be
+                // refreshed when the daemon next constructs a SyncCrypto (restart).
+                // The IPC-initiated pairing paths do call reload_sync_key.
                 crate::ipc::IpcServer::persist_paired_peer(
                     &outcome.peer_fingerprint,
                     &outcome.peer_sync_addr,
                     &outcome.session_key,
                     &peer_meta,
+                    None,
                 );
                 pairing.finish(crate::pairing_sm::PairingState::Confirmed);
             }
