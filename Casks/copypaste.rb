@@ -2,7 +2,7 @@
 
 cask "copypaste" do
   version "0.6.1"
-  sha256 "88fb35d0b6d3eb9724e5697c8961ef7b9e0e0288020efeb4a52fb22b98655893"
+  sha256 "d3dac363e4310a10724c503e54b229c5783488802bb937f012d277941868968b"
 
   # DMG filename follows the CI pattern: CopyPaste-v<version>-macos-arm64.dmg
   # where <version> is bare (build-dmg-ci.sh strips any leading 'v'), so the
