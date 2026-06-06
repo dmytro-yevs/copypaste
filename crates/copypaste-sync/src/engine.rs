@@ -416,12 +416,19 @@ impl SyncEngine {
             // Apply the same ceiling to wall_time (Unix ms).  A peer sending
             // wall_time=i64::MAX would make its item win every future wall-time
             // LWW tie-break, permanently shadowing all locally-captured items.
-            if wire.wall_time > MAX_WALL_TIME_SKEW_MS {
+            // The ceiling is relative to now so that legitimate 2026+ timestamps
+            // are not clamped (MAX_WALL_TIME_SKEW_MS is a ±delta, not an epoch).
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i64;
+            let wall_time_ceiling = now_ms.saturating_add(MAX_WALL_TIME_SKEW_MS);
+            if wire.wall_time > wall_time_ceiling {
                 warn!(
                     "received wire item {} with wall_time {} beyond ceiling {}; clamping",
-                    wire.id, wire.wall_time, MAX_WALL_TIME_SKEW_MS
+                    wire.id, wire.wall_time, wall_time_ceiling
                 );
-                wire.wall_time = MAX_WALL_TIME_SKEW_MS;
+                wire.wall_time = wall_time_ceiling;
             }
 
             // Advance our clock with the (now bounded, non-negative) item timestamp.
