@@ -928,3 +928,17 @@ export async function showPairingRequestNotification(peerName: string): Promise<
     // Best-effort — notification failure must never break the pairing flow.
   }
 }
+
+/**
+ * Write `text` as plain UTF-8 to the system clipboard (no rich formatting),
+ * then activate the prior app and synthesise Cmd+V.
+ *
+ * This is the backend for the Option+Enter "paste as plain text" shortcut (F1).
+ * The caller must hide the popup BEFORE calling this so the prior app receives
+ * focus before the synthetic Cmd+V fires.
+ *
+ * On non-macOS this is a no-op.
+ */
+export async function pasteAsPlainText(text: string): Promise<void> {
+  await invoke<void>("paste_plain_text", { text });
+}

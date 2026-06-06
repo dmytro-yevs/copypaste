@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { api, HistoryEntry, ipcErrorMessage, IpcError, isImageType, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
+import { api, HistoryEntry, ipcErrorMessage, IpcError, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { formatRelativeTime } from "../lib/time";
@@ -375,6 +375,28 @@ export function Popup() {
     [hide, playSoundOnCopy, notifyOnCopy]
   );
 
+  /// Paste the item as plain text (Option+Enter / F1).
+  ///
+  /// Hides the popup first (activating the prior app), then writes only the
+  /// item's plain-text preview to the clipboard and fires Cmd+V.  Rich content
+  /// (HTML, RTF, images) is deliberately NOT written — the target app receives
+  /// a bare UTF-8 string regardless of the original content type.
+  const copyAndPasteAsPlain = useCallback(
+    async (preview: string) => {
+      try {
+        // Hide first so the prior app regains focus before Cmd+V.
+        await hide();
+        await pasteAsPlainText(preview);
+      } catch (e) {
+        const msg = e instanceof IpcError ? e.message : String(e);
+        console.error("popup paste-as-plain-text failed", e);
+        setError(`Paste as plain text failed: ${msg}`);
+        isHidingRef.current = false;
+      }
+    },
+    [hide]
+  );
+
   const handlePin = useCallback(
     async (id: string, pinned: boolean) => {
       try {
@@ -428,13 +450,19 @@ export function Popup() {
           break;
         case "Enter":
           e.preventDefault();
-          void confirmSelection();
+          if (e.altKey) {
+            // Option+Enter (F1): paste as plain text — strip rich formatting.
+            const entry = filtered[selectedIdx];
+            if (entry) void copyAndPasteAsPlain(entry.item.preview);
+          } else {
+            void confirmSelection();
+          }
           break;
         default:
           break;
       }
     },
-    [filtered, query, hide, confirmSelection, copyAndPaste]
+    [filtered, query, hide, confirmSelection, copyAndPaste, copyAndPasteAsPlain, selectedIdx]
   );
 
   const showQuery = query.trim();
