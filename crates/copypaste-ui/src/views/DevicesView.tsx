@@ -688,9 +688,6 @@ export function DevicesView() {
   // Ref so the auto-refresh timer can read the latest qrState without a
   // stale-closure problem — we write it in parallel with the React state.
   const qrStateRef = useRef<QrState>({ status: "idle" });
-  // A5 blur logic: QR starts blurred; first click reveals it, second click
-  // regenerates (stays visible — no re-blur after first reveal).
-  const [qrRevealed, setQrRevealed] = useState(false);
   // Inflight guard: prevents two concurrent generateQr calls (e.g. auto-refresh
   // tick racing a manual click) from both issuing a pairingQrSvg() request and
   // wasting single-use tokens. Unmount flag doubles as a cancelled guard.
@@ -723,14 +720,10 @@ export function DevicesView() {
     }
   }, []);
 
-  // A5: clicking the QR area — first click reveals, subsequent clicks regenerate.
+  // Clicking the QR regenerates it.
   const handleQrClick = useCallback(() => {
-    if (!qrRevealed) {
-      setQrRevealed(true);
-    } else {
-      void generateQr();
-    }
-  }, [qrRevealed, generateQr]);
+    void generateQr();
+  }, [generateQr]);
 
   // --- Load own device info ---
   useEffect(() => {
@@ -1292,57 +1285,39 @@ export function DevicesView() {
 
         {qrState.status === "ready" && (
           <div className="flex items-start gap-5">
-            {/* QR code — A5 blur/reveal: blurred until first click, then
-                stays visible; clicking again regenerates (no re-blur). The SVG
-                comes from our own Tauri backend and never contains remote
-                markup — dangerouslySetInnerHTML is safe here. */}
+            {/* QR code — SVG comes from our own Tauri backend and never
+                contains remote markup — dangerouslySetInnerHTML is safe here. */}
             <button
               type="button"
               onClick={handleQrClick}
               className="relative shrink-0 rounded-ide bg-white p-2 overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
               style={{ width: 190, height: 190 }}
-              title={qrRevealed ? "Click to regenerate" : "Click to reveal QR code"}
-              aria-label={qrRevealed ? "Regenerate pairing QR code" : "Reveal pairing QR code"}
+              title="Click to regenerate"
+              aria-label="Regenerate pairing QR code"
             >
               <div
-                className="[&>svg]:block [&>svg]:h-full [&>svg]:w-full transition-all duration-300"
-                style={{ filter: qrRevealed ? "none" : "blur(12px)", width: "100%", height: "100%" }}
+                className="[&>svg]:block [&>svg]:h-full [&>svg]:w-full"
+                style={{ width: "100%", height: "100%" }}
                 // eslint-disable-next-line react/no-danger
                 dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
               />
-              {!qrRevealed && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="rounded-ide bg-black/60 px-2.5 py-1 text-[11px] font-medium text-white">
-                    Click to reveal
-                  </span>
-                </div>
-              )}
             </button>
             <div className="min-w-0 flex-1 space-y-2">
-              {qrRevealed ? (
-                <>
-                  <p className="select-all break-all font-mono text-[10px] text-ide-faint">
-                    {qrState.qr.payload}
-                  </p>
-                  {qrSecsLeft !== null && qrSecsLeft > 0 && (
-                    <p className="text-[11px] text-ide-dim">
-                      Expires in{" "}
-                      <span className={qrSecsLeft <= 20 ? "text-ide-warning font-medium" : ""}>
-                        {qrSecsLeft}s
-                      </span>
-                      {" "}· click QR to regenerate
-                    </p>
-                  )}
-                  <p className="text-[11px] text-ide-faint">
-                    Scan from CopyPaste on another device to pair automatically.
-                  </p>
-                </>
-              ) : (
-                <p className="text-[12px] text-ide-dim">
-                  Click the QR code to reveal it, then scan from the CopyPaste
-                  app on another device to pair automatically — no password needed.
+              <p className="select-all break-all font-mono text-[10px] text-ide-faint">
+                {qrState.qr.payload}
+              </p>
+              {qrSecsLeft !== null && qrSecsLeft > 0 && (
+                <p className="text-[11px] text-ide-dim">
+                  Expires in{" "}
+                  <span className={qrSecsLeft <= 20 ? "text-ide-warning font-medium" : ""}>
+                    {qrSecsLeft}s
+                  </span>
+                  {" "}· click QR to regenerate
                 </p>
               )}
+              <p className="text-[11px] text-ide-faint">
+                Scan from CopyPaste on another device to pair automatically.
+              </p>
             </div>
           </div>
         )}

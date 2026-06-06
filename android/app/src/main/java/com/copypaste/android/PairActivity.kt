@@ -51,7 +51,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -236,9 +235,6 @@ fun PairScreen(
     var syncing by remember { mutableStateOf(false) }
     var syncResult by remember { mutableStateOf<String?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
-    // QR is blurred until the user taps to reveal. Once revealed it stays
-    // visible — including after a tap-triggered regeneration (HW-A5).
-    var qrBlurred by remember { mutableStateOf(true) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
@@ -248,9 +244,7 @@ fun PairScreen(
     val expired = qr != null && remainingSeconds <= 0
 
     // Shared helper: generate a new QR and render its bitmap.
-    // keepVisible=true keeps qrBlurred=false after generation (used for
-    // tap-regen and auto-regen on expiry so the QR stays readable).
-    fun generateQr(keepVisible: Boolean) {
+    fun generateQr() {
         scope.launch {
             loading = true
             try {
@@ -262,7 +256,6 @@ fun PairScreen(
                 }
                 qr = result
                 qrBitmap = bmp
-                if (keepVisible) qrBlurred = false
             } catch (e: Exception) {
                 errorMessage = e.message ?: e.javaClass.simpleName
             } finally {
@@ -521,8 +514,7 @@ fun PairScreen(
     }
 
     // Countdown ticker — restarts whenever a fresh QR is issued.
-    // When the countdown reaches 0, auto-regenerate the QR and keep it
-    // visible (qrBlurred=false) so the user doesn't need to tap again (HW-A5).
+    // When the countdown reaches 0, auto-regenerate the QR.
     LaunchedEffect(qr) {
         if (qr == null) return@LaunchedEffect
         remainingSeconds = PAIR_TOKEN_TTL_SECONDS
@@ -530,8 +522,8 @@ fun PairScreen(
             delay(1000)
             remainingSeconds -= 1
         }
-        // QR expired — auto-regenerate and show unblurred.
-        generateQr(keepVisible = true)
+        // QR expired — auto-regenerate.
+        generateQr()
     }
 
     // AND2: Auto-start pairing when the screen opens so the QR appears
@@ -548,7 +540,7 @@ fun PairScreen(
             }
             qr = result
             qrBitmap = bmp
-            // Initial load: keep blurred so user taps to reveal.
+            // Initial load complete.
         } catch (e: Exception) {
             errorMessage = e.message ?: e.javaClass.simpleName
         } finally {
@@ -665,28 +657,12 @@ fun PairScreen(
                                 // QR needs a light, high-contrast backing to scan
                                 // reliably — sit the code on a white rounded plate
                                 // that fills the reserved slot exactly.
-                                // First tap reveals the QR; second tap regenerates it
-                                // and keeps it visible (HW-A5: no re-blur after regen).
+                                // Tap to regenerate the QR code.
                                 Box(
                                     modifier = Modifier
                                         .size(QR_SLOT_SIZE_DP.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        // Blur applied after clip so the rounded corners
-                                        // uniformly contain the blur — QR edges near the
-                                        // padding are fully obscured, not just the image.
-                                        .then(
-                                            if (qrBlurred) Modifier.blur(16.dp)
-                                            else Modifier
-                                        )
-                                        .clickable {
-                                            if (qrBlurred) {
-                                                // First tap: reveal the QR.
-                                                qrBlurred = false
-                                            } else {
-                                                // Second tap: regenerate and stay visible.
-                                                generateQr(keepVisible = true)
-                                            }
-                                        },
+                                        .clickable { generateQr() },
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     // White plate with QR image.
@@ -701,15 +677,6 @@ fun PairScreen(
                                             bitmap = bmp.asImageBitmap(),
                                             contentDescription = "Pairing QR code",
                                             modifier = Modifier.size(QR_IMAGE_SIZE_DP.dp)
-                                        )
-                                    }
-                                    // Overlay hint shown only while blurred.
-                                    if (qrBlurred) {
-                                        Text(
-                                            text = "Tap to reveal",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = IdeText,
-                                            textAlign = TextAlign.Center,
                                         )
                                     }
                                 }
