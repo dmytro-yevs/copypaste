@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -1058,6 +1058,8 @@ export function HistoryView() {
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [search, setSearch] = useState("");
+  const [ftsResults, setFtsResults] = useState<Set<string>>(new Set());
+  const [ftsQuery, setFtsQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   // Last error detail surfaced under the "error" load state — kept so the
@@ -1229,14 +1231,41 @@ export function HistoryView() {
   }, [load]);
 
   // -------------------------------------------------------------------------
-  // Filtered list
+  // FTS effect — debounced daemon full-text search over the entire history
   // -------------------------------------------------------------------------
 
-  const filtered = search.trim()
-    ? items.filter((it) =>
-        it.preview.toLowerCase().includes(search.trim().toLowerCase())
-      )
-    : items;
+  useEffect(() => {
+    const q = search.trim();
+    if (!q) {
+      setFtsResults(new Set());
+      setFtsQuery("");
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const hits = await api.searchItems(q, 500);
+        setFtsResults(new Set(hits.map((h) => h.id)));
+        setFtsQuery(q);
+      } catch {
+        // FTS failure falls back gracefully to client-side filter
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // -------------------------------------------------------------------------
+  // Filtered list — union of client-side substring match and daemon FTS results
+  // -------------------------------------------------------------------------
+
+  const filtered = useMemo(() => {
+    return search.trim()
+      ? items.filter(
+          (it) =>
+            it.preview.toLowerCase().includes(search.trim().toLowerCase()) ||
+            (ftsQuery === search.trim() && ftsResults.has(it.id))
+        )
+      : items;
+  }, [items, search, ftsResults, ftsQuery]);
 
   // -------------------------------------------------------------------------
   // Multi-select helpers
