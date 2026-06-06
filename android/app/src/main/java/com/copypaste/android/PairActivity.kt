@@ -227,6 +227,7 @@ internal fun formatScannedInfo(deviceName: String, fingerprint: String): String 
  * - [supabaseUrl]: Supabase project URL.
  * - [supabaseAnonKey]: Supabase publishable anon JWT (safe per Supabase docs).
  */
+/** Holds the optional sync-provisioning data embedded in a CPPAIR2 QR payload. */
 internal data class QrProvisioningData(
     val relayUrl: String?,
     val supabaseUrl: String?,
@@ -234,33 +235,40 @@ internal data class QrProvisioningData(
 )
 
 /**
- * Extract sync-provisioning from the optional 6th `.`-separated field of a bare
- * CPPAIR1/CPPAIR2 payload string (i.e. after stripping any deep-link wrapper).
+ * Extract sync-provisioning from the optional 6th field of a bare CPPAIR2 payload.
  *
- * The 6th field is base64url (no padding) of compact JSON: `{"ru":…,"su":…,"sk":…}`.
- * Returns `null` when the field is absent, empty, or cannot be decoded — the caller
- * treats `null` as "no provisioning carried" and leaves existing settings unchanged.
+ * CPPAIR2 wire format (body after magic prefix):
+ *   [0] fp_b64url  [1] token_b64url  [2] device_id_b64url  [3] name_b64url
+ *   [4] addr_b64url  [5] prov_b64url (optional)
+ *
+ * All 6 body fields are base64url (no dots), so `split(".", limit=7)` on the
+ * full string cleanly isolates the provisioning field at index 6 (0-based,
+ * counting the magic prefix at index 0).
+ *
+ * For CPPAIR1 payloads provisioning is not supported — addr_hint in v1 is the
+ * raw address string and may contain IPv4 dots that collide with the delimiter.
+ *
+ * Returns `null` when the field is absent, empty, or cannot be decoded. A
+ * decode failure here is always silent: provisioning is advisory and must never
+ * break pairing.
  *
  * Pure Kotlin; no FFI dependency, so it works even in stub mode.
  */
 internal fun extractQrProvisioning(barePayload: String): QrProvisioningData? {
-    // Strip the deep-link wrapper if present so we always work on the bare payload.
-    val bare = stripPairingDeepLink(barePayload)
-    // Split off the magic prefix ("CPPAIR1" or "CPPAIR2"), then split the body
-    // into at most 6 fields. Field index 5 (0-based) is the provisioning blob.
-    val dotIdx = bare.indexOf('.')
-    if (dotIdx < 0) return null
-    val body = bare.substring(dotIdx + 1)
-    // splitLimit=6 so field 5 captures everything after the 5th dot (URL-safe
-    // base64 has no dots, so this is clean).
-    val parts = body.split('.', limit = 6)
-    if (parts.size < 6) return null
-    val b64Field = parts[5].trim()
-    if (b64Field.isEmpty()) return null
+    // Only handle CPPAIR2; CPPAIR1 addr_hint contains IPv4 dots that make
+    // field 5 ambiguous without knowing the addr_hint length.
+    val bare = barePayload.trim()
+    if (!bare.startsWith("CPPAIR2.")) return null
+    // Full string: CPPAIR2 . fp . tok . id . name . addr_b64 [. prov_b64]
+    // Indices:        0       1    2    3    4       5           6
+    val parts = bare.split(".", limit = 7)
+    if (parts.size < 7) return null  // no provisioning field present
+    val provB64 = parts[6].trim()
+    if (provB64.isEmpty()) return null
     return try {
+        // base64url: replace url-safe chars to standard before decoding.
         val bytes = android.util.Base64.decode(
-            // android.util.Base64 requires URL_SAFE | NO_PADDING flags for base64url.
-            b64Field.replace('-', '+').replace('_', '/'),
+            provB64.replace('-', '+').replace('_', '/'),
             android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
         )
         val json = String(bytes, Charsets.UTF_8)
@@ -270,7 +278,7 @@ internal fun extractQrProvisioning(barePayload: String): QrProvisioningData? {
             supabaseAnonKey = extractJsonString(json, "sk"),
         )
     } catch (_: Exception) {
-        null // Corrupt/unknown field — silently ignore; pairing is unaffected.
+        null // Corrupt/unknown field �� silently ignore; pairing is unaffected.
     }
 }
 
@@ -1142,3 +1150,4 @@ internal fun lanIpv4Address(): String? {
         null
     }
 }
+

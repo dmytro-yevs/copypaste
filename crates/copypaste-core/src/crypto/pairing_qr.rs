@@ -42,7 +42,7 @@
 //! ## v2 (current — emitted by [`PairingPayload::encode`])
 //!
 //! ```text
-//! CPPAIR2.<fp_b64url43>.<token_b64url>.<device_id_b64url22>.<name_b64url>.<host:port>
+//! CPPAIR2.<fp_b64url43>.<token_b64url>.<device_id_b64url22>.<name_b64url>.<addr_b64url>[.<prov_b64url>]
 //! ```
 //!
 //! * `CPPAIR2` — magic + version (`2`).
@@ -51,15 +51,21 @@
 //!   hex-decoded (colons stripped) to 32 bytes; on decode the bytes are
 //!   hex-encoded back to the lowercase bare-hex form callers expect.
 //! * `token_b64url` — the 32-byte pairing token, base64url **without** padding
-//!   (43 chars, unchanged from v1).
+//!   (43 chars).
 //! * `device_id_b64url22` — the UUID's 16 raw bytes encoded as base64url **without**
 //!   padding (22 chars). On encode the UUID string is parsed to its 16-byte wire
 //!   form; on decode the bytes are formatted back as a standard UUID string.
-//! * `name_b64url` — the human-readable device name, base64url (unchanged from v1).
-//! * `host:port` — optional discovery hint (unchanged from v1).
+//! * `name_b64url` — the human-readable device name, base64url.
+//! * `addr_b64url` — the discovery hint (`host:port`), base64url-encoded so
+//!   that IPv4 dots in the address cannot collide with the `.` field delimiter.
+//!   An empty hint encodes to the base64url of an empty byte string.
+//! * `prov_b64url` — **optional** sync-provisioning JSON, base64url **without**
+//!   padding. Present when the generating device has at least one of relay URL,
+//!   Supabase URL, or Supabase anon key configured.
 //!
 //! Compared to v1, `fp_b64url43` saves 21 chars (64→43) and `device_id_b64url22`
-//! saves 14 chars (36→22), for a total saving of 35 chars per payload.
+//! saves 14 chars (36→22), for a total saving of 35 chars per payload (addr_hint
+//! base64url adds a few chars for IPv4 addresses, but the net saving is positive).
 //!
 //! ## v1 (legacy — still accepted by [`PairingPayload::decode`])
 //!
@@ -71,23 +77,12 @@
 //! * `fp_hex` — the cert fingerprint in lowercase hex (colons optional).
 //! * `token_b64url` — the 32-byte pairing token, base64url **without** padding.
 //! * `device_id` — the displaying device's UUID string.
-//! * `name_b64url` — the human-readable device name, base64url (so `.` and
-//!   non-ASCII in names cannot break field splitting).
+//! * `name_b64url` — the human-readable device name, base64url.
 //! * `host:port` — optional discovery hint (`host` may be empty → mDNS only).
-//! * `prov_b64url` — **optional** sync-provisioning JSON, base64url **without**
-//!   padding. Present when the generating device has at least one of relay URL,
-//!   Supabase URL, or Supabase anon key configured. The JSON keys are compact
-//!   single-letter abbreviations to minimise QR density: `ru` = relay_url,
-//!   `su` = supabase_url, `sk` = supabase_anon_key. All values are optional
-//!   strings. Old decoders that stop at 5 fields simply ignore the 6th, so there
-//!   is no forward-compat break for the 5-field body.
-//!
-//! Fields are `.`-separated. `fp_hex` is `.`-free hex, `token_b64url` and
-//! `name_b64url` use the URL-safe base64 alphabet (no `.`), `device_id` is a
-//! `.`-free UUID, and `host:port` is the 5th field — so `.` is an
-//! unambiguous separator. The format is deliberately delimiter-based (not
-//! JSON/CBOR in the first 5 fields) to keep the QR small: every byte saved
-//! lowers the QR version and improves scan reliability.
+//!   This is the raw, un-encoded form — safe in v1 because it is the terminal
+//!   field and the raw `host:port` string contains `:` but not `.`. Provisioning
+//!   is not supported in the v1 wire format because IPv4 dots in `host:port`
+//!   would collide with the field delimiter; use CPPAIR2 for provisioning.
 
 use base64::Engine as _;
 use rand::rngs::OsRng;
@@ -107,6 +102,8 @@ pub const PAIRING_QR_MAGIC: &str = "CPPAIR1";
 ///
 /// v2 encodes the fingerprint and device_id as base64url (raw bytes) instead of
 /// hex/UUID strings, saving 35 chars per payload and reducing QR code density.
+/// addr_hint is also base64url-encoded in v2 to avoid dot collision with the
+/// optional 6th provisioning field.
 pub const PAIRING_QR_MAGIC_V2: &str = "CPPAIR2";
 
 /// Number of `.`-separated fields in the mandatory part of the payload body
@@ -123,22 +120,13 @@ const UUID_BYTE_LEN: usize = 16;
 /// external QR scanners (e.g. Google Lens, the iOS/Android camera app) treat the
 /// QR as an actionable link and offer "open in app" instead of plain text.
 ///
-/// The wrapped form is `cppair://pair?p=<percent-encoded CPPAIR1...>`. The bare
-/// payload is the value of the `p` query parameter. This is purely a *transport*
-/// envelope around the unchanged [`PairingPayload::encode`] wire format — the
-/// `AndroidManifest.xml` intent-filter (`scheme="cppair" host="pair"`) and
-/// `PairActivity.handleDeepLinkIntent` already extract `?p=` on the receiver side.
-///
-/// Keep this in sync with the Android `PairActivity` / `CopypasteBindings`
-/// constants and the manifest intent-filter.
+/// The wrapped form is `cppair://pair?p=<percent-encoded CPPAIR2...>`. The bare
+/// payload is the value of the `p` query parameter.
 pub const PAIRING_DEEPLINK_PREFIX: &str = "cppair://pair?p=";
 
 /// Length in bytes of the pairing token.
 ///
-/// 32 bytes = 256 bits of entropy, drawn from the OS CSPRNG. This is the
-/// shared secret fed into the PAKE handshake in place of the legacy
-/// 6-character typed password, so it is dramatically stronger while remaining
-/// short enough to fit comfortably in a QR code.
+/// 32 bytes = 256 bits of entropy, drawn from the OS CSPRNG.
 pub const PAIRING_TOKEN_LEN: usize = 32;
 
 /// base64url engine (URL-safe alphabet, no padding) used for binary fields.
@@ -154,11 +142,10 @@ fn b64() -> base64::engine::general_purpose::GeneralPurpose {
 /// the PAKE handshake as the shared "password".
 ///
 /// # Security
-/// * `ZeroizeOnDrop` scrubs the bytes when dropped, bounding the in-memory
-///   lifetime of the secret.
+/// * `ZeroizeOnDrop` scrubs the bytes when dropped.
 /// * Does NOT implement `Debug` / `Display` / `Clone` to avoid accidental
 ///   logging or silent duplication.
-/// * Equality is constant-time via [`ConstantTimeEq`] ([`PartialEq`] impl).
+/// * Equality is constant-time via [`ConstantTimeEq`].
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct PairingToken([u8; PAIRING_TOKEN_LEN]);
 
@@ -166,8 +153,6 @@ impl PairingToken {
     /// Generate a fresh 256-bit pairing token from the OS CSPRNG.
     pub fn generate() -> Self {
         let mut bytes = [0u8; PAIRING_TOKEN_LEN];
-        // OsRng is infallible on all supported targets; a failure here means
-        // the OS entropy source is broken, which is unrecoverable regardless.
         OsRng.fill_bytes(&mut bytes);
         Self(bytes)
     }
@@ -190,19 +175,15 @@ impl PairingToken {
 
     /// Encode the token as the PAKE "password" string.
     ///
-    /// The PAKE API (`copypaste_p2p::pake::PakeInitiator::new`) takes a
-    /// `&str`. We render the raw token bytes as base64url so the full 256 bits
-    /// of entropy survive the byte→str conversion losslessly (the bytes are
-    /// not valid UTF-8 in general). Both devices derive the identical string
-    /// from the identical token, so the PAKE converges.
+    /// Renders the raw token bytes as base64url so the full 256 bits of entropy
+    /// survive the byte→str conversion losslessly.
     pub fn to_pake_password(&self) -> String {
         b64().encode(self.0)
     }
 }
 
 impl PartialEq for PairingToken {
-    /// Constant-time comparison — never short-circuit on the first differing
-    /// byte (timing side-channel resistance, per project crypto conventions).
+    /// Constant-time comparison — never short-circuit on the first differing byte.
     fn eq(&self, other: &Self) -> bool {
         self.0.ct_eq(&other.0).into()
     }
@@ -311,18 +292,10 @@ impl QrProvisioning {
 /// The fully-decoded contents of a QR pairing code.
 ///
 /// Produced by [`PairingPayload::encode`] (on the displaying device) and
-/// recovered by [`PairingPayload::decode`] (on the scanning device). Holds the
-/// material the scanner needs to (a) pin the right mTLS peer and (b) drive the
-/// PAKE handshake as initiator.
-///
-/// The [`token`](Self::token) field is the only secret; everything else is
-/// public pairing metadata. The struct does not implement `Clone` because the
-/// token is non-`Clone` by design.
+/// recovered by [`PairingPayload::decode`] (on the scanning device).
 pub struct PairingPayload {
-    /// Displaying device's cert fingerprint in the user-facing lowercase
-    /// colon-hex form (`xx:xx:...`). The daemon validates this form and strips
-    /// the colons itself before comparing against the mTLS verifier's canonical
-    /// (colon-free) fingerprint.
+    /// Displaying device's cert fingerprint in lowercase colon-hex or bare-hex
+    /// form, depending on version. CPPAIR2 round-trips as bare lowercase hex.
     pub fingerprint: String,
     /// Single-use, TTL-bounded pairing secret fed into the PAKE handshake.
     pub token: PairingToken,
@@ -340,10 +313,6 @@ pub struct PairingPayload {
 
 impl PairingPayload {
     /// Build a payload for the displaying device, generating a fresh token.
-    ///
-    /// The caller supplies the stable identity fields; the token is generated
-    /// here so it is fresh on every QR render (the daemon binds it to a
-    /// TTL-limited PAKE session).
     ///
     /// # Errors
     /// Returns [`PairingQrError::EmptyFingerprint`] if `fingerprint` is empty.
@@ -369,9 +338,15 @@ impl PairingPayload {
 
     /// Serialise to the CPPAIR2 single-line QR string described in the module docs.
     ///
-    /// Emits `CPPAIR2.<fp_b64url43>.<token_b64url>.<device_id_b64url22>.<name_b64url>.<host:port>`.
+    /// Emits:
+    /// `CPPAIR2.<fp_b64url43>.<token_b64url>.<device_id_b64url22>.<name_b64url>.<addr_b64url>`
+    ///
     /// When [`Self::provisioning`] is present and non-empty, appends a 6th field:
     /// the provisioning JSON base64url-encoded.
+    ///
+    /// `addr_hint` is base64url-encoded so that IPv4 dots (e.g. `192.168.1.5`)
+    /// cannot collide with the `.` field delimiter and corrupt a 6-field split.
+    /// This is a v2-only encoding — `decode_v2` base64url-decodes field[4].
     ///
     /// The fingerprint (hex or colon-hex) is stripped of colons and hex-decoded to
     /// 32 raw bytes, then base64url-encoded (43 chars). If the fingerprint is not
@@ -384,15 +359,18 @@ impl PairingPayload {
         let token_b64 = b64().encode(self.token.0);
         let device_id_b64 = uuid_str_to_b64url(&self.device_id);
         let name_b64 = b64().encode(self.device_name.as_bytes());
-        // addr_hint is the final mandatory field; any ':' it contains is harmless.
+        // base64url-encode addr_hint to avoid dot collisions: an IPv4 address
+        // like "192.168.1.5:54321" contains dots that would otherwise corrupt
+        // the splitn(6) when a provisioning 6th field is present.
+        let addr_b64 = b64().encode(self.addr_hint.as_bytes());
         let base = format!(
-            "{magic}.{fp_b64}.{token_b64}.{device_id_b64}.{name_b64}.{addr_hint}",
+            "{magic}.{fp_b64}.{token_b64}.{device_id_b64}.{name_b64}.{addr_b64}",
             magic = PAIRING_QR_MAGIC_V2,
             fp_b64 = fp_b64,
             token_b64 = token_b64,
             device_id_b64 = device_id_b64,
             name_b64 = name_b64,
-            addr_hint = self.addr_hint,
+            addr_b64 = addr_b64,
         );
         // Append optional 6th field for provisioning JSON.
         match &self.provisioning {
@@ -404,9 +382,9 @@ impl PairingPayload {
     /// Parse a scanned QR string back into a [`PairingPayload`].
     ///
     /// Accepts both `CPPAIR2` (current) and `CPPAIR1` (legacy) prefixes.
-    /// Accepts an optional 6th `.`-separated field carrying provisioning JSON
-    /// (base64url). Old payloads with exactly 5 fields are decoded with
-    /// `provisioning: None` — no backward-compat break.
+    /// Accepts an optional 6th `.`-separated field (CPPAIR2 only) carrying
+    /// provisioning JSON (base64url). Old payloads with exactly 5 fields are
+    /// decoded with `provisioning: None` — no backward-compat break.
     ///
     /// # Errors
     /// * [`PairingQrError::BadMagic`] — missing or unrecognised magic+version prefix.
@@ -418,6 +396,7 @@ impl PairingPayload {
     ///   decode to exactly [`FP_BYTE_LEN`] bytes (CPPAIR2 only).
     /// * [`PairingQrError::DeviceIdLength`] — the device_id b64 field did not
     ///   decode to exactly [`UUID_BYTE_LEN`] bytes (CPPAIR2 only).
+    /// * [`PairingQrError::AddrHintDecode`] — addr_hint b64url decode failed (CPPAIR2 only).
     /// * [`PairingQrError::EmptyFingerprint`] — the fingerprint field was empty.
     pub fn decode(input: &str) -> Result<Self, PairingQrError> {
         let trimmed = input.trim();
@@ -434,11 +413,15 @@ impl PairingPayload {
     }
 
     /// Decode a CPPAIR1 body (the part after the magic prefix dot).
+    ///
+    /// CPPAIR1 addr_hint is a raw `host:port` string that may contain IPv4 dots
+    /// (e.g. `192.168.1.1:1234`). To avoid ambiguity we use `splitn(5)` so the
+    /// entire tail — including any IPv4 dots — goes into `parts[4]` as addr_hint.
+    /// Provisioning is not supported in the CPPAIR1 wire format for this reason;
+    /// CPPAIR2 (with base64url-encoded addr_hint) is the format that carries the
+    /// optional 6th provisioning field.
     fn decode_v1(body: &str) -> Result<Self, PairingQrError> {
-        // Split into at most 6 parts to allow the optional provisioning field.
-        // The addr_hint (5th field) contains ':' but not '.', so splitn(6)
-        // cleanly isolates it even when the 6th provisioning field is absent.
-        let parts: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT + 1, '.').collect();
+        let parts: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
         if parts.len() < PAIRING_QR_FIELD_COUNT {
             return Err(PairingQrError::FieldCount(parts.len()));
         }
@@ -461,6 +444,7 @@ impl PairingPayload {
         let device_name = String::from_utf8(name_bytes)
             .map_err(|e| PairingQrError::Utf8(format!("name: {e}")))?;
 
+        // addr_hint is the terminal field; it may contain dots (IPv4) and colons.
         let addr_hint = parts[4].to_string();
 
         // Decode the optional 6th provisioning field. A decode error here is
@@ -477,14 +461,17 @@ impl PairingPayload {
             device_id,
             device_name,
             addr_hint,
-            provisioning,
+            provisioning: None,
         })
     }
 
     /// Decode a CPPAIR2 body (the part after the magic prefix dot).
     fn decode_v2(body: &str) -> Result<Self, PairingQrError> {
-        let parts: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
-        if parts.len() != PAIRING_QR_FIELD_COUNT {
+        // Use splitn(6) so the optional provisioning 6th field is captured.
+        // Because addr_hint is now base64url-encoded (no dots), fields [0..4]
+        // are all dot-free and splitn(6) cleanly separates them.
+        let parts: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT + 1, '.').collect();
+        if parts.len() < PAIRING_QR_FIELD_COUNT {
             return Err(PairingQrError::FieldCount(parts.len()));
         }
 
@@ -525,7 +512,20 @@ impl PairingPayload {
         let device_name = String::from_utf8(name_bytes)
             .map_err(|e| PairingQrError::Utf8(format!("name: {e}")))?;
 
-        let addr_hint = parts[4].to_string();
+        // addr_hint: base64url-encoded in v2 to avoid dot collision with the
+        // optional provisioning 6th field.
+        let addr_hint_bytes = b64()
+            .decode(parts[4])
+            .map_err(|_| PairingQrError::AddrHintDecode)?;
+        let addr_hint =
+            String::from_utf8(addr_hint_bytes).map_err(|_| PairingQrError::AddrHintDecode)?;
+
+        // Optional 6th field = provisioning. Silently ignored on decode error
+        // so a corrupt/unknown blob cannot break pairing.
+        let provisioning = parts
+            .get(5)
+            .filter(|f| !f.is_empty())
+            .and_then(|f| QrProvisioning::decode(f));
 
         Ok(Self {
             fingerprint,
@@ -533,17 +533,12 @@ impl PairingPayload {
             device_id,
             device_name,
             addr_hint,
-            provisioning: None,
+            provisioning,
         })
     }
 
     /// Serialise and wrap the payload in the [`PAIRING_DEEPLINK_PREFIX`] URI so
     /// external scanners (Google Lens, the system camera) offer "open in app".
-    ///
-    /// The bare [`encode`](Self::encode) output is percent-encoded into the `p`
-    /// query parameter. The receiver strips the wrapper with
-    /// [`strip_deeplink`] (or, on Android, the manifest deep-link path) before
-    /// calling [`decode`](Self::decode).
     pub fn encode_deeplink(&self) -> String {
         format!(
             "{PAIRING_DEEPLINK_PREFIX}{}",
@@ -553,16 +548,9 @@ impl PairingPayload {
 }
 
 /// Strip the [`PAIRING_DEEPLINK_PREFIX`] wrapper from a scanned QR string,
-/// returning the bare `CPPAIR1.…` payload ready for [`PairingPayload::decode`].
+/// returning the bare `CPPAIR1.…` / `CPPAIR2.…` payload.
 ///
-/// Accepts both forms for backward compatibility:
-/// * Wrapped: `cppair://pair?p=<percent-encoded CPPAIR1…>` → decoded `p` value.
-/// * Bare: any string not starting with the prefix is returned unchanged
-///   (trimmed), so legacy QR codes and in-app scans keep working.
-///
-/// This is intentionally tolerant: it only knows how to *unwrap* the envelope,
-/// never to validate the inner payload — that remains [`PairingPayload::decode`]'s
-/// job (which still rejects anything without the exact `CPPAIR1` magic).
+/// Accepts both wrapped and bare forms for backward compatibility.
 pub fn strip_deeplink(scanned: &str) -> String {
     let trimmed = scanned.trim();
     match trimmed.strip_prefix(PAIRING_DEEPLINK_PREFIX) {
@@ -573,12 +561,7 @@ pub fn strip_deeplink(scanned: &str) -> String {
 
 /// Minimal RFC 3986 percent-encoding for the `p` query-component value.
 ///
-/// We encode everything that is not an unreserved character (`A-Z a-z 0-9 - _ .
-/// ~`). The bare payload uses `.` and the base64url alphabet (`A-Z a-z 0-9 - _`),
-/// all of which are unreserved, so in practice only the rare `:` inside an
-/// `addr_hint` (`host:port`) is escaped — but we encode defensively so any future
-/// field change stays URL-safe. Kept dependency-free to avoid pulling a URL crate
-/// into `copypaste-core`.
+/// Encodes everything that is not an unreserved character (`A-Z a-z 0-9 - _ . ~`).
 fn percent_encode_component(input: &str) -> String {
     let mut out = String::with_capacity(input.len());
     for &b in input.as_bytes() {
@@ -594,29 +577,23 @@ fn percent_encode_component(input: &str) -> String {
     out
 }
 
-/// Inverse of [`percent_encode_component`]. Decodes `%XX` escapes (and `+` as a
-/// space, matching `application/x-www-form-urlencoded` query semantics) and
-/// passes any malformed escape through verbatim so a decode never panics — the
-/// downstream [`PairingPayload::decode`] will reject a corrupted payload.
+/// Inverse of [`percent_encode_component`].
 fn percent_decode_component(input: &str) -> String {
     let bytes = input.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'%' if i + 2 < bytes.len() => {
-                match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                    (Some(hi), Some(lo)) => {
-                        out.push((hi << 4) | lo);
-                        i += 3;
-                    }
-                    // Malformed escape: keep the literal '%' and continue.
-                    _ => {
-                        out.push(b'%');
-                        i += 1;
-                    }
+            b'%' if i + 2 < bytes.len() => match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                (Some(hi), Some(lo)) => {
+                    out.push((hi << 4) | lo);
+                    i += 3;
                 }
-            }
+                _ => {
+                    out.push(b'%');
+                    i += 1;
+                }
+            },
             b'+' => {
                 out.push(b' ');
                 i += 1;
@@ -627,7 +604,6 @@ fn percent_decode_component(input: &str) -> String {
             }
         }
     }
-    // Lossy is safe: a non-UTF-8 result means a corrupted QR; decode() rejects it.
     String::from_utf8_lossy(&out).into_owned()
 }
 
@@ -800,6 +776,10 @@ pub enum PairingQrError {
     /// Expected exactly [`UUID_BYTE_LEN`] (16).
     #[error("device_id must be {UUID_BYTE_LEN} bytes, got {0}")]
     DeviceIdLength(usize),
+
+    /// (CPPAIR2) The addr_hint b64url field failed to decode or was not valid UTF-8.
+    #[error("addr_hint base64url decode failed")]
+    AddrHintDecode,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -810,9 +790,7 @@ pub enum PairingQrError {
 mod tests {
     use super::*;
 
-    /// `from_bytes` test helper that panics with a clear message instead of
-    /// `.unwrap()` (which would require `PairingToken: Debug`, deliberately not
-    /// implemented to keep the secret out of logs).
+    /// `from_bytes` test helper that panics with a clear message.
     fn token(bytes: [u8; PAIRING_TOKEN_LEN]) -> PairingToken {
         match PairingToken::from_bytes(&bytes) {
             Ok(t) => t,
@@ -841,7 +819,6 @@ mod tests {
         let a = PairingToken::generate();
         let b = PairingToken::generate();
         assert_eq!(a.as_bytes().len(), PAIRING_TOKEN_LEN);
-        // Two fresh tokens must (overwhelmingly likely) differ.
         assert_ne!(a.as_bytes(), b.as_bytes());
     }
 
@@ -869,13 +846,10 @@ mod tests {
         let p1 = t.to_pake_password();
         let p2 = t.to_pake_password();
         assert_eq!(p1, p2, "same token must derive the same PAKE password");
-        // 32 bytes base64url-no-pad = 43 chars, well above the 6-char PAKE
-        // minimum the daemon enforces.
         assert!(p1.len() >= 6);
     }
 
-    /// Decode helper that panics with a clear message instead of `.unwrap()`
-    /// (which would require `PairingPayload: Debug`).
+    /// Decode helper that panics with a clear message.
     fn decode(s: &str) -> PairingPayload {
         match PairingPayload::decode(s) {
             Ok(p) => p,
@@ -883,13 +857,25 @@ mod tests {
         }
     }
 
-    /// Returns the error from a decode that is expected to fail. Avoids
-    /// `.unwrap_err()`, which would require the Ok type (`PairingPayload`) to
-    /// be `Debug`.
+    /// Returns the error from a decode that is expected to fail.
     fn decode_err(s: &str) -> PairingQrError {
         match PairingPayload::decode(s) {
             Ok(_) => panic!("decode was expected to fail but succeeded"),
             Err(e) => e,
+        }
+    }
+
+    /// A sample payload with a valid 64-char (32-byte) hex fingerprint and a
+    /// proper UUID device_id, as required by the CPPAIR2 format.
+    fn sample_v2() -> PairingPayload {
+        PairingPayload {
+            fingerprint: "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
+                .to_string(),
+            token: token([7u8; PAIRING_TOKEN_LEN]),
+            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
+            device_name: "Dmytro's MacBook".to_string(),
+            addr_hint: "192.168.1.5:54321".to_string(),
+            provisioning: None,
         }
     }
 
@@ -935,7 +921,6 @@ mod tests {
 
     #[test]
     fn decode_rejects_wrong_field_count() {
-        // Magic present but too few fields.
         let err = decode_err("CPPAIR1.aabb.tok");
         assert!(matches!(err, PairingQrError::FieldCount(_)));
     }
@@ -1060,22 +1045,26 @@ mod tests {
         // Back-compat: a bare (unwrapped) CPPAIR2 string must be returned as-is.
         let bare = sample_v2().encode();
         assert_eq!(strip_deeplink(&bare), bare);
-        // Whitespace is trimmed.
         let padded = format!("  {bare}  ");
         assert_eq!(strip_deeplink(&padded), bare);
     }
 
     #[test]
-    fn deeplink_escapes_addr_hint_colon() {
-        // addr_hint host:port contains ':', which must be percent-escaped in the
-        // URI and faithfully restored on strip.
+    fn deeplink_encodes_addr_hint_as_b64() {
+        // In CPPAIR2 the addr_hint is base64url-encoded, so its IPv4 dots are
+        // gone from the encoded string and the deep-link has no raw ':'.
+        // The decoded addr_hint must still round-trip correctly.
         let original = sample_v2(); // addr_hint = "192.168.1.5:54321"
-        let wrapped = original.encode_deeplink();
-        assert!(
-            wrapped.contains("%3A"),
-            "the ':' in host:port must be percent-encoded: {wrapped}"
-        );
-        let decoded = decode(&strip_deeplink(&wrapped));
+        let encoded = original.encode();
+        // addr_hint bytes are base64url in the encoded string — no raw dots from IPv4.
+        // Verify the encoded body contains no raw "192.168" sequence.
+        let body = encoded.strip_prefix("CPPAIR2.").unwrap();
+        let fields: Vec<&str> = body.splitn(6, '.').collect();
+        // field[4] is addr_b64 — it must decode back to the original addr_hint.
+        let addr_decoded = String::from_utf8(b64().decode(fields[4]).unwrap()).unwrap();
+        assert_eq!(addr_decoded, "192.168.1.5:54321");
+
+        let decoded = decode(&strip_deeplink(&original.encode_deeplink()));
         assert_eq!(decoded.addr_hint, "192.168.1.5:54321");
     }
 
@@ -1093,21 +1082,6 @@ mod tests {
     }
 
     // ── CPPAIR2 tests ───────────────────────────────────────────────────────────
-
-    /// A sample payload with a valid 64-char (32-byte) hex fingerprint and a
-    /// proper UUID device_id, as required by the CPPAIR2 format.
-    fn sample_v2() -> PairingPayload {
-        PairingPayload {
-            // 64 lowercase hex chars = 32 bytes
-            fingerprint: "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"
-                .to_string(),
-            token: token([7u8; PAIRING_TOKEN_LEN]),
-            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
-            device_name: "Dmytro's MacBook".to_string(),
-            addr_hint: "192.168.1.5:54321".to_string(),
-            provisioning: None,
-        }
-    }
 
     #[test]
     fn cppair2_encode_starts_with_v2_magic() {
@@ -1129,12 +1103,15 @@ mod tests {
         assert_eq!(decoded.device_id, original.device_id);
         assert_eq!(decoded.device_name, original.device_name);
         assert_eq!(decoded.addr_hint, original.addr_hint);
+        assert!(decoded.provisioning.is_none());
     }
 
     #[test]
     fn cppair2_is_shorter_than_cppair1_equivalent() {
         // For the same data, a CPPAIR2 string must be shorter than its CPPAIR1
-        // equivalent (43 vs 64 for fp + 22 vs 36 for device_id = −35 chars).
+        // equivalent. CPPAIR2 saves 21 chars on fp (43 vs 64) and 14 chars on
+        // device_id (22 vs 36) = 35 chars saved; addr_hint base64url adds a few
+        // chars but the net saving is still positive.
         let payload = sample_v2();
         let v2_len = payload.encode().len();
 
@@ -1159,7 +1136,6 @@ mod tests {
     fn cppair2_fingerprint_field_is_43_chars() {
         // 32 raw bytes base64url-no-pad = ceil(32*4/3) = 43 chars (no '=' padding).
         let encoded = sample_v2().encode();
-        // Strip "CPPAIR2." and get the first field
         let body = encoded
             .strip_prefix("CPPAIR2.")
             .expect("must start with CPPAIR2.");
@@ -1179,8 +1155,11 @@ mod tests {
         let body = encoded
             .strip_prefix("CPPAIR2.")
             .expect("must start with CPPAIR2.");
-        let fields: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
-        assert_eq!(fields.len(), PAIRING_QR_FIELD_COUNT, "must have 5 fields");
+        let fields: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT + 1, '.').collect();
+        assert!(
+            fields.len() >= PAIRING_QR_FIELD_COUNT,
+            "must have ≥5 fields"
+        );
         let device_id_field = fields[2];
         assert_eq!(
             device_id_field.len(),
@@ -1198,11 +1177,12 @@ mod tests {
         let body = encoded
             .strip_prefix("CPPAIR2.")
             .expect("must start with CPPAIR2.");
-        let mut fields: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
+        let mut fields: Vec<String> = body
+            .splitn(PAIRING_QR_FIELD_COUNT + 1, '.')
+            .map(|s| s.to_string())
+            .collect();
         // Replace fingerprint field with b64url of 16 bytes (wrong: expected 32)
-        let bad_fp = b64().encode([0xffu8; 16]);
-        let bad_fp_owned = bad_fp.clone();
-        fields[0] = &bad_fp_owned;
+        fields[0] = b64().encode([0xffu8; 16]);
         let tampered = format!("CPPAIR2.{}", fields.join("."));
         let err = decode_err(&tampered);
         assert!(
@@ -1219,8 +1199,8 @@ mod tests {
         let body = encoded
             .strip_prefix("CPPAIR2.")
             .expect("must start with CPPAIR2.");
-        let fields: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
-        assert_eq!(fields.len(), PAIRING_QR_FIELD_COUNT);
+        let fields: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT + 1, '.').collect();
+        assert!(fields.len() >= PAIRING_QR_FIELD_COUNT);
         // Replace device_id field with b64url of 8 bytes (wrong: expected 16)
         let bad_id = b64().encode([0xaau8; 8]);
         let tampered = format!(
@@ -1248,7 +1228,12 @@ mod tests {
         assert_eq!(decoded.device_id, device_id);
         assert_eq!(decoded.device_name, "My Phone");
         assert_eq!(decoded.addr_hint, "192.168.1.1:1234");
+        assert!(decoded.provisioning.is_none());
     }
+
+    // NOTE: CPPAIR1 does not support provisioning — the raw IPv4 addr_hint
+    // (e.g. "192.168.1.1:1234") contains dots that collide with the field delimiter,
+    // making a 6th field ambiguous. Provisioning is CPPAIR2-only.
 
     #[test]
     fn cppair2_fingerprint_recovered_as_lowercase_hex() {
@@ -1350,8 +1335,10 @@ mod tests {
     fn payload_with_provisioning_roundtrips() {
         let original = sample_with_provisioning();
         let encoded = original.encode();
-        // Must have 6 dot-separated fields after the magic.
+        // Must have 6 dot-separated fields in the body after the magic.
         let parts: Vec<&str> = encoded.splitn(2, '.').collect();
+        // All body fields (fp, tok, id, name, addr_b64, prov_b64) are base64url
+        // (no dots), so a plain split gives the accurate field count.
         let field_count = parts[1].split('.').count();
         assert_eq!(
             field_count, 6,
@@ -1380,6 +1367,7 @@ mod tests {
         let original = sample_v2();
         let encoded = original.encode();
         let parts: Vec<&str> = encoded.splitn(2, '.').collect();
+        // All 5 body fields are base64url (no dots) — plain split is accurate.
         let field_count = parts[1].split('.').count();
         assert_eq!(
             field_count, 5,
@@ -1397,6 +1385,7 @@ mod tests {
         let decoded = decode(&corrupt);
         // Core pairing fields must be intact.
         assert_eq!(decoded.fingerprint, sample_v2().fingerprint);
+        assert_eq!(decoded.addr_hint, sample_v2().addr_hint);
         // Provisioning is silently None (corrupt field ignored).
         assert!(decoded.provisioning.is_none());
     }
