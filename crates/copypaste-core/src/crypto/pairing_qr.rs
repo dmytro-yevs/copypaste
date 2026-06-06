@@ -447,14 +447,9 @@ impl PairingPayload {
         // addr_hint is the terminal field; it may contain dots (IPv4) and colons.
         let addr_hint = parts[4].to_string();
 
-        // Decode the optional 6th provisioning field. A decode error here is
-        // silently ignored so that a malformed/unknown provisioning blob cannot
-        // break pairing — the worst case is the scanner doesn't get the creds.
-        let provisioning = parts
-            .get(5)
-            .filter(|f| !f.is_empty())
-            .and_then(|f| QrProvisioning::decode(f));
-
+        // v1 does not carry provisioning: addr_hint is a raw host:port and its
+        // IPv4 dots collide with the field delimiter, making a 6th field ambiguous.
+        // Provisioning is CPPAIR2-only (where addr_hint is base64url-encoded).
         Ok(Self {
             fingerprint,
             token,
