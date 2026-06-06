@@ -347,7 +347,7 @@ class ClipboardService : Service() {
         // running it on the FGS main thread risks ANR. Move the fetch and all
         // downstream work onto Dispatchers.IO via the service-owned scope.
         scope.launch(Dispatchers.IO) {
-        val localItems = repository.localItemsForSync(key, limit = FgsSyncLoop.P2P_LOCAL_ITEM_LIMIT)
+        val localItems = repository.localItemsForSync(key)
 
         val handle = try {
             startP2pListener(
