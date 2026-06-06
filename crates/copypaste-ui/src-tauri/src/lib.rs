@@ -191,6 +191,7 @@ pub fn run() {
             stop_recording_shortcut,
             record_prior_app,
             paste_to_frontmost,
+            paste_plain_text,
             hide_popup,
             play_copy_sound,
             show_copy_notification,
@@ -653,6 +654,51 @@ fn paste_to_frontmost(handle: tauri::AppHandle) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = handle;
+        Ok(())
+    }
+}
+
+/// Write `text` as plain UTF-8 to the system clipboard (strips all rich
+/// formatting / MIME context), then activate the prior app and synthesise
+/// Cmd+V — the Option+Enter "paste as plain text" shortcut (F1).
+///
+/// The caller is responsible for hiding the popup first so the prior app
+/// receives focus before `paste_to_frontmost` fires Cmd+V.
+///
+/// On non-macOS this is a no-op (returns Ok).
+#[tauri::command]
+fn paste_plain_text(text: String, handle: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
+        use objc2_foundation::NSString;
+
+        // Write plain text to the general pasteboard, clearing all prior types.
+        //
+        // SAFETY: NSPasteboard / NSString ObjC bindings are correct; these calls
+        // are safe on any thread that has an autorelease pool. Tauri command
+        // handlers run on the Tokio runtime which provides an autorelease pool on
+        // macOS, so this is safe here.
+        unsafe {
+            let pb = NSPasteboard::generalPasteboard();
+            pb.clearContents();
+            let ns_text = NSString::from_str(&text);
+            // setString_forType returns bool — false means the write was rejected
+            // (e.g. pasteboard is owned by another process). Log and continue; the
+            // Cmd+V will paste whatever was on the clipboard before (graceful
+            // degradation).
+            let ok = pb.setString_forType(&ns_text, NSPasteboardTypeString);
+            if !ok {
+                tracing::warn!("paste_plain_text: NSPasteboard setString_forType returned false");
+            }
+        }
+
+        // Reuse the existing paste-to-frontmost logic (activate prior app + Cmd+V).
+        paste_to_frontmost(handle)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (text, handle);
         Ok(())
     }
 }

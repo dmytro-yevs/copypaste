@@ -4,6 +4,7 @@ import {
   api,
   formatWallTime,
   IpcError,
+  pasteAsPlainText,
   playCopySound,
   resetDatabase,
   showCopyNotification,
@@ -1395,6 +1396,16 @@ export function HistoryView() {
         isKeyboardNavRef.current = true;
         const prev = Math.max(selectedIdx - 1, 0);
         setSelectedId(filtered[prev].id);
+      } else if (e.key === "Enter" && e.altKey && selectedId !== null) {
+        // Option+Enter (F1): paste as plain text — strip rich formatting.
+        e.preventDefault();
+        try {
+          const item = items.find((it) => it.id === selectedId);
+          const text = item?.preview ?? "";
+          await pasteAsPlainText(text);
+        } catch (err) {
+          console.error("paste-as-plain-text failed:", err);
+        }
       } else if (e.key === "Enter" && selectedId !== null) {
         e.preventDefault();
         // Route through handleCopy so sound/notification fire on success
