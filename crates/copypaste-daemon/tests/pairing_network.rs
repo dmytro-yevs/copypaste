@@ -60,14 +60,19 @@ fn wait_for_persisted_peer(daemon: &Daemon, want_fp_canonical: &str) -> serde_js
             for p in arr {
                 if let Some(fp) = p.get("fingerprint").and_then(|v| v.as_str()) {
                     if canonical(fp) == want_fp_canonical {
-                        return p.clone();
+                        // Wait until address is also populated — it may be
+                        // written in a detached task slightly after the record.
+                        let addr = p.get("address").and_then(|v| v.as_str()).unwrap_or("");
+                        if !addr.is_empty() {
+                            return p.clone();
+                        }
                     }
                 }
             }
         }
         if Instant::now() >= deadline {
             panic!(
-                "timed out waiting for peers.json to contain peer {want_fp_canonical}; \
+                "timed out waiting for peers.json to contain peer {want_fp_canonical} with address; \
                  last seen: {peers}"
             );
         }
