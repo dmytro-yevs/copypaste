@@ -48,6 +48,10 @@ const TXT_BPORT: &str = "bport";
 /// v2 adds the `bport` TXT key. `peer_from_resolved` accepts both v1 and v2
 /// so existing peers are never silently dropped from the discovered list.
 const PROTOCOL_VERSION: &str = "2";
+/// Maximum length of a single DNS label per RFC 1035 §2.3.4.
+/// mdns-sd asserts `s.len() < 64` in dns_parser.rs; enforce the limit here
+/// before registering so we never trigger a background-thread panic.
+const DNS_LABEL_MAX: usize = 63;
 /// The v1 protocol version string, accepted for backward compatibility.
 ///
 /// v1 peers lack the `bport` TXT key; they appear in the discovered list but
@@ -358,11 +362,24 @@ impl DiscoveryService {
         // Slice by `chars()`, not byte index, so a non-ASCII device_id cannot
         // panic by splitting a UTF-8 codepoint mid-byte.
         let id_short: String = reg.device_id.chars().take(8).collect();
-        let instance_name = format!("{}.{}", sanitize_label(&reg.device_name), id_short);
+        // DNS labels must be ≤63 bytes (RFC 1035 §2.3.4). id_short is 8 chars
+        // and the separator "." is 1, so cap the device-name portion to 54 chars
+        // to keep the whole instance_name within DNS_LABEL_MAX.
+        let name_max = DNS_LABEL_MAX - id_short.len() - 1; // 1 for the "." separator
+        let name_part: String = sanitize_label(&reg.device_name)
+            .chars()
+            .take(name_max)
+            .collect();
+        let instance_name = format!("{}.{}", name_part, id_short);
 
         // hostname — mdns-sd resolves local addresses automatically; supply a
         // label-safe host name so the daemon has something to work with.
-        let hostname = format!("{}.local.", sanitize_label(&reg.device_name));
+        // Truncate the label portion (before ".local.") to DNS_LABEL_MAX chars.
+        let host_label: String = sanitize_label(&reg.device_name)
+            .chars()
+            .take(DNS_LABEL_MAX)
+            .collect();
+        let hostname = format!("{}.local.", host_label);
 
         // Build TXT properties. bport is optional (Phase 0: absent; Phase 2:
         // set by `register_with_bport`). We heap-allocate the bport string so
