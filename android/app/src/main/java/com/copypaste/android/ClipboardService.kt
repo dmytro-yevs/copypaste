@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -33,6 +34,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import android.provider.OpenableColumns
 import java.io.ByteArrayOutputStream
 import java.util.Calendar
@@ -53,23 +55,17 @@ import java.util.Calendar
  *
  * ## Background clipboard access (Android 10+)
  * `ClipboardManager.getPrimaryClip()` is blocked from any non-foreground,
- * non-IME, non-AccessibilityService context on API 29+. This service registers
+ * non-IME context on API 29+. This service registers
  * `OnPrimaryClipChangedListener` on the main thread (framework requirement),
  * which *fires* even from background — but `getPrimaryClip()` inside the
- * callback will return null unless the process also has an enabled
- * AccessibilityService. [ClipboardAccessibilityService] provides that binding;
- * since both services run in the same process, enabling the a11y service makes
- * getPrimaryClip() return non-null here too.
+ * callback will return null unless the process has a focused window token.
+ * [addCaptureOverlay] adds a 1×1 invisible TYPE_APPLICATION_OVERLAY window
+ * that grants this token, lifting the restriction on Android 10+.
  *
- * When getPrimaryClip() returns null on API 29+ (a11y service not enabled),
- * [clipListener] issues a one-time actionable notification via
- * [maybeNotifyA11yRequired] — shown at most once per install to avoid spam —
- * so the user knows background capture is silently inactive and can fix it.
- * Without the a11y service, this FGS only captures clips copied while the
- * app is in the foreground (via this listener) or via [MainActivity]'s own
- * ClipboardManager listener; it does NOT capture clips from other apps in
- * background on API 29+. There is no workaround for this platform restriction
- * without an enabled AccessibilityService or the default IME role.
+ * Background capture via the logcat+ClipboardFloatingActivity path requires
+ * READ_LOGS (adb grant) and SYSTEM_ALERT_WINDOW. See [LogcatCaptureService].
+ * When getPrimaryClip() returns null (overlay not yet added), this FGS only
+ * captures clips copied while the app is in the foreground.
  *
  * ## Restart on swipe-away ([onTaskRemoved])
  * When the user swipes the app from the recents list, Android calls
@@ -107,6 +103,14 @@ class ClipboardService : Service() {
 
     /** Coroutine draining [pollP2pListener] on the dial cadence. Cancelled in [onDestroy]. */
     private var p2pListenerJob: kotlinx.coroutines.Job? = null
+
+    /**
+     * Coroutine that polls [pairGetSas] every ~1 s and posts a HIGH-priority
+     * notification when this device transitions to `awaiting_sas` with
+     * role="responder" (it received an incoming pairing request). Cancelled in
+     * [onDestroy]. Null when P2P is disabled or the native library is absent.
+     */
+    private var pairResponderPollJob: kotlinx.coroutines.Job? = null
 
     /**
      * Supabase Realtime WS client — primary push-receive channel (~1 s latency).
@@ -148,52 +152,12 @@ class ClipboardService : Service() {
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener {
         val clip = clipboardManager.primaryClip
         if (clip == null) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                if (!ClipboardAccessibilityService.isEnabled(this@ClipboardService)) {
-                    maybeNotifyA11yRequired(this@ClipboardService)
-                }
-            }
             return@OnPrimaryClipChangedListener
         }
 
-        // Detect image MIME before falling back to text. Check all MIME types on
-        // the ClipDescription; the first image/* type wins.
-        val imageMime = (0 until clip.description.mimeTypeCount)
-            .map { clip.description.getMimeType(it) }
-            .firstOrNull { it.startsWith("image/") }
-
-        if (imageMime != null) {
-            val uri = clip.getItemAt(0)?.uri
-            if (uri != null) {
-                scope.launch { captureImageClip(this@ClipboardService, uri, imageMime, settings, repository, syncManager) }
-            } else {
-                Log.w(TAG, "Image clip has no URI — skipping")
-            }
-            return@OnPrimaryClipChangedListener
-        }
-
-        // File branch: a URI whose MIME is not text/* and not image/* is a real
-        // file (PDF, ZIP, DOCX, etc.). Capture bytes + metadata and store as a
-        // "file" content-type item so it can sync to macOS via P2P.
-        val itemUri = clip.getItemAt(0)?.uri
-        if (itemUri != null) {
-            val mimeTypes = (0 until clip.description.mimeTypeCount)
-                .map { clip.description.getMimeType(it) }
-            val fileMime = mimeTypes.firstOrNull { mime ->
-                mime != null && !mime.startsWith("text/") && !mime.startsWith("image/")
-            }
-            if (fileMime != null) {
-                scope.launch {
-                    captureFileClip(this@ClipboardService, itemUri, fileMime, settings, repository)
-                }
-                return@OnPrimaryClipChangedListener
-            }
-        }
-
-        val text = clip.getItemAt(0)?.text?.toString()
-            ?: return@OnPrimaryClipChangedListener
-
-        scope.launch { handleClipboardChange(text) }
+        // BUG 1 fix: delegate to the shared MIME-dispatch helper so the
+        // foreground-service path and the background-overlay path are identical.
+        dispatchClipData(clip, this@ClipboardService, settings, repository, syncManager, scope)
     }
 
     override fun onCreate() {
@@ -206,9 +170,22 @@ class ClipboardService : Service() {
 
         // P1.2/P1.4: Supabase Realtime WS client — constructed here so it can be
         // passed to FgsSyncLoop as the wsConnected gate.
-        realtimeClient = SupabaseRealtimeClient(settings, syncManager, repository, scope)
+        realtimeClient = SupabaseRealtimeClient(
+            settings = settings,
+            syncManager = syncManager,
+            repository = repository,
+            scope = scope,
+            onSyncedTextClip = { text -> applyTextToClipboard(text) },
+        )
         deviceKeyStore = DeviceKeyStore(this)
-        fgsSyncLoop = FgsSyncLoop(settings, repository, syncManager, deviceKeyStore, realtimeClient)
+        fgsSyncLoop = FgsSyncLoop(
+            settings = settings,
+            repository = repository,
+            syncManager = syncManager,
+            deviceKeyStore = deviceKeyStore,
+            wsClient = realtimeClient,
+            onSyncedTextClip = { text -> applyTextToClipboard(text) },
+        )
 
         // Relay SSE subscription — the third independent receive transport.
         // Reuses the same syncManager (relay decrypt + LWW) and FGS scope.
@@ -276,9 +253,61 @@ class ClipboardService : Service() {
         // listener is already running.
         if (settings.syncEnabled && settings.p2pSyncEnabled) {
             startInboundP2pListener()
+            // HB-2: host mDNS discovery (advert + standing SAS-pairing responder)
+            // in the always-on FGS, NOT on the Devices screen. The screen-scoped
+            // version died the moment Devices closed, so a Mac→Android pair hit
+            // "Connection refused". Started AFTER the listener so activeListenerPort
+            // is known and advertised as the peer's sync port.
+            startFgsDiscovery()
         }
 
+        // Deliverable 1: poll for incoming (responder-role) pairing requests so
+        // the user is notified even when DevicesActivity is not open.
+        startPairResponderPoller()
+
         return START_STICKY
+    }
+
+    /**
+     * HB-2: start LAN discovery for the lifetime of the foreground service.
+     *
+     * Advertises this device over mDNS (sync port = the live inbound listener
+     * port; bootstrap port = the fixed [SAS_BPORT]) and runs the standing
+     * SAS-pairing responder so a macOS peer can dial back to pair AT ANY TIME —
+     * not only while the Devices screen is open. Uses the persisted device cert
+     * (peek, else generate). Idempotent on the native side (a second start while
+     * already running is a no-op). All failures are logged and non-fatal: the FGS
+     * must never crash because discovery could not start.
+     */
+    private fun startFgsDiscovery() {
+        scope.launch {
+            try {
+                val cert = withContext(Dispatchers.IO) {
+                    deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
+                }
+                val syncPort = activeListenerPort.coerceAtLeast(0)
+                withContext(Dispatchers.IO) {
+                    startDiscovery(
+                        deviceId = cert.deviceId,
+                        deviceName = Build.MODEL ?: "Android",
+                        syncPort = syncPort,
+                        bport = SAS_BPORT,
+                        certDer = cert.certDer,
+                        keyDer = cert.keyDer,
+                        // HB-1a (ABI 14): own metadata for the standing responder.
+                        deviceModel = Build.MODEL ?: "Android",
+                        osVersion = "Android " + Build.VERSION.RELEASE,
+                        appVersion = BuildConfig.VERSION_NAME,
+                        localIp = lanIpv4Address(),
+                    )
+                }
+                Log.i(TAG, "FGS discovery started (syncPort=$syncPort, bport=$SAS_BPORT)")
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.w(TAG, "FGS discovery failed to start (${e.javaClass.simpleName}: ${e.message})")
+            }
+        }
     }
 
     /**
@@ -313,9 +342,12 @@ class ClipboardService : Service() {
         val sessionKeys = peers.map {
             PeerSessionKeyInfo(it.fingerprint, settings.sessionKeyFor(it.fingerprint))
         }
-        val localItems = runBlocking {
-            repository.localItemsForSync(key, limit = FgsSyncLoop.P2P_LOCAL_ITEM_LIMIT)
-        }
+
+        // C5: localItemsForSync can block for tens–hundreds ms on large history;
+        // running it on the FGS main thread risks ANR. Move the fetch and all
+        // downstream work onto Dispatchers.IO via the service-owned scope.
+        scope.launch(Dispatchers.IO) {
+        val localItems = repository.localItemsForSync(key, limit = FgsSyncLoop.P2P_LOCAL_ITEM_LIMIT)
 
         val handle = try {
             startP2pListener(
@@ -330,7 +362,7 @@ class ClipboardService : Service() {
             )
         } catch (e: Exception) {
             Log.w(TAG, "P2P listener failed to start (${e.javaClass.simpleName}: ${e.message}) — macOS→Android dial-in disabled this session")
-            return
+            return@launch
         }
 
         p2pListener = handle
@@ -390,6 +422,7 @@ class ClipboardService : Service() {
                 delay(FgsSyncLoop.P2P_DIAL_INTERVAL_MS)
             }
         }
+        } // end scope.launch(Dispatchers.IO)
     }
 
     /**
@@ -398,6 +431,15 @@ class ClipboardService : Service() {
      * thrown — [onDestroy] must complete regardless.
      */
     private fun stopInboundP2pListener() {
+        // HB-2: tear down LAN discovery (mDNS advert + standing SAS responder)
+        // alongside the inbound listener. stopDiscovery() is idempotent and
+        // tolerates a stop without a completed start. Called here so both the
+        // P2P-toggle-off path and onDestroy stop advertising.
+        try {
+            stopDiscovery()
+        } catch (e: Exception) {
+            Log.w(TAG, "FGS discovery: stop failed (${e.javaClass.simpleName}: ${e.message})")
+        }
         p2pListenerJob?.cancel()
         p2pListenerJob = null
         val handle = p2pListener ?: return
@@ -408,6 +450,52 @@ class ClipboardService : Service() {
             Log.i(TAG, "P2P listener stopped (id=${handle.listenerId})")
         } catch (e: Exception) {
             Log.w(TAG, "P2P listener: stop failed (${e.javaClass.simpleName}: ${e.message})")
+        }
+    }
+
+    /**
+     * Deliverable 1 — Incoming-pairing notification.
+     *
+     * Polls [pairGetSas] every ~1 s. When the state machine enters `awaiting_sas`
+     * with role="responder" (a peer dialed US), posts a HIGH-priority notification
+     * whose tap opens [DevicesActivity]. De-duped: only one notification is posted
+     * per pairing session (tracked by [pairNotifPosted]). Clears the notification
+     * when the state returns to a non-awaiting state.
+     *
+     * Idempotent: a no-op when the native library is absent (stub mode). Started
+     * once in [onStartCommand]; cancelled in [onDestroy].
+     */
+    private fun startPairResponderPoller() {
+        if (pairResponderPollJob?.isActive == true) return
+        if (!isNativeLibraryLoaded) return
+
+        pairResponderPollJob = scope.launch {
+            var notifPosted = false
+            while (isActive) {
+                try {
+                    val st = withContext(Dispatchers.IO) { pairGetSas() }
+                    if (st.state == "awaiting_sas" && st.role == "responder" && !notifPosted) {
+                        postIncomingPairNotification(
+                            context = this@ClipboardService,
+                            peerName = st.sas?.let { "" } ?: "", // sas field ≠ peer name; use empty
+                        )
+                        notifPosted = true
+                    } else if (st.state != "awaiting_sas") {
+                        if (notifPosted) {
+                            // Clear the notification once the pairing is no longer pending.
+                            val nm = getSystemService(NotificationManager::class.java)
+                            nm?.cancel(NOTIF_ID_PAIR_REQUEST)
+                            notifPosted = false
+                        }
+                    }
+                } catch (_: CancellationException) {
+                    throw CancellationException()
+                } catch (e: Exception) {
+                    // pairGetSas not available yet (discovery not started) — suppress.
+                    Log.v(TAG, "pairResponderPoll: pairGetSas unavailable: ${e.message}")
+                }
+                delay(PAIR_RESPONDER_POLL_MS)
+            }
         }
     }
 
@@ -460,7 +548,7 @@ class ClipboardService : Service() {
 
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return  // canDrawOverlays needs API 23
         if (!android.provider.Settings.canDrawOverlays(this)) {
-            Log.d(TAG, "addCaptureOverlay: SYSTEM_ALERT_WINDOW not granted — skipping overlay (a11y path remains active)")
+            Log.d(TAG, "addCaptureOverlay: SYSTEM_ALERT_WINDOW not granted — skipping overlay")
             return
         }
 
@@ -490,7 +578,7 @@ class ClipboardService : Service() {
             // canDrawOverlays check and the addView call, or on some OEM ROMs
             // that return false from canDrawOverlays at add-time. Non-fatal —
             // fall back to the AccessibilityService capture path.
-            Log.w(TAG, "addCaptureOverlay: addView failed (${e.javaClass.simpleName}: ${e.message}) — falling back to a11y path")
+            Log.w(TAG, "addCaptureOverlay: addView failed (${e.javaClass.simpleName}: ${e.message})")
         }
     }
 
@@ -523,6 +611,26 @@ class ClipboardService : Service() {
         captureClip(this, text, settings, repository, syncManager)
     }
 
+    /**
+     * Write [text] to the system clipboard as the result of an inbound sync.
+     *
+     * Called ONCE per catch-up drain or P2P batch with only the NEWEST text
+     * clip — never called per-item during a bulk sync, so the clipboard is
+     * never spammed and the capture loop is not re-triggered for intermediate
+     * items.
+     *
+     * Uses [ClipboardRepository.expectClip] to register the content-hash so
+     * that the capture listeners ([ClipboardService] / [ClipboardAccessibilityService])
+     * recognise the upcoming setPrimaryClip as an internal write and skip it —
+     * preventing a capture → re-push → re-sync round-trip.
+     */
+    private fun applyTextToClipboard(text: String) {
+        ClipboardRepository.expectClip(text)
+        val clip = ClipData.newPlainText("CopyPaste sync", text)
+        clipboardManager.setPrimaryClip(clip)
+        Log.d(TAG, "Auto-applied newest synced text clip (${text.length} chars)")
+    }
+
     override fun onDestroy() {
         // Stop the inbound listener (cancels its drain job + releases the bound
         // port) BEFORE scope.cancel() so the native accept loop is torn down
@@ -535,6 +643,9 @@ class ClipboardService : Service() {
         realtimeClient?.close()
         // Stop the relay SSE subscription before the scope is cancelled.
         relayClient?.close()
+        // Stop the responder poller before the scope is cancelled.
+        pairResponderPollJob?.cancel()
+        pairResponderPollJob = null
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         settings.stopObserving(prefsListener)
         removeCaptureOverlay()
@@ -560,20 +671,16 @@ class ClipboardService : Service() {
         var activeListenerPort: Int = 0
             private set
 
-        /** Separate notification channel for the one-time "enable Accessibility" action prompt. */
-        private const val CHANNEL_A11Y_WARN = "copypaste_a11y_warn"
+        // ── Deliverable 1: incoming-pair notification ─────────────────────────
 
-        /** Stable notification id for the a11y-required warning (never collides with NOTIFICATION_ID). */
-        private const val NOTIF_ID_A11Y_WARN = 1002
+        /** HIGH-importance channel for incoming SAS pairing requests. */
+        const val CHANNEL_PAIR_REQUEST = "copypaste_pair_request"
 
-        /**
-         * SharedPreferences key used to gate the a11y-required warning to a single
-         * notification per install. We show it once when clipboard data is first
-         * silently dropped due to the Android 10+ restriction, then never again —
-         * the user can always re-open Onboarding from Settings.
-         */
-        private const val KEY_A11Y_WARN_SHOWN = "a11y_warn_shown"
+        /** Stable notification id for the incoming-pair prompt (one at a time). */
+        const val NOTIF_ID_PAIR_REQUEST = 1004
 
+        /** Poll cadence for the responder-role SAS watcher in [startPairResponderPoller]. */
+        private const val PAIR_RESPONDER_POLL_MS = 1_000L
         /**
          * Notification channel for per-copy event toasts (A-SET-6 parity).
          * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
@@ -600,15 +707,72 @@ class ClipboardService : Service() {
         private const val KEY_TODAY_COUNT = "today_count"
 
         /**
+         * BUG 1 fix: shared MIME-dispatch helper.
+         *
+         * Both [ClipboardService.clipListener] and [ClipboardAccessibilityService]
+         * previously duplicated the three-phase image/file/text MIME resolution.
+         * The background overlay path historically dropped images because the two
+         * implementations diverged. This function is the ONE canonical dispatch;
+         * both call sites delegate here.
+         *
+         * Launches the appropriate capture coroutine on [scope] and returns
+         * immediately (fire-and-forget on the caller's SupervisorJob scope).
+         * The caller is responsible for cancelling [scope] after all coroutines
+         * have drained (see [ClipboardAccessibilityService.cleanupAndFinish]).
+         */
+        fun dispatchClipData(
+            clip: android.content.ClipData,
+            context: Context,
+            settings: Settings,
+            repository: ClipboardRepository,
+            syncManager: SyncManager,
+            scope: kotlinx.coroutines.CoroutineScope,
+        ) {
+            // Phase 1: image — check all MIME types; first image/* wins.
+            val imageMime = (0 until clip.description.mimeTypeCount)
+                .map { clip.description.getMimeType(it) }
+                .firstOrNull { it.startsWith("image/") }
+
+            if (imageMime != null) {
+                val uri = clip.getItemAt(0)?.uri
+                if (uri != null) {
+                    scope.launch { captureImageClip(context, uri, imageMime, settings, repository, syncManager) }
+                } else {
+                    Log.w(TAG, "dispatchClipData: image clip has no URI — skipping")
+                }
+                return
+            }
+
+            // Phase 2: file — non-text, non-image URI (PDF, ZIP, DOCX, …).
+            val itemUri = clip.getItemAt(0)?.uri
+            if (itemUri != null) {
+                val mimeTypes = (0 until clip.description.mimeTypeCount)
+                    .map { clip.description.getMimeType(it) }
+                val fileMime = mimeTypes.firstOrNull { mime ->
+                    mime != null && !mime.startsWith("text/") && !mime.startsWith("image/")
+                }
+                if (fileMime != null) {
+                    scope.launch { captureFileClip(context, itemUri, fileMime, settings, repository) }
+                    return
+                }
+            }
+
+            // Phase 3: text (most common path).
+            val text = clip.getItemAt(0)?.text?.toString()
+            if (!text.isNullOrBlank()) {
+                scope.launch { captureClip(context, text, settings, repository, syncManager) }
+            } else {
+                Log.d(TAG, "dispatchClipData: clip has no usable text/URI — skipping")
+            }
+        }
+
+        /**
          * Shared capture pipeline: store + count + sync. HIGH-2.
          *
-         * Both the foreground [ClipboardService] and the background
-         * [ClipboardAccessibilityService] funnel captures through here so that
-         * a11y-captured clips (the PRIMARY background path on Android 10+, where
-         * the FGS's getPrimaryClip() returns null) are stored, counted in the
-         * notification, AND pushed to sync — exactly like foreground captures.
-         * Previously the a11y service only called repository.storeItem, so
-         * backgrounded copies were stored locally but never synced/counted.
+         * The foreground [ClipboardService], [LogcatCaptureService] background
+         * path, and [MainActivity] all funnel captures through here so that
+         * background-captured clips are stored, counted in the notification,
+         * AND pushed to sync — exactly like foreground captures.
          *
          * The native SQLite insert and the repository store mirror
          * [ClipboardService]'s original logic: the native insert is
@@ -680,7 +844,7 @@ class ClipboardService : Service() {
             // Persist to the SharedPreferences repository — the single source the
             // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
             // single copy seen by multiple owners is stored (and counted) once.
-            val storedId = repository.storeItem(text, key, lamportTs = lamportTs)
+            val storedId = repository.storeItem(text, key, lamportTs = lamportTs, originDeviceId = settings.deviceId)
             if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
                 bumpTodayCounter(context)
@@ -688,7 +852,14 @@ class ClipboardService : Service() {
                 if (settings.notifyOnCopy) postCopyNotification(context)
                 if (settings.soundOnCopy) playCopySound(context)
                 if (settings.syncEnabled) {
-                    notifySyncManager(storedId, text, key, settings, syncManager, lamportTs)
+                    notifySyncManager(
+                        itemId = storedId,
+                        payload = text.toByteArray(Charsets.UTF_8),
+                        contentType = "text",
+                        settings = settings,
+                        syncManager = syncManager,
+                        lamportTs = lamportTs,
+                    )
                 }
             }
         }
@@ -708,7 +879,6 @@ class ClipboardService : Service() {
          *   (off-limits file), call storeThumbnailBytes there too so synced image
          *   rows also benefit from thumbnail display.
          */
-        @Suppress("UNUSED_PARAMETER") // syncManager reserved for future image-sync wiring
         suspend fun captureImageClip(
             context: Context,
             uri: android.net.Uri,
@@ -717,15 +887,36 @@ class ClipboardService : Service() {
             repository: ClipboardRepository,
             syncManager: SyncManager,
         ) {
+            // Copy-from-history echo guard (parity with text path in captureClip).
+            // When HistoryActivity copies an image back to the clipboard it calls
+            // ClipboardRepository.expectImageUri(uri) RIGHT BEFORE setPrimaryClip.
+            // Without this check the capture listener fires, decodes the same bytes,
+            // and creates a duplicate history row.  The text path has an identical
+            // guard (shouldSkipExpectedClip); this is the image equivalent.
+            if (ClipboardRepository.shouldSkipExpectedImageUri(uri)) {
+                Log.d(TAG, "Skipping copy-from-history echo for image URI: $uri")
+                return
+            }
+
             if (!settings.captureEnabled) {
                 Log.d(TAG, "Capture paused — dropping image clipboard change")
                 return
             }
 
-            // Private mode: mirror the text-path check in captureClip (~417).
+            // Private mode: mirror the text-path check in captureClip.
             // Images must also be suppressed in private mode (privacy parity).
             if (settings.privateMode) {
                 Log.d(TAG, "Private mode enabled — dropping image clipboard change")
+                return
+            }
+
+            // BUG 3 fix: apply sensitive guard to image URIs. Use the URI string
+            // as a proxy; a sensitive screenshot URI (e.g. from a password manager
+            // sharing an image) will often embed identifiable path segments.
+            val uriStr = uri.toString()
+            val sensitive = try { isSensitive(uriStr) } catch (_: UnsatisfiedLinkError) { false }
+            if (sensitive) {
+                Log.d(TAG, "captureImageClip: sensitive URI detected — skipping capture")
                 return
             }
 
@@ -780,9 +971,18 @@ class ClipboardService : Service() {
 
             // Persist a placeholder text blob with the image MIME type so the row
             // appears in history, then attach the image bytes under the same id.
+            // Generate ONE lamport tick and thread it into the stored row AND the
+            // cloud push (parity with the text path) so LWW agrees on a later poll.
             val placeholder = uri.toString()
             val key = settings.encryptionKey
-            val storedId = repository.storeItem(placeholder, key, contentType = mimeType)
+            val lamportTs = settings.lamportClock.tick()
+            val storedId = repository.storeItem(
+                placeholder,
+                key,
+                contentType = mimeType,
+                lamportTs = lamportTs,
+                originDeviceId = settings.deviceId,
+            )
             if (storedId.isEmpty()) {
                 Log.d(TAG, "captureImageClip: storeItem returned empty (dedup/sensitive) — not storing bytes")
                 return
@@ -802,7 +1002,21 @@ class ClipboardService : Service() {
             refreshNotification(context)
             if (settings.notifyOnCopy) postCopyNotification(context)
             if (settings.soundOnCopy) playCopySound(context)
-            // Image sync is not wired in this version — text sync only for now.
+
+            // AB-4: push the IMAGE bytes to the cloud (Supabase + relay) the same
+            // way text does. content_type "image" makes the receiver store raw
+            // bytes (build_local_blob_item on macOS, the image branch on Android)
+            // instead of UTF-8-decoding binary. No header — images carry none.
+            if (settings.syncEnabled) {
+                notifySyncManager(
+                    itemId = storedId,
+                    payload = pngBytes,
+                    contentType = "image",
+                    settings = settings,
+                    syncManager = syncManager,
+                    lamportTs = lamportTs,
+                )
+            }
         }
 
         /**
@@ -827,13 +1041,36 @@ class ClipboardService : Service() {
             mimeType: String,
             settings: Settings,
             repository: ClipboardRepository,
+            // AB-4: when supplied AND sync is enabled, the captured file is also
+            // pushed to the cloud (Supabase + relay). Optional/defaulted so the
+            // accessibility-service caller (which has no SyncManager wired) compiles
+            // unchanged and simply skips the cloud push.
+            syncManager: SyncManager? = null,
         ) {
+            // Copy-from-history echo guard (mirrors text + image paths above).
+            // HistoryActivity calls ClipboardRepository.expectImageUri(uri) before
+            // setPrimaryClip for the file copy-back path; suppress the re-capture here.
+            if (ClipboardRepository.shouldSkipExpectedImageUri(uri)) {
+                Log.d(TAG, "captureFileClip: skipping copy-from-history echo for URI: $uri")
+                return
+            }
+
             if (!settings.captureEnabled) {
                 Log.d(TAG, "captureFileClip: capture paused — dropping file clipboard change")
                 return
             }
             if (settings.privateMode) {
                 Log.d(TAG, "captureFileClip: private mode — dropping file clipboard change")
+                return
+            }
+
+            // BUG 3 fix: apply sensitive guard to file URIs. The URI path often
+            // contains the filename; isSensitive can detect credential-bearing
+            // filenames (e.g. "passwords.csv", "private_key.pem").
+            val uriStr = uri.toString()
+            val sensitiveUri = try { isSensitive(uriStr) } catch (_: UnsatisfiedLinkError) { false }
+            if (sensitiveUri) {
+                Log.d(TAG, "captureFileClip: sensitive URI detected — skipping capture")
                 return
             }
 
@@ -871,10 +1108,15 @@ class ClipboardService : Service() {
 
             val key = settings.encryptionKey
             val label = SyncFileHelper.buildFileLabel(fileName)
+            // Generate ONE lamport tick and thread it into the stored row AND the
+            // cloud push (parity with the text/image paths) so LWW agrees later.
+            val lamportTs = settings.lamportClock.tick()
             val storedId = repository.storeItem(
                 plaintext = label,
                 key = key,
                 contentType = "file",
+                lamportTs = lamportTs,
+                originDeviceId = settings.deviceId,
             )
             if (storedId.isEmpty()) {
                 Log.d(TAG, "captureFileClip: storeItem returned empty (dedup/sensitive) — skipping")
@@ -893,16 +1135,51 @@ class ClipboardService : Service() {
             refreshNotification(context)
             if (settings.notifyOnCopy) postCopyNotification(context)
             if (settings.soundOnCopy) playCopySound(context)
+
+            // AB-4: push the FILE to the cloud (Supabase + relay) the same way text
+            // does. ENCODE the cloud file-identity header (name + mime + bytes) so
+            // the receiver recovers the original name/MIME (AB-3) — byte-for-byte
+            // the same envelope the macOS daemon ships. Only when a SyncManager is
+            // wired (the foreground-service capture path) and sync is enabled.
+            if (settings.syncEnabled && syncManager != null) {
+                val payload = SyncManager.encodeCloudFilePayload(
+                    name = fileName ?: SyncManager.CLOUD_FILE_LEGACY_NAME,
+                    mime = mimeType.ifBlank { SyncManager.CLOUD_FILE_LEGACY_MIME },
+                    fileBytes = fileBytes,
+                )
+                notifySyncManager(
+                    itemId = storedId,
+                    payload = payload,
+                    contentType = "file",
+                    settings = settings,
+                    syncManager = syncManager,
+                    lamportTs = lamportTs,
+                )
+            }
         }
 
         /** Path to the app-private encrypted SQLite DB used by the UniFFI live binding. */
         private fun databasePath(context: Context): String =
             context.applicationContext.getDatabasePath("copypaste.db").absolutePath
 
+        /**
+         * Push one freshly-captured local item to the configured cloud backend.
+         *
+         * AB-4: routes by ACTUAL [contentType] — text/image/file — instead of the
+         * old text-only path. [payload] is the EXACT byte payload the cloud blob
+         * must carry:
+         *   - text  → UTF-8 bytes of the clip
+         *   - image → raw image bytes (PNG)
+         *   - file  → the cloud file-identity header + bytes
+         *             (`SyncManager.encodeCloudFilePayload(name, mime, bytes)`),
+         *             so the receiver recovers the original name/MIME (AB-3).
+         * The same [payload] is shipped over BOTH the Supabase and relay transports
+         * under the row's STABLE [itemId].
+         */
         private suspend fun notifySyncManager(
             itemId: String,
-            plaintext: String,
-            key: ByteArray,
+            payload: ByteArray,
+            contentType: String,
             settings: Settings,
             syncManager: SyncManager,
             lamportTs: Long,
@@ -917,14 +1194,14 @@ class ClipboardService : Service() {
                     // instead of seeing a new item each time (the duplicates bug).
                     try {
                         val id = syncManager.pushToSupabase(
-                            plaintext = plaintext.toByteArray(Charsets.UTF_8),
-                            contentType = "text",
+                            plaintext = payload,
+                            contentType = contentType,
                             overrideId = itemId,
                             deviceId = settings.deviceId,
                             lamportTs = lamportTs,
                         )
                         if (id != null) {
-                            Log.d(TAG, "Supabase push ok: $id")
+                            Log.d(TAG, "Supabase push ok: $id ($contentType)")
                         } else {
                             Log.w(TAG, "Supabase push returned null (logged above)")
                         }
@@ -943,12 +1220,12 @@ class ClipboardService : Service() {
                     try {
                         val ok = syncManager.pushToRelay(
                             itemId = itemId,
-                            plaintext = plaintext.toByteArray(Charsets.UTF_8),
-                            contentType = "text",
+                            plaintext = payload,
+                            contentType = contentType,
                             lamportTs = lamportTs,
                         )
                         if (ok) {
-                            Log.d(TAG, "Relay push ok: $itemId")
+                            Log.d(TAG, "Relay push ok: $itemId ($contentType)")
                         } else {
                             Log.w(TAG, "Relay push returned false (logged above)")
                         }
@@ -1014,10 +1291,6 @@ class ClipboardService : Service() {
          * [CHANNEL_ID]: IMPORTANCE_LOW = silent (no sound, no heads-up).
          *   setShowBadge(false) keeps the launcher icon clean.
          *
-         * [CHANNEL_A11Y_WARN]: IMPORTANCE_DEFAULT = shows a heads-up the first
-         *   time, which is intentional — the user needs to act on it to restore
-         *   background clipboard capture on Android 10+.
-         *
          * [CHANNEL_COPY_EVENT]: IMPORTANCE_MIN = silent badge only, no heads-up.
          */
         fun ensureChannel(context: Context) {
@@ -1039,19 +1312,6 @@ class ClipboardService : Service() {
                 )
             }
 
-            if (nm.getNotificationChannel(CHANNEL_A11Y_WARN) == null) {
-                nm.createNotificationChannel(
-                    NotificationChannel(
-                        CHANNEL_A11Y_WARN,
-                        context.getString(R.string.notif_channel_a11y_warn_name),
-                        NotificationManager.IMPORTANCE_DEFAULT
-                    ).apply {
-                        description = context.getString(R.string.notif_channel_a11y_warn_description)
-                        setShowBadge(true)
-                    }
-                )
-            }
-
             if (nm.getNotificationChannel(CHANNEL_COPY_EVENT) == null) {
                 nm.createNotificationChannel(
                     NotificationChannel(
@@ -1066,44 +1326,64 @@ class ClipboardService : Service() {
                     }
                 )
             }
+
+            // Deliverable 1: HIGH-importance channel for incoming pairing requests.
+            if (nm.getNotificationChannel(CHANNEL_PAIR_REQUEST) == null) {
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_PAIR_REQUEST,
+                        context.getString(R.string.notif_channel_pair_request_name),
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = context.getString(R.string.notif_channel_pair_request_description)
+                        setShowBadge(true)
+                    }
+                )
+            }
         }
 
-        fun maybeNotifyA11yRequired(context: Context) {
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            if (prefs.getBoolean(KEY_A11Y_WARN_SHOWN, false)) return
-            prefs.edit().putBoolean(KEY_A11Y_WARN_SHOWN, true).apply()
-
-            Log.w(
-                TAG,
-                "Android 10+ clipboard restriction: getPrimaryClip() returned null from " +
-                    "background FGS — background capture disabled until Accessibility " +
-                    "Service is enabled. Issuing one-time setup notification."
-            )
-
+        /**
+         * Deliverable 1 — post (or refresh) a HIGH-priority notification alerting
+         * the user that a peer wants to pair with this device. The tap intent opens
+         * [DevicesActivity] where the SAS confirmation modal auto-opens.
+         *
+         * [peerName] is the discovered peer's device name (may be blank — falls back
+         * to the generic string). Idempotent (same stable [NOTIF_ID_PAIR_REQUEST]).
+         */
+        fun postIncomingPairNotification(context: Context, peerName: String) {
             ensureChannel(context)
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
 
             val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            val onboardingIntent = Intent(context, OnboardingActivity::class.java).apply {
+            val devicesIntent = Intent(context, DevicesActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                // Signal DevicesActivity to auto-open the SAS modal on resume.
+                putExtra(DevicesActivity.EXTRA_AUTO_OPEN_SAS, true)
             }
-            val onboardingPi = PendingIntent.getActivity(context, 10, onboardingIntent, piFlags)
+            val devicesPi = PendingIntent.getActivity(context, 20, devicesIntent, piFlags)
 
-            val notification = NotificationCompat.Builder(context, CHANNEL_A11Y_WARN)
-                .setContentTitle(context.getString(R.string.notif_a11y_warn_title))
-                .setContentText(context.getString(R.string.notif_a11y_warn_content))
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+            val content = if (peerName.isNotBlank()) {
+                context.getString(R.string.notif_pair_request_content, peerName)
+            } else {
+                context.getString(R.string.notif_pair_request_content_unknown)
+            }
+
+            val notification = NotificationCompat.Builder(context, CHANNEL_PAIR_REQUEST)
+                .setSmallIcon(android.R.drawable.ic_menu_share)
+                .setContentTitle(context.getString(R.string.notif_pair_request_title))
+                .setContentText(content)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_EVENT)
                 .setAutoCancel(true)
-                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-                .setContentIntent(onboardingPi)
-                .addAction(0, context.getString(R.string.notif_a11y_warn_action), onboardingPi)
-                .setStyle(
-                    NotificationCompat.BigTextStyle()
-                        .bigText(context.getString(R.string.notif_a11y_warn_content_long))
-                )
+                .setContentIntent(devicesPi)
+                .addAction(0, context.getString(R.string.notif_pair_action_confirm), devicesPi)
                 .build()
 
-            nm.notify(NOTIF_ID_A11Y_WARN, notification)
+            try {
+                nm.notify(NOTIF_ID_PAIR_REQUEST, notification)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "postIncomingPairNotification: POST_NOTIFICATIONS blocked: ${e.message}")
+            }
         }
 
         /**
@@ -1119,7 +1399,7 @@ class ClipboardService : Service() {
 
         /**
          * Guards [bumpTodayCounter]'s read-modify-write against concurrent callers
-         * (ClipboardService + ClipboardAccessibilityService both call captureClip/
+         * (ClipboardService + LogcatCaptureService both call captureClip/
          * captureImageClip on the IO dispatcher and can race on the same prefs file).
          */
         private val counterLock = Any()

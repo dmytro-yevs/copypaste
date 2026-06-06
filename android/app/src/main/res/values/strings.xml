@@ -17,7 +17,8 @@
 
     <!-- Screen titles -->
     <string name="title_history">History</string>
-    <string name="title_pair">Pair</string>
+    <string name="title_devices">Devices</string>
+    <string name="title_pair">Your QR Code</string>
     <string name="title_settings">Settings</string>
 
     <!-- History screen — §9 empty states + search filter -->
@@ -33,7 +34,7 @@
     <string name="cd_search_close">Clear and close search</string>
 
     <!-- Pair screen -->
-    <string name="pair_instructions">Scan the QR code with the other device, or scan its QR here.</string>
+    <string name="pair_instructions">Scan this QR code with the other device to pair. To scan another device\'s QR instead, use \"Scan a device\'s QR\" on the Devices screen.</string>
     <string name="btn_scan_qr">Scan a device\'s QR</string>
     <string name="pair_token_expires_in_seconds">Expires in %1$d s</string>
     <string name="pair_token_expired">Token expired — request a new one.</string>
@@ -126,10 +127,22 @@
     <string name="title_permissions">Permissions</string>
     <string name="permissions_intro">Review the status of each permission CopyPaste uses. Tap a button to re-open its request or settings screen at any time.</string>
 
-    <!-- HW-A11: ADB accessibility-enable command (shown below the Accessibility card) -->
-    <string name="a11y_adb_label">Or enable via ADB:</string>
-    <string name="a11y_adb_command">adb shell settings put secure enabled_accessibility_services com.copypaste.android/.ClipboardAccessibilityService</string>
-    <string name="a11y_adb_copied">Command copied</string>
+    <!-- Background Capture ADB commands (Settings + Onboarding) -->
+    <string name="bg_adb_section_title">Background clipboard capture (ADB)</string>
+    <string name="bg_adb_explainer">Android blocks background clipboard reads. Run these commands once via ADB (USB debugging required, no root needed), then restart the app.</string>
+    <string name="bg_adb_cmd1_label">1. Grant READ_LOGS (enables logcat detection):</string>
+    <string name="bg_adb_cmd1">adb shell pm grant com.copypaste.android android.permission.READ_LOGS</string>
+    <string name="bg_adb_cmd2_label">2. Grant overlay permission (enables focused read):</string>
+    <string name="bg_adb_cmd2">adb shell appops set com.copypaste.android SYSTEM_ALERT_WINDOW allow</string>
+    <string name="bg_adb_cmd3_label">3. Force-stop app (apply grants on next launch):</string>
+    <string name="bg_adb_cmd3">adb shell am force-stop com.copypaste.android</string>
+    <string name="bg_adb_cmd_copied">Command copied</string>
+    <string name="bg_adb_status_read_logs_ok">READ_LOGS: granted</string>
+    <string name="bg_adb_status_read_logs_no">READ_LOGS: not granted</string>
+    <string name="bg_adb_status_overlay_ok">Overlay: allowed</string>
+    <string name="bg_adb_status_overlay_no">Overlay: not allowed</string>
+    <string name="bg_adb_status_capture_working">Capture: working</string>
+    <string name="bg_adb_status_capture_inactive">Capture: inactive</string>
 
     <!-- Background Capture Setup screen -->
     <string name="title_bg_capture_setup">Background Capture Setup</string>
@@ -171,6 +184,14 @@
     <string name="cd_sensitive_item">Sensitive content — preview hidden</string>
     <string name="sensitive_tap_hint">Sensitive — use Copy action</string>
 
+    <!-- Incoming pairing-request notification channel (Deliverable 1) -->
+    <string name="notif_channel_pair_request_name">Pairing Requests</string>
+    <string name="notif_channel_pair_request_description">High-priority alert when another device wants to pair with this one.</string>
+    <string name="notif_pair_request_title">CopyPaste: pairing request</string>
+    <string name="notif_pair_request_content">%1$s wants to pair — tap to confirm</string>
+    <string name="notif_pair_request_content_unknown">A device wants to pair — tap to confirm</string>
+    <string name="notif_pair_action_confirm">Confirm</string>
+
     <!-- Per-copy event notification channel -->
     <string name="notif_channel_copy_event_name">Copy Events</string>
     <string name="notif_channel_copy_event_description">Silent badge notification each time a clipboard item is captured.</string>
@@ -188,17 +209,6 @@
     <string name="notif_action_resume">Resume</string>
     <string name="notif_action_open">Open</string>
 
-    <!-- One-time accessibility-required warning notification (Android 10+ background restriction) -->
-    <string name="notif_channel_a11y_warn_name">Setup Required</string>
-    <string name="notif_channel_a11y_warn_description">One-time notifications when a setup step is needed for full clipboard capture.</string>
-    <string name="notif_a11y_warn_title">Background clipboard capture disabled</string>
-    <string name="notif_a11y_warn_content">Android 10+ blocks clipboard reads in background. Enable Accessibility to capture clips from other apps.</string>
-    <string name="notif_a11y_warn_content_long">Android 10+ (API 29) restricts background clipboard access. CopyPaste can only read clipboard content from other apps when its Accessibility Service is enabled.\n\nTap to open setup and enable it — it reads no screen content and intercepts no input.</string>
-    <string name="notif_a11y_warn_action">Enable Accessibility</string>
-
-    <!-- Accessibility service -->
-    <string name="accessibility_service_description">Monitors clipboard changes in the background so CopyPaste can sync items even when the app is not in the foreground. Does not read screen content or intercept inputs.</string>
-
     <!-- OEM autostart onboarding -->
     <string name="onboarding_oem_title">OEM Autostart / Protected Apps</string>
     <string name="onboarding_oem_button">Open OEM Settings</string>
@@ -210,6 +220,7 @@
     <string name="cd_refresh">Refresh</string>
     <string name="cd_copy">Copy</string>
     <string name="cd_delete">Delete item</string>
+    <string name="preview_drag_up_hint">Drag up to expand</string>
     <string name="cd_sensitive_icon">Sensitive content marker</string>
     <string name="cd_image_item">Image clipboard item</string>
     <string name="cd_image_thumbnail">Image thumbnail</string>
@@ -299,4 +310,9 @@
     <string name="file_saved_ok">File saved to Downloads</string>
     <string name="file_save_failed">Could not save file</string>
     <string name="file_copy_failed">Could not copy file</string>
+
+    <!-- HB-11: in-app file picker (history screen AttachFile button) -->
+    <string name="cd_attach_file">Pick file to send</string>
+    <string name="snackbar_file_captured">File added to clipboard — syncing…</string>
+    <string name="error_file_pick_failed">Could not capture file</string>
 </resources>

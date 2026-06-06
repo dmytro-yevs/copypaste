@@ -132,9 +132,13 @@ namespace copypaste_android {
   /// to the responder ("QR fully provisions all sync"); an Android device
   /// scanning a configured PC passes `null` (nothing to offer). The provisioning
   /// the PEER advertised comes back in `BootstrapResult.peer_provisioning`.
+  /// ABI 14 (HB-1a): the five trailing optional params are THIS device's own
+  /// metadata (device_name, Build.MODEL, "Android <release>", app version, LAN
+  /// IP) — sent in-band so the peer's device card shows real Android info instead
+  /// of a bare entry. The PEER's metadata comes back in `BootstrapResult.peer_*`.
   /// Throws `P2pError` on a bad addr_hint or any transport/PAKE failure.
   [Throws=CopypasteError]
-  BootstrapResult bootstrap_pair_initiator(string addr_hint, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string pake_password, string sync_addr, SyncProvisioning? local_provisioning);
+  BootstrapResult bootstrap_pair_initiator(string addr_hint, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string pake_password, string sync_addr, SyncProvisioning? local_provisioning, string? device_name, string? device_model, string? os_version, string? app_version, string? local_ip);
 
   /// Run ONE P2P clipboard sync session against an already-paired peer.
   ///
@@ -210,8 +214,12 @@ namespace copypaste_android {
   /// can INITIATE pairing to this device. `cert_der`/`key_der` are this device's
   /// mTLS identity; `sync_port` is the advertised P2P sync-listener port; `bport`
   /// is the fixed bootstrap-listener port. key_der is secret — zero it after.
+  /// ABI 14 (HB-1a): the four trailing optional params are THIS device's own
+  /// metadata, threaded into the standing responder so a macOS-INITIATED pair
+  /// records real Android info. `device_name` (already a param) is reused for the
+  /// friendly-name field; `public_ip` is not collected on Android.
   [Throws=CopypasteError]
-  void start_discovery(string device_id, string device_name, u16 sync_port, u16 bport, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der);
+  void start_discovery(string device_id, string device_name, u16 sync_port, u16 bport, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string? device_model, string? os_version, string? app_version, string? local_ip);
 
   /// Stop LAN discovery + the standing responder. Idempotent. Aborts the
   /// browse/responder/initiator tasks, drops the mDNS service, and aborts any
@@ -233,8 +241,10 @@ namespace copypaste_android {
   /// in-band); `local_provisioning` is the optional sync-account setup to offer
   /// (typically null on Android). Throws P2pError if the peer is unknown, is a
   /// v1 peer (no bport), has no routable address, or a pairing is in flight.
+  /// ABI 14 (HB-1a): the five trailing optional params are THIS device's own
+  /// metadata, advertised to the discovered peer during the initiator handshake.
   [Throws=CopypasteError]
-  void pair_with_discovered(string device_id, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string sync_addr, SyncProvisioning? local_provisioning);
+  void pair_with_discovered(string device_id, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string sync_addr, SyncProvisioning? local_provisioning, string? device_name, string? device_model, string? os_version, string? app_version, string? local_ip);
 
   /// Poll the current pairing status. While active, `sas`+`role` are populated;
   /// the peer_* outputs (incl. the 32-byte `session_key`) are populated ONLY
@@ -368,11 +378,21 @@ dictionary DeviceCert {
 // `peer_provisioning` is the sync-account setup the peer advertised over the
 // authenticated tunnel ("QR fully provisions all sync"); null when the peer
 // advertised nothing or is a legacy build. Kotlin persists it later.
+// ABI 14 (HB-1b): peer_model/peer_os/peer_app_version/peer_local_ip/
+// peer_public_ip carry the PEER's device metadata learned in-band over the
+// authenticated bootstrap tunnel (from BootstrapPairing.peer_*). All null for a
+// legacy peer. Kotlin persists them on the PairedPeer so Wave 3 renders the
+// device card. peer_public_ip is informational only — never used for trust.
 dictionary BootstrapResult {
   string peer_fingerprint;
   string peer_sync_addr;
   sequence<u8> session_key;
   SyncProvisioning? peer_provisioning;
+  string? peer_model;
+  string? peer_os;
+  string? peer_app_version;
+  string? peer_local_ip;
+  string? peer_public_ip;
 };
 
 // Sync-account provisioning exchanged in-band over the AUTHENTICATED bootstrap
@@ -405,6 +425,14 @@ dictionary LocalItem {
   // reconstruct the filename and MIME on receive. None for text/image.
   string? file_name;
   string? mime;
+  // ABI 14: soft-delete tombstone propagation. When `deleted` is true the peer
+  // applies a tombstone (deleted=1) for this item_id via LWW so deletions
+  // propagate cross-device. `plaintext` MUST be empty for tombstones.
+  // `pinned` and `pin_order` carry the caller's current pin state so pin/unpin
+  // and reorder operations propagate to peers alongside content.
+  boolean deleted;
+  boolean pinned;
+  f64? pin_order;
 };
 
 // An item received from the peer during sync, decrypted back to plaintext.
@@ -413,6 +441,9 @@ dictionary LocalItem {
 // is not re-minted (which would resurface as a duplicate).
 // `file_name` and `mime` are set for content_type=="file" items (task #21b);
 // both are absent (null in Kotlin) for text and image items.
+// ABI 14: `deleted` is true when the peer soft-deleted this item — Kotlin MUST
+// write/refresh a local tombstone (LWW: newer remote delete wins). `pinned` and
+// `pin_order` carry the originating device's pin state for propagation.
 dictionary SyncedItem {
   string id;
   string item_id;
@@ -421,6 +452,9 @@ dictionary SyncedItem {
   i64 wall_time_ms;
   string? file_name;
   string? mime;
+  boolean deleted;
+  boolean pinned;
+  f64? pin_order;
 };
 
 // A peer's PAKE session key, keyed by its pinned cert fingerprint. Passed to
@@ -451,6 +485,14 @@ dictionary P2pSyncResult {
   // (legacy / non-rekeyed peer). Dropped (undecryptable with the shared sync
   // key) but logged + counted so build-skew is observable rather than silent.
   u32 items_skipped_legacy;
+  // ABI 14 (HB-7a): per-reason drop counters for the previously-silent receive
+  // continues, so a "received N stored 0" status reveals WHY items dropped.
+  //   decrypt_fail = shared-key decrypt failed (wrong key / corrupt / tampered)
+  //   unknown_type = content_type not text/image/file
+  //   missing_blob = known type but no `content` blob to decrypt
+  u32 items_skipped_decrypt_fail;
+  u32 items_skipped_unknown_type;
+  u32 items_skipped_missing_blob;
 };
 
 // CANONICAL user-tunable configuration shared with the macOS daemon.
@@ -537,4 +579,11 @@ dictionary PairStatus {
   string? peer_sync_addr;
   sequence<u8>? session_key;
   SyncProvisioning? peer_provisioning;
+  // ABI 14 (HB-1b): the PEER's device metadata, set ONLY in the `confirmed`
+  // state (from ConfirmedPairing). Kotlin persists them on the PairedPeer.
+  string? peer_model;
+  string? peer_os;
+  string? peer_app_version;
+  string? peer_local_ip;
+  string? peer_public_ip;
 };

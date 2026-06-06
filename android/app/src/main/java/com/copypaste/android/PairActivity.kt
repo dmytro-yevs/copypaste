@@ -51,7 +51,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -139,6 +138,11 @@ class PairActivity : ComponentActivity() {
     // instead of silently ignoring the malformed link.
     private val deepLinkError = mutableStateOf<String?>(null)
 
+    // HB-6: when launched from the Devices screen's "Scan a device's QR" button
+    // (Intent extra mode=scan), auto-open the camera scan flow on first compose.
+    // Without the extra (e.g. opened to show this device's own QR) it stays false.
+    private val autoScan = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // FLAG_SECURE: this screen renders the pairing QR, which encodes the PAKE
@@ -153,6 +157,8 @@ class PairActivity : ComponentActivity() {
         enableEdgeToEdge()
         // Extract payload from a cold-start deep-link intent, if present.
         handleDeepLinkIntent(intent)
+        // HB-6: honor mode=scan from the Devices screen to auto-open the scanner.
+        if (intent?.getStringExtra("mode") == "scan") autoScan.value = true
         setContent {
             CopyPasteTheme {
                 PairScreen(
@@ -161,6 +167,8 @@ class PairActivity : ComponentActivity() {
                     onDeepLinkConsumed = { deepLinkPayload.value = null },
                     incomingDeepLinkError = deepLinkError.value,
                     onDeepLinkErrorConsumed = { deepLinkError.value = null },
+                    autoScan = autoScan.value,
+                    onAutoScanConsumed = { autoScan.value = false },
                 )
             }
         }
@@ -174,7 +182,7 @@ class PairActivity : ComponentActivity() {
     }
 
     /**
-     * Route an incoming intent: valid CPPAIR1 payload → deepLinkPayload;
+     * Route an incoming intent: valid CPPAIR1/CPPAIR2 payload → deepLinkPayload;
      * cppair:// URI with unrecognised payload → deepLinkError for user feedback.
      */
     private fun handleDeepLinkIntent(intent: Intent?) {
@@ -182,10 +190,11 @@ class PairActivity : ComponentActivity() {
         val uri: Uri = intent.data ?: return
         if (uri.scheme != "cppair" || uri.host != "pair") return
         val p = uri.getQueryParameter("p") ?: return
-        if (p.startsWith("CPPAIR1.")) {
+        // Accept both CPPAIR1 (legacy) and CPPAIR2 (current compact encoding).
+        if (p.startsWith("CPPAIR1.") || p.startsWith("CPPAIR2.")) {
             deepLinkPayload.value = p
         } else {
-            // Payload present but not a recognised CPPAIR1 token — surface to user.
+            // Payload present but not a recognised pairing token — surface to user.
             deepLinkError.value = "Invalid pairing link"
         }
     }
@@ -211,6 +220,132 @@ private fun encodeQrBitmap(text: String, sizePx: Int): Bitmap {
 internal fun formatScannedInfo(deviceName: String, fingerprint: String): String =
     "${deviceName.ifBlank { "device" }} ($fingerprint)"
 
+/**
+ * Sync-account provisioning extracted from the optional 6th field of a CPPAIR1/CPPAIR2
+ * payload (H4: QR full provisioning). All fields are non-secret:
+ * - [relayUrl]: HTTP relay base URL.
+ * - [supabaseUrl]: Supabase project URL.
+ * - [supabaseAnonKey]: Supabase publishable anon JWT (safe per Supabase docs).
+ */
+/** Holds the optional sync-provisioning data embedded in a CPPAIR2 QR payload. */
+internal data class QrProvisioningData(
+    val relayUrl: String?,
+    val supabaseUrl: String?,
+    val supabaseAnonKey: String?,
+)
+
+/**
+ * Extract sync-provisioning from the optional 6th field of a bare CPPAIR2 payload.
+ *
+ * CPPAIR2 wire format (body after magic prefix):
+ *   [0] fp_b64url  [1] token_b64url  [2] device_id_b64url  [3] name_b64url
+ *   [4] addr_b64url  [5] prov_b64url (optional)
+ *
+ * All 6 body fields are base64url (no dots), so `split(".", limit=7)` on the
+ * full string cleanly isolates the provisioning field at index 6 (0-based,
+ * counting the magic prefix at index 0).
+ *
+ * For CPPAIR1 payloads provisioning is not supported — addr_hint in v1 is the
+ * raw address string and may contain IPv4 dots that collide with the delimiter.
+ *
+ * Returns `null` when the field is absent, empty, or cannot be decoded. A
+ * decode failure here is always silent: provisioning is advisory and must never
+ * break pairing.
+ *
+ * Pure Kotlin; no FFI dependency, so it works even in stub mode.
+ */
+internal fun extractQrProvisioning(barePayload: String): QrProvisioningData? {
+    // Only handle CPPAIR2; CPPAIR1 addr_hint contains IPv4 dots that make
+    // field 5 ambiguous without knowing the addr_hint length.
+    val bare = barePayload.trim()
+    if (!bare.startsWith("CPPAIR2.")) return null
+    // Full string: CPPAIR2 . fp . tok . id . name . addr_b64 [. prov_b64]
+    // Indices:        0       1    2    3    4       5           6
+    val parts = bare.split(".", limit = 7)
+    if (parts.size < 7) return null  // no provisioning field present
+    val provB64 = parts[6].trim()
+    if (provB64.isEmpty()) return null
+    return try {
+        // base64url: replace url-safe chars to standard before decoding.
+        val bytes = android.util.Base64.decode(
+            provB64.replace('-', '+').replace('_', '/'),
+            android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+        )
+        val json = String(bytes, Charsets.UTF_8)
+        QrProvisioningData(
+            relayUrl = extractJsonString(json, "ru"),
+            supabaseUrl = extractJsonString(json, "su"),
+            supabaseAnonKey = extractJsonString(json, "sk"),
+        )
+    } catch (_: Exception) {
+        null // Corrupt/unknown field �� silently ignore; pairing is unaffected.
+    }
+}
+
+/**
+ * Minimal JSON string extractor for a flat `{"k":"v",...}` object.
+ * Returns the string value for [key], or `null` when absent or not a string.
+ * Handles `\"` and `\\` escapes; sufficient for URLs and JWTs.
+ */
+private fun extractJsonString(json: String, key: String): String? {
+    val needle = "\"$key\":\""
+    val start = json.indexOf(needle).takeIf { it >= 0 } ?: return null
+    val valueStart = start + needle.length
+    val sb = StringBuilder()
+    var i = valueStart
+    while (i < json.length) {
+        when (val c = json[i]) {
+            '"' -> return sb.toString().takeIf { it.isNotEmpty() }
+            '\\' -> {
+                i++
+                if (i >= json.length) return null
+                when (json[i]) {
+                    '"' -> sb.append('"')
+                    '\\' -> sb.append('\\')
+                    'n' -> sb.append('\n')
+                    'r' -> sb.append('\r')
+                    't' -> sb.append('\t')
+                    else -> { sb.append('\\'); sb.append(json[i]) }
+                }
+            }
+            else -> sb.append(c)
+        }
+        i++
+    }
+    return null // Unterminated string
+}
+
+/**
+ * Apply [prov] to [settings] using fill-missing semantics: only write a field when
+ * the corresponding settings value is currently blank. Never overwrites an existing
+ * local configuration — the user may have set up their own relay/Supabase/passphrase.
+ *
+ * Returns a list of field names that were actually written (for logging).
+ * Call only from a background thread (Settings uses SharedPreferences I/O).
+ */
+internal fun applyQrProvisioning(prov: QrProvisioningData, settings: Settings): List<String> {
+    val applied = mutableListOf<String>()
+    prov.relayUrl?.takeIf { it.isNotBlank() }?.let { url ->
+        if (settings.relayUrl.isBlank()) {
+            settings.relayUrl = url
+            applied += "relayUrl"
+        }
+    }
+    prov.supabaseUrl?.takeIf { it.isNotBlank() }?.let { url ->
+        if (settings.supabaseUrl.isBlank()) {
+            settings.supabaseUrl = url
+            applied += "supabaseUrl"
+        }
+    }
+    prov.supabaseAnonKey?.takeIf { it.isNotBlank() }?.let { anon ->
+        if (settings.supabaseAnonKey.isBlank()) {
+            settings.supabaseAnonKey = anon
+            applied += "supabaseAnonKey"
+        }
+    }
+    return applied
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PairScreen(
@@ -221,6 +356,8 @@ fun PairScreen(
     onDeepLinkConsumed: () -> Unit = {},
     incomingDeepLinkError: String? = null,
     onDeepLinkErrorConsumed: () -> Unit = {},
+    autoScan: Boolean = false,
+    onAutoScanConsumed: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
@@ -236,9 +373,6 @@ fun PairScreen(
     var syncing by remember { mutableStateOf(false) }
     var syncResult by remember { mutableStateOf<String?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
-    // QR is blurred until the user taps to reveal. Once revealed it stays
-    // visible — including after a tap-triggered regeneration (HW-A5).
-    var qrBlurred by remember { mutableStateOf(true) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
@@ -248,9 +382,7 @@ fun PairScreen(
     val expired = qr != null && remainingSeconds <= 0
 
     // Shared helper: generate a new QR and render its bitmap.
-    // keepVisible=true keeps qrBlurred=false after generation (used for
-    // tap-regen and auto-regen on expiry so the QR stays readable).
-    fun generateQr(keepVisible: Boolean) {
+    fun generateQr() {
         scope.launch {
             loading = true
             try {
@@ -262,7 +394,6 @@ fun PairScreen(
                 }
                 qr = result
                 qrBitmap = bmp
-                if (keepVisible) qrBlurred = false
             } catch (e: Exception) {
                 errorMessage = e.message ?: e.javaClass.simpleName
             } finally {
@@ -282,6 +413,21 @@ fun PairScreen(
             scannedPeer = info
             syncResult = null
             scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
+            // H4: apply any relay/Supabase provisioning embedded in the 6th QR
+            // field immediately at scan time — before the P2P bootstrap handshake
+            // completes, covering the off-LAN case. Runs on IO (SharedPreferences).
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    val prov = extractQrProvisioning(contents) ?: return@withContext
+                    val applied = applyQrProvisioning(prov, settings)
+                    if (applied.isNotEmpty()) {
+                        android.util.Log.i(
+                            "PairActivity",
+                            "QR provisioning (6th field) applied at scan: ${applied.joinToString(", ")}",
+                        )
+                    }
+                }
+            }
         } catch (e: Exception) {
             errorMessage = e.message ?: "Invalid pairing code"
         }
@@ -401,6 +547,14 @@ fun PairScreen(
                         // own — it RECEIVES the PC's sync provisioning in the
                         // response (bootstrap.peerProvisioning), applied below.
                         localProvisioning = null,
+                        // HB-1a (ABI 14): send THIS device's own metadata so the
+                        // PC's device card shows real Android info. public_ip is
+                        // not collected here (lib.rs passes None).
+                        deviceName = android.os.Build.MODEL ?: "Android",
+                        deviceModel = android.os.Build.MODEL ?: "Android",
+                        osVersion = "Android " + android.os.Build.VERSION.RELEASE,
+                        appVersion = BuildConfig.VERSION_NAME,
+                        localIp = lanIp,
                     )
 
                     // QR full-provisioning: if the paired PC carried its sync
@@ -473,20 +627,68 @@ fun PairScreen(
                         revokedFingerprints = revoked,
                         deviceId = settings.deviceId,
                     )
+                    // HB-7b: route each received item BY CONTENT TYPE, mirroring
+                    // FgsSyncLoop.storeSyncedItem. The old code force-decoded EVERY
+                    // item as UTF-8 text, so image/file frames became garbage and
+                    // were dropped (a cause of "received N stored 0"). All items
+                    // persist under the peer's STABLE item_id (overrideId) so a
+                    // later re-sync reuses it instead of minting a duplicate.
                     var stored = 0
                     for (item in result.items) {
-                        val plaintext = String(
-                            ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
-                            Charsets.UTF_8,
-                        )
-                        // Persist under the peer's STABLE item_id so a later
-                        // re-sync of this clip reuses it (no duplicate on the
-                        // originating device). itemId doubles as the dedup key.
-                        if (repository.storeItem(plaintext, key, overrideId = item.itemId)
-                                .isNotEmpty()
-                        ) {
-                            stored += 1
+                        val plaintextBytes =
+                            ByteArray(item.plaintext.size) { item.plaintext[it].toByte() }
+                        val isImage = item.contentType == "image" ||
+                            item.contentType.startsWith("image/")
+                        val isFile = item.contentType == "file"
+                        val didStore = when {
+                            isImage -> {
+                                if (plaintextBytes.isEmpty()) {
+                                    false
+                                } else {
+                                    val storedId = repository.storeItem(
+                                        plaintext = "[image]",
+                                        key = key,
+                                        overrideId = item.itemId,
+                                        contentType = item.contentType,
+                                    )
+                                    if (storedId.isNotEmpty()) {
+                                        repository.storeImageBytes(storedId, plaintextBytes)
+                                        SyncThumbnailHelper.generateAndStore(plaintextBytes) { thumb ->
+                                            repository.storeThumbnailBytes(storedId, thumb)
+                                        }
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                            }
+                            isFile -> {
+                                if (plaintextBytes.isEmpty()) {
+                                    false
+                                } else {
+                                    val label = SyncFileHelper.buildFileLabel(item.fileName)
+                                    val storedId = repository.storeItem(
+                                        plaintext = label,
+                                        key = key,
+                                        overrideId = item.itemId,
+                                        contentType = item.contentType,
+                                    )
+                                    if (storedId.isNotEmpty()) {
+                                        repository.storeFileBytes(storedId, plaintextBytes)
+                                        repository.storeFileMeta(storedId, item.fileName, item.mime)
+                                        true
+                                    } else {
+                                        false
+                                    }
+                                }
+                            }
+                            else -> {
+                                val plaintext = String(plaintextBytes, Charsets.UTF_8)
+                                repository.storeItem(plaintext, key, overrideId = item.itemId)
+                                    .isNotEmpty()
+                            }
                         }
+                        if (didStore) stored += 1
                     }
                     // Persist (APPEND) the peer into the multi-peer roster for
                     // future syncs — a second pairing must NOT discard the first.
@@ -497,6 +699,7 @@ fun PairScreen(
                     val rawSessionKey =
                         ByteArray(bootstrap.sessionKey.size) { bootstrap.sessionKey[it].toByte() }
                     val (wrappedB64, ivB64) = settings.wrapSessionKey(rawSessionKey)
+                    val nowMs = System.currentTimeMillis()
                     settings.upsertPeer(
                         PairedPeer(
                             fingerprint = bootstrap.peerFingerprint,
@@ -504,11 +707,26 @@ fun PairScreen(
                             name = peer.deviceName,
                             sessionKeyWrappedB64 = wrappedB64,
                             sessionKeyIvB64 = ivB64,
-                            lastSyncMs = System.currentTimeMillis(),
+                            lastSyncMs = nowMs,
+                            pairedAtMs = nowMs,
+                            // HB-1b (ABI 14): persist the peer's device metadata
+                            // received over the authenticated tunnel so Wave 3
+                            // renders the device card.
+                            peerModel = bootstrap.peerModel,
+                            peerOs = bootstrap.peerOs,
+                            peerAppVersion = bootstrap.peerAppVersion,
+                            peerLocalIp = bootstrap.peerLocalIp,
+                            peerPublicIp = bootstrap.peerPublicIp,
                         )
                     )
                     val peerCount = settings.pairedPeers.size
-                    "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored, sent ${result.itemsSent}. ($peerCount paired device(s))"
+                    // HB-7a (ABI 14): surface the per-reason drop counters so a
+                    // "received N stored 0" outcome reveals WHY items dropped.
+                    val skipped = "skipped: legacy ${result.itemsSkippedLegacy} / " +
+                        "decrypt ${result.itemsSkippedDecryptFail} / " +
+                        "type ${result.itemsSkippedUnknownType} / " +
+                        "blob ${result.itemsSkippedMissingBlob}"
+                    "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored ($skipped), sent ${result.itemsSent}. ($peerCount paired device(s))"
                 }
                 syncResult = message
                 scannedPeer = null
@@ -521,8 +739,7 @@ fun PairScreen(
     }
 
     // Countdown ticker — restarts whenever a fresh QR is issued.
-    // When the countdown reaches 0, auto-regenerate the QR and keep it
-    // visible (qrBlurred=false) so the user doesn't need to tap again (HW-A5).
+    // When the countdown reaches 0, auto-regenerate the QR.
     LaunchedEffect(qr) {
         if (qr == null) return@LaunchedEffect
         remainingSeconds = PAIR_TOKEN_TTL_SECONDS
@@ -530,8 +747,8 @@ fun PairScreen(
             delay(1000)
             remainingSeconds -= 1
         }
-        // QR expired — auto-regenerate and show unblurred.
-        generateQr(keepVisible = true)
+        // QR expired — auto-regenerate.
+        generateQr()
     }
 
     // AND2: Auto-start pairing when the screen opens so the QR appears
@@ -548,7 +765,7 @@ fun PairScreen(
             }
             qr = result
             qrBitmap = bmp
-            // Initial load: keep blurred so user taps to reveal.
+            // Initial load complete.
         } catch (e: Exception) {
             errorMessage = e.message ?: e.javaClass.simpleName
         } finally {
@@ -557,13 +774,27 @@ fun PairScreen(
     }
 
     // Consume an incoming cppair:// deep-link payload from an external QR scanner
-    // (e.g. Google Lens).  The payload is the raw CPPAIR1.… string, identical to
-    // what the in-app ZXing scanner would return — so we feed it through exactly
+    // (e.g. Google Lens).  The payload is the raw CPPAIR1/CPPAIR2.… string,
+    // identical to what the in-app ZXing scanner would return — feed it through
     // the same parsePairing path and surface the same confirmation UI.
     LaunchedEffect(incomingDeepLinkPayload) {
         val payload = incomingDeepLinkPayload ?: return@LaunchedEffect
         try {
-            val info = withContext(Dispatchers.IO) { parsePairing(payload) }
+            val info = withContext(Dispatchers.IO) {
+                val scanned = parsePairing(payload)
+                // H4: extract and apply provisioning from the QR's 6th field at
+                // deep-link time — before the P2P bootstrap handshake, covering
+                // the off-LAN / relay-only case.
+                val qrProv = extractQrProvisioning(payload)
+                val applied = qrProv?.let { applyQrProvisioning(it, settings) } ?: emptyList()
+                if (applied.isNotEmpty()) {
+                    android.util.Log.i(
+                        "PairActivity",
+                        "QR provisioning (6th field) applied via deep-link: ${applied.joinToString(", ")}",
+                    )
+                }
+                scanned
+            }
             scannedPeer = info
             syncResult = null
             scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
@@ -594,6 +825,16 @@ fun PairScreen(
         errorMessage = null
     }
 
+    // HB-6: auto-open the scanner when launched in scan mode (from the Devices
+    // screen "Scan a device's QR" button). Consumed once so a recomposition does
+    // not re-launch it; the QR-display flow above still runs in parallel so this
+    // device's own QR is ready behind the scanner.
+    LaunchedEffect(autoScan) {
+        if (!autoScan) return@LaunchedEffect
+        startScanFlow()
+        onAutoScanConsumed()
+    }
+
     Scaffold(
         modifier = modifier,
         containerColor = IdeBg,
@@ -622,12 +863,19 @@ fun PairScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(20.dp, Alignment.Top)
         ) {
-            Text(
-                text = stringResource(R.string.pair_instructions),
-                style = MaterialTheme.typography.bodyLarge,
-                color = IdeText
-            )
+            // ── Deliverable 2: hide own-QR once a peer has been scanned ───────
+            // When scannedPeer is non-null we are in "confirm peer" mode. The own-QR
+            // card, instructions text, and Scan button belong only to the "show my QR"
+            // mode and are hidden so the screen focuses on the scanned-peer confirmation.
+            if (scannedPeer == null) {
+                Text(
+                    text = stringResource(R.string.pair_instructions),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = IdeText
+                )
+            }
 
+            if (scannedPeer == null) {
             CopyPasteCard {
                 Column(
                     modifier = Modifier
@@ -665,28 +913,12 @@ fun PairScreen(
                                 // QR needs a light, high-contrast backing to scan
                                 // reliably — sit the code on a white rounded plate
                                 // that fills the reserved slot exactly.
-                                // First tap reveals the QR; second tap regenerates it
-                                // and keeps it visible (HW-A5: no re-blur after regen).
+                                // Tap to regenerate the QR code.
                                 Box(
                                     modifier = Modifier
                                         .size(QR_SLOT_SIZE_DP.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        // Blur applied after clip so the rounded corners
-                                        // uniformly contain the blur — QR edges near the
-                                        // padding are fully obscured, not just the image.
-                                        .then(
-                                            if (qrBlurred) Modifier.blur(16.dp)
-                                            else Modifier
-                                        )
-                                        .clickable {
-                                            if (qrBlurred) {
-                                                // First tap: reveal the QR.
-                                                qrBlurred = false
-                                            } else {
-                                                // Second tap: regenerate and stay visible.
-                                                generateQr(keepVisible = true)
-                                            }
-                                        },
+                                        .clickable { generateQr() },
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     // White plate with QR image.
@@ -701,15 +933,6 @@ fun PairScreen(
                                             bitmap = bmp.asImageBitmap(),
                                             contentDescription = "Pairing QR code",
                                             modifier = Modifier.size(QR_IMAGE_SIZE_DP.dp)
-                                        )
-                                    }
-                                    // Overlay hint shown only while blurred.
-                                    if (qrBlurred) {
-                                        Text(
-                                            text = "Tap to reveal",
-                                            style = MaterialTheme.typography.labelLarge,
-                                            color = IdeText,
-                                            textAlign = TextAlign.Center,
                                         )
                                     }
                                 }
@@ -753,73 +976,79 @@ fun PairScreen(
                 }
             }
 
-            OutlinedButton(
-                onClick = { startScanFlow() },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(text = stringResource(R.string.btn_scan_qr))
+            // ── Deliverable 2: Scan button — only shown in own-QR mode ──────
+            // Hidden when a peer has already been scanned (scannedPeer != null);
+            // in that state the screen shows only the peer confirmation UI below.
+            if (scannedPeer == null) {
+                OutlinedButton(
+                    onClick = { startScanFlow() },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(text = stringResource(R.string.btn_scan_qr))
+                }
             }
+            } // end if (scannedPeer == null) — closes the QR card block
 
-            // ── Paired device display ─────────────────────────────────────
-            // Show the persisted paired peer (fingerprint + sync address) so the
-            // user can confirm which device is paired after navigating away and
-            // returning. Reads directly from Settings each recomposition — the
-            // values are written by runPairAndSync and are stable once set.
-            val pairedFingerprint = settings.pairedPeerFingerprint
-            val pairedAddr = settings.pairedPeerSyncAddr
-            if (pairedFingerprint.isNotBlank()) {
+            // ── Deliverable 3: rich scanned-peer confirmation card ────────────
+            // Shown INSTEAD of the own-QR once a peer has been scanned. Surfaces
+            // all available fields from ScannedPairing: device name, address
+            // (host:port from addrHint), and fingerprint. Model/OS/appVersion are
+            // not available until after the PAKE meta-exchange (BootstrapResult
+            // fields); they will be shown on the post-pair success screen once
+            // runPairAndSync() completes and stores them in the peer roster.
+            // TODO(post-PAKE-meta): show peerModel/peerOs/peerAppVersion here
+            //   once the BootstrapResult is threaded back to the UI after
+            //   bootstrapPairInitiator completes. Those fields live in
+            //   BootstrapResult.peerModel/peerOs/peerAppVersion (ABI 14) but
+            //   runPairAndSync currently only persists them to Settings.pairedPeers.
+            scannedPeer?.let { peer ->
                 Card(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
-                    ),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     border = BorderStroke(1.dp, IdeBorder),
                 ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                    ) {
                         Text(
-                            text = "Paired device",
+                            text = "Device to pair with",
                             style = MaterialTheme.typography.labelLarge,
                             color = MaterialTheme.colorScheme.primary,
                         )
+                        // Device name (from QR payload field 5)
+                        val displayName = peer.deviceName.ifBlank { "Unknown device" }
                         Text(
-                            text = pairedFingerprint,
+                            text = displayName,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = IdeText,
+                        )
+                        // Address (host:port from QR payload field 6, if present)
+                        if (peer.addrHint.isNotBlank()) {
+                            Text(
+                                text = "Address: ${peer.addrHint}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = IdeDim,
+                            )
+                        }
+                        // Fingerprint (from QR payload field 2) — tappable to copy
+                        Text(
+                            text = "Fingerprint: ${peer.fingerprint}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.clickable {
-                                clipboardManager.setText(AnnotatedString(pairedFingerprint))
+                                clipboardManager.setText(AnnotatedString(peer.fingerprint))
                                 scope.launch {
                                     snackbarHostState.showSnackbar("Fingerprint copied")
                                 }
                             },
                         )
-                        if (pairedAddr.isNotBlank()) {
-                            Text(
-                                text = pairedAddr,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = IdeDim,
-                            )
-                        }
+                        // NOTE: model/OS/appVersion become available after the PAKE
+                        // bootstrap completes — see TODO above.
                     }
                 }
-            }
 
-            scannedInfo?.let { info ->
-                Text(
-                    text = "Scanned: $info",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = IdeText,
-                    modifier = Modifier.clickable {
-                        val fp = scannedPeer?.fingerprint ?: info
-                        clipboardManager.setText(AnnotatedString(fp))
-                        scope.launch {
-                            snackbarHostState.showSnackbar("Fingerprint copied")
-                        }
-                    },
-                )
-            }
-
-            scannedPeer?.let { peer ->
                 Button(
                     enabled = !syncing,
                     onClick = { runPairAndSync(peer) },
@@ -835,12 +1064,57 @@ fun PairScreen(
                 )
             }
 
+            // ── Post-pair success message ──────────────────────────────────────
             syncResult?.let { msg ->
                 Text(
                     text = msg,
                     style = MaterialTheme.typography.bodyMedium,
                     color = IdeAccent
                 )
+            }
+
+            // ── Paired-device roster (own-QR mode only) ───────────────────────
+            // Show the persisted paired peer so the user can confirm which device
+            // is paired. Only shown when not in the scanned-peer confirmation flow.
+            if (scannedPeer == null && syncResult == null) {
+                val pairedFingerprint = settings.pairedPeerFingerprint
+                val pairedAddr = settings.pairedPeerSyncAddr
+                if (pairedFingerprint.isNotBlank()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        ),
+                        border = BorderStroke(1.dp, IdeBorder),
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Text(
+                                text = "Paired device",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                text = pairedFingerprint,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.clickable {
+                                    clipboardManager.setText(AnnotatedString(pairedFingerprint))
+                                    scope.launch {
+                                        snackbarHostState.showSnackbar("Fingerprint copied")
+                                    }
+                                },
+                            )
+                            if (pairedAddr.isNotBlank()) {
+                                Text(
+                                    text = pairedAddr,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = IdeDim,
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -858,8 +1132,11 @@ fun PairScreen(
  *
  * No WifiManager dependency: NetworkInterface enumeration works for both Wi-Fi
  * and other LAN interfaces without the ACCESS_WIFI_STATE permission.
+ *
+ * `internal` so the discovery pairing path ([DevicesActivity]) reuses the SAME
+ * helper for HB-1a `local_ip` instead of duplicating the enumeration.
  */
-private fun lanIpv4Address(): String? {
+internal fun lanIpv4Address(): String? {
     return try {
         java.net.NetworkInterface.getNetworkInterfaces()?.toList()
             ?.asSequence()
@@ -873,3 +1150,4 @@ private fun lanIpv4Address(): String? {
         null
     }
 }
+

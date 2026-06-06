@@ -18,6 +18,32 @@
 /// ```
 use serde::{Deserialize, Serialize};
 
+/// Serde helper — serialize `Option<Vec<u8>>` as an optional base64 string.
+///
+/// Using a base64 string rather than the default JSON number-array encoding
+/// cuts wire size by ~75 % for binary blobs (each byte becomes one char
+/// instead of up to 4 characters + a comma).  The reduction keeps large
+/// encrypted payloads well under the 16 MiB P2P frame cap.
+mod b64_opt {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    use serde::{de::Error as _, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &Option<Vec<u8>>, s: S) -> Result<S::Ok, S::Error> {
+        match bytes {
+            Some(b) => s.serialize_some(&STANDARD.encode(b)),
+            None => s.serialize_none(),
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Vec<u8>>, D::Error> {
+        let opt: Option<&str> = serde::de::Deserialize::deserialize(d)?;
+        match opt {
+            Some(s) => STANDARD.decode(s).map(Some).map_err(D::Error::custom),
+            None => Ok(None),
+        }
+    }
+}
+
 /// Serialisable mirror of `ClipboardItem` carried over the wire.
 ///
 /// We define a separate struct (rather than deriving Serialize on the core
@@ -31,8 +57,10 @@ pub struct WireItem {
     /// MIME-like content type, e.g. `"text"`.
     pub content_type: String,
     /// Encrypted blob bytes, base64-encoded for JSON transport.
+    #[serde(with = "b64_opt")]
     pub content: Option<Vec<u8>>,
     /// Encryption nonce (24 bytes for ChaCha20-Poly1305).
+    #[serde(with = "b64_opt")]
     pub content_nonce: Option<Vec<u8>>,
     /// Optional large-blob reference (not carried inline).
     pub blob_ref: Option<String>,
@@ -77,6 +105,34 @@ pub struct WireItem {
     /// v2 ciphertext with the v1 key/AAD yields `AuthFailed`.
     #[serde(default = "default_key_version")]
     pub key_version: u8,
+    /// Whether this item is a soft-delete tombstone (schema v10).
+    ///
+    /// When `true` the item's content was intentionally wiped on the sender
+    /// and the receiver should apply the tombstone via LWW merge: if this
+    /// version's `lamport_ts` is higher than the local copy, replace the
+    /// local row with the tombstone (set `deleted = 1`, NULL content).
+    ///
+    /// `#[serde(default)]` keeps wire compatibility: old peers omit this
+    /// field, which deserializes as `false` (live item) — correct behaviour
+    /// since pre-v10 peers can never send tombstones.
+    #[serde(default)]
+    pub deleted: bool,
+    /// Whether the item is pinned by the user on the originating device.
+    ///
+    /// Carried on the wire so pin state propagates to peers. The receiver
+    /// applies this via LWW merge alongside the other fields.
+    ///
+    /// `#[serde(default)]` keeps wire compatibility: old peers omit this
+    /// field, which deserializes as `false` (unpinned).
+    #[serde(default)]
+    pub pinned: bool,
+    /// Explicit sort key among pinned items on the originating device.
+    ///
+    /// `None` for unpinned items or when the sender has not assigned an
+    /// explicit order. The receiver applies this via LWW merge so reorder
+    /// operations propagate. Old peers omit the field → `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin_order: Option<f64>,
 }
 
 /// Default `key_version` for `WireItem`s deserialized from a peer that predates
@@ -105,6 +161,51 @@ impl WireItem {
             self.wall_time = 0;
         }
     }
+}
+
+/// A control action sent from one peer to another over the live mTLS link.
+///
+/// Control messages are framed identically to [`WireItem`]s (length-prefixed
+/// JSON) but carry a `"control"` field that is absent from `WireItem`.
+/// Older peers that only know `WireItem` will fail to deserialise a control
+/// frame and emit a warning — this is intentional and safe: the local
+/// eviction already happened, so the peer will simply be refused at the next
+/// mTLS handshake.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "control", rename_all = "snake_case")]
+pub enum ControlMsg {
+    /// Sender is unpairing from the receiver.
+    ///
+    /// On receipt the receiver **must** evict the sender using only the
+    /// mTLS-authenticated peer identity (the verified certificate fingerprint
+    /// of the connection the frame arrived on), **never** a field inside the
+    /// message.  This prevents a compromised or misbehaving peer from causing
+    /// arbitrary evictions.
+    Unpair,
+}
+
+/// A frame that may carry either a clipboard-item payload or a control signal.
+///
+/// # Backward compatibility
+///
+/// `#[serde(untagged)]` means the serialised form of `PeerFrame::Data(item)`
+/// is byte-for-byte identical to serialising `item` directly — old peers
+/// (pre-mutual-unpair) that parse raw `WireItem`s continue to work.
+/// `PeerFrame::Control(msg)` serialises to `{"control":"…"}`, which old peers
+/// cannot parse as a `WireItem` (missing required fields) and will log a
+/// warning; that is acceptable — the local eviction already happened.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(untagged)]
+// `Data(WireItem)` is the overwhelmingly common variant (every synced clip) and
+// lives only transiently on the per-peer mpsc channel; `Control` is rare. Boxing
+// `WireItem` to shrink the enum would add a heap allocation on the hot sync path
+// for no real benefit, so we accept the size difference here.
+#[allow(clippy::large_enum_variant)]
+pub enum PeerFrame {
+    /// A normal clipboard-item payload.
+    Data(WireItem),
+    /// An out-of-band control signal.
+    Control(ControlMsg),
 }
 
 /// Top-level protocol message enum.
@@ -238,6 +339,9 @@ mod tests {
             key_version: 2,
             file_name: None,
             mime: None,
+            deleted: false,
+            pinned: false,
+            pin_order: None,
         };
         let msg = Message::Items { items: vec![item] };
         assert_eq!(round_trip(msg.clone()), msg);
@@ -282,6 +386,9 @@ mod tests {
             key_version: 2,
             file_name: Some("report.pdf".to_string()),
             mime: Some("application/pdf".to_string()),
+            deleted: false,
+            pinned: false,
+            pin_order: None,
         };
         let msg = Message::Items { items: vec![item] };
         let decoded = round_trip(msg.clone());
@@ -314,5 +421,49 @@ mod tests {
         } else {
             panic!("expected Message::Items");
         }
+    }
+
+    /// Binary fields must be serialized as base64 strings, not JSON number arrays.
+    ///
+    /// The number-array form inflates each byte to up to 4 characters + a comma,
+    /// causing ~3.5x expansion that busts the 16 MiB frame cap for payloads above
+    /// ~4.5 MiB.
+    #[test]
+    fn binary_fields_serialize_as_base64_not_arrays() {
+        let item = WireItem {
+            id: "b64-check".to_string(),
+            item_id: "b64-item".to_string(),
+            content_type: "text".to_string(),
+            // 3 bytes → base64 "AQID" (4 chars); number array would be "[1,2,3]" (7 chars)
+            content: Some(vec![0x01, 0x02, 0x03]),
+            content_nonce: Some(vec![0xAA; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 1,
+            wall_time: 1_000,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "device-c".to_string(),
+            key_version: 2,
+            file_name: None,
+            mime: None,
+            deleted: false,
+            pinned: false,
+            pin_order: None,
+        };
+        let json = serde_json::to_string(&item).expect("must serialize");
+        // Base64 for [0x01, 0x02, 0x03] is "AQID".
+        assert!(
+            json.contains("\"AQID\""),
+            "content must be base64 string; got: {json}"
+        );
+        // Number-array form must not appear.
+        assert!(
+            !json.contains("[1,2,3]"),
+            "content must not be a number array; got: {json}"
+        );
+        // Round-trip must still be lossless.
+        let decoded: WireItem = serde_json::from_str(&json).expect("must deserialize");
+        assert_eq!(decoded, item);
     }
 }

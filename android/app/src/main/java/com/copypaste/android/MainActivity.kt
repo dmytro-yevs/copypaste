@@ -5,10 +5,12 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
@@ -27,10 +29,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
@@ -54,8 +59,8 @@ import kotlinx.coroutines.launch
  *
  * Clipboard monitoring:
  *   - [ClipboardService] covers API 26-28 (background allowed).
- *   - [ClipboardAccessibilityService] covers API 29+ background access
- *     (requires the user to enable it via Accessibility Settings).
+ *   - [LogcatCaptureService] covers API 29+ background access via the logcat+overlay path
+ *     (requires READ_LOGS via adb + SYSTEM_ALERT_WINDOW).
  *   - The in-activity [ClipboardManager] listener below covers the foreground
  *     window while this activity is visible (all API levels).
  */
@@ -103,6 +108,15 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // AB-7: FLAG_SECURE. This window hosts the clipboard history (Clips tab),
+        // which can contain passwords, tokens, and other sensitive copied text.
+        // Block screenshots and keep the contents out of the recents/overview
+        // thumbnail. Set before setContent so the flag covers the whole lifetime
+        // (PairActivity already does the same for its QR screen).
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
         // Edge-to-edge: the bottom NavigationBar and each tab's TopAppBar apply
         // their own system-bar insets so nothing is clipped on notched phones.
         enableEdgeToEdge()
@@ -174,7 +188,7 @@ class MainActivity : ComponentActivity() {
     private suspend fun handleClipboardChange(text: String) {
         // Route through the shared capture pipeline so foreground-captured clips
         // are counted in the notification, trigger copy sound/notification, and
-        // sync — exactly like ClipboardService and ClipboardAccessibilityService.
+        // sync — exactly like ClipboardService and LogcatCaptureService.
         // Previously this called repository.storeItem directly, skipping all of
         // bumpTodayCounter / postCopyNotification / playCopySound / notifySyncManager.
         ClipboardService.captureClip(this, text, settings, repository, syncManager)
@@ -196,15 +210,26 @@ class MainActivity : ComponentActivity() {
 // ── Navigation structure ───────────────────────────────────────────────────────
 
 // Internal so NavTabTest (pure-JVM unit test) can verify the tab set.
-internal enum class NavTab(val label: String, val icon: ImageVector) {
-    CLIPS("History", Icons.Filled.ContentPaste),
-    DEVICES("Pair", Icons.Filled.Devices),
-    SETTINGS("Settings", Icons.Filled.Settings),
+// `labelRes` is the bottom-nav label string resource. HB-6: the DEVICES tab now
+// reads R.string.title_devices ("Devices") instead of the old hardcoded "Pair",
+// matching the Devices screen title — pairing lives INSIDE that screen now.
+internal enum class NavTab(@StringRes val labelRes: Int, val icon: ImageVector) {
+    CLIPS(R.string.title_history, Icons.Filled.ContentPaste),
+    DEVICES(R.string.title_devices, Icons.Filled.Devices),
+    SETTINGS(R.string.title_settings, Icons.Filled.Settings),
 }
 
 @Composable
 private fun MainShell(viewModel: ClipboardViewModel) {
     var selectedTab by rememberSaveable { mutableIntStateOf(NavTab.CLIPS.ordinal) }
+    // Unsaved-changes guard registered by SettingsScreen. When the user has
+    // pending edits and tries to switch tabs via the navbar, we route the tab
+    // change through this guard so the Discard/Keep-editing dialog intercepts it
+    // (parity with the back-press / top-bar back-arrow guard). Null when not on
+    // Settings or when there are no unsaved changes.
+    var settingsNavGuard by remember {
+        mutableStateOf<((proceed: () -> Unit) -> Unit)?>(null)
+    }
 
     Scaffold(
         containerColor = IdeBg,
@@ -221,11 +246,24 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                 containerColor = IdePanel,
             ) {
                 NavTab.entries.forEachIndexed { index, tab ->
+                    val label = stringResource(tab.labelRes)
                     NavigationBarItem(
                         selected = selectedTab == index,
-                        onClick = { selectedTab = index },
-                        icon = { Icon(tab.icon, contentDescription = tab.label) },
-                        label = { Text(tab.label) },
+                        onClick = {
+                            val leavingSettings =
+                                NavTab.entries[selectedTab] == NavTab.SETTINGS && index != selectedTab
+                            val guard = settingsNavGuard
+                            if (leavingSettings && guard != null) {
+                                // Intercept: the guard shows the Discard dialog and
+                                // only runs `proceed` if the user confirms (or there
+                                // are no unsaved changes).
+                                guard { selectedTab = index }
+                            } else {
+                                selectedTab = index
+                            }
+                        },
+                        icon = { Icon(tab.icon, contentDescription = label) },
+                        label = { Text(label) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor       = IdeAccent,
                             selectedTextColor       = IdeAccent,
@@ -257,7 +295,8 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                     )
                     NavTab.SETTINGS -> SettingsScreen(
                         showBackButton = false,
-                        onBack = {}
+                        onBack = {},
+                        onRegisterNavGuard = { guard -> settingsNavGuard = guard },
                     )
                 }
             }

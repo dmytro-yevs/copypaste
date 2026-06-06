@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +22,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
+import com.copypaste.android.DevicesOnlineState
 import com.copypaste.android.Settings
 import com.copypaste.android.ui.theme.IdeFaint
 import com.copypaste.android.ui.theme.IdeSuccess
@@ -28,51 +30,49 @@ import kotlinx.coroutines.delay
 
 /**
  * Online-devices badge — Android parity for the macOS sidebar sync-status chip
- * ([SyncStatusChip.tsx]). Renders a small coloured dot plus a count of the
- * sync targets this device is configured to talk to.
+ * ([SyncStatusChip.tsx]). Renders a small coloured dot plus a count of live
+ * online peers.
  *
  * Dot colour:
- *   - GREEN ([IdeSuccess], #5FAD65 — same token as macOS `bg-ide-success`) when
- *     at least one sync target is configured (a paired P2P peer and/or Supabase
- *     cloud sync).
- *   - GREY ([IdeFaint], #6B6F78 — same token as macOS `bg-ide-faint`) when no
- *     sync target is configured.
+ *   - GREEN ([IdeSuccess]) when at least one peer is live-online.
+ *   - GREY ([IdeFaint]) when no peer is online.
  *
  * The numeric count is shown only when it is > 0, mirroring the macOS chip.
  *
- * ## Signal limitation (flagged for follow-up)
- * Android has NO live per-peer reachability flag and NO wall-clock
- * "last-successful-sync" timestamp. The macOS chip turns green on a *recent*
- * `last_sync_ms` round-trip exposed by the daemon over IPC; Android has no
- * equivalent. The closest persisted value, [Settings.lastSupabasePollWallTime],
- * is the keyset cursor of the last *received row's* wall_time — it only advances
- * when rows arrive and is NOT a poll-completion clock, so it cannot honestly
- * back a "synced N seconds ago" recency check. We therefore report
- * CONFIGURED-target presence rather than inventing a fake live-online number.
+ * ## Single source of truth
+ * When the DEVICES tab is visible, [DevicesOnlineState] is updated every ~1 s
+ * by [DevicesScreen] using IP-correlation of the mDNS discovered set against
+ * paired peers (with [PairedPeer.lastSyncMs] as fallback). This badge reads
+ * that same count so the footer dot and every peer card dot are always in sync.
  *
- * To reach true macOS parity ("green only while a peer is actually online/
- * syncing"), the Rust/FFI layer would need to expose either (a) a per-peer
- * reachability probe result, or (b) a wall-clock last-successful-sync timestamp
- * written on every completed P2P dial / Supabase poll. Neither exists today.
+ * When the DEVICES tab has never been shown in this session (value == -1), the
+ * badge falls back to counting configured sync targets (paired P2P peer +
+ * Supabase) so the strip is never blank on first launch.
  */
 @Composable
 fun SyncStatusBadge(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
 
-    // Count of configured sync targets. Recomputed on a light interval so the
-    // badge reflects pairing / cloud-config changes without a manual refresh.
-    var count by remember { mutableIntStateOf(0) }
+    // Live count from DevicesScreen (IP-correlation + lastSyncMs). Updated
+    // every ~1 s while the Devices tab is active. -1 means not yet computed.
+    val liveOnlineCount by DevicesOnlineState.onlineCount.collectAsState()
 
+    // Fallback: count configured sync targets when DevicesScreen hasn't run yet.
+    var configuredCount by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) {
         while (true) {
             var n = 0
             if (settings.pairedPeerFingerprint.isNotBlank()) n += 1
             if (settings.isSupabaseConfigured) n += 1
-            count = n
+            configuredCount = n
             delay(POLL_INTERVAL_MS)
         }
     }
+
+    // Use live count when DevicesScreen has published a real value (>= 0);
+    // otherwise fall back to the configured-target count.
+    val count = if (liveOnlineCount >= 0) liveOnlineCount else configuredCount
 
     val online = count > 0
     val dotColor: Color = if (online) IdeSuccess else IdeFaint

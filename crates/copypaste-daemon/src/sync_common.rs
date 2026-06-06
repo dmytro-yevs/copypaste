@@ -352,6 +352,9 @@ pub(crate) fn build_local_item(
         // thumb is a local-only image thumbnail (schema v9); cloud download is
         // text-only here, so it never carries one.
         thumb: None,
+        // Cloud-downloaded items are always live; tombstones are handled by the
+        // caller before constructing a ClipboardItem.
+        deleted: false,
     })
 }
 
@@ -469,6 +472,9 @@ fn build_local_blob_item(
         pin_order: None,
         // Thumbnail is regenerated locally on demand, never synced.
         thumb: None,
+        // Cloud-downloaded items are always live; tombstones are handled before
+        // this function is called.
+        deleted: false,
     })
 }
 

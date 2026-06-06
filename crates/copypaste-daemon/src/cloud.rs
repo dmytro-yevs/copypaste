@@ -38,6 +38,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
 
+use copypaste_core::storage::items::soft_delete_item;
 use copypaste_core::{
     decrypt_from_cloud, encrypt_for_cloud, exists_item_by_item_id, get_item_by_item_id,
     insert_item, prune_to_cap, ClipboardItem, Database, SyncKey,
@@ -1202,6 +1203,10 @@ async fn run_backlog_sweep(
                 // backlog query selects no thumb column; thumbnails are a
                 // local-only field (schema v9) and never synced.
                 thumb: None,
+                // Rows fetched from the upload backlog are live items (not
+                // tombstones) — if they were soft-deleted they would have been
+                // filtered out by the backlog query's `deleted = 0` guard.
+                deleted: false,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
@@ -1597,7 +1602,7 @@ struct PollCursor {
 /// `(wall_time, id)` so pagination is deterministic even within one millisecond.
 /// Base poll query string. The `limit=` value MUST match [`POLL_BATCH_SIZE`];
 /// a compile-time assertion in `poll_once` enforces this.
-const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc,id.asc&limit=20";
+const POLL_SELECT_QS: &str = "select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc,id.asc&limit=20";
 
 /// Construct the poll URL for a single tick using a `(wall_time, id)` keyset
 /// cursor.
@@ -2075,22 +2080,38 @@ async fn ws_ingest_loop(
                             let row = &event.record;
                             let Some(id) = row["id"].as_str() else { continue };
                             let Some(item_id) = row["item_id"].as_str() else { continue };
-                            let Some(payload_ct_str) = row["payload_ct"].as_str() else {
-                                tracing::warn!(
-                                    "ws_ingest_loop: INSERT event for id={id} missing \
-                                     payload_ct; skipping"
-                                );
-                                continue;
-                            };
 
-                            let blob = match decode_payload_ct(payload_ct_str) {
-                                Ok(b) => b,
-                                Err(e) => {
+                            // Snapshot tombstone and pin state before the
+                            // spawn_blocking move so the fields are owned.
+                            let ws_deleted = row["deleted"].as_bool().unwrap_or(false);
+                            let ws_pinned = row["pinned"].as_bool().unwrap_or(false);
+                            let ws_pin_order = row["pin_order"].as_f64();
+                            // Track whether the cloud row actually carries the pin
+                            // columns (present → authoritative; absent → legacy
+                            // schema, fall back to local-state preservation).
+                            let ws_has_pin_col = row.get("pinned").is_some();
+
+                            // Tombstone rows intentionally carry no payload.
+                            // Only require payload_ct for live (non-deleted) items.
+                            let blob_opt: Option<Vec<u8>> = if ws_deleted {
+                                None
+                            } else {
+                                let Some(payload_ct_str) = row["payload_ct"].as_str() else {
                                     tracing::warn!(
-                                        "ws_ingest_loop: payload_ct decode failed \
-                                         for id={id}: {e}; skipping"
+                                        "ws_ingest_loop: INSERT event for id={id} missing \
+                                         payload_ct; skipping"
                                     );
                                     continue;
+                                };
+                                match decode_payload_ct(payload_ct_str) {
+                                    Ok(b) => Some(b),
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            "ws_ingest_loop: payload_ct decode failed \
+                                             for id={id}: {e}; skipping"
+                                        );
+                                        continue;
+                                    }
                                 }
                             };
 
@@ -2195,7 +2216,54 @@ async fn ws_ingest_loop(
                                     }
                                 };
 
+                                // ── Tombstone fast-path ──────────────────────
+                                // Tombstone rows carry deleted=true and no payload.
+                                // Apply as a soft-delete so the item becomes a local
+                                // tombstone (deleted=1, content wiped) with the remote
+                                // lamport/wall_time, exactly matching the P2P path.
+                                if ws_deleted {
+                                    zeroize::Zeroize::zeroize(&mut key_arr);
+                                    if let Some(local_pk) = preserved_pk.as_ref() {
+                                        match soft_delete_item(
+                                            &db_guard,
+                                            local_pk,
+                                            lamport_ts,
+                                            wall_time,
+                                        ) {
+                                            Ok(n) if n > 0 => {
+                                                tracing::info!(
+                                                    "ws_ingest_loop: applied tombstone \
+                                                     item_id={item_id_owned}"
+                                                );
+                                                return true;
+                                            }
+                                            Ok(_) => {}
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    "ws_ingest_loop: soft_delete_item failed \
+                                                     for item_id={item_id_owned}: {e}"
+                                                );
+                                            }
+                                        }
+                                    }
+                                    return false;
+                                }
+
                                 // Decrypt with sync key.
+                                // `blob_opt` is always `Some` here — tombstones were
+                                // handled above and `blob_opt` is `None` only for
+                                // deleted rows (guarded by `ws_deleted`).
+                                let blob = match blob_opt {
+                                    Some(b) => b,
+                                    None => {
+                                        tracing::warn!(
+                                            "ws_ingest_loop: no blob for non-tombstone \
+                                             id={id_owned}; skipping"
+                                        );
+                                        zeroize::Zeroize::zeroize(&mut key_arr);
+                                        return false;
+                                    }
+                                };
                                 let tmp_key = SyncKey::from_bytes(key_arr);
                                 let plaintext =
                                     match decrypt_from_cloud(&tmp_key, &item_id_owned, &blob) {
@@ -2236,16 +2304,16 @@ async fn ws_ingest_loop(
                                     local_item.id = pk.clone();
                                 }
 
-                                // Pin preservation: a pinned item edited on
-                                // another device and pulled via cloud LWW-replace
-                                // must keep its pinned flag AND pin_order. The
-                                // cloud `build_local_item` always sets pinned=false
-                                // / pin_order=None (the wire carries no pin state),
-                                // so OR-merge the prior local row's pin state on
-                                // replace — mirroring sync_orch's P2P TakeRemote
-                                // path. Without this the item loses prune-exemption
-                                // (→ TTL data loss) and its ordering resets to NULL.
-                                if let Some(local) = existing.as_ref() {
+                                // Apply cloud pin state. When the cloud row carries
+                                // the pin columns (ws_has_pin_col) they are
+                                // authoritative — use them directly. For legacy rows
+                                // (schema-skew, no pin columns) fall back to the
+                                // previous OR-merge so a pinned item does not lose
+                                // its prune-exemption on an old-schema roundtrip.
+                                if ws_has_pin_col {
+                                    local_item.pinned = ws_pinned;
+                                    local_item.pin_order = ws_pin_order;
+                                } else if let Some(local) = existing.as_ref() {
                                     local_item.pinned = local_item.pinned || local.pinned;
                                     if local_item.pin_order.is_none() {
                                         local_item.pin_order = local.pin_order;
@@ -2458,6 +2526,44 @@ async fn poll_once(
                 }
             };
 
+            // ── Tombstone fast-path ──────────────────────────────────────────
+            // If the remote row carries `deleted = true` the remote device has
+            // soft-deleted this item. Apply the deletion locally as a tombstone
+            // (soft-delete: wipe content, set deleted=1, propagate via LWW) so
+            // the item cannot resurrect on this device or re-broadcast incorrectly.
+            // The cursor still advances (batch_max was updated above) so tombstones
+            // are never re-requested.
+            let remote_deleted = row["deleted"].as_bool().unwrap_or(false);
+            if remote_deleted {
+                if let Some(local_pk) = preserved_pk.as_ref() {
+                    let remote_lamport = row["lamport_ts"].as_i64().unwrap_or(0);
+                    let remote_wall = row_wall;
+                    match soft_delete_item(&db_guard, local_pk, remote_lamport, remote_wall) {
+                        Ok(n) if n > 0 => {
+                            synced += 1;
+                            tracing::info!(
+                                "cloud-sync poll_once: applied tombstone for \
+                                 item_id={item_id} (soft-deleted {n} local row(s))"
+                            );
+                        }
+                        Ok(_) => {
+                            tracing::debug!(
+                                "cloud-sync poll_once: tombstone for item_id={item_id} \
+                                 but row was already absent locally"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "cloud-sync poll_once: soft_delete_item failed for \
+                                 item_id={item_id}: {e}"
+                            );
+                        }
+                    }
+                }
+                // Either soft-deleted or already absent — skip payload decode.
+                continue;
+            }
+
             // Decode payload_ct (base64 → bytes).
             let payload_ct_b64 = match row["payload_ct"].as_str() {
                 Some(s) => s,
@@ -2529,6 +2635,12 @@ async fn poll_once(
                         String::new()
                     });
 
+            // Read cloud pin state. These are sourced from the real columns now
+            // (schema v10+), so the previous OR-merge workaround is replaced by
+            // direct use of the authoritative cloud values.
+            let cloud_pinned = row["pinned"].as_bool().unwrap_or(false);
+            let cloud_pin_order = row["pin_order"].as_f64();
+
             let mut local_item = match build_local_item(
                 id,
                 item_id,
@@ -2557,14 +2669,17 @@ async fn poll_once(
                 local_item.id = pk.clone();
             }
 
-            // Pin preservation: a pinned item edited on another device and pulled
-            // via cloud LWW-replace must keep its pinned flag AND pin_order.
-            // `build_local_item` always sets pinned=false / pin_order=None (the
-            // wire carries no pin state), so OR-merge the prior local row's pin
-            // state on replace — mirroring sync_orch's P2P TakeRemote path.
-            // Without this the item loses prune-exemption (→ TTL data loss) and
-            // its ordering resets to NULL.
-            if let Some(local) = existing.as_ref() {
+            // Apply cloud pin state. The cloud columns are now authoritative:
+            // a pin/unpin on the originating device is propagated here.
+            // If the cloud row pre-dates the pin columns (both absent/null) we
+            // fall back to preserving the existing local state so a pinned item
+            // does not lose its pin-exemption on a schema-skew roundtrip.
+            let cloud_carries_pin = row.get("pinned").is_some();
+            if cloud_carries_pin {
+                local_item.pinned = cloud_pinned;
+                local_item.pin_order = cloud_pin_order;
+            } else if let Some(local) = existing.as_ref() {
+                // Legacy row (no pin columns) — preserve existing local state.
                 local_item.pinned = local_item.pinned || local.pinned;
                 if local_item.pin_order.is_none() {
                     local_item.pin_order = local.pin_order;
@@ -2830,6 +2945,12 @@ pub fn exists_item(db: &Database, id: &str) -> Result<bool, anyhow::Error> {
 ///   * `expires_at`       — TTL (nullable)
 ///   * `app_bundle_id`    — origin app (nullable)
 ///   * `device_id`        — maps to `origin_device_id`
+///   * `deleted`          — soft-delete tombstone flag; false for live items.
+///     When true the receiving device must call delete_item rather than
+///     inserting/updating. Tombstone rows still carry the item_id so the
+///     receiver can locate the row.
+///   * `pinned`           — whether the item is explicitly pinned on the source device.
+///   * `pin_order`        — drag-to-reorder sort key for pinned items (nullable).
 ///
 /// `user_id` is intentionally omitted — the default `auth.uid()` on the
 /// column fills it in automatically, and the RLS `with check` enforces it.
@@ -2853,6 +2974,15 @@ fn clipboard_item_to_json(item: &ClipboardItem, payload_ct_b64: &str) -> serde_j
         "expires_at":    item.expires_at,
         "app_bundle_id": item.app_bundle_id,
         "device_id":     item.origin_device_id,
+        // Soft-delete tombstone. ClipboardItem has no dedicated `deleted` field
+        // (tombstones are not yet materialised locally); live uploads are always
+        // false. A future tombstone-upload path will set this to `true` and send
+        // a minimal payload so the receiver calls delete_item.
+        "deleted":       false,
+        // Pin state: propagate so a pin/unpin on one device is reflected on
+        // every other device after the next cloud sync round.
+        "pinned":        item.pinned,
+        "pin_order":     item.pin_order,
     })
 }
 
@@ -3118,6 +3248,7 @@ mod tests {
     /// about `id` for log lines and the serialised JSON body.
     fn test_item(id: &str) -> copypaste_core::ClipboardItem {
         copypaste_core::ClipboardItem {
+            deleted: false,
             id: id.to_owned(),
             item_id: id.to_owned(),
             content_type: "text".to_owned(),
@@ -4454,6 +4585,7 @@ mod e2e_live {
         let (nonce, ciphertext) =
             encrypt_item_with_aad(plaintext, &v2_key, &aad).expect("local encrypt");
         ClipboardItem {
+            deleted: false,
             id,
             item_id,
             content_type: "text".to_owned(),
@@ -4664,7 +4796,7 @@ mod e2e_live {
         // runs the real decode/decrypt/insert pipeline. Bounded poll: up to 10
         // tries, 1s apart.
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc&limit=20"
         );
         let mut inserted = false;
         let mut last_diag = String::from("(no rows fetched)");
@@ -5018,6 +5150,7 @@ mod bytea_e2e {
     /// the pre-encoded `payload_ct_b64` argument to `push_item_with_retries`.
     fn make_item(id: &str, item_id: &str) -> ClipboardItem {
         ClipboardItem {
+            deleted: false,
             id: id.to_owned(),
             item_id: item_id.to_owned(),
             content_type: "text".to_owned(),
@@ -5102,7 +5235,7 @@ mod bytea_e2e {
 
         // Poll it back through the real GET path and the product decoder.
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc&limit=20"
         );
         let rows = match fetch_remote_rows(&client, &poll_url, &cfg.anon_key, "anon-key-for-tests")
             .await
@@ -5169,7 +5302,7 @@ mod bytea_e2e {
             .await;
 
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc&limit=20"
         );
         let rows = match fetch_remote_rows(&client, &poll_url, &cfg.anon_key, "anon-key-for-tests")
             .await
@@ -5243,7 +5376,7 @@ mod bytea_e2e {
             .await;
 
         let poll_url = format!(
-            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id&order=wall_time.asc&limit=20"
+            "{url}/rest/v1/clipboard_items?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order&order=wall_time.asc&limit=20"
         );
         let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
         // Session-less auth client: this fake never returns 401, so the refresh
@@ -5346,6 +5479,7 @@ mod bytea_e2e {
     /// `wrap_cloud_upload_plaintext` can read its name/MIME.
     fn file_item(id: &str, name: &str, mime: &str, original_size: usize) -> ClipboardItem {
         ClipboardItem {
+            deleted: false,
             id: id.to_owned(),
             item_id: id.to_owned(),
             content_type: "file".to_owned(),

@@ -22,6 +22,9 @@ const ITEM_COUNTS: &[usize] = &[10, 100, 1000];
 /// framing overhead, not payload work.
 fn make_wire_item(i: usize) -> WireItem {
     WireItem {
+        deleted: false,
+        pinned: false,
+        pin_order: None,
         id: format!("id-{i:08}"),
         item_id: format!("item-{i:08}"),
         content_type: "text".to_string(),

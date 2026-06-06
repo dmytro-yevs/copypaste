@@ -74,6 +74,21 @@ export interface HistoryEntry {
    * Arrives as snake_case `too_large_to_sync` in the daemon JSON.
    */
   too_large_to_sync?: boolean;
+  /**
+   * Stable device UUID of the machine that originally captured this item.
+   * Empty string for pre-v3 rows that were never backfilled. Compare against
+   * `HistoryPage.own_device_id` to determine whether an item is local.
+   * Optional for back-compat with daemon builds predating this field.
+   */
+  origin_device_id?: string;
+  /**
+   * Refined content-kind label computed by the daemon's core text-kind
+   * classifier. Values for text items: "TEXT" | "URL" | "EMAIL" | "PHONE" |
+   * "COLOR" | "JSON" | "CODE" | "NUMBER" | "PATH". Non-text: "IMAGE" | "FILE".
+   * Optional for back-compat — older daemon builds do not emit this field.
+   * The UI falls back to a content_type-derived label when absent.
+   */
+  kind?: string;
 }
 
 /**
@@ -93,6 +108,12 @@ export function sourceAppLabel(bundleId: string | null | undefined): string {
 export interface HistoryPage {
   items: HistoryEntry[];
   total: number;
+  /**
+   * This daemon's own stable device UUID. Compare each item's `origin_device_id`
+   * against this to label locally-captured items as "This device".
+   * Empty string on daemon builds that predate this field.
+   */
+  own_device_id: string;
 }
 
 export interface AppSettings {
@@ -244,6 +265,34 @@ export interface PairSasStatus {
   sas?: string;
   /** "initiator" | "responder" — present only mid-pairing. */
   role?: string;
+  // Peer identity fields — included when the daemon has learned them during
+  // the pairing handshake. All optional for back-compat: older daemon builds
+  // omit them; the UI shows what is available and falls back gracefully.
+  // model/OS/app_version are surfaced post-SAS in the pair_with_discovered
+  // response, not here.
+  /** Peer's user-visible device name (legacy field name; see peer_device_name). */
+  peer_name?: string | null;
+  /** Peer's hardware model (e.g. "Pixel 8 Pro") — post-SAS only. */
+  peer_model?: string | null;
+  /** Peer's OS name + version (e.g. "Android 15") — post-SAS only. */
+  peer_os?: string | null;
+  /** Peer's app/daemon version — post-SAS only. */
+  peer_app_version?: string | null;
+  /** Peer's best LAN-routable IP address (legacy single-IP field). */
+  peer_ip?: string | null;
+  /**
+   * Peer's human-readable device name, advertised over mDNS before dialling.
+   * Present on the initiator path; absent on the responder path (inbound
+   * connection — no prior mDNS resolution).
+   */
+  peer_device_name?: string;
+  /** Peer's resolved IP addresses (IPv4-first), from mDNS. Initiator path only. */
+  peer_ip_addrs?: string[];
+  /**
+   * Peer's certificate fingerprint (the mDNS `device_id` = hex SHA-256).
+   * Present on the initiator path; absent on the responder path.
+   */
+  peer_fingerprint?: string;
 }
 
 export interface PairedDevice {
@@ -263,6 +312,11 @@ export interface PairedDevice {
   app_version: string | null;
   /** Peer's best LAN-routable display IP, learned in-band. */
   local_ip: string | null;
+  /**
+   * Peer's public (WAN) IPv4 address, persisted + returned by the daemon
+   * (peers.rs + list_peers passthrough). Null/absent until learned.
+   */
+  public_ip?: string | null;
   /** Unix epoch seconds of the first successful sync, or null until the first sync. */
   first_sync_at: number | null;
   /** Unix epoch seconds of the most recent successful sync, or null. */
@@ -415,6 +469,12 @@ export const api = {
   listDiscovered: () =>
     ipcCall<{ devices: DiscoveredDevice[] }>("list_discovered", {}),
   /**
+   * HB-9: force an mDNS-SD rescan (restart-in-place re-browse) and return the
+   * fresh discovered list. Same response shape as {@link listDiscovered}.
+   */
+  rescanDiscovered: () =>
+    ipcCall<{ devices: DiscoveredDevice[] }>("rescan_discovered", {}),
+  /**
    * Begin a discovery-initiated SAS pairing with `deviceId` (the discovered
    * peer's `device_id`). Returns immediately; poll {@link pairGetSas} for the
    * SAS. Throws `IpcError` with code `rate_limited` when another pairing is
@@ -443,12 +503,73 @@ export const api = {
    * \ responses.
    */
   reorderPinned: (ids: string[]) => ipcCall("reorder_pinned", { ids }),
+
+  /**
+   * Ingest a file into the clipboard history directly from the UI.
+   *
+   * The caller provides the raw file bytes already read (e.g. via the browser
+   * File API from an `<input type="file">` picker or the drag-drop handler),
+   * the filename, and an optional MIME type.  The bytes are base64-encoded and
+   * forwarded to the daemon's `add_file_item` method which encrypts and stores
+   * them exactly like a pasteboard-captured file.
+   *
+   * Returns `{ id: string }` on success. Throws `IpcError` on failure.
+   */
+  addFileItem: (
+    bytes: Uint8Array,
+    filename: string,
+    mime = "application/octet-stream"
+  ): Promise<{ id: string }> => {
+    // Chunk-based btoa avoids RangeError ("Maximum call stack size exceeded")
+    // when spreading a large Uint8Array into String.fromCharCode (C3).
+    const data_b64 = (() => {
+      let bin = "";
+      const CHUNK = 8192;
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+      }
+      return btoa(bin);
+    })();
+    return ipcCall<{ id: string }>("add_file_item", { filename, mime, data_b64 });
+  },
+
+  /**
+   * Full-text search over the daemon's FTS5 index (all stored items, not just
+   * the loaded page). Returns up to `limit` matching item IDs. Use the returned
+   * IDs as a set to augment the client-side substring filter in HistoryView so
+   * items beyond the loaded page are discoverable.
+   */
+  searchItems: (query: string, limit = 500): Promise<{ id: string }[]> =>
+    ipcCall<{ items: { id: string }[] }>("search", { query, limit }).then(
+      (r) => r.items ?? []
+    ),
 };
 
 /** Format Unix epoch milliseconds for display. */
 export function formatWallTime(ms: number): string {
   if (ms <= 0) return "—";
   return new Date(ms).toLocaleString();
+}
+
+/**
+ * Returns true when a daemon content_type represents an image — either the
+ * bare legacy token "image" or any MIME-typed "image/*" variant.
+ * Single source of truth shared by HistoryView, Popup, and notification logic.
+ */
+export function isImageType(ct: string): boolean {
+  return ct === "image" || ct.startsWith("image/");
+}
+
+/**
+ * Extract a human-readable message from a caught error, falling back to
+ * `fallback` when the error is not an IpcError (e.g. a transport TypeError).
+ * Use at every catch site instead of the repeated ternary.
+ *
+ * @param err      The value caught in a catch clause (type `unknown`).
+ * @param fallback Fallback string when `err` is not an IpcError.
+ */
+export function ipcErrorMessage(err: unknown, fallback: string): string {
+  return err instanceof IpcError ? err.message : fallback;
 }
 
 // ---------------------------------------------------------------------------
@@ -471,18 +592,62 @@ export async function playCopySound(): Promise<void> {
 }
 
 /**
- * Show a macOS notification banner on copy — Maccy-style feedback.
- * Calls the `show_copy_notification` Tauri command which posts a
- * user-notification via osascript. Non-blocking and failure-safe: any error
- * (missing entitlement, user denied notifications, etc.) is swallowed.
- * @param preview A short one-line preview of the copied item (may be empty).
+ * Show a rich macOS notification banner on copy via UNUserNotificationCenter.
+ * Derives a human-readable title ("Text Copied" / "Image Copied" / "File
+ * Copied") and a preview body (first ~160 chars of text, filename for files,
+ * "Image" for images) from the item's content type and preview string, then
+ * calls the `show_copy_notification` Tauri command which posts it from inside
+ * the CopyPaste.app bundle so the banner shows the app icon.
+ *
+ * Non-blocking and failure-safe: any error is swallowed.
+ *
+ * @param contentType The daemon content type: "text" | "image" | "file" | "".
+ * @param preview     The raw preview string from the daemon (may be empty).
  */
-export async function showCopyNotification(preview: string): Promise<void> {
+export async function showCopyNotification(
+  contentType: string,
+  preview: string
+): Promise<void> {
+  const { title, body } = buildNotificationContent(contentType, preview);
   try {
-    await invoke<void>("show_copy_notification", { preview });
+    await invoke<void>("show_copy_notification", { title, body });
   } catch {
     // Notification is best-effort; never block the copy flow on a notify failure.
   }
+}
+
+/** Build notification title + body from daemon content_type + preview. */
+function buildNotificationContent(
+  contentType: string,
+  preview: string
+): { title: string; body: string } {
+  if (contentType === "text") {
+    return { title: "Text Copied", body: truncatePreviewBody(preview) || "Copied" };
+  }
+  if (contentType === "image" || contentType.startsWith("image/")) {
+    return { title: "Image Copied", body: "Image" };
+  }
+  if (contentType === "file") {
+    // Daemon preview is "[file: <filename>]" — strip the wrapper.
+    const inner = preview.replace(/^\[file:\s*/, "").replace(/\]$/, "").trim();
+    return { title: "File Copied", body: inner || "File" };
+  }
+  // Fallback / unknown content type.
+  return { title: "Copied", body: truncatePreviewBody(preview) || "Copied" };
+}
+
+/**
+ * Truncate a raw text preview to ~160 chars at a word boundary with a
+ * trailing `…`.  Preserves newlines so multi-line text reads naturally.
+ */
+function truncatePreviewBody(preview: string): string {
+  const MAX = 160;
+  const s = preview.trim();
+  if (s.length <= MAX) return s;
+  const cut = s.slice(0, MAX);
+  const wordBoundary = Math.max(cut.lastIndexOf(" "), cut.lastIndexOf("\n"));
+  const chopped = wordBoundary > 0 ? cut.slice(0, wordBoundary).trimEnd() : cut.trimEnd();
+  return chopped + "…";
 }
 
 /**
@@ -728,4 +893,52 @@ export async function readLogs(maxLines: number): Promise<string> {
  */
 export async function logDirPath(): Promise<string> {
   return invoke<string>("log_dir_path");
+}
+
+/**
+ * Bring the main CopyPaste window to the foreground.
+ *
+ * Used when an incoming pairing request arrives on the responder side so the
+ * user sees the SAS confirmation modal without having to open the app manually.
+ * Non-blocking and failure-safe: any error is swallowed.
+ */
+export async function focusMainWindow(): Promise<void> {
+  try {
+    await invoke<void>("focus_main_window");
+  } catch {
+    // Best-effort — never block the pairing flow on a window-focus failure.
+  }
+}
+
+/**
+ * Fire a macOS notification informing the user that a remote device is
+ * requesting to pair. Reuses the existing UNUserNotificationCenter path via
+ * `show_copy_notification` so no new Tauri command is needed.
+ *
+ * Non-blocking and failure-safe.
+ *
+ * @param peerName  User-visible name of the peer requesting to pair.
+ */
+export async function showPairingRequestNotification(peerName: string): Promise<void> {
+  const title = "CopyPaste: Pairing Request";
+  const body = `"${peerName}" wants to pair — open CopyPaste to confirm.`;
+  try {
+    await invoke<void>("show_copy_notification", { title, body });
+  } catch {
+    // Best-effort — notification failure must never break the pairing flow.
+  }
+}
+
+/**
+ * Write `text` as plain UTF-8 to the system clipboard (no rich formatting),
+ * then activate the prior app and synthesise Cmd+V.
+ *
+ * This is the backend for the Option+Enter "paste as plain text" shortcut (F1).
+ * The caller must hide the popup BEFORE calling this so the prior app receives
+ * focus before the synthetic Cmd+V fires.
+ *
+ * On non-macOS this is a no-op.
+ */
+export async function pasteAsPlainText(text: string): Promise<void> {
+  await invoke<void>("paste_plain_text", { text });
 }

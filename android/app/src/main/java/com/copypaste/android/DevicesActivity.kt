@@ -1,12 +1,23 @@
 package com.copypaste.android
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import java.text.DateFormat
+import java.util.Date
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -34,23 +46,30 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.IdeDanger
@@ -60,8 +79,15 @@ import com.copypaste.android.ui.theme.IdeFaint
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
 import com.copypaste.android.ui.theme.SectionLabel
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -80,6 +106,31 @@ internal const val ONLINE_WINDOW_MS = 60_000L
 /** True when [peer] synced within [ONLINE_WINDOW_MS] of [nowMs]. */
 internal fun PairedPeer.isOnline(nowMs: Long = System.currentTimeMillis()): Boolean =
     lastSyncMs > 0L && (nowMs - lastSyncMs) <= ONLINE_WINDOW_MS
+
+/**
+ * Shared online-count state published by [DevicesScreen] and consumed by
+ * [com.copypaste.android.ui.SyncStatusBadge] so both the footer dot+count AND
+ * every PeerCard dot are driven by the SAME single computation.
+ *
+ * A paired peer is ONLINE iff its IP host appears in the current live mDNS
+ * `discovered` set (IP-correlation — mDNS device_id is a UUID, NOT a cert
+ * fingerprint, so we match on IP only), OR its lastSyncMs falls within
+ * [ONLINE_WINDOW_MS] as a fallback.
+ *
+ * [DevicesScreen] updates this every ~1 s via [publish]. When the Devices tab
+ * is not visible, [SyncStatusBadge] falls back to its own configured-target
+ * count (value stays at whatever was last published).
+ */
+object DevicesOnlineState {
+    private val _onlineCount = MutableStateFlow(-1)
+
+    /** -1 = not yet computed (badge may fall back to its own logic). */
+    val onlineCount: StateFlow<Int> = _onlineCount.asStateFlow()
+
+    internal fun publish(count: Int) {
+        _onlineCount.value = count
+    }
+}
 
 /**
  * Forget a single paired peer locally: remove its roster entry (fingerprint,
@@ -107,12 +158,28 @@ fun unpairPeer(settings: Settings, fingerprint: String) {
  * "Devices" row).
  */
 class DevicesActivity : ComponentActivity() {
+
+    companion object {
+        /**
+         * Boolean Intent extra: when true, [DevicesScreen] auto-opens the SAS modal on
+         * resume if [pairGetSas] returns `awaiting_sas`. Set by
+         * [ClipboardService.postIncomingPairNotification] so tapping the pairing-request
+         * notification takes the user directly to the SAS confirm dialog.
+         */
+        const val EXTRA_AUTO_OPEN_SAS = "auto_open_sas"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        val autoOpenSas = intent?.getBooleanExtra(EXTRA_AUTO_OPEN_SAS, false) ?: false
         setContent {
             CopyPasteTheme {
-                DevicesScreen(showBackButton = true, onBack = { finish() })
+                DevicesScreen(
+                    showBackButton = true,
+                    onBack = { finish() },
+                    autoOpenSasOnEntry = autoOpenSas,
+                )
             }
         }
     }
@@ -127,16 +194,86 @@ fun DevicesScreen(
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
     onBack: () -> Unit = {},
+    /**
+     * When true (set by tapping the incoming-pair notification), the screen
+     * immediately polls [pairGetSas] once on composition and auto-opens the SAS
+     * modal if the state is `awaiting_sas`. Consumed after the first check.
+     */
+    autoOpenSasOnEntry: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
     val deviceKeyStore = remember { DeviceKeyStore(ctx) }
     val scope = rememberCoroutineScope()
 
+    // ── Direct camera scan launcher (Deliverable 2) ───────────────────────────
+    // The scan button on this screen launches the ZXing scanner directly —
+    // no PairActivity intermediary. The scan result (a CPPAIR1.… payload) is
+    // forwarded to PairActivity as a cppair:// deep-link so the full pair &
+    // sync flow (PAKE bootstrap, key persistence, provisioning apply) still
+    // runs there unmodified.
+    var scanError by remember { mutableStateOf<String?>(null) }
+
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val contents = result.contents ?: return@rememberLauncherForActivityResult
+        // Forward the raw CPPAIR1.… payload to PairActivity via the deep-link
+        // path so PAKE + provisioning logic runs there.
+        val intent = Intent(ctx, PairActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            data = android.net.Uri.parse("cppair://pair?p=${android.net.Uri.encode(contents)}")
+        }
+        ctx.startActivity(intent)
+    }
+
+    fun launchScanner() {
+        val opts = ScanOptions()
+            .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+            .setPrompt("Scan the pairing QR on the other device")
+            .setBeepEnabled(false)
+            .setOrientationLocked(true)
+            .setCaptureActivity(PortraitCaptureActivity::class.java)
+        try {
+            scanLauncher.launch(opts)
+        } catch (e: Exception) {
+            scanError = "Could not open the camera scanner: " +
+                (e.message ?: e.javaClass.simpleName)
+        }
+    }
+
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            launchScanner()
+        } else {
+            scanError = "Camera permission required to scan a pairing QR. " +
+                "Grant it in Settings → Apps → CopyPaste → Permissions."
+        }
+    }
+
+    fun startScanFlow() {
+        val hasCamera = ContextCompat.checkSelfPermission(
+            ctx, Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+        if (hasCamera) launchScanner() else cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+    }
+
     // Refresh the roster every poll interval so the online dots and last-sync
     // labels update as FgsSyncLoop stamps presence.
     var peers by remember { mutableStateOf(settings.pairedPeers) }
     var ownIdentity by remember { mutableStateOf(settings.p2pIdentity) }
+
+    // ── 1-second clock tick ───────────────────────────────────────────────────
+    // Drives smooth "Xm ago" / "Xs ago" updates and the online dot recomputation
+    // without a separate per-card timer. Also used to re-read the local IP on a
+    // coarser cadence (every ~5 s) so a Wi-Fi handoff is reflected promptly.
+    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000L)
+            nowMs = System.currentTimeMillis()
+        }
+    }
 
     // ── LAN discovery + SAS pairing state ─────────────────────────────────────
     // P2P must be enabled for discovery (parity with the daemon gating discovery
@@ -165,50 +302,83 @@ fun DevicesScreen(
         }
     }
 
-    // ── Start/stop mDNS discovery for the lifetime of this screen ─────────────
-    // Begin advertising + browsing when the screen opens (gated on P2P enabled),
-    // and stop on dispose. Uses the persisted device cert (peek, else generate)
-    // and the live inbound listener port; the bootstrap port is the fixed
-    // [SAS_BPORT] this device owns for SAS pairing.
-    DisposableEffect(p2pEnabled) {
-        val job = if (p2pEnabled) {
-            scope.launch {
-                try {
-                    val cert = withContext(Dispatchers.IO) {
-                        deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
-                    }
-                    val syncPort = ClipboardService.activeListenerPort.coerceAtLeast(0)
-                    withContext(Dispatchers.IO) {
-                        startDiscovery(
-                            deviceId = cert.deviceId,
-                            deviceName = android.os.Build.MODEL ?: "Android",
-                            syncPort = syncPort,
-                            bport = SAS_BPORT,
-                            certDer = cert.certDer,
-                            keyDer = cert.keyDer,
-                        )
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "startDiscovery failed: ${e.message}", e)
-                    discoverError = "Could not start network discovery."
-                }
-            }
-        } else {
-            null
-        }
-        onDispose {
-            job?.cancel()
-            if (p2pEnabled) {
-                // Best-effort stop on the caller thread — stopDiscovery tolerates
-                // a stop without a completed start.
-                scope.launch(Dispatchers.IO) { stopDiscovery() }
-            }
+    // ── SINGLE SOURCE OF TRUTH: online map keyed by fingerprint ───────────────
+    //
+    // A paired peer is ONLINE iff:
+    //   (a) its IP host (from syncAddr or peerLocalIp) appears in the live mDNS
+    //       `discovered` set (IP-correlation — mDNS device_id is a UUID, NOT a
+    //       cert fingerprint, so we match on IP only), OR
+    //   (b) its lastSyncMs falls within ONLINE_WINDOW_MS of nowMs (fallback for
+    //       peers not currently advertising on mDNS, e.g. were online recently).
+    //
+    // Computed ONCE here and threaded to every site that shows an online
+    // indicator: PeerCard dot AND the footer count via [DevicesOnlineState].
+    // Removes the prior divergence where the footer counted configured targets
+    // while each card independently called peer.isOnline().
+    val discoveredIps: Set<String> = remember(discovered) {
+        discovered.flatMap { it.ipAddrs }.toHashSet()
+    }
+    val onlineByFingerprint: Map<String, Boolean> = remember(peers, discoveredIps, nowMs) {
+        peers.associate { peer ->
+            val peerIpHosts = listOfNotNull(
+                // host part of "host:port" (substringBeforeLast tolerates bare host).
+                peer.syncAddr.takeIf { it.isNotEmpty() }?.substringBeforeLast(':'),
+                peer.peerLocalIp?.takeIf { it.isNotEmpty() },
+            )
+            val viaMdns = peerIpHosts.any { host -> discoveredIps.contains(host) }
+            val viaRecent = peer.isOnline(nowMs)
+            peer.fingerprint to (viaMdns || viaRecent)
         }
     }
 
+    // ── Deliverable 1: auto-open SAS modal on screen entry ────────────────────
+    // Triggered when: (a) user tapped the incoming-pair notification
+    // (autoOpenSasOnEntry=true), OR (b) general entry — poll once to catch
+    // awaiting_sas for EITHER role so the modal appears regardless of who
+    // initiated. Uses a sentinel DiscoveredPeer with the state machine's peer
+    // info; if the native library is absent this is a safe no-op.
+    LaunchedEffect(Unit) {
+        if (!isNativeLibraryLoaded) return@LaunchedEffect
+        // Give mDNS a moment to start on first composition before probing.
+        if (!autoOpenSasOnEntry) delay(800L)
+        try {
+            val st = withContext(Dispatchers.IO) { pairGetSas() }
+            if (st.state == "awaiting_sas" && pairingPeer == null) {
+                // Build a sentinel DiscoveredPeer so SasPairingDialog can open.
+                // deviceId/deviceName are best-effort; the dialog only uses them
+                // for the title and (for responder) skips pairWithDiscovered.
+                pairingPeer = DiscoveredPeer(
+                    deviceId = st.peerFingerprint ?: "unknown",
+                    deviceName = "",   // unknown at this stage for responder role
+                    ipAddrs = emptyList(),
+                    port = 0u,
+                    bport = null,
+                    paired = false,
+                )
+            }
+        } catch (_: Exception) {
+            // pairGetSas not yet available — safe to ignore on first composition.
+        }
+    }
+
+
+    // Publish live count so SyncStatusBadge (footer) reads the SAME value as the
+    // peer cards — single source, zero divergence.
+    DevicesOnlineState.publish(onlineByFingerprint.count { it.value })
+
+    // ── mDNS discovery lifecycle lives in ClipboardService (HB-2) ─────────────
+    // Discovery (the mDNS advert + the standing SAS-pairing responder on
+    // [SAS_BPORT]) is started/stopped by the always-on [ClipboardService] FGS,
+    // NOT here. Hosting it on this screen meant the responder died the moment the
+    // Devices screen closed, so a Mac→Android pair got "Connection refused". The
+    // FGS keeps it alive for the lifetime of the service; this screen only
+    // browses the resulting peer snapshot below.
+
     // ── Poll the discovered peer list every ~2 s ──────────────────────────────
-    // listDiscovered stamps `paired` by cross-referencing the supplied paired
-    // fingerprints; we additionally drop already-paired entries defensively.
+    // HB-4: listDiscovered marks `paired` by IP-correlation now (the mDNS
+    // device_id is a UUID, not a cert fingerprint, so the old fingerprint-compare
+    // never matched). We pass the set of IP hosts we have paired with — each
+    // peer's syncAddr host plus its peerLocalIp — and drop the matched entries.
     LaunchedEffect(p2pEnabled) {
         if (!p2pEnabled) {
             discovered = emptyList()
@@ -216,8 +386,15 @@ fun DevicesScreen(
         }
         while (true) {
             try {
-                val pairedFps = settings.pairedPeers.map { it.fingerprint }
-                val list = withContext(Dispatchers.IO) { listDiscovered(pairedFps) }
+                val pairedIps = settings.pairedPeers.flatMap { peer ->
+                    listOfNotNull(
+                        // host part of "host:port" (substringBeforeLast tolerates a
+                        // bare host with no port).
+                        peer.syncAddr.takeIf { it.isNotEmpty() }?.substringBeforeLast(':'),
+                        peer.peerLocalIp?.takeIf { it.isNotEmpty() },
+                    )
+                }.distinct()
+                val list = withContext(Dispatchers.IO) { listDiscovered(pairedIps) }
                 discovered = list.filterNot { it.paired }
             } catch (e: Exception) {
                 // Discovery is best-effort — keep the previous snapshot, log only.
@@ -246,12 +423,26 @@ fun DevicesScreen(
                         // phone advertises no sync address / carries no config.
                         syncAddr = "",
                         localProvisioning = null,
+                        // HB-1a (ABI 14): advertise this device's own metadata.
+                        deviceName = android.os.Build.MODEL ?: "Android",
+                        deviceModel = android.os.Build.MODEL ?: "Android",
+                        osVersion = "Android " + android.os.Build.VERSION.RELEASE,
+                        appVersion = BuildConfig.VERSION_NAME,
+                        localIp = lanIpv4Address(),
                     )
                 }
                 pairingPeer = peer
             } catch (e: Exception) {
                 Log.w(TAG, "pairWithDiscovered failed: ${e.message}", e)
                 discoverError = e.message ?: "Failed to start pairing."
+                // HB-8: pairWithDiscovered may have claimed the native SM (via
+                // try_begin) before failing — reset defensively so a retry is not
+                // refused with "a pairing is already in flight".
+                try {
+                    withContext(Dispatchers.IO) { pairReset() }
+                } catch (re: Exception) {
+                    Log.w(TAG, "pairReset after failed start failed: ${re.message}")
+                }
             } finally {
                 pairStarting = false
             }
@@ -363,12 +554,24 @@ fun DevicesScreen(
         )
     }
 
+    // ── Scan error surface ────────────────────────────────────────────────────
+    scanError?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { scanError = null },
+            title = { Text("Scanner unavailable") },
+            text = { Text(msg) },
+            confirmButton = {
+                TextButton(onClick = { scanError = null }) { Text("OK") }
+            },
+        )
+    }
+
     Scaffold(
         modifier = modifier,
         containerColor = IdeBg,
         topBar = {
             CopyPasteTopBar(
-                title = "Devices",
+                title = stringResource(R.string.title_devices),
                 showBackButton = showBackButton,
                 onBack = onBack,
                 backContentDescription = "Back",
@@ -384,18 +587,46 @@ fun DevicesScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
 
-            // ── Paired peers ────────────────────────────────────────────────
-            SectionLabel("Paired Devices")
+            // ── Deliverable 1: own QR at the top, always visible, blurred ────
+            // Shows THIS device's pairing QR at the top of the screen so the
+            // user doesn't need to navigate to PairActivity to get scanned.
+            // The QR is blurred by default (tap to reveal) because it encodes
+            // the PAKE password + sync provisioning material. Reuses the same
+            // blur/reveal pattern as PairActivity (Modifier.blur(16.dp) + overlay
+            // label, first-tap reveals, second-tap regenerates and stays visible).
+            // The QR is generated lazily in OwnQrSection; the Scaffold FLAG_SECURE
+            // from PairActivity is NOT needed here because the QR is blurred at
+            // rest and FLAG_SECURE on PairActivity still protects the reveal flow
+            // when the user taps through to that screen.
+            OwnQrSection(settings = settings)
 
+            // ── Single unified device list ───────────────────────────────────
+            // Parity with macOS DevicesView: this device first, then every
+            // paired peer, then discovered (unpaired) LAN peers — all in one
+            // continuous column, no separate section headers per list.
+            SectionLabel("Devices")
+
+            // This device — always first.
+            ownIdentity?.let { identity ->
+                OwnDeviceCard(identity = identity, nowMs = nowMs)
+            }
+
+            // Paired peers — pass the pre-computed online flag so the card dot
+            // and the footer badge are always in sync.
             if (peers.isNotEmpty()) {
                 for (peer in peers) {
                     PeerCard(
                         peer = peer,
+                        online = onlineByFingerprint[peer.fingerprint] ?: false,
+                        nowMs = nowMs,
                         onUnpair = { unpairTarget = peer },
                         onRevoke = { revokeTarget = peer },
                     )
                 }
-            } else {
+            } else if (ownIdentity == null) {
+                // Show the empty state only when we also have no own-device card
+                // to anchor the list (avoids a redundant prompt when the own
+                // card is already present).
                 NoPeerCard(
                     onPair = {
                         ctx.startActivity(Intent(ctx, PairActivity::class.java))
@@ -403,14 +634,9 @@ fun DevicesScreen(
                 )
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            // ── Discovered on your network ───────────────────────────────────
-            // Parity with the macOS DevicesView "Devices on your network" list:
-            // unpaired, SAS-capable LAN peers with a Pair button. Only shown when
-            // P2P is enabled (discovery is gated on it).
+            // Discovered on your network (unpaired LAN peers).
+            // Only shown when P2P is enabled (discovery is gated on it).
             if (p2pEnabled) {
-                SectionLabel("Discovered on Your Network")
                 if (discovered.isNotEmpty()) {
                     for (peer in discovered) {
                         DiscoveredPeerCard(
@@ -419,12 +645,6 @@ fun DevicesScreen(
                             onPair = { startPairing(peer) },
                         )
                     }
-                } else {
-                    Text(
-                        text = "Searching for nearby devices…",
-                        color = IdeFaint,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
                 }
                 discoverError?.let { msg ->
                     Text(
@@ -433,17 +653,248 @@ fun DevicesScreen(
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
-                Spacer(Modifier.height(8.dp))
             }
 
-            // ── This device ──────────────────────────────────────────────────
-            ownIdentity?.let { identity ->
-                SectionLabel("This Device")
-                OwnDeviceCard(identity = identity)
+            // ── Deliverable 2: Scan button opens the camera directly ─────────
+            // Launches PortraitCaptureActivity (ZXing) via ScanContract without
+            // routing through PairActivity. The scan result is forwarded to
+            // PairActivity as a cppair:// deep-link so PAKE + provisioning still
+            // run there unmodified.
+            OutlinedButton(
+                onClick = { startScanFlow() },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(stringResource(R.string.btn_scan_qr))
+            }
+
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Own QR section (Deliverable 1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Pixel side of the QR bitmap generated here — matches [QR_BITMAP_PX] in
+ * PairActivity so both screens produce identical-quality codes.
+ */
+private const val DEVICES_QR_BITMAP_PX = 512
+
+/**
+ * On-screen dp side of the QR image inside the plate.
+ * Slightly smaller than PairActivity's 240 dp to fit compactly in the
+ * Devices list above the device cards.
+ */
+private const val DEVICES_QR_IMAGE_DP = 200
+
+/** White backing-plate padding (each side, dp). */
+private const val DEVICES_QR_PLATE_PADDING_DP = 10
+
+/** Total reserved slot size: image + plate padding on both sides. */
+private const val DEVICES_QR_SLOT_DP = DEVICES_QR_IMAGE_DP + DEVICES_QR_PLATE_PADDING_DP * 2
+
+/** Mirrors PAIR_TOKEN_TTL_SECONDS in PairActivity (private there). */
+private const val DEVICES_QR_TTL_SECONDS = 120
+
+/** Mirrors PAIR_TOKEN_URGENT_THRESHOLD_SECONDS in PairActivity (private there). */
+private const val DEVICES_QR_URGENT_THRESHOLD_SECONDS = 15
+
+/**
+ * Generates a QR [Bitmap] for [text] at [sizePx] pixels. Identical to
+ * [encodeQrBitmap] in PairActivity — duplicated to avoid a cross-file
+ * private reference; both produce the same ZXing QR_CODE output.
+ */
+private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap {
+    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx)
+    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
+    for (x in 0 until sizePx) {
+        for (y in 0 until sizePx) {
+            bmp.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
+        }
+    }
+    return bmp
+}
+
+/**
+ * Shows this device's pairing QR at the top of the Devices screen.
+ *
+ * Privacy model — identical to [PairActivity]:
+ *  - QR is blurred ([Modifier.blur] 16 dp) by default; a "Tap to reveal"
+ *    overlay guides the user.
+ *  - First tap → unblurred (revealed).
+ *  - Second tap → regenerates + stays visible (mirrors HW-A5 from PairActivity).
+ *  - On expiry (2-minute TTL) the QR auto-regenerates and stays visible.
+ *
+ * The QR is generated on first composition via [startPairing] (same FFI call
+ * as PairActivity). Failures show a muted error label so the rest of the
+ * Devices screen still renders.
+ *
+ * FLAG_SECURE: this composable lives in DevicesScreen, which does NOT set
+ * FLAG_SECURE. The QR is blurred at rest, so the secret material is not
+ * readable from a screenshot in the default state. Users who tap to reveal
+ * accept the exposure; a future hardening pass could set FLAG_SECURE on
+ * DevicesActivity too, but that blocks the rest of the screen uselessly.
+ */
+@Composable
+private fun OwnQrSection(settings: Settings) {
+    val scope = rememberCoroutineScope()
+    var qr by remember { mutableStateOf<PairingQrResult?>(null) }
+    var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    var remainingSeconds by remember { mutableStateOf(0) }
+    // Blurred by default; tap reveals; second tap regenerates (stays unblurred).
+    var qrBlurred by remember { mutableStateOf(true) }
+
+    val expired = qr != null && remainingSeconds <= 0
+
+    fun generateQr(keepVisible: Boolean) {
+        scope.launch {
+            loading = true
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    startPairing(settings.deviceId, android.os.Build.MODEL ?: "Android")
+                }
+                val bmp = withContext(Dispatchers.Default) {
+                    encodeDevicesQrBitmap(result.qr, DEVICES_QR_BITMAP_PX)
+                }
+                qr = result
+                qrBitmap = bmp
+                if (keepVisible) qrBlurred = false
+            } catch (e: Exception) {
+                errorMsg = e.message ?: e.javaClass.simpleName
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    // Countdown ticker — restarts whenever a fresh QR is issued. Auto-regenerates
+    // on expiry and keeps the QR visible (mirrors PairActivity HW-A5).
+    LaunchedEffect(qr) {
+        if (qr == null) return@LaunchedEffect
+        remainingSeconds = DEVICES_QR_TTL_SECONDS
+        while (remainingSeconds > 0) {
+            delay(1_000L)
+            remainingSeconds -= 1
+        }
+        generateQr(keepVisible = true)
+    }
+
+    // Generate QR on first composition.
+    LaunchedEffect(Unit) {
+        if (qr != null || loading) return@LaunchedEffect
+        generateQr(keepVisible = false)
+    }
+
+    SectionLabel("Your QR code")
+
+    CopyPasteCard {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = "Let another device scan this to pair",
+                style = MaterialTheme.typography.bodySmall,
+                color = IdeDim,
+                textAlign = TextAlign.Center,
+            )
+
+            Box(
+                modifier = Modifier.size(DEVICES_QR_SLOT_DP.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                val bmp = qrBitmap
+                when {
+                    loading -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(32.dp),
+                            color = IdeAccent,
+                            strokeWidth = 2.dp,
+                        )
+                    }
+                    bmp != null && !expired -> {
+                        Box(
+                            modifier = Modifier
+                                .size(DEVICES_QR_SLOT_DP.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .then(
+                                    if (qrBlurred) Modifier.blur(16.dp) else Modifier
+                                )
+                                .clickable {
+                                    if (qrBlurred) {
+                                        qrBlurred = false
+                                    } else {
+                                        generateQr(keepVisible = true)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            // White backing plate.
+                            Box(
+                                modifier = Modifier
+                                    .size(DEVICES_QR_SLOT_DP.dp)
+                                    .background(androidx.compose.ui.graphics.Color.White)
+                                    .padding(DEVICES_QR_PLATE_PADDING_DP.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "Your pairing QR code — tap to reveal",
+                                    modifier = Modifier.size(DEVICES_QR_IMAGE_DP.dp),
+                                )
+                            }
+                            // Reveal overlay (only while blurred).
+                            if (qrBlurred) {
+                                Text(
+                                    text = "Tap to reveal",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = IdeText,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
+                    }
+                    else -> {
+                        // Expired placeholder while auto-regeneration is in flight.
+                        Text(
+                            text = "Refreshing…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = IdeDim,
+                        )
+                    }
+                }
+            }
+
+            // Countdown / expiry label.
+            if (qr != null && !expired) {
+                val urgent = remainingSeconds <= DEVICES_QR_URGENT_THRESHOLD_SECONDS
+                Text(
+                    text = stringResource(R.string.pair_token_expires_in_seconds, remainingSeconds),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (urgent) IdeDanger else IdeFaint,
+                )
+            }
+
+            errorMsg?.let { msg ->
+                Text(
+                    text = "QR unavailable: $msg",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = IdeDanger,
+                    textAlign = TextAlign.Center,
+                )
             }
         }
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 /** Display label for a peer: its name when set, else a short fingerprint. */
 private fun PairedPeer.displayName(): String =
@@ -453,13 +904,28 @@ private fun PairedPeer.displayName(): String =
 // Peer card
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Fixed width of the label column in the two-column metadata table.
+ * Sized to fit the longest label ("Local IP" / "Public IP") at 11 sp so
+ * values in all three card types (Own, Peer, Discovered) start at the same
+ * horizontal position regardless of which card they appear in.
+ */
+private val META_LABEL_WIDTH: Dp = 72.dp
+
 @Composable
 private fun PeerCard(
     peer: PairedPeer,
+    /**
+     * Pre-computed online flag from [DevicesScreen] — the SINGLE source of truth
+     * for this peer's online/offline state. Replaces the former per-card call to
+     * [PairedPeer.isOnline] which diverged from the footer badge computation.
+     */
+    online: Boolean,
+    /** Current epoch millis from the 1-second ticker in [DevicesScreen]. */
+    nowMs: Long,
     onUnpair: () -> Unit,
     onRevoke: () -> Unit,
 ) {
-    val online = peer.isOnline()
     val dotColor = if (online) IdeSuccess else IdeFaint
 
     Card(
@@ -494,25 +960,54 @@ private fun PeerCard(
 
             Spacer(Modifier.height(10.dp))
 
-            // ── Fingerprint (short) ─────────────────────────────────────────
-            DeviceField(label = "Fingerprint", value = peer.fingerprint.take(16))
-
-            // ── Sync address ────────────────────────────────────────────────
-            if (peer.syncAddr.isNotBlank()) {
-                Spacer(Modifier.height(6.dp))
-                DeviceField(label = "Sync address", value = peer.syncAddr)
-            }
-
-            // ── Last sync ───────────────────────────────────────────────────
-            if (peer.lastSyncMs > 0L) {
-                Spacer(Modifier.height(6.dp))
-                val elapsed = (System.currentTimeMillis() - peer.lastSyncMs) / 1_000L
-                val lastSyncText = when {
+            // ── Two-column aligned table ─────────────────────────────────────
+            // Label column is [META_LABEL_WIDTH] wide; value column takes the
+            // rest. Each row uses verticalAlignment = CenterVertically so
+            // multi-line values don't cause the label to sit misaligned.
+            // Only rows with non-blank values rendered — legacy pre-ABI-14
+            // roster entries simply show fewer rows.
+            val lastSyncText: String? = if (peer.lastSyncMs > 0L) {
+                val elapsed = (nowMs - peer.lastSyncMs) / 1_000L
+                when {
                     elapsed < 60 -> "${elapsed}s ago"
                     elapsed < 3600 -> "${elapsed / 60}m ago"
-                    else -> "${elapsed / 3600}h ago"
+                    elapsed < 86400 -> "${elapsed / 3600}h ago"
+                    else -> formatEpochMs(peer.lastSyncMs)
                 }
-                DeviceField(label = "Last sync", value = lastSyncText)
+            } else null
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Fingerprint (short) — parity with macOS PeerRow.
+                MetaRow(
+                    label = "Fingerprint",
+                    value = if (peer.fingerprint.length > 24)
+                        "${peer.fingerprint.take(16)}…${peer.fingerprint.takeLast(8)}"
+                    else peer.fingerprint,
+                )
+                peer.peerModel?.takeIf { it.isNotBlank() }?.let {
+                    MetaRow(label = "Model", value = it)
+                }
+                peer.peerOs?.takeIf { it.isNotBlank() }?.let {
+                    MetaRow(label = "OS", value = it)
+                }
+                peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
+                    MetaRow(label = "Version", value = it)
+                }
+                peer.peerLocalIp?.takeIf { it.isNotBlank() }?.let {
+                    MetaRow(label = "Local IP", value = it)
+                }
+                peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
+                    MetaRow(label = "Public IP", value = it)
+                }
+                if (peer.syncAddr.isNotBlank()) {
+                    MetaRow(label = "Sync", value = peer.syncAddr)
+                }
+                if (peer.pairedAtMs > 0L) {
+                    MetaRow(label = "Paired", value = formatEpochMs(peer.pairedAtMs))
+                }
+                lastSyncText?.let {
+                    MetaRow(label = "Last sync", value = it)
+                }
             }
 
             HorizontalDivider(
@@ -581,7 +1076,28 @@ private fun NoPeerCard(onPair: () -> Unit) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun OwnDeviceCard(identity: P2pIdentity) {
+private fun OwnDeviceCard(
+    identity: P2pIdentity,
+    /** Current epoch millis from the 1-second ticker — drives live IP refresh. */
+    nowMs: Long,
+) {
+    // HB-1c: render THIS device's info at parity with the macOS "This Mac" card.
+    // ABI 14 sends these same fields to peers (own gather in PairActivity /
+    // DevicesActivity startPairing); we surface them locally too. Gathered live —
+    // P2pIdentity only carries the id/fingerprint, the rest comes from the
+    // platform (Build/BuildConfig) and a LAN-IPv4 enumeration. No synchronous
+    // public-IP source on-device, so that row is omitted (matches the bootstrap
+    // path, which sends public_ip = None for this device).
+    val model = Build.MODEL.orEmpty().ifBlank { "Android" }
+    val osVersion = "Android " + Build.VERSION.RELEASE
+    val appVersion = BuildConfig.VERSION_NAME
+
+    // Live local IP — re-read every ~5 s (keyed on nowMs / 5000) so a network
+    // change (Wi-Fi handoff, VPN connect) is reflected promptly.
+    // The bare `remember { lanIpv4Address() }` snapshot was stale on network
+    // change because it was only evaluated once at first composition.
+    val localIp = remember(nowMs / 5_000L) { lanIpv4Address() }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
@@ -589,9 +1105,46 @@ private fun OwnDeviceCard(identity: P2pIdentity) {
         border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            DeviceField(label = "Device ID", value = identity.deviceId)
-            Spacer(Modifier.height(6.dp))
-            DeviceField(label = "My fingerprint", value = identity.fingerprint)
+            // Header: online dot (this device is always online) + model name
+            // + "This Device" badge mirroring macOS "This Mac".
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(IdeSuccess),
+                )
+                Text(
+                    text = model,
+                    color = IdeText,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    text = "Online",
+                    color = IdeSuccess,
+                    style = MaterialTheme.typography.labelMedium,
+                )
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // Two-column aligned table — same [META_LABEL_WIDTH] as PeerCard.
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                MetaRow(label = "Model", value = model)
+                MetaRow(label = "OS", value = osVersion)
+                MetaRow(label = "Version", value = appVersion)
+                localIp?.let { MetaRow(label = "Local IP", value = it) }
+                // Fingerprint shown instead of raw Device ID — parity with macOS ThisDeviceCard.
+                MetaRow(
+                    label = "Fingerprint",
+                    value = if (identity.fingerprint.length > 24)
+                        "${identity.fingerprint.take(16)}…${identity.fingerprint.takeLast(8)}"
+                    else identity.fingerprint,
+                )
+            }
         }
     }
 }
@@ -640,13 +1193,10 @@ private fun DiscoveredPeerCard(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Spacer(Modifier.height(4.dp))
-                DeviceField(
-                    label = "Fingerprint",
-                    value = peer.deviceId.take(16),
-                )
-                if (ip != null) {
-                    Spacer(Modifier.height(4.dp))
-                    DeviceField(label = "Local IP", value = ip)
+                // Fingerprint omitted; IP shown as an aligned table row matching
+                // the layout of OwnDeviceCard and PeerCard.
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    ip?.let { MetaRow(label = "Local IP", value = it) }
                 }
             }
             Button(
@@ -702,7 +1252,25 @@ private fun SasPairingDialog(
     val scope = rememberCoroutineScope()
 
     // Current pairing status; starts optimistically at "initiating".
-    var status by remember { mutableStateOf(PairStatus("initiating", null, null, null, null, null, null)) }
+    var status by remember {
+        mutableStateOf(
+            PairStatus(
+                state = "initiating",
+                sas = null,
+                role = null,
+                peerFingerprint = null,
+                peerSyncAddr = null,
+                sessionKey = null,
+                peerProvisioning = null,
+                // ABI 14 (HB-1b): peer metadata, populated by the native side on confirm.
+                peerModel = null,
+                peerOs = null,
+                peerAppVersion = null,
+                peerLocalIp = null,
+                peerPublicIp = null,
+            )
+        )
+    }
     // Transient (non-terminal) poll/confirm error.
     var error by remember { mutableStateOf<String?>(null) }
     // True while a pairConfirmSas call is in flight (disables the buttons).
@@ -732,6 +1300,7 @@ private fun SasPairingDialog(
             val rawSessionKey = ByteArray(keyUBytes.size) { keyUBytes[it].toByte() }
             try {
                 val (wrappedB64, ivB64) = settings.wrapSessionKey(rawSessionKey)
+                val nowMs = System.currentTimeMillis()
                 settings.upsertPeer(
                     PairedPeer(
                         fingerprint = fingerprint,
@@ -739,7 +1308,15 @@ private fun SasPairingDialog(
                         name = peer.deviceName,
                         sessionKeyWrappedB64 = wrappedB64,
                         sessionKeyIvB64 = ivB64,
-                        lastSyncMs = System.currentTimeMillis(),
+                        lastSyncMs = nowMs,
+                        pairedAtMs = nowMs,
+                        // HB-1b (ABI 14): persist the peer's device metadata received
+                        // over the discovery/SAS pairing for the Wave-3 device card.
+                        peerModel = st.peerModel,
+                        peerOs = st.peerOs,
+                        peerAppVersion = st.peerAppVersion,
+                        peerLocalIp = st.peerLocalIp,
+                        peerPublicIp = st.peerPublicIp,
                     )
                 )
 
@@ -823,7 +1400,21 @@ private fun SasPairingDialog(
                             confirmedRef.value = true
                             // Persist from the last status we held the keys on.
                             persistConfirmed(status)
-                            status = PairStatus("confirmed", null, null, status.peerFingerprint, status.peerSyncAddr, null, null)
+                            status = PairStatus(
+                                state = "confirmed",
+                                sas = null,
+                                role = null,
+                                peerFingerprint = status.peerFingerprint,
+                                peerSyncAddr = status.peerSyncAddr,
+                                sessionKey = null,
+                                peerProvisioning = null,
+                                // HB-1b: carry forward the peer metadata we last held.
+                                peerModel = status.peerModel,
+                                peerOs = status.peerOs,
+                                peerAppVersion = status.peerAppVersion,
+                                peerLocalIp = status.peerLocalIp,
+                                peerPublicIp = status.peerPublicIp,
+                            )
                             onPaired()
                         } else {
                             ended = true
@@ -839,10 +1430,26 @@ private fun SasPairingDialog(
         }
     }
 
-    // Close: abort the pairing unless it already succeeded (exactly once).
+    // Close: abort the pairing unless it already succeeded (exactly once), then
+    // ALWAYS reset the native pairing state machine.
+    //
+    // HB-8: pairAbort() moves the SM to the terminal `Aborted` state but leaves
+    // `try_begin` claimed, so without a follow-up pairReset() every later pairing
+    // attempt failed with "a pairing is already in flight". pairReset() returns
+    // the SM to Idle. It is idempotent and safe whether we aborted, already hit a
+    // terminal state, or the pairing succeeded.
     fun handleClose() {
         if (!confirmedRef.value && !terminal) {
-            scope.launch(Dispatchers.IO) { pairAbort() }
+            // Abort branch: abort, then reset, on the same IO dispatcher so the
+            // reset is ordered AFTER the abort.
+            scope.launch(Dispatchers.IO) {
+                pairAbort()
+                pairReset()
+            }
+        } else {
+            // Already-terminal / confirmed branch: nothing to abort, but still
+            // clear the SM so the next pairing can claim it.
+            scope.launch(Dispatchers.IO) { pairReset() }
         }
         onClose()
     }
@@ -994,6 +1601,39 @@ private fun SasPairingDialog(
 // Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Two-column aligned table row used in device cards.
+ *
+ * The label column is [META_LABEL_WIDTH] wide (fixed) so all labels in
+ * OwnDeviceCard, PeerCard, and DiscoveredPeerCard start at the same horizontal
+ * offset. Both text nodes are vertically centred within the row
+ * (verticalAlignment = Alignment.CenterVertically) so multi-line values don't
+ * cause the label to sit misaligned — fixing the former "Mac" misalignment in
+ * the Model row.
+ */
+@Composable
+private fun MetaRow(label: String, value: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = IdeDim,
+            fontSize = 11.sp,
+            modifier = Modifier.width(META_LABEL_WIDTH),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            color = IdeText,
+            fontSize = 11.sp,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
 @Composable
 private fun DeviceField(label: String, value: String) {
     Column {
@@ -1013,6 +1653,27 @@ private fun DeviceField(label: String, value: String) {
 
 private const val TAG = "DevicesActivity"
 
+/**
+ * Format a Unix epoch-millisecond timestamp as a short locale date+time string
+ * for device-info fields. Returns "—" for zero / negative values (unknown).
+ * Mirrors macOS formatEpochSecs (which uses toLocaleString()).
+ */
+private fun formatEpochMs(ms: Long): String {
+    if (ms <= 0L) return "—"
+    return DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+        .format(Date(ms))
+}
+
+/** Extract the host part from a "host:port" sync address, or return the full string. */
+private fun syncAddrToIp(syncAddr: String): String? {
+    if (syncAddr.isBlank()) return null
+    // IPv6: [::1]:4242 → ::1; IPv4: 192.168.1.2:4242 → 192.168.1.2
+    val v6 = Regex("""^\[(.+)]:\d+$""").find(syncAddr)
+    if (v6 != null) return v6.groupValues[1]
+    val colon = syncAddr.lastIndexOf(':')
+    return if (colon > 0) syncAddr.substring(0, colon) else syncAddr
+}
+
 /** Poll cadence for refreshing peer state on the Devices screen. */
 private const val PEER_POLL_MS = 10_000L
 
@@ -1027,4 +1688,6 @@ private const val SAS_POLL_MS = 500L
  * TXT record so peers can dial back to pair. A non-zero bport marks this device
  * SAS-pairing-capable (v2); the native discovery service binds/owns this port.
  */
-private const val SAS_BPORT = 47_654
+// `internal` so the always-on [ClipboardService] FGS owns the discovery
+// lifecycle with the SAME well-known bport (HB-2).
+internal const val SAS_BPORT = 47_654

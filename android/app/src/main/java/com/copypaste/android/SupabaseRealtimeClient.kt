@@ -50,6 +50,16 @@ class SupabaseRealtimeClient(
     private val syncManager: SyncManager,
     private val repository: ClipboardRepository,
     private val scope: CoroutineScope,
+    /**
+     * Called with the text of a NEWLY stored text clip delivered via WS push.
+     *
+     * WS push delivers ONE item at a time (live single-item delta), so we
+     * apply it immediately — there is no batch to reduce here. The same
+     * callback type is reused for symmetry with [FgsSyncLoop.onSyncedTextClip].
+     *
+     * Null (default) means "no auto-apply".
+     */
+    private val onSyncedTextClip: ((text: String) -> Unit)? = null,
 ) {
     companion object {
         private const val TAG = "SupabaseRealtimeClient"
@@ -524,6 +534,7 @@ class SupabaseRealtimeClient(
                     overrideId = item.itemId,
                     contentType = item.contentType,
                     lamportTs = item.lamportTs,
+                    wallTimeMs = item.wallTime,
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeImageBytes(storedId, item.plaintext)
@@ -550,6 +561,7 @@ class SupabaseRealtimeClient(
                     overrideId = item.itemId,
                     contentType = item.contentType,
                     lamportTs = item.lamportTs,
+                    wallTimeMs = item.wallTime,
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeFileBytes(storedId, item.plaintext)
@@ -562,12 +574,20 @@ class SupabaseRealtimeClient(
         } else {
             val text = item.plaintext.toString(Charsets.UTF_8)
             if (text.isBlank()) false
-            else repository.storeItemWithLww(
-                plaintext = text,
-                key = settings.encryptionKey,
-                itemId = item.itemId,
-                incomingLamportTs = item.lamportTs,
-            )
+            else {
+                val didStore = repository.storeItemWithLww(
+                    plaintext = text,
+                    key = settings.encryptionKey,
+                    itemId = item.itemId,
+                    incomingLamportTs = item.lamportTs,
+                    wallTimeMs = item.wallTime,
+                    originDeviceId = deviceId,
+                )
+                // WS delivers one item at a time (live delta, not a bulk batch),
+                // so apply it immediately — no reduction needed.
+                if (didStore) onSyncedTextClip?.invoke(text)
+                didStore
+            }
         }
 
         if (stored) {
@@ -576,22 +596,119 @@ class SupabaseRealtimeClient(
     }
 
     /**
-     * Trigger a one-shot catch-up poll via [FgsSyncLoop] indirection.
-     * Called on each (re)connect so gaps during the WS-down window are healed.
-     * The poll uses the same cursor as the regular loop — no duplication occurs.
+     * Trigger a one-shot catch-up poll on WS (re)connect.
+     *
+     * Fetches any rows missed while the WS was down and stores them using the
+     * same LWW / cursor logic as [ingestWsRow] and [FgsSyncLoop].  Without this
+     * the poll batch was fetched and then silently discarded — the "catch-up"
+     * healed nothing (H2).
+     *
+     * Cursor advancement mirrors [FgsSyncLoop.poll]: every row (including
+     * self-echo and decrypt-failures) advances the watermark before any
+     * `continue`, so a batch of own-device rows still moves the cursor forward.
      */
     private suspend fun triggerCatchUpPoll() {
-        // Delegate: re-poll from the last persisted cursor.  The FgsSyncLoop
-        // also calls pollFromSupabase; both share the same Settings cursor so
-        // they naturally dedup via LWW (storeItemWithLww is idempotent on
-        // item_id). No explicit coordination is needed.
         try {
             val batch = syncManager.pollFromSupabase(
                 sinceWallTime = settings.lastSupabasePollWallTime,
                 sinceId = settings.lastSupabasePollId,
             ) ?: return
-            if (batch.rows.isNotEmpty()) {
-                Log.d(TAG, "WS catch-up poll: ${batch.rows.size} row(s) returned")
+            if (batch.rows.isEmpty()) return
+            Log.d(TAG, "WS catch-up: ${batch.rows.size} row(s) — storing")
+
+            var newCount = 0
+            var cursorWallTime = settings.lastSupabasePollWallTime
+            var cursorId = settings.lastSupabasePollId
+
+            for (row in batch.rows) {
+                // Advance cursor for EVERY row before any continue (mirrors FgsSyncLoop).
+                if (row.wallTime > cursorWallTime ||
+                    (row.wallTime == cursorWallTime && row.id > cursorId)
+                ) {
+                    cursorWallTime = row.wallTime
+                    cursorId = row.id
+                }
+
+                // Skip own-device echoes.
+                if (row.deviceId == settings.deviceId) continue
+
+                // Advance Lamport clock.
+                settings.lamportClock.observe(row.lamportTs)
+
+                val item = batch.client.decryptRow(row, batch.syncKey)
+                if (item == null) {
+                    Log.w(TAG, "WS catch-up: decryptRow failed for id=${row.id}")
+                    continue
+                }
+
+                val isImage = item.contentType == "image" || item.contentType.startsWith("image/")
+                val isFile = item.contentType == "file"
+
+                val stored = if (isImage) {
+                    if (item.plaintext.isEmpty()) {
+                        false
+                    } else {
+                        val storedId = repository.storeItem(
+                            plaintext = "[image]",
+                            key = settings.encryptionKey,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                            lamportTs = item.lamportTs,
+                        )
+                        if (storedId.isNotEmpty()) {
+                            repository.storeImageBytes(storedId, item.plaintext)
+                            SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
+                                repository.storeThumbnailBytes(storedId, thumbBytes)
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                } else if (isFile) {
+                    if (item.plaintext.isEmpty()) {
+                        false
+                    } else {
+                        val label = SyncFileHelper.buildFileLabel(null)
+                        val storedId = repository.storeItem(
+                            plaintext = label,
+                            key = settings.encryptionKey,
+                            overrideId = item.itemId,
+                            contentType = item.contentType,
+                            lamportTs = item.lamportTs,
+                        )
+                        if (storedId.isNotEmpty()) {
+                            repository.storeFileBytes(storedId, item.plaintext)
+                            repository.storeFileMeta(storedId, null, null)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                } else {
+                    val text = item.plaintext.toString(Charsets.UTF_8)
+                    if (text.isBlank()) false
+                    else repository.storeItemWithLww(
+                        plaintext = text,
+                        key = settings.encryptionKey,
+                        itemId = item.itemId,
+                        incomingLamportTs = item.lamportTs,
+                    )
+                }
+                if (stored) newCount++
+            }
+
+            // Persist the advanced cursor after processing the batch.
+            if (cursorWallTime > settings.lastSupabasePollWallTime ||
+                (cursorWallTime == settings.lastSupabasePollWallTime &&
+                        cursorId > settings.lastSupabasePollId)
+            ) {
+                settings.lastSupabasePollWallTime = cursorWallTime
+                settings.lastSupabasePollId = cursorId
+            }
+
+            if (newCount > 0) {
+                Log.i(TAG, "WS catch-up: stored $newCount of ${batch.rows.size} row(s)")
             }
         } catch (e: Exception) {
             Log.w(TAG, "WS catch-up poll failed: ${e.message}")

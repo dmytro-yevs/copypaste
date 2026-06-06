@@ -78,7 +78,7 @@ impl DeviceMeta {
 // Hostname / computer name
 // ---------------------------------------------------------------------------
 
-fn collect_device_name() -> Option<String> {
+pub(crate) fn collect_device_name() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         // Prefer the user-visible "Computer Name" (e.g. "Dmytro's MacBook Air")

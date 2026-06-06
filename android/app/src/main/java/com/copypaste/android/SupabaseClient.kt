@@ -137,6 +137,11 @@ class SupabaseClient(
 
     /**
      * A decrypted clipboard item ready to store locally.
+     *
+     * For `content_type == "file"`, [plaintext] is the HEADER-STRIPPED file body
+     * (the cloud file-identity header is decoded in [decryptRow]) and
+     * [fileName]/[fileMime] carry the recovered name + MIME. For text/image items
+     * [plaintext] is the raw plaintext and [fileName]/[fileMime] are null.
      */
     data class DecryptedItem(
         val id: String,
@@ -148,6 +153,10 @@ class SupabaseClient(
         val expiresAt: Long?,
         val appBundleId: String?,
         val deviceId: String,
+        /** Recovered original filename for file items; null for text/image. */
+        val fileName: String? = null,
+        /** Recovered MIME for file items; null for text/image. */
+        val fileMime: String? = null,
     )
 
     // ── Auth ─────────────────────────────────────────────────────────────────
@@ -395,16 +404,38 @@ class SupabaseClient(
             Log.w(TAG, "decryptRow: cloud_decrypt failed for id=${row.id} — wrong key or tampered blob")
             return null
         }
+        // AB-3: a FILE payload carries a self-describing header (version + name +
+        // mime) prepended by the sender before cloud encryption (see
+        // SyncManager.encodeCloudFilePayload / daemon sync_common.rs). Strip it so
+        // the stored body is the true file content (never the header-prefixed
+        // plaintext) and recover the original name/MIME. A headerless (old-daemon)
+        // payload decodes as raw bytes with the legacy name/MIME. Text/image rows
+        // carry no header and are passed through unchanged.
+        val body: ByteArray
+        val fileName: String?
+        val fileMime: String?
+        if (row.contentType == "file") {
+            val decoded = SyncManager.decodeCloudFilePayload(plaintext)
+            body = decoded.body
+            fileName = decoded.name.takeIf { it.isNotEmpty() }
+            fileMime = decoded.mime.takeIf { it.isNotEmpty() }
+        } else {
+            body = plaintext
+            fileName = null
+            fileMime = null
+        }
         return DecryptedItem(
             id = row.id,
             itemId = row.itemId,
             contentType = row.contentType,
-            plaintext = plaintext,
+            plaintext = body,
             lamportTs = row.lamportTs,
             wallTime = row.wallTime,
             expiresAt = row.expiresAt,
             appBundleId = row.appBundleId,
             deviceId = row.deviceId,
+            fileName = fileName,
+            fileMime = fileMime,
         )
     }
 

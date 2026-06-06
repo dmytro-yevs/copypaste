@@ -135,6 +135,35 @@
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
 
+        <!--
+            HB-11: share-target. Lets the user SEND a file (or several) into
+            CopyPaste from any app's share sheet ("Share → CopyPaste"). The
+            activity reads the EXTRA_STREAM URI(s), captures them as file clipboard
+            items via ClipboardService.captureFileClip, and finishes (no UI).
+
+            android:exported="true" is required for the system share sheet to route
+            ACTION_SEND / ACTION_SEND_MULTIPLE here. mimeType="*/*" accepts any
+            shareable stream (PDF, ZIP, photo, document, …). excludeFromRecents +
+            noHistory + Translucent theme keep it invisible and off the recents list.
+        -->
+        <activity
+            android:name=".ShareReceiverActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+        </activity>
+
         <!-- In-app log viewer, launched from Settings › Diagnostics -->
         <activity
             android:name=".LogViewerActivity"
@@ -161,6 +190,32 @@
             android:name=".BackgroundCaptureSetupActivity"
             android:exported="false"
             android:theme="@style/Theme.CopyPaste" />
+
+        <!--
+            ClipboardFloatingActivity: transparent focusable overlay used for the
+            ClipCascade-technique background clipboard read on Android 10+ (API 29+).
+
+            Launched by LogcatCaptureService when a clipboard-access denial for our
+            package is detected in logcat. The Activity adds a TYPE_APPLICATION_OVERLAY
+            window, clears FLAG_NOT_FOCUSABLE to gain input focus, waits for the
+            OnGlobalLayoutListener callback (the OS lifts the API-29+ clipboard
+            restriction at that point), reads getPrimaryClip(), routes through the
+            shared capture pipeline, then finishes.
+
+            exported=false       — internal use only; no intent-filter needed
+            excludeFromRecents=true — must not appear in the Recents list
+            noHistory=true       — must not push onto the back stack
+            taskAffinity=""      — detach from the main task so FLAG_ACTIVITY_CLEAR_TASK
+                                   does not affect MainActivity's back stack
+            theme=FloatingOverlay — translucent/floating/no-dim (invisible to the user)
+        -->
+        <activity
+            android:name=".ClipboardFloatingActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.CopyPaste.FloatingOverlay" />
 
         <!-- Devices screen: paired P2P peer list + Unpair/Revoke actions.
              Surfaced as the DEVICES tab in MainActivity's bottom nav and as a
@@ -191,21 +246,6 @@
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Encrypted clipboard sync between user's paired devices" />
-        </service>
-
-        <!-- AccessibilityService: enables background clipboard reading on Android 10+.
-             User must manually enable in Settings > Accessibility. OnboardingActivity
-             prompts them with ACTION_ACCESSIBILITY_SETTINGS and explains why. -->
-        <service
-            android:name=".ClipboardAccessibilityService"
-            android:exported="true"
-            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
-            <intent-filter>
-                <action android:name="android.accessibilityservice.AccessibilityService" />
-            </intent-filter>
-            <meta-data
-                android:name="android.accessibilityservice"
-                android:resource="@xml/accessibility_service_config" />
         </service>
 
         <!--
@@ -250,7 +290,7 @@
             Reads clipboard-change events from the system logcat stream when
             android.permission.READ_LOGS has been granted via adb. This is a
             best-effort fallback — the primary background capture mechanism is
-            ClipboardAccessibilityService. See LogcatCaptureService.kt for
+            the adb READ_LOGS path. See LogcatCaptureService.kt for
             full documentation of capabilities and limitations per Android version.
         -->
         <service

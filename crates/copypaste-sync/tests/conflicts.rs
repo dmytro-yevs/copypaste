@@ -25,6 +25,7 @@ use copypaste_sync::{resolve, MergeOutcome};
 /// known string to compare against (e.g. "zzz" > "device-local").
 fn local_item(id: &str, lamport: i64, wall: i64, content: &[u8]) -> ClipboardItem {
     ClipboardItem {
+        deleted: false,
         id: id.to_string(),
         item_id: format!("iid-{id}"),
         content_type: "text".to_string(),
@@ -56,6 +57,9 @@ fn wire_item(
     content: Option<Vec<u8>>,
 ) -> WireItem {
     WireItem {
+        deleted: false,
+        pinned: false,
+        pin_order: None,
         id: id.to_string(),
         item_id: format!("iid-{id}"),
         content_type: "text".to_string(),
@@ -80,6 +84,7 @@ fn apply(local: ClipboardItem, remote: &WireItem) -> ClipboardItem {
     match resolve(&local, remote) {
         MergeOutcome::KeepLocal => local,
         MergeOutcome::TakeRemote => ClipboardItem {
+        deleted: false,
             id: remote.id.clone(),
             item_id: remote.item_id.clone(),
             content_type: remote.content_type.clone(),
@@ -290,6 +295,7 @@ fn delete_concurrent_with_update_lww_resolves_deterministically() {
 
     // Case B: update with HIGHER lamport beats older tombstone.
     let local_tombstone = ClipboardItem {
+        deleted: false,
         content: None,
         blob_ref: None,
         ..local_item("item-D", 3, 1_000, b"")
@@ -313,6 +319,7 @@ fn delete_concurrent_with_update_lww_resolves_deterministically() {
     let p1_final = apply(p1_local, &p1_remote);
 
     let p2_local = ClipboardItem {
+        deleted: false,
         content: None,
         blob_ref: None,
         ..local_item("item-E", 8, 1_500, b"")

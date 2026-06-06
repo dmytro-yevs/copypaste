@@ -3,12 +3,14 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { api, HistoryEntry, IpcError, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
+import { api, HistoryEntry, ipcErrorMessage, IpcError, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
+import { formatRelativeTime } from "../lib/time";
 import { useUI } from "../store";
 import { clearImageCache, ImageThumb } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
+import { EmptyState } from "../components/EmptyState";
 
 // Max items fetched for the popup list. Intentionally compact — the popup is a
 // quick-access surface, not a full history browser.
@@ -55,7 +57,7 @@ function ContentChip({ type }: { type: string }) {
       </span>
     );
   }
-  if (type === "image" || type.startsWith("image/")) {
+  if (isImageType(type)) {
     return (
       <span className="chip" style={{ background: "rgba(198,120,221,0.14)", color: "#C678DD" }}>
         {/* mini image frame */}
@@ -79,24 +81,6 @@ function ContentChip({ type }: { type: string }) {
     <span className="chip" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)" }}>
       •
     </span>
-  );
-}
-
-// ── Empty state hero ─────────────────────────────────────────────────────────
-
-function EmptyState({ icon, title, body, action }: {
-  icon: React.ReactNode;
-  title: string;
-  body: string;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-col items-center justify-center flex-1 gap-2 px-6 py-8 text-center">
-      <span style={{ color: "rgba(255,255,255,0.20)", fontSize: 28, lineHeight: 1 }}>{icon}</span>
-      <p className="text-[13px]" style={{ color: "rgba(255,255,255,0.45)" }}>{title}</p>
-      <p className="text-[11px]" style={{ color: "rgba(255,255,255,0.28)" }}>{body}</p>
-      {action}
-    </div>
   );
 }
 
@@ -247,7 +231,7 @@ export function Popup() {
     }
     const scored: Array<{ item: HistoryEntry; positions: number[]; score: number }> = [];
     for (const item of items) {
-      const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
+      const isImage = isImageType(item.content_type);
       const isSensitive = item.is_sensitive;
       let label: string;
       if (isImage) {
@@ -366,6 +350,10 @@ export function Popup() {
           typeof copied === "object" && copied !== null && "preview" in copied
             ? String((copied as { preview: string }).preview)
             : "";
+        const contentType =
+          typeof copied === "object" && copied !== null && "content_type" in copied
+            ? String((copied as { content_type: string }).content_type)
+            : "";
         // Copy succeeded — now hide (activates prior app) and paste.
         await hide();
         await invoke("paste_to_frontmost");
@@ -373,11 +361,10 @@ export function Popup() {
           void playCopySound();
         }
         if (notifyOnCopy) {
-          const title = preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied";
-          void showCopyNotification(title);
+          void showCopyNotification(contentType, preview);
         }
       } catch (e) {
-        const msg = e instanceof IpcError ? e.message : String(e);
+        const msg = ipcErrorMessage(e, String(e));
         console.error("popup copy/paste failed", e);
         // Surface the error while the popup is still visible.
         setError(`Copy failed: ${msg}`);
@@ -386,6 +373,28 @@ export function Popup() {
       }
     },
     [hide, playSoundOnCopy, notifyOnCopy]
+  );
+
+  /// Paste the item as plain text (Option+Enter / F1).
+  ///
+  /// Hides the popup first (activating the prior app), then writes only the
+  /// item's plain-text preview to the clipboard and fires Cmd+V.  Rich content
+  /// (HTML, RTF, images) is deliberately NOT written — the target app receives
+  /// a bare UTF-8 string regardless of the original content type.
+  const copyAndPasteAsPlain = useCallback(
+    async (preview: string) => {
+      try {
+        // Hide first so the prior app regains focus before Cmd+V.
+        await hide();
+        await pasteAsPlainText(preview);
+      } catch (e) {
+        const msg = e instanceof IpcError ? e.message : String(e);
+        console.error("popup paste-as-plain-text failed", e);
+        setError(`Paste as plain text failed: ${msg}`);
+        isHidingRef.current = false;
+      }
+    },
+    [hide]
   );
 
   const handlePin = useCallback(
@@ -441,13 +450,19 @@ export function Popup() {
           break;
         case "Enter":
           e.preventDefault();
-          void confirmSelection();
+          if (e.altKey) {
+            // Option+Enter (F1): paste as plain text — strip rich formatting.
+            const entry = filtered[selectedIdx];
+            if (entry) void copyAndPasteAsPlain(entry.item.preview);
+          } else {
+            void confirmSelection();
+          }
           break;
         default:
           break;
       }
     },
-    [filtered, query, hide, confirmSelection, copyAndPaste]
+    [filtered, query, hide, confirmSelection, copyAndPaste, copyAndPasteAsPlain, selectedIdx]
   );
 
   const showQuery = query.trim();
@@ -676,7 +691,7 @@ function PopupRow({
   onClick,
   onPin,
 }: PopupRowProps) {
-  const isImage = item.content_type === "image" || item.content_type.startsWith("image/");
+  const isImage = isImageType(item.content_type);
   const isSensitive = item.is_sensitive;
 
   const rowH = popupRowHeight(isImage, textRowHeight, imageMaxHeight);
@@ -698,7 +713,7 @@ function PopupRow({
   }
 
   // Relative time (tabular-nums)
-  const relTime = relativeTimeShort(item.wall_time);
+  const relTime = formatRelativeTime(item.wall_time, "short");
 
   return (
     <li
@@ -841,12 +856,3 @@ function PopupRow({
   );
 }
 
-/** Very short relative time for the popup right cluster (tabular-nums). */
-function relativeTimeShort(ms: number): string {
-  if (!ms || ms <= 0) return "";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h`;
-  return `${Math.floor(diff / 86_400_000)}d`;
-}

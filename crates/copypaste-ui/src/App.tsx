@@ -3,7 +3,7 @@ import { useUI, type ViewId } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
-import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError } from "./lib/ipc";
+import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError, type PairSasStatus } from "./lib/ipc";
 import { listen } from "@tauri-apps/api/event";
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
@@ -11,6 +11,8 @@ import { SettingsView } from "./views/SettingsView";
 import { AboutView } from "./views/AboutView";
 import { LogView } from "./views/LogView";
 
+// Views that take no extra props — routed generically via ComponentType.
+// DevicesView is rendered separately below so it can receive `incomingPairing`.
 const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
   history: { Component: HistoryView, label: "History" },
   devices: { Component: DevicesView, label: "Devices" },
@@ -37,6 +39,40 @@ export default function App() {
       else unlisten = fn;
     }).catch(() => {
       // Best-effort — popup gear is a convenience, not critical path.
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [setView]);
+
+  // ---------------------------------------------------------------------------
+  // Incoming pairing (responder side) — always-on background detection
+  // ---------------------------------------------------------------------------
+  // The Tauri backend polls `pair_get_sas` every ~1 s and emits
+  // `"incoming-pairing"` when it observes state="awaiting_sas"+role="responder".
+  // We switch to the Devices tab and pass the payload to DevicesView so the SAS
+  // modal opens regardless of which tab was active when the request arrived.
+  const [incomingPairing, setIncomingPairing] = useState<PairSasStatus | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    void listen<PairSasStatus>("incoming-pairing", (event) => {
+      if (cancelled) return;
+      const payload = event.payload;
+      // Only act on responder+awaiting_sas payloads (belt-and-suspenders guard;
+      // the Rust poller already filters, but defensive check here too).
+      if (payload.state === "awaiting_sas" && payload.role === "responder") {
+        setIncomingPairing(payload);
+        setView("devices");
+      }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    }).catch(() => {
+      // Best-effort — not critical path; the in-component poll in DevicesView
+      // serves as a fallback when the user is already on the Devices tab.
     });
     return () => {
       cancelled = true;
@@ -249,7 +285,16 @@ export default function App() {
                 stays contained, and navigating away then back (new key)
                 remounts a fresh, non-crashed subtree. */}
             <ErrorBoundary key={view} label={label}>
-              <View />
+              {view === "devices" ? (
+                // DevicesView gets `incomingPairing` so the SAS modal opens
+                // even when the user wasn't on the Devices tab when the request
+                // arrived.  We clear it once DevicesView mounts (the prop is
+                // stable for that render cycle; DevicesView owns the modal
+                // lifetime after that).
+                <DevicesView incomingPairing={incomingPairing} />
+              ) : (
+                <View />
+              )}
             </ErrorBoundary>
           </main>
         </div>

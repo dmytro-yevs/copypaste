@@ -117,6 +117,14 @@ pub struct ConfirmedPairing {
     /// Sync-account provisioning the PEER advertised over the authenticated
     /// tunnel. `None` when the peer advertised nothing or is a legacy build.
     pub peer_provisioning: Option<SyncProvisioning>,
+    /// HB-1b (ABI 14): the PEER's device metadata learned in-band during the
+    /// discovery/SAS pairing, sourced from `BootstrapPairing.peer_*`. All `None`
+    /// for a legacy peer. Surfaced to Kotlin via [`PairStatus`] on `confirmed`.
+    pub peer_model: Option<String>,
+    pub peer_os: Option<String>,
+    pub peer_app_version: Option<String>,
+    pub peer_local_ip: Option<String>,
+    pub peer_public_ip: Option<String>,
 }
 
 /// The discovery-pairing state machine. Ported from the macOS daemon's
@@ -125,6 +133,14 @@ pub struct ConfirmedPairing {
 ///
 /// Non-terminal: `Idle`, `Initiating`, `AwaitingSas`.
 /// Terminal: `Confirmed`, `Rejected`, `Aborted`, `TimedOut`.
+// ABI 14 grew `ConfirmedPairing` (the `Confirmed` payload) with five peer_*
+// metadata strings, tripping `clippy::large_enum_variant`. Boxing the payload
+// would add an allocation + indirection on the hot read path of a state machine
+// that holds AT MOST ONE live instance at a time (single active pairing), so the
+// "wasted bytes in the other variants" the lint warns about never materialise in
+// practice — there is never an array/Vec of PairingState. The clarity of an
+// inline payload outweighs shaving one short-lived enum's footprint.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum PairingState {
     /// No pairing in flight — the only state in which a new pairing may start.
@@ -510,6 +526,14 @@ pub struct PairStatus {
     pub peer_sync_addr: Option<String>,
     pub session_key: Option<Vec<u8>>,
     pub peer_provisioning: Option<SyncProvisioning>,
+    /// HB-1b (ABI 14): the PEER's device metadata, set ONLY in the `confirmed`
+    /// state (copied from [`ConfirmedPairing`]). Kotlin persists these on the
+    /// `PairedPeer` for the Wave-3 device card.
+    pub peer_model: Option<String>,
+    pub peer_os: Option<String>,
+    pub peer_app_version: Option<String>,
+    pub peer_local_ip: Option<String>,
+    pub peer_public_ip: Option<String>,
 }
 
 impl PairStatus {
@@ -527,6 +551,12 @@ impl PairStatus {
             status.peer_sync_addr = Some(c.peer_sync_addr.clone());
             status.session_key = Some(c.session_key.clone());
             status.peer_provisioning = c.peer_provisioning.clone();
+            // HB-1b: carry the peer's device metadata through to Kotlin.
+            status.peer_model = c.peer_model.clone();
+            status.peer_os = c.peer_os.clone();
+            status.peer_app_version = c.peer_app_version.clone();
+            status.peer_local_ip = c.peer_local_ip.clone();
+            status.peer_public_ip = c.peer_public_ip.clone();
         }
         status
     }
@@ -580,6 +610,12 @@ mod tests {
             peer_sync_addr: "10.0.0.2:51515".to_string(),
             session_key: vec![0x42u8; 32],
             peer_provisioning: None,
+            // HB-1b (ABI 14): sample peer metadata for the round-trip assertions.
+            peer_model: Some("MacBook Air".to_string()),
+            peer_os: Some("macOS 15.5".to_string()),
+            peer_app_version: Some("0.6.1".to_string()),
+            peer_local_ip: Some("10.0.0.2".to_string()),
+            peer_public_ip: Some("203.0.113.7".to_string()),
         }
     }
 
@@ -692,11 +728,24 @@ mod tests {
         assert_eq!(out.peer_sync_addr, "10.0.0.2:51515");
         assert_eq!(out.session_key.len(), 32);
 
+        // HB-1b (ABI 14): the peer metadata round-trips into ConfirmedPairing.
+        assert_eq!(out.peer_model.as_deref(), Some("MacBook Air"));
+        assert_eq!(out.peer_os.as_deref(), Some("macOS 15.5"));
+        assert_eq!(out.peer_app_version.as_deref(), Some("0.6.1"));
+        assert_eq!(out.peer_local_ip.as_deref(), Some("10.0.0.2"));
+        assert_eq!(out.peer_public_ip.as_deref(), Some("203.0.113.7"));
+
         // PairStatus surfaces the peer_* only on confirmed.
         let status = PairStatus::from_state(&s);
         assert_eq!(status.state, "confirmed");
         assert_eq!(status.peer_fingerprint.as_deref(), Some("abc123"));
         assert!(status.session_key.is_some());
+        // HB-1b: PairStatus carries the peer metadata through for Kotlin.
+        assert_eq!(status.peer_model.as_deref(), Some("MacBook Air"));
+        assert_eq!(status.peer_os.as_deref(), Some("macOS 15.5"));
+        assert_eq!(status.peer_app_version.as_deref(), Some("0.6.1"));
+        assert_eq!(status.peer_local_ip.as_deref(), Some("10.0.0.2"));
+        assert_eq!(status.peer_public_ip.as_deref(), Some("203.0.113.7"));
     }
 
     #[test]
@@ -713,6 +762,15 @@ mod tests {
             "peer_* only on confirmed"
         );
         assert!(status.session_key.is_none(), "no key before confirmed");
+        // HB-1b: peer metadata is likewise withheld until confirmed.
+        assert!(
+            status.peer_model.is_none(),
+            "peer metadata only on confirmed"
+        );
+        assert!(
+            status.peer_local_ip.is_none(),
+            "peer metadata only on confirmed"
+        );
     }
 
     #[test]

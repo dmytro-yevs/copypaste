@@ -5,7 +5,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,13 +14,13 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
@@ -33,15 +32,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,9 +45,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -79,15 +72,18 @@ import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.ideSwitchColors
 import com.copypaste.android.ui.theme.ideTextFieldColors
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import android.content.ClipData
+import android.content.ClipboardManager
 
 /**
  * Settings screen — grouped into tabs mirroring the macOS settings layout:
  *   General / Display / Storage / Sync / Notifications
  *
  * AND3: Settings are split into tabs matching macOS panel tabs.
- * AND4: All edits buffer in Compose state; values are only written to
- *       SharedPreferences when the user taps the "Save" button.
+ * H5/U1: Auto-save on every change — no Save button, parity with macOS.
  */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -108,16 +104,43 @@ private const val TAB_STORAGE       = 2
 private const val TAB_SYNC          = 3
 private const val TAB_NOTIFICATIONS = 4
 
+/**
+ * Expose the unsaved-changes guard to external navigation controllers
+ * (e.g. the bottom navbar in [MainActivity]).
+ *
+ * Callers set this to a non-null function BEFORE triggering a tab switch.
+ * [SettingsScreen] calls it with the proposed navigation lambda; the screen
+ * either executes it immediately (no dirty changes) or shows the discard
+ * dialog and defers it until the user confirms.
+ *
+ * Usage in MainShell:
+ *   val settingsNavGuard = remember { mutableStateOf<((()-> Unit) -> Unit)?>(null) }
+ *   // Pass settingsNavGuard.value to SettingsScreen; intercept NavBar clicks
+ *   // through settingsNavGuard.value?.invoke { selectedTab = index } ?: run { selectedTab = index }
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
     onBack: () -> Unit = {},
+    /**
+     * H5/U1: No dirty state — always proceeds immediately.
+     * The guard is kept for API compatibility with MainShell's navbar.
+     */
+    onRegisterNavGuard: ((guard: (proceed: () -> Unit) -> Unit) -> Unit)? = null,
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
     val scope = rememberCoroutineScope()
+
+    // ── Debounce jobs for text fields (300 ms) ──
+    var supabaseUrlJob by remember { mutableStateOf<Job?>(null) }
+    var supabaseAnonKeyJob by remember { mutableStateOf<Job?>(null) }
+    var cloudPassphraseJob by remember { mutableStateOf<Job?>(null) }
+    var supabaseEmailJob by remember { mutableStateOf<Job?>(null) }
+    var supabasePasswordJob by remember { mutableStateOf<Job?>(null) }
+    var relayUrlJob by remember { mutableStateOf<Job?>(null) }
 
     // ── General ──
     // Private mode (ON = this device stops recording new clips). Mirrors the
@@ -179,242 +202,50 @@ fun SettingsScreen(
     // LogcatCaptureService.status() is a cheap synchronous check (no I/O), so this is safe.
     val logcatStatus = LogcatCaptureService.status(ctx, settings)
 
-    // ── HW-A10: dirty tracking — snapshot of saved values for discard check ──
-    // Captured once on composition; reset after each successful Save.
-    data class SettingsSnapshot(
-        val privateMode: Boolean,
-        val syncEnabled: Boolean,
-        val showWarnings: Boolean,
-        val maskSensitive: Boolean,
-        val translucency: Boolean,
-        val imageMaxHeight: Int,
-        val previewDelay: Int,
-        val imageQuality: Int,
-        val maxTextSizeBytes: Long,
-        val maxImageSizeBytes: Long,
-        val storageQuotaBytes: Long,
-        val maxFileSizeBytes: Long,
-        val sensitiveTtlSecs: Long,
-        val collectPublicIp: Boolean,
-        val pasteAsPlainText: Boolean,
-        val excludedApps: List<String>,
-        val syncBackend: SyncBackend,
-        val syncOnWifiOnly: Boolean,
-        val p2pSyncEnabled: Boolean,
-        val supabaseUrl: String,
-        val supabaseAnonKey: String,
-        val cloudPassphrase: String,
-        val supabaseEmail: String,
-        val supabasePassword: String,
-        val relayUrl: String,
-        val notifyOnCopy: Boolean,
-        val soundOnCopy: Boolean,
-        val logcatEnabled: Boolean,
-    )
+    // H5/U1: nav-guard always proceeds immediately — no dirty state.
+    LaunchedEffect(onRegisterNavGuard) {
+        onRegisterNavGuard?.invoke { proceed -> proceed() }
+    }
 
-    var savedSnapshot by remember {
-        mutableStateOf(
-            SettingsSnapshot(
-                privateMode = settings.privateMode,
-                syncEnabled = settings.syncEnabled,
-                showWarnings = settings.showSensitiveWarnings,
-                maskSensitive = settings.maskSensitiveContent,
-                translucency = settings.translucency,
-                imageMaxHeight = settings.imageMaxHeight.coerceIn(10, 200),
-                previewDelay = settings.previewDelay.toInt().coerceIn(200, 30_000),
-                imageQuality = settings.imageQuality,
-                maxTextSizeBytes = snapToNearestLong(TEXT_SIZE_STEP_VALUES, settings.maxTextSizeBytes),
-                maxImageSizeBytes = snapToNearestLong(IMAGE_SIZE_STEP_VALUES, settings.maxImageSizeBytes),
-                storageQuotaBytes = snapToNearestLong(QUOTA_STEP_VALUES, settings.storageQuotaBytes),
-                maxFileSizeBytes = snapToNearestLong(FILE_SIZE_STEP_VALUES, settings.maxFileSizeBytes),
-                sensitiveTtlSecs = snapToNearestLong(SENSITIVE_TTL_STEP_VALUES, settings.sensitiveTtlSecs),
-                collectPublicIp = settings.collectPublicIp,
-                pasteAsPlainText = settings.pasteAsPlainText,
-                excludedApps = settings.excludedAppBundleIds,
-                syncBackend = settings.syncBackend,
-                syncOnWifiOnly = settings.syncOnWifiOnly,
-                p2pSyncEnabled = settings.p2pSyncEnabled,
-                supabaseUrl = settings.supabaseUrl,
-                supabaseAnonKey = settings.supabaseAnonKey,
-                cloudPassphrase = settings.cloudSyncPassphrase,
-                supabaseEmail = settings.supabaseEmail,
-                supabasePassword = settings.supabasePassword,
-                relayUrl = settings.relayUrl,
-                notifyOnCopy = settings.notifyOnCopy,
-                soundOnCopy = settings.soundOnCopy,
-                logcatEnabled = settings.logcatCaptureEnabled,
-            )
+    // ── Helper: persist all non-text scalar settings in one commit ──
+    // Called after every toggle/slider change.
+    fun persistAll() {
+        settings.saveScreenSettings(
+            captureEnabled = settings.captureEnabled,
+            privateMode = privateMode,
+            syncEnabled = syncEnabled,
+            showSensitiveWarnings = showWarnings,
+            maskSensitiveContent = maskSensitive,
+            translucency = translucency,
+            imageMaxHeight = imageMaxHeight,
+            previewDelayMs = previewDelay.toLong(),
+            imageQuality = imageQuality,
+            maxTextSizeBytes = maxTextSizeBytes,
+            maxImageSizeBytes = maxImageSizeBytes,
+            storageQuotaBytes = storageQuotaBytes,
+            syncOnWifiOnly = syncOnWifiOnly,
+            syncBackend = syncBackend,
+            p2pSyncEnabled = p2pSyncEnabled,
+            supabaseUrl = supabaseUrl.trim(),
+            supabaseAnonKey = supabaseAnonKey.trim(),
+            supabaseEmail = supabaseEmail.trim(),
+            relayUrl = relayUrl.trim(),
+            notifyOnCopy = notifyOnCopy,
+            soundOnCopy = soundOnCopy,
+            logcatCaptureEnabled = logcatEnabled,
         )
-    }
-
-    val isDirty by remember {
-        derivedStateOf {
-            privateMode != savedSnapshot.privateMode ||
-                syncEnabled != savedSnapshot.syncEnabled ||
-                showWarnings != savedSnapshot.showWarnings ||
-                maskSensitive != savedSnapshot.maskSensitive ||
-                translucency != savedSnapshot.translucency ||
-                imageMaxHeight != savedSnapshot.imageMaxHeight ||
-                previewDelay != savedSnapshot.previewDelay ||
-                imageQuality != savedSnapshot.imageQuality ||
-                maxTextSizeBytes != savedSnapshot.maxTextSizeBytes ||
-                maxImageSizeBytes != savedSnapshot.maxImageSizeBytes ||
-                storageQuotaBytes != savedSnapshot.storageQuotaBytes ||
-                maxFileSizeBytes != savedSnapshot.maxFileSizeBytes ||
-                sensitiveTtlSecs != savedSnapshot.sensitiveTtlSecs ||
-                collectPublicIp != savedSnapshot.collectPublicIp ||
-                pasteAsPlainText != savedSnapshot.pasteAsPlainText ||
-                excludedApps != savedSnapshot.excludedApps ||
-                syncBackend != savedSnapshot.syncBackend ||
-                syncOnWifiOnly != savedSnapshot.syncOnWifiOnly ||
-                p2pSyncEnabled != savedSnapshot.p2pSyncEnabled ||
-                supabaseUrl != savedSnapshot.supabaseUrl ||
-                supabaseAnonKey != savedSnapshot.supabaseAnonKey ||
-                cloudPassphrase != savedSnapshot.cloudPassphrase ||
-                supabaseEmail != savedSnapshot.supabaseEmail ||
-                supabasePassword != savedSnapshot.supabasePassword ||
-                relayUrl != savedSnapshot.relayUrl ||
-                notifyOnCopy != savedSnapshot.notifyOnCopy ||
-                soundOnCopy != savedSnapshot.soundOnCopy ||
-                logcatEnabled != savedSnapshot.logcatEnabled
-        }
-    }
-
-    var showDiscardDialog by remember { mutableStateOf(false) }
-
-    // Intercept system back when there are unsaved changes.
-    BackHandler(enabled = isDirty) {
-        showDiscardDialog = true
+        settings.maxFileSizeBytes = maxFileSizeBytes
+        settings.sensitiveTtlSecs = sensitiveTtlSecs
+        settings.collectPublicIp = collectPublicIp
+        settings.pasteAsPlainText = pasteAsPlainText
+        settings.excludedAppBundleIds = excludedApps
+        SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
+        LogcatCaptureService.syncState(ctx, settings)
     }
 
     // ── Tab selection — rememberSaveable so the selected tab survives rotation ──
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
     val tabs = listOf("General", "Display", "Storage", "Sync", "Notifications")
-
-    val snackbarHostState = remember { SnackbarHostState() }
-    val savedMessage = stringResource(R.string.settings_saved)
-    val errorTemplate = stringResource(R.string.error_settings_save)
-    val dismissLabel = stringResource(R.string.snackbar_dismiss)
-
-    // AND4: Write ALL buffered settings to SharedPreferences in one go.
-    val onSave: () -> Unit = {
-        try {
-            // ROOT-CAUSE FIX (settings revert on force-stop): persist every scalar
-            // setting in ONE synchronous commit() instead of many async apply()
-            // calls. apply() flushes to disk on a background thread; a force-stop
-            // (SIGKILL) right after Save killed the process before that flush ran,
-            // so the relaunch read the old on-disk value (and defaulted-true
-            // getters reported ON again). commit() blocks until the write hits
-            // disk, so the toggle now survives an immediate kill.
-            settings.saveScreenSettings(
-                // captureEnabled is owned by the notification Pause/Resume, not
-                // this screen — round-trip its current value unchanged.
-                captureEnabled = settings.captureEnabled,
-                privateMode = privateMode,
-                syncEnabled = syncEnabled,
-                showSensitiveWarnings = showWarnings,
-                maskSensitiveContent = maskSensitive,
-                translucency = translucency,
-                imageMaxHeight = imageMaxHeight,
-                previewDelayMs = previewDelay.toLong(),
-                imageQuality = imageQuality,
-                maxTextSizeBytes = maxTextSizeBytes,
-                maxImageSizeBytes = maxImageSizeBytes,
-                storageQuotaBytes = storageQuotaBytes,
-                syncOnWifiOnly = syncOnWifiOnly,
-                syncBackend = syncBackend,
-                p2pSyncEnabled = p2pSyncEnabled,
-                supabaseUrl = supabaseUrl.trim(),
-                supabaseAnonKey = supabaseAnonKey.trim(),
-                supabaseEmail = supabaseEmail.trim(),
-                relayUrl = relayUrl.trim(),
-                notifyOnCopy = notifyOnCopy,
-                soundOnCopy = soundOnCopy,
-                logcatCaptureEnabled = logcatEnabled,
-            )
-            // KEK-wrapped secrets keep their dedicated keystore write path.
-            settings.cloudSyncPassphrase = cloudPassphrase
-            settings.supabasePassword = supabasePassword
-            // Config-via-FFI knobs not folded into saveScreenSettings — each setter
-            // clamps through the native clampConfig (macOS parity). C-P1-1.
-            settings.maxFileSizeBytes = maxFileSizeBytes
-            settings.sensitiveTtlSecs = sensitiveTtlSecs
-            settings.collectPublicIp = collectPublicIp
-            settings.pasteAsPlainText = pasteAsPlainText
-            settings.excludedAppBundleIds = excludedApps
-            // Side-effects that must happen immediately after persisting.
-            // logcatStatus is re-read on next recomposition automatically — no assignment needed.
-            SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
-            LogcatCaptureService.syncState(ctx, settings)
-            // HW-A10: reset dirty snapshot so back-press no longer shows the dialog
-            savedSnapshot = SettingsSnapshot(
-                privateMode = privateMode,
-                syncEnabled = syncEnabled,
-                showWarnings = showWarnings,
-                maskSensitive = maskSensitive,
-                translucency = translucency,
-                imageMaxHeight = imageMaxHeight,
-                previewDelay = previewDelay,
-                imageQuality = imageQuality,
-                maxTextSizeBytes = maxTextSizeBytes,
-                maxImageSizeBytes = maxImageSizeBytes,
-                storageQuotaBytes = storageQuotaBytes,
-                maxFileSizeBytes = maxFileSizeBytes,
-                sensitiveTtlSecs = sensitiveTtlSecs,
-                collectPublicIp = collectPublicIp,
-                pasteAsPlainText = pasteAsPlainText,
-                excludedApps = excludedApps,
-                syncBackend = syncBackend,
-                syncOnWifiOnly = syncOnWifiOnly,
-                p2pSyncEnabled = p2pSyncEnabled,
-                supabaseUrl = supabaseUrl.trim(),
-                supabaseAnonKey = supabaseAnonKey.trim(),
-                cloudPassphrase = cloudPassphrase,
-                supabaseEmail = supabaseEmail.trim(),
-                supabasePassword = supabasePassword,
-                relayUrl = relayUrl.trim(),
-                notifyOnCopy = notifyOnCopy,
-                soundOnCopy = soundOnCopy,
-                logcatEnabled = logcatEnabled,
-            )
-            scope.launch {
-                snackbarHostState.showSnackbar(
-                    message = savedMessage,
-                    actionLabel = dismissLabel,
-                )
-            }
-        } catch (e: Exception) {
-            val msg = e.message ?: e.javaClass.simpleName
-            scope.launch {
-                snackbarHostState.showSnackbar(
-                    message = errorTemplate.format(msg),
-                    actionLabel = dismissLabel,
-                )
-            }
-        }
-    }
-
-    // HW-A10: Discard-changes confirmation dialog shown when back is pressed with unsaved edits.
-    if (showDiscardDialog) {
-        AlertDialog(
-            onDismissRequest = { showDiscardDialog = false },
-            title = { Text(stringResource(R.string.dialog_discard_title)) },
-            text = { Text(stringResource(R.string.dialog_discard_message)) },
-            confirmButton = {
-                TextButton(onClick = {
-                    showDiscardDialog = false
-                    onBack()
-                }) {
-                    Text(stringResource(R.string.dialog_discard_confirm))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDiscardDialog = false }) {
-                    Text(stringResource(R.string.dialog_discard_keep))
-                }
-            },
-        )
-    }
 
     Scaffold(
         modifier = modifier,
@@ -423,20 +254,10 @@ fun SettingsScreen(
             CopyPasteTopBar(
                 title = stringResource(R.string.title_settings),
                 showBackButton = showBackButton,
-                // HW-A10: intercept the top-bar back arrow for dirty check too.
-                onBack = { if (isDirty) showDiscardDialog = true else onBack() },
+                onBack = onBack,
                 backContentDescription = stringResource(R.string.cd_back),
-                actions = {
-                    Button(
-                        onClick = onSave,
-                        modifier = Modifier.padding(end = 8.dp),
-                    ) {
-                        Text(stringResource(R.string.action_save))
-                    }
-                },
             )
         },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -468,72 +289,102 @@ fun SettingsScreen(
                 when (selectedTab) {
                     TAB_GENERAL -> GeneralTab(
                         privateMode = privateMode,
-                        onPrivateModeChange = { privateMode = it },
+                        onPrivateModeChange = { privateMode = it; persistAll() },
                         syncEnabled = syncEnabled,
-                        onSyncEnabledChange = { syncEnabled = it },
+                        onSyncEnabledChange = { syncEnabled = it; persistAll() },
                         collectPublicIp = collectPublicIp,
-                        onCollectPublicIpChange = { collectPublicIp = it },
+                        onCollectPublicIpChange = { collectPublicIp = it; persistAll() },
                         pasteAsPlainText = pasteAsPlainText,
-                        onPasteAsPlainTextChange = { pasteAsPlainText = it },
+                        onPasteAsPlainTextChange = { pasteAsPlainText = it; persistAll() },
                         logcatEnabled = logcatEnabled,
-                        onLogcatEnabledChange = { logcatEnabled = it },
+                        onLogcatEnabledChange = { logcatEnabled = it; persistAll() },
                         logcatStatus = logcatStatus,
                         ctx = ctx,
                     )
                     TAB_DISPLAY -> DisplayTab(
                         showWarnings = showWarnings,
-                        onShowWarningsChange = { showWarnings = it },
+                        onShowWarningsChange = { showWarnings = it; persistAll() },
                         maskSensitive = maskSensitive,
-                        onMaskSensitiveChange = { maskSensitive = it },
+                        onMaskSensitiveChange = { maskSensitive = it; persistAll() },
                         translucency = translucency,
-                        onTranslucencyChange = { translucency = it },
+                        onTranslucencyChange = { translucency = it; persistAll() },
                         imageMaxHeight = imageMaxHeight,
-                        onImageMaxHeightChange = { imageMaxHeight = it },
+                        onImageMaxHeightChange = { imageMaxHeight = it; persistAll() },
                         previewDelay = previewDelay,
-                        onPreviewDelayChange = { previewDelay = it },
+                        onPreviewDelayChange = { previewDelay = it; persistAll() },
                         imageQuality = imageQuality,
-                        onImageQualityChange = { imageQuality = it },
+                        onImageQualityChange = { imageQuality = it; persistAll() },
                     )
                     TAB_STORAGE -> StorageTab(
                         maxTextSizeBytes = maxTextSizeBytes,
-                        onMaxTextSizeBytesChange = { maxTextSizeBytes = it },
+                        onMaxTextSizeBytesChange = { maxTextSizeBytes = it; persistAll() },
                         maxImageSizeBytes = maxImageSizeBytes,
-                        onMaxImageSizeBytesChange = { maxImageSizeBytes = it },
+                        onMaxImageSizeBytesChange = { maxImageSizeBytes = it; persistAll() },
                         maxFileSizeBytes = maxFileSizeBytes,
-                        onMaxFileSizeBytesChange = { maxFileSizeBytes = it },
+                        onMaxFileSizeBytesChange = { maxFileSizeBytes = it; persistAll() },
                         storageQuotaBytes = storageQuotaBytes,
-                        onStorageQuotaBytesChange = { storageQuotaBytes = it },
+                        onStorageQuotaBytesChange = { storageQuotaBytes = it; persistAll() },
                         sensitiveTtlSecs = sensitiveTtlSecs,
-                        onSensitiveTtlSecsChange = { sensitiveTtlSecs = it },
+                        onSensitiveTtlSecsChange = { sensitiveTtlSecs = it; persistAll() },
                         excludedApps = excludedApps,
-                        onExcludedAppsChange = { excludedApps = it },
+                        onExcludedAppsChange = { excludedApps = it; persistAll() },
                         ctx = ctx,
                     )
                     TAB_SYNC -> SyncTab(
                         syncBackend = syncBackend,
-                        onSyncBackendChange = { syncBackend = it },
+                        onSyncBackendChange = { syncBackend = it; persistAll() },
                         syncOnWifiOnly = syncOnWifiOnly,
-                        onSyncOnWifiOnlyChange = { syncOnWifiOnly = it },
+                        onSyncOnWifiOnlyChange = { syncOnWifiOnly = it; persistAll() },
                         p2pSyncEnabled = p2pSyncEnabled,
-                        onP2pSyncEnabledChange = { p2pSyncEnabled = it },
+                        onP2pSyncEnabledChange = { p2pSyncEnabled = it; persistAll() },
                         supabaseUrl = supabaseUrl,
-                        onSupabaseUrlChange = { supabaseUrl = it },
+                        onSupabaseUrlChange = { v ->
+                            supabaseUrl = v
+                            supabaseUrlJob?.cancel()
+                            supabaseUrlJob = scope.launch { delay(300); persistAll() }
+                        },
                         supabaseAnonKey = supabaseAnonKey,
-                        onSupabaseAnonKeyChange = { supabaseAnonKey = it },
+                        onSupabaseAnonKeyChange = { v ->
+                            supabaseAnonKey = v
+                            supabaseAnonKeyJob?.cancel()
+                            supabaseAnonKeyJob = scope.launch { delay(300); persistAll() }
+                        },
                         cloudPassphrase = cloudPassphrase,
-                        onCloudPassphraseChange = { cloudPassphrase = it },
+                        onCloudPassphraseChange = { v ->
+                            cloudPassphrase = v
+                            cloudPassphraseJob?.cancel()
+                            cloudPassphraseJob = scope.launch {
+                                delay(300)
+                                settings.cloudSyncPassphrase = v
+                            }
+                        },
                         supabaseEmail = supabaseEmail,
-                        onSupabaseEmailChange = { supabaseEmail = it },
+                        onSupabaseEmailChange = { v ->
+                            supabaseEmail = v
+                            supabaseEmailJob?.cancel()
+                            supabaseEmailJob = scope.launch { delay(300); persistAll() }
+                        },
                         supabasePassword = supabasePassword,
-                        onSupabasePasswordChange = { supabasePassword = it },
+                        onSupabasePasswordChange = { v ->
+                            supabasePassword = v
+                            supabasePasswordJob?.cancel()
+                            supabasePasswordJob = scope.launch {
+                                delay(300)
+                                settings.supabasePassword = v
+                            }
+                        },
                         relayUrl = relayUrl,
-                        onRelayUrlChange = { relayUrl = it },
+                        onRelayUrlChange = { v ->
+                            relayUrl = v
+                            relayUrlJob?.cancel()
+                            relayUrlJob = scope.launch { delay(300); persistAll() }
+                        },
                     )
                     TAB_NOTIFICATIONS -> NotificationsTab(
                         notifyOnCopy = notifyOnCopy,
-                        onNotifyOnCopyChange = { notifyOnCopy = it },
+                        onNotifyOnCopyChange = { notifyOnCopy = it; persistAll() },
                         soundOnCopy = soundOnCopy,
-                        onSoundOnCopyChange = { soundOnCopy = it },
+                        onSoundOnCopyChange = { soundOnCopy = it; persistAll() },
                     )
                 }
             }
@@ -630,43 +481,27 @@ private fun GeneralTab(
             onClick = { LogExportHelper.shareLogsZip(ctx) }
         )
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+
+        // ── BACKGROUND CAPTURE (ADB) ─────────────────────────────────────────
+        SectionLabel(stringResource(R.string.bg_adb_section_title))
+        // Explainer
+        Text(
+            text = stringResource(R.string.bg_adb_explainer),
+            style = MaterialTheme.typography.bodySmall,
+            color = IdeDim,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+        )
+        // Live status line
+        AdbCaptureStatusLine(logcatStatus = logcatStatus, ctx = ctx)
+        // Toggle: user can disable logcat capture even when READ_LOGS is granted
         SettingsRow(
             title = stringResource(R.string.setting_logcat_capture_title),
             subtitle = stringResource(R.string.setting_logcat_capture_subtitle),
             checked = logcatEnabled,
             onCheckedChange = onLogcatEnabledChange,
         )
-        val (statusText, statusColor) = when (logcatStatus) {
-            LogcatCaptureStatus.NOT_GRANTED ->
-                stringResource(R.string.logcat_status_not_granted) to IdeDanger
-            LogcatCaptureStatus.DISABLED ->
-                stringResource(R.string.logcat_status_disabled) to IdeDim
-            LogcatCaptureStatus.GRANTED_NOT_WORKING ->
-                stringResource(R.string.logcat_status_not_working) to IdeWarning
-            LogcatCaptureStatus.WORKING ->
-                stringResource(R.string.logcat_status_working) to IdeSuccess
-        }
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.bodySmall,
-            color = statusColor,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp),
-        )
-        if (logcatStatus == LogcatCaptureStatus.NOT_GRANTED) {
-            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                Text(
-                    text = stringResource(R.string.logcat_adb_label),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = IdeDim,
-                )
-                Text(
-                    text = stringResource(R.string.logcat_adb_grant_command),
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                    color = IdeAccent,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
-            }
-        }
+        // Tap-to-copy ADB commands
+        AdbCaptureCommandRows(ctx = ctx)
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
         // ── ABOUT (last General entry) ─────────────────────────────────────
@@ -1120,6 +955,106 @@ private fun SettingsRow(
         )
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Background capture (ADB) composables
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Live status badge for the background-capture ADB section in Settings. */
+@Composable
+private fun AdbCaptureStatusLine(
+    logcatStatus: LogcatCaptureStatus,
+    ctx: android.content.Context,
+) {
+    val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
+    val overlayGranted: Boolean = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
+        android.provider.Settings.canDrawOverlays(ctx)
+    } else true
+
+    val (captureText, captureColor) = when (logcatStatus) {
+        LogcatCaptureStatus.WORKING ->
+            stringResource(R.string.bg_adb_status_capture_working) to IdeSuccess
+        LogcatCaptureStatus.DISABLED, LogcatCaptureStatus.NOT_GRANTED ->
+            stringResource(R.string.bg_adb_status_capture_inactive) to IdeDim
+        LogcatCaptureStatus.GRANTED_NOT_WORKING ->
+            stringResource(R.string.bg_adb_status_capture_inactive) to IdeWarning
+    }
+
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(
+                text = if (readLogsGranted)
+                    stringResource(R.string.bg_adb_status_read_logs_ok)
+                else
+                    stringResource(R.string.bg_adb_status_read_logs_no),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (readLogsGranted) IdeSuccess else IdeDanger,
+            )
+            Text(
+                text = if (overlayGranted)
+                    stringResource(R.string.bg_adb_status_overlay_ok)
+                else
+                    stringResource(R.string.bg_adb_status_overlay_no),
+                style = MaterialTheme.typography.labelSmall,
+                color = if (overlayGranted) IdeSuccess else IdeDim,
+            )
+        }
+        Text(
+            text = captureText,
+            style = MaterialTheme.typography.labelSmall,
+            color = captureColor,
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+/** Three tap-to-copy ADB command rows for background capture setup. */
+@Composable
+private fun AdbCaptureCommandRows(ctx: android.content.Context) {
+    val toastText = stringResource(R.string.bg_adb_cmd_copied)
+    val commands = listOf(
+        stringResource(R.string.bg_adb_cmd1_label) to stringResource(R.string.bg_adb_cmd1),
+        stringResource(R.string.bg_adb_cmd2_label) to stringResource(R.string.bg_adb_cmd2),
+        stringResource(R.string.bg_adb_cmd3_label) to stringResource(R.string.bg_adb_cmd3),
+    )
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
+        AdbCmdRow(label = commands[0].first, cmd = commands[0].second, toastText = toastText, ctx = ctx)
+        Spacer(modifier = Modifier.height(6.dp))
+        AdbCmdRow(label = commands[1].first, cmd = commands[1].second, toastText = toastText, ctx = ctx)
+        Spacer(modifier = Modifier.height(6.dp))
+        AdbCmdRow(label = commands[2].first, cmd = commands[2].second, toastText = toastText, ctx = ctx)
+    }
+}
+
+@Composable
+private fun AdbCmdRow(
+    label: String,
+    cmd: String,
+    toastText: String,
+    ctx: android.content.Context,
+) {
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelSmall,
+        color = IdeDim,
+    )
+    Text(
+        text = cmd,
+        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        color = IdeAccent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                    as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", cmd))
+                android.widget.Toast.makeText(ctx, toastText, android.widget.Toast.LENGTH_SHORT)
+                    .show()
+            }
+            .padding(top = 2.dp, bottom = 4.dp),
+    )
+}
+
 
 /**
  * Return the value in [steps] whose absolute distance to [raw] is smallest.

@@ -118,6 +118,18 @@ pub const METHOD_PAIR_CONFIRM_SAS: &str = "pair_confirm_sas";
 /// Abort an in-flight discovery pairing and reset the state machine to `idle`.
 pub const METHOD_PAIR_ABORT: &str = "pair_abort";
 
+// ── File ingest ─────────────────────────────────────────────────────────────
+
+/// Ingest a file directly into the clipboard history from the desktop UI.
+///
+/// Params: `{ filename: String, mime: String, data_b64: String }` where
+/// `data_b64` is standard base64-encoded raw file bytes. The daemon encrypts,
+/// stores, and deduplicates it the same way a pasteboard-captured file is
+/// stored via `handle_file`.
+///
+/// Response: `{ id: String }` — the stable clipboard item UUID.
+pub const METHOD_ADD_FILE_ITEM: &str = "add_file_item";
+
 // ── Database maintenance ────────────────────────────────────────────────────
 
 /// Method name for the destructive "reset database" recovery operation.

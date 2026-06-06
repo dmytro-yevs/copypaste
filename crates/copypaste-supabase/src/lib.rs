@@ -45,7 +45,7 @@ pub mod store;
 // Auth re-exports
 pub use auth::AuthClient;
 pub use error::{AuthError, AuthResult};
-pub use models::{Session, User};
+pub use models::{CloudClipboardRow, Session, User};
 pub use store::{InMemoryStore, SessionStore};
 
 // Realtime re-exports

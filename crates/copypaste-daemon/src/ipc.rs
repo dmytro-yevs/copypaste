@@ -9,11 +9,14 @@ use copypaste_core::derive_sync_key;
 use copypaste_core::SyncKey;
 use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
-    decrypt_item_by_version, delete_fts, delete_item, derive_v2, encode_thumbnail_from_png,
-    ensure_revoked_devices_table, fetch_text_preview, get_item_by_id, get_page,
-    get_page_pinned_first, pin_item, reorder_pinned, revoke_device, revoke_devices, search_items,
-    set_thumb, unpin_item, Database, EncryptError, FileMeta, SensitiveDetector,
+    decrypt_item_by_version, derive_v2, encode_thumbnail_from_png, ensure_revoked_devices_table,
+    fetch_text_preview, get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned,
+    revoke_device, revoke_devices, search_items, set_thumb, unpin_item, Database, EncryptError,
+    FileMeta, SensitiveDetector,
 };
+// `soft_delete_item` is not yet re-exported from the crate root so we use the
+// full module path (the `storage` module is `pub`).
+use copypaste_core::storage::items::soft_delete_item;
 use copypaste_p2p::pake::{PakeInitiator, PakeResponder, PasswordFile};
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
@@ -447,38 +450,36 @@ fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
     }
 }
 
-/// Atomically write `cfg` to the `config.json` path with mode `0600`.
+/// Atomically write `bytes` to `path` with mode `0600` from the first byte.
 ///
-/// # Security (Fix-2)
-///
-/// The previous implementation called `std::fs::write(path, json)` (creates the
-/// file at the umask-derived mode, typically `0644`) and then
-/// `set_permissions(path, 0o600)`. Between the write and the chmod the file
-/// was world-readable for a brief window — long enough for a concurrent process
-/// running as the same user to read `supabase_password` or `supabase_anon_key`.
-///
-/// The fix uses the same atomic-0600 pattern as
-/// `keychain::file_store::write_secret_atomic_to`:
+/// Uses the same atomic-0600 pattern as `crate::peers::save_peers`:
 /// 1. Ensure the parent directory exists (tightened to `0700`).
-/// 2. Create a uniquely-named temp file in the SAME directory.
+/// 2. Create a uniquely-named temp file in the **same** directory (same
+///    filesystem → `rename` is POSIX-atomic).
 /// 3. Set mode `0600` on the temp file before writing any bytes.
-/// 4. Write + flush + sync the JSON payload.
-/// 5. `rename` the temp file over the destination.
-fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
+/// 4. Write + flush + sync the payload.
+/// 5. `rename` over the destination.
+///
+/// A crash between write and rename leaves an invisible `.tmp.*` file that
+/// will be cleaned up by the next successful write.
+fn atomic_write_0600(path: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
     use std::io::Write as _;
 
-    let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
     let parent = path
         .parent()
-        .ok_or_else(|| anyhow::anyhow!("config path has no parent directory"))?;
+        .ok_or_else(|| anyhow::anyhow!("path has no parent directory: {}", path.display()))?;
     std::fs::create_dir_all(parent)?;
-    // Best-effort: tighten parent dir to user-only.
+    // Best-effort: tighten parent dir to user-only so secret files are not
+    // discoverable through a world-executable parent.
     let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
 
-    let json = serde_json::to_string_pretty(cfg)?;
-
+    let stem = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "tmp".to_owned());
     let tmp = parent.join(format!(
-        ".config.json.tmp.{}.{}",
+        ".{}.tmp.{}.{}",
+        stem,
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -495,12 +496,14 @@ fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
             opts.mode(0o600);
         }
         let mut f = opts.open(&tmp)?;
+        // Defence-in-depth: re-assert 0600 in case a restrictive parent umask
+        // or a non-honouring filesystem ignored the create mode above.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         }
-        f.write_all(json.as_bytes())?;
+        f.write_all(bytes)?;
         f.flush()?;
         f.sync_all()?;
         Ok(())
@@ -510,11 +513,28 @@ fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
     }
-    if let Err(e) = std::fs::rename(&tmp, &path) {
+    if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e.into());
     }
     Ok(())
+}
+
+/// Atomically write `cfg` to the `config.json` path with mode `0600`.
+///
+/// # Security (Fix-2)
+///
+/// The previous implementation called `std::fs::write(path, json)` (creates the
+/// file at the umask-derived mode, typically `0644`) and then
+/// `set_permissions(path, 0o600)`. Between the write and the chmod the file
+/// was world-readable for a brief window — long enough for a concurrent process
+/// running as the same user to read `supabase_password` or `supabase_anon_key`.
+/// Delegates to [`atomic_write_0600`], which sets `0600` on the temp file
+/// before any bytes are written and `rename`s it over the destination.
+fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
+    let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
+    let json = serde_json::to_string_pretty(cfg)?;
+    atomic_write_0600(&path, json.as_bytes())
 }
 
 // ---------------------------------------------------------------------------
@@ -681,6 +701,42 @@ fn load_peers() -> anyhow::Result<Vec<serde_json::Value>> {
     Ok(filtered)
 }
 
+/// HB-4: build the set of IP HOSTS we have already paired with, for correlating
+/// mDNS-discovered peers against `peers.json`.
+///
+/// The mDNS `device_id` advertised by a peer is a random UUID, NOT its cert
+/// fingerprint, so a fingerprint-compare never matched a discovered peer to a
+/// paired record — already-paired devices kept showing "Pair". Instead we match
+/// on the network identity: a peer's `local_ip` and the HOST part of its
+/// `address` (`host:port`). A discovered peer is "paired" when any of its
+/// resolved `ip_addrs` is in this set.
+fn paired_ip_hosts(peers: &[serde_json::Value]) -> std::collections::HashSet<String> {
+    let mut hosts = std::collections::HashSet::new();
+    for p in peers {
+        if let Some(ip) = p.get("local_ip").and_then(|v| v.as_str()) {
+            if !ip.is_empty() {
+                hosts.insert(ip.to_string());
+            }
+        }
+        if let Some(addr) = p.get("address").and_then(|v| v.as_str()) {
+            // `address` is `host:port`; keep only the host. `rsplit_once(':')`
+            // tolerates bracketed IPv6 (`[::1]:9123`) by stripping the trailing
+            // `:port` and leaving the bracketed host, which still matches the
+            // bracket-free `ip_addrs` form below only for IPv4 — IPv6 hosts are
+            // matched via `local_ip` instead.
+            let host = match addr.rsplit_once(':') {
+                Some((h, _port)) => h,
+                None => addr,
+            };
+            let host = host.trim_start_matches('[').trim_end_matches(']');
+            if !host.is_empty() {
+                hosts.insert(host.to_string());
+            }
+        }
+    }
+    hosts
+}
+
 /// Persist peers list to peers.json atomically with mode 0600 from the first byte.
 ///
 /// # Security
@@ -703,64 +759,9 @@ fn load_peers() -> anyhow::Result<Vec<serde_json::Value>> {
 /// removed by the dual-daemon fix (a losing daemon now exits on IPC-bind
 /// failure instead of running a second stack), so unification is deferred.
 fn save_peers(peers: &[serde_json::Value]) -> anyhow::Result<()> {
-    use std::io::Write as _;
-
     let path = peers_file_path();
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("peers path has no parent directory: {}", path.display()))?;
-    std::fs::create_dir_all(parent)?;
-    // Best-effort: tighten parent dir perms to user-only.
-    let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
-
     let json = serde_json::to_string_pretty(peers)?;
-
-    // Atomic 0600 write: uniquely-named temp file in the same directory so the
-    // final rename is guaranteed to be on the same filesystem (POSIX atomic).
-    let tmp = parent.join(format!(
-        ".peers.json.tmp.{}.{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-
-    let write_result = (|| -> std::io::Result<()> {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            // Create with 0600 from the outset — the sync_key_b64 is never
-            // momentarily group/other-readable between create and chmod.
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp)?;
-        // Defence-in-depth: re-assert 0600 in case a restrictive parent umask
-        // or a non-honouring filesystem ignored the create mode above.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        }
-        f.write_all(json.as_bytes())?;
-        f.flush()?;
-        f.sync_all()?;
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-
-    if let Err(e) = std::fs::rename(&tmp, &path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-
-    Ok(())
+    atomic_write_0600(&path, json.as_bytes())
 }
 
 /// Validate that a fingerprint string matches the XX:XX:... hex pattern.
@@ -806,6 +807,85 @@ pub(crate) fn display_fingerprint(fp: &str) -> String {
         .map(|pair| std::str::from_utf8(pair).unwrap_or_default())
         .collect::<Vec<_>>()
         .join(":")
+}
+
+/// Fire-and-forget: send a `ControlMsg::Unpair` signal to the peer identified
+/// by `canonical_fp` if it currently has a live sink in `live_sinks`.
+///
+/// This is the **send side** of mutual unpair.  Called by `unpair_peer`,
+/// `revoke_peer`, and `revoke_all_peers` after the local eviction has already
+/// committed, so the peer learns it has been removed while the connection is
+/// still open rather than waiting for the next mTLS handshake rejection.
+///
+/// Design properties:
+/// - **Non-blocking**: uses `try_send`; a full or closed sink is silently
+///   ignored.  The unpair has already taken effect locally; the signal is
+///   best-effort delivery only.
+/// - **No panic**: all `Mutex::lock` failures (poisoned lock) are silently
+///   swallowed so a prior panic cannot prevent the caller from returning a
+///   success response.
+/// - **Minimal blast radius**: only the specific peer's sink is touched; other
+///   connections are unaffected.
+fn send_unpair_signal_if_connected(
+    live_sinks: &Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>>,
+    canonical_fp: &str,
+) {
+    use copypaste_sync::protocol::{ControlMsg, PeerFrame};
+
+    // Acquire the outer Mutex<Option<LivePeerSinks>> — this holds the Arc to the
+    // inner async Mutex<HashMap> only for the brief clone, never across send.
+    let sinks_arc_opt = match live_sinks.lock() {
+        Ok(guard) => guard.clone(),
+        Err(_) => return, // poisoned — skip silently
+    };
+    let sinks_arc = match sinks_arc_opt {
+        Some(a) => a,
+        None => return, // P2P not started
+    };
+
+    // `try_lock` on the async Mutex: if the map is momentarily locked by an
+    // accept/fanout task we skip — it is only needed to clone the sender.
+    let sender_opt = match sinks_arc.try_lock() {
+        Ok(map) => map.get(canonical_fp).cloned(),
+        Err(_) => return,
+    };
+
+    if let Some(tx) = sender_opt {
+        // `try_send` never blocks; Closed/Full both mean "skip silently".
+        let _ = tx.try_send(PeerFrame::Control(ControlMsg::Unpair));
+        tracing::debug!(peer = %canonical_fp, "mutual unpair: sent Unpair signal to connected peer");
+    }
+}
+
+/// Extract and validate a UUID `"id"` param from an IPC request, returning a
+/// typed `ERR_CODE_INVALID_ARGUMENT` error response on failure.
+///
+/// Used by the typed-error IPC arms (`delete_item`, `copy_item`, `pin_item`,
+/// `reorder_pinned`, `get_item_image`, `get_item_thumbnail`, `get_item_file`)
+/// to eliminate repeated boilerplate. Arms that use the legacy untyped
+/// `Response::err` style (`delete`, `copy`/`paste`, `pin`) are left unchanged.
+fn extract_uuid_param(
+    params: &serde_json::Value,
+    req_id: String,
+) -> Result<String, crate::protocol::Response> {
+    let id = match params.get("id").and_then(|v| v.as_str()) {
+        Some(s) => s.to_string(),
+        None => {
+            return Err(crate::protocol::Response::err_with_code(
+                req_id,
+                crate::protocol::ERR_CODE_INVALID_ARGUMENT,
+                "missing param: id",
+            ))
+        }
+    };
+    if uuid::Uuid::parse_str(&id).is_err() {
+        return Err(crate::protocol::Response::err_with_code(
+            req_id,
+            crate::protocol::ERR_CODE_INVALID_ARGUMENT,
+            "invalid param: id must be a valid UUID",
+        ));
+    }
+    Ok(id)
 }
 
 /// Maximum lifetime of an in-progress PAKE session before it is evicted as
@@ -877,6 +957,12 @@ pub struct IpcServer {
     db: Arc<Mutex<Database>>,
     /// Shared private-mode flag. When true, the clipboard monitor skips recording.
     private_mode: Arc<AtomicBool>,
+    /// Stable device UUID loaded (or created) at daemon start via
+    /// `load_or_create_device_id`. Stamped on every locally-captured clipboard
+    /// item as `origin_device_id`. Returned in `history_page` as `own_device_id`
+    /// so the UI can label "This device" vs. synced items from other devices.
+    /// `None` when not wired in (unit tests / degraded-mode builds).
+    local_device_id: Option<String>,
     /// Local symmetric encryption key (XChaCha20-Poly1305). Required by the
     /// `copy`/`paste` handlers so paste-back can decrypt the ciphertext
     /// stored in `clipboard_items.content` and write *plaintext* to
@@ -1045,6 +1131,26 @@ pub struct IpcServer {
     /// inbound pair routes its SAS through the SAME machine the IPC handlers
     /// observe. Always present (the machine is `Idle` when nothing is pairing).
     pairing: Arc<crate::pairing_sm::PairingCoordinator>,
+
+    /// Shared live peer-sink map — serves two purposes:
+    ///   1. Online-status computation (`list_peers`): iterate to find non-closed senders.
+    ///   2. Mutual-unpair signalling (`unpair_peer` / `revoke_peer` / `revoke_all_peers`):
+    ///      look up a specific peer's sender and deliver `ControlMsg::Unpair`.
+    ///
+    /// `LivePeerSinks` and `PeerSinks` are identical type aliases
+    /// (`Arc<tokio::sync::Mutex<HashMap<DeviceFingerprint, mpsc::Sender<PeerFrame>>>>`).
+    /// `P2pHandle` exposes both names only because they were introduced at different times;
+    /// both fields on that struct are `Arc::clone`s of the same underlying map.
+    /// daemon.rs writes `P2pHandle::live_sinks` here after `start_p2p` returns.
+    live_peer_sinks: Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>>,
+    /// Clone of the running sync orchestrator's `SyncCrypto` context (H8).
+    ///
+    /// Because `SyncCrypto` stores its cached sync key behind an `Arc<Mutex>`,
+    /// this clone shares the SAME backing store as the orchestrator's copy.
+    /// Calling `reload_sync_key()` here after a pairing write propagates to the
+    /// orchestrator immediately without any channel or restart. `None` when P2P
+    /// is disabled (no orchestrator crypto context exists).
+    p2p_sync_crypto: Option<crate::sync_orch::SyncCrypto>,
 }
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
@@ -1069,32 +1175,13 @@ impl IpcServer {
         local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
         device_public_key: Arc<[u8; 32]>,
     ) -> Self {
-        Self {
+        Self::new_with_ready(
             db,
             private_mode,
             local_key,
             device_public_key,
-            ready: Arc::new(AtomicBool::new(true)),
-            pake_sessions: Arc::new(Mutex::new(HashMap::new())),
-            pending_qr_token: Arc::new(Mutex::new(None)),
-            p2p_peers: None,
-            cert_fingerprint: None,
-            p2p_cert: None,
-            discovery: None,
-            p2p_sync_addr: Arc::new(std::sync::Mutex::new(None)),
-            self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
-            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
-            sync_key: Arc::new(Mutex::new(None)),
-            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
-            last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
-            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
-            cloud_signed_in: Arc::new(AtomicBool::new(false)),
-            new_item_tx: None,
-            degraded_reason: Arc::new(std::sync::Mutex::new(None)),
-            core_config: None,
-            cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
-            pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
-        }
+            Arc::new(AtomicBool::new(true)),
+        )
     }
 
     /// Mark this server as serving a degraded startup (e.g. keychain-locked /
@@ -1123,6 +1210,14 @@ impl IpcServer {
         self
     }
 
+    /// Attach the stable per-device UUID so `history_page` can return it as
+    /// `own_device_id`. The UI uses this to label locally-captured items as
+    /// "This device" vs. items synced from a remote peer.
+    pub fn with_local_device_id(mut self, id: impl Into<String>) -> Self {
+        self.local_device_id = Some(id.into());
+        self
+    }
+
     /// Attach the live P2P paired-peer allowlist (fix/p2p-c-review #2).
     ///
     /// The daemon shares the same `PairedPeers` instance with the running mTLS
@@ -1131,6 +1226,28 @@ impl IpcServer {
     /// daemon restart.
     pub fn with_p2p_peers(mut self, peers: copypaste_p2p::transport::PairedPeers) -> Self {
         self.p2p_peers = Some(peers);
+        self
+    }
+
+    /// Return the slot that daemon.rs writes `P2pHandle::live_sinks` into after
+    /// `start_p2p` returns.
+    ///
+    /// Two consumers share this slot:
+    /// - `list_peers` iterates it to compute the authoritative online flag from
+    ///   live connection state rather than the stale mTLS-allowlist heuristic.
+    /// - `unpair_peer` / `revoke_peer` / `revoke_all_peers` look up a specific
+    ///   peer's sender and deliver a best-effort `ControlMsg::Unpair` signal.
+    pub fn live_peer_sinks_slot(&self) -> Arc<std::sync::Mutex<Option<crate::p2p::LivePeerSinks>>> {
+        Arc::clone(&self.live_peer_sinks)
+    }
+
+    /// Attach a clone of the running sync orchestrator's `SyncCrypto` context
+    /// (H8 perf fix). Because `SyncCrypto` stores its cached sync key behind an
+    /// `Arc<Mutex>`, this clone shares the SAME backing store as the
+    /// orchestrator's copy; calling `reload_sync_key()` here after a pairing
+    /// write propagates to the orchestrator without any channel or restart.
+    pub fn with_p2p_sync_crypto(mut self, crypto: crate::sync_orch::SyncCrypto) -> Self {
+        self.p2p_sync_crypto = Some(crypto);
         self
     }
 
@@ -1242,6 +1359,7 @@ impl IpcServer {
         Self {
             db,
             private_mode,
+            local_device_id: None,
             local_key,
             device_public_key,
             ready,
@@ -1264,6 +1382,8 @@ impl IpcServer {
             core_config: None,
             cached_public_ip: Arc::new(tokio::sync::RwLock::new(None)),
             pairing: Arc::new(crate::pairing_sm::PairingCoordinator::new()),
+            live_peer_sinks: Arc::new(std::sync::Mutex::new(None)),
+            p2p_sync_crypto: None,
         }
     }
 
@@ -1764,6 +1884,7 @@ impl IpcServer {
         peer_sync_addr: &str,
         session_key: &copypaste_p2p::pake::SessionKey,
         peer_meta: &copypaste_p2p::bootstrap::PeerMeta,
+        sync_crypto: Option<&crate::sync_orch::SyncCrypto>,
     ) {
         let display = display_fingerprint(peer_fp_canonical);
         let added_at = std::time::SystemTime::now()
@@ -1817,11 +1938,18 @@ impl IpcServer {
         });
 
         match crate::peers::save_peers(&path, &peers) {
-            Ok(()) => tracing::info!(
-                fingerprint = %peer_fp_canonical,
-                addr = %peer_sync_addr,
-                "persisted paired peer to peers.json"
-            ),
+            Ok(()) => {
+                tracing::info!(
+                    fingerprint = %peer_fp_canonical,
+                    addr = %peer_sync_addr,
+                    "persisted paired peer to peers.json"
+                );
+                // H8: refresh the in-memory sync-key cache so the running
+                // orchestrator picks up the new shared key without a restart.
+                if let Some(crypto) = sync_crypto {
+                    crypto.reload_sync_key();
+                }
+            }
             Err(e) => tracing::warn!(
                 fingerprint = %peer_fp_canonical,
                 "failed to persist paired peer to peers.json: {e}"
@@ -1912,12 +2040,33 @@ impl IpcServer {
         };
         let addr = std::net::SocketAddr::new(ip, bport);
 
+        // Build the peer snapshot from the mDNS PeerInfo resolved above.
+        // This is available immediately (pre-handshake) and is the richest
+        // source of peer identity data at `pair_get_sas` poll time. The PAKE
+        // metadata exchange (model/OS/version) happens AFTER the SAS confirm
+        // step and is surfaced in the final `pair_with_discovered` response.
+        let peer_snapshot = crate::pairing_sm::PeerSnapshot {
+            device_name: if peer.device_name.is_empty() {
+                None
+            } else {
+                Some(peer.device_name.clone())
+            },
+            ip_addrs: peer.ip_addrs.iter().map(|a| a.to_string()).collect(),
+            // device_id IS the cert fingerprint (hex SHA-256); use it directly
+            // so the UI can show the fingerprint before the TLS handshake.
+            fingerprint: if peer.device_id.is_empty() {
+                None
+            } else {
+                Some(peer.device_id.clone())
+            },
+        };
+
         // Claim the single-active-pairing slot. A concurrent request is rejected
         // with a rate-limited error (one pairing at a time, v0.6 simplicity).
-        if !self
-            .pairing
-            .try_begin(crate::pairing_sm::PairingRole::Initiator)
-        {
+        if !self.pairing.try_begin(
+            crate::pairing_sm::PairingRole::Initiator,
+            peer_snapshot.clone(),
+        ) {
             return Response::err_with_code(
                 req_id,
                 ERR_CODE_RATE_LIMITED,
@@ -1954,9 +2103,15 @@ impl IpcServer {
         let confirm = move |sas: &str| {
             let coordinator = Arc::clone(&coordinator);
             let sas = sas.to_string();
+            // Forward the already-captured peer snapshot so `pair_get_sas` polls
+            // surface the mDNS identity while the user is reading the SAS code.
+            let snap = peer_snapshot.clone();
             async move {
-                let rx =
-                    coordinator.enter_awaiting_sas(sas, crate::pairing_sm::PairingRole::Initiator);
+                let rx = coordinator.enter_awaiting_sas(
+                    sas,
+                    crate::pairing_sm::PairingRole::Initiator,
+                    snap,
+                );
                 // SAS_CONFIRM_TIMEOUT bounds the human decision; a dropped sender
                 // (abort) or elapsed timeout both yield a rejection.
                 match tokio::time::timeout(crate::pairing_sm::SAS_CONFIRM_TIMEOUT, rx).await {
@@ -2006,6 +2161,7 @@ impl IpcServer {
                     &outcome.peer_sync_addr,
                     &outcome.session_key,
                     &peer_meta,
+                    self.p2p_sync_crypto.as_ref(),
                 );
                 // "QR fully provisions all sync": apply any sync config the peer
                 // advertised that we currently lack (never overwrites existing).
@@ -2040,11 +2196,32 @@ impl IpcServer {
                         .finish(crate::pairing_sm::PairingState::Rejected);
                 }
                 tracing::warn!("discovery SAS pairing failed: {e}");
-                let resp = Response::err_with_code(
-                    req_id,
-                    ERR_CODE_AUTH_FAILED,
-                    format!("discovery SAS pairing failed: {e}"),
-                );
+                // HB-4: a raw TCP connect failure ("Connection refused", host
+                // unreachable, timeout) means the peer's bootstrap responder is
+                // not listening — almost always because the device is already
+                // paired (so it no longer advertises) or its Devices/pairing
+                // screen is closed. Map that to a friendly message instead of the
+                // raw os-error; genuine PAKE/SAS failures keep the auth message.
+                let lower = e.to_string().to_ascii_lowercase();
+                let is_connect_failure = lower.contains("connection refused")
+                    || lower.contains("connect")
+                    || lower.contains("unreachable")
+                    || lower.contains("timed out")
+                    || lower.contains("timeout")
+                    || lower.contains("os error 61")
+                    || lower.contains("os error 111");
+                let (code, message) = if is_connect_failure {
+                    (
+                        ERR_CODE_NOT_FOUND,
+                        "device not reachable (already paired or its screen is closed)".to_string(),
+                    )
+                } else {
+                    (
+                        ERR_CODE_AUTH_FAILED,
+                        format!("discovery SAS pairing failed: {e}"),
+                    )
+                };
+                let resp = Response::err_with_code(req_id, code, message);
                 // BUG A1: reset the SM to `Idle` on EVERY failure return path that
                 // reached here after `try_begin` succeeded, so the next pairing
                 // attempt is not refused as rate-limited. The terminal outcome is
@@ -2083,6 +2260,9 @@ impl IpcServer {
         // task can BUILD our provisioning to advertise and APPLY the peer's.
         #[cfg(feature = "cloud-sync")]
         let sync_key = self.sync_key.clone();
+        // H8: clone before the move so the spawned task can call reload_sync_key
+        // after persist_paired_peer writes peers.json.
+        let spawn_sync_crypto = self.p2p_sync_crypto.clone();
         tokio::spawn(async move {
             // P2P Phase 4: collect our own device metadata to advertise in-band.
             // DeviceMeta::collect spawns child processes (up to ~2 s), so run it
@@ -2134,6 +2314,7 @@ impl IpcServer {
                         &outcome.peer_sync_addr,
                         &outcome.session_key,
                         &peer_meta,
+                        spawn_sync_crypto.as_ref(),
                     );
                     // "QR fully provisions all sync": apply any sync config the
                     // scanning peer advertised that we currently lack.
@@ -2257,6 +2438,7 @@ impl IpcServer {
                     &outcome.peer_sync_addr,
                     &outcome.session_key,
                     &peer_meta,
+                    self.p2p_sync_crypto.as_ref(),
                 );
                 // "QR fully provisions all sync": apply any sync config the
                 // responder advertised that we currently lack.
@@ -2340,6 +2522,8 @@ impl IpcServer {
                 | "get_item_thumbnail"
                 // get_item_file decrypts file chunks — needs a ready DB.
                 | "get_item_file"
+                // add_file_item encrypts and stores a new file item — needs a ready DB.
+                | "add_file_item"
                 | "revoke_peer"
                 | "revoke_all_peers"
                 // revoke_and_rotate runs the revoke body (audit-row insert),
@@ -2544,6 +2728,54 @@ impl IpcServer {
         }
     }
 
+    /// Soft-delete the item with primary key `id`, bump its `lamport_ts` and
+    /// `wall_time` so the tombstone wins LWW on all peers, then broadcast the
+    /// resulting tombstone row via `new_item_tx` so the sync orchestrator
+    /// propagates it to P2P peers and the cloud upload queue.
+    ///
+    /// Returns `Ok((changed, tombstone_opt))` where `changed` is the number of
+    /// rows modified (0 = not found). `Err` carries either the DB error string
+    /// or a spawn-join failure message. Used by both the legacy `"delete"` arm
+    /// and the typed `"delete_item"` arm; each arm formats its own distinct
+    /// response shape and error style.
+    async fn soft_delete_and_broadcast(
+        &self,
+        id: &str,
+    ) -> Result<(usize, Option<copypaste_core::ClipboardItem>), String> {
+        let db_arc = self.db.clone();
+        let id_owned = id.to_string();
+        let join = tokio::task::spawn_blocking(move || {
+            let db = db_arc.blocking_lock();
+            // Soft-delete: wipe content/nonce/thumb, set deleted=1, bump
+            // lamport_ts + wall_time so the tombstone wins LWW on peers.
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                // SAFETY: current time is always after UNIX_EPOCH.
+                .unwrap_or_default()
+                .as_millis() as i64;
+            // Look up the current row to derive the new lamport_ts.
+            let existing = get_item_by_id(&db, &id_owned).map_err(|e| e.to_string())?;
+            let new_lamport = existing.as_ref().map(|r| r.lamport_ts + 1).unwrap_or(1);
+            let changed =
+                soft_delete_item(&db, &id_owned, new_lamport, now_ms).map_err(|e| e.to_string())?;
+            // Re-read the tombstone row so we can broadcast it to peers.
+            let tombstone = get_item_by_id(&db, &id_owned).map_err(|e| e.to_string())?;
+            Ok::<_, String>((changed, tombstone))
+        })
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))?;
+
+        if let Ok((_, Some(ref tombstone))) = join {
+            // Broadcast the tombstone so P2P/cloud sync propagates the
+            // deletion to peers. Fire-and-forget: a failed send only
+            // means no sync receiver is currently active.
+            if let Some(ref tx) = self.new_item_tx {
+                let _ = tx.send(tombstone.clone());
+            }
+        }
+        join
+    }
+
     #[tracing::instrument(skip(self), fields(method), name = "ipc_dispatch")]
     async fn dispatch(&self, line: &str) -> Response {
         let req: Request = match serde_json::from_str(line) {
@@ -2646,29 +2878,9 @@ impl IpcServer {
                 if uuid::Uuid::parse_str(&id).is_err() {
                     return Response::err(req.id, "invalid param: id must be a valid UUID");
                 }
-                let db_arc = self.db.clone();
-                let id_for_task = id.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let db = db_arc.blocking_lock();
-                    let del = delete_item(&db, &id_for_task);
-                    // Best-effort FTS cleanup; surface as warning, not failure
-                    let fts = delete_fts(&db, &id_for_task);
-                    (del, fts)
-                })
-                .await;
-                match join {
-                    Ok((Ok(_), fts_res)) => {
-                        if let Err(e) = fts_res {
-                            tracing::warn!("fts delete failed for id={id}: {e}");
-                        }
-                        Response::ok(req.id, serde_json::Value::Null)
-                    }
-                    Ok((Err(e), _)) => Response::err(req.id, e.to_string()),
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
+                match self.soft_delete_and_broadcast(&id).await {
+                    Ok(_) => Response::ok(req.id, serde_json::Value::Null),
+                    Err(e) => Response::err(req.id, e),
                 }
             }
             "count" => {
@@ -2821,29 +3033,44 @@ impl IpcServer {
                 }
             }
             "delete_all" => {
+                // C1 fix: tombstone every non-pinned, non-deleted item via
+                // soft_delete_and_broadcast so peers receive the deletion and
+                // cleared items no longer resurrect on the next sync cycle.
                 let db_arc = self.db.clone();
-                let join = tokio::task::spawn_blocking(move || {
+                let ids_result = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    // Atomically delete every row from both tables inside a
-                    // single transaction so the history is never half-cleared
-                    // and FTS never drifts from clipboard_items.
                     let conn = db.conn();
-                    let tx = conn.unchecked_transaction()?;
-                    let deleted = tx.execute("DELETE FROM clipboard_items WHERE pinned = 0", [])?;
-                    // Sync FTS: remove any rows whose parent item was deleted.
-                    // Pinned items remain in clipboard_items so their FTS rows
-                    // are kept; only orphaned FTS rows (deleted items) are removed.
-                    tx.execute(
-                        "DELETE FROM clipboard_fts WHERE rowid NOT IN (SELECT rowid FROM clipboard_items)",
-                        [],
+                    let mut stmt = conn.prepare(
+                        "SELECT id FROM clipboard_items WHERE pinned = 0 AND deleted = 0",
                     )?;
-                    tx.commit()?;
-                    Ok::<_, rusqlite::Error>(deleted)
+                    let ids: Vec<String> = stmt
+                        .query_map([], |row| row.get::<_, String>(0))?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    Ok::<_, rusqlite::Error>(ids)
                 })
                 .await;
-                match join {
-                    Ok(Ok(deleted)) => {
-                        Response::ok(req.id, serde_json::json!({"deleted": deleted}))
+
+                match ids_result {
+                    Ok(Ok(ids)) => {
+                        let count = ids.len();
+                        for id in &ids {
+                            if let Err(e) = self.soft_delete_and_broadcast(id).await {
+                                tracing::warn!("delete_all: failed to tombstone {id}: {e}");
+                            }
+                        }
+                        // Prune orphaned FTS rows that were not removed inside
+                        // soft_delete_item (belt-and-suspenders cleanup).
+                        let db_arc2 = self.db.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let db = db_arc2.blocking_lock();
+                            let _ = db.conn().execute(
+                                "DELETE FROM clipboard_fts WHERE rowid NOT IN (SELECT rowid FROM clipboard_items)",
+                                [],
+                            );
+                        })
+                        .await;
+                        Response::ok(req.id, serde_json::json!({ "deleted": count }))
                     }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
@@ -2901,11 +3128,19 @@ impl IpcServer {
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    copypaste_core::pin_item(&db, &id_for_task)
+                    copypaste_core::pin_item(&db, &id_for_task)?;
+                    // Re-read the updated row so the broadcast carries the new
+                    // pinned=true / pin_order for LWW propagation to peers.
+                    let row = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, copypaste_core::storage::items::ItemsError>(row)
                 })
                 .await;
                 match join {
-                    Ok(Ok(())) => {
+                    Ok(Ok(row_opt)) => {
+                        // Propagate pin state to peers via the sync channel.
+                        if let (Some(row), Some(ref tx)) = (row_opt, &self.new_item_tx) {
+                            let _ = tx.send(row);
+                        }
                         Response::ok(req.id, serde_json::json!({"pinned": true, "id": id}))
                     }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
@@ -2921,23 +3156,10 @@ impl IpcServer {
             // UI can toggle from a single callback. A `pinned=false` request
             // clears the pin flag (restoring normal TTL behaviour).
             "pin_item" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let pinned = match req.params.get("pinned").and_then(|v| v.as_bool()) {
                     Some(b) => b,
                     None => {
@@ -2953,14 +3175,22 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     if pinned {
-                        pin_item(&db, &id_for_task)
+                        pin_item(&db, &id_for_task)?;
                     } else {
-                        unpin_item(&db, &id_for_task)
+                        unpin_item(&db, &id_for_task)?;
                     }
+                    // Re-read the updated row so the broadcast carries the new
+                    // pinned / pin_order for LWW propagation to peers.
+                    let row = get_item_by_id(&db, &id_for_task)?;
+                    Ok::<_, copypaste_core::storage::items::ItemsError>(row)
                 })
                 .await;
                 match join {
-                    Ok(Ok(())) => {
+                    Ok(Ok(row_opt)) => {
+                        // Propagate pin-state change to peers via the sync channel.
+                        if let (Some(row), Some(ref tx)) = (row_opt, &self.new_item_tx) {
+                            let _ = tx.send(row);
+                        }
                         Response::ok(req.id, serde_json::json!({"pinned": pinned, "id": id}))
                     }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
@@ -3006,11 +3236,30 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     let id_refs: Vec<&str> = ids.iter().map(String::as_str).collect();
-                    reorder_pinned(&db, &id_refs)
+                    reorder_pinned(&db, &id_refs)?;
+                    // Re-read each reordered row so the broadcast carries the
+                    // updated pin_order for LWW convergence on peers.
+                    let mut rows: Vec<copypaste_core::ClipboardItem> =
+                        Vec::with_capacity(id_refs.len());
+                    for id in &id_refs {
+                        if let Some(row) = get_item_by_id(&db, id)? {
+                            rows.push(row);
+                        }
+                    }
+                    Ok::<_, copypaste_core::storage::items::ItemsError>(rows)
                 })
                 .await;
                 match join {
-                    Ok(Ok(_changed)) => Response::ok(req.id, serde_json::json!({"ok": true})),
+                    Ok(Ok(rows)) => {
+                        // Broadcast every reordered item so peers converge on
+                        // the new pin_order via LWW.
+                        if let Some(ref tx) = self.new_item_tx {
+                            for row in rows {
+                                let _ = tx.send(row);
+                            }
+                        }
+                        Response::ok(req.id, serde_json::json!({"ok": true}))
+                    }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -3024,51 +3273,16 @@ impl IpcServer {
             // branches on `error_code`) and returns a structured `{deleted,
             // id}` payload. FTS cleanup is best-effort (logged on failure).
             "delete_item" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
+                match self.soft_delete_and_broadcast(&id).await {
+                    Ok((changed, _)) => Response::ok(
                         req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
-                let db_arc = self.db.clone();
-                let id_for_task = id.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let db = db_arc.blocking_lock();
-                    let del = delete_item(&db, &id_for_task);
-                    let fts = delete_fts(&db, &id_for_task);
-                    (del, fts)
-                })
-                .await;
-                match join {
-                    Ok((Ok(removed), fts_res)) => {
-                        if let Err(e) = fts_res {
-                            tracing::warn!("fts delete failed for id={id}: {e}");
-                        }
-                        // Report whether a row was actually removed so the
-                        // response matches reality: `deleted: false` for an id
-                        // that did not exist, instead of always claiming `true`.
-                        Response::ok(
-                            req.id,
-                            serde_json::json!({"deleted": removed > 0, "id": id}),
-                        )
-                    }
-                    Ok((Err(e), _)) => Response::err(req.id, e.to_string()),
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
+                        serde_json::json!({"deleted": changed > 0, "id": id}),
                     ),
+                    Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
                 }
             }
             // T5.x — copy an item back to the system clipboard by id. Same
@@ -3076,23 +3290,10 @@ impl IpcServer {
             // surfaces typed `invalid_argument` / `not_found` error codes so
             // the UI can branch on `error_code` rather than parsing strings.
             "copy_item" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
@@ -3103,11 +3304,25 @@ impl IpcServer {
                     // (data-loss for power users). `get_item_by_id` is a single
                     // indexed `SELECT ... WHERE id = ?1` with no window cap.
                     let item = get_item_by_id(&db, &id_for_task)?;
-                    Ok::<_, anyhow::Error>(item)
+                    // Also fetch the short text preview while we hold the db
+                    // lock; this is used by the UI to build a rich notification.
+                    let preview: Option<String> = item.as_ref().and_then(|it| {
+                        if it.content_type == "text" && !it.is_sensitive {
+                            fetch_text_preview(&db, &it.id).ok().flatten()
+                        } else if it.content_type == "file" {
+                            it.blob_ref
+                                .as_deref()
+                                .and_then(|j| parse_file_meta(j).ok())
+                                .map(|m| format!("[file: {}]", m.filename))
+                        } else {
+                            None // image and unknown: body is set by the UI
+                        }
+                    });
+                    Ok::<_, anyhow::Error>((item, preview))
                 })
                 .await;
                 match join {
-                    Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
+                    Ok(Ok((Some(item), preview))) => match self.write_to_pasteboard(&item) {
                         Ok(()) => {
                             // C. PROMOTE-ON-COPY: bump wall_time/lamport so this
                             // item sorts to the top of history_page on the next
@@ -3145,6 +3360,10 @@ impl IpcServer {
                                 serde_json::json!({
                                     "id": item.id,
                                     "content_type": item.content_type,
+                                    // Short preview for rich notifications — text
+                                    // items get plaintext; files get "[file: name]";
+                                    // images are null (the UI uses "Image" fallback).
+                                    "preview": preview,
                                     "written": true,
                                 }),
                             )
@@ -3158,7 +3377,7 @@ impl IpcServer {
                             Response::err(req.id, format!("pasteboard write failed: {msg}"))
                         }
                     },
-                    Ok(Ok(None)) => Response::err_with_code(
+                    Ok(Ok((None, _))) => Response::err_with_code(
                         req.id,
                         ERR_CODE_NOT_FOUND,
                         format!("item not found: {id}"),
@@ -3182,23 +3401,10 @@ impl IpcServer {
             // the raw PNG bytes for the UI to render as a thumbnail without having
             // to hit the pasteboard.
             "get_item_image" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
@@ -3306,23 +3512,10 @@ impl IpcServer {
             //                          get_item_image (full-res).
             // Error: item not found, non-image content_type, parse/decode failure.
             "get_item_thumbnail" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 // Capture the local_key once before entering spawn_blocking;
@@ -3359,14 +3552,40 @@ impl IpcServer {
                         })?
                         .to_owned();
 
-                    // Resolve the thumbnail blob: use the stored one when present,
-                    // or attempt a Phase-4 lazy backfill for legacy rows with
-                    // thumb IS NULL.
-                    let thumb_blob: Vec<u8> = match item.thumb {
+                    // Resolve the thumbnail blob: use the stored one when present
+                    // AND it conforms to the current THUMBNAIL_MAX_DIM cap.
+                    // Regenerate (Phase-4 backfill path) when either:
+                    //   * thumb IS NULL (legacy row, never had a thumbnail), or
+                    //   * the stored thumbnail was encoded under an older, larger
+                    //     cap (e.g. 680 px) and its recorded dims exceed the new
+                    //     cap — otherwise the UI would decode an oversized bitmap
+                    //     (HB-10, 350 MB image-memory regression).
+                    let stored_thumb: Option<Vec<u8>> = match item.thumb {
+                        Some(b) => {
+                            let (tw, th) = parse_image_thumb_dims(&meta_json);
+                            if copypaste_core::thumb_dims_exceed_cap(tw, th) {
+                                tracing::debug!(
+                                    item_id = %id_for_task,
+                                    thumb_w = tw,
+                                    thumb_h = th,
+                                    "stored thumbnail exceeds current cap; regenerating"
+                                );
+                                None // fall through to regeneration below
+                            } else {
+                                Some(b)
+                            }
+                        }
+                        None => None,
+                    };
+                    let thumb_blob: Vec<u8> = match stored_thumb {
                         Some(b) => b,
                         None => {
                             // Phase 4 lazy backfill: generate + persist a
-                            // thumbnail on first display.  Returns both the
+                            // thumbnail on first display (NULL thumb) OR
+                            // regenerate an oversized one at the current cap.
+                            // `set_thumb` overwrites any existing row, so an
+                            // oversized stored thumbnail is replaced in place.
+                            // Returns both the
                             // encrypted blob and the updated meta_json (which
                             // now includes thumb_file_id / thumb_w / thumb_h)
                             // so the subsequent decode path reads the right AAD.
@@ -3470,23 +3689,10 @@ impl IpcServer {
             // and returns the raw bytes as base64 plus the filename and MIME type
             // parsed from the `blob_ref` meta JSON.
             "get_item_file" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
+                let id = match extract_uuid_param(&req.params, req.id.clone()) {
+                    Ok(id) => id,
+                    Err(resp) => return resp,
                 };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
                 let join = tokio::task::spawn_blocking(move || {
@@ -3692,6 +3898,22 @@ impl IpcServer {
                                     (preview, vec![])
                                 };
 
+                            // Compute a stable content-kind label for the UI chip.
+                            // For text items we classify the preview string (already
+                            // the decrypted plaintext prefix — no extra decrypt needed).
+                            // Sensitive text items use their redacted placeholder, so
+                            // the classify call sees "" and returns "TEXT" (safe; the
+                            // label never leaks the secret content).
+                            // Image and file items get a fixed label.
+                            let kind: &str = if item.content_type == "text" {
+                                copypaste_core::text_kind::classify_text(&preview).label()
+                            } else if item.content_type == "file" {
+                                "FILE"
+                            } else {
+                                // "image" (legacy) or "image/*" MIME subtypes
+                                "IMAGE"
+                            };
+
                             serde_json::json!({
                                 "id": item.id,
                                 "content_type": item.content_type,
@@ -3707,16 +3929,37 @@ impl IpcServer {
                                 // therefore won't be synced. This is the arm the macOS
                                 // UI (HistoryWindow) actually renders from.
                                 "too_large_to_sync": too_large_to_sync(item),
+                                // Stable device UUID of the machine that originally
+                                // captured this item. Empty string for pre-v3 rows
+                                // that were never backfilled. The UI uses this with
+                                // `own_device_id` (envelope field) to show "This device"
+                                // vs. items synced from a peer.
+                                "origin_device_id": item.origin_device_id,
+                                // Refined content-kind label derived from the core
+                                // text-kind classifier (copypaste_core::text_kind).
+                                // Stable set: TEXT/URL/EMAIL/PHONE/COLOR/JSON/CODE/
+                                // NUMBER/PATH (text items) | IMAGE | FILE.
+                                // Older daemons omit this field; the UI falls back to
+                                // a content_type-derived label for back-compat.
+                                "kind": kind,
                             })
                         })
                         .collect();
                     Ok::<_, anyhow::Error>((json_items, total))
                 })
                 .await;
+                // Snapshot the own device id outside the blocking task (it lives on self).
+                let own_device_id = self.local_device_id.clone().unwrap_or_default();
                 match join {
                     Ok(Ok((json_items, total))) => Response::ok(
                         req.id,
-                        serde_json::json!({"items": json_items, "total": total}),
+                        serde_json::json!({
+                            "items": json_items,
+                            "total": total,
+                            // This device's stable UUID — lets the UI distinguish
+                            // locally-captured items from items synced from peers.
+                            "own_device_id": own_device_id,
+                        }),
                     ),
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
@@ -4461,29 +4704,6 @@ impl IpcServer {
 
             "list_peers" => match load_peers() {
                 Ok(peers) => {
-                    // Snapshot the live mTLS allowlist fingerprints (canonical
-                    // colon-free lowercase hex) so we can check them O(1) per peer.
-                    // TODO: add live-mDNS signal once DiscoveryService exposes a
-                    // snapshot of known fingerprints (currently keyed by instance
-                    // fullname, not fingerprint).
-                    let live_fps: std::collections::HashSet<String> =
-                        if let Some(ref p2p) = self.p2p_peers {
-                            // PairedPeers::is_known is per-fingerprint; collect
-                            // active entries by snapping the peers from peers.json
-                            // and testing each against the allowlist.
-                            peers
-                                .iter()
-                                .filter_map(|p| {
-                                    p.get("fingerprint")
-                                        .and_then(|v| v.as_str())
-                                        .map(canonical_fingerprint)
-                                })
-                                .filter(|cfp| p2p.is_known(cfp))
-                                .collect()
-                        } else {
-                            std::collections::HashSet::new()
-                        };
-
                     let now_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         // SAFETY: now() is always after UNIX_EPOCH on any
@@ -4491,15 +4711,43 @@ impl IpcServer {
                         .unwrap_or_default()
                         .as_secs() as i64;
 
+                    // SINGLE SOURCE OF TRUTH for online status: snapshot the
+                    // live P2P peer-sinks map (set of fingerprints with a
+                    // non-closed mpsc sender = currently-connected peers).
+                    // Falls back to `last_sync_at` recency only when P2P is
+                    // disabled (inner slot is None).
+                    //
+                    // The outer std::sync::Mutex is locked briefly to clone
+                    // the inner Arc (no .await while holding it). The inner
+                    // tokio Mutex is then locked with .await so we don't block
+                    // the executor.
+                    let live_fps: Option<std::collections::HashSet<String>> = {
+                        // Clone the Arc while holding the std::sync lock, then
+                        // drop the lock before awaiting.
+                        let maybe_sinks_arc: Option<crate::p2p::LivePeerSinks> = {
+                            let slot = self
+                                .live_peer_sinks
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner());
+                            slot.as_ref().map(Arc::clone)
+                        };
+                        if let Some(sinks_arc) = maybe_sinks_arc {
+                            let sinks = sinks_arc.lock().await;
+                            Some(
+                                sinks
+                                    .iter()
+                                    .filter(|(_, tx)| !tx.is_closed())
+                                    .map(|(fp, _)| fp.clone())
+                                    .collect(),
+                            )
+                        } else {
+                            None
+                        }
+                    };
+
                     let enriched: Vec<serde_json::Value> = peers
                         .into_iter()
                         .map(|mut peer| {
-                            let fp_canonical = peer
-                                .get("fingerprint")
-                                .and_then(|v| v.as_str())
-                                .map(canonical_fingerprint)
-                                .unwrap_or_default();
-
                             // last_sync_at from the record (i64 or absent).
                             let last_sync_at: Option<i64> =
                                 peer.get("last_sync_at").and_then(|v| v.as_i64());
@@ -4511,15 +4759,24 @@ impl IpcServer {
                                 None => -1,
                             };
 
-                            // online = live mTLS session  OR
-                            //          last_sync_at within ONLINE_THRESHOLD_SECS
-                            // TODO: also wire live-mDNS signal when
-                            // DiscoveryService gains a fingerprint-keyed index.
-                            let mtls_online = live_fps.contains(&fp_canonical);
-                            let recency_online = matches!(last_sync_at,
-                                Some(t) if now_secs.saturating_sub(t) <= ONLINE_THRESHOLD_SECS
-                            );
-                            let online = mtls_online || recency_online;
+                            // Compute online from the authoritative source:
+                            // 1. If live_fps is available (P2P running): peer is
+                            //    online iff its canonical fingerprint has a live
+                            //    non-closed sink in the connection table.
+                            // 2. Fallback (P2P disabled): recent last_sync_at
+                            //    within ONLINE_THRESHOLD_SECS.
+                            let peer_fp_canonical = peer
+                                .get("fingerprint")
+                                .and_then(|v| v.as_str())
+                                .map(canonical_fingerprint)
+                                .unwrap_or_default();
+
+                            let online = match &live_fps {
+                                Some(fps) => fps.contains(&peer_fp_canonical),
+                                None => matches!(last_sync_at,
+                                    Some(t) if now_secs.saturating_sub(t) <= ONLINE_THRESHOLD_SECS
+                                ),
+                            };
 
                             if let Some(obj) = peer.as_object_mut() {
                                 obj.insert("online".to_string(), serde_json::Value::Bool(online));
@@ -4550,17 +4807,14 @@ impl IpcServer {
                     None => return Response::err(req.id, "discovery not available (P2P disabled)"),
                 };
 
-                // Snapshot known-peer fingerprints from peers.json (canonical
-                // colon-free lowercase hex) for O(1) membership test per peer.
-                let paired_fps: std::collections::HashSet<String> = match load_peers() {
-                    Ok(stored) => stored
-                        .into_iter()
-                        .filter_map(|p| {
-                            p.get("fingerprint")
-                                .and_then(|v| v.as_str())
-                                .map(canonical_fingerprint)
-                        })
-                        .collect(),
+                // HB-4: the mDNS `device_id` is a UUID, NOT a cert fingerprint, so
+                // a fingerprint-compare against peers.json never matched and paired
+                // devices kept showing "Pair". Instead snapshot the set of IP hosts
+                // we have paired with (`local_ip` + the host part of `address`) and
+                // mark a discovered peer `paired` when ANY of its resolved
+                // `ip_addrs` is in that set.
+                let paired_ips: std::collections::HashSet<String> = match load_peers() {
+                    Ok(stored) => paired_ip_hosts(&stored),
                     // Non-fatal: treat as empty — we just won't mark any peer paired.
                     Err(e) => {
                         tracing::warn!("list_discovered: failed to load peers.json: {e}");
@@ -4572,9 +4826,9 @@ impl IpcServer {
                     .peers()
                     .into_iter()
                     .map(|peer| {
-                        let paired = paired_fps.contains(&canonical_fingerprint(&peer.device_id));
                         let ip_strs: Vec<String> =
                             peer.ip_addrs.iter().map(|a| a.to_string()).collect();
+                        let paired = ip_strs.iter().any(|ip| paired_ips.contains(ip));
                         serde_json::json!({
                             "device_id":   peer.device_id,
                             "device_name": peer.device_name,
@@ -4582,6 +4836,65 @@ impl IpcServer {
                             "port":        peer.port,
                             // null when peer is v1 (no bport TXT key); UI
                             // disables "Pair" in that case.
+                            "bport":       peer.bport,
+                            "paired":      paired,
+                        })
+                    })
+                    .collect();
+
+                Response::ok(req.id, serde_json::json!({ "devices": devices }))
+            }
+
+            // HB-9: manual rescan. Restart the mDNS-SD browse in place
+            // (`DiscoveryService::start` tears down the prior browse task/socket
+            // first, then re-advertises + re-browses) and return the fresh peer
+            // snapshot. Used by the UI "Refresh" button next to the discovered
+            // list when passive polling hasn't surfaced a peer yet.
+            //
+            // Response: { devices: [...] } — same shape as `list_discovered`.
+            "rescan_discovered" => {
+                let disc = match self.discovery.as_ref() {
+                    Some(d) => d,
+                    None => return Response::err(req.id, "discovery not available (P2P disabled)"),
+                };
+
+                // Restart-in-place re-browse. `start()` returns a JoinHandle for
+                // the new browse loop; detach it onto the runtime so the rebrowse
+                // keeps running after this request returns (the handle would
+                // otherwise be dropped, cancelling the task). `start()` already
+                // shuts down any prior task internally, so this does not leak.
+                match disc.start().await {
+                    Ok(handle) => {
+                        tokio::spawn(async move {
+                            let _ = handle.await;
+                        });
+                    }
+                    Err(e) => {
+                        return Response::err(req.id, format!("rescan failed to start: {e}"));
+                    }
+                }
+
+                // HB-4: IP-correlate already-paired peers (see `list_discovered`).
+                let paired_ips: std::collections::HashSet<String> = match load_peers() {
+                    Ok(stored) => paired_ip_hosts(&stored),
+                    Err(e) => {
+                        tracing::warn!("rescan_discovered: failed to load peers.json: {e}");
+                        std::collections::HashSet::new()
+                    }
+                };
+
+                let devices: Vec<serde_json::Value> = disc
+                    .peers()
+                    .into_iter()
+                    .map(|peer| {
+                        let ip_strs: Vec<String> =
+                            peer.ip_addrs.iter().map(|a| a.to_string()).collect();
+                        let paired = ip_strs.iter().any(|ip| paired_ips.contains(ip));
+                        serde_json::json!({
+                            "device_id":   peer.device_id,
+                            "device_name": peer.device_name,
+                            "ip_addrs":    ip_strs,
+                            "port":        peer.port,
                             "bport":       peer.bport,
                             "paired":      paired,
                         })
@@ -4614,6 +4927,15 @@ impl IpcServer {
 
             // LAN/SAS Phase 2: poll the pairing state machine. Returns the
             // current state plus the SAS + role when awaiting confirmation.
+            // Also surfaces whatever peer metadata is known at this point:
+            //   • peer_device_name  — mDNS advertised name (initiator path)
+            //   • peer_ip_addrs     — resolved IP addresses (initiator path)
+            //   • peer_fingerprint  — cert fingerprint = mDNS device_id (initiator path)
+            // These are all Optional — absent on the responder path (inbound
+            // connection, no prior mDNS resolution) and gracefully omitted by
+            // the UI. Model/OS/version are NOT surfaced here: the PAKE metadata
+            // extension happens AFTER the SAS confirm step; they appear in the
+            // final `pair_with_discovered` response once both sides accept.
             "pair_get_sas" => {
                 let state = self.pairing.snapshot();
                 let mut body = serde_json::json!({ "state": state.as_str() });
@@ -4622,6 +4944,22 @@ impl IpcServer {
                 }
                 if let Some(role) = state.role() {
                     body["role"] = serde_json::Value::String(role.as_str().to_string());
+                }
+                if let Some(snap) = state.peer_snapshot() {
+                    if let Some(ref name) = snap.device_name {
+                        body["peer_device_name"] = serde_json::Value::String(name.clone());
+                    }
+                    if !snap.ip_addrs.is_empty() {
+                        body["peer_ip_addrs"] = serde_json::Value::Array(
+                            snap.ip_addrs
+                                .iter()
+                                .map(|a| serde_json::Value::String(a.clone()))
+                                .collect(),
+                        );
+                    }
+                    if let Some(ref fp) = snap.fingerprint {
+                        body["peer_fingerprint"] = serde_json::Value::String(fp.clone());
+                    }
                 }
                 Response::ok(req.id, body)
             }
@@ -4741,10 +5079,27 @@ impl IpcServer {
                         let removed = peers.len() < before_len;
 
                         match save_peers(&peers) {
-                            Ok(_) => Response::ok(
-                                req.id,
-                                serde_json::json!({ "ok": true, "removed": removed }),
-                            ),
+                            Ok(_) => {
+                                // AB-9: unpair must also evict the live in-memory
+                                // mTLS allowlist (mirrors what revoke_peer does),
+                                // otherwise an existing mTLS session survives until
+                                // the next daemon restart. Normalise to canonical
+                                // lowercase hex (strip colons) to match
+                                // PairedPeers' key format.
+                                if let Some(ref peers) = self.p2p_peers {
+                                    peers.remove(&canonical_fingerprint(&fingerprint));
+                                }
+                                // Mutual unpair: best-effort signal the peer if
+                                // it is currently connected over P2P.
+                                send_unpair_signal_if_connected(
+                                    &self.live_peer_sinks,
+                                    &canonical_fingerprint(&fingerprint),
+                                );
+                                Response::ok(
+                                    req.id,
+                                    serde_json::json!({ "ok": true, "removed": removed }),
+                                )
+                            }
                             Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
                         }
                     }
@@ -4838,6 +5193,12 @@ impl IpcServer {
                         if let Some(ref peers) = self.p2p_peers {
                             peers.remove(&canonical_fingerprint(&fingerprint));
                         }
+                        // Mutual unpair: best-effort signal the peer if it is
+                        // currently connected over P2P.
+                        send_unpair_signal_if_connected(
+                            &self.live_peer_sinks,
+                            &canonical_fingerprint(&fingerprint),
+                        );
                         Response::ok(
                             req.id,
                             serde_json::json!({
@@ -4939,6 +5300,14 @@ impl IpcServer {
                     for (fp, _) in &captured {
                         peers.remove(&canonical_fingerprint(fp));
                     }
+                }
+
+                // Mutual unpair: signal every currently-connected peer.
+                for (fp, _) in &captured {
+                    send_unpair_signal_if_connected(
+                        &self.live_peer_sinks,
+                        &canonical_fingerprint(fp),
+                    );
                 }
 
                 Response::ok(
@@ -5550,6 +5919,35 @@ impl IpcServer {
                     String::new()
                 };
 
+                // H4: embed relay + Supabase config into the QR as the optional
+                // 6th provisioning field so the scanning device (Android) can
+                // configure cloud/relay sync automatically at scan time — before
+                // the P2P bootstrap tunnel is established (covers off-LAN case
+                // where the P2P handshake may not complete).
+                //
+                // These are all non-secret values: relay_url is a plain HTTP
+                // base URL; supabase_url + supabase_anon_key are the publishable
+                // Supabase connection params, intentionally public per Supabase
+                // documentation. No long-term secrets are embedded in the QR.
+                let qr_provisioning = {
+                    let app_cfg = read_config();
+                    let relay_url = app_cfg.relay_url.clone();
+                    let supabase_url = std::env::var("SUPABASE_URL").ok().or(app_cfg.supabase_url);
+                    let supabase_anon_key = std::env::var("SUPABASE_ANON_KEY")
+                        .ok()
+                        .or(app_cfg.supabase_anon_key);
+                    let prov = copypaste_core::QrProvisioning {
+                        relay_url,
+                        supabase_url,
+                        supabase_anon_key,
+                    };
+                    if prov.is_empty() {
+                        None
+                    } else {
+                        Some(prov)
+                    }
+                };
+
                 // Build the payload directly from the pre-generated token so the
                 // QR, the stored token, and the bootstrap password all agree.
                 let payload = copypaste_core::PairingPayload {
@@ -5558,6 +5956,7 @@ impl IpcServer {
                     device_id,
                     device_name,
                     addr_hint,
+                    provisioning: qr_provisioning,
                 };
 
                 // Wrap the bare CPPAIR1 payload in the cppair://pair?p= deep-link
@@ -6209,6 +6608,105 @@ impl IpcServer {
                 }
             }
 
+            // ── File ingest (desktop UI file picker / drag-drop) ───────────────────
+            // Takes { filename, mime, data_b64 } where data_b64 is standard
+            // base64. Encrypts and stores the file exactly as handle_file does
+            // for pasteboard-captured files. Returns { id } on success.
+            "add_file_item" => {
+                let filename = match req.params.get("filename").and_then(|v| v.as_str()) {
+                    Some(s) if !s.is_empty() => s.to_string(),
+                    _ => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing or empty param: filename",
+                        )
+                    }
+                };
+                let mime = req
+                    .params
+                    .get("mime")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("application/octet-stream")
+                    .to_string();
+                let data_b64 = match req.params.get("data_b64").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: data_b64",
+                        )
+                    }
+                };
+
+                use base64::Engine as _;
+                let raw_bytes = match base64::engine::general_purpose::STANDARD.decode(&data_b64) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            format!("data_b64 decode error: {e}"),
+                        )
+                    }
+                };
+
+                let db_arc = self.db.clone();
+                let local_key: [u8; 32] = **self.local_key;
+                let join = tokio::task::spawn_blocking(move || {
+                    // Read config on blocking thread — same pattern as set_config.
+                    let config = read_config();
+                    // Content-hash file_id: deterministic so identical files dedup
+                    // across captures (mirrors handle_file in daemon.rs).
+                    let file_id = crate::clipboard::image_content_hash(&raw_bytes);
+                    let max_file_bytes = config
+                        .max_file_size_bytes
+                        .and_then(|v| usize::try_from(v).ok())
+                        .unwrap_or(usize::MAX);
+
+                    let (meta, chunks) = copypaste_core::encode_file(
+                        &raw_bytes,
+                        &filename,
+                        &mime,
+                        &local_key,
+                        &file_id,
+                        max_file_bytes,
+                    )
+                    .map_err(|e| anyhow::anyhow!("encode_file failed: {e}"))?;
+
+                    let blob = copypaste_core::chunks_to_blob(&chunks)
+                        .map_err(|e| anyhow::anyhow!("chunks_to_blob failed: {e}"))?;
+
+                    let meta_json = crate::clipboard::build_file_meta_json(&meta);
+                    let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
+                    // Stable cross-device identity: derive item_id from the
+                    // content-hash file_id (mirrors handle_file in daemon.rs).
+                    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+
+                    let db_guard = db_arc.blocking_lock();
+                    let stored_id = copypaste_core::insert_item_with_fts(&db_guard, &item, "")
+                        .map_err(|e| anyhow::anyhow!("insert_item_with_fts failed: {e}"))?;
+
+                    Ok::<String, anyhow::Error>(stored_id)
+                })
+                .await;
+
+                match join {
+                    Ok(Ok(id)) => Response::ok(req.id, serde_json::json!({ "id": id })),
+                    Ok(Err(e)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("add_file_item failed: {e}"),
+                    ),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
+
             other => Response::err(req.id, format!("unknown method: {other}")),
         }
     }
@@ -6839,6 +7337,31 @@ pub(crate) fn parse_image_file_id(meta_json: &str) -> Result<[u8; 16], String> {
 /// `get_item_thumbnail` IPC verb.
 pub(crate) fn parse_image_thumb_file_id(meta_json: &str) -> Result<[u8; 16], String> {
     parse_meta_id_array(meta_json, "thumb_file_id")
+}
+
+/// Parse the recorded `(thumb_w, thumb_h)` pixel dimensions out of an image
+/// `blob_ref` meta JSON. Returns `(0, 0)` when either field is absent — legacy
+/// rows written before the thumb-dim fields existed have no dims to compare,
+/// so the caller treats `(0, 0)` as "unknown / do not regenerate on size".
+///
+/// Used to decide whether a *stored* thumbnail was encoded under an older,
+/// larger [`copypaste_core::THUMBNAIL_MAX_DIM`] cap and must be regenerated
+/// (HB-10). See [`copypaste_core::thumb_dims_exceed_cap`].
+fn parse_image_thumb_dims(meta_json: &str) -> (u32, u32) {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(meta_json) else {
+        return (0, 0);
+    };
+    let w = v
+        .get("thumb_w")
+        .and_then(|x| x.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(0);
+    let h = v
+        .get("thumb_h")
+        .and_then(|x| x.as_u64())
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(0);
+    (w, h)
 }
 
 /// Parse a named 16-byte array (e.g. `"file_id"` / `"thumb_file_id"`) out of an
@@ -9620,13 +10143,13 @@ mod tests {
     /// stuck rate-limited). Before the fix the second `try_begin` returned false.
     #[tokio::test]
     async fn pair_with_discovered_can_begin_twice_sequentially() {
-        use crate::pairing_sm::{PairingRole, PairingState};
+        use crate::pairing_sm::{PairingRole, PairingState, PeerSnapshot};
         let server = bare_server();
         let pairing = server.pairing_coordinator();
 
         // --- First pairing: success arm. ---
         assert!(
-            pairing.try_begin(PairingRole::Initiator),
+            pairing.try_begin(PairingRole::Initiator, PeerSnapshot::default()),
             "first pairing must begin from Idle"
         );
         // Handler records the terminal outcome, then resets (the fix).
@@ -9639,7 +10162,7 @@ mod tests {
 
         // --- Second pairing: must NOT be refused as rate-limited. ---
         assert!(
-            pairing.try_begin(PairingRole::Initiator),
+            pairing.try_begin(PairingRole::Initiator, PeerSnapshot::default()),
             "BUG A1: a second pair_with_discovered must be able to begin; \
              without the reset the SM stays terminal and try_begin returns false"
         );
@@ -9653,7 +10176,7 @@ mod tests {
 
         // --- Third pairing proves the failure arm reset works too. ---
         assert!(
-            pairing.try_begin(PairingRole::Initiator),
+            pairing.try_begin(PairingRole::Initiator, PeerSnapshot::default()),
             "a pairing after a failed one must also begin"
         );
     }
@@ -10792,7 +11315,7 @@ mod tests {
         );
         let key = [0u8; 32];
 
-        // A 1000×1000 image: larger than THUMBNAIL_MAX_DIM (680) so the
+        // A 1000×1000 image: larger than THUMBNAIL_MAX_DIM (192) so the
         // thumbnail is genuinely downscaled and its PNG is smaller than the
         // full-res PNG. A per-pixel gradient keeps PNG compression honest (a
         // flat color would compress so well the size gap could vanish).
@@ -11159,8 +11682,8 @@ mod tests {
     }
 
     /// `list_peers` must mark a peer `online = true` when the peer's fingerprint
-    /// is in the live mTLS allowlist (PairedPeers), even if `last_sync_at` is
-    /// absent or stale.
+    /// is present with a live (non-closed) sender in the live P2P peer-sinks
+    /// map, even if `last_sync_at` is absent or stale.
     #[tokio::test]
     async fn list_peers_online_true_from_live_mtls_allowlist() {
         let dir = tempdir().unwrap();
@@ -11174,19 +11697,25 @@ mod tests {
 
         // Peer fingerprint in colon-hex (as stored in peers.json).
         let fp_display = "a1:b2:c3:d4:e5:f6:07:18";
-        // Canonical (colon-free, lowercase) form that PairedPeers uses.
+        // Canonical (colon-free, lowercase) form used as the sinks-map key.
         let fp_canonical = canonical_fingerprint(fp_display);
 
         let peers_json = cfg_home.join("peers.json");
-        // Peer has no last_sync_at — only the live mTLS allowlist signals online.
+        // Peer has no last_sync_at — only the live sinks map signals online.
         let peers = serde_json::json!([
             {"name": "Desktop", "fingerprint": fp_display, "added_at": 1}
         ]);
         std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
 
-        // Build a PairedPeers with the peer in the active allowlist.
-        let live_peers = copypaste_p2p::transport::PairedPeers::new();
-        live_peers.add(&fp_canonical, "Desktop");
+        // Build a live sinks map with a non-closed sender for the peer.
+        // The receiver is kept alive for the duration of the test so the
+        // sender's `is_closed()` returns false (the channel is open).
+        let (peer_tx, _peer_rx) =
+            tokio::sync::mpsc::channel::<copypaste_sync::protocol::PeerFrame>(1);
+        let sinks_map: crate::p2p::LivePeerSinks =
+            Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::from([
+                (fp_canonical.clone(), peer_tx),
+            ])));
 
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
         let cert = copypaste_p2p::cert::SelfSignedCert::generate("mtls-test").unwrap();
@@ -11196,8 +11725,15 @@ mod tests {
             Arc::new(zeroize::Zeroizing::new([0u8; 32])),
             Arc::new([0u8; 32]),
         )
-        .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()))
-        .with_p2p_peers(live_peers);
+        .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()));
+
+        // Populate the live-sinks slot (simulates what daemon.rs does after
+        // start_p2p returns).
+        {
+            let slot = server.live_peer_sinks_slot();
+            let mut guard = slot.lock().unwrap();
+            *guard = Some(Arc::clone(&sinks_map));
+        }
 
         let path = sock.clone();
         tokio::spawn(async move {
@@ -11214,8 +11750,11 @@ mod tests {
         assert_eq!(
             peer["online"].as_bool(),
             Some(true),
-            "peer in live mTLS allowlist must be online even without last_sync_at: {peer}"
+            "peer in live sinks map must be online even without last_sync_at: {peer}"
         );
+        // Ensure the receiver stays alive until after the assertion so the
+        // sender is not marked closed prematurely.
+        drop(_peer_rx);
     }
 
     /// `persist_paired_peer` must populate the `name` field from `PeerMeta.device_name`
@@ -11245,7 +11784,7 @@ mod tests {
         let session_key = copypaste_p2p::pake::SessionKey([0u8; 32]);
         let fp = "b3:c4:d5:e6:f7:08:19:2a";
 
-        IpcServer::persist_paired_peer(fp, "127.0.0.1:5001", &session_key, &peer_meta);
+        IpcServer::persist_paired_peer(fp, "127.0.0.1:5001", &session_key, &peer_meta, None);
 
         // Read back the written peers.json and check name.
         let peers_path = peers_file_path();

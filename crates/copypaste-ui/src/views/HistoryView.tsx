@@ -1,17 +1,23 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
-  formatWallTime,
+  ipcErrorMessage,
   IpcError,
+  isImageType,
+  pasteAsPlainText,
   playCopySound,
   resetDatabase,
   showCopyNotification,
   sourceAppLabel,
   type HistoryEntry,
+  type HistoryPage,
 } from "../lib/ipc";
 import { applySpanMasking } from "../lib/masking";
+import { formatRelativeTime } from "../lib/time";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
+import { EmptyState } from "../components/EmptyState";
 import { useUI } from "../store";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
@@ -82,15 +88,6 @@ function parseFilename(preview: string): string {
   return m ? m[1].trim() : preview || "file";
 }
 
-function relativeTime(ms: number): string {
-  if (ms <= 0) return "—";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-  return formatWallTime(ms);
-}
 
 // ---------------------------------------------------------------------------
 // Content-type icon (colored SVG glyphs)
@@ -206,6 +203,58 @@ function ContentIcon({ type }: { type: string }) {
 }
 
 // ---------------------------------------------------------------------------
+// KindChip — full-word type chip powered by the daemon's text-kind classifier
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive a fallback kind label from content_type when the daemon does not
+ * emit `kind` (older daemon builds). Mirrors the daemon's fixed labels so
+ * the UI is consistent regardless of daemon version.
+ */
+function kindFallback(contentType: string): string {
+  if (contentType === "image" || contentType.startsWith("image/")) return "IMAGE";
+  if (contentType === "file") return "FILE";
+  return "TEXT"; // text or unknown → "TEXT"
+}
+
+/**
+ * Full-word type chip: shows the daemon-computed kind label (e.g. "URL",
+ * "EMAIL", "CODE") or falls back to a content_type-derived label for older
+ * daemon builds that do not emit the `kind` field.
+ *
+ * Replaces the single-letter "T" glyph for text items; image and file items
+ * keep their ContentIcon glyph and do NOT render a KindChip (the icon is
+ * already self-explanatory).
+ */
+function KindChip({ kind, contentType }: { kind: string | undefined; contentType: string }) {
+  const label = kind ?? kindFallback(contentType);
+  // Color the chip based on the kind — each maps to an existing IDE token or
+  // a fixed hex that matches the ContentIcon palette for visual consistency.
+  const colorClass =
+    label === "URL"     ? "text-[#56b6c2] border-[#56b6c2]/40 bg-[#56b6c2]/8"
+    : label === "EMAIL"   ? "text-[#98c379] border-[#98c379]/40 bg-[#98c379]/8"
+    : label === "PHONE"   ? "text-[#98c379] border-[#98c379]/40 bg-[#98c379]/8"
+    : label === "COLOR"   ? "text-[#e5c07b] border-[#e5c07b]/40 bg-[#e5c07b]/8"
+    : label === "JSON"    ? "text-[#e06c75] border-[#e06c75]/40 bg-[#e06c75]/8"
+    : label === "CODE"    ? "text-[#c678dd] border-[#c678dd]/40 bg-[#c678dd]/8"
+    : label === "NUMBER"  ? "text-[#d19a66] border-[#d19a66]/40 bg-[#d19a66]/8"
+    : label === "PATH"    ? "text-[#e5c07b] border-[#e5c07b]/40 bg-[#e5c07b]/8"
+    : /* TEXT / fallback */ "text-ide-accent border-ide-accent/40 bg-ide-accent/8";
+  return (
+    <span
+      className={[
+        "flex shrink-0 items-center rounded border px-1 py-px",
+        "text-[9px] font-semibold leading-none tracking-wide uppercase",
+        colorClass,
+      ].join(" ")}
+      aria-label={`Type: ${label}`}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Pin indicator (filled amber pin)
 // ---------------------------------------------------------------------------
 
@@ -253,6 +302,49 @@ function SyncBlockedIndicator() {
 }
 
 // ---------------------------------------------------------------------------
+// Origin-device badge — shown on each row indicating which device captured it
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a compact label for an origin device ID.
+ * - Empty / unknown → null (badge not shown)
+ * - Matches own device → "This device"
+ * - Otherwise → first 8 chars of UUID (enough to distinguish devices)
+ */
+function deviceLabel(originId: string | undefined, ownId: string): string | null {
+  if (!originId) return null;
+  if (ownId && originId === ownId) return "This device";
+  if (originId === "") return null;
+  // Compact: first 8 chars of UUID is visually enough for disambiguation
+  return originId.slice(0, 8);
+}
+
+function DeviceBadge({
+  originId,
+  ownId,
+}: {
+  originId: string | undefined;
+  ownId: string;
+}) {
+  const label = deviceLabel(originId, ownId);
+  if (!label) return null;
+  const isOwn = label === "This device";
+  return (
+    <span
+      className={[
+        "flex shrink-0 items-center text-[10px] px-1 py-0.5 rounded border leading-none",
+        isOwn
+          ? "border-ide-accent/40 bg-ide-accent/10 text-ide-accent"
+          : "border-ide-divider/60 bg-ide-elevated/50 text-ide-faint",
+      ].join(" ")}
+      title={originId}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Row height model (shared by the row and the virtualizer)
 // ---------------------------------------------------------------------------
 
@@ -272,8 +364,7 @@ export function rowHeightFor(
   previewSize: number,
   imageMaxHeight: number
 ): number {
-  const isImage =
-    entry.content_type === "image" || entry.content_type.startsWith("image/");
+  const isImage = isImageType(entry.content_type);
   // File rows get a fixed height that fits the FileChip (icon + filename + buttons).
   const isFile = entry.content_type === "file";
   if (isImage) return Math.max(imageMaxHeight + 10, 34);
@@ -351,6 +442,8 @@ interface RowProps {
   previewSize: number;
   imageMaxHeight: number;
   maskSensitive: boolean;
+  /** Own device UUID from the HistoryPage envelope — used for device badge. */
+  ownDeviceId: string;
   onSelect: () => void;
   onToggleMultiSelect: (e: React.MouseEvent) => void;
   onCopy: () => void;
@@ -380,6 +473,7 @@ function HistoryRow({
   previewSize: _previewSize,
   imageMaxHeight,
   maskSensitive,
+  ownDeviceId,
   onSelect,
   onToggleMultiSelect,
   onCopy,
@@ -390,7 +484,7 @@ function HistoryRow({
   dragHandleProps,
 }: RowProps) {
   // Bare "image" content_type (legacy) or MIME-typed "image/*" future rows.
-  const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
+  const isImage = isImageType(entry.content_type);
   const isFile = entry.content_type === "file";
 
   let preview: string;
@@ -418,10 +512,16 @@ function HistoryRow({
     }
   };
 
+  // Build a concise screen-reader label: type + first 80 chars of preview.
+  const kindLabel = isImage ? "image" : isFile ? "file" : entry.content_type;
+  const ariaRowLabel = `${kindLabel}: ${preview.slice(0, 80)}`;
+
   return (
     <div
+      id={`clip-${entry.id}`}
       role="option"
       aria-selected={multiSelected || selected}
+      aria-label={ariaRowLabel}
       draggable={dragHandleProps !== undefined}
       className={[
         "group relative flex cursor-pointer select-none items-center gap-2 px-3 py-1.5",
@@ -508,10 +608,17 @@ function HistoryRow({
         </span>
       )}
 
-      {/* Type glyph */}
-      <span className="flex w-4 shrink-0 items-center justify-center">
-        <ContentIcon type={isImage ? "image" : isFile ? "file" : entry.content_type} />
-      </span>
+      {/* Type chip / glyph: image + file use their ContentIcon (visually distinct);
+          text items use a full-word KindChip powered by the daemon's classifier. */}
+      {isImage || isFile ? (
+        <span className="flex w-4 shrink-0 items-center justify-center">
+          <ContentIcon type={isImage ? "image" : "file"} />
+        </span>
+      ) : (
+        <span className="flex shrink-0 items-center">
+          <KindChip kind={entry.kind} contentType={entry.content_type} />
+        </span>
+      )}
 
       {isImage ? (
         // M1: Maccy parity — image rows show ONLY the thumbnail, no text title.
@@ -550,14 +657,17 @@ function HistoryRow({
         </span>
       )}
 
-      {/* Right-side slot: source-app chip + timestamp (always visible) + icon action buttons (on hover).
-          Both live in the same fixed-width flex container so showing/hiding the
+      {/* Right-side slot: device badge + source-app chip + timestamp (always visible) + icon action buttons (on hover).
+          All live in the same fixed-width flex container so showing/hiding the
           buttons never shifts the layout — the slot width is constant. */}
       <div
         className="flex shrink-0 items-center justify-end gap-1"
         style={{ minWidth: "4.5rem" }}
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Origin-device badge: "This device" or compact UUID prefix */}
+        <DeviceBadge originId={entry.origin_device_id} ownId={ownDeviceId} />
+
         {/* Source-app icon + label chip; only rendered when present */}
         {entry.app_bundle_id && (() => {
           const appLabel = sourceAppLabel(entry.app_bundle_id);
@@ -573,7 +683,7 @@ function HistoryRow({
         })()}
         {/* Timestamp — always shown; sits before the buttons */}
         <span className="text-[11px] text-ide-faint">
-          {relativeTime(entry.wall_time)}
+          {formatRelativeTime(entry.wall_time, "long")}
         </span>
 
         {/* Icon action buttons — invisible at rest, visible on hover.
@@ -804,7 +914,7 @@ function DetailsModal({
   entry: HistoryEntry;
   onClose: () => void;
 }) {
-  const isImage = entry.content_type === "image" || entry.content_type.startsWith("image/");
+  const isImage = isImageType(entry.content_type);
   const isFile = entry.content_type === "file";
 
   // Close on Escape
@@ -966,6 +1076,14 @@ interface VirtualListProps {
   listRef: React.RefObject<HTMLDivElement | null>;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   renderRow: (entry: HistoryEntry) => React.ReactNode;
+  /**
+   * Called when the user scrolls to within LOAD_MORE_THRESHOLD_PX of the
+   * bottom of the list. The parent uses this to fetch the next page.
+   * Optional — omit when load-more is not needed.
+   */
+  onNearBottom?: () => void;
+  /** ID of the currently keyboard-selected option — drives aria-activedescendant. */
+  activeDescendantId?: string | null;
 }
 
 function VirtualList({
@@ -975,6 +1093,8 @@ function VirtualList({
   listRef,
   onKeyDown,
   renderRow,
+  onNearBottom,
+  activeDescendantId,
 }: VirtualListProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
@@ -1000,14 +1120,31 @@ function VirtualList({
   const visible = items.slice(start, end);
   const padTop = offsets[start] ?? 0;
 
+  const handleScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const el = e.target as HTMLDivElement;
+      setScrollTop(el.scrollTop);
+      // Fire onNearBottom when the user is within the threshold of the bottom.
+      // scrollHeight - scrollTop - clientHeight gives the remaining distance.
+      if (onNearBottom !== undefined) {
+        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (remaining < LOAD_MORE_THRESHOLD_PX) {
+          onNearBottom();
+        }
+      }
+    },
+    [onNearBottom]
+  );
+
   return (
     <div
       ref={listRef}
       role="listbox"
       aria-label="Clipboard history"
+      aria-activedescendant={activeDescendantId ?? undefined}
       tabIndex={0}
       onKeyDown={onKeyDown}
-      onScroll={(e) => setScrollTop((e.target as HTMLDivElement).scrollTop)}
+      onScroll={handleScroll}
       className="h-full overflow-y-auto focus:outline-none"
       style={{ scrollbarWidth: "thin" }}
     >
@@ -1041,6 +1178,9 @@ function VirtualList({
 
 type LoadState = "loading" | "ready" | "offline" | "error";
 
+/** How many px from the bottom of the scroll container triggers load-more. */
+const LOAD_MORE_THRESHOLD_PX = 300;
+
 interface ToastState {
   id: number;
   message: string;
@@ -1056,8 +1196,23 @@ export function HistoryView() {
   const PAGE_SIZE = 200;
 
   const [items, setItems] = useState<HistoryEntry[]>([]);
+  // Own device UUID from the most-recent history_page response envelope.
+  // Empty string until the first successful load (back-compat with old daemons).
+  const [ownDeviceId, setOwnDeviceId] = useState<string>("");
+  // "all" | device UUID | "this" — filters the list to a specific origin device.
+  const [deviceFilter, setDeviceFilter] = useState<string>("all");
+  // "recency" (default daemon order) | "device" (group by origin device, then recency within group)
+  const [sortMode, setSortMode] = useState<"recency" | "device">("recency");
+  // Total count of stored items as reported by the daemon (all pages, not just
+  // what is currently loaded). Initialised to null so the badge is hidden until
+  // the first page arrives.
+  const [totalCount, setTotalCount] = useState<number | null>(null);
+  // True while a load-more fetch is in flight — prevents concurrent requests.
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [search, setSearch] = useState("");
+  const [ftsResults, setFtsResults] = useState<Set<string>>(new Set());
+  const [ftsQuery, setFtsQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   // Last error detail surfaced under the "error" load state — kept so the
@@ -1088,6 +1243,31 @@ export function HistoryView() {
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; position: "above" | "below" } | null>(null);
 
+  // D3: OS-level file drag-drop state — true while files are hovering over the window
+  const [fileDragOver, setFileDragOver] = useState(false);
+
+  // Hidden file-input ref for D2 (browser-picker path)
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // F11: Undo-on-delete — item is removed optimistically from the UI; the
+  // actual api.deleteItem call is deferred 5 s. If the user hits "Undo" the
+  // delete is cancelled and we reload to restore the row.
+  const [undoPending, setUndoPending] = useState<{
+    id: string;
+    preview: string;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  // Keep a ref so async callbacks read the current value without needing it
+  // in every dependency array.
+  const undoPendingRef = useRef<{
+    id: string;
+    preview: string;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  useEffect(() => {
+    undoPendingRef.current = undoPending;
+  }, [undoPending]);
+
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Track current signature to avoid unnecessary re-renders on identical data.
@@ -1117,6 +1297,18 @@ export function HistoryView() {
     };
   }, []);
 
+  // F11: On unmount, commit any pending deferred delete immediately so items
+  // are not silently left un-deleted if the user closes the popup mid-window.
+  useEffect(() => {
+    return () => {
+      const pending = undoPendingRef.current;
+      if (pending !== null) {
+        clearTimeout(pending.timer);
+        void api.deleteItem(pending.id).catch(() => {});
+      }
+    };
+  }, []);
+
   // -------------------------------------------------------------------------
   // Data loading — shared by initial mount, interval, and manual triggers.
   // -------------------------------------------------------------------------
@@ -1126,7 +1318,7 @@ export function HistoryView() {
       if (!silent) setLoadState("loading");
       try {
         // PAGE_SIZE controls how many items to request initially; clamped by MAX_PAGE server-side.
-        const page = await api.historyPage(PAGE_SIZE, 0);
+        const page = await api.historyPage(PAGE_SIZE, 0) as HistoryPage;
         // Daemon returns pinned items first, then newest-first within each group.
         const incoming = page.items;
         const newSig = itemsSignature(incoming);
@@ -1134,6 +1326,11 @@ export function HistoryView() {
           sigRef.current = newSig;
           setItems(incoming);
         }
+        // Capture own device UUID for the device badge (back-compat: empty string on old daemons).
+        setOwnDeviceId(page.own_device_id ?? "");
+        // Always update the total from the daemon — it reflects the true DB count
+        // across all pages, not just the loaded slice.
+        setTotalCount(page.total);
         setDegraded(false);
         setErrorDetail(null);
         setLoadState("ready");
@@ -1145,7 +1342,7 @@ export function HistoryView() {
         // The daemon is reachable but history failed. Surface the real error and,
         // when the daemon reports a degraded/not-ready DB, offer the reset escape
         // hatch instead of a dead-end "Failed to load history" screen.
-        setErrorDetail(err instanceof IpcError ? err.message : String(err));
+        setErrorDetail(ipcErrorMessage(err, String(err)));
         const notReady =
           err instanceof IpcError &&
           (err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY");
@@ -1172,6 +1369,67 @@ export function HistoryView() {
     []
   );
 
+  // -------------------------------------------------------------------------
+  // Load-more — fetches the next page and appends it (de-duped by id).
+  // Only fires when:
+  //   1. We're in the "ready" state (no active load or error).
+  //   2. The loaded item count is less than the daemon-reported total.
+  //   3. No other load-more is already in flight.
+  //
+  // We use a mutable ref for the implementation so the stable `handleNearBottom`
+  // callback always calls the latest version without needing to re-subscribe the
+  // VirtualList's scroll handler on every render.
+  // -------------------------------------------------------------------------
+
+  const itemsLengthRef = useRef(0);
+  const totalCountRef = useRef<number | null>(null);
+  const loadingMoreRef = useRef(false);
+  const loadStateRef = useRef<LoadState>(loadState);
+
+  // Keep refs in sync on every render (no extra effect needed — render-time
+  // assignment is safe because these are not used during render itself).
+  itemsLengthRef.current = items.length;
+  totalCountRef.current = totalCount;
+  loadingMoreRef.current = loadingMore;
+  loadStateRef.current = loadState;
+
+  const loadMoreRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  loadMoreRef.current = async () => {
+    const total = totalCountRef.current;
+    const loaded = itemsLengthRef.current;
+    // Guard: skip when all rows are already loaded or a fetch is in progress.
+    if (
+      total === null ||
+      loaded >= total ||
+      loadingMoreRef.current ||
+      loadStateRef.current !== "ready"
+    ) {
+      return;
+    }
+    setLoadingMore(true);
+    try {
+      const page = await api.historyPage(PAGE_SIZE, loaded);
+      if (page.items.length > 0) {
+        setItems((prev) => {
+          const existingIds = new Set(prev.map((it) => it.id));
+          const fresh = page.items.filter((it) => !existingIds.has(it.id));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      }
+      // Update total in case new items arrived since the last poll.
+      setTotalCount(page.total);
+    } catch {
+      // Load-more failure is non-fatal: the user can scroll up and the next
+      // near-bottom event will retry automatically.
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const handleNearBottom = useCallback(() => {
+    void loadMoreRef.current?.();
+  }, []);
+
   // Initial load
   useEffect(() => {
     void load(false);
@@ -1180,14 +1438,10 @@ export function HistoryView() {
   // Auto-refresh while the window is visible; backed off when the daemon is
   // unreachable so we don't hammer a dead daemon at full rate.
   //
-  // loadState is intentionally read via a ref rather than being a dep: adding it
-  // to the dep array would restart (and therefore double-fire) the effect on every
-  // state-recovery transition (e.g. "offline" → "ready"), causing a duplicate
-  // silent load immediately after the one that just recovered.
-  const loadStateRef = useRef<LoadState>(loadState);
-  useEffect(() => {
-    loadStateRef.current = loadState;
-  });
+  // loadState is intentionally read via the ref rather than being a dep: adding
+  // it to the dep array would restart (and therefore double-fire) the effect on
+  // every state-recovery transition (e.g. "offline" → "ready"), causing a
+  // duplicate silent load immediately after the one that just recovered.
 
   useEffect(() => {
     const ACTIVE_MS = 1200;
@@ -1229,14 +1483,78 @@ export function HistoryView() {
   }, [load]);
 
   // -------------------------------------------------------------------------
-  // Filtered list
+  // FTS effect — debounced daemon full-text search over the entire history
   // -------------------------------------------------------------------------
 
-  const filtered = search.trim()
-    ? items.filter((it) =>
-        it.preview.toLowerCase().includes(search.trim().toLowerCase())
-      )
-    : items;
+
+  useEffect(() => {
+    const q = search.trim();
+    if (!q) {
+      setFtsResults(new Set());
+      setFtsQuery("");
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const hits = await api.searchItems(q, 500);
+        setFtsResults(new Set(hits.map((h) => h.id)));
+        setFtsQuery(q);
+      } catch {
+        // FTS failure falls back gracefully to client-side filter
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+
+  // -------------------------------------------------------------------------
+  // Distinct device IDs seen in the loaded items — drives the filter dropdown.
+  // Computed with useMemo so it only recalculates when items or ownDeviceId change.
+  // -------------------------------------------------------------------------
+  const knownDeviceIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const it of items) {
+      if (it.origin_device_id) ids.add(it.origin_device_id);
+    }
+    return Array.from(ids);
+  }, [items]);
+
+  // -------------------------------------------------------------------------
+  // Filtered + sorted list — union of client-side substring match, daemon FTS
+  // results, and device filter; sorted by the selected sort mode.
+  // -------------------------------------------------------------------------
+
+  const filtered = useMemo(() => {
+    // 1. Text search: client-side substring OR daemon FTS hit
+    let result = search.trim()
+      ? items.filter(
+          (it) =>
+            it.preview.toLowerCase().includes(search.trim().toLowerCase()) ||
+            (ftsQuery === search.trim() && ftsResults.has(it.id))
+        )
+      : items;
+
+    // 2. Device filter
+    if (deviceFilter !== "all") {
+      result = result.filter((it) => (it.origin_device_id ?? "") === deviceFilter);
+    }
+
+    // 3. Sort mode: "device" groups by origin_device_id (own device first, then
+    //    alphabetical by id), preserving the daemon's recency order within each group.
+    if (sortMode === "device") {
+      // Stable sort: JS Array.sort is stable in all modern engines.
+      result = [...result].sort((a, b) => {
+        const aId = a.origin_device_id ?? "";
+        const bId = b.origin_device_id ?? "";
+        if (aId === bId) return 0;
+        // Own device always sorts first.
+        if (ownDeviceId && aId === ownDeviceId) return -1;
+        if (ownDeviceId && bId === ownDeviceId) return 1;
+        return aId.localeCompare(bId);
+      });
+    }
+
+    return result;
+  }, [items, search, ftsResults, ftsQuery, deviceFilter, sortMode, ownDeviceId]);
 
   // -------------------------------------------------------------------------
   // Multi-select helpers
@@ -1323,12 +1641,12 @@ export function HistoryView() {
           void playCopySound();
         }
         if (notifyOnCopy) {
-          // Build a short preview from the current items list for the notification.
+          // Use content_type + preview from HistoryEntry for rich notification.
           const item = items.find((it) => it.id === id);
-          const preview = item
-            ? item.preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied"
-            : "Copied";
-          void showCopyNotification(preview);
+          void showCopyNotification(
+            item?.content_type ?? "",
+            item?.preview ?? ""
+          );
         }
         // Optimistically move the copied item to the top — but only for
         // unpinned items. Pinned items keep their pin_order position; the daemon
@@ -1356,12 +1674,44 @@ export function HistoryView() {
         });
         void load(true);
       } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Copy failed";
+        const msg = ipcErrorMessage(err, "Copy failed");
         showToast(msg, "error");
       }
     },
     [items, load, playSoundOnCopy, notifyOnCopy, showToast]
   );
+
+  // F11: handleDelete/handleUndo must be declared before handleKeyDown so the
+  // keyboard handler can reference them without a "used before declaration" error.
+
+  // Optimistically removes the item from local state and schedules the actual
+  // api.deleteItem call after a 5-second undo window.  If a second delete fires
+  // before the timer expires the first is committed immediately.
+  const handleDelete = useCallback(
+    (id: string, preview: string) => {
+      const prev = undoPendingRef.current;
+      if (prev !== null) {
+        clearTimeout(prev.timer);
+        void api.deleteItem(prev.id).catch(() => {});
+      }
+      setItems((prevItems) => prevItems.filter((it) => it.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      const timer = setTimeout(() => {
+        void api.deleteItem(id).catch(() => {});
+        setUndoPending(null);
+      }, 5000);
+      setUndoPending({ id, preview, timer });
+    },
+    [selectedId]
+  );
+
+  const handleUndo = useCallback(() => {
+    const pending = undoPendingRef.current;
+    if (pending === null) return;
+    clearTimeout(pending.timer);
+    setUndoPending(null);
+    void load(true);
+  }, [load]);
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -1395,6 +1745,16 @@ export function HistoryView() {
         isKeyboardNavRef.current = true;
         const prev = Math.max(selectedIdx - 1, 0);
         setSelectedId(filtered[prev].id);
+      } else if (e.key === "Enter" && e.altKey && selectedId !== null) {
+        // Option+Enter (F1): paste as plain text — strip rich formatting.
+        e.preventDefault();
+        try {
+          const item = items.find((it) => it.id === selectedId);
+          const text = item?.preview ?? "";
+          await pasteAsPlainText(text);
+        } catch (err) {
+          console.error("paste-as-plain-text failed:", err);
+        }
       } else if (e.key === "Enter" && selectedId !== null) {
         e.preventDefault();
         // Route through handleCopy so sound/notification fire on success
@@ -1402,19 +1762,14 @@ export function HistoryView() {
         await handleCopy(selectedId);
       } else if ((e.key === "Backspace" || e.key === "Delete") && selectedId !== null) {
         e.preventDefault();
-        try {
-          await api.deleteItem(selectedId);
-          // Select the next item after deletion.
-          const newIdx = Math.min(selectedIdx, filtered.length - 2);
-          setSelectedId(newIdx >= 0 ? (filtered[newIdx]?.id ?? null) : null);
-          void load(true);
-        } catch (err) {
-          const msg = err instanceof IpcError ? err.message : "Delete failed";
-          showToast(msg, "error");
-        }
+        const entry = filtered.find((it) => it.id === selectedId);
+        // Select the next item before removing the current one from the list.
+        const newIdx = Math.min(selectedIdx, filtered.length - 2);
+        setSelectedId(newIdx >= 0 ? (filtered[newIdx]?.id ?? null) : null);
+        handleDelete(selectedId, entry?.preview ?? "");
       }
     },
-    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy]
+    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy, handleDelete]
   );
 
   // -------------------------------------------------------------------------
@@ -1428,25 +1783,11 @@ export function HistoryView() {
         // Immediate refresh so the server's new state + re-sort is reflected.
         void load(true);
       } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Pin failed";
+        const msg = ipcErrorMessage(err, "Pin failed");
         showToast(msg, "error");
       }
     },
     [load, showToast]
-  );
-
-  const handleDelete = useCallback(
-    async (id: string) => {
-      try {
-        await api.deleteItem(id);
-        if (selectedId === id) setSelectedId(null);
-        void load(true);
-      } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Delete failed";
-        showToast(msg, "error");
-      }
-    },
-    [selectedId, load, showToast]
   );
 
   // A1: Drag-to-reorder handler — placed after `load` and `showToast` are declared
@@ -1478,7 +1819,7 @@ export function HistoryView() {
         await api.reorderPinned(newIds);
         void load(true);
       } catch (err) {
-        const msg = err instanceof IpcError ? err.message : "Reorder failed";
+        const msg = ipcErrorMessage(err, "Reorder failed");
         showToast(msg, "error");
         // Revert to server state on failure.
         void load(true);
@@ -1579,7 +1920,7 @@ export function HistoryView() {
         try {
           await api.copyItem(firstId);
         } catch (err) {
-          const msg = err instanceof IpcError ? err.message : "Copy failed";
+          const msg = ipcErrorMessage(err, "Copy failed");
           showToast(msg, "error");
           // Return inside try so finally still runs and releases the busy flag (V-13).
           return;
@@ -1590,10 +1931,7 @@ export function HistoryView() {
       // preview text of all selected non-sensitive, non-image items. This is
       // best-effort — we don't surface an error if the API is unavailable.
       const textItems = selectedItems.filter(
-        (it) =>
-          !it.is_sensitive &&
-          it.content_type !== "image" &&
-          !it.content_type.startsWith("image/")
+        (it) => !it.is_sensitive && !isImageType(it.content_type)
       );
       if (textItems.length > 1 && typeof navigator?.clipboard?.writeText === "function") {
         const concatenated = textItems.map((it) => it.preview).join("\n");
@@ -1611,11 +1949,12 @@ export function HistoryView() {
         void playCopySound();
       }
       if (notifyOnCopy) {
+        // Use content_type + preview from the first selected item for the banner.
         const firstItem = selectedItems[0];
-        const preview = firstItem
-          ? firstItem.preview.replace(/\s+/g, " ").trim().slice(0, 60) || "Copied"
-          : "Copied";
-        void showCopyNotification(preview);
+        void showCopyNotification(
+          firstItem?.content_type ?? "",
+          firstItem?.preview ?? ""
+        );
       }
       showToast(`Copied ${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`, "success");
     } finally {
@@ -1645,7 +1984,7 @@ export function HistoryView() {
       showToast("Database reset — local history erased", "success");
       await load(false);
     } catch (err) {
-      const msg = err instanceof IpcError ? err.message : String(err);
+      const msg = ipcErrorMessage(err, String(err));
       setErrorDetail(`Reset failed: ${msg}`);
       showToast(`Reset failed: ${msg}`, "error");
     } finally {
@@ -1654,18 +1993,202 @@ export function HistoryView() {
   }, [load, showToast]);
 
   // -------------------------------------------------------------------------
+  // D2: File picker — read the chosen file via the browser File API and send
+  // to the daemon. No Rust-side file dialog needed; <input type="file"> gives
+  // us the bytes directly so we can base64-encode and call add_file_item.
+  // -------------------------------------------------------------------------
+
+  const handleFileInputChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = Array.from(e.target.files ?? []);
+      if (files.length === 0) return;
+      // Reset the input so the same file can be picked again if needed.
+      e.target.value = "";
+
+      for (const file of files) {
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          await api.addFileItem(bytes, file.name, file.type || "application/octet-stream");
+          showToast(`Added "${file.name}"`, "success");
+        } catch (err) {
+          const msg = err instanceof IpcError ? err.message : String(err);
+          showToast(`Failed to add "${file.name}": ${msg}`, "error");
+        }
+      }
+      void load(true);
+    },
+    [load, showToast]
+  );
+
+  // -------------------------------------------------------------------------
+  // D3: OS file drag-drop — subscribe to Tauri's webview onDragDropEvent.
+  // On 'enter': show drop-zone overlay. On 'drop': ingest each file via
+  // add_file_item. On 'leave'/'cancel': hide overlay.
+  // NOTE: dragDropEnabled must be true in tauri.conf.json (already set).
+  // -------------------------------------------------------------------------
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+
+    void getCurrentWebview()
+      .onDragDropEvent((event) => {
+        if (cancelled) return;
+        const { type } = event.payload;
+
+        if (type === "enter") {
+          setFileDragOver(true);
+        } else if (type === "leave") {
+          setFileDragOver(false);
+        } else if (type === "drop") {
+          setFileDragOver(false);
+          const paths = "paths" in event.payload ? (event.payload.paths as string[]) : [];
+          if (paths.length === 0) return;
+
+          void (async () => {
+            let added = 0;
+            let failed = 0;
+            for (const p of paths) {
+              try {
+                // Read via fetch with a file:// URL — works inside Tauri webview.
+                const resp = await fetch(`file://${p}`);
+                if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
+                const buf = await resp.arrayBuffer();
+                const bytes = new Uint8Array(buf);
+                const filename = p.split("/").pop() ?? "file";
+                // Infer MIME from the content-type header (best-effort).
+                const mime =
+                  resp.headers.get("content-type")?.split(";")[0]?.trim() ||
+                  "application/octet-stream";
+                await api.addFileItem(bytes, filename, mime);
+                added++;
+              } catch (err) {
+                failed++;
+                const msg = err instanceof Error ? err.message : String(err);
+                showToast(`Drop failed for "${p.split("/").pop()}": ${msg}`, "error");
+              }
+            }
+            if (added > 0) {
+              showToast(
+                `Added ${added} file${added === 1 ? "" : "s"}${failed > 0 ? ` (${failed} failed)` : ""}`,
+                "success"
+              );
+              void load(true);
+            }
+          })();
+        }
+      })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      })
+      .catch(() => {
+        // Best-effort — drag-drop is a convenience, never block on its failure.
+      });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [load, showToast]);
+
+  // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
 
+  // Build human-readable label for a device id in the filter dropdown.
+  const deviceOptionLabel = (id: string): string => {
+    if (id === "all") return "All devices";
+    if (ownDeviceId && id === ownDeviceId) return "This device";
+    return id.slice(0, 8);
+  };
+
   const actions = (
-    <input
-      ref={searchRef}
-      type="search"
-      value={search}
-      onChange={(e) => setSearch(e.target.value)}
-      placeholder="Filter…"
-      className="h-7 w-44 rounded-ide px-2 text-[12px]"
-    />
+    <>
+      {/* D2: hidden file input + attach button */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(e) => void handleFileInputChange(e)}
+        aria-label="Add file to clipboard history"
+        tabIndex={-1}
+      />
+      <button
+        type="button"
+        title="Add file to clipboard history"
+        aria-label="Add file"
+        onClick={() => fileInputRef.current?.click()}
+        className="flex h-7 w-7 items-center justify-center rounded-ide border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text"
+      >
+        {/* Paperclip / attach icon */}
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M13.5 7.5 7 14a4.243 4.243 0 0 1-6-6l7-7a2.828 2.828 0 1 1 4 4L5.5 12A1.414 1.414 0 0 1 3.5 10L9 4.5" />
+        </svg>
+      </button>
+      {/* Device filter dropdown — only shown when more than one device is present */}
+      {knownDeviceIds.length > 1 && (
+        <select
+          value={deviceFilter}
+          onChange={(e) => setDeviceFilter(e.target.value)}
+          className="h-7 rounded-ide border border-ide-border bg-ide-elevated px-1.5 text-[11px] text-ide-text hover:bg-ide-hover cursor-pointer"
+          aria-label="Filter by device"
+          title="Filter by origin device"
+        >
+          <option value="all">All devices</option>
+          {knownDeviceIds.map((id) => (
+            <option key={id} value={id}>
+              {deviceOptionLabel(id)}
+            </option>
+          ))}
+        </select>
+      )}
+
+      {/* Sort-mode toggle — only shown when multiple devices are present */}
+      {knownDeviceIds.length > 1 && (
+        <button
+          type="button"
+          title={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
+          aria-label={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
+          onClick={() => setSortMode((m) => (m === "recency" ? "device" : "recency"))}
+          className={[
+            "flex h-7 items-center gap-1 rounded-ide border px-2 text-[11px]",
+            sortMode === "device"
+              ? "border-ide-accent/60 bg-ide-accent/10 text-ide-accent"
+              : "border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text",
+          ].join(" ")}
+        >
+          {/* Simple sort icon — two lines of different widths */}
+          <svg viewBox="0 0 14 12" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+            <line x1="1" y1="2" x2="13" y2="2" />
+            <line x1="1" y1="6" x2="9" y2="6" />
+            <line x1="1" y1="10" x2="5" y2="10" />
+          </svg>
+          {sortMode === "device" ? "By device" : "By time"}
+        </button>
+      )}
+
+      {/* Total-count badge — shows the full DB count from the daemon, not just
+          the loaded slice. Hidden until the first page resolves (totalCount null). */}
+      {totalCount !== null && (
+        <span
+          data-testid="history-total-badge"
+          className="text-[11px] text-ide-faint tabular-nums"
+          title="Total items in clipboard history"
+        >
+          {totalCount} {totalCount === 1 ? "item" : "items"}
+        </span>
+      )}
+      <input
+        ref={searchRef}
+        type="search"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Filter…"
+        className="h-7 w-44 rounded-ide px-2 text-[12px]"
+      />
+    </>
   );
 
   let body: React.ReactNode;
@@ -1678,17 +2201,17 @@ export function HistoryView() {
     );
   } else if (loadState === "offline") {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        {/* §9 hero icon — plug/zap 28px faint */}
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
-          <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-        </svg>
-        <p className="text-[13px] text-ide-dim">Clipboard service offline</p>
-        <p className="text-[11px] text-ide-faint">The daemon is not running.</p>
-        <div className="mt-1">
-          <RestartDaemonButton onRestarted={() => void load()} />
-        </div>
-      </div>
+      <EmptyState
+        className="h-full"
+        icon={
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        }
+        title="Clipboard service offline"
+        body="The daemon is not running."
+        action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void load()} /></div>}
+      />
     );
   } else if (loadState === "error") {
     body = (
@@ -1741,28 +2264,32 @@ export function HistoryView() {
     );
   } else if (filtered.length === 0 && items.length === 0) {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        {/* §9 clipboard hero icon 28px faint */}
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
-          <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-        </svg>
-        <p className="text-[13px] text-ide-dim">Nothing copied yet</p>
-        <p className="text-[11px] text-ide-faint">Copy something and it will appear here.</p>
-      </div>
+      <EmptyState
+        className="h-full"
+        icon={
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+          </svg>
+        }
+        title="Nothing copied yet"
+        body="Copy something and it will appear here."
+      />
     );
   } else if (filtered.length === 0) {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-        {/* §9 search-x hero icon 28px faint */}
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint">
-          <circle cx="11" cy="11" r="7" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-          <line x1="8" y1="11" x2="14" y2="11" />
-        </svg>
-        <p className="text-[13px] text-ide-dim">No results for &ldquo;{search}&rdquo;</p>
-        <p className="text-[11px] text-ide-faint">Try a different search term.</p>
-      </div>
+      <EmptyState
+        className="h-full"
+        icon={
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="7" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            <line x1="8" y1="11" x2="14" y2="11" />
+          </svg>
+        }
+        title={`No results for “${search}”`}
+        body="Try a different search term."
+      />
     );
   } else {
     body = (
@@ -1788,6 +2315,11 @@ export function HistoryView() {
           imageMaxHeight={imageMaxHeight}
           listRef={listRef}
           onKeyDown={(e) => void handleKeyDown(e)}
+          // Only trigger load-more when not filtering: filtered view operates
+          // over the already-loaded set, so near-bottom doesn't mean "more data
+          // to fetch" — it just means the user has reached the end of the match.
+          onNearBottom={search.trim() === "" ? handleNearBottom : undefined}
+          activeDescendantId={selectedId ? `clip-${selectedId}` : null}
           renderRow={(entry) => (
             <HistoryRow
               key={entry.id}
@@ -1799,6 +2331,7 @@ export function HistoryView() {
               previewSize={previewSize}
               imageMaxHeight={imageMaxHeight}
               maskSensitive={maskSensitive}
+              ownDeviceId={ownDeviceId}
               onSelect={() => {
                 isKeyboardNavRef.current = false;
                 setSelectedId(entry.id);
@@ -1810,7 +2343,7 @@ export function HistoryView() {
               }}
               onCopy={() => void handleCopy(entry.id)}
               onPin={() => void handlePin(entry.id, entry.pinned)}
-              onDelete={() => void handleDelete(entry.id)}
+              onDelete={() => handleDelete(entry.id, entry.preview)}
               onPreview={() => setPreviewEntry(entry)}
               onMouseEnter={() => {
                 isKeyboardNavRef.current = false;
@@ -1870,8 +2403,83 @@ export function HistoryView() {
 
   return (
     <ViewShell title="History" actions={actions}>
-      {body}
+      {/*
+        D3 drop-zone overlay: shown while OS files are hovering over the window.
+        The overlay sits above the content (z-10) and shows a dashed border +
+        label so the user knows dropping is accepted. Pointer-events are none
+        on the inner label so the Tauri drag event fires on the webview, not
+        on a React element.
+      */}
+      <div className="relative h-full">
+        {fileDragOver && (
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-ide border-2 border-dashed border-ide-accent bg-ide-accent/5"
+          >
+            <div className="flex flex-col items-center gap-2 text-ide-accent">
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <span className="text-[13px] font-medium">Drop to add to clipboard</span>
+            </div>
+          </div>
+        )}
+        {body}
+      </div>
       {toast !== null && <Toast key={toast.id} message={toast.message} kind={toast.kind} />}
+      {/* F11: Undo-delete toast — shown while a deferred delete is pending */}
+      {undoPending !== null && (
+        <div
+          className="toast-in fixed bottom-3 left-1/2 z-[9999] pointer-events-auto"
+          style={{
+            transform: "translateX(-50%)",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.10)",
+            background: "rgba(35,37,45,0.92)",
+            backdropFilter: "blur(20px) saturate(160%)",
+            WebkitBackdropFilter: "blur(20px) saturate(160%)",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.35)",
+            padding: "6px 14px 6px 10px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: "var(--ide-danger, #e06c75)",
+            }}
+          />
+          <span className="text-[12px]" style={{ color: "rgba(255,255,255,0.82)" }}>
+            Deleted &ldquo;
+            {undoPending.preview.length > 40
+              ? `${undoPending.preview.slice(0, 40)}…`
+              : undoPending.preview}
+            &rdquo;
+          </span>
+          <button
+            onClick={handleUndo}
+            className="text-[12px] font-semibold"
+            style={{
+              color: "#7EC8E3",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
       {/* M10: Details modal */}
       {previewEntry !== null && (
         <DetailsModal entry={previewEntry} onClose={() => setPreviewEntry(null)} />

@@ -163,7 +163,53 @@
 /// functions directly (no Kotlin-side HKDF) for a guaranteed byte-match with the
 /// daemon. Kotlin generated against ABI 12 lacks both symbols and must be
 /// regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 13;
+///
+/// **ABI 14 (PeerMeta send+receive + P2P drop counters — v0.6.1 HB-1/HB-7):**
+/// A batch of additive FFI changes, all breaking the binding surface so Kotlin
+/// must be regenerated:
+///   * HB-1a — Android now SENDS its own device metadata. The three pairing
+///     functions gained five trailing optional params `device_name?,
+///     device_model?, os_version?, app_version?, local_ip?` used to build a real
+///     `PeerMeta` instead of `PeerMeta::default()`: `bootstrap_pair_initiator`,
+///     `start_discovery` (threaded into the standing responder loop), and
+///     `pair_with_discovered`. (`public_ip` stays `None` for now.)
+///   * HB-1b — Android now RECEIVES the peer's metadata. `BootstrapResult` and
+///     the discovery `PairStatus` each gained five trailing optional fields
+///     `peer_model?, peer_os?, peer_app_version?, peer_local_ip?,
+///     peer_public_ip?`, populated from the `BootstrapPairing.peer_*` fields the
+///     p2p crate already carries. Kotlin persists them so Wave 3 renders device
+///     cards at parity with macOS.
+///   * HB-7a — `P2pSyncResult` gained three per-reason drop counters
+///     `items_skipped_decrypt_fail`, `items_skipped_unknown_type`,
+///     `items_skipped_missing_blob`, incremented at the previously-silent
+///     `continue` sites in the receive loop so "received N stored 0" surfaces
+///     WHY items dropped instead of vanishing.
+///
+/// (AB-6a — the `is_sensitive` threshold parity change to a >= 0.70 confidence
+/// gate — is a pure behaviour fix with no signature change, so it does not by
+/// itself force a bump; it ships in this ABI for coherence.)
+///
+/// Kotlin generated against ABI 13 constructs the old pairing-fn arities and
+/// reads `BootstrapResult` / `PairStatus` / `P2pSyncResult` with the wrong shape
+/// — it must be regenerated.
+///
+/// **ABI 15 (delete/pin propagation over P2P FFI):** `LocalItem` gained three
+/// new fields — `deleted: bool`, `pinned: bool`, `pin_order: f64?` — enabling
+/// Android to send local soft-delete tombstones and its current pin state to
+/// peers. `SyncedItem` gained the same three fields so Kotlin can receive and
+/// apply inbound delete/pin state. Both `sync_with_peer` and the inbound
+/// listener (`build_catchup_wire_items` / `decrypt_wire_item`) are updated:
+///   * `LocalItem.deleted = true` → sender emits a `WireItem { deleted: true,
+///     content: None }` so the macOS daemon applies a tombstone via LWW.
+///   * `LocalItem.pinned` / `pin_order` → forwarded onto the wire so pin/unpin
+///     and drag-to-reorder propagate cross-device.
+///   * `SyncedItem.deleted = true` → Kotlin refreshes the local tombstone (LWW:
+///     newer remote delete wins) instead of storing visible content.
+///   * `SyncedItem.pinned` / `pin_order` → Kotlin applies pin state to the row.
+///
+/// Kotlin generated against ABI 14 constructs `LocalItem` without the new fields
+/// and reads `SyncedItem` with the wrong shape; both must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 15;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

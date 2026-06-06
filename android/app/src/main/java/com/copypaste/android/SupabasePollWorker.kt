@@ -1,5 +1,7 @@
 package com.copypaste.android
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.util.Log
 import androidx.work.Constraints
@@ -68,6 +70,10 @@ class SupabasePollWorker(
             // persisted after every cycle so a re-poll continues from the last row.
             var totalFetched = 0
             var totalNewCount = 0
+            // Accumulate (text, wallTime) for every text clip stored across ALL
+            // batch cycles in this drain. After the full drain, apply only the
+            // NEWEST text clip to the system clipboard once — not per item.
+            val storedTextClips = mutableListOf<Pair<String, Long>>()
             while (true) {
                 val batch = syncManager.pollFromSupabase(
                     sinceWallTime = settings.lastSupabasePollWallTime,
@@ -95,45 +101,10 @@ class SupabasePollWorker(
                     // Decrypt the row; skip if decryption fails (wrong key / tampered).
                     val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
 
-                    val isImage = item.contentType == "image" ||
-                        item.contentType.startsWith("image/")
-
-                    val stored = if (isImage) {
-                        // Image row: store a placeholder entry then persist raw bytes.
-                        // Mirror the FgsSyncLoop.poll() image path so image rows are
-                        // not silently corrupted by UTF-8 decoding of binary data.
-                        if (item.plaintext.isEmpty()) {
-                            false
-                        } else {
-                            val storedId = repository.storeItem(
-                                plaintext = "[image]",
-                                key = settings.encryptionKey,
-                                overrideId = item.itemId,
-                                contentType = item.contentType,
-                                lamportTs = item.lamportTs,
-                            )
-                            if (storedId.isNotEmpty()) {
-                                repository.storeImageBytes(storedId, item.plaintext)
-                                true
-                            } else {
-                                false
-                            }
-                        }
-                    } else {
-                        val text = item.plaintext.toString(Charsets.UTF_8)
-                        if (text.isBlank()) {
-                            false
-                        } else {
-                            // Task 5: LWW replace — if item_id already exists locally, replace
-                            // only when the incoming lamport_ts is strictly newer.
-                            repository.storeItemWithLww(
-                                plaintext = text,
-                                key = settings.encryptionKey,
-                                itemId = item.itemId,
-                                incomingLamportTs = item.lamportTs,
-                            )
-                        }
-                    }
+                    // Delegate to the shared handler so text, image, and file rows
+                    // are all processed correctly — file bytes are stored as binary,
+                    // not UTF-8-decoded as garbage (fixes C4).
+                    val stored = storeDecryptedItem(item, repository, settings)
                     if (stored) newCount++
                 }
 
@@ -156,6 +127,12 @@ class SupabasePollWorker(
                 if (cursorWallTime == startWallTime && cursorId == startId) break
             }
 
+            // Auto-apply: write only the NEWEST text clip to the system clipboard
+            // once after the full drain — never per-item during bulk sync.
+            FgsSyncLoop.newestTextClip(storedTextClips)?.let { text ->
+                applyTextToClipboard(ctx, text)
+            }
+
             Log.i(TAG, "Poll complete: $totalFetched fetched, $totalNewCount stored")
             Result.success()
         } catch (e: Exception) {
@@ -176,6 +153,28 @@ class SupabasePollWorker(
 
         /** Minimum WorkManager periodic interval. Increase if battery matters more than latency. */
         private const val POLL_INTERVAL_MINUTES = 15L
+
+        /**
+         * Write [text] to the system clipboard as the result of a WorkManager
+         * background sync — called AT MOST ONCE per drain with the NEWEST text
+         * clip, never per-item.
+         *
+         * Registers a [ClipboardRepository.expectClip] expectation first so
+         * the capture listeners recognise the write as an internal echo and skip it,
+         * preventing a re-capture → re-push → re-sync loop.
+         */
+        fun applyTextToClipboard(context: Context, text: String) {
+            try {
+                ClipboardRepository.expectClip(text)
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                cm.setPrimaryClip(ClipData.newPlainText("CopyPaste sync", text))
+                Log.d(TAG, "Auto-applied newest synced text clip (${text.length} chars)")
+            } catch (e: Exception) {
+                // Non-fatal: if the clipboard is unavailable in the WorkManager context
+                // (e.g. killed process, headless test), log and continue.
+                Log.w(TAG, "applyTextToClipboard failed: ${e.message}")
+            }
+        }
 
         /**
          * Schedule (or reschedule) the periodic poll worker.
@@ -218,6 +217,102 @@ class SupabasePollWorker(
             val settings = Settings(context)
             val shouldRun = settings.syncEnabled && settings.syncBackend == SyncBackend.SUPABASE
             schedule(context, enabled = shouldRun)
+        }
+    }
+}
+
+// ── Package-level helper ──────────────────────────────────────────────────────
+
+/**
+ * Stores a single decrypted Supabase row into the local repository, handling
+ * text, image, and file content types correctly.
+ *
+ * This is the canonical receive path for the WorkManager 15-minute fallback
+ * poll ([SupabasePollWorker.doWork]). Mirrors the [FgsSyncLoop] cloud-poll
+ * branch so all three receive paths (WorkManager, FGS, Realtime WS) behave
+ * identically:
+ *
+ * - **image**: stored as a binary blob via [ClipboardRepository.storeImageBytes];
+ *   a thumbnail is generated non-fatally.
+ * - **file**: stored as binary bytes via [ClipboardRepository.storeFileBytes]
+ *   — NOT UTF-8-decoded (which would garble arbitrary binary data).
+ * - **text**: stored via [ClipboardRepository.storeItemWithLww] (LWW replace).
+ *
+ * Previously [SupabasePollWorker] had no file branch at all, so file rows fell
+ * through to the text path and were UTF-8-decoded as garbage (bug C4).
+ *
+ * @return `true` when a new or replaced row was stored, `false` on dedup/blank/empty.
+ */
+internal suspend fun storeDecryptedItem(
+    item: SupabaseClient.DecryptedItem,
+    repository: ClipboardRepository,
+    settings: Settings,
+): Boolean {
+    val isImage = item.contentType == "image" || item.contentType.startsWith("image/")
+    val isFile = item.contentType == "file" || item.contentType.startsWith("application/")
+
+    return when {
+        isImage -> {
+            if (item.plaintext.isEmpty()) {
+                false
+            } else {
+                val storedId = repository.storeItem(
+                    plaintext = "[image]",
+                    key = settings.encryptionKey,
+                    overrideId = item.itemId,
+                    contentType = item.contentType,
+                    lamportTs = item.lamportTs,
+                )
+                if (storedId.isNotEmpty()) {
+                    repository.storeImageBytes(storedId, item.plaintext)
+                    // Generate thumbnail after full-res storage; non-fatal on failure.
+                    SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
+                        repository.storeThumbnailBytes(storedId, thumbBytes)
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        isFile -> {
+            // File row: store raw bytes — do NOT UTF-8-decode binary file data.
+            // Cloud-polled items have no separate fileName/mime columns; use null
+            // so the label shows "[file]" without a name (mirrors FgsSyncLoop).
+            if (item.plaintext.isEmpty()) {
+                false
+            } else {
+                val label = SyncFileHelper.buildFileLabel(null)
+                val storedId = repository.storeItem(
+                    plaintext = label,
+                    key = settings.encryptionKey,
+                    overrideId = item.itemId,
+                    contentType = item.contentType,
+                    lamportTs = item.lamportTs,
+                )
+                if (storedId.isNotEmpty()) {
+                    repository.storeFileBytes(storedId, item.plaintext)
+                    repository.storeFileMeta(storedId, null, null)
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        else -> {
+            // Text row: LWW replace — replace only when incoming lamport_ts is
+            // strictly newer than the locally stored row for the same item_id.
+            val text = item.plaintext.toString(Charsets.UTF_8)
+            if (text.isBlank()) {
+                false
+            } else {
+                repository.storeItemWithLww(
+                    plaintext = text,
+                    key = settings.encryptionKey,
+                    itemId = item.itemId,
+                    incomingLamportTs = item.lamportTs,
+                )
+            }
         }
     }
 }

@@ -6,6 +6,7 @@ pub mod logging;
 pub mod relay;
 pub mod sensitive;
 pub mod storage;
+pub mod text_kind;
 
 // Top-level re-exports
 pub use config::AppConfig;
@@ -28,16 +29,17 @@ pub use crypto::encrypt::{decrypt_item, encrypt_item};
 pub use crypto::{
     decrypt_from_cloud, derive_storage_key_v1, derive_storage_key_v2, derive_sync_key,
     derive_sync_key_v2, derive_telemetry_key_v2, derive_v2, encrypt_for_cloud, strip_deeplink,
-    DeviceKeypair, KeyError, PairingPayload, PairingQrError, PairingToken, SyncKey, SyncKeyError,
-    ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_SYNC_SALT, ARGON2_T_COST, CLOUD_AAD_SCHEMA_VERSION,
-    HKDF_VERSION, PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC, PAIRING_TOKEN_LEN,
+    DeviceKeypair, KeyError, PairingPayload, PairingQrError, PairingToken, QrProvisioning, SyncKey,
+    SyncKeyError, ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_SYNC_SALT, ARGON2_T_COST,
+    CLOUD_AAD_SCHEMA_VERSION, HKDF_VERSION, PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC,
+    PAIRING_TOKEN_LEN,
 };
 pub use file::{decode_file, encode_file, FileError, FileMeta, FILE_CHUNK_SIZE, MAX_FILE_BYTES};
 pub use image::{
     chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_clipboard_image_limited,
     decode_image, decode_thumbnail, encode_as_png, encode_image, encode_image_full,
-    encode_image_with_limit, encode_thumbnail, encode_thumbnail_from_png, thumbnail, ImageError,
-    ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES, THUMBNAIL_MAX_DIM,
+    encode_image_with_limit, encode_thumbnail, encode_thumbnail_from_png, thumb_dims_exceed_cap,
+    thumbnail, ImageError, ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES, THUMBNAIL_MAX_DIM,
 };
 pub use sensitive::{
     detect, is_sensitive_app, is_sensitive_for_autowipe, luhn_valid, redact, PatternMatch,

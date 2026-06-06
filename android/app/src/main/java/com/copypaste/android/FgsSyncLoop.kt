@@ -1,5 +1,8 @@
 package com.copypaste.android
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -71,6 +74,23 @@ class FgsSyncLoop(
     /** WS client whose [SupabaseRealtimeClient.isConnected] gate drives the
      *  catch-up poll interval. Null-safe: when absent the loop treats WS as down. */
     private val wsClient: SupabaseRealtimeClient? = null,
+    /**
+     * Called AT MOST ONCE after a full Supabase catch-up drain or P2P batch
+     * with the text of the NEWEST (highest wall_time) text clip that was stored.
+     *
+     * Intent: auto-apply the latest synced text clip to the system clipboard so
+     * the user can paste it immediately — but only the newest one, not every clip
+     * in the batch (which would spam the clipboard and could re-trigger capture
+     * loops).
+     *
+     * Sensitive and private-mode guards in the store path already suppress the
+     * text before it reaches here: this callback only fires for clips that were
+     * actually stored.
+     *
+     * Null (default) means "no auto-apply" — used by unit tests and callers that
+     * do not have a live system clipboard context.
+     */
+    private val onSyncedTextClip: ((text: String) -> Unit)? = null,
 ) {
     private var job: Job? = null
 
@@ -106,13 +126,6 @@ class FgsSyncLoop(
 
         /** How many consecutive empty polls before we slow down to the idle interval. */
         private const val IDLE_THRESHOLD_POLLS = 3
-
-        /**
-         * Cap on local items pushed per background P2P dial (mirrors PairActivity).
-         * Also reused by the inbound listener ([ClipboardService]) so a peer that
-         * dials IN receives the same catch-up window the dialer would have sent.
-         */
-        const val P2P_LOCAL_ITEM_LIMIT = 200
 
         /**
          * Cadence for the background LAN P2P dial, DECOUPLED from the Supabase
@@ -167,6 +180,34 @@ class FgsSyncLoop(
          */
         fun intervalForEmptyStreak(consecutiveEmpty: Int): Long =
             pollIntervalMs(wsConnected = false, consecutiveEmpty = consecutiveEmpty)
+
+        /**
+         * Select the newest text clip from a list of (text, wallTime) pairs
+         * accumulated across a bulk-sync batch drain.
+         *
+         * "Newest" = highest wall_time. When two items share the same wall_time,
+         * the one that arrived LAST in batch order wins (latest row processed).
+         *
+         * Pure function — no Android runtime, no coroutines — intentionally kept
+         * in the companion object so it can be unit-tested on the plain JVM.
+         *
+         * @return the text of the newest clip, or null when [clips] is empty.
+         */
+        fun newestTextClip(clips: List<Pair<String, Long>>): String? {
+            if (clips.isEmpty()) return null
+            var bestText = clips[0].first
+            var bestWallTime = clips[0].second
+            for (i in 1 until clips.size) {
+                val (text, wallTime) = clips[i]
+                // >= so that a later item at the SAME wall_time replaces the
+                // current winner (last-in-order wins on ties).
+                if (wallTime >= bestWallTime) {
+                    bestText = text
+                    bestWallTime = wallTime
+                }
+            }
+            return bestText
+        }
     }
 
     /**
@@ -291,6 +332,11 @@ class FgsSyncLoop(
         // persisted after every cycle, so a re-poll continues from where the
         // previous cycle left off.
         var totalNewCount = 0
+        // Accumulate (text, wallTime) for every text clip stored across ALL
+        // batch cycles in this drain. After the full drain, we apply only the
+        // NEWEST text clip once — not one per item (which would spam the system
+        // clipboard and could re-trigger the capture loop).
+        val storedTextClips = mutableListOf<Pair<String, Long>>()
         while (isActive) {
             val batch = syncManager.pollFromSupabase(
                 sinceWallTime = settings.lastSupabasePollWallTime,
@@ -333,6 +379,7 @@ class FgsSyncLoop(
                             overrideId = item.itemId,
                             contentType = item.contentType,
                             lamportTs = item.lamportTs,
+                            originDeviceId = item.deviceId,
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeImageBytes(storedId, item.plaintext)
@@ -359,6 +406,7 @@ class FgsSyncLoop(
                             overrideId = item.itemId,
                             contentType = item.contentType,
                             lamportTs = item.lamportTs,
+                            originDeviceId = item.deviceId,
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeFileBytes(storedId, item.plaintext)
@@ -375,12 +423,17 @@ class FgsSyncLoop(
                     if (text.isBlank()) {
                         false
                     } else {
-                        repository.storeItemWithLww(
+                        val didStore = repository.storeItemWithLww(
                             plaintext = text,
                             key = settings.encryptionKey,
                             itemId = item.itemId,
                             incomingLamportTs = item.lamportTs,
+                            originDeviceId = item.deviceId,
                         )
+                        // Track this text clip for the post-drain auto-apply
+                        // selection; we only apply the newest one at the end.
+                        if (didStore) storedTextClips.add(text to row.wallTime)
+                        didStore
                     }
                 }
                 if (stored) newCount++
@@ -402,6 +455,13 @@ class FgsSyncLoop(
             // Safety: if a full batch somehow failed to advance the cursor,
             // break rather than spin forever re-fetching the same window.
             if (cursorWallTime == startWallTime && cursorId == startId) break
+        }
+
+        // Auto-apply: after the full drain, apply only the NEWEST text clip once.
+        // This prevents N clipboard overwrites for a batch of N items and avoids
+        // re-triggering the capture loop for intermediate clips.
+        newestTextClip(storedTextClips)?.let { text ->
+            onSyncedTextClip?.invoke(text)
         }
 
         totalNewCount
@@ -450,12 +510,21 @@ class FgsSyncLoop(
                 emptyList()
             }
 
-        val localItems = repository.localItemsForSync(key, limit = P2P_LOCAL_ITEM_LIMIT)
+        val localItems = repository.localItemsForSync(key)
+
+        // Snapshot the LAN discovery table ONCE per pass. Used by the per-peer
+        // mDNS IP-correlation fallback below. listDiscovered can throw if the
+        // native side is not yet started; treat that as "no peers discovered".
+        val discovered = runCatching {
+            listDiscovered(peers.map { it.fingerprint })
+        }.getOrElse { e ->
+            Log.d(TAG, "listDiscovered unavailable during dial pass: ${e.message}")
+            emptyList()
+        }
 
         // Iterate every paired peer. Per-peer try/catch so one unreachable or
         // failing peer does not abort dials to the others.
         for (peer in peers) {
-            val peerAddr = peer.syncAddr
             val peerFingerprint = peer.fingerprint
             val sessionKey = settings.sessionKeyFor(peerFingerprint)
 
@@ -463,6 +532,31 @@ class FgsSyncLoop(
             if (peerFingerprint in revoked) {
                 Log.i(TAG, "P2P dial: skipping revoked peer ${peerFingerprint.take(8)}")
                 continue
+            }
+
+            // Resolve the best available dial address. Start with the persisted
+            // syncAddr, then apply a proactive mDNS IP-correlation refresh so we
+            // use the peer's current ephemeral port even on the FIRST dial attempt
+            // after a Mac daemon restart.  This mirrors the Mac-side
+            // `resolve_addr_from_discovery_by_ip` fix.  The mDNS `device_id` is a
+            // per-device UUID — it never equals the cert fingerprint — so we
+            // correlate by the LAN IP instead.
+            val persistedAddr = peer.syncAddr
+            val peerAddr = resolveAddrByIp(persistedAddr, discovered) ?: persistedAddr
+
+            // If mDNS gave us a fresher address, persist it so the next tick starts
+            // from the correct port without re-correlating every time.
+            if (peerAddr != persistedAddr && peerAddr.isNotBlank()) {
+                Log.i(
+                    TAG,
+                    "P2P dial ${peerFingerprint.take(8)}: mDNS pre-refresh " +
+                        "$persistedAddr → $peerAddr — persisting",
+                )
+                runCatching {
+                    settings.upsertPeer(peer.copy(syncAddr = peerAddr))
+                }.onFailure { e ->
+                    Log.w(TAG, "Failed to persist refreshed addr for ${peerFingerprint.take(8)}: ${e.message}")
+                }
             }
 
             if (!P2pDialerGate.shouldDial(peerAddr, peerFingerprint, sessionKey)) continue
@@ -479,11 +573,27 @@ class FgsSyncLoop(
                 deviceId = settings.deviceId,
             )
             var stored = 0
+            // Accumulate text clips from this P2P batch; apply only the newest
+            // after the full set is stored — mirrors the Supabase drain logic.
+            val p2pTextClips = mutableListOf<Pair<String, Long>>()
             for (item in result.items) {
                 // Store-mapping shared with the inbound listener poll (Android-as-
                 // responder). LWW dedup on item_id makes a re-dial / re-receipt a
                 // no-op, so no extra dedup is needed across the two paths.
-                if (storeSyncedItem(item)) stored += 1
+                val didStore = storeSyncedItem(item)
+                if (didStore) {
+                    stored += 1
+                    val isText = item.contentType != "image" &&
+                        !item.contentType.startsWith("image/") &&
+                        item.contentType != "file"
+                    if (isText) {
+                        val text = String(
+                            ByteArray(item.plaintext.size) { item.plaintext[it].toByte() },
+                            Charsets.UTF_8,
+                        )
+                        if (text.isNotBlank()) p2pTextClips.add(text to item.wallTimeMs)
+                    }
+                }
             }
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(
@@ -491,6 +601,10 @@ class FgsSyncLoop(
                     "P2P dial ${peerFingerprint.take(8)}: received ${result.itemsReceived} " +
                         "(stored $stored), sent ${result.itemsSent}",
                 )
+            }
+            // Auto-apply the newest P2P text clip once (not per item).
+            newestTextClip(p2pTextClips)?.let { text ->
+                onSyncedTextClip?.invoke(text)
             }
             // E1: stamp a real-presence contact time on the roster entry so the
             // Devices screen "online" dot reflects an ACTUAL successful P2P sync
@@ -506,8 +620,67 @@ class FgsSyncLoop(
                 throw e
             } catch (e: Exception) {
                 Log.w(TAG, "P2P dial to peer ${peerFingerprint.take(8)} failed: ${e.message}")
+
+                // mDNS post-failure IP-correlation: on dial failure (most commonly
+                // "Connection refused" from a stale port), consult the discovery
+                // snapshot for a fresher port from the same IP.  Only update when
+                // the discovered address actually differs — avoids a no-op write.
+                val freshAddr = resolveAddrByIp(peerAddr, discovered)
+                if (freshAddr != null && freshAddr != peerAddr) {
+                    Log.i(
+                        TAG,
+                        "P2P dial ${peerFingerprint.take(8)}: mDNS post-failure refresh " +
+                            "$peerAddr → $freshAddr — persisting",
+                    )
+                    runCatching {
+                        settings.upsertPeer(peer.copy(syncAddr = freshAddr))
+                    }.onFailure { e2 ->
+                        Log.w(TAG, "Failed to persist post-failure addr for ${peerFingerprint.take(8)}: ${e2.message}")
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * IP-correlation helper: mirror the Mac's `resolve_addr_from_discovery_by_ip`.
+     *
+     * Given a [currentAddr] in `"host:port"` form, find the [DiscoveredPeer] in
+     * [discovered] whose [DiscoveredPeer.ipAddrs] list contains the same host IP.
+     * If found and the discovered port differs from [currentAddr]'s port, return
+     * `"<host>:<freshPort>"`; otherwise return null (no actionable update).
+     *
+     * Self-heals the stale-port failure mode: both peers bind an EPHEMERAL
+     * sync-listener port that drifts on every daemon/app restart, so the port
+     * persisted at pairing time goes stale.  LAN IP is stable enough to act as
+     * the correlation key.  The mDNS `device_id` is a per-device UUID that never
+     * equals the cert fingerprint, so direct device_id matching is skipped.
+     */
+    private fun resolveAddrByIp(
+        currentAddr: String,
+        discovered: List<DiscoveredPeer>,
+    ): String? {
+        if (currentAddr.isBlank() || discovered.isEmpty()) return null
+
+        // Parse host from "host:port".  Handle plain IPv4 ("1.2.3.4:port") and
+        // bracketed-IPv6 ("[::1]:port") by stripping brackets from the host part.
+        val colonIdx = currentAddr.lastIndexOf(':')
+        if (colonIdx <= 0) return null
+        val host = currentAddr.substring(0, colonIdx).trimStart('[').trimEnd(']')
+        if (host.isBlank()) return null
+
+        // Find the first discovered peer that advertises this IP.
+        val match = discovered.firstOrNull { dp ->
+            dp.ipAddrs.any { it == host }
+        } ?: return null
+
+        val freshPort = match.port.toInt()
+        if (freshPort <= 0) return null
+
+        // Reconstruct "host:port" — keep the original host string (no bracket changes).
+        val hostPart = currentAddr.substring(0, colonIdx)
+        val refreshed = "$hostPart:$freshPort"
+        return if (refreshed != currentAddr) refreshed else null
     }
 
     /**
@@ -526,6 +699,7 @@ class FgsSyncLoop(
      * Returns true when a new (or replaced) row was stored, false on a dedup /
      * empty / blank no-op.
      */
+
     suspend fun storeSyncedItem(item: uniffi.copypaste_android.SyncedItem): Boolean =
         withContext(Dispatchers.IO) {
             // Advance the local Lamport clock to stay causally after every received
@@ -533,17 +707,27 @@ class FgsSyncLoop(
             // future local pushes appear "older" and breaking LWW ordering.
             settings.lamportClock.observe(item.wallTimeMs)
 
+            // ABI 15: tombstone frame — apply via LWW so a newer remote delete wins
+            // and a stale re-sync cannot resurrect a live item.
+            if (item.deleted) {
+                val tombstoned = repository.applyInboundTombstoneWithLww(
+                    itemId = item.itemId,
+                    lamportTs = item.wallTimeMs,
+                )
+                if (tombstoned) {
+                    Log.d(TAG, "P2P: applied inbound tombstone for itemId=${item.itemId.take(8)}…")
+                }
+                return@withContext tombstoned
+            }
+
             val key = settings.encryptionKey
-            val isImage = item.contentType == "image" ||
-                item.contentType.startsWith("image/")
-            val isFile = item.contentType == "file"
 
             // UniFFI maps `sequence<u8>` to List<UByte>; storeImageBytes and the
             // UTF-8 text decode below both want a ByteArray.
             val plaintextBytes = ByteArray(item.plaintext.size) { item.plaintext[it].toByte() }
 
-            when {
-                isImage -> {
+            val stored = when {
+                contentTypeIsImage(item.contentType) -> {
                     // Image frame: store a placeholder row under the peer's STABLE
                     // item_id, then persist the raw image bytes so HistoryActivity
                     // can render them. Re-dials dedup via overrideId.
@@ -568,7 +752,7 @@ class FgsSyncLoop(
                         }
                     }
                 }
-                isFile -> {
+                contentTypeIsFile(item.contentType) -> {
                     // File frame: store actual bytes so the user can save/copy them.
                     // file_name/mime are carried in-band so the label shows the real
                     // name ("[file: report.pdf]") instead of "[file]".
@@ -592,14 +776,38 @@ class FgsSyncLoop(
                     }
                 }
                 else -> {
-                    // Text frame: persist under the peer's STABLE item_id
-                    // (overrideId) — dedups a re-dial AND lets a later re-sync of
-                    // this clip reuse the same cross-device id instead of minting a
-                    // fresh local UUID.
+                    // Text frame: LWW-replace under the peer's STABLE item_id so an
+                    // EDITED clip replaces the prior local row instead of being
+                    // deduped/dropped (AB-17 — parity with the cloud/relay paths,
+                    // which already use storeItemWithLww). SyncedItem carries no
+                    // lamport field over the frozen P2P ABI, so wall_time_ms is the
+                    // causal basis — the same value already observed into the local
+                    // Lamport clock above (line ~535) and the same basis the macOS
+                    // daemon's P2P LWW uses.
                     val plaintext = String(plaintextBytes, Charsets.UTF_8)
-                    repository.storeItem(plaintext, key, overrideId = item.itemId)
-                        .isNotEmpty()
+                    val didStore = repository.storeItemWithLww(
+                        plaintext = plaintext,
+                        key = key,
+                        itemId = item.itemId,
+                        incomingLamportTs = item.wallTimeMs,
+                    )
+                    // Auto-apply is intentionally NOT done per-frame here. The BATCH
+                    // callers (dialPairedPeer / the Supabase drain) apply only the
+                    // NEWEST stored text clip once via onSyncedTextClip — applying
+                    // per-frame would spam the system clipboard and re-trigger the
+                    // capture loop during a multi-item catch-up.
+                    didStore
                 }
             }
+
+            // ABI 15: apply inbound pin state when the item was stored/updated.
+            // Use setPinned (which is idempotent) so a re-dial carrying the same
+            // pin state is a no-op. Only apply when the item was actually stored to
+            // avoid spuriously pinning a deduped item on every re-dial.
+            if (stored && item.pinned) {
+                repository.setPinned(item.itemId, true)
+            }
+
+            stored
         }
 }

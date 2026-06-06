@@ -19,6 +19,7 @@
 //! forwards bytes through these channels.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 
 use tokio::sync::{broadcast, mpsc, Mutex};
@@ -41,6 +42,29 @@ use copypaste_sync::{
     protocol::WireItem,
 };
 
+/// Context passed to [`merge_incoming_with_crypto`] to enable the
+/// Universal Clipboard auto-apply feature: when a genuinely fresh remote
+/// item wins the LWW merge, write its decrypted plaintext directly to
+/// NSPasteboard so it is ready to paste immediately.
+///
+/// The `self_write_change_count` is the **same** `Arc<AtomicI64>` the
+/// [`ClipboardMonitor`](crate::clipboard::ClipboardMonitor) checks on every
+/// poll tick.  Writing to NSPasteboard increments the system changeCount;
+/// we stamp the new changeCount into this atomic before the monitor's next
+/// tick so the poller recognises the write as ours and skips re-capturing it
+/// (loop prevention — identical to the mechanism used by the `copy_item` IPC
+/// handler).
+pub struct AutoApplyCtx {
+    /// Shared self-write sentinel for the pasteboard poller.
+    pub self_write_change_count: Arc<AtomicI64>,
+    /// This device's local encryption key (v1 seed).  Needed to decrypt image
+    /// chunks for NSPasteboard writes.
+    pub local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
+    /// Live daemon config.  The `auto_apply_synced_clip` flag is read here on
+    /// every merge so toggling it via `set_config` takes effect immediately.
+    pub core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+}
+
 /// Cross-device content-key context for the sync orchestrator (P2P Phase 3).
 ///
 /// Items are stored at rest encrypted under this device's *per-device*
@@ -62,6 +86,15 @@ use copypaste_sync::{
 /// no `sync_key_b64`) the orchestrator falls back to the legacy behaviour:
 /// outgoing items ship their raw at-rest ciphertext (undecryptable on the peer,
 /// exactly as before Phase 3) and incoming items are stored verbatim.
+///
+/// ## Caching (H8 perf fix)
+///
+/// The shared sync key is cached in-memory as an `Arc<std::sync::Mutex<Option<[u8;
+/// 32]>>>`. All clones (e.g. the `spawn_blocking` copy inside
+/// `merge_incoming_with_crypto`) share the same backing `Arc`, so a single
+/// `reload_sync_key` call — made after any pairing write — updates every live
+/// copy simultaneously. The key bytes are stored as a plain array rather than
+/// `SyncKey` because `SyncKey` intentionally does not implement `Clone`.
 #[derive(Clone)]
 pub struct SyncCrypto {
     /// This device's v1 local-storage key (the raw seed from `load_local_key`).
@@ -69,42 +102,70 @@ pub struct SyncCrypto {
     /// This device's v2 local-storage key (`derive_v2(seed)`).
     /// Item 5: wrapped in `Zeroizing` so the key bytes are scrubbed on drop.
     v2_key: zeroize::Zeroizing<[u8; 32]>,
-    /// Path to `peers.json`, re-read on each crypto operation so a peer paired
-    /// at runtime contributes its shared sync key without a restart.
+    /// Path to `peers.json`. Only read during construction and `reload_sync_key`
+    /// — NOT on every crypto operation (H8 fix).
     peers_path: PathBuf,
+    /// Cached shared content sync key bytes (H8: eliminates per-item disk I/O).
+    ///
+    /// Shared via `Arc` so every `SyncCrypto` clone (including the temporary
+    /// copy inside `merge_incoming_with_crypto::spawn_blocking`) observes the
+    /// same value. Updated atomically by `reload_sync_key` after pairing.
+    cached_sync_key_bytes: std::sync::Arc<std::sync::Mutex<Option<[u8; 32]>>>,
 }
 
 impl SyncCrypto {
     /// Build a crypto context from the device's local-storage seed and the
-    /// `peers.json` path.
+    /// `peers.json` path. Eagerly loads the shared sync key from `peers.json`
+    /// so the hot-path `shared_sync_key()` never touches the filesystem.
     pub fn new(local_seed: [u8; 32], peers_path: PathBuf) -> Self {
+        let cached = Self::load_key_from_peers(&peers_path);
         Self {
             v1_key: local_seed,
             v2_key: derive_v2(&local_seed),
+            cached_sync_key_bytes: std::sync::Arc::new(std::sync::Mutex::new(cached)),
             peers_path,
         }
     }
 
-    /// Load the shared content sync key (if any) from `peers.json`.
-    ///
-    /// Returns the first peer record that carries a valid `sync_key_b64`. The
-    /// supported topology is two paired devices sharing one key; with >2 devices
-    /// a common group key would be required (deferred — see module notes).
-    fn shared_sync_key(&self) -> Option<SyncKey> {
+    /// Read `peers.json` once and return the first valid 32-byte sync key, or
+    /// `None` when no paired peer with a key is present.
+    fn load_key_from_peers(peers_path: &std::path::Path) -> Option<[u8; 32]> {
         use base64::Engine as _;
-        let peers = crate::peers::load_peers(&self.peers_path);
-        for dev in &peers {
-            let Some(b64) = dev.sync_key_b64.as_deref() else {
-                continue;
-            };
-            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
-                continue;
-            };
-            if let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) {
-                return Some(SyncKey::from_bytes(arr));
-            }
-        }
-        None
+        crate::peers::load_peers(peers_path)
+            .into_iter()
+            .find_map(|dev| {
+                let b64 = dev.sync_key_b64.as_deref()?;
+                let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+                <[u8; 32]>::try_from(bytes.as_slice()).ok()
+            })
+    }
+
+    /// Return the cached shared content sync key (if any).
+    ///
+    /// This is now an O(1) memory read — no file I/O (H8 fix). Call
+    /// `reload_sync_key` after pairing to refresh the cache.
+    fn shared_sync_key(&self) -> Option<SyncKey> {
+        let guard = self
+            .cached_sync_key_bytes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        (*guard).map(SyncKey::from_bytes)
+    }
+
+    /// Re-read `peers.json` and update the in-memory cache. Call this once
+    /// after any write to `peers.json` (pairing completion, revoke) so the
+    /// orchestrator picks up the new key without a daemon restart.
+    ///
+    /// Because `cached_sync_key_bytes` is an `Arc`, this update is visible to
+    /// every `SyncCrypto` clone (including ones moved into `spawn_blocking`
+    /// closures) immediately.
+    pub fn reload_sync_key(&self) {
+        let new_key = Self::load_key_from_peers(&self.peers_path);
+        let mut guard = self
+            .cached_sync_key_bytes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        *guard = new_key;
     }
 }
 
@@ -122,10 +183,15 @@ impl SyncCrypto {
 /// * `device_id` — UUID stamped as `origin_device_id` on outgoing items.
 /// * `storage_quota_bytes` — byte cap passed to `prune_to_cap` after each
 ///   successful P2P merge so the local DB stays bounded (mirrors the cloud path).
+/// * `auto_apply` — when `Some`, enables the Universal Clipboard feature: a
+///   genuinely fresh incoming item (newer than the current local clipboard) is
+///   written to NSPasteboard immediately after merge, with the self-write guard
+///   armed to prevent re-capture by the poller.
 /// * `shutdown` — D2: token cancelled by the daemon on SIGINT/SIGTERM so the
 ///   orchestrator exits promptly instead of waiting for channels to drain.
 ///
 /// Returns `Ok(())` once both channels close or `shutdown` fires.
+#[allow(clippy::too_many_arguments)]
 pub async fn run(
     db: Arc<Mutex<Database>>,
     mut new_item_rx: broadcast::Receiver<ClipboardItem>,
@@ -134,6 +200,7 @@ pub async fn run(
     device_id: String,
     crypto: Option<SyncCrypto>,
     storage_quota_bytes: i64,
+    auto_apply: Option<AutoApplyCtx>,
     shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     info!(%device_id, has_crypto = crypto.is_some(), "sync orchestrator started");
@@ -188,7 +255,13 @@ pub async fn run(
             incoming = incoming_rx.recv(), if !incoming_closed => {
                 match incoming {
                     Some(wire) => {
-                        if let Err(e) = merge_incoming_with_crypto(&db, vec![wire], crypto.as_ref(), storage_quota_bytes).await {
+                        if let Err(e) = merge_incoming_with_crypto(
+                            &db,
+                            vec![wire],
+                            crypto.as_ref(),
+                            storage_quota_bytes,
+                            auto_apply.as_ref(),
+                        ).await {
                             warn!("sync_orch: merge_incoming failed: {e}");
                         }
                     }
@@ -224,7 +297,7 @@ pub async fn merge_incoming(
     items: Vec<WireItem>,
 ) -> anyhow::Result<usize> {
     let quota = copypaste_core::AppConfig::default().storage_quota_bytes as i64;
-    merge_incoming_with_crypto(db, items, None, quota).await
+    merge_incoming_with_crypto(db, items, None, quota, None).await
 }
 
 /// Crypto-aware variant of [`merge_incoming`] (P2P Phase 3).
@@ -246,11 +319,19 @@ pub async fn merge_incoming(
 /// **Fix HIGH-3:** after a successful merge `prune_to_cap` is called with
 /// `storage_quota_bytes` so the P2P inbound path enforces the same local DB
 /// size cap the cloud path already enforces.
+///
+/// **Universal Clipboard:** when `auto_apply` is `Some` and the winning item
+/// is *strictly newer* than the current local latest (wall_time comparison),
+/// the decrypted plaintext is written to NSPasteboard so it is immediately
+/// ready to paste. The self-write changeCount sentinel is stamped before/after
+/// the write so the poller skips re-capturing the write. Only text and image
+/// are auto-applied; files are skipped (noted in the log).
 pub async fn merge_incoming_with_crypto(
     db: &Arc<Mutex<Database>>,
     items: Vec<WireItem>,
     crypto: Option<&SyncCrypto>,
     storage_quota_bytes: i64,
+    auto_apply: Option<&AutoApplyCtx>,
 ) -> anyhow::Result<usize> {
     if items.is_empty() {
         return Ok(0);
@@ -261,6 +342,20 @@ pub async fn merge_incoming_with_crypto(
     // - `SyncCrypto` is `Clone` (derives it).
     let db = db.clone();
     let crypto_owned: Option<SyncCrypto> = crypto.cloned();
+    // Clone the auto-apply Arcs so the blocking closure can move them in.
+    // Type alias avoids the `clippy::type_complexity` lint on this local binding.
+    type AutoApplyTuple = (
+        Arc<AtomicI64>,
+        Arc<zeroize::Zeroizing<[u8; 32]>>,
+        Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    );
+    let auto_apply_owned: Option<AutoApplyTuple> = auto_apply.map(|ctx| {
+        (
+            ctx.self_write_change_count.clone(),
+            ctx.local_key.clone(),
+            ctx.core_config.clone(),
+        )
+    });
 
     let result = tokio::task::spawn_blocking(move || {
         // Acquire the std-compatible blocking lock INSIDE the blocking closure.
@@ -269,6 +364,11 @@ pub async fn merge_incoming_with_crypto(
         let db_guard = db.blocking_lock();
 
         let mut upserted = 0usize;
+        // Candidate for auto-apply: (wall_time, plaintext_bytes, content_type).
+        // We track the highest-wall_time winner across the batch so only the
+        // single freshest item is applied to NSPasteboard even during a burst.
+        let mut apply_candidate: Option<(i64, Vec<u8>, String)> = None;
+
         for mut wire in items {
             // P0 security/correctness: clamp any negative lamport_ts / wall_time
             // before processing. A hostile or buggy peer can send lamport_ts = -1
@@ -307,14 +407,42 @@ pub async fn merge_incoming_with_crypto(
                 debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
                 continue;
             }
-            // Fix-3: capture the local `pinned` flag before `wire_to_local`
-            // (which always sets pinned=false — the wire carries no pinned field).
-            let local_pinned: bool = existing.as_ref().map(|r| r.pinned).unwrap_or(false);
-            // Fix (pin_order): also capture the local `pin_order` before
-            // `wire_to_local` (which carries no pin_order → None). The replace
-            // INSERT must re-bind this or the user's pinned ordering is reset to
-            // NULL on every LWW content update of a pinned item.
-            let local_pin_order: Option<f64> = existing.as_ref().and_then(|r| r.pin_order);
+            // Tombstone fast-path: when the winning wire item is a soft-delete
+            // (deleted=true), apply it locally without going through the full
+            // rekey + replace path.
+            //   • Row exists locally  → soft-delete it (wipe content, set deleted=1).
+            //   • Row does not exist  → skip; no point creating a tombstone for a
+            //     row we never held (the item was already absent here).
+            if wire.deleted {
+                if exists {
+                    let local_id = local_pk
+                        .as_deref()
+                        // SAFETY: `exists` is true only when `local_pk` is Some —
+                        // it is set from `existing.as_ref().map(|r| r.id.clone())`.
+                        .unwrap_or("");
+                    match copypaste_core::storage::items::soft_delete_item(
+                        &db_guard,
+                        local_id,
+                        wire.lamport_ts,
+                        wire.wall_time,
+                    ) {
+                        Ok(_) => {
+                            debug!(item_id = %wire.item_id, "sync_orch: applied inbound tombstone");
+                            upserted += 1;
+                        }
+                        Err(e) => {
+                            warn!(item_id = %wire.item_id, "sync_orch: soft_delete_item failed: {e}");
+                        }
+                    }
+                } else {
+                    debug!(item_id = %wire.item_id, "sync_orch: inbound tombstone for unknown item — skipping");
+                }
+                continue;
+            }
+
+            // Capture wall_time before wire is consumed by rekey_inbound.
+            let wire_wall_time = wire.wall_time;
+            let wire_content_type = wire.content_type.clone();
 
             // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
             // this device's own local key, recovering the plaintext for FTS. Returns
@@ -338,18 +466,12 @@ pub async fn merge_incoming_with_crypto(
                 to_insert.id = pk;
             }
 
-            // Fix-3 (cont.): OR-merge the local `pinned` flag so a pinned item
-            // that gets a content update via LWW TakeRemote is not silently
-            // unpinned (losing its prune-exemption → TTL data loss).
-            to_insert.pinned = to_insert.pinned || local_pinned;
-            // Fix (pin_order, cont.): carry the prior pin_order across the
-            // replace so the pinned ordering is preserved. `wire_to_local`
-            // leaves pin_order=None, so without this the replace INSERT would
-            // store NULL and scramble the user's pinned order. Prefer the
-            // existing local value; only keep an inbound non-None as a fallback.
-            if to_insert.pin_order.is_none() {
-                to_insert.pin_order = local_pin_order;
-            }
+            // `wire_to_local` now propagates `pinned` and `pin_order` directly from
+            // the wire (see merge.rs), so pin/unpin/reorder broadcasts converge via
+            // normal LWW TakeRemote.  We intentionally trust the wire's values here
+            // instead of OR-merging with the local state: the IPC handlers bump
+            // lamport_ts before broadcasting, so the wire wins LWW only when it is
+            // causally later — which is exactly when its pin state should take effect.
 
             // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
             // ran `delete_item` then a separate `insert_item`; if the insert failed
@@ -358,11 +480,41 @@ pub async fn merge_incoming_with_crypto(
             // old row (and its FTS entry) intact. Mirrors `insert_item_with_fts`'s
             // `unchecked_transaction` approach (we can't reuse it directly because
             // it does plain INSERT with dedup-on-conflict rather than replace).
-            let fts_text = fts_plaintext.and_then(|pt| String::from_utf8(pt).ok());
+            let fts_text = fts_plaintext
+                .clone()
+                .and_then(|pt| String::from_utf8(pt).ok());
             match replace_item_atomic(&db_guard, exists, &to_insert, fts_text.as_deref()) {
                 Ok(()) => {
                     debug!(item_id = %to_insert.item_id, "sync_orch: upserted incoming item");
                     upserted += 1;
+                    // Track the highest-wall_time winner for potential auto-apply.
+                    // `fts_plaintext` holds the already-decrypted text bytes; for
+                    // image/file we recover the plaintext separately in
+                    // `apply_to_pasteboard_if_fresh`.  Only update the candidate
+                    // when this item is strictly newer than the current best.
+                    if auto_apply_owned.is_some() {
+                        let plaintext_opt = match wire_content_type.as_str() {
+                            "text" => fts_plaintext.clone(),
+                            // Image plaintext must be recovered from the stored
+                            // row's chunks; pass a sentinel so the caller knows to
+                            // do the decode step.  We use an empty vec as the
+                            // marker here — the actual decode happens in
+                            // `apply_to_pasteboard_if_fresh`.
+                            "image" => Some(Vec::new()),
+                            // Files: skip (deferred — file-URL pasteboard write
+                            // needs a temp-file round-trip; not safe to do in
+                            // the blocking DB closure).
+                            _ => None,
+                        };
+                        if let Some(pt) = plaintext_opt {
+                            let better = apply_candidate
+                                .as_ref()
+                                .is_none_or(|(best_wt, _, _)| wire_wall_time > *best_wt);
+                            if better {
+                                apply_candidate = Some((wire_wall_time, pt, wire_content_type));
+                            }
+                        }
+                    }
                 }
                 Err(e) => {
                     warn!(item_id = %to_insert.item_id, "sync_orch: atomic replace failed: {e}")
@@ -378,6 +530,64 @@ pub async fn merge_incoming_with_crypto(
                 Ok(0) => {}
                 Ok(n) => debug!("sync_orch: prune_to_cap removed {n} rows after P2P merge"),
                 Err(e) => warn!("sync_orch: prune_to_cap failed after P2P merge: {e}"),
+            }
+        }
+
+        // Universal Clipboard auto-apply: write the single freshest winner to
+        // NSPasteboard, but ONLY when it is strictly newer than the current local
+        // latest wall_time (prevents historical backfill from overwriting the user's
+        // current clipboard on reconnect).
+        if let (
+            Some((candidate_wt, plaintext, content_type)),
+            Some((swcc, local_key, core_config)),
+        ) = (apply_candidate, auto_apply_owned)
+        {
+            // Check feature flag — allows live toggle via set_config.
+            let enabled = core_config
+                .read()
+                .map(|cfg| cfg.auto_apply_synced_clip)
+                .unwrap_or(true); // safe default: on
+
+            if enabled {
+                // Query the current local latest wall_time to decide whether this
+                // is a genuinely fresh remote copy or historical catch-up.
+                let local_latest_wt: i64 = db_guard
+                    .conn()
+                    .query_row(
+                        "SELECT COALESCE(MAX(wall_time), 0) FROM clipboard_items \
+                         WHERE origin_device_id = ''  OR 1=1",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                // Use the actual max wall_time across ALL rows (local or synced)
+                // to detect whether this candidate is the newest thing we know of.
+                let global_max_wt: i64 = db_guard
+                    .conn()
+                    .query_row(
+                        "SELECT COALESCE(MAX(wall_time), 0) FROM clipboard_items",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                let _ = local_latest_wt; // used via global_max_wt path below
+
+                if candidate_wt >= global_max_wt {
+                    // This item is the newest in the DB — apply it.
+                    apply_to_pasteboard_if_fresh(
+                        &db_guard,
+                        &content_type,
+                        plaintext,
+                        &local_key,
+                        &swcc,
+                    );
+                } else {
+                    debug!(
+                        candidate_wt,
+                        global_max_wt,
+                        "sync_orch: auto-apply skipped — not the newest item (historical backfill)"
+                    );
+                }
             }
         }
 
@@ -437,8 +647,8 @@ fn replace_item_atomic(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+          content_hash, origin_device_id, key_version, pinned, pin_order, deleted)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)",
         params![
             item.id,
             item.item_id,
@@ -460,10 +670,13 @@ fn replace_item_atomic(
             // v1-encrypted → permanent auth-tag failure on every subsequent decrypt.
             item.key_version as i64,
             item.pinned as i64,
-            // pin_order: preserved from the prior local row by the caller's
-            // OR-merge above. Without this column the replace defaulted it to
-            // NULL and scrambled the user's pinned ordering on every update.
+            // pin_order: the wire now carries pin_order directly via wire_to_local,
+            // so this correctly reflects the sender's pinned ordering.
             item.pin_order,
+            // deleted: wire_to_local propagates this from the WireItem; for
+            // non-tombstone items this is always false (tombstones are handled
+            // by the soft_delete_item fast-path above and never reach here).
+            item.deleted as i64,
         ],
     )?;
     if let Some(text) = fts_text {
@@ -493,29 +706,17 @@ fn replace_item_atomic(
 /// Returns an empty vec when there is no shared sync key (nothing decryptable to
 /// send) or the DB read fails — catch-up is best-effort.
 pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec<WireItem> {
-    // P2 fix: load the shared sync key ONCE here rather than on every
-    // `rekey_outbound` call (which re-reads peers.json per item). If no shared
+    // P2 fix: check the shared sync key ONCE here (now an in-memory cache read
+    // after the H8 fix) rather than re-reading peers.json per item. If no shared
     // key is available there is nothing to forward — bail early.
     //
     // P1 fix: paginate through the local store in CATCHUP_PAGE_SIZE-row batches
     // instead of materialising up to 10 000 structs in one shot. Each page is
     // processed immediately and dropped, keeping peak heap usage bounded.
-    use base64::Engine as _;
 
     // Pre-flight: only bother paginating if a shared key actually exists.
-    let shared_key_available = {
-        let peers = crate::peers::load_peers(&crypto.peers_path);
-        peers.iter().any(|dev| {
-            dev.sync_key_b64.as_deref().is_some_and(|b64| {
-                base64::engine::general_purpose::STANDARD
-                    .decode(b64)
-                    .ok()
-                    .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
-                    .is_some()
-            })
-        })
-    };
-    if !shared_key_available {
+    // H8 fix: use the cached key via shared_sync_key() — no peers.json disk read.
+    if crypto.shared_sync_key().is_none() {
         return Vec::new();
     }
 
@@ -967,6 +1168,193 @@ fn parse_file_name_mime(meta_json: &str) -> Option<(String, String)> {
     Some((filename, mime))
 }
 
+/// Write decrypted plaintext for a synced item directly to NSPasteboard.
+///
+/// Called from [`merge_incoming_with_crypto`] after determining that the
+/// incoming item is the freshest thing in the DB and `auto_apply_synced_clip`
+/// is enabled.
+///
+/// # Loop prevention
+///
+/// The self-write guard works identically to the `copy_item` IPC handler:
+/// 1. Read the *current* NSPasteboard `changeCount` (pre-write).
+/// 2. Pre-stamp the expected post-write value (`current + 2`) into
+///    `self_write_change_count` **before** calling `clearContents` /
+///    `setString_forType`, so no poll arriving between the write and the stamp
+///    can slip through with a stale sentinel.
+/// 3. After the write, overwrite with the *actual* new `changeCount` so a
+///    macOS increment that differs from our prediction is handled correctly.
+/// 4. On any failure reset the sentinel to `-1` to avoid permanent suppression.
+///
+/// # Content types
+///
+/// * `text` — writes `NSPasteboardTypeString`.  `plaintext` is the raw UTF-8
+///   bytes returned by [`rekey_inbound`].
+/// * `image` — `plaintext` is an empty-vec sentinel (set in the merge loop
+///   because the full PNG was not re-materialised there).  We re-decode it
+///   here from the stored chunks in the DB row.
+/// * `file` — **skipped** (a temp-file round-trip is required; deferred).
+///   Logged at DEBUG.
+///
+/// All Cocoa calls are wrapped in `autoreleasepool` to prevent Objective-C
+/// object leaks on this tokio blocking thread (mirrors `clipboard.rs::poll` and
+/// `ipc.rs::write_to_pasteboard`).
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+fn apply_to_pasteboard_if_fresh(
+    db: &Database,
+    content_type: &str,
+    plaintext: Vec<u8>,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+    self_write_change_count: &Arc<AtomicI64>,
+) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSPasteboard;
+
+        match content_type {
+            "text" => {
+                let text = match std::str::from_utf8(&plaintext) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        warn!("sync_orch: auto-apply text is not UTF-8: {e}");
+                        return;
+                    }
+                };
+                objc2::rc::autoreleasepool(|_pool| {
+                    use objc2_app_kit::NSPasteboardTypeString;
+                    use objc2_foundation::NSString;
+
+                    // Pre-stamp expected changeCount (clearContents +1, setString +1).
+                    let pre = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    self_write_change_count.store(pre + 2, Ordering::Release);
+
+                    let ok = unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let ns_str = NSString::from_str(text);
+                        pb.setString_forType(&ns_str, NSPasteboardTypeString)
+                    };
+                    if ok {
+                        // Post-stamp with the actual changeCount.
+                        let actual =
+                            unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                        self_write_change_count.store(actual, Ordering::Release);
+                        debug!(
+                            change_count = actual,
+                            "sync_orch: auto-applied synced text to NSPasteboard"
+                        );
+                    } else {
+                        // Reset sentinel so the monitor is not permanently suppressed.
+                        self_write_change_count.store(-1, Ordering::Release);
+                        warn!("sync_orch: auto-apply text: NSPasteboard setString:forType: returned false");
+                    }
+                });
+            }
+            "image" => {
+                // `plaintext` is an empty-vec sentinel from the merge loop
+                // (the PNG was not re-materialised there to avoid a second
+                // decode pass).  Recover the PNG from the most-recent image
+                // row in the DB — it was just inserted/updated by this merge.
+                let png_bytes = recover_latest_image_png(db, local_key);
+                let png_bytes = match png_bytes {
+                    Some(b) => b,
+                    None => {
+                        warn!("sync_orch: auto-apply image: could not recover PNG from DB");
+                        return;
+                    }
+                };
+                objc2::rc::autoreleasepool(|_pool| {
+                    use objc2_foundation::{NSData, NSString};
+
+                    let pre = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    self_write_change_count.store(pre + 2, Ordering::Release);
+
+                    let ok = unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let type_str = NSString::from_str("public.png");
+                        let data = NSData::with_bytes(&png_bytes);
+                        pb.setData_forType(Some(&data), &type_str)
+                    };
+                    if ok {
+                        let actual =
+                            unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                        self_write_change_count.store(actual, Ordering::Release);
+                        debug!(
+                            change_count = actual,
+                            "sync_orch: auto-applied synced image to NSPasteboard"
+                        );
+                    } else {
+                        self_write_change_count.store(-1, Ordering::Release);
+                        warn!("sync_orch: auto-apply image: NSPasteboard setData:forType: returned false");
+                    }
+                });
+            }
+            "file" => {
+                // Files require writing bytes to a temp file and placing its
+                // file-URL on the pasteboard — deferred to a future iteration.
+                debug!("sync_orch: auto-apply skipped for file item (not yet supported)");
+            }
+            other => {
+                debug!(
+                    content_type = other,
+                    "sync_orch: auto-apply skipped for unknown content_type"
+                );
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Non-macOS: no NSPasteboard. No-op — called only on macOS in production.
+        debug!(content_type, "sync_orch: auto-apply skipped (not macOS)");
+    }
+}
+
+/// Recover PNG bytes for the most-recently-inserted image row from the DB.
+///
+/// Used by [`apply_to_pasteboard_if_fresh`] for the image auto-apply path.
+/// Reads the newest image row's chunk blob + blob_ref, decodes with `local_key`
+/// (v1 seed, the chunk-encryption key), and returns the raw PNG bytes.
+/// Returns `None` on any parse/decrypt failure (logged at DEBUG).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn recover_latest_image_png(
+    db: &Database,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+) -> Option<Vec<u8>> {
+    use copypaste_core::{chunks_from_blob, decode_image};
+
+    // Fetch the most recent image row (just inserted by this merge).
+    let (content, blob_ref): (Vec<u8>, String) = db
+        .conn()
+        .query_row(
+            "SELECT content, blob_ref FROM clipboard_items \
+             WHERE content_type = 'image' AND content IS NOT NULL AND blob_ref IS NOT NULL \
+             ORDER BY wall_time DESC, id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get::<_, Vec<u8>>(0)?, r.get::<_, String>(1)?)),
+        )
+        .ok()?;
+
+    let file_id = crate::ipc::parse_image_file_id(&blob_ref)
+        .map_err(|e| {
+            debug!("sync_orch: auto-apply image: blob_ref parse failed: {e}");
+        })
+        .ok()?;
+
+    let chunks = chunks_from_blob(&content)
+        .map_err(|e| {
+            debug!("sync_orch: auto-apply image: chunks_from_blob failed: {e}");
+        })
+        .ok()?;
+
+    decode_image(&chunks, local_key, &file_id)
+        .map_err(|e| {
+            debug!("sync_orch: auto-apply image: decode_image failed: {e}");
+        })
+        .ok()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -980,6 +1368,9 @@ mod tests {
 
     fn make_wire(id: &str, lamport: i64, content: u8) -> WireItem {
         WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: id.to_string(),
             item_id: format!("{id}-iid"),
             content_type: "text".to_string(),
@@ -1034,6 +1425,9 @@ mod tests {
 
         // A's wire item carries A's at-rest ciphertext + nonce.
         let mut wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: "row-1".to_string(),
             item_id: item_id.clone(),
             content_type: "text".to_string(),
@@ -1154,6 +1548,9 @@ mod tests {
         let meta_json_a = format!(r#"{{"file_id":{file_id_a:?}}}"#);
 
         let mut wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: "img-row".to_string(),
             item_id: item_id.clone(),
             content_type: "image".to_string(),
@@ -1251,6 +1648,9 @@ mod tests {
         let meta_json_a = crate::clipboard::build_file_meta_json(&meta_a);
 
         let mut wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
             id: "file-row".to_string(),
             item_id: item_id.clone(),
             content_type: "file".to_string(),
@@ -1359,6 +1759,7 @@ mod tests {
                 "local-device".to_string(),
                 None,
                 500_000_000, // storage_quota_bytes: 500 MB (test default)
+                None,        // auto_apply: disabled in tests (no NSPasteboard)
                 shutdown,
             )
             .await
@@ -1406,6 +1807,7 @@ mod tests {
                 "local-device".to_string(),
                 None,
                 500_000_000, // storage_quota_bytes: 500 MB (test default)
+                None,        // auto_apply: disabled in tests (no NSPasteboard)
                 shutdown,
             )
             .await
@@ -1437,19 +1839,21 @@ mod tests {
         handle.await.expect("task join");
     }
 
-    /// Fix-3 (pinned preserved on LWW TakeRemote): when the local row is pinned
-    /// and the incoming wire item wins LWW (newer lamport), the stored row must
-    /// keep `pinned = true`.  The wire protocol has no `pinned` field, so
-    /// `wire_to_local` always produces `pinned = false`; the merge path must
-    /// OR-merge the existing value before the atomic replace.
+    /// Op-propagation (v0.6.1): the wire now carries authoritative `pinned` /
+    /// `pin_order`, so on LWW TakeRemote the winning wire's pin state is applied
+    /// directly — this is what lets an explicit pin / UNPIN / reorder on one
+    /// device converge onto the others. (The previous semantic OR-merged the
+    /// local pin and was kept only because the wire had no pin field; that
+    /// would silently swallow a remote unpin, which the "sync all operations"
+    /// requirement forbids.)
     ///
-    /// The current lookup path uses `wire.id` as the lookup key, so the local
-    /// row's `id` must equal `wire.id` for TakeRemote to fire.
+    /// Here a locally-pinned row receives a newer remote that is unpinned →
+    /// the row must become unpinned (remote unpin propagated). The lookup uses
+    /// `wire.id`, so the local row's `id` must equal `wire.id` for TakeRemote.
     #[tokio::test]
-    async fn merge_incoming_takeremode_preserves_pinned() {
+    async fn merge_incoming_takeremote_propagates_wire_pin_state() {
         let db = make_db();
-        // Local row: id matches the wire id so the LWW lookup finds it.
-        // lamport 3 < wire lamport 9 → TakeRemote will fire.
+        // Local row pinned=true; lamport 3 < wire lamport 9 → TakeRemote fires.
         let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 3);
         local.id = "shared-id".to_string();
         local.item_id = "shared-id-iid".to_string();
@@ -1463,10 +1867,10 @@ mod tests {
             assert!(stored.pinned, "setup: local row must be pinned");
         }
 
-        // Wire id = "shared-id" so the lookup finds the existing row.
-        // make_wire("shared-id", …) sets item_id = "shared-id-iid" (matches).
+        // Newer remote, unpinned (make_wire sets pinned=false, pin_order=None).
         let wire = make_wire("shared-id", 9, 0xFF);
         assert_eq!(wire.id, "shared-id");
+        assert!(!wire.pinned, "setup: incoming wire is unpinned");
 
         let upserted = merge_incoming(&db, vec![wire]).await.unwrap();
         assert_eq!(upserted, 1, "newer remote must win LWW");
@@ -1475,8 +1879,8 @@ mod tests {
         let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
         assert_eq!(rows.len(), 1, "must remain ONE row");
         assert!(
-            rows[0].pinned,
-            "pinned flag must be preserved after TakeRemote — got pinned={}",
+            !rows[0].pinned,
+            "remote unpin must propagate on TakeRemote — got pinned={}",
             rows[0].pinned
         );
     }

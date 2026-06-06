@@ -16,7 +16,12 @@ import { api } from "../lib/ipc";
 // always the most-recently-used key and the head is the LRU candidate.
 // ---------------------------------------------------------------------------
 
-const CACHE_BUDGET_BYTES = 24 * 1024 * 1024; // 24 MiB
+// 16 MiB (HB-10): caps the cumulative COMPRESSED data-URI string bytes held in
+// memory. The dominant image-memory cost is the WebView's DECODED bitmaps, now
+// bounded by the smaller 192 px thumbnail source + the intrinsic decode-size
+// hint on the <img> below; this budget is the secondary, string-side bound and
+// is trimmed modestly from 24 → 16 MiB to keep total RSS down.
+const CACHE_BUDGET_BYTES = 16 * 1024 * 1024; // 16 MiB
 
 // Value stored per entry: { uri, bytes }.
 interface CacheEntry {
@@ -251,6 +256,17 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
     <img
       src={src}
       alt=""
+      // Intrinsic decode-size hint (HB-10): the WebView decodes the data URI to
+      // an RGBA bitmap whose RSS scales with the decoded pixel AREA, not with the
+      // (small, LRU-capped) data-URI string length. Advertising the bounding-box
+      // dimensions as the intrinsic width/height lets WebKit downsample at decode
+      // time toward the displayed size rather than holding a larger source
+      // bitmap. These attributes do not drive layout — the CSS max-width/
+      // max-height + width/height:auto below stay authoritative for the Maccy
+      // bounding box; they only steer the decoder's target resolution.
+      width={340}
+      height={maxHeight}
+      decoding="async"
       // max-width/max-height + object-fit:contain implements the Maccy bounding
       // box: the image shrinks to fit but is never upscaled past its natural size.
       style={{

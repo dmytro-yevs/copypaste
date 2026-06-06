@@ -81,16 +81,71 @@ pub struct PairedDevice {
     pub last_sync_at: Option<i64>,
 }
 
-/// Normalise a fingerprint to the canonical colon-free, lowercase hex form used
-/// by the mTLS/P2P layer.
+// Use the canonical fingerprint normaliser from the IPC module — single
+// implementation, zero drift risk. The local alias keeps call-site churn
+// minimal; any future rename only touches this one line.
+use crate::ipc::canonical_fingerprint as canonical_fp;
+
+/// Update the persisted `name`, `address`, and `local_ip` fields for a paired
+/// peer from a live mDNS snapshot.
 ///
-/// `peers.json` stores fingerprints in the user-facing `XX:XX:…` colon-hex
-/// form, while the P2P layer reports colon-free hex. To match a peer record
-/// against a P2P-reported fingerprint both sides must be canonicalised. This
-/// mirrors `crate::ipc::canonical_fingerprint` (kept local so `peers` has no
-/// dependency on the IPC module).
-fn canonical_fp(fp: &str) -> String {
-    fp.replace(':', "").to_ascii_lowercase()
+/// Loads `peers.json`, finds the record whose fingerprint canonicalises to the
+/// same value as `fingerprint`, and applies whichever of the three live fields
+/// actually differ from what is stored, then atomically rewrites the file via
+/// [`save_peers`].  All other fields (sync timestamps, `sync_key_b64`, `model`,
+/// `os_version`, `app_version`, `public_ip`) are preserved verbatim — those
+/// richer fields are NOT carried by mDNS and are out of scope for this helper.
+///
+/// Returns `true` when at least one field changed and the file was rewritten,
+/// `false` when nothing changed (no I/O).  No-op (returns `Ok(false)`) when no
+/// matching peer record exists.
+///
+/// # Follow-up
+/// `model`, `os_version`, `app_version`, and `public_ip` are learned in-band
+/// over the bootstrap channel at pairing time and are NOT carried by mDNS TXT
+/// records.  Refreshing them reactively would require a separate wire-protocol
+/// extension and is deferred.
+/// // TODO(DeviceInfoAnnounce frame): once we add a DeviceInfoAnnounce wire frame,
+/// // drive model/os_version/app_version/public_ip refresh through that path.
+pub fn update_peer_meta(
+    path: &Path,
+    fingerprint: &str,
+    new_name: &str,
+    new_addr: std::net::SocketAddr,
+    new_local_ip: &str,
+) -> anyhow::Result<bool> {
+    let target = canonical_fp(fingerprint);
+    let mut peers = load_peers(path);
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|p| canonical_fp(&p.fingerprint) == target)
+    else {
+        // No matching record — nothing to update.  Not an error.
+        return Ok(false);
+    };
+
+    let mut changed = false;
+
+    if !new_name.is_empty() && peer.name != new_name {
+        peer.name = new_name.to_string();
+        changed = true;
+    }
+
+    let new_addr_str = new_addr.to_string();
+    if peer.address.as_deref() != Some(new_addr_str.as_str()) {
+        peer.address = Some(new_addr_str);
+        changed = true;
+    }
+
+    if !new_local_ip.is_empty() && peer.local_ip.as_deref() != Some(new_local_ip) {
+        peer.local_ip = Some(new_local_ip.to_string());
+        changed = true;
+    }
+
+    if changed {
+        save_peers(path, &peers)?;
+    }
+    Ok(changed)
 }
 
 /// Update the persisted `address` field for a paired peer.
@@ -410,5 +465,85 @@ mod tests {
         let loaded = load_peers(&path);
         assert_eq!(loaded[0].first_sync_at, None);
         assert_eq!(loaded[0].last_sync_at, None);
+    }
+
+    /// `update_peer_meta` updates name, address, and local_ip when they change
+    /// and returns `true`.  A second call with the SAME values returns `false`
+    /// (no I/O) — idempotent.  Other fields (sync timestamps, sync_key_b64,
+    /// model, os_version, app_version, public_ip) are preserved verbatim.
+    #[test]
+    fn update_peer_meta_updates_changed_fields_and_is_idempotent() {
+        use std::net::SocketAddr;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        // Start with a record that has a stale name and address.
+        save_peers(&path, &[make_device("aa:bb:cc:dd", "Old Name")]).unwrap();
+        // Manually set last_sync_at so we can verify it is preserved.
+        touch_sync_times(&path, "aa:bb:cc:dd", 42_000).unwrap();
+
+        let new_addr: SocketAddr = "192.168.1.5:9876".parse().unwrap();
+
+        // First call — should change name, address, and local_ip → returns true.
+        let changed = update_peer_meta(&path, "aabbccdd", "New Name", new_addr, "192.168.1.5")
+            .expect("update_peer_meta must not error");
+        assert!(changed, "expected true on first call with changed fields");
+
+        let loaded = load_peers(&path);
+        assert_eq!(loaded[0].name, "New Name");
+        assert_eq!(loaded[0].address, Some("192.168.1.5:9876".to_string()));
+        assert_eq!(loaded[0].local_ip, Some("192.168.1.5".to_string()));
+        // last_sync_at preserved verbatim.
+        assert_eq!(loaded[0].last_sync_at, Some(42_000));
+        // model / os_version / app_version / public_ip remain None (out-of-scope).
+        assert_eq!(loaded[0].model, None);
+        assert_eq!(loaded[0].os_version, None);
+
+        // Second call with identical values — nothing changed → returns false.
+        let changed2 = update_peer_meta(&path, "aabbccdd", "New Name", new_addr, "192.168.1.5")
+            .expect("update_peer_meta must not error");
+        assert!(!changed2, "expected false on second call with same values");
+    }
+
+    /// `update_peer_meta` is a no-op (returns `Ok(false)`) when the fingerprint
+    /// does not match any record.
+    #[test]
+    fn update_peer_meta_no_match_is_noop() {
+        use std::net::SocketAddr;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        save_peers(&path, &[make_device("aa:bb:cc:dd", "Alice")]).unwrap();
+
+        let addr: SocketAddr = "10.0.0.1:1234".parse().unwrap();
+        let changed = update_peer_meta(&path, "deadbeef", "Bob", addr, "10.0.0.1")
+            .expect("update_peer_meta must not error on no-match");
+        assert!(!changed, "no-match must return false");
+
+        // Original record must be untouched.
+        let loaded = load_peers(&path);
+        assert_eq!(loaded[0].name, "Alice");
+    }
+
+    /// `update_peer_meta` preserves the name when `new_name` is empty (a peer
+    /// that re-announces without a name should not blank our stored display name).
+    #[test]
+    fn update_peer_meta_empty_name_preserved() {
+        use std::net::SocketAddr;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        save_peers(&path, &[make_device("aabbcc", "Keeper")]).unwrap();
+
+        let addr: SocketAddr = "10.0.0.2:5678".parse().unwrap();
+        // Pass empty new_name — name must not be blanked.
+        update_peer_meta(&path, "aabbcc", "", addr, "10.0.0.2").unwrap();
+
+        let loaded = load_peers(&path);
+        assert_eq!(
+            loaded[0].name, "Keeper",
+            "empty new_name must not overwrite stored name"
+        );
+        assert_eq!(loaded[0].address, Some("10.0.0.2:5678".to_string()));
     }
 }

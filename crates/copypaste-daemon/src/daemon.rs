@@ -40,17 +40,19 @@ const GENERAL_CLEANUP_INTERVAL_MS: u64 = 60_000;
 /// than the old 250 ms value.
 const DEGRADED_QUIT_POLL_INTERVAL_MS: u64 = 1_000;
 
-/// Resolve a human-readable device name for P2P advertisements.
+/// Resolve a human-readable device name for P2P advertisements and QR pairing.
 ///
-/// Tries `HOSTNAME` (Unix), then `COMPUTERNAME` (Windows), and falls back to
-/// the literal string `"CopyPaste"` if neither is set. Extracted into a helper
-/// so the single source of truth can be reused by `daemon.rs` and `ipc.rs`
-/// (ipc.rs:~3876 has an identical three-way fallback that should call this
-/// function in a follow-up edit).
+/// On macOS uses `scutil --get ComputerName` (the user-visible name, e.g.
+/// "Dmytro's MacBook Air") as the primary source, which is the same path used
+/// by `DeviceMeta::collect()` for the QR-pairing PeerMeta.  Falls back to the
+/// `HOSTNAME` env var (Unix), then `COMPUTERNAME` (Windows), then the `hostname`
+/// binary, and finally the literal `"CopyPaste"` only when all else fails.
+///
+/// This is the single source of truth for the P2P mDNS registration, the QR
+/// payload `device_name` field, and the relay identity — every advertising path
+/// calls this function so all peers see the same consistent name.
 pub(crate) fn resolve_device_name() -> String {
-    std::env::var("HOSTNAME")
-        .or_else(|_| std::env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "CopyPaste".to_string())
+    crate::device_meta::collect_device_name().unwrap_or_else(|| "CopyPaste".to_string())
 }
 
 use std::sync::RwLock;
@@ -496,10 +498,26 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // would receive `RecvError::Lagged` and silently drop items.
     let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
 
+    // H8 perf fix: build SyncCrypto early so a clone can be shared with both
+    // the IpcServer (to call reload_sync_key after pairing) and the sync
+    // orchestrator (to do the actual re-keying). Because the cached sync key is
+    // stored behind an Arc<Mutex> inside SyncCrypto, all clones share the same
+    // backing store — one reload_sync_key() call updates every holder.
+    let sync_crypto: Option<sync_orch::SyncCrypto> = if p2p_enabled {
+        let seed: [u8; 32] = **local_key_arc;
+        Some(sync_orch::SyncCrypto::new(
+            seed,
+            crate::ipc::peers_file_path(),
+        ))
+    } else {
+        None
+    };
+
     #[cfg(unix)]
     let (
         self_write_change_count_arc,
         p2p_sync_addr_slot,
+        live_sinks_slot,
         pairing_coordinator,
         _ipc_handle,
         // B1: surfaced out of this block so the P2P subsystem (below) can share
@@ -513,9 +531,16 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             device_public_key_arc.clone(),
         )
         .with_new_item_tx(new_item_tx.clone())
-        .with_core_config(core_config_arc.clone());
+        .with_core_config(core_config_arc.clone())
+        .with_local_device_id(local_device_id.clone());
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
+        }
+        // H8: share a SyncCrypto clone with the IPC server so it can call
+        // reload_sync_key after any pairing write, propagating the new key to
+        // the orchestrator (they share the same Arc<Mutex> backing store).
+        if let Some(ref crypto) = sync_crypto {
+            server = server.with_p2p_sync_crypto(crypto.clone());
         }
         if let Some(ref fp) = cert_fingerprint_display {
             server = server.with_cert_fingerprint(fp.clone());
@@ -581,6 +606,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // known; the pairing handlers then send it in-band over the bootstrap
         // channel so the peer can persist it for the Phase 3 connector.
         let sync_addr_slot = server.p2p_sync_addr_slot();
+        // Online-status + mutual-unpair control slot (both consumers share the same Arc).
+        let live_sinks_slot = server.live_peer_sinks_slot();
         // LAN/SAS Phase 2: grab a clone of the shared discovery-pairing
         // coordinator so the standing responder in `start_p2p` routes its SAS
         // through the SAME state machine the IPC handlers observe.
@@ -612,6 +639,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         (
             swcc,
             sync_addr_slot,
+            live_sinks_slot,
             pairing_coordinator,
             handle,
             public_ip_cache,
@@ -736,6 +764,16 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
                         *slot = Some(addr);
                     }
+                    {
+                        // Populate the single shared slot used for both online-status
+                        // (list_peers) and mutual-unpair signalling (unpair/revoke).
+                        // live_sinks and peer_sinks on P2pHandle are Arc clones of the
+                        // same underlying map; we write live_sinks here.
+                        let mut slot = live_sinks_slot
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        *slot = Some(std::sync::Arc::clone(&handle.live_sinks));
+                    }
                     Some(handle)
                 }
                 Err(e) => {
@@ -767,23 +805,29 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let sync_rx = new_item_tx.subscribe();
     // D2 (sync_orch): pass a token clone so the orchestrator exits on shutdown.
     let sync_shutdown = shutdown_token.clone();
-    // P2P Phase 3 (cross-device readability): give the orchestrator this
-    // device's local-storage seed and the peers.json path so it can re-key item
-    // payloads through the shared content sync key established at pairing. Only
-    // wired when P2P is enabled — the cloud path uses its own SyncKey scheme.
-    let sync_crypto = if p2p_enabled {
-        let seed: [u8; 32] = **local_key_arc;
-        Some(sync_orch::SyncCrypto::new(
-            seed,
-            crate::ipc::peers_file_path(),
-        ))
-    } else {
-        None
-    };
+    // P2P Phase 3 (cross-device readability): the orchestrator uses the
+    // SyncCrypto built earlier (H8: shared with the IpcServer so pairing
+    // immediately refreshes the cached key via reload_sync_key).
     // Pass the configured quota so the P2P merge path prunes to the same cap
     // as the cloud path (Fix HIGH-3). Saturating cast: values above i64::MAX
     // (>9 EB) are unreachable in practice.
     let sync_quota_bytes = config.storage_quota_bytes.min(i64::MAX as u64) as i64;
+
+    // Universal Clipboard auto-apply: wire the self-write sentinel Arc (shared
+    // with ClipboardMonitor via IpcServer) and the local key into the sync
+    // orchestrator so freshly-synced items are immediately written to
+    // NSPasteboard. The same changeCount guard that prevents IPC copy_item
+    // from being re-captured is reused here — zero new primitives required.
+    // Only wired on Unix (where the IPC socket and ClipboardMonitor exist).
+    #[cfg(unix)]
+    let sync_auto_apply = Some(sync_orch::AutoApplyCtx {
+        self_write_change_count: self_write_change_count_arc.clone(),
+        local_key: local_key_arc.clone(),
+        core_config: core_config_arc.clone(),
+    });
+    #[cfg(not(unix))]
+    let sync_auto_apply: Option<sync_orch::AutoApplyCtx> = None;
+
     let sync_handle = tokio::spawn(async move {
         if let Err(e) = sync_orch::run(
             sync_db,
@@ -793,6 +837,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             sync_device_id,
             sync_crypto,
             sync_quota_bytes,
+            sync_auto_apply,
             sync_shutdown,
         )
         .await
@@ -1337,37 +1382,24 @@ async fn handle_tick(
                 // A send error only means there are no active receivers —
                 // that is normal when both P2P and cloud-sync are disabled.
                 let _ = new_item_tx.send(item);
-                // M12: play sound / show notification on macOS when the daemon
-                // captures a new item from another app in the background.
-                // Disabled in tests to avoid OS hangs and sound/notification spam.
+                // M12: play sound on macOS when the daemon captures a new item.
+                // Notifications are now posted by the Tauri UI bundle
+                // (spawn_tray_recent_resync polls history_page and fires
+                // UNUserNotificationCenter) so the banner shows the app icon.
+                // Disabled in tests to avoid OS hangs and sound spam.
                 #[cfg(target_os = "macos")]
-                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
-                    if config.sound_on_copy {
-                        // P1: reap the child in a detached thread so the capture
-                        // path is never blocked and no zombie process accumulates
-                        // (dropping a Child without wait() leaves a zombie entry
-                        // in the process table until the daemon exits).
-                        if let Ok(mut child) = std::process::Command::new("afplay")
-                            .arg("/System/Library/Sounds/Tink.aiff")
-                            .spawn()
-                        {
-                            std::thread::spawn(move || {
-                                let _ = child.wait();
-                            });
-                        }
-                    }
-                    if config.notify_on_copy {
-                        if let Ok(mut child) = std::process::Command::new("osascript")
-                            .args([
-                                "-e",
-                                r#"display notification "Text item copied" with title "CopyPaste""#,
-                            ])
-                            .spawn()
-                        {
-                            std::thread::spawn(move || {
-                                let _ = child.wait();
-                            });
-                        }
+                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() && config.sound_on_copy {
+                    // P1: reap the child in a detached thread so the capture
+                    // path is never blocked and no zombie process accumulates
+                    // (dropping a Child without wait() leaves a zombie entry
+                    // in the process table until the daemon exits).
+                    if let Ok(mut child) = std::process::Command::new("afplay")
+                        .arg("/System/Library/Sounds/Tink.aiff")
+                        .spawn()
+                    {
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
                     }
                 }
             }
@@ -1382,30 +1414,17 @@ async fn handle_tick(
                 handle_image(raw_bytes, db, local_key, config, local_device_id).await
             {
                 let _ = new_item_tx.send(item);
-                // M12: play sound / show notification for image captures too.
-                // Disabled in tests to avoid OS hangs and sound/notification spam.
+                // M12: play sound for image captures too.
+                // Notifications handled by Tauri UI (same as text above).
                 #[cfg(target_os = "macos")]
-                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() {
-                    if config.sound_on_copy {
-                        if let Ok(mut child) = std::process::Command::new("afplay")
-                            .arg("/System/Library/Sounds/Tink.aiff")
-                            .spawn()
-                        {
-                            std::thread::spawn(move || {
-                                let _ = child.wait();
-                            });
-                        }
-                    }
-                    if config.notify_on_copy {
-                        if let Ok(mut child) = std::process::Command::new("osascript")
-                            .args([
-                                "-e",
-                                r#"display notification "Image item copied" with title "CopyPaste""#,
-                            ])
-                            .spawn()
-                        {
-                            std::thread::spawn(move || { let _ = child.wait(); });
-                        }
+                if std::env::var("COPYPASTE_EPHEMERAL_KEY").is_err() && config.sound_on_copy {
+                    if let Ok(mut child) = std::process::Command::new("afplay")
+                        .arg("/System/Library/Sounds/Tink.aiff")
+                        .spawn()
+                    {
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
                     }
                 }
             }

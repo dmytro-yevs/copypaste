@@ -26,6 +26,7 @@ use std::time::{Duration, Instant};
 use rand::Rng as _;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::{ClientConfig, ServerConfig};
+use socket2::{SockRef, TcpKeepalive};
 use thiserror::Error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_rustls::{TlsAcceptor, TlsConnector};
@@ -85,6 +86,31 @@ fn length_codec() -> LengthDelimitedCodec {
     LengthDelimitedCodec::builder()
         .max_frame_length(MAX_FRAME_BYTES)
         .new_codec()
+}
+
+/// Idle time before the OS starts sending TCP keepalive probes.
+const TCP_KEEPALIVE_TIME: Duration = Duration::from_secs(20);
+
+/// Interval between successive TCP keepalive probes once they start.
+const TCP_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(10);
+
+/// Enable TCP keepalive on an established P2P socket.
+///
+/// Defense-in-depth alongside the daemon-side write timeout: if a peer vanishes
+/// with **no** FIN (Wi-Fi drop, app killed, cable yanked) there is no EOF to
+/// observe, so without keepalive the kernel would never error the socket and
+/// the pump's read/write arms would block indefinitely. Keepalive probes force
+/// the socket into an error state after `TCP_KEEPALIVE_TIME` +
+/// N×`TCP_KEEPALIVE_INTERVAL`, which surfaces as a read/write error and tears
+/// the connection down. Best-effort: a failure to set the option is logged and
+/// ignored rather than dropping an otherwise-usable connection.
+fn enable_tcp_keepalive(stream: &TcpStream) {
+    let keepalive = TcpKeepalive::new()
+        .with_time(TCP_KEEPALIVE_TIME)
+        .with_interval(TCP_KEEPALIVE_INTERVAL);
+    if let Err(e) = SockRef::from(stream).set_tcp_keepalive(&keepalive) {
+        tracing::warn!("failed to enable TCP keepalive on peer socket: {e}");
+    }
 }
 
 use crate::cert::{fingerprint_of, SelfSignedCert};
@@ -410,6 +436,7 @@ impl PeerTransport {
 
         let (tcp_stream, peer_addr) = listener.accept().await?;
         tracing::debug!(peer_addr = %peer_addr, "incoming TCP connection");
+        enable_tcp_keepalive(&tcp_stream);
 
         let tls_stream =
             match tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(tcp_stream)).await {
@@ -467,6 +494,7 @@ impl PeerTransport {
                 }
             };
         tracing::debug!(peer_addr = %addr, "TCP connection established");
+        enable_tcp_keepalive(&tcp_stream);
 
         // rustls requires a ServerName even for mutual-TLS peer-to-peer.
         // We use a fixed placeholder since identity is verified by fingerprint.

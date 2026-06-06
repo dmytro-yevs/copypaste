@@ -49,4 +49,4 @@ pub use backoff::{
 pub use clock::LamportClock;
 pub use engine::{PeerState, SyncEngine, SyncError, SyncResult};
 pub use merge::{local_to_wire, resolve, wire_to_local, MergeOutcome};
-pub use protocol::{Message, WireItem};
+pub use protocol::{ControlMsg, Message, PeerFrame, WireItem};
