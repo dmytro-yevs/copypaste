@@ -3003,29 +3003,44 @@ impl IpcServer {
                 }
             }
             "delete_all" => {
+                // C1 fix: tombstone every non-pinned, non-deleted item via
+                // soft_delete_and_broadcast so peers receive the deletion and
+                // cleared items no longer resurrect on the next sync cycle.
                 let db_arc = self.db.clone();
-                let join = tokio::task::spawn_blocking(move || {
+                let ids_result = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
-                    // Atomically delete every row from both tables inside a
-                    // single transaction so the history is never half-cleared
-                    // and FTS never drifts from clipboard_items.
                     let conn = db.conn();
-                    let tx = conn.unchecked_transaction()?;
-                    let deleted = tx.execute("DELETE FROM clipboard_items WHERE pinned = 0", [])?;
-                    // Sync FTS: remove any rows whose parent item was deleted.
-                    // Pinned items remain in clipboard_items so their FTS rows
-                    // are kept; only orphaned FTS rows (deleted items) are removed.
-                    tx.execute(
-                        "DELETE FROM clipboard_fts WHERE rowid NOT IN (SELECT rowid FROM clipboard_items)",
-                        [],
+                    let mut stmt = conn.prepare(
+                        "SELECT id FROM clipboard_items WHERE pinned = 0 AND deleted = 0",
                     )?;
-                    tx.commit()?;
-                    Ok::<_, rusqlite::Error>(deleted)
+                    let ids: Vec<String> = stmt
+                        .query_map([], |row| row.get::<_, String>(0))?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    Ok::<_, rusqlite::Error>(ids)
                 })
                 .await;
-                match join {
-                    Ok(Ok(deleted)) => {
-                        Response::ok(req.id, serde_json::json!({"deleted": deleted}))
+
+                match ids_result {
+                    Ok(Ok(ids)) => {
+                        let count = ids.len();
+                        for id in &ids {
+                            if let Err(e) = self.soft_delete_and_broadcast(id).await {
+                                tracing::warn!("delete_all: failed to tombstone {id}: {e}");
+                            }
+                        }
+                        // Prune orphaned FTS rows that were not removed inside
+                        // soft_delete_item (belt-and-suspenders cleanup).
+                        let db_arc2 = self.db.clone();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let db = db_arc2.blocking_lock();
+                            let _ = db.conn().execute(
+                                "DELETE FROM clipboard_fts WHERE rowid NOT IN (SELECT rowid FROM clipboard_items)",
+                                [],
+                            );
+                        })
+                        .await;
+                        Response::ok(req.id, serde_json::json!({ "deleted": count }))
                     }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
