@@ -2356,7 +2356,7 @@ impl IpcServer {
         };
 
         // Accept both the wrapped cppair://pair?p=… deep-link form (emitted by
-        // pair_generate_qr / Android for external scanners) and a bare CPPAIR1
+        // pair_generate_qr / Android for external scanners) and a bare CPPAIR2
         // string (back-compat). strip_deeplink is a no-op on the bare form.
         let bare = copypaste_core::strip_deeplink(qr);
         let payload = match copypaste_core::PairingPayload::decode(&bare) {
@@ -5825,7 +5825,7 @@ impl IpcServer {
             // fingerprint. See `copypaste_core::crypto::pairing_qr`.
             //
             // Request params: {} (device identity is taken from daemon state).
-            // Response data: { "qr": "CPPAIR1...", "expires_in_secs": <u64> }
+            // Response data: { "qr": "CPPAIR2...", "expires_in_secs": <u64> }
             // ----------------------------------------------------------------
             "pair_generate_qr" => {
                 // CRITICAL-1 fix: the QR must carry the live mTLS **certificate**
@@ -5855,11 +5855,15 @@ impl IpcServer {
                 // device shows a consistent label.
                 let device_name = crate::daemon::resolve_device_name();
 
-                // device_id is best-effort: the canonical fingerprint doubles
-                // as a stable identifier when no UUID is threaded here. The QR
-                // `device_id` field is informational on the scanning side; peer
-                // pinning uses the fingerprint.
-                let device_id = fingerprint.clone();
+                // device_id must be a valid UUID: CPPAIR2 encodes it as 16 raw
+                // bytes (base64url), and the decoder rejects any other length.
+                // Use the stable daemon UUID when available; fall back to a
+                // fresh v4 UUID (informational only — peer pinning uses the
+                // fingerprint, not device_id).
+                let device_id = self
+                    .local_device_id
+                    .clone()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
                 // Generate the single-use pairing token up front so the same
                 // value feeds (a) the QR the scanner reads, (b) the legacy IPC
@@ -5959,7 +5963,7 @@ impl IpcServer {
                     provisioning: qr_provisioning,
                 };
 
-                // Wrap the bare CPPAIR1 payload in the cppair://pair?p= deep-link
+                // Wrap the bare CPPAIR2 payload in the cppair://pair?p= deep-link
                 // URI so external scanners (Google Lens, the system camera) treat
                 // the QR as an actionable link and offer "open in app". The
                 // in-app scanner and Android manifest deep-link both strip the
@@ -9680,15 +9684,18 @@ mod tests {
         // the PAKE password (mirrors the in-app scanner / manifest deep-link path).
         let bare = copypaste_core::strip_deeplink(&qr);
         assert!(
-            bare.starts_with("CPPAIR1."),
-            "stripped QR must use the v1 magic: {bare}"
+            bare.starts_with("CPPAIR2."),
+            "stripped QR must use the v2 magic: {bare}"
         );
         let payload = copypaste_core::PairingPayload::decode(&bare)
             .expect("scanning device must decode the QR");
         let password = payload.token.to_pake_password();
         // The fingerprint A pins is the one carried in the QR (B's fingerprint).
-        let fp_b = payload.fingerprint.clone();
-        assert!(!fp_b.is_empty(), "QR must carry B's fingerprint");
+        // CPPAIR2 decode returns bare lowercase hex; convert to the colon-grouped
+        // display form that `pair_peer_with_password` / `is_valid_fingerprint` expect.
+        let fp_b_raw = payload.fingerprint.clone();
+        assert!(!fp_b_raw.is_empty(), "QR must carry B's fingerprint");
+        let fp_b = display_fingerprint(&fp_b_raw);
 
         // Step 1: Device A initiates using the QR-derived password.
         let body = format!(
