@@ -532,6 +532,17 @@ export const api = {
     })();
     return ipcCall<{ id: string }>("add_file_item", { filename, mime, data_b64 });
   },
+
+  /**
+   * Full-text search over the daemon's FTS5 index (all stored items, not just
+   * the loaded page). Returns up to `limit` matching item IDs. Use the returned
+   * IDs as a set to augment the client-side substring filter in HistoryView so
+   * items beyond the loaded page are discoverable.
+   */
+  searchItems: (query: string, limit = 500): Promise<{ id: string }[]> =>
+    ipcCall<{ items: { id: string }[] }>("search", { query, limit }).then(
+      (r) => r.items ?? []
+    ),
 };
 
 /** Format Unix epoch milliseconds for display. */

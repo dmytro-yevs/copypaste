@@ -1200,6 +1200,8 @@ export function HistoryView() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [search, setSearch] = useState("");
+  const [ftsResults, setFtsResults] = useState<Set<string>>(new Set());
+  const [ftsQuery, setFtsQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
   // Last error detail surfaced under the "error" load state — kept so the
@@ -1439,8 +1441,28 @@ export function HistoryView() {
   }, [load]);
 
   // -------------------------------------------------------------------------
-  // Filtered list
+  // FTS effect — debounced daemon full-text search over the entire history
   // -------------------------------------------------------------------------
+
+
+  useEffect(() => {
+    const q = search.trim();
+    if (!q) {
+      setFtsResults(new Set());
+      setFtsQuery("");
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const hits = await api.searchItems(q, 500);
+        setFtsResults(new Set(hits.map((h) => h.id)));
+        setFtsQuery(q);
+      } catch {
+        // FTS failure falls back gracefully to client-side filter
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   // -------------------------------------------------------------------------
   // Distinct device IDs seen in the loaded items — drives the filter dropdown.
@@ -1455,14 +1477,17 @@ export function HistoryView() {
   }, [items]);
 
   // -------------------------------------------------------------------------
-  // Filtered + sorted list (client-side over the loaded PAGE_SIZE items)
+  // Filtered + sorted list — union of client-side substring match, daemon FTS
+  // results, and device filter; sorted by the selected sort mode.
   // -------------------------------------------------------------------------
 
   const filtered = useMemo(() => {
-    // 1. Text search
+    // 1. Text search: client-side substring OR daemon FTS hit
     let result = search.trim()
-      ? items.filter((it) =>
-          it.preview.toLowerCase().includes(search.trim().toLowerCase())
+      ? items.filter(
+          (it) =>
+            it.preview.toLowerCase().includes(search.trim().toLowerCase()) ||
+            (ftsQuery === search.trim() && ftsResults.has(it.id))
         )
       : items;
 
@@ -1487,7 +1512,7 @@ export function HistoryView() {
     }
 
     return result;
-  }, [items, search, deviceFilter, sortMode, ownDeviceId]);
+  }, [items, search, ftsResults, ftsQuery, deviceFilter, sortMode, ownDeviceId]);
 
   // -------------------------------------------------------------------------
   // Multi-select helpers
