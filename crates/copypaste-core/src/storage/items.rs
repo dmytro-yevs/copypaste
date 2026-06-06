@@ -1010,9 +1010,11 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
 }
 
 pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
-    Ok(db
-        .conn()
-        .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))?)
+    Ok(db.conn().query_row(
+        "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
+        [],
+        |r| r.get(0),
+    )?)
 }
 
 /// Maximum byte length of a text preview returned by [`fetch_text_preview`].

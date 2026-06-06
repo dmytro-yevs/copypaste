@@ -223,12 +223,9 @@ pub struct QrProvisioning {
 impl QrProvisioning {
     /// Returns `true` if every field is `None` or empty — nothing to encode.
     pub fn is_empty(&self) -> bool {
-        self.relay_url.as_deref().map_or(true, str::is_empty)
-            && self.supabase_url.as_deref().map_or(true, str::is_empty)
-            && self
-                .supabase_anon_key
-                .as_deref()
-                .map_or(true, str::is_empty)
+        self.relay_url.as_deref().is_none_or(str::is_empty)
+            && self.supabase_url.as_deref().is_none_or(str::is_empty)
+            && self.supabase_anon_key.as_deref().is_none_or(str::is_empty)
     }
 
     /// Encode as compact JSON then base64url (no padding) for the QR 6th field.
