@@ -174,7 +174,7 @@ class PairActivity : ComponentActivity() {
     }
 
     /**
-     * Route an incoming intent: valid CPPAIR1 payload → deepLinkPayload;
+     * Route an incoming intent: valid CPPAIR1/CPPAIR2 payload → deepLinkPayload;
      * cppair:// URI with unrecognised payload → deepLinkError for user feedback.
      */
     private fun handleDeepLinkIntent(intent: Intent?) {
@@ -182,10 +182,11 @@ class PairActivity : ComponentActivity() {
         val uri: Uri = intent.data ?: return
         if (uri.scheme != "cppair" || uri.host != "pair") return
         val p = uri.getQueryParameter("p") ?: return
-        if (p.startsWith("CPPAIR1.")) {
+        // Accept both CPPAIR1 (legacy) and CPPAIR2 (current compact encoding).
+        if (p.startsWith("CPPAIR1.") || p.startsWith("CPPAIR2.")) {
             deepLinkPayload.value = p
         } else {
-            // Payload present but not a recognised CPPAIR1 token — surface to user.
+            // Payload present but not a recognised pairing token — surface to user.
             deepLinkError.value = "Invalid pairing link"
         }
     }
@@ -210,6 +211,124 @@ private fun encodeQrBitmap(text: String, sizePx: Int): Bitmap {
  */
 internal fun formatScannedInfo(deviceName: String, fingerprint: String): String =
     "${deviceName.ifBlank { "device" }} ($fingerprint)"
+
+/**
+ * Sync-account provisioning extracted from the optional 6th field of a CPPAIR1/CPPAIR2
+ * payload (H4: QR full provisioning). All fields are non-secret:
+ * - [relayUrl]: HTTP relay base URL.
+ * - [supabaseUrl]: Supabase project URL.
+ * - [supabaseAnonKey]: Supabase publishable anon JWT (safe per Supabase docs).
+ */
+internal data class QrProvisioningData(
+    val relayUrl: String?,
+    val supabaseUrl: String?,
+    val supabaseAnonKey: String?,
+)
+
+/**
+ * Extract sync-provisioning from the optional 6th `.`-separated field of a bare
+ * CPPAIR1/CPPAIR2 payload string (i.e. after stripping any deep-link wrapper).
+ *
+ * The 6th field is base64url (no padding) of compact JSON: `{"ru":…,"su":…,"sk":…}`.
+ * Returns `null` when the field is absent, empty, or cannot be decoded — the caller
+ * treats `null` as "no provisioning carried" and leaves existing settings unchanged.
+ *
+ * Pure Kotlin; no FFI dependency, so it works even in stub mode.
+ */
+internal fun extractQrProvisioning(barePayload: String): QrProvisioningData? {
+    // Strip the deep-link wrapper if present so we always work on the bare payload.
+    val bare = stripPairingDeepLink(barePayload)
+    // Split off the magic prefix ("CPPAIR1" or "CPPAIR2"), then split the body
+    // into at most 6 fields. Field index 5 (0-based) is the provisioning blob.
+    val dotIdx = bare.indexOf('.')
+    if (dotIdx < 0) return null
+    val body = bare.substring(dotIdx + 1)
+    // splitLimit=6 so field 5 captures everything after the 5th dot (URL-safe
+    // base64 has no dots, so this is clean).
+    val parts = body.split('.', limit = 6)
+    if (parts.size < 6) return null
+    val b64Field = parts[5].trim()
+    if (b64Field.isEmpty()) return null
+    return try {
+        val bytes = android.util.Base64.decode(
+            // android.util.Base64 requires URL_SAFE | NO_PADDING flags for base64url.
+            b64Field.replace('-', '+').replace('_', '/'),
+            android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+        )
+        val json = String(bytes, Charsets.UTF_8)
+        QrProvisioningData(
+            relayUrl = extractJsonString(json, "ru"),
+            supabaseUrl = extractJsonString(json, "su"),
+            supabaseAnonKey = extractJsonString(json, "sk"),
+        )
+    } catch (_: Exception) {
+        null // Corrupt/unknown field — silently ignore; pairing is unaffected.
+    }
+}
+
+/**
+ * Minimal JSON string extractor for a flat `{"k":"v",...}` object.
+ * Returns the string value for [key], or `null` when absent or not a string.
+ * Handles `\"` and `\\` escapes; sufficient for URLs and JWTs.
+ */
+private fun extractJsonString(json: String, key: String): String? {
+    val needle = "\"$key\":\""
+    val start = json.indexOf(needle).takeIf { it >= 0 } ?: return null
+    val valueStart = start + needle.length
+    val sb = StringBuilder()
+    var i = valueStart
+    while (i < json.length) {
+        when (val c = json[i]) {
+            '"' -> return sb.toString().takeIf { it.isNotEmpty() }
+            '\\' -> {
+                i++
+                if (i >= json.length) return null
+                when (json[i]) {
+                    '"' -> sb.append('"')
+                    '\\' -> sb.append('\\')
+                    'n' -> sb.append('\n')
+                    'r' -> sb.append('\r')
+                    't' -> sb.append('\t')
+                    else -> { sb.append('\\'); sb.append(json[i]) }
+                }
+            }
+            else -> sb.append(c)
+        }
+        i++
+    }
+    return null // Unterminated string
+}
+
+/**
+ * Apply [prov] to [settings] using fill-missing semantics: only write a field when
+ * the corresponding settings value is currently blank. Never overwrites an existing
+ * local configuration — the user may have set up their own relay/Supabase/passphrase.
+ *
+ * Returns a list of field names that were actually written (for logging).
+ * Call only from a background thread (Settings uses SharedPreferences I/O).
+ */
+internal fun applyQrProvisioning(prov: QrProvisioningData, settings: Settings): List<String> {
+    val applied = mutableListOf<String>()
+    prov.relayUrl?.takeIf { it.isNotBlank() }?.let { url ->
+        if (settings.relayUrl.isBlank()) {
+            settings.relayUrl = url
+            applied += "relayUrl"
+        }
+    }
+    prov.supabaseUrl?.takeIf { it.isNotBlank() }?.let { url ->
+        if (settings.supabaseUrl.isBlank()) {
+            settings.supabaseUrl = url
+            applied += "supabaseUrl"
+        }
+    }
+    prov.supabaseAnonKey?.takeIf { it.isNotBlank() }?.let { anon ->
+        if (settings.supabaseAnonKey.isBlank()) {
+            settings.supabaseAnonKey = anon
+            applied += "supabaseAnonKey"
+        }
+    }
+    return applied
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -282,6 +401,21 @@ fun PairScreen(
             scannedPeer = info
             syncResult = null
             scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
+            // H4: apply any relay/Supabase provisioning embedded in the 6th QR
+            // field immediately at scan time — before the P2P bootstrap handshake
+            // completes, covering the off-LAN case. Runs on IO (SharedPreferences).
+            scope.launch {
+                withContext(Dispatchers.IO) {
+                    val prov = extractQrProvisioning(contents) ?: return@withContext
+                    val applied = applyQrProvisioning(prov, settings)
+                    if (applied.isNotEmpty()) {
+                        android.util.Log.i(
+                            "PairActivity",
+                            "QR provisioning (6th field) applied at scan: ${applied.joinToString(", ")}",
+                        )
+                    }
+                }
+            }
         } catch (e: Exception) {
             errorMessage = e.message ?: "Invalid pairing code"
         }
@@ -557,13 +691,27 @@ fun PairScreen(
     }
 
     // Consume an incoming cppair:// deep-link payload from an external QR scanner
-    // (e.g. Google Lens).  The payload is the raw CPPAIR1.… string, identical to
-    // what the in-app ZXing scanner would return — so we feed it through exactly
+    // (e.g. Google Lens).  The payload is the raw CPPAIR1/CPPAIR2.… string,
+    // identical to what the in-app ZXing scanner would return — feed it through
     // the same parsePairing path and surface the same confirmation UI.
     LaunchedEffect(incomingDeepLinkPayload) {
         val payload = incomingDeepLinkPayload ?: return@LaunchedEffect
         try {
-            val info = withContext(Dispatchers.IO) { parsePairing(payload) }
+            val info = withContext(Dispatchers.IO) {
+                val scanned = parsePairing(payload)
+                // H4: extract and apply provisioning from the QR's 6th field at
+                // deep-link time — before the P2P bootstrap handshake, covering
+                // the off-LAN / relay-only case.
+                val qrProv = extractQrProvisioning(payload)
+                val applied = qrProv?.let { applyQrProvisioning(it, settings) } ?: emptyList()
+                if (applied.isNotEmpty()) {
+                    android.util.Log.i(
+                        "PairActivity",
+                        "QR provisioning (6th field) applied via deep-link: ${applied.joinToString(", ")}",
+                    )
+                }
+                scanned
+            }
             scannedPeer = info
             syncResult = null
             scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)

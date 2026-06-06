@@ -40,7 +40,7 @@
 //! The encoded payload is a single ASCII line, safe to embed in any QR code:
 //!
 //! ```text
-//! CPPAIR1.<fp_hex>.<token_b64url>.<device_id>.<name_b64url>.<host:port>
+//! CPPAIR1.<fp_hex>.<token_b64url>.<device_id>.<name_b64url>.<host:port>[.<prov_b64url>]
 //! ```
 //!
 //! * `CPPAIR1` — magic + version (`1`). Bumping the trailing digit is a hard
@@ -52,13 +52,20 @@
 //! * `name_b64url` — the human-readable device name, base64url (so `.` and
 //!   non-ASCII in names cannot break field splitting).
 //! * `host:port` — optional discovery hint (`host` may be empty → mDNS only).
+//! * `prov_b64url` — **optional** sync-provisioning JSON, base64url **without**
+//!   padding. Present when the generating device has at least one of relay URL,
+//!   Supabase URL, or Supabase anon key configured. The JSON keys are compact
+//!   single-letter abbreviations to minimise QR density: `ru` = relay_url,
+//!   `su` = supabase_url, `sk` = supabase_anon_key. All values are optional
+//!   strings. Old decoders that stop at 5 fields simply ignore the 6th, so there
+//!   is no forward-compat break for the 5-field body.
 //!
 //! Fields are `.`-separated. `fp_hex` is `.`-free hex, `token_b64url` and
 //! `name_b64url` use the URL-safe base64 alphabet (no `.`), `device_id` is a
-//! `.`-free UUID, and `host:port` is the final field — so `.` is an
+//! `.`-free UUID, and `host:port` is the 5th field — so `.` is an
 //! unambiguous separator. The format is deliberately delimiter-based (not
-//! JSON/CBOR) to keep the QR small: every byte saved lowers the QR version and
-//! improves scan reliability.
+//! JSON/CBOR in the first 5 fields) to keep the QR small: every byte saved
+//! lowers the QR version and improves scan reliability.
 
 use base64::Engine as _;
 use rand::rngs::OsRng;
@@ -74,7 +81,8 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 /// downgrade attack that strips the token field.
 pub const PAIRING_QR_MAGIC: &str = "CPPAIR1";
 
-/// Number of `.`-separated fields in the v1 payload after the magic prefix.
+/// Number of `.`-separated fields in the mandatory part of the payload body
+/// (after the magic prefix). A 6th optional field carries provisioning JSON.
 const PAIRING_QR_FIELD_COUNT: usize = 5;
 
 /// Deep-link URI prefix wrapping the bare [`PAIRING_QR_MAGIC`] payload so that
@@ -168,6 +176,100 @@ impl PartialEq for PairingToken {
 
 impl Eq for PairingToken {}
 
+// ──────────────────────────���──────────────────────────────────────────────────
+// QrProvisioning
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Optional sync-account provisioning embedded in the QR payload (6th field).
+///
+/// These are all **non-secret** configuration values (URLs + publishable JWT)
+/// that let a scanning device inherit the displaying device's sync endpoints
+/// without manual configuration. The displaying device (e.g. a configured
+/// macOS daemon) encodes them into the QR so the phone can configure relay and
+/// Supabase sync automatically at scan time — before the P2P bootstrap tunnel
+/// is established.
+///
+/// Security note: `supabase_anon_key` is a Supabase publishable JWT (the
+/// "anon" role, intentionally public). It is NOT a secret and is explicitly
+/// safe to embed in a QR code per Supabase's own documentation.
+///
+/// Stored as compact JSON (`{"ru":…,"su":…,"sk":…}`) base64url-encoded to
+/// keep the QR payload as small as possible.
+#[derive(Debug, Clone, Default)]
+pub struct QrProvisioning {
+    /// HTTP relay base URL (e.g. `https://relay.example.com`). Non-secret.
+    pub relay_url: Option<String>,
+    /// Supabase project URL (e.g. `https://xxxx.supabase.co`). Non-secret.
+    pub supabase_url: Option<String>,
+    /// Supabase publishable anon/public JWT. Non-secret by Supabase design.
+    pub supabase_anon_key: Option<String>,
+}
+
+impl QrProvisioning {
+    /// Returns `true` if every field is `None` or empty — nothing to encode.
+    pub fn is_empty(&self) -> bool {
+        self.relay_url.as_deref().map_or(true, str::is_empty)
+            && self.supabase_url.as_deref().map_or(true, str::is_empty)
+            && self
+                .supabase_anon_key
+                .as_deref()
+                .map_or(true, str::is_empty)
+    }
+
+    /// Encode as compact JSON then base64url (no padding) for the QR 6th field.
+    ///
+    /// Only present, non-empty fields are emitted to keep the JSON small.
+    /// Dependency-free: hand-builds the JSON string.
+    pub fn encode(&self) -> String {
+        let mut parts: Vec<String> = Vec::with_capacity(3);
+        if let Some(ref v) = self.relay_url {
+            if !v.is_empty() {
+                parts.push(format!("\"ru\":{}", json_str(v)));
+            }
+        }
+        if let Some(ref v) = self.supabase_url {
+            if !v.is_empty() {
+                parts.push(format!("\"su\":{}", json_str(v)));
+            }
+        }
+        if let Some(ref v) = self.supabase_anon_key {
+            if !v.is_empty() {
+                parts.push(format!("\"sk\":{}", json_str(v)));
+            }
+        }
+        let json = format!("{{{}}}", parts.join(","));
+        b64().encode(json.as_bytes())
+    }
+
+    /// Decode from the base64url 6th QR field.
+    ///
+    /// Silently ignores unknown JSON keys (forward compat). Returns `None` on
+    /// any base64 or UTF-8 error so old payloads that happen to have a 6th
+    /// field are benignly skipped — the pairing itself is unaffected.
+    pub fn decode(field: &str) -> Option<Self> {
+        let bytes = b64().decode(field).ok()?;
+        let json = std::str::from_utf8(&bytes).ok()?;
+        Some(Self::parse_json(json))
+    }
+
+    /// Minimal hand-rolled JSON parser for the compact `{"ru":…,"su":…,"sk":…}` shape.
+    ///
+    /// Only extracts string values for known keys. Non-string values, unknown
+    /// keys, and structural issues are silently ignored — downstream code
+    /// treats missing fields as unconfigured and falls back to the existing
+    /// settings, so malformed JSON cannot cause data loss or crashes.
+    fn parse_json(json: &str) -> Self {
+        let relay_url = extract_json_string(json, "ru");
+        let supabase_url = extract_json_string(json, "su");
+        let supabase_anon_key = extract_json_string(json, "sk");
+        Self {
+            relay_url,
+            supabase_url,
+            supabase_anon_key,
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PairingPayload
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,6 +298,10 @@ pub struct PairingPayload {
     pub device_name: String,
     /// Optional discovery hint `host:port`. Empty when discovery is mDNS-only.
     pub addr_hint: String,
+    /// Optional sync-account provisioning (relay + Supabase URLs/key). Present
+    /// when the generating device is configured for cloud/relay sync and wants
+    /// the scanning device to inherit those settings automatically.
+    pub provisioning: Option<QrProvisioning>,
 }
 
 impl PairingPayload {
@@ -223,10 +329,15 @@ impl PairingPayload {
             device_id: device_id.into(),
             device_name: device_name.into(),
             addr_hint: addr_hint.into(),
+            provisioning: None,
         })
     }
 
     /// Serialise to the single-line QR string described in the module docs.
+    ///
+    /// Emits the 5-field `CPPAIR1.<fp>.<token>.<id>.<name>.<addr_hint>` base
+    /// format. When [`Self::provisioning`] is present and non-empty, appends a
+    /// 6th field: the provisioning JSON base64url-encoded.
     ///
     /// The fingerprint is lowercased but its colons are preserved: the daemon
     /// pairing surface (`is_valid_fingerprint`) expects the user-facing
@@ -237,9 +348,7 @@ impl PairingPayload {
         let fp = normalize_fingerprint(&self.fingerprint);
         let token_b64 = b64().encode(self.token.0);
         let name_b64 = b64().encode(self.device_name.as_bytes());
-        // device_id (UUID) and addr_hint (host:port) are passed through.
-        // addr_hint is the final field, so any ':' it contains is harmless.
-        format!(
+        let base = format!(
             "{magic}.{fp}.{token_b64}.{device_id}.{name_b64}.{addr_hint}",
             magic = PAIRING_QR_MAGIC,
             fp = fp,
@@ -247,10 +356,19 @@ impl PairingPayload {
             device_id = self.device_id,
             name_b64 = name_b64,
             addr_hint = self.addr_hint,
-        )
+        );
+        // Append optional 6th field for provisioning JSON.
+        match &self.provisioning {
+            Some(prov) if !prov.is_empty() => format!("{base}.{}", prov.encode()),
+            _ => base,
+        }
     }
 
     /// Parse a scanned QR string back into a [`PairingPayload`].
+    ///
+    /// Accepts an optional 6th `.`-separated field carrying provisioning JSON
+    /// (base64url). Old payloads with exactly 5 fields are decoded with
+    /// `provisioning: None` — no backward-compat break.
     ///
     /// # Errors
     /// * [`PairingQrError::BadMagic`] — missing/unknown magic+version prefix
@@ -272,11 +390,11 @@ impl PairingPayload {
             return Err(PairingQrError::BadMagic);
         }
 
-        // The body has exactly PAIRING_QR_FIELD_COUNT fields. addr_hint is the
-        // last field and may itself contain ':' (host:port) but not '.', so
-        // splitn keeps it intact even when host:port is empty.
-        let parts: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT, '.').collect();
-        if parts.len() != PAIRING_QR_FIELD_COUNT {
+        // Split into at most 6 parts to allow the optional provisioning field.
+        // The addr_hint (5th field) contains ':' but not '.', so splitn(6)
+        // cleanly isolates it even when the 6th provisioning field is absent.
+        let parts: Vec<&str> = body.splitn(PAIRING_QR_FIELD_COUNT + 1, '.').collect();
+        if parts.len() < PAIRING_QR_FIELD_COUNT {
             return Err(PairingQrError::FieldCount(parts.len()));
         }
 
@@ -300,12 +418,21 @@ impl PairingPayload {
 
         let addr_hint = parts[4].to_string();
 
+        // Decode the optional 6th provisioning field. A decode error here is
+        // silently ignored so that a malformed/unknown provisioning blob cannot
+        // break pairing — the worst case is the scanner doesn't get the creds.
+        let provisioning = parts
+            .get(5)
+            .filter(|f| !f.is_empty())
+            .and_then(|f| QrProvisioning::decode(f));
+
         Ok(Self {
             fingerprint,
             token,
             device_id,
             device_name,
             addr_hint,
+            provisioning,
         })
     }
 
@@ -431,6 +558,61 @@ fn normalize_fingerprint(fp: &str) -> String {
     fp.to_ascii_lowercase()
 }
 
+/// Build a minimal JSON-escaped string literal: `"value"`.
+///
+/// Escapes `"` and `\` only — sufficient for URLs and JWTs which never contain
+/// control characters. Kept dependency-free.
+fn json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            other => out.push(other),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// Extract a JSON string value for a known key from a flat `{"k":"v",...}` JSON.
+///
+/// Only handles simple string values (no nesting). Returns `None` when the key
+/// is absent or the value is not a quoted string. Non-ASCII and escaped
+/// characters in the value are preserved verbatim (sufficient for URLs/JWTs).
+fn extract_json_string(json: &str, key: &str) -> Option<String> {
+    // Look for `"key":"`
+    let needle = format!("\"{}\":\"", key);
+    let start = json.find(&needle)? + needle.len();
+    let rest = &json[start..];
+    // Scan for the closing quote, handling `\"` escapes.
+    let mut value = String::new();
+    let mut chars = rest.chars().peekable();
+    loop {
+        match chars.next()? {
+            '"' => break,
+            '\\' => match chars.next()? {
+                '"' => value.push('"'),
+                '\\' => value.push('\\'),
+                'n' => value.push('\n'),
+                'r' => value.push('\r'),
+                't' => value.push('\t'),
+                other => {
+                    value.push('\\');
+                    value.push(other);
+                }
+            },
+            c => value.push(c),
+        }
+    }
+    if value.is_empty() {
+        None
+    } else {
+        Some(value)
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Errors
 // ─────────────────────────────────────────────────────────────────────────────
@@ -466,7 +648,7 @@ pub enum PairingQrError {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
-// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────��───────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -489,6 +671,22 @@ mod tests {
             device_id: "11112222-3333-4444-5555-666677778888".to_string(),
             device_name: "Dmytro's MacBook".to_string(),
             addr_hint: "192.168.1.5:54321".to_string(),
+            provisioning: None,
+        }
+    }
+
+    fn sample_with_provisioning() -> PairingPayload {
+        PairingPayload {
+            fingerprint: "aabbccddeeff00112233445566778899".to_string(),
+            token: token([7u8; PAIRING_TOKEN_LEN]),
+            device_id: "11112222-3333-4444-5555-666677778888".to_string(),
+            device_name: "Dmytro's MacBook".to_string(),
+            addr_hint: "192.168.1.5:54321".to_string(),
+            provisioning: Some(QrProvisioning {
+                relay_url: Some("https://relay.example.com".to_string()),
+                supabase_url: Some("https://abcd.supabase.co".to_string()),
+                supabase_anon_key: Some("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.anon".to_string()),
+            }),
         }
     }
 
@@ -560,6 +758,7 @@ mod tests {
         assert_eq!(decoded.device_id, original.device_id);
         assert_eq!(decoded.device_name, original.device_name);
         assert_eq!(decoded.addr_hint, original.addr_hint);
+        assert!(decoded.provisioning.is_none());
     }
 
     #[test]
@@ -617,6 +816,7 @@ mod tests {
             device_id: "id".to_string(),
             device_name: "n".to_string(),
             addr_hint: String::new(),
+            provisioning: None,
         };
         let decoded = decode(&payload.encode());
         assert_eq!(decoded.fingerprint, "aa:bb:cc:dd");
@@ -630,6 +830,7 @@ mod tests {
             device_id: "dev".to_string(),
             device_name: "Phone".to_string(),
             addr_hint: String::new(),
+            provisioning: None,
         };
         let decoded = decode(&payload.encode());
         assert_eq!(decoded.addr_hint, "");
@@ -645,6 +846,7 @@ mod tests {
             // of the name field protects against that.
             device_name: "A.B:C — café".to_string(),
             addr_hint: "host:1234".to_string(),
+            provisioning: None,
         };
         let decoded = decode(&payload.encode());
         assert_eq!(decoded.device_name, "A.B:C — café");
@@ -723,5 +925,144 @@ mod tests {
             Err(e) => panic!("new must succeed: {e}"),
         };
         assert!(a.token != b.token, "each payload must get a fresh token");
+    }
+
+    // ── QrProvisioning tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn provisioning_roundtrip_all_fields() {
+        let prov = QrProvisioning {
+            relay_url: Some("https://relay.example.com".to_string()),
+            supabase_url: Some("https://abcd.supabase.co".to_string()),
+            supabase_anon_key: Some("eyJhbGciOiJIUzI1NiJ9.anon".to_string()),
+        };
+        let encoded = prov.encode();
+        let decoded = QrProvisioning::decode(&encoded)
+            .expect("decode must succeed for a valid provisioning field");
+        assert_eq!(
+            decoded.relay_url.as_deref(),
+            Some("https://relay.example.com")
+        );
+        assert_eq!(
+            decoded.supabase_url.as_deref(),
+            Some("https://abcd.supabase.co")
+        );
+        assert_eq!(
+            decoded.supabase_anon_key.as_deref(),
+            Some("eyJhbGciOiJIUzI1NiJ9.anon")
+        );
+    }
+
+    #[test]
+    fn provisioning_roundtrip_partial_fields() {
+        let prov = QrProvisioning {
+            relay_url: Some("https://relay.example.com".to_string()),
+            supabase_url: None,
+            supabase_anon_key: None,
+        };
+        let encoded = prov.encode();
+        let decoded = QrProvisioning::decode(&encoded).expect("decode must succeed");
+        assert_eq!(
+            decoded.relay_url.as_deref(),
+            Some("https://relay.example.com")
+        );
+        assert!(decoded.supabase_url.is_none());
+        assert!(decoded.supabase_anon_key.is_none());
+    }
+
+    #[test]
+    fn provisioning_is_empty_when_all_none() {
+        let prov = QrProvisioning::default();
+        assert!(prov.is_empty());
+    }
+
+    #[test]
+    fn provisioning_is_empty_when_all_blank() {
+        let prov = QrProvisioning {
+            relay_url: Some(String::new()),
+            supabase_url: Some(String::new()),
+            supabase_anon_key: Some(String::new()),
+        };
+        assert!(prov.is_empty());
+    }
+
+    #[test]
+    fn payload_with_provisioning_roundtrips() {
+        let original = sample_with_provisioning();
+        let encoded = original.encode();
+        // Must have 6 dot-separated fields after the magic.
+        let parts: Vec<&str> = encoded.splitn(2, '.').collect();
+        let field_count = parts[1].split('.').count();
+        assert_eq!(
+            field_count, 6,
+            "payload with provisioning must have 6 body fields"
+        );
+
+        let decoded = decode(&encoded);
+        assert_eq!(decoded.fingerprint, original.fingerprint);
+        assert!(decoded.token == original.token);
+        assert_eq!(decoded.addr_hint, original.addr_hint);
+
+        let prov = decoded.provisioning.expect("provisioning must be decoded");
+        assert_eq!(prov.relay_url.as_deref(), Some("https://relay.example.com"));
+        assert_eq!(
+            prov.supabase_url.as_deref(),
+            Some("https://abcd.supabase.co")
+        );
+        assert_eq!(
+            prov.supabase_anon_key.as_deref(),
+            Some("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.anon")
+        );
+    }
+
+    #[test]
+    fn payload_without_provisioning_has_5_fields() {
+        let original = sample();
+        let encoded = original.encode();
+        let parts: Vec<&str> = encoded.splitn(2, '.').collect();
+        let field_count = parts[1].split('.').count();
+        assert_eq!(
+            field_count, 5,
+            "payload without provisioning must have 5 body fields"
+        );
+    }
+
+    #[test]
+    fn old_payload_without_6th_field_decodes_with_none_provisioning() {
+        // Simulate an old payload: strip the 6th field if any, decode — must succeed
+        // with provisioning = None (backward compat).
+        let old_payload = sample().encode();
+        assert!(
+            !old_payload.contains("CPPAIR1.") || old_payload.split('.').count() == 6,
+            "sample() must not have a provisioning field"
+        );
+        let decoded = decode(&old_payload);
+        assert!(decoded.provisioning.is_none());
+    }
+
+    #[test]
+    fn malformed_provisioning_field_does_not_break_decode() {
+        // Build a valid 5-field payload, then append a corrupt 6th field.
+        // decode() must still succeed (with provisioning = None) — the
+        // provisioning field is advisory and must never break pairing.
+        let base = sample().encode();
+        let corrupt = format!("{base}.!!!notbase64!!!");
+        let decoded = decode(&corrupt);
+        // Core pairing fields must be intact.
+        assert_eq!(decoded.fingerprint, sample().fingerprint);
+        // Provisioning is silently None (corrupt field ignored).
+        assert!(decoded.provisioning.is_none());
+    }
+
+    #[test]
+    fn deeplink_with_provisioning_roundtrips() {
+        let original = sample_with_provisioning();
+        let wrapped = original.encode_deeplink();
+        let stripped = strip_deeplink(&wrapped);
+        let decoded = decode(&stripped);
+        let prov = decoded
+            .provisioning
+            .expect("provisioning must survive deep-link round-trip");
+        assert_eq!(prov.relay_url.as_deref(), Some("https://relay.example.com"));
     }
 }

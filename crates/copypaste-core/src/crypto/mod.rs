@@ -9,8 +9,8 @@ pub use keys::{
     HKDF_VERSION,
 };
 pub use pairing_qr::{
-    strip_deeplink, PairingPayload, PairingQrError, PairingToken, PAIRING_DEEPLINK_PREFIX,
-    PAIRING_QR_MAGIC, PAIRING_TOKEN_LEN,
+    strip_deeplink, PairingPayload, PairingQrError, PairingToken, QrProvisioning,
+    PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC, PAIRING_TOKEN_LEN,
 };
 pub use sync_key::{
     decrypt_from_cloud, derive_sync_key, encrypt_for_cloud, SyncKey, SyncKeyError,
