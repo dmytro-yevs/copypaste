@@ -512,10 +512,16 @@ function HistoryRow({
     }
   };
 
+  // Build a concise screen-reader label: type + first 80 chars of preview.
+  const kindLabel = isImage ? "image" : isFile ? "file" : entry.content_type;
+  const ariaRowLabel = `${kindLabel}: ${preview.slice(0, 80)}`;
+
   return (
     <div
+      id={`clip-${entry.id}`}
       role="option"
       aria-selected={multiSelected || selected}
+      aria-label={ariaRowLabel}
       draggable={dragHandleProps !== undefined}
       className={[
         "group relative flex cursor-pointer select-none items-center gap-2 px-3 py-1.5",
@@ -1076,6 +1082,8 @@ interface VirtualListProps {
    * Optional — omit when load-more is not needed.
    */
   onNearBottom?: () => void;
+  /** ID of the currently keyboard-selected option — drives aria-activedescendant. */
+  activeDescendantId?: string | null;
 }
 
 function VirtualList({
@@ -1086,6 +1094,7 @@ function VirtualList({
   onKeyDown,
   renderRow,
   onNearBottom,
+  activeDescendantId,
 }: VirtualListProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
@@ -1132,6 +1141,7 @@ function VirtualList({
       ref={listRef}
       role="listbox"
       aria-label="Clipboard history"
+      aria-activedescendant={activeDescendantId ?? undefined}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onScroll={handleScroll}
@@ -2309,6 +2319,7 @@ export function HistoryView() {
           // over the already-loaded set, so near-bottom doesn't mean "more data
           // to fetch" — it just means the user has reached the end of the match.
           onNearBottom={search.trim() === "" ? handleNearBottom : undefined}
+          activeDescendantId={selectedId ? `clip-${selectedId}` : null}
           renderRow={(entry) => (
             <HistoryRow
               key={entry.id}
