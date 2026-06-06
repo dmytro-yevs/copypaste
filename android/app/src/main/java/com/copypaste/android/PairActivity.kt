@@ -174,7 +174,7 @@ class PairActivity : ComponentActivity() {
     }
 
     /**
-     * Route an incoming intent: valid CPPAIR1 payload → deepLinkPayload;
+     * Route an incoming intent: valid CPPAIR1/CPPAIR2 payload → deepLinkPayload;
      * cppair:// URI with unrecognised payload → deepLinkError for user feedback.
      */
     private fun handleDeepLinkIntent(intent: Intent?) {
@@ -182,10 +182,10 @@ class PairActivity : ComponentActivity() {
         val uri: Uri = intent.data ?: return
         if (uri.scheme != "cppair" || uri.host != "pair") return
         val p = uri.getQueryParameter("p") ?: return
-        if (p.startsWith("CPPAIR1.")) {
+        if (p.startsWith("CPPAIR1.") || p.startsWith("CPPAIR2.")) {
             deepLinkPayload.value = p
         } else {
-            // Payload present but not a recognised CPPAIR1 token — surface to user.
+            // Payload present but not a recognised pairing token — surface to user.
             deepLinkError.value = "Invalid pairing link"
         }
     }
@@ -872,4 +872,94 @@ private fun lanIpv4Address(): String? {
         android.util.Log.w("PairActivity", "lanIpv4Address lookup failed: ${e.message}")
         null
     }
+}
+
+/** Holds the optional sync-provisioning data embedded in a CPPAIR2 QR payload. */
+internal data class QrProvisioningData(
+    val relayUrl: String?,
+    val supabaseUrl: String?,
+    val supabaseAnonKey: String?,
+)
+
+/**
+ * Extract sync-provisioning from the optional 7th `.`-separated field of a bare
+ * CPPAIR2 payload string (i.e. after stripping any deep-link wrapper).
+ *
+ * CPPAIR2 wire format (body after magic prefix):
+ *   [0] fp_b64url  [1] token_b64url  [2] device_id_b64url  [3] name_b64url
+ *   [4] addr_b64url  [5] prov_b64url (optional)
+ *
+ * All 6 body fields are base64url (no dots), so `split(".", limit=7)` on the
+ * full string cleanly isolates the provisioning field at index 6 (0-based,
+ * counting the magic prefix at index 0).
+ *
+ * For CPPAIR1 payloads the provisioning field is at body-index 5 (full-string
+ * index 6), but addr_hint in v1 is the raw address string and may contain IPv4
+ * dots — this function only handles CPPAIR2 to avoid that ambiguity.
+ *
+ * Returns `null` when the field is absent, empty, or cannot be decoded. A
+ * decode failure here is always silent: provisioning is advisory and must never
+ * break pairing.
+ *
+ * Pure Kotlin; no FFI dependency, so it works even in stub mode.
+ */
+internal fun extractQrProvisioning(barePayload: String): QrProvisioningData? {
+    // Only handle CPPAIR2; CPPAIR1 addr_hint contains IPv4 dots that make
+    // field 5 ambiguous without knowing the addr_hint length.
+    val bare = barePayload.trim()
+    if (!bare.startsWith("CPPAIR2.")) return null
+    // Full string: CPPAIR2 . fp . tok . id . name . addr_b64 [. prov_b64]
+    // Indices:        0       1    2    3    4       5           6
+    val parts = bare.split(".", limit = 7)
+    if (parts.size < 7) return null  // no provisioning field present
+    val provB64 = parts[6].trim()
+    if (provB64.isEmpty()) return null
+    return try {
+        // base64url: replace url-safe chars to standard before decoding.
+        val bytes = android.util.Base64.decode(
+            provB64.replace('-', '+').replace('_', '/'),
+            android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+        )
+        val json = String(bytes, Charsets.UTF_8)
+        QrProvisioningData(
+            relayUrl = extractJsonString(json, "ru"),
+            supabaseUrl = extractJsonString(json, "su"),
+            supabaseAnonKey = extractJsonString(json, "sk"),
+        )
+    } catch (_: Exception) {
+        null // Corrupt/unknown field — silently ignore; pairing is unaffected.
+    }
+}
+
+/**
+ * Minimal JSON string extractor for a flat `{"k":"v",...}` object.
+ * Returns the string value for [key], or `null` when absent or not a string.
+ * Handles `\"` and `\\` escapes; sufficient for URLs and JWTs.
+ */
+private fun extractJsonString(json: String, key: String): String? {
+    val needle = "\"$key\":\""
+    val start = json.indexOf(needle).takeIf { it >= 0 } ?: return null
+    val valueStart = start + needle.length
+    val sb = StringBuilder()
+    var i = valueStart
+    while (i < json.length) {
+        when (val c = json[i]) {
+            '"' -> return sb.toString().takeIf { it.isNotEmpty() }
+            '\\' -> {
+                i++
+                if (i >= json.length) return null
+                when (json[i]) {
+                    '"' -> sb.append('"')
+                    '\\' -> sb.append('\\')
+                    'n' -> sb.append('\n')
+                    'r' -> sb.append('\r')
+                    't' -> sb.append('\t')
+                    else -> { sb.append('\\'); sb.append(json[i]) }
+                }
+            }
+            else -> sb.append(c)
+        }
+        i++
+    }
+    return null // Unterminated string
 }
