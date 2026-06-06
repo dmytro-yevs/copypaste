@@ -1239,6 +1239,25 @@ export function HistoryView() {
   // Hidden file-input ref for D2 (browser-picker path)
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // F11: Undo-on-delete — item is removed optimistically from the UI; the
+  // actual api.deleteItem call is deferred 5 s. If the user hits "Undo" the
+  // delete is cancelled and we reload to restore the row.
+  const [undoPending, setUndoPending] = useState<{
+    id: string;
+    preview: string;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  // Keep a ref so async callbacks read the current value without needing it
+  // in every dependency array.
+  const undoPendingRef = useRef<{
+    id: string;
+    preview: string;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  useEffect(() => {
+    undoPendingRef.current = undoPending;
+  }, [undoPending]);
+
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   // Track current signature to avoid unnecessary re-renders on identical data.
@@ -1265,6 +1284,18 @@ export function HistoryView() {
   useEffect(() => {
     return () => {
       if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
+  // F11: On unmount, commit any pending deferred delete immediately so items
+  // are not silently left un-deleted if the user closes the popup mid-window.
+  useEffect(() => {
+    return () => {
+      const pending = undoPendingRef.current;
+      if (pending !== null) {
+        clearTimeout(pending.timer);
+        void api.deleteItem(pending.id).catch(() => {});
+      }
     };
   }, []);
 
@@ -1640,6 +1671,38 @@ export function HistoryView() {
     [items, load, playSoundOnCopy, notifyOnCopy, showToast]
   );
 
+  // F11: handleDelete/handleUndo must be declared before handleKeyDown so the
+  // keyboard handler can reference them without a "used before declaration" error.
+
+  // Optimistically removes the item from local state and schedules the actual
+  // api.deleteItem call after a 5-second undo window.  If a second delete fires
+  // before the timer expires the first is committed immediately.
+  const handleDelete = useCallback(
+    (id: string, preview: string) => {
+      const prev = undoPendingRef.current;
+      if (prev !== null) {
+        clearTimeout(prev.timer);
+        void api.deleteItem(prev.id).catch(() => {});
+      }
+      setItems((prevItems) => prevItems.filter((it) => it.id !== id));
+      if (selectedId === id) setSelectedId(null);
+      const timer = setTimeout(() => {
+        void api.deleteItem(id).catch(() => {});
+        setUndoPending(null);
+      }, 5000);
+      setUndoPending({ id, preview, timer });
+    },
+    [selectedId]
+  );
+
+  const handleUndo = useCallback(() => {
+    const pending = undoPendingRef.current;
+    if (pending === null) return;
+    clearTimeout(pending.timer);
+    setUndoPending(null);
+    void load(true);
+  }, [load]);
+
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLDivElement>) => {
       // Escape always clears multi-selection (or single selection if in selection mode).
@@ -1689,19 +1752,14 @@ export function HistoryView() {
         await handleCopy(selectedId);
       } else if ((e.key === "Backspace" || e.key === "Delete") && selectedId !== null) {
         e.preventDefault();
-        try {
-          await api.deleteItem(selectedId);
-          // Select the next item after deletion.
-          const newIdx = Math.min(selectedIdx, filtered.length - 2);
-          setSelectedId(newIdx >= 0 ? (filtered[newIdx]?.id ?? null) : null);
-          void load(true);
-        } catch (err) {
-          const msg = ipcErrorMessage(err, "Delete failed");
-          showToast(msg, "error");
-        }
+        const entry = filtered.find((it) => it.id === selectedId);
+        // Select the next item before removing the current one from the list.
+        const newIdx = Math.min(selectedIdx, filtered.length - 2);
+        setSelectedId(newIdx >= 0 ? (filtered[newIdx]?.id ?? null) : null);
+        handleDelete(selectedId, entry?.preview ?? "");
       }
     },
-    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy]
+    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy, handleDelete]
   );
 
   // -------------------------------------------------------------------------
@@ -1720,20 +1778,6 @@ export function HistoryView() {
       }
     },
     [load, showToast]
-  );
-
-  const handleDelete = useCallback(
-    async (id: string) => {
-      try {
-        await api.deleteItem(id);
-        if (selectedId === id) setSelectedId(null);
-        void load(true);
-      } catch (err) {
-        const msg = ipcErrorMessage(err, "Delete failed");
-        showToast(msg, "error");
-      }
-    },
-    [selectedId, load, showToast]
   );
 
   // A1: Drag-to-reorder handler — placed after `load` and `showToast` are declared
@@ -2288,7 +2332,7 @@ export function HistoryView() {
               }}
               onCopy={() => void handleCopy(entry.id)}
               onPin={() => void handlePin(entry.id, entry.pinned)}
-              onDelete={() => void handleDelete(entry.id)}
+              onDelete={() => handleDelete(entry.id, entry.preview)}
               onPreview={() => setPreviewEntry(entry)}
               onMouseEnter={() => {
                 isKeyboardNavRef.current = false;
@@ -2374,6 +2418,57 @@ export function HistoryView() {
         {body}
       </div>
       {toast !== null && <Toast key={toast.id} message={toast.message} kind={toast.kind} />}
+      {/* F11: Undo-delete toast — shown while a deferred delete is pending */}
+      {undoPending !== null && (
+        <div
+          className="toast-in fixed bottom-3 left-1/2 z-[9999] pointer-events-auto"
+          style={{
+            transform: "translateX(-50%)",
+            borderRadius: 10,
+            border: "1px solid rgba(255,255,255,0.10)",
+            background: "rgba(35,37,45,0.92)",
+            backdropFilter: "blur(20px) saturate(160%)",
+            WebkitBackdropFilter: "blur(20px) saturate(160%)",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.35)",
+            padding: "6px 14px 6px 10px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: "50%",
+              flexShrink: 0,
+              background: "var(--ide-danger, #e06c75)",
+            }}
+          />
+          <span className="text-[12px]" style={{ color: "rgba(255,255,255,0.82)" }}>
+            Deleted &ldquo;
+            {undoPending.preview.length > 40
+              ? `${undoPending.preview.slice(0, 40)}…`
+              : undoPending.preview}
+            &rdquo;
+          </span>
+          <button
+            onClick={handleUndo}
+            className="text-[12px] font-semibold"
+            style={{
+              color: "#7EC8E3",
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              padding: 0,
+              flexShrink: 0,
+            }}
+          >
+            Undo
+          </button>
+        </div>
+      )}
       {/* M10: Details modal */}
       {previewEntry !== null && (
         <DetailsModal entry={previewEntry} onClose={() => setPreviewEntry(null)} />
