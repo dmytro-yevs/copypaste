@@ -498,6 +498,21 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // would receive `RecvError::Lagged` and silently drop items.
     let (new_item_tx, _new_item_rx) = broadcast::channel::<ClipboardItem>(256);
 
+    // H8 perf fix: build SyncCrypto early so a clone can be shared with both
+    // the IpcServer (to call reload_sync_key after pairing) and the sync
+    // orchestrator (to do the actual re-keying). Because the cached sync key is
+    // stored behind an Arc<Mutex> inside SyncCrypto, all clones share the same
+    // backing store — one reload_sync_key() call updates every holder.
+    let sync_crypto: Option<sync_orch::SyncCrypto> = if p2p_enabled {
+        let seed: [u8; 32] = **local_key_arc;
+        Some(sync_orch::SyncCrypto::new(
+            seed,
+            crate::ipc::peers_file_path(),
+        ))
+    } else {
+        None
+    };
+
     #[cfg(unix)]
     let (
         self_write_change_count_arc,
@@ -522,6 +537,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         .with_local_device_id(local_device_id.clone());
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
+        }
+        // H8: share a SyncCrypto clone with the IPC server so it can call
+        // reload_sync_key after any pairing write, propagating the new key to
+        // the orchestrator (they share the same Arc<Mutex> backing store).
+        if let Some(ref crypto) = sync_crypto {
+            server = server.with_p2p_sync_crypto(crypto.clone());
         }
         if let Some(ref fp) = cert_fingerprint_display {
             server = server.with_cert_fingerprint(fp.clone());
@@ -790,19 +811,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let sync_rx = new_item_tx.subscribe();
     // D2 (sync_orch): pass a token clone so the orchestrator exits on shutdown.
     let sync_shutdown = shutdown_token.clone();
-    // P2P Phase 3 (cross-device readability): give the orchestrator this
-    // device's local-storage seed and the peers.json path so it can re-key item
-    // payloads through the shared content sync key established at pairing. Only
-    // wired when P2P is enabled — the cloud path uses its own SyncKey scheme.
-    let sync_crypto = if p2p_enabled {
-        let seed: [u8; 32] = **local_key_arc;
-        Some(sync_orch::SyncCrypto::new(
-            seed,
-            crate::ipc::peers_file_path(),
-        ))
-    } else {
-        None
-    };
+    // P2P Phase 3 (cross-device readability): the orchestrator uses the
+    // SyncCrypto built earlier (H8: shared with the IpcServer so pairing
+    // immediately refreshes the cached key via reload_sync_key).
     // Pass the configured quota so the P2P merge path prunes to the same cap
     // as the cloud path (Fix HIGH-3). Saturating cast: values above i64::MAX
     // (>9 EB) are unreachable in practice.

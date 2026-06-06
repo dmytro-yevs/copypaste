@@ -86,6 +86,15 @@ pub struct AutoApplyCtx {
 /// no `sync_key_b64`) the orchestrator falls back to the legacy behaviour:
 /// outgoing items ship their raw at-rest ciphertext (undecryptable on the peer,
 /// exactly as before Phase 3) and incoming items are stored verbatim.
+///
+/// ## Caching (H8 perf fix)
+///
+/// The shared sync key is cached in-memory as an `Arc<std::sync::Mutex<Option<[u8;
+/// 32]>>>`. All clones (e.g. the `spawn_blocking` copy inside
+/// `merge_incoming_with_crypto`) share the same backing `Arc`, so a single
+/// `reload_sync_key` call — made after any pairing write — updates every live
+/// copy simultaneously. The key bytes are stored as a plain array rather than
+/// `SyncKey` because `SyncKey` intentionally does not implement `Clone`.
 #[derive(Clone)]
 pub struct SyncCrypto {
     /// This device's v1 local-storage key (the raw seed from `load_local_key`).
@@ -93,42 +102,70 @@ pub struct SyncCrypto {
     /// This device's v2 local-storage key (`derive_v2(seed)`).
     /// Item 5: wrapped in `Zeroizing` so the key bytes are scrubbed on drop.
     v2_key: zeroize::Zeroizing<[u8; 32]>,
-    /// Path to `peers.json`, re-read on each crypto operation so a peer paired
-    /// at runtime contributes its shared sync key without a restart.
+    /// Path to `peers.json`. Only read during construction and `reload_sync_key`
+    /// — NOT on every crypto operation (H8 fix).
     peers_path: PathBuf,
+    /// Cached shared content sync key bytes (H8: eliminates per-item disk I/O).
+    ///
+    /// Shared via `Arc` so every `SyncCrypto` clone (including the temporary
+    /// copy inside `merge_incoming_with_crypto::spawn_blocking`) observes the
+    /// same value. Updated atomically by `reload_sync_key` after pairing.
+    cached_sync_key_bytes: std::sync::Arc<std::sync::Mutex<Option<[u8; 32]>>>,
 }
 
 impl SyncCrypto {
     /// Build a crypto context from the device's local-storage seed and the
-    /// `peers.json` path.
+    /// `peers.json` path. Eagerly loads the shared sync key from `peers.json`
+    /// so the hot-path `shared_sync_key()` never touches the filesystem.
     pub fn new(local_seed: [u8; 32], peers_path: PathBuf) -> Self {
+        let cached = Self::load_key_from_peers(&peers_path);
         Self {
             v1_key: local_seed,
             v2_key: derive_v2(&local_seed),
+            cached_sync_key_bytes: std::sync::Arc::new(std::sync::Mutex::new(cached)),
             peers_path,
         }
     }
 
-    /// Load the shared content sync key (if any) from `peers.json`.
-    ///
-    /// Returns the first peer record that carries a valid `sync_key_b64`. The
-    /// supported topology is two paired devices sharing one key; with >2 devices
-    /// a common group key would be required (deferred — see module notes).
-    fn shared_sync_key(&self) -> Option<SyncKey> {
+    /// Read `peers.json` once and return the first valid 32-byte sync key, or
+    /// `None` when no paired peer with a key is present.
+    fn load_key_from_peers(peers_path: &std::path::Path) -> Option<[u8; 32]> {
         use base64::Engine as _;
-        let peers = crate::peers::load_peers(&self.peers_path);
-        for dev in &peers {
-            let Some(b64) = dev.sync_key_b64.as_deref() else {
-                continue;
-            };
-            let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) else {
-                continue;
-            };
-            if let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) {
-                return Some(SyncKey::from_bytes(arr));
-            }
-        }
-        None
+        crate::peers::load_peers(peers_path)
+            .into_iter()
+            .find_map(|dev| {
+                let b64 = dev.sync_key_b64.as_deref()?;
+                let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
+                <[u8; 32]>::try_from(bytes.as_slice()).ok()
+            })
+    }
+
+    /// Return the cached shared content sync key (if any).
+    ///
+    /// This is now an O(1) memory read — no file I/O (H8 fix). Call
+    /// `reload_sync_key` after pairing to refresh the cache.
+    fn shared_sync_key(&self) -> Option<SyncKey> {
+        let guard = self
+            .cached_sync_key_bytes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        (*guard).map(SyncKey::from_bytes)
+    }
+
+    /// Re-read `peers.json` and update the in-memory cache. Call this once
+    /// after any write to `peers.json` (pairing completion, revoke) so the
+    /// orchestrator picks up the new key without a daemon restart.
+    ///
+    /// Because `cached_sync_key_bytes` is an `Arc`, this update is visible to
+    /// every `SyncCrypto` clone (including ones moved into `spawn_blocking`
+    /// closures) immediately.
+    pub fn reload_sync_key(&self) {
+        let new_key = Self::load_key_from_peers(&self.peers_path);
+        let mut guard = self
+            .cached_sync_key_bytes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        *guard = new_key;
     }
 }
 
@@ -669,29 +706,17 @@ fn replace_item_atomic(
 /// Returns an empty vec when there is no shared sync key (nothing decryptable to
 /// send) or the DB read fails — catch-up is best-effort.
 pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec<WireItem> {
-    // P2 fix: load the shared sync key ONCE here rather than on every
-    // `rekey_outbound` call (which re-reads peers.json per item). If no shared
+    // P2 fix: check the shared sync key ONCE here (now an in-memory cache read
+    // after the H8 fix) rather than re-reading peers.json per item. If no shared
     // key is available there is nothing to forward — bail early.
     //
     // P1 fix: paginate through the local store in CATCHUP_PAGE_SIZE-row batches
     // instead of materialising up to 10 000 structs in one shot. Each page is
     // processed immediately and dropped, keeping peak heap usage bounded.
-    use base64::Engine as _;
 
     // Pre-flight: only bother paginating if a shared key actually exists.
-    let shared_key_available = {
-        let peers = crate::peers::load_peers(&crypto.peers_path);
-        peers.iter().any(|dev| {
-            dev.sync_key_b64.as_deref().is_some_and(|b64| {
-                base64::engine::general_purpose::STANDARD
-                    .decode(b64)
-                    .ok()
-                    .and_then(|b| <[u8; 32]>::try_from(b.as_slice()).ok())
-                    .is_some()
-            })
-        })
-    };
-    if !shared_key_available {
+    // H8 fix: use the cached key via shared_sync_key() — no peers.json disk read.
+    if crypto.shared_sync_key().is_none() {
         return Vec::new();
     }
 
