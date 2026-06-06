@@ -5919,6 +5919,35 @@ impl IpcServer {
                     String::new()
                 };
 
+                // H4: embed relay + Supabase config into the QR as the optional
+                // 6th provisioning field so the scanning device (Android) can
+                // configure cloud/relay sync automatically at scan time — before
+                // the P2P bootstrap tunnel is established (covers off-LAN case
+                // where the P2P handshake may not complete).
+                //
+                // These are all non-secret values: relay_url is a plain HTTP
+                // base URL; supabase_url + supabase_anon_key are the publishable
+                // Supabase connection params, intentionally public per Supabase
+                // documentation. No long-term secrets are embedded in the QR.
+                let qr_provisioning = {
+                    let app_cfg = read_config();
+                    let relay_url = app_cfg.relay_url.clone();
+                    let supabase_url = std::env::var("SUPABASE_URL").ok().or(app_cfg.supabase_url);
+                    let supabase_anon_key = std::env::var("SUPABASE_ANON_KEY")
+                        .ok()
+                        .or(app_cfg.supabase_anon_key);
+                    let prov = copypaste_core::QrProvisioning {
+                        relay_url,
+                        supabase_url,
+                        supabase_anon_key,
+                    };
+                    if prov.is_empty() {
+                        None
+                    } else {
+                        Some(prov)
+                    }
+                };
+
                 // Build the payload directly from the pre-generated token so the
                 // QR, the stored token, and the bootstrap password all agree.
                 let payload = copypaste_core::PairingPayload {
@@ -5927,6 +5956,7 @@ impl IpcServer {
                     device_id,
                     device_name,
                     addr_hint,
+                    provisioning: qr_provisioning,
                 };
 
                 // Wrap the bare CPPAIR1 payload in the cppair://pair?p= deep-link

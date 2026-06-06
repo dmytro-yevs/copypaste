@@ -29,9 +29,10 @@ pub use crypto::encrypt::{decrypt_item, encrypt_item};
 pub use crypto::{
     decrypt_from_cloud, derive_storage_key_v1, derive_storage_key_v2, derive_sync_key,
     derive_sync_key_v2, derive_telemetry_key_v2, derive_v2, encrypt_for_cloud, strip_deeplink,
-    DeviceKeypair, KeyError, PairingPayload, PairingQrError, PairingToken, SyncKey, SyncKeyError,
-    ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_SYNC_SALT, ARGON2_T_COST, CLOUD_AAD_SCHEMA_VERSION,
-    HKDF_VERSION, PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC, PAIRING_TOKEN_LEN,
+    DeviceKeypair, KeyError, PairingPayload, PairingQrError, PairingToken, QrProvisioning, SyncKey,
+    SyncKeyError, ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_SYNC_SALT, ARGON2_T_COST,
+    CLOUD_AAD_SCHEMA_VERSION, HKDF_VERSION, PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC,
+    PAIRING_TOKEN_LEN,
 };
 pub use file::{decode_file, encode_file, FileError, FileMeta, FILE_CHUNK_SIZE, MAX_FILE_BYTES};
 pub use image::{
