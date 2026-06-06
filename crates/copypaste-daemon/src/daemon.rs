@@ -523,8 +523,6 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // B1: surfaced out of this block so the P2P subsystem (below) can share
         // the SAME public-IP cache the IPC server reads and the STUN task writes.
         public_ip_cache,
-        // Mutual unpair: shared slot the IPC handlers read to find live peer sinks.
-        p2p_live_sinks_slot,
     ) = {
         let mut server = IpcServer::new(
             db.clone(),
@@ -608,9 +606,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // known; the pairing handlers then send it in-band over the bootstrap
         // channel so the peer can persist it for the Phase 3 connector.
         let sync_addr_slot = server.p2p_sync_addr_slot();
-        // Online-status slot (list_peers) + mutual-unpair control slot.
+        // Online-status + mutual-unpair control slot (both consumers share the same Arc).
         let live_sinks_slot = server.live_peer_sinks_slot();
-        let p2p_unpair_slot = server.p2p_live_sinks_slot();
         // LAN/SAS Phase 2: grab a clone of the shared discovery-pairing
         // coordinator so the standing responder in `start_p2p` routes its SAS
         // through the SAME state machine the IPC handlers observe.
@@ -646,7 +643,6 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             pairing_coordinator,
             handle,
             public_ip_cache,
-            p2p_unpair_slot,
         )
     };
 
@@ -769,16 +765,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         *slot = Some(addr);
                     }
                     {
+                        // Populate the single shared slot used for both online-status
+                        // (list_peers) and mutual-unpair signalling (unpair/revoke).
+                        // live_sinks and peer_sinks on P2pHandle are Arc clones of the
+                        // same underlying map; we write live_sinks here.
                         let mut slot = live_sinks_slot
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
                         *slot = Some(std::sync::Arc::clone(&handle.live_sinks));
-                    }
-                    {
-                        let mut slot = p2p_live_sinks_slot
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        *slot = Some(handle.peer_sinks.clone());
                     }
                     Some(handle)
                 }
