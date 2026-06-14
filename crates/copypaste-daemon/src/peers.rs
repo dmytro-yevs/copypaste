@@ -79,15 +79,32 @@ pub struct PairedDevice {
     /// with this peer. Updated on every established (throttled) connection.
     #[serde(default)]
     pub last_sync_at: Option<i64>,
-    /// Base64 (standard) of the serialised `PasswordFile` blob from the PAKE
-    /// bootstrap pairing handshake.  Written on the RESPONDER side by
-    /// `pair_accept_finish` and preserved across load/save round-trips.
-    /// `None` on the INITIATOR side (which uses `sync_key_b64` instead).
-    /// `#[serde(default)]` for backward-compat with older records that
-    /// predate this field; `skip_serializing_if` omits the key entirely when
-    /// absent so the on-disk format stays compact.
+    /// **DEPRECATED (plaintext at-rest)** — Base64 of the raw `PasswordFile`
+    /// blob. Kept for **migration reads only**: if this field is present in an
+    /// existing `peers.json` and `password_file_enc` is absent the daemon
+    /// treats the value as a legacy plaintext entry and re-encrypts it into
+    /// `password_file_enc` on the next save. New writes always use
+    /// `password_file_enc`; this field is never written by current code.
+    /// `#[serde(default, skip_serializing_if)]` means it is silently ignored
+    /// on load when absent and NEVER written to disk by `save_peers`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub password_file_b64: Option<String>,
+
+    /// Encrypted-at-rest `PasswordFile` blob (CopyPaste-5lm).
+    ///
+    /// Encoding: base64-standard of `nonce[24] || ciphertext` where the
+    /// ciphertext is `XChaCha20-Poly1305(plaintext=PasswordFile::serialized,
+    /// key=local_key, aad=b"pake_password_file|{canonical_fingerprint}")`.
+    ///
+    /// Written by `pair_accept_finish` (responder side). `None` on the
+    /// INITIATOR side (which uses `sync_key_b64`), and `None` for legacy
+    /// records that predate this field (those have `password_file_b64`
+    /// instead — they are re-encrypted on next write).
+    ///
+    /// `#[serde(default, skip_serializing_if)]` keeps backward compat with
+    /// older `peers.json` files; the key is omitted when `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub password_file_enc: Option<String>,
 }
 
 // Use the canonical fingerprint normaliser from the IPC module — single
@@ -277,15 +294,15 @@ pub fn queue_pending_unpair(
 pub fn load_pending_unpairs(path: &Path) -> Vec<PendingUnpair> {
     match std::fs::read_to_string(path) {
         Ok(contents) => serde_json::from_str(&contents).unwrap_or_else(|e| {
-            tracing::warn!("Failed to parse pending_unpair file {}: {e}", path.display());
+            tracing::warn!(
+                "Failed to parse pending_unpair file {}: {e}",
+                path.display()
+            );
             Vec::new()
         }),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(e) => {
-            tracing::warn!(
-                "Could not read pending_unpair file {}: {e}",
-                path.display()
-            );
+            tracing::warn!("Could not read pending_unpair file {}: {e}", path.display());
             Vec::new()
         }
     }
@@ -443,6 +460,7 @@ mod tests {
             first_sync_at: None,
             last_sync_at: None,
             password_file_b64: None,
+            password_file_enc: None,
         }
     }
 
@@ -679,7 +697,11 @@ mod tests {
         // with a fresher address → replaces, never duplicates.
         queue_pending_unpair(&pending_path, "aabbcc", Some("10.0.0.2:5555"), "Alice2").unwrap();
         let loaded = load_pending_unpairs(&pending_path);
-        assert_eq!(loaded.len(), 1, "re-queue must dedupe by canonical fingerprint");
+        assert_eq!(
+            loaded.len(),
+            1,
+            "re-queue must dedupe by canonical fingerprint"
+        );
         assert_eq!(loaded[0].address.as_deref(), Some("10.0.0.2:5555"));
 
         // Queue a second, distinct peer.
@@ -707,7 +729,10 @@ mod tests {
         let dir = tempdir().unwrap();
         let pending_path = dir.path().join("pending_unpair.json");
         queue_pending_unpair(&pending_path, "aabbcc", Some("127.0.0.1:1"), "X").unwrap();
-        let mode = std::fs::metadata(&pending_path).unwrap().permissions().mode();
+        let mode = std::fs::metadata(&pending_path)
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600, "pending_unpair.json must be 0600");
     }
 
@@ -731,5 +756,140 @@ mod tests {
             "empty new_name must not overwrite stored name"
         );
         assert_eq!(loaded[0].address, Some("10.0.0.2:5678".to_string()));
+    }
+
+    // ─── CopyPaste-5lm: PasswordFile at-rest encryption ─────────────────────
+
+    /// `password_file_enc` round-trips through `save_peers` / `load_peers`.
+    ///
+    /// We store an arbitrary encrypted blob in the field and verify it
+    /// deserialises back unchanged.  The encryption itself is tested at the
+    /// `ipc.rs` layer where the key is available; this test only covers the
+    /// serde round-trip of the new field.
+    #[test]
+    fn password_file_enc_roundtrips_through_save_load() {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+
+        // Simulate an encrypted blob: arbitrary bytes that look like nonce+ct.
+        let fake_enc_bytes: Vec<u8> = (0u8..48).collect(); // 24-byte nonce + 24-byte ct
+        let fake_enc_b64 = b64.encode(&fake_enc_bytes);
+
+        let device = PairedDevice {
+            fingerprint: "aa:bb:cc".to_string(),
+            name: "Alice".to_string(),
+            added_at: 1_700_000_000,
+            address: None,
+            sync_key_b64: None,
+            model: None,
+            os_version: None,
+            app_version: None,
+            local_ip: None,
+            public_ip: None,
+            first_sync_at: None,
+            last_sync_at: None,
+            password_file_b64: None,
+            password_file_enc: Some(fake_enc_b64.clone()),
+        };
+
+        save_peers(&path, &[device]).unwrap();
+        let loaded = load_peers(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(
+            loaded[0].password_file_enc.as_deref(),
+            Some(fake_enc_b64.as_str()),
+            "password_file_enc must survive save/load round-trip"
+        );
+        // Legacy plaintext field must remain absent when not set.
+        assert!(
+            loaded[0].password_file_b64.is_none(),
+            "password_file_b64 must be absent when only password_file_enc is set"
+        );
+    }
+
+    /// A legacy `peers.json` entry with `password_file_b64` (plaintext — the
+    /// pre-CopyPaste-5lm format) must still deserialise successfully, with
+    /// `password_file_b64` populated and `password_file_enc` absent.
+    ///
+    /// This validates the migration path: on next write, the caller re-encrypts
+    /// the plaintext bytes into `password_file_enc` and writes only that field.
+    #[test]
+    fn legacy_password_file_b64_loads_as_plaintext_migration_entry() {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+
+        // Write a legacy record with password_file_b64 (not password_file_enc).
+        let fake_pf_bytes: Vec<u8> = vec![0xAB, 0xCD, 0xEF, 0x01, 0x23];
+        let fake_pf_b64 = b64.encode(&fake_pf_bytes);
+        std::fs::write(
+            &path,
+            format!(
+                r#"[{{"fingerprint":"aa:bb:cc","name":"Alice","added_at":1700000000,"password_file_b64":"{fake_pf_b64}"}}]"#
+            ),
+        )
+        .unwrap();
+
+        let loaded = load_peers(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(
+            loaded[0].password_file_b64.as_deref(),
+            Some(fake_pf_b64.as_str()),
+            "legacy password_file_b64 must be deserialized for migration"
+        );
+        assert!(
+            loaded[0].password_file_enc.is_none(),
+            "password_file_enc must be None for a legacy record"
+        );
+    }
+
+    /// A `peers.json` with `password_file_b64` must NOT re-serialize that field
+    /// after a `save_peers` round-trip when `password_file_enc` is also None —
+    /// i.e. loading a legacy entry and re-saving it (without the caller
+    /// supplying a `password_file_enc`) leaves the `password_file_b64` in place
+    /// so the caller can still detect it for migration.
+    ///
+    /// (Once the caller encrypts the bytes and sets `password_file_enc`, it
+    /// should also clear `password_file_b64` — that clearing is done at the
+    /// `pair_accept_finish` IPC site, not in `save_peers`.)
+    #[test]
+    fn legacy_password_file_b64_preserved_on_resave_without_enc() {
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+
+        let fake_pf_b64 = b64.encode(b"hello_pake");
+        // Write initial record with the legacy field only.
+        let device = PairedDevice {
+            fingerprint: "aa:bb:cc".to_string(),
+            name: "Alice".to_string(),
+            added_at: 1_700_000_000,
+            address: None,
+            sync_key_b64: None,
+            model: None,
+            os_version: None,
+            app_version: None,
+            local_ip: None,
+            public_ip: None,
+            first_sync_at: None,
+            last_sync_at: None,
+            password_file_b64: Some(fake_pf_b64.clone()),
+            password_file_enc: None,
+        };
+        save_peers(&path, &[device]).unwrap();
+        // Re-load: the legacy field must be intact.
+        let loaded = load_peers(&path);
+        assert_eq!(
+            loaded[0].password_file_b64.as_deref(),
+            Some(fake_pf_b64.as_str()),
+            "password_file_b64 must survive resave when password_file_enc is None"
+        );
     }
 }

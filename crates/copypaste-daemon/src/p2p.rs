@@ -466,21 +466,17 @@ pub async fn start_p2p(
     if config.lan_visibility {
         // Advertise the bootstrap port in `bport` when available (v2); else v1.
         let register_result = match bootstrap_port {
-            Some(bport) => {
-                discovery.register_with_bport(
-                    actual_port,
-                    &device_id_str,
-                    &config.device_name,
-                    bport,
-                )
-            }
+            Some(bport) => discovery.register_with_bport(
+                actual_port,
+                &device_id_str,
+                &config.device_name,
+                bport,
+            ),
             None => discovery.register(actual_port, &device_id_str, &config.device_name),
         };
         register_result.map_err(|e| anyhow::anyhow!("mDNS register failed: {e}"))?;
     } else {
-        tracing::info!(
-            "lan_visibility=false: skipping mDNS-SD registration and browsing"
-        );
+        tracing::info!("lan_visibility=false: skipping mDNS-SD registration and browsing");
     }
 
     let discovery_for_task = Arc::clone(&discovery);
@@ -559,7 +555,14 @@ pub async fn start_p2p(
         let outbound_shutdown = shutdown_token.clone();
         let outbound_crypto = sync_crypto.clone();
         tokio::spawn(async move {
-            outbound_loop(new_item_rx, outbound_rx, peer_sinks, outbound_crypto, outbound_shutdown).await;
+            outbound_loop(
+                new_item_rx,
+                outbound_rx,
+                peer_sinks,
+                outbound_crypto,
+                outbound_shutdown,
+            )
+            .await;
         });
     }
 
@@ -1196,8 +1199,7 @@ async fn peer_connector_loop(
 
                         // RTT: per-connection pending-pings map shared between
                         // the ping sender task and the connection task.
-                        let pending_pings: PendingPings =
-                            Arc::new(Mutex::new(HashMap::new()));
+                        let pending_pings: PendingPings = Arc::new(Mutex::new(HashMap::new()));
                         let rtt_map_for_task = Arc::clone(&peer_rtt_ms);
                         let rtt_map_for_ping = Arc::clone(&peer_rtt_ms);
                         let pending_pings_for_conn = Arc::clone(&pending_pings);
@@ -1925,13 +1927,12 @@ async fn deliver_pending_unpairs(
             Ok(mut stream) => {
                 let frame = PeerFrame::Control(ControlMsg::Unpair);
                 let sent = match serde_json::to_vec(&frame) {
-                    Ok(payload) => tokio::time::timeout(
-                        WRITE_TIMEOUT,
-                        stream.send(Bytes::from(payload)),
-                    )
-                    .await
-                    .map(|r| r.is_ok())
-                    .unwrap_or(false),
+                    Ok(payload) => {
+                        tokio::time::timeout(WRITE_TIMEOUT, stream.send(Bytes::from(payload)))
+                            .await
+                            .map(|r| r.is_ok())
+                            .unwrap_or(false)
+                    }
                     Err(e) => {
                         tracing::warn!(error = %e, "pending-unpair: failed to serialise Unpair frame");
                         false
@@ -2390,10 +2391,8 @@ mod tests {
 
         let server_peers = PairedPeers::new();
         let client_known = rt.block_on(async {
-            let server_cert =
-                copypaste_p2p::cert::SelfSignedCert::generate("gapb-server").unwrap();
-            let client_cert =
-                copypaste_p2p::cert::SelfSignedCert::generate("gapb-client").unwrap();
+            let server_cert = copypaste_p2p::cert::SelfSignedCert::generate("gapb-server").unwrap();
+            let client_cert = copypaste_p2p::cert::SelfSignedCert::generate("gapb-client").unwrap();
             let server_fp = server_cert.fingerprint();
             let client_fp = client_cert.fingerprint();
 
@@ -2444,8 +2443,7 @@ mod tests {
             // Client: connect and send a single Unpair control frame.
             let connect_fut = async move {
                 let mut stream = client_transport.connect(addr, &server_fp).await.unwrap();
-                let payload =
-                    serde_json::to_vec(&PeerFrame::Control(ControlMsg::Unpair)).unwrap();
+                let payload = serde_json::to_vec(&PeerFrame::Control(ControlMsg::Unpair)).unwrap();
                 stream.send(Bytes::from(payload)).await.unwrap();
                 // Hold the connection briefly so the server processes the frame
                 // before the client drops (which would also close the stream).
@@ -2494,13 +2492,17 @@ mod tests {
                 first_sync_at: None,
                 last_sync_at: None,
                 password_file_b64: None,
+                password_file_enc: None,
             }],
         )
         .unwrap();
 
         let live = PairedPeers::new();
         live.add("aabbcc", "Alice");
-        assert!(live.is_known("aabbcc"), "precondition: live allowlist has Alice");
+        assert!(
+            live.is_known("aabbcc"),
+            "precondition: live allowlist has Alice"
+        );
 
         let env_lock = crate::TEST_ENV_LOCK
             .lock()
@@ -2523,7 +2525,10 @@ mod tests {
 
         // File: Alice removed.
         let loaded = crate::peers::load_peers(&path);
-        assert!(loaded.is_empty(), "Gap B: peers.json must no longer contain Alice");
+        assert!(
+            loaded.is_empty(),
+            "Gap B: peers.json must no longer contain Alice"
+        );
         // Live allowlist: Alice removed.
         assert!(
             !live.is_known("aabbcc"),
@@ -3122,6 +3127,7 @@ mod tests {
                     first_sync_at: Some(500),
                     last_sync_at: Some(999),
                     password_file_b64: None,
+                    password_file_enc: None,
                 },
                 crate::peers::PairedDevice {
                     fingerprint: "ccdd".to_string(),
@@ -3137,6 +3143,7 @@ mod tests {
                     first_sync_at: None,
                     last_sync_at: None,
                     password_file_b64: None,
+                    password_file_enc: None,
                 },
             ],
         )
@@ -3191,6 +3198,7 @@ mod tests {
                 first_sync_at: None,
                 last_sync_at: None,
                 password_file_b64: None,
+                password_file_enc: None,
             }],
         )
         .unwrap();
@@ -3237,6 +3245,7 @@ mod tests {
                     first_sync_at: None,
                     last_sync_at: None,
                     password_file_b64: None,
+                    password_file_enc: None,
                 },
                 crate::peers::PairedDevice {
                     fingerprint: "dd:ee:ff".to_string(),
@@ -3252,6 +3261,7 @@ mod tests {
                     first_sync_at: None,
                     last_sync_at: None,
                     password_file_b64: None,
+                    password_file_enc: None,
                 },
             ],
         )
@@ -3311,6 +3321,7 @@ mod tests {
                 first_sync_at: None,
                 last_sync_at: None,
                 password_file_b64: None,
+                password_file_enc: None,
             }],
         )
         .unwrap();
@@ -3396,7 +3407,13 @@ mod tests {
             "precondition: cache is empty before any peer is persisted"
         );
 
-        crate::ipc::IpcServer::persist_paired_peer(fp, "127.0.0.1:5001", &session_key, &peer_meta, None);
+        crate::ipc::IpcServer::persist_paired_peer(
+            fp,
+            "127.0.0.1:5001",
+            &session_key,
+            &peer_meta,
+            None,
+        );
 
         // None was passed → reload_sync_key was never called → cache still empty.
         // This assertion PASSES before the fix, pinning the bug.
@@ -3496,7 +3513,10 @@ mod tests {
         );
 
         // Ping and Pong must produce different serialisations (different control values).
-        assert_ne!(ping_json, pong_json, "Ping and Pong must not serialise identically");
+        assert_ne!(
+            ping_json, pong_json,
+            "Ping and Pong must not serialise identically"
+        );
     }
 
     /// The RTT record: after inserting a nonce + Instant into the pending-pings
@@ -3524,10 +3544,7 @@ mod tests {
         assert!(resolved.is_some(), "nonce must be found in pending_pings");
 
         let rtt_ms = resolved.unwrap().elapsed().as_millis() as u32;
-        peer_rtt_ms
-            .lock()
-            .await
-            .insert(peer_fp.clone(), rtt_ms);
+        peer_rtt_ms.lock().await.insert(peer_fp.clone(), rtt_ms);
 
         let stored = peer_rtt_ms.lock().await.get(&peer_fp).copied();
         assert!(

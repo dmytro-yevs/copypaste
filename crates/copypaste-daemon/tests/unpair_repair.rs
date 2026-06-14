@@ -117,18 +117,22 @@ fn unpair_then_repair_succeeds_on_first_attempt() {
     let daemon_b = Daemon::spawn_with_p2p(); // initiator (scans QR)
 
     // Learn both fingerprints upfront (canonical lowercase hex).
-    let fp_a_resp =
-        daemon_a.request(r#"{"id":"fa1","method":"get_own_fingerprint","params":{}}"#);
-    assert_eq!(fp_a_resp["ok"], true, "A get_own_fingerprint failed: {fp_a_resp}");
+    let fp_a_resp = daemon_a.request(r#"{"id":"fa1","method":"get_own_fingerprint","params":{}}"#);
+    assert_eq!(
+        fp_a_resp["ok"], true,
+        "A get_own_fingerprint failed: {fp_a_resp}"
+    );
     let fp_a_display = fp_a_resp["data"]["fingerprint"]
         .as_str()
         .expect("A fingerprint string")
         .to_string();
     let fp_a_canonical = canonical(&fp_a_display);
 
-    let fp_b_resp =
-        daemon_b.request(r#"{"id":"fb1","method":"get_own_fingerprint","params":{}}"#);
-    assert_eq!(fp_b_resp["ok"], true, "B get_own_fingerprint failed: {fp_b_resp}");
+    let fp_b_resp = daemon_b.request(r#"{"id":"fb1","method":"get_own_fingerprint","params":{}}"#);
+    assert_eq!(
+        fp_b_resp["ok"], true,
+        "B get_own_fingerprint failed: {fp_b_resp}"
+    );
     let fp_b_display = fp_b_resp["data"]["fingerprint"]
         .as_str()
         .expect("B fingerprint string")
@@ -137,9 +141,11 @@ fn unpair_then_repair_succeeds_on_first_attempt() {
 
     // ── FIRST PAIRING ─────────────────────────────────────────────────────────
     // A generates QR → binds ephemeral bootstrap TLS listener.
-    let qr1_resp =
-        daemon_a.request(r#"{"id":"qa1","method":"pair_generate_qr","params":{}}"#);
-    assert_eq!(qr1_resp["ok"], true, "pair_generate_qr (first) failed: {qr1_resp}");
+    let qr1_resp = daemon_a.request(r#"{"id":"qa1","method":"pair_generate_qr","params":{}}"#);
+    assert_eq!(
+        qr1_resp["ok"], true,
+        "pair_generate_qr (first) failed: {qr1_resp}"
+    );
     let qr1 = qr1_resp["data"]["qr"]
         .as_str()
         .expect("QR string")
@@ -180,9 +186,7 @@ fn unpair_then_repair_succeeds_on_first_attempt() {
         "first pairing must persist sync_key_b64 on B, got record: {b_record_first}"
     );
 
-    eprintln!(
-        "[repro] FIRST pairing completed. A={fp_a_canonical} B={fp_b_canonical}"
-    );
+    eprintln!("[repro] FIRST pairing completed. A={fp_a_canonical} B={fp_b_canonical}");
 
     // ── UNPAIR B from A ───────────────────────────────────────────────────────
     // A removes B using B's DISPLAY fingerprint (colon-hex) — the format stored
@@ -220,8 +224,7 @@ fn unpair_then_repair_succeeds_on_first_attempt() {
     // listener port, new token. The bootstrap socket from the first pairing
     // has already closed (its task completed successfully). This is a clean
     // bind on a fresh OS-assigned port.
-    let qr2_resp =
-        daemon_a.request(r#"{"id":"qa2","method":"pair_generate_qr","params":{}}"#);
+    let qr2_resp = daemon_a.request(r#"{"id":"qa2","method":"pair_generate_qr","params":{}}"#);
     assert_eq!(
         qr2_resp["ok"], true,
         "pair_generate_qr (re-pair) failed: {qr2_resp}"
@@ -266,9 +269,7 @@ fn unpair_then_repair_succeeds_on_first_attempt() {
         "B must learn A's fingerprint on re-pair (bootstrap channel cross-check)"
     );
 
-    eprintln!(
-        "[repro] RE-PAIR pair_accept_qr returned ok=true. Waiting for persistence..."
-    );
+    eprintln!("[repro] RE-PAIR pair_accept_qr returned ok=true. Waiting for persistence...");
 
     // ── Wait for re-pair to persist on both daemons ───────────────────────────
     // A's responder task runs detached; give it time to write peers.json.
@@ -331,8 +332,7 @@ fn unpair_with_canonical_fingerprint_removes_peer_from_json() {
     let daemon_a = Daemon::spawn_with_p2p();
     let daemon_b = Daemon::spawn_with_p2p();
 
-    let fp_b_resp =
-        daemon_b.request(r#"{"id":"fb2","method":"get_own_fingerprint","params":{}}"#);
+    let fp_b_resp = daemon_b.request(r#"{"id":"fb2","method":"get_own_fingerprint","params":{}}"#);
     assert_eq!(fp_b_resp["ok"], true, "B get_own_fingerprint: {fp_b_resp}");
     let fp_b_display = fp_b_resp["data"]["fingerprint"]
         .as_str()
@@ -367,7 +367,10 @@ fn unpair_with_canonical_fingerprint_removes_peer_from_json() {
     let unpair_resp = daemon_a.request(&unpair_canonical_body);
 
     // The call must succeed at the IPC level.
-    assert_eq!(unpair_resp["ok"], true, "unpair_peer must not return an error: {unpair_resp}");
+    assert_eq!(
+        unpair_resp["ok"], true,
+        "unpair_peer must not return an error: {unpair_resp}"
+    );
 
     // CRITICAL: the record must actually be gone from peers.json.
     // If this assertion fails, it means the `retain` comparison in
@@ -409,7 +412,7 @@ fn unpair_with_canonical_fingerprint_removes_peer_from_json() {
 /// that reading back the file always yields valid JSON with no duplicate entries.
 #[test]
 fn interleaved_pair_add_and_unpair_remove_yield_consistent_peers_json() {
-    use copypaste_daemon::peers::{PairedDevice, load_peers, save_peers};
+    use copypaste_daemon::peers::{load_peers, save_peers, PairedDevice};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -435,6 +438,7 @@ fn interleaved_pair_add_and_unpair_remove_yield_consistent_peers_json() {
         first_sync_at: None,
         last_sync_at: None,
         password_file_b64: None,
+        password_file_enc: None,
     };
     save_peers(&path, &[peer_x.clone()]).expect("initial save");
 
@@ -442,7 +446,11 @@ fn interleaved_pair_add_and_unpair_remove_yield_consistent_peers_json() {
     let mut snap_a = load_peers(&path);
     let before_a = snap_a.len();
     snap_a.retain(|p| canonical(&p.fingerprint) != canonical("aa:bb:cc:dd"));
-    assert_eq!(snap_a.len(), before_a - 1, "thread A must remove peer X from its snapshot");
+    assert_eq!(
+        snap_a.len(),
+        before_a - 1,
+        "thread A must remove peer X from its snapshot"
+    );
 
     // Simulate thread B: load snapshot (also sees peer X), add peer Y.
     let mut snap_b = load_peers(&path);
@@ -460,6 +468,7 @@ fn interleaved_pair_add_and_unpair_remove_yield_consistent_peers_json() {
         first_sync_at: None,
         last_sync_at: None,
         password_file_b64: None,
+        password_file_enc: None,
     };
     snap_b.push(peer_y.clone());
 

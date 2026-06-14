@@ -13,10 +13,11 @@ use copypaste_core::derive_sync_key;
 use copypaste_core::SyncKey;
 use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
-    decrypt_item_by_version, derive_v2, encode_thumbnail_from_png, ensure_revoked_devices_table,
-    fetch_text_preview, get_device_names, get_item_by_id, get_page, get_page_pinned_first,
-    pin_item, reorder_pinned, revoke_device, revoke_devices, search_items, set_thumb, unpin_item,
-    Database, DbRead, EncryptError, FileMeta, SensitiveDetector,
+    decrypt_item_by_version, decrypt_item_with_aad, derive_v2, encode_thumbnail_from_png,
+    encrypt_item_with_aad, ensure_revoked_devices_table, fetch_text_preview, get_device_names,
+    get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned, revoke_device,
+    revoke_devices, search_items, set_thumb, unpin_item, Database, DbRead, EncryptError, FileMeta,
+    SensitiveDetector, NONCE_SIZE,
 };
 // `soft_delete_item` is not yet re-exported from the crate root so we use the
 // full module path (the `storage` module is `pub`).
@@ -685,6 +686,78 @@ fn is_placeholder_fingerprint(fp: &str) -> bool {
     groups.iter().all(|g| *g == groups[0])
 }
 
+/// AAD prefix for PAKE `PasswordFile` at-rest encryption (CopyPaste-5lm).
+///
+/// The full AAD is `b"pake_password_file|{canonical_fingerprint}"`, binding
+/// the ciphertext to both its purpose and the specific peer it belongs to.
+/// This prevents a ciphertext from one peer record from being transplanted
+/// into another peer record (AEAD auth tag would reject the mismatched AAD).
+const PAKE_PASSWORD_FILE_AAD_PREFIX: &[u8] = b"pake_password_file|";
+
+/// Encrypt the raw `PasswordFile` blob for at-rest storage in `peers.json`.
+///
+/// Returns base64-standard of `nonce[24] || ciphertext` (suitable for
+/// storing in the `password_file_enc` field of `PairedDevice`).
+///
+/// AAD = `"pake_password_file|{canonical_fingerprint}"` — binds the
+/// ciphertext to the peer it belongs to.
+fn encrypt_pake_password_file(
+    plaintext: &[u8],
+    canonical_fingerprint: &str,
+    local_key: &[u8; 32],
+) -> Result<String, String> {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+
+    let aad = [
+        PAKE_PASSWORD_FILE_AAD_PREFIX,
+        canonical_fingerprint.as_bytes(),
+    ]
+    .concat();
+    let (nonce, ciphertext) =
+        encrypt_item_with_aad(plaintext, local_key, &aad).map_err(|e| e.to_string())?;
+
+    // Encode as nonce[24] || ciphertext so decrypt can split on the fixed nonce size.
+    let mut blob = Vec::with_capacity(NONCE_SIZE + ciphertext.len());
+    blob.extend_from_slice(&nonce);
+    blob.extend_from_slice(&ciphertext);
+    Ok(b64.encode(&blob))
+}
+
+/// Decrypt a `password_file_enc` value from `peers.json` back to the raw
+/// `PasswordFile` blob bytes.
+///
+/// Returns `Err` if the base64 is malformed, the blob is too short (< 24
+/// bytes for the nonce), or AEAD authentication fails (wrong key / tampered
+/// data). Callers should log and treat the entry as unusable.
+fn decrypt_pake_password_file(
+    enc_b64: &str,
+    canonical_fingerprint: &str,
+    local_key: &[u8; 32],
+) -> Result<Vec<u8>, String> {
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+
+    let blob = b64
+        .decode(enc_b64)
+        .map_err(|e| format!("base64 decode: {e}"))?;
+    if blob.len() < NONCE_SIZE {
+        return Err(format!(
+            "password_file_enc too short: {} bytes (expected ≥ {NONCE_SIZE})",
+            blob.len()
+        ));
+    }
+    let nonce: [u8; NONCE_SIZE] = blob[..NONCE_SIZE].try_into().expect("slice length checked");
+    let ciphertext = &blob[NONCE_SIZE..];
+
+    let aad = [
+        PAKE_PASSWORD_FILE_AAD_PREFIX,
+        canonical_fingerprint.as_bytes(),
+    ]
+    .concat();
+    decrypt_item_with_aad(ciphertext, &nonce, local_key, &aad).map_err(|e| e.to_string())
+}
+
 /// Load peers list from peers.json via the canonical typed `crate::peers`
 /// helper.  Returns `serde_json::Value` objects so that all existing call
 /// sites (which rely on dynamic field access) continue to work without
@@ -768,8 +841,9 @@ fn paired_ip_hosts(peers: &[serde_json::Value]) -> std::collections::HashSet<Str
 /// `serde_json::Value` slice is deserialized into the typed `PairedDevice`
 /// form first, then handed to `crate::peers::save_peers` which performs the
 /// atomic 0600 rename.  Unrecognised fields (e.g. from an older file format)
-/// are silently dropped; all current fields — including `password_file_b64`
-/// — are preserved by `PairedDevice`.
+/// are silently dropped; all current fields — including `password_file_enc`
+/// (encrypted PasswordFile) and the legacy `password_file_b64` — are
+/// preserved by `PairedDevice`.
 ///
 /// Unified from two former writers (`serde_json::Value` variant here and
 /// `crate::peers::save_peers` via `persist_paired_peer`) to eliminate the
@@ -778,15 +852,15 @@ fn save_peers(peers: &[serde_json::Value]) -> anyhow::Result<()> {
     let path = peers_file_path();
     let typed: Vec<crate::peers::PairedDevice> = peers
         .iter()
-        .filter_map(|v| {
-            match serde_json::from_value::<crate::peers::PairedDevice>(v.clone()) {
+        .filter_map(
+            |v| match serde_json::from_value::<crate::peers::PairedDevice>(v.clone()) {
                 Ok(p) => Some(p),
                 Err(e) => {
                     tracing::warn!("save_peers: skipping malformed record: {e}");
                     None
                 }
-            }
-        })
+            },
+        )
         .collect();
     crate::peers::save_peers(&path, &typed)
 }
@@ -897,9 +971,7 @@ fn send_unpair_signal_if_connected(
 /// intent is not lost.
 fn queue_unpair_for_offline_delivery(fingerprint: &str, address: Option<&str>, name: &str) {
     let pending_path = crate::peers::pending_unpair_path_for(&peers_file_path());
-    if let Err(e) =
-        crate::peers::queue_pending_unpair(&pending_path, fingerprint, address, name)
-    {
+    if let Err(e) = crate::peers::queue_pending_unpair(&pending_path, fingerprint, address, name) {
         tracing::warn!(
             peer = %fingerprint,
             error = %e,
@@ -1358,9 +1430,7 @@ impl IpcServer {
     /// Return the slot that daemon.rs writes `P2pHandle::peer_rtt_ms` into
     /// after `start_p2p` returns.  The `list_peers` handler reads from this
     /// to add `latency_ms` to each peer entry.
-    pub fn live_peer_rtt_ms_slot(
-        &self,
-    ) -> Arc<std::sync::Mutex<Option<crate::p2p::PeerRttMs>>> {
+    pub fn live_peer_rtt_ms_slot(&self) -> Arc<std::sync::Mutex<Option<crate::p2p::PeerRttMs>>> {
         Arc::clone(&self.live_peer_rtt_ms)
     }
 
@@ -2137,12 +2207,13 @@ impl IpcServer {
             public_ip: peer_meta.public_ip.clone(),
             first_sync_at: prior_first_sync,
             last_sync_at: prior_last_sync,
-            // password_file_b64 is only populated on the RESPONDER side by
-            // pair_accept_finish; persist_paired_peer is called from the
-            // INITIATOR path and from the QR-responder bootstrap task — neither
-            // holds the PasswordFile blob here.  The field defaults to None;
-            // pair_accept_finish writes it separately.
+            // password_file_b64 / password_file_enc are only populated on the
+            // RESPONDER side by pair_accept_finish; persist_paired_peer is called
+            // from the INITIATOR path and the QR-responder bootstrap task — neither
+            // holds the PasswordFile blob here.  Both fields default to None;
+            // pair_accept_finish writes password_file_enc (encrypted) separately.
             password_file_b64: None,
+            password_file_enc: None,
         });
 
         match crate::peers::save_peers(&path, &peers) {
@@ -3748,7 +3819,11 @@ impl IpcServer {
                         };
                         let v1_key: [u8; 32] = **self.local_key;
                         let v2_key = derive_v2(&v1_key);
-                        let key_to_use = if item.key_version == 1 { &v1_key } else { &*v2_key };
+                        let key_to_use = if item.key_version == 1 {
+                            &v1_key
+                        } else {
+                            &*v2_key
+                        };
                         let png_bytes = match decode_image(&chunks, key_to_use, &file_id) {
                             Ok(b) => b,
                             Err(e) => {
@@ -3814,7 +3889,11 @@ impl IpcServer {
                     };
                     // Dispatch on key_version: v1 rows use the raw seed; v2 rows use derive_v2.
                     let v2_key_thumb = derive_v2(&v1_key_thumb);
-                    let decode_key: &[u8; 32] = if item.key_version == 1 { &v1_key_thumb } else { &v2_key_thumb };
+                    let decode_key: &[u8; 32] = if item.key_version == 1 {
+                        &v1_key_thumb
+                    } else {
+                        &v2_key_thumb
+                    };
 
                     let is_image =
                         item.content_type == "image" || item.content_type.starts_with("image/");
@@ -4042,7 +4121,11 @@ impl IpcServer {
                         };
                         let v1_key: [u8; 32] = **self.local_key;
                         let v2_key = derive_v2(&v1_key);
-                        let key_to_use = if item.key_version == 1 { &v1_key } else { &*v2_key };
+                        let key_to_use = if item.key_version == 1 {
+                            &v1_key
+                        } else {
+                            &*v2_key
+                        };
                         let raw_bytes = match decode_file(&chunks, key_to_use, &file_meta.file_id) {
                             Ok(b) => b,
                             Err(e) => {
@@ -4166,11 +4249,12 @@ impl IpcServer {
                                 // `None` when the device was never paired on
                                 // this machine (e.g. synced from a third device)
                                 // or for pre-v3 rows with an empty origin id.
-                                let origin_device_name: Option<&str> = if item.origin_device_id.is_empty() {
-                                    None
-                                } else {
-                                    device_names.get(&item.origin_device_id).map(|s| s.as_str())
-                                };
+                                let origin_device_name: Option<&str> =
+                                    if item.origin_device_id.is_empty() {
+                                        None
+                                    } else {
+                                        device_names.get(&item.origin_device_id).map(|s| s.as_str())
+                                    };
                                 serde_json::json!({
                                     "id": item.id,
                                     "content_type": item.content_type,
@@ -5141,76 +5225,73 @@ impl IpcServer {
                         // complete in well under 1 s on any real device. If it
                         // times out (task panicked / stuck) we proceed anyway so
                         // list_peers never stalls indefinitely.
-                        let _ = tokio::time::timeout(
-                            std::time::Duration::from_secs(5),
-                            handle,
-                        )
-                        .await;
+                        let _ =
+                            tokio::time::timeout(std::time::Duration::from_secs(5), handle).await;
                     }
                 }
                 match load_peers() {
-                Ok(peers) => {
-                    let now_secs = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        // SAFETY: now() is always after UNIX_EPOCH on any
-                        // supported platform (macOS, Linux, Android).
-                        .unwrap_or_default()
-                        .as_secs() as i64;
+                    Ok(peers) => {
+                        let now_secs = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            // SAFETY: now() is always after UNIX_EPOCH on any
+                            // supported platform (macOS, Linux, Android).
+                            .unwrap_or_default()
+                            .as_secs() as i64;
 
-                    // SINGLE SOURCE OF TRUTH for online status: snapshot the
-                    // live P2P peer-sinks map (set of fingerprints with a
-                    // non-closed mpsc sender = currently-connected peers).
-                    // Falls back to `last_sync_at` recency only when P2P is
-                    // disabled (inner slot is None).
-                    //
-                    // The outer std::sync::Mutex is locked briefly to clone
-                    // the inner Arc (no .await while holding it). The inner
-                    // tokio Mutex is then locked with .await so we don't block
-                    // the executor.
-                    let live_fps: Option<std::collections::HashSet<String>> = {
-                        // Clone the Arc while holding the std::sync lock, then
-                        // drop the lock before awaiting.
-                        let maybe_sinks_arc: Option<crate::p2p::LivePeerSinks> = {
-                            let slot = self
-                                .live_peer_sinks
-                                .lock()
-                                .unwrap_or_else(|p| p.into_inner());
-                            slot.as_ref().map(Arc::clone)
+                        // SINGLE SOURCE OF TRUTH for online status: snapshot the
+                        // live P2P peer-sinks map (set of fingerprints with a
+                        // non-closed mpsc sender = currently-connected peers).
+                        // Falls back to `last_sync_at` recency only when P2P is
+                        // disabled (inner slot is None).
+                        //
+                        // The outer std::sync::Mutex is locked briefly to clone
+                        // the inner Arc (no .await while holding it). The inner
+                        // tokio Mutex is then locked with .await so we don't block
+                        // the executor.
+                        let live_fps: Option<std::collections::HashSet<String>> = {
+                            // Clone the Arc while holding the std::sync lock, then
+                            // drop the lock before awaiting.
+                            let maybe_sinks_arc: Option<crate::p2p::LivePeerSinks> = {
+                                let slot = self
+                                    .live_peer_sinks
+                                    .lock()
+                                    .unwrap_or_else(|p| p.into_inner());
+                                slot.as_ref().map(Arc::clone)
+                            };
+                            if let Some(sinks_arc) = maybe_sinks_arc {
+                                let sinks = sinks_arc.lock().await;
+                                Some(
+                                    sinks
+                                        .iter()
+                                        .filter(|(_, tx)| !tx.is_closed())
+                                        .map(|(fp, _)| fp.clone())
+                                        .collect(),
+                                )
+                            } else {
+                                None
+                            }
                         };
-                        if let Some(sinks_arc) = maybe_sinks_arc {
-                            let sinks = sinks_arc.lock().await;
-                            Some(
-                                sinks
-                                    .iter()
-                                    .filter(|(_, tx)| !tx.is_closed())
-                                    .map(|(fp, _)| fp.clone())
-                                    .collect(),
-                            )
-                        } else {
-                            None
-                        }
-                    };
 
-                    // Snapshot the RTT map (fingerprint → last RTT in ms).
-                    // Same lazy-injection pattern as live_fps: None when P2P is
-                    // disabled or not yet started.
-                    let rtt_snapshot: Option<std::collections::HashMap<String, u32>> = {
-                        let maybe_rtt_arc: Option<crate::p2p::PeerRttMs> = {
-                            let slot = self
-                                .live_peer_rtt_ms
-                                .lock()
-                                .unwrap_or_else(|p| p.into_inner());
-                            slot.as_ref().map(std::sync::Arc::clone)
+                        // Snapshot the RTT map (fingerprint → last RTT in ms).
+                        // Same lazy-injection pattern as live_fps: None when P2P is
+                        // disabled or not yet started.
+                        let rtt_snapshot: Option<std::collections::HashMap<String, u32>> = {
+                            let maybe_rtt_arc: Option<crate::p2p::PeerRttMs> = {
+                                let slot = self
+                                    .live_peer_rtt_ms
+                                    .lock()
+                                    .unwrap_or_else(|p| p.into_inner());
+                                slot.as_ref().map(std::sync::Arc::clone)
+                            };
+                            if let Some(rtt_arc) = maybe_rtt_arc {
+                                let rtt = rtt_arc.lock().await;
+                                Some(rtt.iter().map(|(k, v)| (k.clone(), *v)).collect())
+                            } else {
+                                None
+                            }
                         };
-                        if let Some(rtt_arc) = maybe_rtt_arc {
-                            let rtt = rtt_arc.lock().await;
-                            Some(rtt.iter().map(|(k, v)| (k.clone(), *v)).collect())
-                        } else {
-                            None
-                        }
-                    };
 
-                    let enriched: Vec<serde_json::Value> = peers
+                        let enriched: Vec<serde_json::Value> = peers
                         .into_iter()
                         .map(|mut peer| {
                             // last_sync_at from the record (i64 or absent).
@@ -5262,14 +5343,20 @@ impl IpcServer {
                                         serde_json::Value::Number(ms.into()),
                                     );
                                 }
+                                // CopyPaste-5lm: never expose the PasswordFile blob
+                                // (encrypted or plaintext) over the IPC wire. The UI
+                                // has no need for this field; stripping it here means
+                                // a compromised IPC client cannot exfiltrate it.
+                                obj.remove("password_file_enc");
+                                obj.remove("password_file_b64");
                             }
                             peer
                         })
                         .collect();
 
-                    Response::ok(req.id, serde_json::json!({ "peers": enriched }))
-                }
-                Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
+                        Response::ok(req.id, serde_json::json!({ "peers": enriched }))
+                    }
+                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
                 }
             }
 
@@ -5791,8 +5878,7 @@ impl IpcServer {
                         // to rotate — and the response reflects that.
                         #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
                         {
-                            let key_was_active =
-                                self.sync_key.lock().await.is_some();
+                            let key_was_active = self.sync_key.lock().await.is_some();
                             if key_was_active {
                                 let new_key = SyncKey::random();
                                 self.persist_and_install_sync_key(new_key).await;
@@ -6165,12 +6251,8 @@ impl IpcServer {
                         // without a cert; fall back to a zero binder in that case
                         // (still binds the session key, just weakly — production
                         // daemons always have a cert fingerprint).
-                        let own_fp = self
-                            .cert_fingerprint
-                            .clone()
-                            .unwrap_or_default();
-                        let binder =
-                            Self::pake_cert_binder(&own_fp, &peer_fingerprint);
+                        let own_fp = self.cert_fingerprint.clone().unwrap_or_default();
+                        let binder = Self::pake_cert_binder(&own_fp, &peer_fingerprint);
                         let bound_key = session_key.bind_to_tls_channel(&binder);
                         let initiator_tag =
                             channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
@@ -6457,10 +6539,7 @@ impl IpcServer {
                     }
                 };
 
-                let own_fp = self
-                    .cert_fingerprint
-                    .clone()
-                    .unwrap_or_default();
+                let own_fp = self.cert_fingerprint.clone().unwrap_or_default();
                 // On the responder side: own_fp is responder's fp, peer_fp is
                 // initiator's fp — same canonical (sorted) binder as the other end.
                 let binder = Self::pake_cert_binder(&own_fp, &peer_fingerprint);
@@ -6489,8 +6568,7 @@ impl IpcServer {
                             ),
                         );
                     }
-                    let expected =
-                        channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
+                    let expected = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
                     // Constant-time compare — subtle::ConstantTimeEq on slices.
                     let ok: bool = received.as_slice().ct_eq(&expected).into();
                     if !ok {
@@ -6508,7 +6586,23 @@ impl IpcServer {
                 let responder_confirm_b64 = b64.encode(responder_tag);
 
                 // Persist the peer with the PasswordFile blob on the responder side.
-                let password_file_b64 = b64.encode(&password_file.serialized);
+                // CopyPaste-5lm: encrypt at rest with XChaCha20-Poly1305 under the
+                // daemon's local key. The ciphertext (`password_file_enc`) replaces
+                // the former plaintext base64 field (`password_file_b64`).
+                let fp_c = canonical_fingerprint(&peer_fingerprint);
+                let password_file_enc = match encrypt_pake_password_file(
+                    &password_file.serialized,
+                    &fp_c,
+                    &self.local_key,
+                ) {
+                    Ok(enc) => enc,
+                    Err(e) => {
+                        return Response::err(
+                            req.id,
+                            format!("failed to encrypt PasswordFile for storage: {e}"),
+                        )
+                    }
+                };
                 let added_at = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
@@ -6518,7 +6612,6 @@ impl IpcServer {
                     Ok(mut peers) => {
                         // Normalise both sides so colon-hex vs bare-hex match
                         // (CopyPaste-qvn: raw string compare missed cross-format).
-                        let fp_c = canonical_fingerprint(&peer_fingerprint);
                         let already = peers.iter().any(|p| {
                             p.get("fingerprint")
                                 .and_then(|v| v.as_str())
@@ -6528,19 +6621,27 @@ impl IpcServer {
                         if !already {
                             peers.push(serde_json::json!({
                                 "fingerprint": peer_fingerprint,
-                                "password_file_b64": password_file_b64,
+                                // password_file_enc: encrypted-at-rest blob.
+                                // password_file_b64 is NOT written — new records
+                                // always use the encrypted form.
+                                "password_file_enc": password_file_enc,
                                 "added_at": added_at,
                             }));
                         } else {
-                            // Update existing peer with the new PasswordFile.
+                            // Update existing peer with the new encrypted PasswordFile.
+                            // Also clear any legacy password_file_b64 field.
                             for p in peers.iter_mut() {
                                 if p.get("fingerprint")
                                     .and_then(|v| v.as_str())
                                     .map(|f| canonical_fingerprint(f) == fp_c)
                                     .unwrap_or(false)
                                 {
-                                    p["password_file_b64"] =
-                                        serde_json::Value::String(password_file_b64.clone());
+                                    p["password_file_enc"] =
+                                        serde_json::Value::String(password_file_enc.clone());
+                                    // Remove legacy plaintext field if present.
+                                    if let Some(obj) = p.as_object_mut() {
+                                        obj.remove("password_file_b64");
+                                    }
                                     break;
                                 }
                             }
@@ -7681,13 +7782,16 @@ impl IpcServer {
                     })?;
                     let wtp_v1_key: [u8; 32] = **self.local_key;
                     let wtp_v2_key = derive_v2(&wtp_v1_key);
-                    let wtp_img_key: &[u8; 32] = if item.key_version == 1 { &wtp_v1_key } else { &wtp_v2_key };
-                    let png_bytes =
-                        decode_image(&chunks, wtp_img_key, &file_id).map_err(|e| {
-                            self.self_write_change_count
-                                .store(-1, std::sync::atomic::Ordering::Release);
-                            PasteboardError::decrypt(format!("image decode failed: {e}"))
-                        })?;
+                    let wtp_img_key: &[u8; 32] = if item.key_version == 1 {
+                        &wtp_v1_key
+                    } else {
+                        &wtp_v2_key
+                    };
+                    let png_bytes = decode_image(&chunks, wtp_img_key, &file_id).map_err(|e| {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        PasteboardError::decrypt(format!("image decode failed: {e}"))
+                    })?;
 
                     let write_ok = unsafe {
                         let pb = NSPasteboard::generalPasteboard();
@@ -7735,7 +7839,11 @@ impl IpcServer {
                     // Dispatch on key_version: v1 rows use the raw seed; v2 rows use derive_v2.
                     let v1_key: [u8; 32] = **self.local_key;
                     let v2_key = derive_v2(&v1_key);
-                    let key_to_use: &[u8; 32] = if item.key_version == 1 { &v1_key } else { &v2_key };
+                    let key_to_use: &[u8; 32] = if item.key_version == 1 {
+                        &v1_key
+                    } else {
+                        &v2_key
+                    };
                     let raw_bytes =
                         decode_file(&chunks, key_to_use, &file_meta.file_id).map_err(|e| {
                             self.self_write_change_count
@@ -8185,7 +8293,11 @@ fn lazy_backfill_thumbnail(
 ) -> Result<(Vec<u8>, String), anyhow::Error> {
     use copypaste_core::THUMBNAIL_MAX_DIM;
     let v2_key_backfill = derive_v2(local_key);
-    let decode_key: &[u8; 32] = if key_version == 1 { local_key } else { &v2_key_backfill };
+    let decode_key: &[u8; 32] = if key_version == 1 {
+        local_key
+    } else {
+        &v2_key_backfill
+    };
 
     // 1. Decrypt the full-resolution content to PNG bytes.
     let file_id = parse_image_file_id(meta_json)
@@ -8621,6 +8733,130 @@ mod tests {
             serde_json::json!("https://x.supabase.co")
         );
         assert_eq!(obj["p2p_enabled"], serde_json::json!(true));
+    }
+
+    // ─── CopyPaste-5lm: PasswordFile at-rest encryption unit tests ──────────
+
+    /// `encrypt_pake_password_file` / `decrypt_pake_password_file` must
+    /// round-trip: encrypt → base64 blob → decrypt → original plaintext.
+    #[test]
+    fn pake_password_file_encrypt_decrypt_roundtrip() {
+        let plaintext = b"fake_password_file_bytes_for_testing_01234567890";
+        let local_key = [0x42u8; 32];
+        let fp = "aabbccddeeff";
+
+        let enc =
+            encrypt_pake_password_file(plaintext, fp, &local_key).expect("encrypt must succeed");
+        assert!(!enc.is_empty(), "encrypted output must not be empty");
+
+        let decrypted =
+            decrypt_pake_password_file(&enc, fp, &local_key).expect("decrypt must succeed");
+        assert_eq!(
+            decrypted, plaintext,
+            "decrypted bytes must match original plaintext"
+        );
+    }
+
+    /// A different fingerprint (wrong AAD) must cause authentication failure.
+    #[test]
+    fn pake_password_file_wrong_fp_aad_fails() {
+        let plaintext = b"some_pake_blob";
+        let local_key = [0x11u8; 32];
+        let correct_fp = "aabbcc";
+        let wrong_fp = "ddeeff";
+
+        let enc = encrypt_pake_password_file(plaintext, correct_fp, &local_key)
+            .expect("encrypt must succeed");
+        let result = decrypt_pake_password_file(&enc, wrong_fp, &local_key);
+        assert!(
+            result.is_err(),
+            "decrypt with wrong fingerprint must fail (AEAD auth): {result:?}"
+        );
+    }
+
+    /// A wrong local key must cause authentication failure.
+    #[test]
+    fn pake_password_file_wrong_key_fails() {
+        let plaintext = b"some_pake_blob";
+        let correct_key = [0x11u8; 32];
+        let wrong_key = [0x22u8; 32];
+        let fp = "aabbcc";
+
+        let enc =
+            encrypt_pake_password_file(plaintext, fp, &correct_key).expect("encrypt must succeed");
+        let result = decrypt_pake_password_file(&enc, fp, &wrong_key);
+        assert!(
+            result.is_err(),
+            "decrypt with wrong key must fail (AEAD auth): {result:?}"
+        );
+    }
+
+    /// A truncated blob (too short for even a nonce) must return an error.
+    #[test]
+    fn pake_password_file_truncated_blob_fails() {
+        let local_key = [0x33u8; 32];
+        let fp = "aabb";
+        // Only 10 bytes — shorter than the 24-byte nonce.
+        use base64::Engine as _;
+        let short_b64 = base64::engine::general_purpose::STANDARD.encode(&[0u8; 10]);
+        let result = decrypt_pake_password_file(&short_b64, fp, &local_key);
+        assert!(
+            result.is_err(),
+            "truncated blob must fail with an error: {result:?}"
+        );
+    }
+
+    /// list_peers must NOT expose `password_file_enc` or `password_file_b64`
+    /// in its IPC response (CopyPaste-5lm: prevent credential exfiltration).
+    #[tokio::test]
+    async fn list_peers_strips_password_file_fields() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+
+        // Write a peers.json with both sensitive fields present (simulating a
+        // legacy + new mix so we confirm both are stripped).
+        let peers_path = cfg_home.join("peers.json");
+        std::fs::create_dir_all(&cfg_home).unwrap();
+        std::fs::write(
+            &peers_path,
+            r#"[{"fingerprint":"aa:bb:cc","name":"Alice","added_at":1700000000,
+                  "password_file_b64":"cGxhaW50ZXh0","password_file_enc":"ZW5jcnlwdGVk"}]"#,
+        )
+        .unwrap();
+
+        let sock = dir.path().join("test-strip-pf.sock");
+        start_test_server(&sock).await;
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"sp1\",\"method\":\"list_peers\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+        let peers = resp["data"]["peers"].as_array().unwrap();
+        assert_eq!(peers.len(), 1, "must have one peer");
+        let p = &peers[0];
+        assert!(
+            p.get("password_file_b64").is_none(),
+            "list_peers must strip password_file_b64: {p}"
+        );
+        assert!(
+            p.get("password_file_enc").is_none(),
+            "list_peers must strip password_file_enc: {p}"
+        );
+        // The non-sensitive fields must still be present.
+        assert_eq!(p["fingerprint"], "aa:bb:cc");
+        assert_eq!(p["name"], "Alice");
     }
 
     /// When the credentials are absent (null), the presence flags must be
@@ -10321,12 +10557,20 @@ mod tests {
         // S3: Fetch the actual cert fingerprints that the servers advertise.
         // These must be used as peer_fingerprint in the pairing calls so that
         // the cert-binder computation on both sides uses the same (real) fp pair.
-        let fp_resp_a = call(&sock_a, r#"{"id":"fp_a","method":"get_own_fingerprint","params":{}}"#).await;
+        let fp_resp_a = call(
+            &sock_a,
+            r#"{"id":"fp_a","method":"get_own_fingerprint","params":{}}"#,
+        )
+        .await;
         let fp_a = fp_resp_a["data"]["fingerprint"]
             .as_str()
             .expect("server A must return own fingerprint")
             .to_string();
-        let fp_resp_b = call(&sock_b, r#"{"id":"fp_b","method":"get_own_fingerprint","params":{}}"#).await;
+        let fp_resp_b = call(
+            &sock_b,
+            r#"{"id":"fp_b","method":"get_own_fingerprint","params":{}}"#,
+        )
+        .await;
         let fp_b = fp_resp_b["data"]["fingerprint"]
             .as_str()
             .expect("server B must return own fingerprint")
@@ -10380,8 +10624,8 @@ mod tests {
             "pair_accept_finish must include responder_confirm_b64: {resp}"
         );
 
-        // Verify Device B stored the peer (with password_file_b64) in peers.json.
-        // We check via the list_peers IPC method.
+        // Verify Device B stored the peer in peers.json.
+        // We check via the list_peers IPC method for the fingerprint presence.
         let list_resp = call(&sock_b, r#"{"id":"rt5","method":"list_peers","params":{}}"#).await;
         assert_eq!(list_resp["ok"], true, "list_peers failed: {list_resp}");
         let peers = list_resp["data"]["peers"].as_array().unwrap();
@@ -10396,16 +10640,56 @@ mod tests {
             "peer {fp_a} must be stored on device B after finish"
         );
 
-        // Verify the stored peer has the password_file_b64 field (PasswordFile blob).
-        let pf_b64 = stored
-            .unwrap()
-            .get("password_file_b64")
-            .and_then(|v| v.as_str());
-        assert!(pf_b64.is_some(), "peer must have password_file_b64 stored");
-        let pf_bytes = b64
-            .decode(pf_b64.unwrap())
-            .expect("password_file_b64 is valid base64");
-        assert!(!pf_bytes.is_empty(), "PasswordFile blob must not be empty");
+        // CopyPaste-5lm: password_file_b64 / password_file_enc must NOT appear
+        // in the list_peers IPC response (stripped to prevent exfiltration).
+        let stored_peer = stored.unwrap();
+        assert!(
+            stored_peer.get("password_file_b64").is_none(),
+            "list_peers must not expose plaintext password_file_b64: {stored_peer}"
+        );
+        assert!(
+            stored_peer.get("password_file_enc").is_none(),
+            "list_peers must not expose password_file_enc: {stored_peer}"
+        );
+
+        // Verify that the on-disk peers.json for server B has the encrypted
+        // `password_file_enc` field and NOT the plaintext `password_file_b64`.
+        // Server B shares its config dir with `cfg_home` (both servers use the
+        // same COPYPASTE_CONFIG_DIR, so we need the typed peers loader which
+        // gives us the structured form).
+        let peers_path = cfg_home.join("peers.json");
+        let raw_json =
+            std::fs::read_to_string(&peers_path).expect("peers.json must exist after pairing");
+        let on_disk: Vec<serde_json::Value> =
+            serde_json::from_str(&raw_json).expect("peers.json must be valid JSON");
+        let fp_a_canonical = canonical_fingerprint(&fp_a);
+        let disk_peer = on_disk
+            .iter()
+            .find(|p| {
+                p.get("fingerprint")
+                    .and_then(|v| v.as_str())
+                    .map(|f| canonical_fingerprint(f) == fp_a_canonical)
+                    .unwrap_or(false)
+            })
+            .expect("fp_a must appear in peers.json on disk");
+
+        assert!(
+            disk_peer.get("password_file_b64").is_none(),
+            "on-disk peers.json must NOT contain plaintext password_file_b64: {disk_peer}"
+        );
+        let pf_enc = disk_peer
+            .get("password_file_enc")
+            .and_then(|v| v.as_str())
+            .expect("on-disk peers.json must contain password_file_enc");
+        // Verify it is non-empty valid base64 (>= 24 bytes nonce + 1 byte ciphertext).
+        let pf_enc_bytes = b64
+            .decode(pf_enc)
+            .expect("password_file_enc must be valid base64");
+        assert!(
+            pf_enc_bytes.len() > 24,
+            "password_file_enc blob must be > 24 bytes (nonce + ciphertext): got {}",
+            pf_enc_bytes.len()
+        );
 
         // Verify Device A also stored the peer (without PasswordFile — initiator side).
         let list_resp = call(&sock_a, r#"{"id":"rt6","method":"list_peers","params":{}}"#).await;
@@ -10440,7 +10724,10 @@ mod tests {
         let binder_ac = IpcServer::pake_cert_binder(fp_a, fp_c);
 
         assert_eq!(binder_ab, binder_ba, "binder must be symmetric");
-        assert_ne!(binder_ab, binder_ac, "different fp pairs must yield different binders");
+        assert_ne!(
+            binder_ab, binder_ac,
+            "different fp pairs must yield different binders"
+        );
     }
 
     /// S3: A full PAKE round-trip with matching cert binders on both ends
@@ -10496,11 +10783,11 @@ mod tests {
     /// binder → different confirmation tags → the responder's verify step rejects.
     #[test]
     fn pake_channel_binding_fails_with_mismatched_cert_binders() {
-        use subtle::ConstantTimeEq as _;
         use copypaste_p2p::pake::{
             channel_confirmation_tag, ConfirmRole, PakeInitiator, PakeResponder, PasswordFile,
             CONFIRM_TAG_LEN,
         };
+        use subtle::ConstantTimeEq as _;
 
         let password = "correct-horse-battery-mitm";
         let pf = PasswordFile::register(password).expect("register");
@@ -10523,7 +10810,10 @@ mod tests {
         // Responder sees (fp_mitm_leg_b, fp_responder) → binder_b (different!)
         let binder_b = IpcServer::pake_cert_binder(fp_mitm_leg_b, fp_responder);
 
-        assert_ne!(binder_a, binder_b, "MitM legs must produce different binders");
+        assert_ne!(
+            binder_a, binder_b,
+            "MitM legs must produce different binders"
+        );
 
         let client_bound = client_key.bind_to_tls_channel(&binder_a);
         let server_bound = server_key.bind_to_tls_channel(&binder_b);
@@ -10579,12 +10869,20 @@ mod tests {
         // S3: Use the actual cert fingerprints so binders agree on both legs;
         // we tamper the tag value AFTER computing it so rejection is caused by
         // the corrupted tag, not a binder mismatch.
-        let fp_resp_a = call(&sock_a, r#"{"id":"s3rfpa","method":"get_own_fingerprint","params":{}}"#).await;
+        let fp_resp_a = call(
+            &sock_a,
+            r#"{"id":"s3rfpa","method":"get_own_fingerprint","params":{}}"#,
+        )
+        .await;
         let fp_a = fp_resp_a["data"]["fingerprint"]
             .as_str()
             .expect("server A must return own fingerprint")
             .to_string();
-        let fp_resp_b = call(&sock_b, r#"{"id":"s3rfpb","method":"get_own_fingerprint","params":{}}"#).await;
+        let fp_resp_b = call(
+            &sock_b,
+            r#"{"id":"s3rfpb","method":"get_own_fingerprint","params":{}}"#,
+        )
+        .await;
         let fp_b = fp_resp_b["data"]["fingerprint"]
             .as_str()
             .expect("server B must return own fingerprint")
@@ -11167,8 +11465,7 @@ mod tests {
             let mut known_item =
                 copypaste_core::ClipboardItem::new_text(vec![0xAA; 4], vec![0u8; 24], 1);
             known_item.origin_device_id = known_device_id.to_string();
-            copypaste_core::insert_item_with_fts(&guard, &known_item, "hello from known")
-                .unwrap();
+            copypaste_core::insert_item_with_fts(&guard, &known_item, "hello from known").unwrap();
 
             // Item from an unknown device (not in the `devices` table).
             let mut unknown_item =
@@ -12546,9 +12843,9 @@ mod tests {
             Arc::new([0u8; 32]),
         );
         let key = [0u8; 32]; // v1 seed matching dummy server key
-        // new_image stamps key_version = 2; the server reads kv=2 rows with
-        // derive_v2(local_key). Encrypt with the same v2 key so the round-trip
-        // matches the production writer (handle_image uses derive_v2).
+                             // new_image stamps key_version = 2; the server reads kv=2 rows with
+                             // derive_v2(local_key). Encrypt with the same v2 key so the round-trip
+                             // matches the production writer (handle_image uses derive_v2).
         let v2_key = derive_v2(&key);
 
         // A 1000×1000 image: larger than THUMBNAIL_MAX_DIM (192) so the
@@ -12679,9 +12976,9 @@ mod tests {
             Arc::new([0u8; 32]),
         );
         let key = [0u8; 32]; // v1 seed matching dummy server key
-        // new_image stamps key_version = 2; the server reads kv=2 rows with
-        // derive_v2(local_key). Encrypt with the same v2 key so the round-trip
-        // matches the production writer (handle_image uses derive_v2).
+                             // new_image stamps key_version = 2; the server reads kv=2 rows with
+                             // derive_v2(local_key). Encrypt with the same v2 key so the round-trip
+                             // matches the production writer (handle_image uses derive_v2).
         let v2_key = derive_v2(&key);
 
         // Build a 1000×1000 image (larger than THUMBNAIL_MAX_DIM so a real
@@ -13460,8 +13757,15 @@ mod tests {
         // Step 1: A generates a QR. With a real p2p_cert, this binds a
         // bootstrap TLS listener, stores the JoinHandle in pending_bootstrap,
         // and embeds the listener's host:port in the QR's addr_hint.
-        let qr_resp = call(&sock_a, r#"{"id":"7mf-q","method":"pair_generate_qr","params":{}}"#).await;
-        assert_eq!(qr_resp["ok"], true, "pair_generate_qr must succeed: {qr_resp}");
+        let qr_resp = call(
+            &sock_a,
+            r#"{"id":"7mf-q","method":"pair_generate_qr","params":{}}"#,
+        )
+        .await;
+        assert_eq!(
+            qr_resp["ok"], true,
+            "pair_generate_qr must succeed: {qr_resp}"
+        );
         let qr = qr_resp["data"]["qr"]
             .as_str()
             .expect("QR string in response")
@@ -13511,9 +13815,18 @@ mod tests {
         // Without the CopyPaste-7mf fix this would race the detached spawn and
         // return an empty peers list. With the fix, list_peers awaits the
         // pending_bootstrap JoinHandle and blocks until persist_paired_peer runs.
-        let list_resp = call(&sock_a, r#"{"id":"7mf-list","method":"list_peers","params":{}}"#).await;
-        assert_eq!(list_resp["ok"], true, "list_peers on A must succeed: {list_resp}");
-        let peers = list_resp["data"]["peers"].as_array().expect("data.peers array");
+        let list_resp = call(
+            &sock_a,
+            r#"{"id":"7mf-list","method":"list_peers","params":{}}"#,
+        )
+        .await;
+        assert_eq!(
+            list_resp["ok"], true,
+            "list_peers on A must succeed: {list_resp}"
+        );
+        let peers = list_resp["data"]["peers"]
+            .as_array()
+            .expect("data.peers array");
         let found = peers.iter().any(|p| {
             p.get("fingerprint")
                 .and_then(|v| v.as_str())
@@ -13570,7 +13883,9 @@ mod tests {
     /// returned `AppConfig` reflects the new value.
     #[test]
     fn update_core_config_persists_lan_visibility() {
-        let env_lock = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = tempdir().unwrap();
         unsafe { std::env::set_var("COPYPASTE_CONFIG_DIR", dir.path()) };
 
