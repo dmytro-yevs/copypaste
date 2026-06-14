@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { Search, Clipboard, SearchX, PlugZap } from "lucide-react";
 import { api, HistoryEntry, ipcErrorMessage, IpcError, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking, shouldMask } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
@@ -11,6 +12,8 @@ import { useUI } from "../store";
 import { clearImageCache, ImageThumb } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 import { EmptyState } from "../components/EmptyState";
+import { ContentIcon } from "../components/ContentIcon";
+import { RestartDaemonButton } from "../components/RestartDaemonButton";
 
 // Max items fetched for the popup list. Intentionally compact — the popup is a
 // quick-access surface, not a full history browser.
@@ -37,53 +40,6 @@ const DEFAULT_TEXT_ROW_H = 34;
 // Maccy parity: image rows in the popup use imageMaxHeight + 10 px padding.
 function popupRowHeight(isImage: boolean, textH: number, imageMaxH: number): number {
   return isImage ? Math.max(imageMaxH + 10, 34) : Math.max(textH, 22);
-}
-
-// ── Content-type chip ────────────────────────────────────────────────────────
-// Shared inline SVG glyphs with tinted chip background.
-
-function ContentChip({ type }: { type: string }) {
-  // All colors reference CSS custom properties from :root (index.css §0/§3).
-  // --ide-accent-dim / --ide-info-dim / --ide-violet-dim are the container tints.
-  if (type === "text" || type === "text/plain") {
-    return (
-      <span className="chip" style={{ background: "var(--ide-accent-dim)", color: "var(--ide-accent)" }}>
-        T
-      </span>
-    );
-  }
-  if (type === "url") {
-    return (
-      <span className="chip" style={{ background: "var(--ide-info-dim)", color: "var(--ide-info)" }}>
-        ↗
-      </span>
-    );
-  }
-  if (isImageType(type)) {
-    return (
-      <span className="chip" style={{ background: "var(--ide-violet-dim)", color: "var(--ide-violet)" }}>
-        {/* mini image frame */}
-        <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
-          <circle cx="5.5" cy="6" r="1.1" fill="currentColor" stroke="none" />
-          <path d="m1.5 11 3.5-3.5 2.5 2.5 2-2 4 4" />
-        </svg>
-      </span>
-    );
-  }
-  if (type === "code" || type.startsWith("text/x-") || type.startsWith("application/")) {
-    return (
-      <span className="chip" style={{ background: "var(--ide-violet-dim)", color: "var(--ide-violet)" }}>
-        {"</>"}
-      </span>
-    );
-  }
-  // Fallback: faint dot
-  return (
-    <span className="chip" style={{ background: "rgba(255,255,255,0.06)", color: "var(--ide-faint)" }}>
-      •
-    </span>
-  );
 }
 
 // ── Highlighted text ──────────────────────────────────────────────────────────
@@ -498,16 +454,13 @@ export function Popup() {
           borderBottom: "1px solid rgba(255,255,255,0.08)",
         }}
       >
-        {/* Search icon (16px) */}
-        <svg
-          width="16" height="16" viewBox="0 0 24 24"
-          fill="none" stroke="currentColor" strokeWidth="1.75"
-          strokeLinecap="round" strokeLinejoin="round"
+        {/* Search icon — lucide-react, 16px stroke 1.5 */}
+        <Search
+          size={16}
+          strokeWidth={1.5}
+          aria-hidden
           style={{ color: "var(--ide-ghost)", flexShrink: 0 }}
-        >
-          <circle cx="11" cy="11" r="7" />
-          <line x1="21" y1="21" x2="16.65" y2="16.65" />
-        </svg>
+        />
 
         <input
           ref={inputRef}
@@ -551,13 +504,10 @@ export function Popup() {
       {error ? (
         error === "daemon_offline" ? (
           <EmptyState
-            icon={
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-            }
+            icon={<PlugZap size={28} strokeWidth={1.5} aria-hidden />}
             title="Clipboard service offline"
             body="The daemon is not running. Restart it from Settings."
+            action={<RestartDaemonButton onRestarted={() => void refresh()} />}
           />
         ) : (
           <EmptyState
@@ -575,55 +525,60 @@ export function Popup() {
       ) : filtered.length === 0 ? (
         showQuery ? (
           <EmptyState
-            icon={
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="7" />
-                <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                <line x1="8" y1="11" x2="14" y2="11" />
-              </svg>
-            }
+            icon={<SearchX size={28} strokeWidth={1.5} aria-hidden />}
             title={`No matches for "${showQuery}"`}
             body="Try a different search term."
           />
         ) : (
           <EmptyState
-            icon={
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-              </svg>
-            }
+            icon={<Clipboard size={28} strokeWidth={1.5} aria-hidden />}
             title="Nothing copied yet"
             body="Copy something and it will appear here."
           />
         )
       ) : (
-        <ul
-          ref={listRef}
-          className="flex-1 overflow-y-auto py-1"
-          style={{ minHeight: 0 }}
-        >
-          {filtered.map(({ item, positions }, idx) => (
-            <PopupRow
-              key={item.id}
-              item={item}
-              index={idx}
-              selected={idx === selectedIdx}
-              textRowHeight={previewSize}
-              imageMaxHeight={imageMaxHeight}
-              maskSensitive={maskSensitive}
-              matchPositions={positions}
-              previewLines={previewLinesPopup}
-              showKeycap={!showQuery && idx < 9}
-              onMouseEnter={() => {
-                isKeyboardNavRef.current = false;
-                setSelectedIdx(idx);
-              }}
-              onClick={() => void copyAndPaste(item.id, item.preview)}
-              onPin={() => void handlePin(item.id, item.pinned)}
-            />
-          ))}
-        </ul>
+        /* §4/§8 Selection glide: a single absolutely-positioned highlight layer
+           that animates top/height as selectedIdx changes. The layer sits behind
+           each row's content (z-index 0). Each row renders transparent so only
+           the glide layer provides the selection background.
+           prefers-reduced-motion: the transition is skipped when the user prefers
+           reduced motion (instant position change with no animation). */
+        <div className="relative flex-1 overflow-hidden" style={{ minHeight: 0 }}>
+          {/* Glide highlight layer — tracks selectedIdx */}
+          <GlideHighlight
+            selectedIdx={selectedIdx}
+            items={filtered}
+            textRowHeight={previewSize}
+            imageMaxHeight={imageMaxHeight}
+            listRef={listRef}
+          />
+          <ul
+            ref={listRef}
+            className="relative flex-1 overflow-y-auto py-1 h-full"
+            style={{ minHeight: 0 }}
+          >
+            {filtered.map(({ item, positions }, idx) => (
+              <PopupRow
+                key={item.id}
+                item={item}
+                index={idx}
+                selected={idx === selectedIdx}
+                textRowHeight={previewSize}
+                imageMaxHeight={imageMaxHeight}
+                maskSensitive={maskSensitive}
+                matchPositions={positions}
+                previewLines={previewLinesPopup}
+                showKeycap={!showQuery && idx < 9}
+                onMouseEnter={() => {
+                  isKeyboardNavRef.current = false;
+                  setSelectedIdx(idx);
+                }}
+                onClick={() => void copyAndPaste(item.id, item.preview)}
+                onPin={() => void handlePin(item.id, item.pinned)}
+              />
+            ))}
+          </ul>
+        </div>
       )}
 
       {/* ── Footer keycap pills ─────────────────────────────────────────── */}
@@ -634,9 +589,18 @@ export function Popup() {
           color: "var(--ide-ghost)",
         }}
       >
-        <span className="text-[10.5px]">↑↓ navigate</span>
+        <span className="text-[10.5px] flex items-center gap-1">
+          <span className="keycap">↑↓</span>
+          <span>navigate</span>
+        </span>
         <div className="flex items-center gap-2">
-          <span className="text-[10.5px]">⏎ paste · Esc close</span>
+          <span className="text-[10.5px] flex items-center gap-1">
+            <span className="keycap">⏎</span>
+            <span>paste</span>
+            <span className="text-[10.5px]">·</span>
+            <span className="keycap">Esc</span>
+            <span>close</span>
+          </span>
           {/* Settings gear — opens the main window Settings view. Inline SVG to
               match the popup's existing inline-icon style (Lucide "settings"). */}
           <button
@@ -644,7 +608,7 @@ export function Popup() {
             aria-label="Open settings"
             title="Open settings"
             onClick={() => void openSettings()}
-            className="flex min-h-[24px] min-w-[24px] items-center justify-center rounded hover:bg-white/10 transition-colors"
+            className="flex min-h-[24px] min-w-[24px] items-center justify-center rounded hover:bg-ide-hover transition-colors"
             style={{ border: "none", background: "none", cursor: "pointer", color: "var(--ide-ghost)" }}
           >
             <svg
@@ -660,6 +624,86 @@ export function Popup() {
         </div>
       </div>
     </div>
+  );
+}
+
+// ── GlideHighlight ────────────────────────────────────────────────────────────
+// §4/§8: A single absolutely-positioned layer that slides to the selected row.
+// Animates top + height over 130ms ease (CSS var --ease-standard if defined,
+// else cubic-bezier(0.2,0,0,1)). Instant when prefers-reduced-motion is set.
+
+interface GlideHighlightProps {
+  selectedIdx: number;
+  items: Array<{ item: HistoryEntry; positions: number[] }>;
+  textRowHeight: number;
+  imageMaxHeight: number;
+  listRef: React.RefObject<HTMLUListElement | null>;
+}
+
+function GlideHighlight({
+  selectedIdx,
+  items,
+  textRowHeight,
+  imageMaxHeight,
+  listRef,
+}: GlideHighlightProps) {
+  const [top, setTop] = useState(0);
+  const [height, setHeight] = useState(textRowHeight);
+  // Track whether the user prefers reduced motion so we can skip animation.
+  // Guard against jsdom / test environments where matchMedia is unavailable.
+  const prefersReduced = useRef(
+    typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+
+  useEffect(() => {
+    // Read geometry directly from the rendered list item so we match the
+    // exact heights produced by popupRowHeight() without duplicating the calc.
+    const list = listRef.current;
+    if (!list) return;
+    const child = list.children[selectedIdx] as HTMLElement | undefined;
+    if (!child) return;
+    // offsetTop is relative to the list's offsetParent (which is our wrapper div).
+    // We also need to offset by the list's own scrollTop so the glide layer
+    // tracks the visible position (list scrolls, wrapper does not).
+    setTop(child.offsetTop - list.scrollTop);
+    setHeight(child.offsetHeight);
+  }, [selectedIdx, items, textRowHeight, imageMaxHeight, listRef]);
+
+  // Keep glide in sync when the list scrolls (user scrolls with keyboard nav).
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const onScroll = () => {
+      const child = list.children[selectedIdx] as HTMLElement | undefined;
+      if (!child) return;
+      setTop(child.offsetTop - list.scrollTop);
+    };
+    list.addEventListener("scroll", onScroll, { passive: true });
+    return () => list.removeEventListener("scroll", onScroll);
+  }, [selectedIdx, listRef]);
+
+  return (
+    <div
+      aria-hidden
+      style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        top,
+        height,
+        // §3 selection fill — matches the original row background colour.
+        background: "rgba(61,139,255,0.16)",
+        // Glide animation: 130ms ease-standard. Skipped when reduced motion.
+        transition: prefersReduced.current
+          ? "none"
+          : "top 130ms cubic-bezier(0.2,0,0,1), height 130ms cubic-bezier(0.2,0,0,1)",
+        // Behind row content (z=0), above list background.
+        zIndex: 0,
+        pointerEvents: "none",
+      }}
+    />
   );
 }
 
@@ -733,18 +777,18 @@ function PopupRow({
       ].join(" ")}
       style={{
         minHeight: isImage ? Math.max(rowH, 50) : rowH,
-        background: selected
-          ? "rgba(61,139,255,0.16)"
-          : item.pinned
-          ? "var(--ide-warning-dim)"
-          : "transparent",
-        transition: `background ${selected ? "0ms" : "80ms"} ease`,
+        // §4/§8 glide: row background is always transparent — the GlideHighlight
+        // layer provides the selection colour via absolute positioning.
+        // Pinned rows keep their warm tint since it's a persistent state marker.
+        background: item.pinned ? "var(--ide-warning-dim)" : "transparent",
+        // No per-row transition needed — GlideHighlight handles animation.
+        zIndex: 1,
       }}
       onMouseEnter={onMouseEnter}
       onClick={onClick}
     >
-      {/* Content-type chip */}
-      <ContentChip type={isImage ? "image" : item.content_type} />
+      {/* Content-type glyph — shared ContentIcon (Lucide, strokeWidth 1.5) */}
+      <ContentIcon contentType={isImage ? "image" : item.content_type} size={14} />
 
       {/* Primary label / image thumb */}
       {isImage ? (
@@ -801,7 +845,7 @@ function PopupRow({
         const appLabel = sourceAppLabel(item.app_bundle_id);
         return appLabel ? (
           <span
-            className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5 rounded"
+            className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5 rounded-ide-sm"
             style={{
               color: "var(--ide-ghost)",
               background: "rgba(255,255,255,0.06)",
@@ -809,7 +853,8 @@ function PopupRow({
             }}
             title={item.app_bundle_id ?? undefined}
           >
-            <AppIcon bundleId={item.app_bundle_id} size={12} />
+            {/* §4: AppIcon 12→16px */}
+            <AppIcon bundleId={item.app_bundle_id} size={16} />
             {appLabel}
           </span>
         ) : null;
@@ -858,7 +903,7 @@ function PopupRow({
               e.stopPropagation();
               onPin();
             }}
-            className="absolute inset-0 flex items-center justify-center rounded hover:bg-white/10 text-ide-dim hover:text-white transition-opacity opacity-0 group-hover:opacity-100"
+            className="absolute inset-0 flex items-center justify-center rounded hover:bg-ide-hover text-ide-dim hover:text-white transition-opacity opacity-0 group-hover:opacity-100"
             style={{ border: "none", background: "none", cursor: "pointer", zIndex: 2 }}
           >
             {item.pinned ? (
@@ -883,4 +928,3 @@ function PopupRow({
     </li>
   );
 }
-
