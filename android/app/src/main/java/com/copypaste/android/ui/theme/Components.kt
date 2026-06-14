@@ -169,8 +169,8 @@ fun rememberTranslucency(): Boolean {
 //     Settings, Pair, Onboarding and Permissions screens read as siblings.
 //     The status-bar inset is applied via windowInsets (not a fixed height)
 //     so the header is never clipped under a notch or display cutout.
-//   • Rounded 12 dp cards on the #26282d elevated surface, hairline border.
-//   • Subdued section labels in the accent blue.
+//   • Rounded 12 dp cards on the elevated surface, single 1 dp hairline border.
+//   • Grey uppercase section labels (Apple grouped headers — NOT accent blue).
 //
 // Spacing scale: 4 / 8 / 12 / 16 / 24 dp. Keep new padding on this grid.
 // ---------------------------------------------------------------------------
@@ -179,9 +179,10 @@ fun rememberTranslucency(): Boolean {
  * Standard compact header. Dark panel surface, 14 sp medium title.
  *
  * When [translucent] is true (default: reads from the "copypaste" SharedPreferences
- * key "translucency"), the container color is IdePanel.copy(alpha = GLASS_ALPHA)
- * so the root IdeBg window background bleeds through for a frosted/glass look.
- * When false, the bar is fully opaque IdePanel — the pre-glass solid look.
+ * key "translucency"), the container is the §2 glass fill at GLASS_ALPHA so the
+ * opaque window canvas bleeds through for a frosted/glass look. When false, the
+ * bar is the fully opaque theme panel surface — the pre-glass solid look. All
+ * text/icon colors come from the active light/dark ramp (LocalIdeColors).
  *
  * windowInsets defaults to [TopAppBarDefaults.windowInsets] so the bar
  * automatically pads its content below the status-bar / display-cutout on
@@ -200,6 +201,8 @@ fun CopyPasteTopBar(
     // §3 translucency: reads the pref by default; callers may override.
     translucent: Boolean = rememberTranslucency(),
 ) {
+    // Active light/dark ramp — read once so the bar themes in lockstep (§1).
+    val c = LocalIdeColors.current
     // §2 glass header: warm-near-white (light) / deep (dark) fill at the §2
     // alpha when translucent, else the opaque theme panel surface.
     val containerColor = glassFillForTheme(
@@ -210,10 +213,11 @@ fun CopyPasteTopBar(
 
     TopAppBar(
         title = {
+            // §3 view title: 14 sp medium (titleLarge), theme text color.
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleLarge,
-                color = IdeText,
+                color = c.text,
             )
         },
         navigationIcon = {
@@ -222,7 +226,7 @@ fun CopyPasteTopBar(
                     Icon(
                         Icons.AutoMirrored.Filled.ArrowBack,
                         contentDescription = backContentDescription,
-                        tint = IdeDim,
+                        tint = c.dim,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -230,10 +234,10 @@ fun CopyPasteTopBar(
         },
         actions = actions,
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor             = containerColor, // glass when translucent, solid #1B1C22 when off
-            titleContentColor          = IdeText,
-            actionIconContentColor     = IdeDim,
-            navigationIconContentColor = IdeDim,
+            containerColor             = containerColor, // glass when translucent, solid panel when off
+            titleContentColor          = c.text,
+            actionIconContentColor     = c.dim,
+            navigationIconContentColor = c.dim,
         ),
         // Apply the status-bar / display-cutout inset as TOP PADDING so the
         // bar's content sits *below* the notch, never under it. A hard fixed
@@ -275,6 +279,7 @@ fun CopyPasteCard(
 
     Card(
         modifier = modifier.fillMaxWidth(),
+        // §4 card radius 12 dp.
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = containerColor,
@@ -282,27 +287,41 @@ fun CopyPasteCard(
         ),
         // §4: single 1 dp hairline.
         border = androidx.compose.foundation.BorderStroke(1.dp, accent),
+        // §4 elevation: drop Material tonal-elevation drift (no pressed/hovered
+        // jumps) — a flat hairline + one subtle e2-equivalent shadow only.
         elevation = CardDefaults.cardElevation(
             defaultElevation   = 2.dp,
-            pressedElevation   = 4.dp,
+            pressedElevation   = 2.dp,
             focusedElevation   = 2.dp,
-            hoveredElevation   = 3.dp,
+            hoveredElevation   = 2.dp,
+            draggedElevation   = 2.dp,
+            disabledElevation  = 2.dp,
         ),
     ) {
         Column(content = content)
     }
 }
 
-/** Subdued accent-blue section label, 8 dp grid. */
+/**
+ * Apple grouped section header (PARITY-SPEC §3): uppercase, 11 sp semibold,
+ * GREY (`c.dim`) — NOT accent blue — with wide tracking. Apple section headers
+ * are grey, not blue. 8 dp grid padding.
+ */
 @Composable
 fun SectionLabel(
     text: String,
     modifier: Modifier = Modifier,
 ) {
+    val c = LocalIdeColors.current
     Text(
-        text = text,
-        style = MaterialTheme.typography.titleMedium,
-        color = IdeAccent.copy(alpha = 0.80f),   // slightly subdued, matches macOS
+        // §3: uppercase Apple section header.
+        text = text.uppercase(),
+        style = MaterialTheme.typography.titleMedium.copy(
+            fontSize      = 11.sp,
+            fontWeight    = FontWeight.SemiBold,
+            letterSpacing = 0.6.sp,   // tracking-wide
+        ),
+        color = c.dim,   // §3 grey, not accent
         modifier = modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
     )
 }
@@ -341,6 +360,8 @@ fun SteppedSliderRow(
     require(stepValues.size >= 2) { "SteppedSliderRow needs ≥ 2 steps" }
     require(stepValues.size == stepLabels.size) { "stepValues and stepLabels must be same length" }
 
+    val c = LocalIdeColors.current
+
     // Find the closest step index for currentValue.
     val initialIndex = stepValues.indices.minByOrNull { kotlin.math.abs(stepValues[it] - currentValue) } ?: 0
     var sliderPosition by remember(currentValue) { mutableFloatStateOf(initialIndex.toFloat()) }
@@ -363,7 +384,7 @@ fun SteppedSliderRow(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyLarge,
-                color = IdeText,
+                color = c.text,
             )
             Text(
                 text = stepLabels[sliderPosition.toInt().coerceIn(0, stepValues.size - 1)],
@@ -371,7 +392,7 @@ fun SteppedSliderRow(
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
                 ),
-                color = IdeAccent,
+                color = c.accent,
                 textAlign = TextAlign.End,
                 // §6 spec: value label fixed 80px min-width so step labels never
                 // cause the slider track to shift width between steps.
@@ -391,11 +412,11 @@ fun SteppedSliderRow(
             valueRange = 0f..maxIdx,
             steps = discreteSteps,
             colors = SliderDefaults.colors(
-                thumbColor              = IdeAccent,
-                activeTrackColor        = IdeAccent,
-                inactiveTrackColor      = IdeBorder,
-                activeTickColor         = IdeAccent.copy(alpha = 0.7f),
-                inactiveTickColor       = IdeBorder.copy(alpha = 0.5f),
+                thumbColor              = c.accent,
+                activeTrackColor        = c.accent,
+                inactiveTrackColor      = c.border,
+                activeTickColor         = c.accent.copy(alpha = 0.7f),
+                inactiveTickColor       = c.border.copy(alpha = 0.5f),
             ),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -430,6 +451,7 @@ fun ContinuousSliderRow(
     onRelease: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val c = LocalIdeColors.current
     var sliderPos by remember(value) { mutableFloatStateOf(value.coerceIn(min, max).toFloat()) }
 
     Column(modifier = modifier
@@ -444,7 +466,7 @@ fun ContinuousSliderRow(
             Text(
                 text = label,
                 style = MaterialTheme.typography.bodyLarge,
-                color = IdeText,
+                color = c.text,
             )
             Text(
                 text = formatValue(sliderPos.toInt().coerceIn(min, max)),
@@ -452,7 +474,7 @@ fun ContinuousSliderRow(
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
                 ),
-                color = IdeAccent,
+                color = c.accent,
                 textAlign = TextAlign.End,
                 modifier = Modifier.padding(start = 8.dp),
             )
@@ -466,9 +488,9 @@ fun ContinuousSliderRow(
             },
             valueRange = min.toFloat()..max.toFloat(),
             colors = SliderDefaults.colors(
-                thumbColor         = IdeAccent,
-                activeTrackColor   = IdeAccent,
-                inactiveTrackColor = IdeBorder,
+                thumbColor         = c.accent,
+                activeTrackColor   = c.accent,
+                inactiveTrackColor = c.border,
             ),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -573,35 +595,39 @@ val MAX_ITEMS_STEP_LABELS: Array<String> = arrayOf(
  * OutlinedTextField call site for consistent appearance.
  */
 @Composable
-fun ideTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    // Container (fill inside the text field)
-    focusedContainerColor   = IdeElevated,
-    unfocusedContainerColor = IdeElevated,
-    disabledContainerColor  = IdeElevated.copy(alpha = 0.50f),
+fun ideTextFieldColors(): androidx.compose.material3.TextFieldColors {
+    val c = LocalIdeColors.current
+    return OutlinedTextFieldDefaults.colors(
+        // Container (fill inside the text field)
+        focusedContainerColor   = c.elevated,
+        unfocusedContainerColor = c.elevated,
+        // §4 disabled opacity 0.40.
+        disabledContainerColor  = c.elevated.copy(alpha = 0.40f),
 
-    // Border
-    focusedBorderColor   = IdeAccent,
-    unfocusedBorderColor = IdeBorder,
-    disabledBorderColor  = IdeBorder.copy(alpha = 0.40f),
-    errorBorderColor     = IdeDanger,
+        // Border
+        focusedBorderColor   = c.accent,
+        unfocusedBorderColor = c.border,
+        disabledBorderColor  = c.border.copy(alpha = 0.40f),
+        errorBorderColor     = c.danger,
 
-    // Text
-    focusedTextColor   = IdeText,
-    unfocusedTextColor = IdeText,
-    disabledTextColor  = IdeDim,
-    errorTextColor     = IdeDanger,
+        // Text
+        focusedTextColor   = c.text,
+        unfocusedTextColor = c.text,
+        disabledTextColor  = c.dim,
+        errorTextColor     = c.danger,
 
-    // Label (floating)
-    focusedLabelColor   = IdeAccent,
-    unfocusedLabelColor = IdeDim,
-    disabledLabelColor  = IdeFaint,
-    errorLabelColor     = IdeDanger,
+        // Label (floating)
+        focusedLabelColor   = c.accent,
+        unfocusedLabelColor = c.dim,
+        disabledLabelColor  = c.faint,
+        errorLabelColor     = c.danger,
 
-    // Placeholder
-    focusedPlaceholderColor   = IdeFaint,
-    unfocusedPlaceholderColor = IdeFaint,
+        // Placeholder
+        focusedPlaceholderColor   = c.faint,
+        unfocusedPlaceholderColor = c.faint,
 
-    // Cursor
-    cursorColor      = IdeAccent,
-    errorCursorColor = IdeDanger,
-)
+        // Cursor
+        cursorColor      = c.accent,
+        errorCursorColor = c.danger,
+    )
+}
