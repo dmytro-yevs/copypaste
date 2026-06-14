@@ -54,7 +54,7 @@ pub enum SchemaError {
 ///     enumeration (sync catchup). The UI list queries filter `deleted = 0`;
 ///     `get_item_by_item_id` intentionally does NOT filter so the merge layer
 ///     can see tombstones and apply LWW correctly.
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -146,6 +146,22 @@ pub(crate) const V10_ALTER: &str = "\
 ALTER TABLE clipboard_items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;\n\
 CREATE INDEX IF NOT EXISTS idx_clipboard_deleted \
     ON clipboard_items(deleted) WHERE deleted = 1;\n";
+
+/// v11 step — partial covering index that lets `prune_to_cap`'s size gate run
+/// `SUM(LENGTH(content)) WHERE pinned = 0` as an **index-only** scan instead of
+/// a full-table scan that reads (and discards) every encrypted `content` BLOB
+/// on every clipboard write (CopyPaste-pvp4).
+///
+/// The pre-existing `idx_clipboard_pinned` is partial on `WHERE pinned = 1`, so
+/// the inverted `pinned = 0` predicate could not use it. This index stores the
+/// byte length of each unpinned row's `content` as the indexed expression and is
+/// partial on `WHERE pinned = 0`, so the running `SUM` reads only the small
+/// index B-tree — no table rows, no BLOB I/O. Cap eviction semantics are
+/// unchanged (this only accelerates the cheap gate that decides whether any
+/// pruning is needed at all).
+pub(crate) const V11_INDEX: &str = "\
+CREATE INDEX IF NOT EXISTS idx_clipboard_unpinned_len \
+    ON clipboard_items(LENGTH(COALESCE(content, ''))) WHERE pinned = 0;\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -293,6 +309,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // devices. `DEFAULT 0` backfills existing rows as live. The partial
         // index on `deleted = 1` keeps tombstone enumeration efficient.
         script.push_str(V10_ALTER);
+    }
+
+    if current_version < 11 {
+        // Migration v11 (CopyPaste-pvp4): add a partial covering index on the
+        // byte length of unpinned rows' content so `prune_to_cap`'s per-write
+        // size gate computes its SUM index-only instead of full-scanning the
+        // table and reading every encrypted BLOB. Index-only, no data change.
+        script.push_str(V11_INDEX);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));

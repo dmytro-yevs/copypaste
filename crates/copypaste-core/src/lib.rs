@@ -45,7 +45,8 @@ pub use storage::devices::{
 };
 pub use storage::items::{
     bump_item_recency, count_items, delete_expired, delete_fts, delete_item,
-    delete_sensitive_expired, exists_item_by_item_id, fetch_text_preview, find_recent_by_hash,
+    delete_sensitive_expired, exists_item_by_item_id, fetch_text_preview,
+    fetch_text_previews_batch, find_recent_by_hash,
     get_device_names, get_item_by_id, get_item_by_item_id, get_page, get_page_meta,
     get_page_pinned_first, insert_item, insert_item_with_fts, insert_tombstone, next_lamport_ts,
     pin_item, prune_to_cap, reorder_pinned, search_items, set_thumb, soft_delete_item, unpin_item,

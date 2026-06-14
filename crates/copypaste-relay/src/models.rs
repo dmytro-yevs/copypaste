@@ -71,12 +71,27 @@ pub struct PushResponse {
 // Items — pull (wall-clock sync protocol)
 // ---------------------------------------------------------------------------
 
+/// Serialize an `Arc<str>` as a plain JSON string. Used instead of enabling
+/// serde's workspace-wide `rc` feature (which would also add Rc/Arc *de*serialize
+/// impls we don't want). CopyPaste-ux2i.
+fn serialize_arc_str<S>(value: &std::sync::Arc<str>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(value)
+}
+
 /// Single item returned by GET /devices/:id/items
 #[derive(Debug, Clone, Serialize)]
 pub struct PullItem {
     pub id: i64,
     pub content_type: String,
-    pub content_b64: String,
+    /// Opaque ciphertext, base64-standard encoded. `Arc<str>` (CopyPaste-ux2i):
+    /// the in-memory store holds the same `Arc<str>`, so building a `PullItem`
+    /// under the global store mutex is a refcount bump rather than a full heap
+    /// copy of the (up to ~13 MiB) base64 string. Serializes as a plain string.
+    #[serde(serialize_with = "serialize_arc_str")]
+    pub content_b64: std::sync::Arc<str>,
     pub wall_time: u64,
 }
 

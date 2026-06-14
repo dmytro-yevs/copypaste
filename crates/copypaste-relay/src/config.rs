@@ -41,6 +41,13 @@ pub struct RelayConfig {
     /// restart). The relay always uses **plain** SQLite here — it never holds
     /// keys and never calls `PRAGMA key` (see `db.rs`).
     pub db_path: String,
+    /// Maximum number of requests served concurrently (default: 1024). Sourced
+    /// from `RELAY_MAX_CONNECTIONS`. Enforced by a `tower` concurrency-limit
+    /// layer (CopyPaste-pbre) so a burst of in-flight requests cannot exhaust
+    /// process memory / file descriptors; excess requests queue (back-pressure)
+    /// rather than being dropped. Complements the per-IP/per-device rate limits
+    /// (which bound request *rate*, not *concurrency*).
+    pub max_connections: usize,
 }
 
 impl Default for RelayConfig {
@@ -53,6 +60,7 @@ impl Default for RelayConfig {
             max_items_per_device: 500,
             trust_proxy_headers: false,
             db_path: crate::db::IN_MEMORY_PATH.to_string(),
+            max_connections: 1024,
         }
     }
 }
@@ -69,6 +77,7 @@ impl RelayConfig {
     /// - `RELAY_MAX_ITEMS_PER_DEVICE`  — per-device inbox cap (usize, default 500)
     /// - `RELAY_TRUST_PROXY_HEADERS`   — `1`/`true` to honor XFF/X-Real-IP/Forwarded
     /// - `RELAY_DB_PATH`               — on-disk SQLite path (default `:memory:`)
+    /// - `RELAY_MAX_CONNECTIONS`       — max concurrent in-flight requests (usize, default 1024)
     pub fn from_env() -> Self {
         let mut cfg = Self::default();
 
@@ -115,6 +124,13 @@ impl RelayConfig {
                 cfg.db_path = v.to_string();
             }
         }
+        if let Ok(v) = std::env::var("RELAY_MAX_CONNECTIONS") {
+            if let Ok(n) = v.parse::<usize>() {
+                // Clamp to at least 1: a 0 concurrency limit would deadlock the
+                // server (every request waits forever for a permit).
+                cfg.max_connections = n.max(1);
+            }
+        }
 
         cfg
     }
@@ -142,6 +158,23 @@ mod tests {
         assert_eq!(cfg.max_item_bytes, 10 * 1024 * 1024);
         assert_eq!(cfg.max_items_per_device, 500);
         assert!(!cfg.trust_proxy_headers, "proxy trust must be opt-in");
+        assert_eq!(cfg.max_connections, 1024);
+    }
+
+    /// CopyPaste-pbre: `RELAY_MAX_CONNECTIONS` overrides the default and is
+    /// clamped to at least 1 so a `0` cannot deadlock the server.
+    #[test]
+    fn max_connections_from_env_and_clamp() {
+        let _guard = env_lock();
+        std::env::set_var("RELAY_MAX_CONNECTIONS", "256");
+        assert_eq!(RelayConfig::from_env().max_connections, 256);
+        std::env::set_var("RELAY_MAX_CONNECTIONS", "0");
+        assert_eq!(
+            RelayConfig::from_env().max_connections,
+            1,
+            "a 0 concurrency limit must be clamped to 1"
+        );
+        std::env::remove_var("RELAY_MAX_CONNECTIONS");
     }
 
     #[test]

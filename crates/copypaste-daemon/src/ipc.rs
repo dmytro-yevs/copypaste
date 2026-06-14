@@ -14,7 +14,8 @@ use copypaste_core::SyncKey;
 use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
     decrypt_item_by_version, decrypt_item_with_aad, derive_v2, encode_thumbnail_from_png,
-    encrypt_item_with_aad, ensure_revoked_devices_table, fetch_text_preview, get_device_names,
+    encrypt_item_with_aad, ensure_revoked_devices_table, fetch_text_preview,
+    fetch_text_previews_batch, get_device_names,
     get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned, revoke_device,
     revoke_devices, search_items, set_thumb, unpin_item, Database, DbRead, EncryptError, FileMeta,
     SensitiveDetector, NONCE_SIZE,
@@ -3784,98 +3785,120 @@ impl IpcServer {
                 };
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let db = db_arc.blocking_lock();
-                    let item = get_item_by_id(&*db, &id_for_task)?;
-                    Ok::<_, anyhow::Error>(item)
+                // CopyPaste-z1xt: do the WHOLE pipeline — DB fetch, decrypt
+                // (decode_image), and base64 — inside spawn_blocking. Previously
+                // only the DB fetch ran on the blocking pool; the CPU-heavy
+                // decrypt + base64 ran on the async executor thread, stalling it.
+                // CopyPaste-eq9m: encode directly from the decrypted `png_bytes`
+                // slice and DROP it before building the data URI so peak RAM is
+                // one decoded copy + one base64 string, not both plus the URI;
+                // we also move `item.content` out instead of `.clone()`-ing the
+                // full encrypted blob.
+                let v1_key: [u8; 32] = **self.local_key;
+                // ItemImageResult mirrors the response branches so error mapping
+                // stays on the async side (Response::* needs `req.id`).
+                enum ItemImageResult {
+                    Ok(String),
+                    NotFound,
+                    NotImage(String),
+                    Internal(String),
+                    Auth(String),
+                }
+                let join = tokio::task::spawn_blocking(move || -> anyhow::Result<ItemImageResult> {
+                    let item = {
+                        let db = db_arc.blocking_lock();
+                        get_item_by_id(&*db, &id_for_task)?
+                    };
+                    let mut item = match item {
+                        Some(it) => it,
+                        None => return Ok(ItemImageResult::NotFound),
+                    };
+                    let is_image = item.content_type == "image"
+                        || item.content_type.starts_with("image/");
+                    if !is_image {
+                        return Ok(ItemImageResult::NotImage(format!(
+                            "item {id_for_task} is not an image (content_type: {})",
+                            item.content_type
+                        )));
+                    }
+                    // Move the encrypted blob out of the item — no extra clone.
+                    let content = match item.content.take() {
+                        Some(b) => b,
+                        None => {
+                            return Ok(ItemImageResult::Internal(format!(
+                                "image item {id_for_task} has no content blob"
+                            )))
+                        }
+                    };
+                    let meta_json = match item.blob_ref.as_deref() {
+                        Some(s) => s,
+                        None => {
+                            return Ok(ItemImageResult::Internal(format!(
+                                "image item {id_for_task} missing blob_ref metadata"
+                            )))
+                        }
+                    };
+                    let file_id = match parse_image_file_id(meta_json) {
+                        Ok(fid) => fid,
+                        Err(e) => {
+                            return Ok(ItemImageResult::Internal(format!(
+                                "image item {id_for_task} blob_ref parse error: {e}"
+                            )))
+                        }
+                    };
+                    let chunks = match chunks_from_blob(&content) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return Ok(ItemImageResult::Internal(format!(
+                                "image item {id_for_task} chunks_from_blob failed: {e}"
+                            )))
+                        }
+                    };
+                    let v2_key = derive_v2(&v1_key);
+                    let key_to_use = if item.key_version == 1 {
+                        &v1_key
+                    } else {
+                        &*v2_key
+                    };
+                    let png_bytes = match decode_image(&chunks, key_to_use, &file_id) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            return Ok(ItemImageResult::Auth(format!(
+                                "image item {id_for_task} decode failed: {e}"
+                            )))
+                        }
+                    };
+                    use base64::Engine as _;
+                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                    // CopyPaste-eq9m: free the decoded image bytes before we build
+                    // the URI so the base64 string is the only large allocation
+                    // still alive when we format the data URI.
+                    drop(png_bytes);
+                    // The stored content_type is "image" (legacy) or a real MIME
+                    // type. For the data URI we always emit "image/png" because
+                    // decode_image always returns PNG bytes.
+                    let data_uri = format!("data:image/png;base64,{b64}");
+                    Ok(ItemImageResult::Ok(data_uri))
                 })
                 .await;
                 match join {
-                    Ok(Ok(Some(item))) => {
-                        // Only IMAGE items are supported; content_type == "image"
-                        // (legacy) or starts with "image/" (MIME-typed future rows).
-                        let is_image =
-                            item.content_type == "image" || item.content_type.starts_with("image/");
-                        if !is_image {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INVALID_ARGUMENT,
-                                format!(
-                                    "item {} is not an image (content_type: {})",
-                                    id, item.content_type
-                                ),
-                            );
-                        }
-                        let content = match &item.content {
-                            Some(b) => b.clone(),
-                            None => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("image item {} has no content blob", id),
-                                )
-                            }
-                        };
-                        let meta_json = match item.blob_ref.as_deref() {
-                            Some(s) => s.to_owned(),
-                            None => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("image item {} missing blob_ref metadata", id),
-                                )
-                            }
-                        };
-                        let file_id = match parse_image_file_id(&meta_json) {
-                            Ok(fid) => fid,
-                            Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("image item {id} blob_ref parse error: {e}"),
-                                )
-                            }
-                        };
-                        let chunks = match chunks_from_blob(&content) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("image item {id} chunks_from_blob failed: {e}"),
-                                )
-                            }
-                        };
-                        let v1_key: [u8; 32] = **self.local_key;
-                        let v2_key = derive_v2(&v1_key);
-                        let key_to_use = if item.key_version == 1 {
-                            &v1_key
-                        } else {
-                            &*v2_key
-                        };
-                        let png_bytes = match decode_image(&chunks, key_to_use, &file_id) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_AUTH_FAILED,
-                                    format!("image item {id} decode failed: {e}"),
-                                )
-                            }
-                        };
-                        use base64::Engine as _;
-                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                        // The stored content_type is "image" (legacy) or a real
-                        // MIME type. For the data URI we always emit "image/png"
-                        // because decode_image always returns PNG bytes.
-                        let data_uri = format!("data:image/png;base64,{b64}");
+                    Ok(Ok(ItemImageResult::Ok(data_uri))) => {
                         Response::ok(req.id, serde_json::json!({ "data_uri": data_uri }))
                     }
-                    Ok(Ok(None)) => Response::err_with_code(
+                    Ok(Ok(ItemImageResult::NotFound)) => Response::err_with_code(
                         req.id,
                         ERR_CODE_NOT_FOUND,
                         format!("item not found: {id}"),
                     ),
+                    Ok(Ok(ItemImageResult::NotImage(msg))) => {
+                        Response::err_with_code(req.id, ERR_CODE_INVALID_ARGUMENT, msg)
+                    }
+                    Ok(Ok(ItemImageResult::Internal(msg))) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg)
+                    }
+                    Ok(Ok(ItemImageResult::Auth(msg))) => {
+                        Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg)
+                    }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -4090,97 +4113,123 @@ impl IpcServer {
                 };
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let db = db_arc.blocking_lock();
-                    let item = get_item_by_id(&*db, &id_for_task)?;
-                    Ok::<_, anyhow::Error>(item)
+                // CopyPaste-z1xt: run the full DB-fetch + decrypt + base64 pipeline
+                // inside spawn_blocking (the decrypt + base64 previously ran on the
+                // async executor thread).
+                // CopyPaste-eq9m: move the encrypted blob out of the item (no
+                // clone) and free the decrypted `raw_bytes` before building the
+                // response so peak RAM is one decoded copy + one base64 string.
+                let v1_key: [u8; 32] = **self.local_key;
+                enum ItemFileResult {
+                    Ok {
+                        filename: String,
+                        mime: String,
+                        data_b64: String,
+                    },
+                    NotFound,
+                    NotFile(String),
+                    Internal(String),
+                    Auth(String),
+                }
+                let join = tokio::task::spawn_blocking(move || -> anyhow::Result<ItemFileResult> {
+                    let item = {
+                        let db = db_arc.blocking_lock();
+                        get_item_by_id(&*db, &id_for_task)?
+                    };
+                    let mut item = match item {
+                        Some(it) => it,
+                        None => return Ok(ItemFileResult::NotFound),
+                    };
+                    if item.content_type != "file" {
+                        return Ok(ItemFileResult::NotFile(format!(
+                            "item {id_for_task} is not a file (content_type: {})",
+                            item.content_type
+                        )));
+                    }
+                    let content = match item.content.take() {
+                        Some(b) => b,
+                        None => {
+                            return Ok(ItemFileResult::Internal(format!(
+                                "file item {id_for_task} has no content blob"
+                            )))
+                        }
+                    };
+                    let meta_json = match item.blob_ref.as_deref() {
+                        Some(s) => s,
+                        None => {
+                            return Ok(ItemFileResult::Internal(format!(
+                                "file item {id_for_task} missing blob_ref metadata"
+                            )))
+                        }
+                    };
+                    let file_meta = match parse_file_meta(meta_json) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            return Ok(ItemFileResult::Internal(format!(
+                                "file item {id_for_task} blob_ref parse error: {e}"
+                            )))
+                        }
+                    };
+                    let chunks = match chunks_from_blob(&content) {
+                        Ok(c) => c,
+                        Err(e) => {
+                            return Ok(ItemFileResult::Internal(format!(
+                                "file item {id_for_task} chunks_from_blob failed: {e}"
+                            )))
+                        }
+                    };
+                    let v2_key = derive_v2(&v1_key);
+                    let key_to_use = if item.key_version == 1 {
+                        &v1_key
+                    } else {
+                        &*v2_key
+                    };
+                    let raw_bytes = match decode_file(&chunks, key_to_use, &file_meta.file_id) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            return Ok(ItemFileResult::Auth(format!(
+                                "file item {id_for_task} decode failed: {e}"
+                            )))
+                        }
+                    };
+                    use base64::Engine as _;
+                    let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
+                    // CopyPaste-eq9m: free the decoded file bytes before returning.
+                    drop(raw_bytes);
+                    Ok(ItemFileResult::Ok {
+                        filename: file_meta.filename,
+                        mime: file_meta.mime,
+                        data_b64,
+                    })
                 })
                 .await;
                 match join {
-                    Ok(Ok(Some(item))) => {
-                        if item.content_type != "file" {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INVALID_ARGUMENT,
-                                format!(
-                                    "item {} is not a file (content_type: {})",
-                                    id, item.content_type
-                                ),
-                            );
-                        }
-                        let content = match &item.content {
-                            Some(b) => b.clone(),
-                            None => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("file item {} has no content blob", id),
-                                )
-                            }
-                        };
-                        let meta_json = match item.blob_ref.as_deref() {
-                            Some(s) => s.to_owned(),
-                            None => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("file item {} missing blob_ref metadata", id),
-                                )
-                            }
-                        };
-                        let file_meta = match parse_file_meta(&meta_json) {
-                            Ok(m) => m,
-                            Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("file item {id} blob_ref parse error: {e}"),
-                                )
-                            }
-                        };
-                        let chunks = match chunks_from_blob(&content) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("file item {id} chunks_from_blob failed: {e}"),
-                                )
-                            }
-                        };
-                        let v1_key: [u8; 32] = **self.local_key;
-                        let v2_key = derive_v2(&v1_key);
-                        let key_to_use = if item.key_version == 1 {
-                            &v1_key
-                        } else {
-                            &*v2_key
-                        };
-                        let raw_bytes = match decode_file(&chunks, key_to_use, &file_meta.file_id) {
-                            Ok(b) => b,
-                            Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_AUTH_FAILED,
-                                    format!("file item {id} decode failed: {e}"),
-                                )
-                            }
-                        };
-                        use base64::Engine as _;
-                        let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
-                        Response::ok(
-                            req.id,
-                            serde_json::json!({
-                                "filename": file_meta.filename,
-                                "mime":     file_meta.mime,
-                                "data_b64": data_b64,
-                            }),
-                        )
-                    }
-                    Ok(Ok(None)) => Response::err_with_code(
+                    Ok(Ok(ItemFileResult::Ok {
+                        filename,
+                        mime,
+                        data_b64,
+                    })) => Response::ok(
+                        req.id,
+                        serde_json::json!({
+                            "filename": filename,
+                            "mime":     mime,
+                            "data_b64": data_b64,
+                        }),
+                    ),
+                    Ok(Ok(ItemFileResult::NotFound)) => Response::err_with_code(
                         req.id,
                         ERR_CODE_NOT_FOUND,
                         format!("item not found: {id}"),
                     ),
+                    Ok(Ok(ItemFileResult::NotFile(msg))) => {
+                        Response::err_with_code(req.id, ERR_CODE_INVALID_ARGUMENT, msg)
+                    }
+                    Ok(Ok(ItemFileResult::Internal(msg))) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg)
+                    }
+                    Ok(Ok(ItemFileResult::Auth(msg))) => {
+                        Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg)
+                    }
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -4223,6 +4272,20 @@ impl IpcServer {
                         // Build a device-id → name map once per page so we can
                         // resolve each item's origin without a per-row JOIN.
                         let device_names = get_device_names(db).unwrap_or_default();
+                        // CopyPaste-mnte: batch the text-preview fetch into ONE
+                        // `SELECT ... WHERE id IN (...)` instead of one round-trip
+                        // per text item (a 50-item page was 51 SQL round-trips).
+                        // Only non-sensitive text items need an FTS lookup.
+                        let preview_ids: Vec<&str> = items
+                            .iter()
+                            .filter(|it| !it.is_sensitive && it.content_type == "text")
+                            .map(|it| it.id.as_str())
+                            .collect();
+                        let preview_map =
+                            fetch_text_previews_batch(db, &preview_ids).unwrap_or_default();
+                        // CopyPaste-mnte: the detector is a zero-sized unit struct
+                        // over process-wide lazy `RegexSet` statics; construct once
+                        // per page (not per item).
                         let detector = SensitiveDetector::new();
                         let json_items: Vec<serde_json::Value> = items
                             .iter()
@@ -4230,8 +4293,9 @@ impl IpcServer {
                                 let preview = if item.is_sensitive {
                                     format!("[sensitive — id:{}]", &item.id[..8])
                                 } else if item.content_type == "text" {
-                                    fetch_text_preview(db, &item.id)
-                                        .unwrap_or(None)
+                                    preview_map
+                                        .get(&item.id)
+                                        .cloned()
                                         .unwrap_or_else(|| format!("[text — id:{}]", &item.id[..8]))
                                 } else if item.content_type == "file" {
                                     let name = item
@@ -4246,10 +4310,15 @@ impl IpcServer {
                                 };
                                 let (preview, sensitive_spans): (String, Vec<serde_json::Value>) =
                                     if !item.is_sensitive && item.content_type == "text" {
+                                        // CopyPaste-mnte: normalise ONCE here (we
+                                        // need the normalised string to map byte→char
+                                        // offsets below); `detect_normalised` then
+                                        // skips the redundant second NFKC pass that
+                                        // `detect()` would do internally.
                                         let normalised =
                                             copypaste_core::sensitive::nfkc_normalize(&preview);
                                         let spans = detector
-                                            .detect(&normalised)
+                                            .detect_normalised(&normalised)
                                             .into_iter()
                                             .map(|m| {
                                                 let start = byte_to_char_offset(

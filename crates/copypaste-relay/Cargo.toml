@@ -31,6 +31,10 @@ subtle = { workspace = true }  # S5: pinned to >=2.5 via workspace
 # across the workspace. See db.rs for the feature-unification note.
 rusqlite = { version = "0.32", features = ["bundled"] }
 tower_governor = { version = "0.8", features = ["axum"] }
+# CopyPaste-pbre: global concurrency cap (ConcurrencyLimitLayer) so a burst of
+# in-flight requests cannot exhaust process memory / FDs. Already in the
+# dependency graph transitively via axum 0.8 and tower_governor 0.8.
+tower = { version = "0.4", features = ["limit"] }
 # Required to name RateLimitingMiddleware / QuantaInstant in spawn_governor_cleanup
 # bounds. Already in the dependency graph transitively via tower_governor 0.8.
 governor = "0.10"

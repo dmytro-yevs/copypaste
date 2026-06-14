@@ -261,48 +261,38 @@ impl SyncEngine {
         };
         let peer_ids: HashSet<&String> = peer_clock_map.keys().collect();
 
-        // Items peer has that we don't have at all.
-        let only_on_peer: Vec<String> = peer_ids
-            .difference(&local_ids)
-            .map(|s| (*s).clone())
-            .collect();
+        // CopyPaste-ux2i: build `we_want` / `peer_wants_hint` in a single
+        // collect each instead of materialising four intermediate `Vec<String>`
+        // (only_on_peer, peer_newer, only_on_us, us_newer) that were each moved
+        // or `extend`-ed exactly once. The difference/intersection iterators are
+        // chained and collected directly.
 
-        // Items on both sides where peer's Lamport clock is strictly higher
-        // (peer has a more recent version — request it for LWW comparison).
-        let peer_newer: Vec<String> = peer_ids
-            .intersection(&local_ids)
-            .filter(|id| {
+        // We WANT: items peer has that we don't (difference) + items on both
+        // sides where peer's Lamport clock is strictly higher (peer's version is
+        // newer — request it for LWW comparison).
+        let we_want: Vec<String> = peer_ids
+            .difference(&local_ids)
+            .copied()
+            .chain(peer_ids.intersection(&local_ids).copied().filter(|id| {
                 let peer_ts = peer_clock_map[id.as_str()];
                 let local_ts = local_clock_map[id.as_str()];
                 peer_ts > local_ts
-            })
-            .map(|s| (*s).clone())
+            }))
+            .cloned()
             .collect();
 
-        // We WANT: items we don't have + items where peer's version is newer.
-        let mut we_want: Vec<String> = only_on_peer;
-        we_want.extend(peer_newer);
-
-        // Items we have that peer doesn't.
-        let only_on_us: Vec<String> = local_ids
+        // Peer WANTS: items only on us (difference) + items where our Lamport
+        // clock is strictly higher than peer's.
+        let peer_wants_hint: Vec<String> = local_ids
             .difference(&peer_ids)
-            .map(|s| (*s).clone())
-            .collect();
-
-        // Items where our Lamport clock is strictly higher than peer's.
-        let us_newer: Vec<String> = local_ids
-            .intersection(&peer_ids)
-            .filter(|id| {
+            .copied()
+            .chain(local_ids.intersection(&peer_ids).copied().filter(|id| {
                 let our_ts = local_clock_map[id.as_str()];
                 let peer_ts = peer_clock_map[id.as_str()];
                 our_ts > peer_ts
-            })
-            .map(|s| (*s).clone())
+            }))
+            .cloned()
             .collect();
-
-        // Peer WANTS: items only on us + items where our version is newer.
-        let mut peer_wants_hint: Vec<String> = only_on_us;
-        peer_wants_hint.extend(us_newer);
 
         debug!(
             "we want {} items from peer, peer likely wants {} items from us",
@@ -311,10 +301,12 @@ impl SyncEngine {
         );
 
         // --- WANT exchange ---
+        // CopyPaste-ux2i: move `we_want` into the message (it is dead after this
+        // send) instead of cloning the whole Vec<String>.
         send_message(
             stream,
             &Message::Want {
-                item_ids: we_want.clone(),
+                item_ids: we_want,
             },
         )
         .await?;

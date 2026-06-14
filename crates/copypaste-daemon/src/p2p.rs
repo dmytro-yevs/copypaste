@@ -966,11 +966,53 @@ fn refresh_peer_meta_from_discovery(
 }
 
 /// A dialable paired peer resolved from `peers.json`.
+#[derive(Clone)]
 struct DialablePeer {
     /// Canonical (colon-free, lowercase) cert fingerprint — the mTLS pin.
     fingerprint: DeviceFingerprint,
     /// The peer's sync-listener socket address.
     addr: SocketAddr,
+}
+
+/// CopyPaste-c1dd: mtime-gated cache for the dialable-peer list so the connector
+/// loop does not re-read + re-parse `peers.json` from disk on every 3 s tick.
+///
+/// `peers.json` only changes when the user pairs/unpairs or when
+/// `refresh_peer_meta_from_discovery` writes an updated peer record; both bump
+/// the file mtime, which invalidates the cache. The steady state (no pairing
+/// activity) reads only the cheap `fs::metadata` mtime and reuses the parsed
+/// Vec, avoiding a full read+JSON-parse every tick.
+#[derive(Default)]
+struct DialablePeersCache {
+    /// Last observed file modification time; `None` until the first read.
+    last_mtime: Option<std::time::SystemTime>,
+    /// Cached parse result reused while the mtime is unchanged.
+    cached: Vec<DialablePeer>,
+}
+
+impl DialablePeersCache {
+    /// Return the dialable peers for `path`, re-reading + re-parsing from disk
+    /// only when the file mtime has changed since the last call (or on the first
+    /// call, or if the mtime cannot be read — fail safe by always re-reading).
+    ///
+    /// Returns an owned `Vec` (a cheap clone of the cached list — a handful of
+    /// `String` + `SocketAddr` per peer) so the connector loop keeps its
+    /// existing by-value iteration; the avoided cost is the per-tick file read +
+    /// JSON parse, not the small Vec clone.
+    fn get(&mut self, path: &std::path::Path) -> Vec<DialablePeer> {
+        let current_mtime = std::fs::metadata(path).and_then(|m| m.modified()).ok();
+        // Re-read when: first call (last_mtime None), mtime changed, or mtime is
+        // unavailable (treat as "may have changed" to never serve stale data).
+        let stale = match (current_mtime, self.last_mtime) {
+            (Some(now), Some(prev)) => now != prev,
+            _ => true,
+        };
+        if stale {
+            self.cached = dialable_peers_from_path(path);
+            self.last_mtime = current_mtime;
+        }
+        self.cached.clone()
+    }
 }
 
 /// Read `peers.json` and return the paired peers that carry a parseable sync
@@ -1053,6 +1095,9 @@ async fn peer_connector_loop(
     let peers_path = crate::ipc::peers_file_path();
     let pending_path = crate::peers::pending_unpair_path_for(&peers_path);
     let mut dial_state: HashMap<DeviceFingerprint, DialBackoff> = HashMap::new();
+    // CopyPaste-c1dd: mtime-gated cache so peers.json is not re-read+parsed every
+    // 3 s tick when nothing changed.
+    let mut dialable_cache = DialablePeersCache::default();
 
     loop {
         // BUG F1: race the inter-tick sleep against cancellation so shutdown wins
@@ -1070,7 +1115,7 @@ async fn peer_connector_loop(
         // `Unpair` frame, then removed from both the live allowlist and the file.
         deliver_pending_unpairs(&transport, &pending_path, &own_fp, &live_peers).await;
 
-        let peers = dialable_peers_from_path(&peers_path);
+        let peers = dialable_cache.get(&peers_path);
         // Drop dial-state for peers no longer present (unpaired) so the map
         // does not grow unbounded across re-pairings.
         let live: std::collections::HashSet<&str> =

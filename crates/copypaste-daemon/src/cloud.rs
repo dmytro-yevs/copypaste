@@ -57,7 +57,7 @@ use copypaste_sync::merge::{remote_wins, RemoteMeta};
 #[allow(unused_imports)] // some symbols are used only by this module's tests
 use crate::sync_common::{
     build_local_item, decode_cloud_file_payload, decode_payload_ct, decrypt_item_plaintext,
-    encode_cloud_file_payload, replace_cloud_item_by_item_id,
+    decrypt_item_plaintext_blocking, encode_cloud_file_payload, replace_cloud_item_by_item_id,
     wrap_and_check_cloud_upload_plaintext, wrap_cloud_upload_plaintext, CLOUD_FILE_HEADER_VERSION,
     CLOUD_FILE_LEGACY_MIME, CLOUD_FILE_LEGACY_NAME, SYNC_HTTP_TIMEOUT,
 };
@@ -993,6 +993,56 @@ async fn push_loop(
             result = rx.recv() => {
                 match result {
                     Ok(item) => {
+                        // Fast no-key skip (preserved from the original): if no
+                        // sync passphrase is set there is nothing to upload, so
+                        // skip BEFORE doing the (now blocking-pool) decrypt. The
+                        // guard is dropped immediately so the lock is not held
+                        // across the decrypt await below.
+                        {
+                            let key_guard = sync_key.lock().await;
+                            if key_guard.is_none() {
+                                if !warned_no_key {
+                                    tracing::warn!(
+                                        "cloud-sync push_loop: no sync passphrase set — \
+                                         skipping upload (call set_sync_passphrase first)"
+                                    );
+                                    warned_no_key = true;
+                                }
+                                continue;
+                            }
+                        }
+                        // CopyPaste-z1xt: decrypt the local ciphertext on the
+                        // blocking thread pool BEFORE re-taking the sync-key lock.
+                        // `decode_image`/`decode_file`/`decrypt_item_by_version`
+                        // are CPU-bound (potentially multi-MB) and previously ran
+                        // inline on the async executor thread. Doing this before
+                        // the lock also avoids holding the `sync_key` mutex across
+                        // the await. The wrapper consumes + returns the item so we
+                        // do not clone the heavy `content` blob.
+                        let (item_back, decrypt_res) = decrypt_item_plaintext_blocking(
+                            item,
+                            zeroize::Zeroizing::new(**local_key),
+                        )
+                        .await;
+                        let item = match item_back {
+                            Some(it) => it,
+                            None => {
+                                tracing::warn!(
+                                    "cloud-sync push_loop: decrypt task failed; skipping"
+                                );
+                                continue;
+                            }
+                        };
+                        let plaintext = match decrypt_res {
+                            Ok(p) => p,
+                            Err(e) => {
+                                tracing::warn!(
+                                    "cloud-sync push_loop: failed to decrypt id={} for re-encryption: {e}; skipping",
+                                    item.id
+                                );
+                                continue;
+                            }
+                        };
                         // Re-encrypt the item for the cloud using the current sync key.
                         // If no sync key is set, skip with a one-time warning.
                         let payload_ct_b64 = {
@@ -1009,17 +1059,6 @@ async fn push_loop(
                                     continue;
                                 }
                                 Some(key) => {
-                                    // Decrypt local ciphertext → plaintext.
-                                    let plaintext = match decrypt_item_plaintext(&item, &local_key) {
-                                        Ok(p) => p,
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "cloud-sync push_loop: failed to decrypt id={} for re-encryption: {e}; skipping",
-                                                item.id
-                                            );
-                                            continue;
-                                        }
-                                    };
                                     // BUG C1: for files, embed name+MIME inside
                                     // the encrypted plaintext (Supabase schema
                                     // carries none). No-op for text/image. The
@@ -1222,7 +1261,20 @@ async fn run_backlog_sweep(
         tracing::info!("cloud-sync backlog: found {count} unsynced item(s) — queuing for push");
         let tmp_key = SyncKey::from_bytes(key_arr);
         for item in backlog_items {
-            let plaintext = match decrypt_item_plaintext(&item, local_key) {
+            // CopyPaste-z1xt: decrypt on the blocking thread pool (CPU-bound
+            // decode/decrypt was stalling the async executor). The wrapper
+            // consumes + returns the item so the heavy `content` blob is moved,
+            // not cloned.
+            let (item_back, decrypt_res) =
+                decrypt_item_plaintext_blocking(item, zeroize::Zeroizing::new(***local_key)).await;
+            let item = match item_back {
+                Some(it) => it,
+                None => {
+                    tracing::warn!("cloud-sync backlog: decrypt task failed; skipping");
+                    continue;
+                }
+            };
+            let plaintext = match decrypt_res {
                 Ok(p) => p,
                 Err(e) => {
                     tracing::warn!(

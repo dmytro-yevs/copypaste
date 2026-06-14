@@ -720,6 +720,60 @@ pub fn exists_item_by_item_id(db: &Database, item_id: &str) -> Result<bool, Item
     Ok(count > 0)
 }
 
+/// CopyPaste-6fd: defensively delete any `pending_uploads` rows whose
+/// cross-device `item_id` belongs to clipboard rows that are about to be hard
+/// deleted, identified by their primary-key `id`s.
+///
+/// `pending_uploads` has no `ON DELETE CASCADE` foreign key (and even if it did,
+/// `PRAGMA foreign_keys` is connection-scoped and easy to miss on a fresh
+/// connection — see `CONNECTION_PRAGMAS` in `db.rs`). Every hard-delete /
+/// prune / evict path therefore calls this inside its own transaction so a
+/// dropped clipboard item can never strand a resumable-upload row. The DELETE
+/// resolves `item_id` from `clipboard_items` while those rows still exist, so it
+/// MUST run before the corresponding `clipboard_items` delete.
+///
+/// No-op when `ids` is empty.
+fn delete_pending_uploads_for_ids(
+    tx: &rusqlite::Transaction<'_>,
+    ids: &[String],
+) -> Result<(), ItemsError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "DELETE FROM pending_uploads WHERE item_id IN \
+         (SELECT item_id FROM clipboard_items WHERE id IN ({placeholders}))"
+    );
+    tx.execute(&sql, rusqlite::params_from_iter(ids.iter()))?;
+    Ok(())
+}
+
+/// CopyPaste-c1dd: delete the FTS5 rows for `ids` in a SINGLE
+/// `DELETE FROM clipboard_fts WHERE id IN (...)` statement instead of one
+/// `tx.execute(... WHERE id = ?)` round-trip per id (an N+1 pattern in
+/// `delete_expired` / `delete_sensitive_expired` / `prune_to_cap`).
+///
+/// All ids are already materialised by the callers before the delete, so a
+/// single batched statement is a pure win with identical semantics. No-op when
+/// `ids` is empty.
+fn delete_fts_for_ids(
+    tx: &rusqlite::Transaction<'_>,
+    ids: &[String],
+) -> Result<(), ItemsError> {
+    if ids.is_empty() {
+        return Ok(());
+    }
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("DELETE FROM clipboard_fts WHERE id IN ({placeholders})");
+    tx.execute(&sql, rusqlite::params_from_iter(ids.iter()))?;
+    Ok(())
+}
+
 pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
     // Fix 4: delete matching FTS rows in the same transaction so no orphan FTS
     // entries accumulate when items are TTL-pruned.
@@ -733,13 +787,15 @@ pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
         .query_map(params![now_ms], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     drop(stmt);
+    // CopyPaste-6fd: clean pending_uploads BEFORE the items delete (it resolves
+    // item_id from the rows that are about to vanish).
+    delete_pending_uploads_for_ids(&tx, &ids)?;
     let changed = tx.execute(
         "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
         params![now_ms],
     )?;
-    for id in &ids {
-        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
-    }
+    // CopyPaste-c1dd: batch FTS deletes into one statement (was N+1).
+    delete_fts_for_ids(&tx, &ids)?;
     tx.commit()?;
     Ok(changed)
 }
@@ -773,13 +829,14 @@ pub fn delete_sensitive_expired(
         .query_map(params![threshold], |r| r.get(0))?
         .collect::<Result<_, _>>()?;
     drop(stmt);
+    // CopyPaste-6fd: clean pending_uploads before the items delete.
+    delete_pending_uploads_for_ids(&tx, &ids)?;
     let changed = tx.execute(
         "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1 AND pinned = 0",
         params![threshold],
     )?;
-    for id in &ids {
-        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
-    }
+    // CopyPaste-c1dd: batch FTS deletes into one statement (was N+1).
+    delete_fts_for_ids(&tx, &ids)?;
     tx.commit()?;
     Ok(changed)
 }
@@ -795,6 +852,10 @@ pub fn delete_sensitive_expired(
 pub fn delete_item(db: &Database, id: &str) -> Result<usize, ItemsError> {
     let conn = db.conn();
     let tx = conn.unchecked_transaction()?;
+    // CopyPaste-6fd: clean any resumable-upload row for this item BEFORE the
+    // items delete resolves the item_id away.
+    let id_owned = id.to_string();
+    delete_pending_uploads_for_ids(&tx, std::slice::from_ref(&id_owned))?;
     let removed = tx.execute("DELETE FROM clipboard_items WHERE id=?1", params![id])?;
     tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
     tx.commit()?;
@@ -1051,8 +1112,14 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     // Fast path: if total unpinned bytes are within the quota nothing to do.
     // This avoids constructing the window-function query on every insert when
     // the DB is well under the cap (the common case).
+    //
+    // CopyPaste-pvp4: the `LENGTH(COALESCE(content, ''))` expression and the
+    // `WHERE pinned = 0` predicate match the partial covering index
+    // `idx_clipboard_unpinned_len` (schema v11) verbatim, so SQLite serves this
+    // SUM from an index-only scan — no full-table scan and no decrypted-BLOB
+    // reads on every clipboard write.
     let total_unpinned: i64 = db.conn().query_row(
-        "SELECT COALESCE(SUM(LENGTH(COALESCE(content,''))),0) \
+        "SELECT COALESCE(SUM(LENGTH(COALESCE(content, ''))), 0) \
          FROM clipboard_items WHERE pinned = 0",
         [],
         |r| r.get(0),
@@ -1123,6 +1190,10 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
         return Ok(0);
     }
 
+    // CopyPaste-6fd: clean pending_uploads for the evicted ids before the items
+    // delete (resolves item_id while those rows still exist).
+    delete_pending_uploads_for_ids(&tx, &ids)?;
+
     let deleted = tx.execute(
         "WITH ranked AS (
              SELECT
@@ -1142,9 +1213,8 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
          )",
         params![excess, keep_id],
     )?;
-    for id in &ids {
-        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
-    }
+    // CopyPaste-c1dd: batch FTS deletes into one statement (was N+1).
+    delete_fts_for_ids(&tx, &ids)?;
     tx.commit()?;
     Ok(deleted)
 }
@@ -1186,6 +1256,47 @@ pub fn fetch_text_preview<D: DbRead + ?Sized>(db: &D, id: &str) -> Result<Option
         .map_err(ItemsError::Sqlite)?;
 
     Ok(result.map(|text| clamp_preview(text, MAX_PREVIEW_BYTES)))
+}
+
+/// Batch variant of [`fetch_text_preview`]: fetch clamped previews for many ids
+/// in a **single** `SELECT ... WHERE id IN (...)` round-trip instead of one
+/// query per id.
+///
+/// `history_page` renders up to [`crate::storage`]'s page size of text items;
+/// the per-item `fetch_text_preview` previously fired one SQL round-trip each
+/// (a 50-item page = 51 round-trips). This collapses the preview fetch to one
+/// statement and returns a `id → clamped preview` map. Ids with no FTS row are
+/// simply absent from the map (callers render the usual placeholder).
+///
+/// Returns an empty map when `ids` is empty (no SQL issued).
+pub fn fetch_text_previews_batch<D: DbRead + ?Sized>(
+    db: &D,
+    ids: &[&str],
+) -> Result<std::collections::HashMap<String, String>, ItemsError> {
+    if ids.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    // Build a `?,?,…` placeholder list sized to `ids`. Each id is bound as a
+    // parameter (never interpolated), so this is injection-safe even though the
+    // placeholder count is dynamic.
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("SELECT id, content_text FROM clipboard_fts WHERE id IN ({placeholders})");
+    let conn = db.conn();
+    let mut stmt = conn.prepare(&sql)?;
+    let params = rusqlite::params_from_iter(ids.iter());
+    let rows = stmt.query_map(params, |row| {
+        let id: String = row.get(0)?;
+        let text: String = row.get(1)?;
+        Ok((id, text))
+    })?;
+    let mut map = std::collections::HashMap::with_capacity(ids.len());
+    for row in rows {
+        let (id, text) = row.map_err(ItemsError::Sqlite)?;
+        map.insert(id, clamp_preview(text, MAX_PREVIEW_BYTES));
+    }
+    Ok(map)
 }
 
 /// Clamp `text` to at most `max_bytes` bytes, truncating at a UTF-8 character
@@ -1328,11 +1439,13 @@ fn sanitize_fts5_query(raw: &str) -> Option<String> {
     // degrades to a valid MATCH instead of an FTS5 operator-syntax error.
     let tokens: Vec<&str> = trimmed
         .split_whitespace()
+        // CopyPaste-pbre: compare case-insensitively WITHOUT allocating a new
+        // uppercased String per token (the old `t.to_ascii_uppercase()` heap-
+        // allocated on every token just to feed a 4-way match).
         .filter(|t| {
-            !matches!(
-                t.to_ascii_uppercase().as_str(),
-                "NOT" | "OR" | "AND" | "NEAR"
-            )
+            !["NOT", "OR", "AND", "NEAR"]
+                .iter()
+                .any(|kw| t.eq_ignore_ascii_case(kw))
         })
         .collect();
     // All tokens may have been stripped (e.g. query was "NOT AND") — return None
@@ -2375,6 +2488,105 @@ mod tests {
         assert!(result.ends_with('…'));
     }
 
+    /// CopyPaste-mnte: batch preview fetch returns clamped text for every id
+    /// that has an FTS entry, in one round-trip, and omits ids without one.
+    #[test]
+    fn fetch_text_previews_batch_returns_map_for_present_ids() {
+        let db = Database::open_in_memory().unwrap();
+        let a = make_item(1);
+        let b = make_item(2);
+        let c = make_item(3); // no FTS entry — must be absent from the map
+        insert_item(&db, &a).unwrap();
+        insert_item(&db, &b).unwrap();
+        insert_item(&db, &c).unwrap();
+        upsert_fts(&db, &a.id, "alpha snippet").unwrap();
+        upsert_fts(&db, &b.id, "beta snippet").unwrap();
+
+        let ids = [a.id.as_str(), b.id.as_str(), c.id.as_str()];
+        let map = fetch_text_previews_batch(&db, &ids).unwrap();
+
+        assert_eq!(map.get(&a.id).map(String::as_str), Some("alpha snippet"));
+        assert_eq!(map.get(&b.id).map(String::as_str), Some("beta snippet"));
+        assert!(
+            !map.contains_key(&c.id),
+            "id with no FTS entry must be absent from the batch map"
+        );
+        // Parity with the per-item helper for both present ids.
+        assert_eq!(map.get(&a.id).cloned(), fetch_text_preview(&db, &a.id).unwrap());
+        assert_eq!(map.get(&b.id).cloned(), fetch_text_preview(&db, &b.id).unwrap());
+    }
+
+    /// CopyPaste-mnte: empty id slice issues no SQL and returns an empty map.
+    #[test]
+    fn fetch_text_previews_batch_empty_ids_is_noop() {
+        let db = Database::open_in_memory().unwrap();
+        let map = fetch_text_previews_batch(&db, &[]).unwrap();
+        assert!(map.is_empty());
+    }
+
+    /// CopyPaste-mnte: batch preview clamps long text identically to the
+    /// per-item path.
+    #[test]
+    fn fetch_text_previews_batch_clamps_large_text() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        let big_text: String = "y".repeat(MAX_PREVIEW_BYTES + 500);
+        upsert_fts(&db, &item.id, &big_text).unwrap();
+
+        let map = fetch_text_previews_batch(&db, &[item.id.as_str()]).unwrap();
+        let got = map.get(&item.id).expect("present");
+        assert!(got.len() <= MAX_PREVIEW_BYTES + "…".len());
+        assert!(got.ends_with('…'));
+    }
+
+    /// CopyPaste-pvp4: the schema-v11 partial covering index used by the
+    /// `prune_to_cap` size gate exists on a freshly migrated database.
+    #[test]
+    fn schema_has_unpinned_len_covering_index() {
+        let db = Database::open_in_memory().unwrap();
+        let found: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type = 'index' AND name = 'idx_clipboard_unpinned_len'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(found, 1, "idx_clipboard_unpinned_len must exist");
+    }
+
+    /// CopyPaste-pvp4: the `prune_to_cap` size-gate SUM is planned as an
+    /// index-only scan over the partial covering index (no full-table scan and
+    /// no BLOB reads). We assert the query plan references the covering index.
+    #[test]
+    fn prune_to_cap_size_gate_uses_covering_index() {
+        let db = Database::open_in_memory().unwrap();
+        for i in 0..5 {
+            insert_item(&db, &make_item(i)).unwrap();
+        }
+        let plan: Vec<String> = {
+            let conn = db.conn();
+            let mut stmt = conn
+                .prepare(
+                    "EXPLAIN QUERY PLAN \
+                     SELECT COALESCE(SUM(LENGTH(COALESCE(content, ''))), 0) \
+                     FROM clipboard_items WHERE pinned = 0",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        let joined = plan.join(" | ");
+        assert!(
+            joined.contains("idx_clipboard_unpinned_len"),
+            "size-gate SUM must use the covering index, plan was: {joined}"
+        );
+    }
+
     /// Empty history list — model correctly handles zero items.
     #[test]
     fn get_page_meta_empty_db_returns_empty_list() {
@@ -2996,6 +3208,111 @@ mod tests {
         let deleted = prune_to_cap(&db, 50).unwrap();
         assert_eq!(deleted, 0, "no eviction when quota met");
         assert_eq!(count_items(&db).unwrap(), 2);
+    }
+
+    // --- CopyPaste-6fd: pending_uploads defensive cleanup ---
+
+    /// Insert a `pending_uploads` row keyed by the given cross-device item_id.
+    fn insert_pending_upload(db: &Database, item_id: &str) {
+        db.conn()
+            .execute(
+                "INSERT INTO pending_uploads \
+                 (item_id, tus_url, bytes_uploaded, total_bytes, chunk_format_version, \
+                  created_at, expires_at) \
+                 VALUES (?1, 'https://relay/tus/x', 0, 100, 1, 0, 0)",
+                params![item_id],
+            )
+            .unwrap();
+    }
+
+    fn count_pending(db: &Database) -> i64 {
+        db.conn()
+            .query_row("SELECT COUNT(*) FROM pending_uploads", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    /// `delete_item` must also remove the matching `pending_uploads` row so a
+    /// hard-deleted item can never strand a resumable-upload row.
+    #[test]
+    fn delete_item_cleans_pending_uploads() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        insert_pending_upload(&db, &item.item_id);
+        // A second unrelated pending row must survive.
+        insert_pending_upload(&db, "other-item-id");
+        assert_eq!(count_pending(&db), 2);
+
+        delete_item(&db, &item.id).unwrap();
+
+        assert_eq!(
+            count_pending(&db),
+            1,
+            "only the deleted item's pending_uploads row is removed"
+        );
+        let survivor: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM pending_uploads WHERE item_id = 'other-item-id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(survivor, 1, "unrelated pending_uploads row must survive");
+    }
+
+    /// `prune_to_cap` eviction must also clean `pending_uploads` for evicted ids.
+    #[test]
+    fn prune_to_cap_cleans_pending_uploads() {
+        let db = Database::open_in_memory().unwrap();
+        // 3 × 20 bytes = 60. Quota = 20 → 2 oldest evicted.
+        let mut items = Vec::new();
+        for i in 0..3 {
+            let item = make_sized_item(i, (i + 1) * 1_000, 20);
+            insert_item(&db, &item).unwrap();
+            insert_pending_upload(&db, &item.item_id);
+            items.push(item);
+        }
+        assert_eq!(count_pending(&db), 3);
+
+        let deleted = prune_to_cap(&db, 20).unwrap();
+        assert_eq!(deleted, 2);
+
+        // Only the surviving (newest) item keeps its pending_uploads row.
+        assert_eq!(
+            count_pending(&db),
+            1,
+            "evicted items' pending_uploads rows must be cleaned"
+        );
+        let surviving_iid = &items[2].item_id;
+        let survivor: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM pending_uploads WHERE item_id = ?1",
+                params![surviving_iid],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(survivor, 1, "surviving item keeps its pending_uploads row");
+    }
+
+    /// `delete_expired` (TTL prune) must also clean `pending_uploads`.
+    #[test]
+    fn delete_expired_cleans_pending_uploads() {
+        let db = Database::open_in_memory().unwrap();
+        let mut item = make_item(1);
+        item.expires_at = Some(1_000); // already expired vs now=10_000
+        insert_item(&db, &item).unwrap();
+        insert_pending_upload(&db, &item.item_id);
+        assert_eq!(count_pending(&db), 1);
+
+        let removed = delete_expired(&db, 10_000).unwrap();
+        assert_eq!(removed, 1);
+        assert_eq!(
+            count_pending(&db),
+            0,
+            "TTL-expired item's pending_uploads row must be cleaned"
+        );
     }
 
     /// Large dataset (50 rows): window-function rewrite produces identical

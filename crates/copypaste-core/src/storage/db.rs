@@ -184,7 +184,15 @@ fn key_pragma(key: &[u8; 32]) -> zeroize::Zeroizing<String> {
 /// again. Skipping these is the root cause of two production issues:
 ///   * Missing `busy_timeout` ⇒ UI reader and daemon writer race instantly,
 ///     surfacing as silent `SQLITE_BUSY`.
-///   * Missing `foreign_keys=ON` ⇒ ON DELETE CASCADE silently no-ops.
+///   * Missing `foreign_keys=ON` ⇒ any `ON DELETE CASCADE` FK silently no-ops.
+///
+/// NOTE (CopyPaste-6fd): the schema currently declares NO `ON DELETE CASCADE`
+/// foreign keys. In particular `pending_uploads(item_id)` is a bare PK with no
+/// FK back to `clipboard_items`, so this pragma does NOT cascade-clean it when
+/// an item is hard-deleted. That cleanup is done explicitly in code by
+/// `storage::items::delete_pending_uploads_for_ids`, called from every
+/// hard-delete / prune / evict path. Keep `foreign_keys=ON` set anyway so any
+/// future cascading FK behaves; do not rely on it for `pending_uploads`.
 ///
 /// Keep this in sync with `pool::open_pool` and `schema::apply_migrations`
 /// — every code path that opens a SQLCipher connection must apply the same

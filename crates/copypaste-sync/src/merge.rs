@@ -204,6 +204,51 @@ pub fn local_to_wire(item: &ClipboardItem, local_device_id: &str) -> WireItem {
     }
 }
 
+/// By-value variant of [`local_to_wire`]: consumes the `ClipboardItem` and
+/// **moves** its heap-allocated fields (notably the `content` /
+/// `content_nonce` ciphertext blobs, which can be megabytes for file/image
+/// items) into the `WireItem` instead of cloning them.
+///
+/// CopyPaste-ux2i: callers that already own the item and do not need it after
+/// building the wire item (e.g. the daemon sync orchestrator draining a
+/// broadcast receiver) should use this to avoid an avoidable full-blob copy.
+/// The borrowing [`local_to_wire`] is kept for callers that only hold a `&`
+/// (e.g. the engine's `filter().map()` over a shared `&[ClipboardItem]` slice).
+pub fn local_to_wire_owned(item: ClipboardItem, local_device_id: &str) -> WireItem {
+    let origin = if item.origin_device_id.is_empty() {
+        local_device_id.to_string()
+    } else {
+        item.origin_device_id
+    };
+
+    let (file_name, mime) = if item.content_type == "file" {
+        parse_file_meta_name_mime(item.blob_ref.as_deref())
+    } else {
+        (None, None)
+    };
+
+    WireItem {
+        id: item.id,
+        item_id: item.item_id,
+        content_type: item.content_type,
+        content: item.content,
+        content_nonce: item.content_nonce,
+        blob_ref: item.blob_ref,
+        is_sensitive: item.is_sensitive,
+        lamport_ts: item.lamport_ts,
+        wall_time: item.wall_time,
+        expires_at: item.expires_at,
+        app_bundle_id: item.app_bundle_id,
+        origin_device_id: origin,
+        key_version: item.key_version,
+        deleted: item.deleted,
+        pinned: item.pinned,
+        pin_order: item.pin_order,
+        file_name,
+        mime,
+    }
+}
+
 /// Parse `filename` and `mime` from a file blob_ref meta JSON string.
 ///
 /// The meta JSON is produced by `clipboard::build_file_meta_json`; its shape
@@ -374,6 +419,33 @@ mod tests {
         assert_eq!(wire.lamport_ts, 3);
         assert_eq!(wire.origin_device_id, "my-device");
         assert_eq!(wire.content, item.content);
+    }
+
+    /// CopyPaste-ux2i: the by-value `local_to_wire_owned` produces a `WireItem`
+    /// byte-for-byte identical to the borrowing `local_to_wire`, including the
+    /// moved `content` blob and the empty-origin → local-device stamping.
+    #[test]
+    fn local_to_wire_owned_matches_borrowing_variant() {
+        // Case 1: existing origin preserved.
+        let mut item = make_local(7, 900);
+        item.origin_device_id = "peer-Z".to_string();
+        let borrowed = local_to_wire(&item, "my-device");
+        let owned = local_to_wire_owned(item, "my-device");
+        assert_eq!(owned.id, borrowed.id);
+        assert_eq!(owned.item_id, borrowed.item_id);
+        assert_eq!(owned.content, borrowed.content);
+        assert_eq!(owned.content_nonce, borrowed.content_nonce);
+        assert_eq!(owned.origin_device_id, borrowed.origin_device_id);
+        assert_eq!(owned.origin_device_id, "peer-Z");
+        assert_eq!(owned.key_version, borrowed.key_version);
+
+        // Case 2: empty origin → stamped with the local device id.
+        let mut item2 = make_local(3, 500);
+        item2.origin_device_id = String::new();
+        let borrowed2 = local_to_wire(&item2, "my-device");
+        let owned2 = local_to_wire_owned(item2, "my-device");
+        assert_eq!(owned2.origin_device_id, "my-device");
+        assert_eq!(owned2.content, borrowed2.content);
     }
 
     // --- key_version round-trip (crypto correctness regression) ---

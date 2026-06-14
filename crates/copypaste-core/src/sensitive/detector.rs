@@ -116,11 +116,14 @@ impl SensitiveDetector {
         self.detect_normalised(&normalised)
     }
 
-    /// Detect over an *already* NFKC-normalised string. Internal hot-path entry
-    /// that skips re-normalisation; callers (`detect`, `is_sensitive`) must pass
-    /// a string already run through [`nfkc_normalize`]. Returned byte ranges are
-    /// over `normalised`.
-    fn detect_normalised(&self, normalised: &str) -> Vec<PatternMatch> {
+    /// Detect over an *already* NFKC-normalised string. Hot-path entry that
+    /// skips re-normalisation; callers must pass a string already run through
+    /// [`nfkc_normalize`]. Returned byte ranges are over `normalised`.
+    ///
+    /// Public so IPC/preview callers that already hold a normalised string (e.g.
+    /// `history_page`, which normalises once to map byte→char offsets) can detect
+    /// without a redundant second NFKC pass over the same text.
+    pub fn detect_normalised(&self, normalised: &str) -> Vec<PatternMatch> {
         let mut results: Vec<PatternMatch> = Vec::new();
         for (i, re) in patterns().iter().enumerate() {
             for m in re.find_iter(normalised) {

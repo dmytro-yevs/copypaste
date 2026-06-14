@@ -637,8 +637,27 @@ async fn push_loop(
                 };
 
                 let inbox_id = derive_relay_inbox_id(&key_bytes);
-                let sk = SyncKey::from_bytes(key_bytes);
-                let Some(content_b64) = build_content_b64(&item, &local_key, &sk) else {
+                // CopyPaste-z1xt: `build_content_b64` decrypts the local
+                // ciphertext + re-encrypts for the relay (CPU-bound, possibly
+                // multi-MB) — run it on the blocking thread pool instead of inline
+                // on the async executor. Move `item` into the closure (no clone of
+                // the heavy blob) and get it back so the rest of the loop can use
+                // it. `SyncKey` is reconstructed inside from the Send `[u8; 32]`.
+                let lk = local_key.clone();
+                let (item, content_b64) = match tokio::task::spawn_blocking(move || {
+                    let sk = SyncKey::from_bytes(key_bytes);
+                    let out = build_content_b64(&item, &lk, &sk);
+                    (item, out)
+                })
+                .await
+                {
+                    Ok(pair) => pair,
+                    Err(e) => {
+                        tracing::warn!("relay-sync push_loop: build task failed: {e}; skipping");
+                        continue;
+                    }
+                };
+                let Some(content_b64) = content_b64 else {
                     continue;
                 };
                 let wall_time = item.wall_time.max(0) as u64;

@@ -248,6 +248,9 @@ where
         .layer(GovernorLayer::new(per_ip_conf));
 
     // ---- Merge all sub-routers + shared body-limit + config injection ------
+    // CopyPaste-pbre: global concurrency cap. Read the value before `config` is
+    // moved into the Extension layer below.
+    let max_connections = config.max_connections;
     let router = Router::new()
         .merge(exempt)
         .merge(item_routes)
@@ -259,6 +262,11 @@ where
         .layer(axum::extract::DefaultBodyLimit::max(
             config.max_item_bytes * 4 / 3 + 1024,
         ))
+        // CopyPaste-pbre: cap concurrent in-flight requests so a connection burst
+        // cannot exhaust memory / file descriptors. Requests over the limit queue
+        // for a permit (back-pressure) rather than being dropped; this complements
+        // the per-IP/per-device rate limits (which bound rate, not concurrency).
+        .layer(tower::limit::ConcurrencyLimitLayer::new(max_connections))
         // Inject the live `RelayConfig` so handlers (e.g. `items::push`)
         // can honor operator-supplied limits like `RELAY_MAX_ITEM_BYTES`
         // instead of falling back to compile-time defaults (HIGH #2).

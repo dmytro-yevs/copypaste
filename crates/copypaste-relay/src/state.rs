@@ -189,7 +189,10 @@ pub struct SyncItem {
     /// Auto-incremented integer ID (unique per device inbox, ascending).
     pub id: i64,
     pub content_type: String,
-    pub content_b64: String,
+    /// Opaque base64 ciphertext. `Arc<str>` (CopyPaste-ux2i) so `pull_items`
+    /// clones a refcount under the global store mutex instead of memcpy-ing the
+    /// full payload; the cloned `Arc` is handed straight to the `PullItem`.
+    pub content_b64: std::sync::Arc<str>,
     /// Sender wall-clock time (Unix epoch milliseconds).
     pub wall_time: u64,
     /// Server-side wall-clock time at insert (Unix epoch seconds). Used for
@@ -444,7 +447,8 @@ impl RelayStore {
                 .map(|it| SyncItem {
                     id: it.id,
                     content_type: it.content_type,
-                    content_b64: it.content_b64,
+                    // CopyPaste-ux2i: own the base64 ciphertext as Arc<str>.
+                    content_b64: std::sync::Arc::from(it.content_b64),
                     wall_time: it.wall_time,
                     inserted_at_unix: it.inserted_at_unix,
                 })
@@ -1136,11 +1140,16 @@ impl RelayStore {
             })?
             .as_secs();
 
+        // CopyPaste-ux2i: take ownership of the base64 ciphertext as Arc<str>
+        // ONCE (consumes the incoming String, no extra copy). The same Arc is
+        // shared into the in-memory inbox and borrowed for the durable write,
+        // and later cloned (refcount only) by `pull_items`.
+        let content_b64: std::sync::Arc<str> = std::sync::Arc::from(content_b64);
         let inbox = self.sync_items.entry(device_id.to_string()).or_default();
         let item = SyncItem {
             id,
             content_type: content_type.clone(),
-            content_b64: content_b64.clone(),
+            content_b64: std::sync::Arc::clone(&content_b64),
             wall_time,
             inserted_at_unix,
         };
@@ -1189,7 +1198,7 @@ impl RelayStore {
             device_id,
             id,
             &content_type,
-            &content_b64,
+            &content_b64, // Arc<str> derefs to &str
             wall_time,
             inserted_at_unix,
         )?;
@@ -1289,7 +1298,8 @@ impl RelayStore {
             result.push(PullItem {
                 id: item.id,
                 content_type: item.content_type.clone(),
-                content_b64: item.content_b64.clone(),
+                // CopyPaste-ux2i: refcount bump, not a full-payload memcpy.
+                content_b64: std::sync::Arc::clone(&item.content_b64),
                 wall_time: item.wall_time,
             });
         }

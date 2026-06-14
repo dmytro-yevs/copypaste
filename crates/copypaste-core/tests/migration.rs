@@ -53,7 +53,10 @@ async fn test_schema_rollback_v5_mid_batch() {
 /// v7: adds pinned column on clipboard table (TTL prune respects pin).
 /// v8: adds pin_order column for user-controlled pinned-item ordering.
 /// v9: adds thumb BLOB column for capture-time image thumbnail previews.
-const CURRENT_SCHEMA_VERSION: i64 = 10;
+/// v10: adds deleted column + partial index (soft-delete tombstones).
+/// v11: adds idx_clipboard_unpinned_len partial covering index so the
+///      prune_to_cap size gate runs index-only (CopyPaste-pvp4).
+const CURRENT_SCHEMA_VERSION: i64 = 11;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from

@@ -122,6 +122,39 @@ pub(crate) fn decrypt_item_plaintext(
     .map_err(|e| e.to_string())
 }
 
+/// Async wrapper around [`decrypt_item_plaintext`] that runs the CPU-bound
+/// decrypt/decode on the blocking thread pool (CopyPaste-z1xt).
+///
+/// The push/relay loops are async tasks on the tokio executor; `decode_image` /
+/// `decode_file` / `decrypt_item_by_version` are synchronous, potentially
+/// multi-MB crypto operations that previously ran inline and stalled the
+/// executor thread. This consumes the `ClipboardItem` (so it can move into the
+/// `'static` closure without cloning the heavy `content` blob) and returns it
+/// back (as `Some`) alongside the decrypt result, so the caller can keep using
+/// the item.
+///
+/// On the (effectively unreachable) JoinError path — a panic inside the
+/// blocking task or runtime shutdown — the item cannot be recovered, so the
+/// first tuple element is `None` and the second is `Err`. Callers handle the
+/// error path by logging + skipping, so no panic is raised here.
+pub(crate) async fn decrypt_item_plaintext_blocking(
+    item: ClipboardItem,
+    local_key: zeroize::Zeroizing<[u8; 32]>,
+) -> (Option<ClipboardItem>, Result<Vec<u8>, String>) {
+    match tokio::task::spawn_blocking(move || {
+        let result = decrypt_item_plaintext(&item, &local_key);
+        (item, result)
+    })
+    .await
+    {
+        Ok((item, result)) => (Some(item), result),
+        Err(join_err) => (
+            None,
+            Err(format!("decrypt blocking task failed: {join_err}")),
+        ),
+    }
+}
+
 /// Prepend the cloud file-identity header to `file_bytes`.
 ///
 /// `name`/`mime` longer than `u16::MAX` bytes are truncated on a UTF-8 char

@@ -39,7 +39,7 @@ use copypaste_core::{
     NONCE_SIZE,
 };
 use copypaste_sync::{
-    merge::{local_to_wire, resolve, wire_to_local, MergeOutcome},
+    merge::{local_to_wire_owned, resolve, wire_to_local, MergeOutcome},
     protocol::WireItem,
 };
 
@@ -309,7 +309,10 @@ pub async fn run(
             local = new_item_rx.recv(), if !local_closed => {
                 match local {
                     Ok(item) => {
-                        let wire = local_to_wire(&item, &device_id);
+                        // CopyPaste-ux2i: `item` is owned here and unused after the
+                        // wire item is built, so move its content blobs instead of
+                        // cloning them.
+                        let wire = local_to_wire_owned(item, &device_id);
                         // CopyPaste-716: per-peer re-keying now happens in the
                         // transport's fanout_to_peers (p2p.rs) so each peer
                         // receives a blob encrypted under its own pairwise sync
@@ -872,8 +875,10 @@ pub fn catchup_items(
             }
         };
         let page_len = page.len();
-        for item in &page {
-            let mut wire = local_to_wire(item, device_id);
+        // CopyPaste-ux2i: `page` is a locally-owned Vec consumed once; move each
+        // item's content blob into the wire item instead of cloning it.
+        for item in page {
+            let mut wire = local_to_wire_owned(item, device_id);
             // Re-key under this peer's pairwise key (CopyPaste-716).
             // Only forward items we could actually re-key — a
             // still-locally-encrypted (NotApplicable) or failed payload is useless
