@@ -20,16 +20,20 @@
 //
 /// Per-IP rate limit: 200 requests/minute.
 /// Uses `per_second(3)` + `burst_size(60)` in `GovernorConfigBuilder`.
+// These consts are the canonical source of the governor parameters; they are
+// referenced in documentation and tests but not yet threaded into the
+// `GovernorLayer` builder (wired at runtime from config). Keep them public so
+// integration tests can assert against the declared limits.
 #[allow(dead_code)]
 pub const PER_IP_PER_SECOND: u64 = 3;
-#[allow(dead_code)]
+#[allow(dead_code)] // same reason as PER_IP_PER_SECOND
 pub const PER_IP_BURST_SIZE: u32 = 60;
 
 /// Per-device rate limit: 60 requests/minute.
 /// Uses `per_second(1)` + `burst_size(20)` in `GovernorConfigBuilder`.
-#[allow(dead_code)]
+#[allow(dead_code)] // same reason as PER_IP_PER_SECOND
 pub const PER_DEVICE_PER_SECOND: u64 = 1;
-#[allow(dead_code)]
+#[allow(dead_code)] // same reason as PER_IP_PER_SECOND
 pub const PER_DEVICE_BURST_SIZE: u32 = 20;
 
 // ---------------------------------------------------------------------------

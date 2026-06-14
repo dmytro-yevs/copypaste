@@ -278,6 +278,9 @@ impl SyncCrypto {
 ///   orchestrator exits promptly instead of waiting for channels to drain.
 ///
 /// Returns `Ok(())` once both channels close or `shutdown` fires.
+// `run` takes: db, new_item_rx, incoming_rx, outbound_tx, device_id, crypto,
+// storage_quota_bytes, auto_apply, and shutdown — each a distinct runtime
+// dependency; no struct without pulling daemon internals into copypaste-sync.
 #[allow(clippy::too_many_arguments)]
 pub async fn run(
     db: Arc<Mutex<Database>>,

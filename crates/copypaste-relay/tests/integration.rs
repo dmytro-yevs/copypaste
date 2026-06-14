@@ -98,6 +98,7 @@ fn valid_pop() -> String {
 }
 
 const DEVICE_A: &str = "11111111-1111-1111-1111-111111111111";
+// Reserved for multi-device tests; not used in every test case.
 #[allow(dead_code)]
 const DEVICE_B: &str = "22222222-2222-2222-2222-222222222222";
 

@@ -432,6 +432,9 @@ async fn push_item(
 }
 
 /// The push loop: a 3rd subscriber on `new_item_tx` (alongside cloud + sync_orch).
+// relay_url, device_name, sync_key, local_key, last_sync_ms, and shutdown are
+// independent state slices — no natural grouping into a struct without adding
+// indirection for a private-only function.
 #[allow(clippy::too_many_arguments)]
 async fn push_loop(
     client: reqwest::Client,
@@ -538,6 +541,9 @@ async fn push_loop(
 
 /// Push with one re-auth retry: ensure a token, push; on 401 drop the token,
 /// re-register, and push once more.
+// The relay protocol binds all of: client, url, inbox_id, sync_key_bytes,
+// device_name/id, local_key, and last_sync_ms. No natural grouping without
+// a new intermediate struct; count is justified by the protocol surface.
 #[allow(clippy::too_many_arguments)]
 async fn push_with_reauth(
     client: &reqwest::Client,
@@ -792,6 +798,8 @@ fn ingest_page_blocking(
 
 /// The receive loop: poll the shared inbox, ingest new items via the LWW path,
 /// advance the watermark.
+// All parameters are independent runtime slices (db, url, name, keys, shutdown)
+// with no natural grouping for a private async fn.
 #[allow(clippy::too_many_arguments)]
 async fn receive_loop(
     client: reqwest::Client,
@@ -940,6 +948,9 @@ async fn receive_loop(
 /// receive loop (polls the shared inbox). Active iff `relay_url` is a valid URL.
 ///
 /// `device_name` is the human-readable name presented at registration (1..=64).
+// All params are distinct daemon-lifecycle handles (client, url, name, db,
+// rx, sync_key, local_key, last_sync_ms, shutdown) — no struct without
+// reaching into daemon internals.
 #[allow(clippy::too_many_arguments)]
 pub fn start_relay(
     client: reqwest::Client,

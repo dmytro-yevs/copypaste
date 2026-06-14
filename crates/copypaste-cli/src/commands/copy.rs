@@ -206,6 +206,7 @@ mod tests {
 
     #[test]
     fn run_signature_accepts_all_modes() {
+        // Compile-time signature check — the complex fn-pointer type is intentional here.
         #[allow(clippy::type_complexity)]
         let _: fn(&Path, Option<u64>, Option<&str>, Option<&str>, bool, u64) -> Result<()> = run;
     }

@@ -1690,6 +1690,9 @@ fn save_poll_watermark(db: &Database, watermark: i64) -> rusqlite::Result<()> {
     Ok(())
 }
 
+// Realtime loop handles: config, bearer, db, shutdown, notifier, signed_in,
+// and ingest_tx — each is an independent runtime dependency with no natural
+// grouping short of a new private struct.
 #[allow(clippy::too_many_arguments)]
 async fn realtime_loop(
     config: CloudConfig,
@@ -1923,6 +1926,8 @@ async fn realtime_loop(
 ///
 /// Listens on the shared `shutdown` Notify; calls `ClientHandle::shutdown`
 /// which sends `phx_leave` + WebSocket Close before returning.
+// ws_ingest_loop binds: realtime config, bearer, db, shutdown, ingest_tx,
+// signed_in, and re-auth callback — independent slices across the cloud stack.
 #[allow(clippy::too_many_arguments)]
 async fn ws_ingest_loop(
     config: RealtimeConfig,
@@ -2413,6 +2418,8 @@ async fn ws_ingest_loop(
 ///
 /// On a fetch error the cursor is returned unchanged so the next tick retries
 /// the same window.
+// poll_once parameters: client, config, bearer, db, cursor, signed_in,
+// ingest_tx, and last_sync_ms — each an independent runtime slice.
 #[allow(clippy::too_many_arguments)]
 async fn poll_once(
     client: &reqwest::Client,

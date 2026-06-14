@@ -46,6 +46,8 @@ fn history_cap_for_limit(tier_limit: Option<usize>) -> usize {
 }
 
 /// Maximum number of devices a single logical "account" can register (free tier).
+// Quota module exposes `check_device_quota`; this const is the documented limit
+// referenced by tests and docs. Not yet used in production routing.
 #[allow(dead_code)]
 pub const MAX_FREE_DEVICES: usize = 5;
 
@@ -1382,6 +1384,8 @@ impl RelayStore {
     // Devices listing
     // -----------------------------------------------------------------------
 
+    // Used by integration tests and diagnostic helpers; no production HTTP
+    // route currently calls this method directly.
     #[allow(dead_code)]
     pub fn list_devices(&self) -> Vec<String> {
         let mut records: Vec<&DeviceRecord> = self.devices.values().collect();

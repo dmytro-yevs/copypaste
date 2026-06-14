@@ -1,4 +1,4 @@
-//! Integration tests for the OPAQUE-KE PAKE handshake (W2.4 beta bonus).
+//! Integration tests for the OPAQUE-KE PAKE handshake.
 //!
 //! These exercise the public `copypaste_p2p::pake` API end-to-end without
 //! reaching into the module's `#[cfg(test)]` internals. They complement the

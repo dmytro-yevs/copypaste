@@ -1,6 +1,9 @@
 /// Configuration for the relay server, loaded from environment variables
 /// with safe defaults for all fields.
 #[derive(Debug, Clone)]
+// Fields are read through Axum's `Extension<RelayConfig>` in route handlers;
+// the struct itself is not directly destructured in the binary entry point,
+// so the compiler reports the fields as dead without the allow.
 #[allow(dead_code)]
 pub struct RelayConfig {
     /// TCP port to listen on (default: 8080)

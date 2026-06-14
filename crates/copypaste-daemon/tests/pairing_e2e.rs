@@ -32,8 +32,8 @@
 //! - `state.transport` — `Arc<PeerTransport>`; exposes our own fingerprint
 //!   via [`PeerTransport::fingerprint`].
 //! - `state.peers`     — `Arc<Mutex<PairedPeers>>`; mutated when pairing
-//!   completes (we call `.lock().await.add(...)` here, the same call site a
-//!   future `pair_peer` impl will use once W2.4 lands).
+//!   completes (we call `.lock().await.add(...)` here, the same call site
+//!   the IPC layer uses when a PAKE handshake completes).
 //! - `state.discovery` — `Arc<DiscoveryService>`; not used by these tests
 //!   because `DiscoveryService::register` hard-codes the production service
 //!   type `_copypaste._tcp.local.` (no per-test isolation possible). We use
@@ -68,9 +68,8 @@ use copypaste_p2p::pake::{PakeInitiator, PakeResponder, PasswordFile, SessionKey
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 /// Shared pairing password used across all tests in this file. Long enough
-/// to satisfy any minimum-entropy guard `pair_peer` may add in W2.4; the
-/// concrete value is unimportant for OPAQUE (the protocol is salt+OPRF-based,
-/// not dictionary-vulnerable).
+/// sufficient for OPAQUE's entropy requirements; the concrete value is
+/// unimportant (the protocol is salt+OPRF-based, not dictionary-vulnerable).
 const PAIR_PASSWORD: &str = "test-pair-123456";
 
 /// Monotonic counter to guarantee per-test-process uniqueness of mDNS service

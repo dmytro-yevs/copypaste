@@ -4,8 +4,9 @@
 //! bridging `copypaste-p2p` transport with the `sync_orch` channel pair
 //! (`incoming_tx` / `outbound_rx`).
 //!
-//! Pairing (`pair_peer` / `unpair_peer`) currently returns
-//! [`P2pError::NotImplemented`] — the PAKE handshake lands in W2.4.
+//! Pairing via these thin wrappers (`pair_peer` / `unpair_peer`) currently
+//! returns [`P2pError::NotImplemented`]; the PAKE handshake is handled
+//! directly by the IPC layer in `ipc.rs` rather than through this module.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -67,8 +68,9 @@ pub enum P2pError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// The requested pairing operation is not yet implemented (PAKE — W2.4).
-    #[error("Pairing not yet implemented (PAKE lands in W2.4)")]
+    /// The requested pairing operation is not yet implemented via this module;
+    /// the PAKE handshake is handled directly by the IPC layer.
+    #[error("Pairing not implemented via p2p module (handled by IPC layer)")]
     NotImplemented,
 }
 
@@ -203,8 +205,8 @@ pub fn list_peers(state: &P2pState) -> Vec<PeerInfo> {
 
 /// Pair with a peer using PAKE (Password-Authenticated Key Exchange).
 ///
-/// **Not yet implemented** — returns [`P2pError::NotImplemented`].
-/// PAKE-based pairing lands in W2.4.
+/// **Not implemented via this module** — returns [`P2pError::NotImplemented`].
+/// The PAKE handshake is handled directly by the IPC layer (`ipc.rs`).
 pub fn pair_peer(
     _state: &P2pState,
     _peer_fingerprint: &str,
@@ -215,8 +217,8 @@ pub fn pair_peer(
 
 /// Remove a previously-paired peer.
 ///
-/// **Not yet implemented** — returns [`P2pError::NotImplemented`].
-/// Lands in W2.4 alongside `pair_peer`.
+/// **Not implemented via this module** — returns [`P2pError::NotImplemented`].
+/// Pairing lifecycle is managed by the IPC layer alongside `pair_peer`.
 pub fn unpair_peer(_state: &P2pState, _peer_fingerprint: &str) -> Result<(), P2pError> {
     Err(P2pError::NotImplemented)
 }
@@ -2848,8 +2850,8 @@ mod tests {
         );
     }
 
-    /// `pair_peer` is a placeholder until W2.4 — it must surface the explicit
-    /// `NotImplemented` error rather than silently returning Ok.
+    /// `pair_peer` is a thin stub that delegates to the IPC layer — it must
+    /// surface the explicit `NotImplemented` error rather than silently returning Ok.
     #[test]
     fn pair_peer_returns_not_implemented() {
         let state = init(0, "test-device-id", "Test Device").expect("init must succeed");
@@ -2857,7 +2859,7 @@ mod tests {
         assert!(matches!(result, Err(P2pError::NotImplemented)));
     }
 
-    /// `unpair_peer` is also a placeholder until W2.4.
+    /// `unpair_peer` is also a thin stub; pairing is managed by the IPC layer.
     #[test]
     fn unpair_peer_returns_not_implemented() {
         let state = init(0, "test-device-id", "Test Device").expect("init must succeed");

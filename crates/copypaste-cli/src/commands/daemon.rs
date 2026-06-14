@@ -593,6 +593,8 @@ mod tests {
         }
 
         /// Override the response for a specific (program, first_arg) pair.
+        // Builder helper — not every test uses it, so the compiler sees it as
+        // dead in some configurations.
         #[allow(dead_code)]
         fn set_response(
             &mut self,
@@ -647,6 +649,8 @@ mod tests {
     }
 
     impl MockFs {
+        // Builder pattern — individual builder methods are not called by every
+        // test, so unused-in-this-cfg warnings appear on some platforms.
         #[allow(dead_code)]
         fn new() -> Self {
             Self {
@@ -662,19 +666,19 @@ mod tests {
                 files: std::collections::HashMap::new(),
             }
         }
-        #[allow(dead_code)]
+        #[allow(dead_code)] // builder helper, not called by every test
         fn with_existing(mut self, p: impl Into<PathBuf>) -> Self {
             self.existing.insert(p.into());
             self
         }
-        #[allow(dead_code)]
+        #[allow(dead_code)] // builder helper, not called by every test
         fn with_file(mut self, p: impl Into<PathBuf>, content: impl Into<String>) -> Self {
             let p = p.into();
             self.existing.insert(p.clone());
             self.files.insert(p, content.into());
             self
         }
-        #[allow(dead_code)]
+        #[allow(dead_code)] // builder helper, not called by every test
         fn with_exe(mut self, exe: impl Into<PathBuf>) -> Self {
             self.exe = exe.into();
             self
@@ -717,6 +721,7 @@ mod tests {
         }
     }
 
+    // Used by macOS-gated tests; dead on non-macOS where those tests are skipped.
     #[allow(dead_code)]
     fn expected_plist() -> PathBuf {
         PathBuf::from("/Users/test/Library/LaunchAgents/com.copypaste.daemon.plist")
@@ -1328,6 +1333,7 @@ mod tests {
         );
     }
 
+    // Sample fixture for install tests; dead on non-macOS where those tests are skipped.
     #[allow(dead_code)]
     const SAMPLE_PLIST_FOR_INSTALL: &str = r#"<?xml version="1.0"?>
 <plist><dict>

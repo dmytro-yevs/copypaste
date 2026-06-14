@@ -251,6 +251,9 @@ fn collect_os_version() -> Option<String> {
     {
         return Some("Windows".to_owned());
     }
+    // The `None` below is unreachable on any currently-supported platform
+    // (macOS, Linux, Windows all have a cfg block above). The allow prevents
+    // a warning when all three cfg branches match, leaving a dead fallthrough.
     #[allow(unreachable_code)]
     None
 }

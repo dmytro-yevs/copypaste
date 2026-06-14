@@ -261,6 +261,9 @@ impl Db {
     // -- Device mutations ----------------------------------------------------
 
     /// Insert a brand-new device record (first registration of this id).
+    // All columns of the devices table (id, name, token, expires_at, key, pop,
+    // scope, tier, registered_at) map to separate parameters — grouping them
+    // into a struct would not improve clarity for a direct DB insert.
     #[allow(clippy::too_many_arguments)]
     pub fn insert_device(
         &self,
