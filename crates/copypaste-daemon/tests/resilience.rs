@@ -61,8 +61,7 @@ use copypaste_daemon::ipc::IpcServer;
 /// task had bound the socket, causing spurious "connection refused" failures
 /// in the tests that follow.
 async fn wait_for_unix_socket(path: &std::path::Path, timeout_ms: u64) -> bool {
-    let deadline = tokio::time::Instant::now()
-        + Duration::from_millis(timeout_ms);
+    let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout_ms);
     loop {
         if UnixStream::connect(path).await.is_ok() {
             return true;

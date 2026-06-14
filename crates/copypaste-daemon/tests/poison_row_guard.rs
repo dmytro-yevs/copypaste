@@ -176,7 +176,10 @@ fn row_exists(db: &Database, id: &str) -> bool {
 fn sweep_removes_text_poison_row() {
     let db = open_db();
     insert_poison_text(&db, "poison-text-1");
-    assert!(row_exists(&db, "poison-text-1"), "row must exist before sweep");
+    assert!(
+        row_exists(&db, "poison-text-1"),
+        "row must exist before sweep"
+    );
 
     let swept = sweep_poison_rows(&db).expect("sweep must succeed");
 
@@ -191,7 +194,10 @@ fn sweep_removes_text_poison_row() {
 fn sweep_removes_file_poison_row() {
     let db = open_db();
     insert_poison_file(&db, "poison-file-1");
-    assert!(row_exists(&db, "poison-file-1"), "row must exist before sweep");
+    assert!(
+        row_exists(&db, "poison-file-1"),
+        "row must exist before sweep"
+    );
 
     let swept = sweep_poison_rows(&db).expect("sweep must succeed");
 
@@ -242,8 +248,5 @@ fn sweep_returns_correct_count() {
 
     assert_eq!(swept, 2, "must sweep exactly the 2 poison rows");
     assert_eq!(row_count(&db), 1, "1 healthy row must remain");
-    assert!(
-        row_exists(&db, "h-txt"),
-        "healthy row must survive"
-    );
+    assert!(row_exists(&db, "h-txt"), "healthy row must survive");
 }

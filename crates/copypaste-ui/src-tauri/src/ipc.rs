@@ -285,7 +285,7 @@ fn is_dangerous_extension(ext: &str) -> bool {
     matches!(
         ext.to_ascii_lowercase().as_str(),
         // macOS-specific execution vectors
-        | "app" | "action" | "workflow" | "definition"
+        |"app"| "action" | "workflow" | "definition"
         | "scpt" | "scptd" | "applescript"
         | "terminal" | "command" | "tool"
         // Shell scripts
@@ -353,9 +353,7 @@ pub async fn open_item_file(id: String) -> Result<(), String> {
         let reply = call("get_item_file", serde_json::json!({ "id": id }))
             .map_err(|e| format!("IPC error: {e}"))?;
         if !reply.ok {
-            return Err(reply
-                .error
-                .unwrap_or_else(|| "get_item_file failed".into()));
+            return Err(reply.error.unwrap_or_else(|| "get_item_file failed".into()));
         }
         let data = reply
             .data
@@ -378,8 +376,7 @@ pub async fn open_item_file(id: String) -> Result<(), String> {
 
         // 3. Write to temp file.
         let tmp_dir = std::env::temp_dir().join("copypaste_open");
-        std::fs::create_dir_all(&tmp_dir)
-            .map_err(|e| format!("create temp dir failed: {e}"))?;
+        std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("create temp dir failed: {e}"))?;
 
         // Sanitise the filename: strip path separators so a malicious filename
         // cannot escape the temp directory (defence-in-depth; daemon should
@@ -403,8 +400,7 @@ pub async fn open_item_file(id: String) -> Result<(), String> {
         let dangerous = is_dangerous_extension(&extension);
 
         let tmp_path = tmp_dir.join(&safe_name);
-        std::fs::write(&tmp_path, &bytes)
-            .map_err(|e| format!("write temp file failed: {e}"))?;
+        std::fs::write(&tmp_path, &bytes).map_err(|e| format!("write temp file failed: {e}"))?;
 
         // 5. Open with OS default app, or reveal in Finder for dangerous types.
         #[cfg(target_os = "macos")]

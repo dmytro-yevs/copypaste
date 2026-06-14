@@ -731,7 +731,15 @@ fn try_decrypt_row(row: &ClipboardItem, v1_key: &[u8; 32], v2_key: &[u8; 32]) ->
     let nonce_slice = row.content_nonce.as_deref()?;
     // A malformed nonce can never decrypt; skip rather than panic on the cast.
     let nonce: [u8; NONCE_SIZE] = nonce_slice.try_into().ok()?;
-    decrypt_item_by_version(row.key_version, v1_key, v2_key, &row.item_id, &nonce, content).ok()
+    decrypt_item_by_version(
+        row.key_version,
+        v1_key,
+        v2_key,
+        &row.item_id,
+        &nonce,
+        content,
+    )
+    .ok()
 }
 
 /// Fetch a single clipboard item by its primary-key `id`.
@@ -740,7 +748,10 @@ fn try_decrypt_row(row: &ClipboardItem, v1_key: &[u8; 32], v2_key: &[u8; 32]) ->
 /// `copy_item` that resolve an item directly by id — this avoids the
 /// data-loss footgun of paging (`get_page`) and linear-scanning, which
 /// silently misses any item beyond the fetched page window.
-pub fn get_item_by_id<D: DbRead + ?Sized>(db: &D, id: &str) -> Result<Option<ClipboardItem>, ItemsError> {
+pub fn get_item_by_id<D: DbRead + ?Sized>(
+    db: &D,
+    id: &str,
+) -> Result<Option<ClipboardItem>, ItemsError> {
     let result = db.conn().query_row(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -844,10 +855,7 @@ fn delete_pending_uploads_for_ids(
 /// All ids are already materialised by the callers before the delete, so a
 /// single batched statement is a pure win with identical semantics. No-op when
 /// `ids` is empty.
-fn delete_fts_for_ids(
-    tx: &rusqlite::Transaction<'_>,
-    ids: &[String],
-) -> Result<(), ItemsError> {
+fn delete_fts_for_ids(tx: &rusqlite::Transaction<'_>, ids: &[String]) -> Result<(), ItemsError> {
     if ids.is_empty() {
         return Ok(());
     }
@@ -1348,7 +1356,10 @@ pub const MAX_PREVIEW_BYTES: usize = 1_024;
 /// Returns `None` when no FTS entry exists for the given id (image items or
 /// pre-FTS rows). Callers should render an appropriate placeholder in that
 /// case (e.g. `"[image — id:XXXXXXXX]"`).
-pub fn fetch_text_preview<D: DbRead + ?Sized>(db: &D, id: &str) -> Result<Option<String>, ItemsError> {
+pub fn fetch_text_preview<D: DbRead + ?Sized>(
+    db: &D,
+    id: &str,
+) -> Result<Option<String>, ItemsError> {
     let result: Option<String> = db
         .conn()
         .query_row(
@@ -1444,9 +1455,7 @@ pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsE
 pub fn get_device_names<D: DbRead + ?Sized>(
     db: &D,
 ) -> Result<std::collections::HashMap<String, String>, ItemsError> {
-    let mut stmt = db
-        .conn()
-        .prepare("SELECT id, name FROM devices")?;
+    let mut stmt = db.conn().prepare("SELECT id, name FROM devices")?;
     let pairs = stmt
         .query_map([], |row| {
             let id: String = row.get(0)?;
@@ -1748,12 +1757,12 @@ mod tests {
             .map(|(row, pt)| (row.id, pt))
             .collect();
         got.sort();
-        let mut want = vec![
-            (good_a, b"hello-A".to_vec()),
-            (good_b, b"hello-B".to_vec()),
-        ];
+        let mut want = vec![(good_a, b"hello-A".to_vec()), (good_b, b"hello-B".to_vec())];
         want.sort();
-        assert_eq!(got, want, "decrypted plaintext must match what was encrypted");
+        assert_eq!(
+            got, want,
+            "decrypted plaintext must match what was encrypted"
+        );
     }
 
     #[test]
@@ -2273,7 +2282,10 @@ mod tests {
             after_pin.lamport_ts,
             after_unpin.lamport_ts
         );
-        assert!(!after_unpin.pinned, "item must be unpinned after unpin_item");
+        assert!(
+            !after_unpin.pinned,
+            "item must be unpinned after unpin_item"
+        );
         assert!(
             after_unpin.pin_order.is_none(),
             "unpin_item must clear pin_order back to NULL"
@@ -2684,8 +2696,14 @@ mod tests {
             "id with no FTS entry must be absent from the batch map"
         );
         // Parity with the per-item helper for both present ids.
-        assert_eq!(map.get(&a.id).cloned(), fetch_text_preview(&db, &a.id).unwrap());
-        assert_eq!(map.get(&b.id).cloned(), fetch_text_preview(&db, &b.id).unwrap());
+        assert_eq!(
+            map.get(&a.id).cloned(),
+            fetch_text_preview(&db, &a.id).unwrap()
+        );
+        assert_eq!(
+            map.get(&b.id).cloned(),
+            fetch_text_preview(&db, &b.id).unwrap()
+        );
     }
 
     /// CopyPaste-mnte: empty id slice issues no SQL and returns an empty map.

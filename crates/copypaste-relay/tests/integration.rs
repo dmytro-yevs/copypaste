@@ -312,9 +312,14 @@ async fn test_push_and_pull_roundtrip() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // Push an item.
@@ -368,9 +373,14 @@ async fn test_pull_since_wall_time() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     for wt in [1000u64, 2000, 3000] {
@@ -402,9 +412,14 @@ async fn test_push_invalid_content_type_is_400() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
     let (status, _) = post_json(
         app,
@@ -421,9 +436,14 @@ async fn test_delete_nonexistent_item_is_404() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
     let del_status = delete_req(app, &format!("/devices/{DEVICE_A}/items/9999"), &a_token).await;
     assert_eq!(del_status, StatusCode::NOT_FOUND);
@@ -442,9 +462,14 @@ async fn test_push_oversized_text_item_is_413_item_size_exceeded() {
     let (app, state) = make_app_with_item_bytes(20 * 1024 * 1024);
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // 8 MiB + 1 byte of decoded payload — over the Free text limit (8 MiB),
@@ -468,9 +493,14 @@ async fn test_push_text_item_at_limit_is_accepted() {
     let (app, state) = make_app_with_item_bytes(20 * 1024 * 1024);
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // Exactly 8 MiB of decoded payload — at the limit, must pass.
@@ -512,9 +542,14 @@ async fn test_push_route_advances_last_seen() {
     // Register a device directly in the store (no HTTP round-trip needed for setup).
     let token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // Rewind last_seen to 2 hours ago — well past any realistic cleanup threshold.
@@ -583,9 +618,14 @@ async fn test_pull_route_advances_last_seen() {
 
     let token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // Rewind last_seen to 2 hours ago.
@@ -635,9 +675,14 @@ async fn test_push_large_image_under_image_limit_is_accepted() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_A.to_string(),
+            "Device A".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // 2 MiB image: well under both the 8 MiB text cap and the 10 MiB image cap.

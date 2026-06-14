@@ -253,7 +253,11 @@ async fn coregistration_with_correct_pop_is_accepted() {
         "pop_b64": pop.clone(),
     });
     let (status1, body1) = post_register(app.clone(), first).await;
-    assert_eq!(status1, StatusCode::CREATED, "first registration must succeed");
+    assert_eq!(
+        status1,
+        StatusCode::CREATED,
+        "first registration must succeed"
+    );
     let token1 = body1["auth_token"].as_str().unwrap().to_owned();
 
     // Second device on the same account co-registers with the same PoP.

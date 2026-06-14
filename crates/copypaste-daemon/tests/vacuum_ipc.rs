@@ -81,8 +81,7 @@ fn wait_for_socket(socket_path: &Path, timeout: Duration) -> bool {
 }
 
 fn ipc_roundtrip(socket_path: &Path, request: &str) -> serde_json::Value {
-    let mut stream =
-        UnixStream::connect(socket_path).expect("could not connect to daemon socket");
+    let mut stream = UnixStream::connect(socket_path).expect("could not connect to daemon socket");
     stream
         .set_read_timeout(Some(Duration::from_secs(10)))
         .unwrap();

@@ -32,25 +32,27 @@ describe("ContentIcon", () => {
     expect(svg!.className.baseVal).toContain("text-ide-accent");
   });
 
-  it("renders url icon with info class", () => {
+  it("renders url icon with sky class", () => {
     const { container } = render(<ContentIcon contentType="url" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
-    expect(svg!.className.baseVal).toContain("text-ide-info");
+    // 1hqt: URL uses the sky token (was info)
+    expect(svg!.className.baseVal).toContain("text-ide-sky");
   });
 
-  it("renders image icon with violet class for 'image'", () => {
+  it("renders image icon with sky class for 'image'", () => {
     const { container } = render(<ContentIcon contentType="image" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
-    expect(svg!.className.baseVal).toContain("text-ide-violet");
+    // 1hqt: IMAGE uses the sky token (was violet)
+    expect(svg!.className.baseVal).toContain("text-ide-sky");
   });
 
-  it("renders image icon with violet class for 'image/png' (MIME prefix)", () => {
+  it("renders image icon with sky class for 'image/png' (MIME prefix)", () => {
     const { container } = render(<ContentIcon contentType="image/png" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
-    expect(svg!.className.baseVal).toContain("text-ide-violet");
+    expect(svg!.className.baseVal).toContain("text-ide-sky");
   });
 
   it("renders code icon with violet class for 'code'", () => {
@@ -102,16 +104,16 @@ describe("KindChip", () => {
     expect(el.className).toContain("text-ide-accent");
   });
 
-  it("renders URL label with info class", () => {
+  it("renders URL label with sky class", () => {
     const { getByText } = render(<KindChip contentType="url" />);
     const el = getByText("URL");
-    expect(el.className).toContain("text-ide-info");
+    expect(el.className).toContain("text-ide-sky");
   });
 
-  it("renders IMAGE label with violet class", () => {
+  it("renders IMAGE label with sky class", () => {
     const { getByText } = render(<KindChip contentType="image" />);
     const el = getByText("IMAGE");
-    expect(el.className).toContain("text-ide-violet");
+    expect(el.className).toContain("text-ide-sky");
   });
 
   it("renders CODE label with violet class", () => {
@@ -133,7 +135,7 @@ describe("KindChip", () => {
       <KindChip contentType="text" kind="IMAGE" />
     );
     const el = getByText("IMAGE");
-    expect(el.className).toContain("text-ide-violet");
+    expect(el.className).toContain("text-ide-sky");
   });
 });
 

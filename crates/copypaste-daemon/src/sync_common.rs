@@ -53,8 +53,7 @@ use copypaste_core::{
 /// still bounding worst-case latency to a recoverable window. Without a
 /// timeout, reqwest's default is infinite — one unresponsive endpoint would
 /// block the whole sync loop permanently.
-pub(crate) const SYNC_HTTP_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(30);
+pub(crate) const SYNC_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Version byte for the cloud file-identity header. Bump only with a matching
 /// decoder branch.

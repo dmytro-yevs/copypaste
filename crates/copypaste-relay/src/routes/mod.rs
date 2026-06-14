@@ -172,9 +172,7 @@ where
             .key_extractor(per_ip_key)
             .finish()
             .ok_or_else(|| {
-                GovernorConfigError(
-                    "per-IP: per_second or burst_size is zero".to_string(),
-                )
+                GovernorConfigError("per-IP: per_second or burst_size is zero".to_string())
             })?,
     );
 
@@ -197,9 +195,7 @@ where
             .key_extractor(DeviceIdKeyExtractor)
             .finish()
             .ok_or_else(|| {
-                GovernorConfigError(
-                    "per-device: per_second or burst_size is zero".to_string(),
-                )
+                GovernorConfigError("per-device: per_second or burst_size is zero".to_string())
             })?,
     );
 

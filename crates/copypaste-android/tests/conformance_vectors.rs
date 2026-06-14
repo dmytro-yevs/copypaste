@@ -90,13 +90,23 @@ fn generate_and_selfcheck_golden_vectors() {
     let mut item_vectors = Vec::new();
     for (label, plaintext) in item_plaintexts() {
         let item_id = format!("conformance-item-{label}");
-        let blob = encrypt_text(item_id.clone(), plaintext.as_bytes(), &key, item_key_version)
-            .expect("encrypt_text must succeed");
+        let blob = encrypt_text(
+            item_id.clone(),
+            plaintext.as_bytes(),
+            &key,
+            item_key_version,
+        )
+        .expect("encrypt_text must succeed");
 
         // Rust self-check: round-trip its own freshly produced vector.
-        let recovered =
-            decrypt_text(item_id.clone(), &blob.ciphertext, &blob.nonce, &key, item_key_version)
-                .expect("decrypt_text must round-trip");
+        let recovered = decrypt_text(
+            item_id.clone(),
+            &blob.ciphertext,
+            &blob.nonce,
+            &key,
+            item_key_version,
+        )
+        .expect("decrypt_text must round-trip");
         assert_eq!(
             recovered,
             plaintext.as_bytes(),
@@ -259,8 +269,13 @@ fn rust_recovers_committed_fixture() {
             let nonce = from_hex(vec["nonce_hex"].as_str().unwrap());
             let ct = from_hex(vec["ciphertext_hex"].as_str().unwrap());
             let expected = vec["plaintext_utf8"].as_str().unwrap();
-            let key_version: u8 = vec["key_version_u8"].as_u64().expect("key_version_u8 field") as u8;
-            assert_eq!(key_version, 1, "item_aead_v1_anchor vector must use key_version=1");
+            let key_version: u8 = vec["key_version_u8"]
+                .as_u64()
+                .expect("key_version_u8 field") as u8;
+            assert_eq!(
+                key_version, 1,
+                "item_aead_v1_anchor vector must use key_version=1"
+            );
 
             let pt = decrypt_text(item_id, &ct, &nonce, &key, key_version)
                 .expect("decrypt committed v1 anchor vector");
@@ -338,7 +353,13 @@ fn external_kat_xchacha20poly1305_cfrg_draft_inputs() {
 
     // Encrypt with fixed nonce: must produce the committed ciphertext exactly.
     let ct = cipher
-        .encrypt(&nonce, Payload { msg: &plaintext, aad: &aad })
+        .encrypt(
+            &nonce,
+            Payload {
+                msg: &plaintext,
+                aad: &aad,
+            },
+        )
         .expect("XChaCha20-Poly1305 encryption must succeed");
     assert_eq!(
         ct, expected_ct_with_tag,
@@ -348,11 +369,16 @@ fn external_kat_xchacha20poly1305_cfrg_draft_inputs() {
 
     // Decrypt the committed ciphertext: must recover the original plaintext.
     let recovered = cipher
-        .decrypt(&nonce, Payload { msg: &expected_ct_with_tag, aad: &aad })
+        .decrypt(
+            &nonce,
+            Payload {
+                msg: &expected_ct_with_tag,
+                aad: &aad,
+            },
+        )
         .expect("XChaCha20-Poly1305 decryption of committed KAT vector must succeed");
     assert_eq!(
         recovered, plaintext,
         "decrypted CFRG-input KAT ciphertext does not match expected plaintext"
     );
 }
-

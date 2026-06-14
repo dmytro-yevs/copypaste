@@ -15,10 +15,9 @@ use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
     decrypt_item_by_version, decrypt_item_with_aad, derive_v2, encode_thumbnail_from_png,
     encrypt_item_with_aad, ensure_revoked_devices_table, fetch_text_preview,
-    fetch_text_previews_batch, get_device_names,
-    get_item_by_id, get_page, get_page_pinned_first, pin_item, reorder_pinned, revoke_device,
-    revoke_devices, search_items, set_thumb, unpin_item, Database, DbRead, EncryptError, FileMeta,
-    SensitiveDetector, NONCE_SIZE,
+    fetch_text_previews_batch, get_device_names, get_item_by_id, get_page, get_page_pinned_first,
+    pin_item, reorder_pinned, revoke_device, revoke_devices, search_items, set_thumb, unpin_item,
+    Database, DbRead, EncryptError, FileMeta, SensitiveDetector, NONCE_SIZE,
 };
 // `soft_delete_item` is not yet re-exported from the crate root so we use the
 // full module path (the `storage` module is `pub`).
@@ -1591,9 +1590,7 @@ impl IpcServer {
             live_peer_rtt_ms: Arc::new(std::sync::Mutex::new(None)),
             p2p_sync_crypto: None,
             pending_bootstrap: Arc::new(tokio::sync::Mutex::new(None)),
-            peer_event_queue: Arc::new(std::sync::Mutex::new(
-                std::collections::VecDeque::new(),
-            )),
+            peer_event_queue: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
         }
     }
 
@@ -3829,83 +3826,84 @@ impl IpcServer {
                     Internal(String),
                     Auth(String),
                 }
-                let join = tokio::task::spawn_blocking(move || -> anyhow::Result<ItemImageResult> {
-                    let item = {
-                        let db = db_arc.blocking_lock();
-                        get_item_by_id(&*db, &id_for_task)?
-                    };
-                    let mut item = match item {
-                        Some(it) => it,
-                        None => return Ok(ItemImageResult::NotFound),
-                    };
-                    let is_image = item.content_type == "image"
-                        || item.content_type.starts_with("image/");
-                    if !is_image {
-                        return Ok(ItemImageResult::NotImage(format!(
-                            "item {id_for_task} is not an image (content_type: {})",
-                            item.content_type
-                        )));
-                    }
-                    // Move the encrypted blob out of the item — no extra clone.
-                    let content = match item.content.take() {
-                        Some(b) => b,
-                        None => {
-                            return Ok(ItemImageResult::Internal(format!(
-                                "image item {id_for_task} has no content blob"
-                            )))
+                let join =
+                    tokio::task::spawn_blocking(move || -> anyhow::Result<ItemImageResult> {
+                        let item = {
+                            let db = db_arc.blocking_lock();
+                            get_item_by_id(&*db, &id_for_task)?
+                        };
+                        let mut item = match item {
+                            Some(it) => it,
+                            None => return Ok(ItemImageResult::NotFound),
+                        };
+                        let is_image =
+                            item.content_type == "image" || item.content_type.starts_with("image/");
+                        if !is_image {
+                            return Ok(ItemImageResult::NotImage(format!(
+                                "item {id_for_task} is not an image (content_type: {})",
+                                item.content_type
+                            )));
                         }
-                    };
-                    let meta_json = match item.blob_ref.as_deref() {
-                        Some(s) => s,
-                        None => {
-                            return Ok(ItemImageResult::Internal(format!(
-                                "image item {id_for_task} missing blob_ref metadata"
-                            )))
-                        }
-                    };
-                    let file_id = match parse_image_file_id(meta_json) {
-                        Ok(fid) => fid,
-                        Err(e) => {
-                            return Ok(ItemImageResult::Internal(format!(
-                                "image item {id_for_task} blob_ref parse error: {e}"
-                            )))
-                        }
-                    };
-                    let chunks = match chunks_from_blob(&content) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            return Ok(ItemImageResult::Internal(format!(
-                                "image item {id_for_task} chunks_from_blob failed: {e}"
-                            )))
-                        }
-                    };
-                    let v2_key = derive_v2(&v1_key);
-                    let key_to_use = if item.key_version == 1 {
-                        &v1_key
-                    } else {
-                        &*v2_key
-                    };
-                    let png_bytes = match decode_image(&chunks, key_to_use, &file_id) {
-                        Ok(b) => b,
-                        Err(e) => {
-                            return Ok(ItemImageResult::Auth(format!(
-                                "image item {id_for_task} decode failed: {e}"
-                            )))
-                        }
-                    };
-                    use base64::Engine as _;
-                    let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                    // CopyPaste-eq9m: free the decoded image bytes before we build
-                    // the URI so the base64 string is the only large allocation
-                    // still alive when we format the data URI.
-                    drop(png_bytes);
-                    // The stored content_type is "image" (legacy) or a real MIME
-                    // type. For the data URI we always emit "image/png" because
-                    // decode_image always returns PNG bytes.
-                    let data_uri = format!("data:image/png;base64,{b64}");
-                    Ok(ItemImageResult::Ok(data_uri))
-                })
-                .await;
+                        // Move the encrypted blob out of the item — no extra clone.
+                        let content = match item.content.take() {
+                            Some(b) => b,
+                            None => {
+                                return Ok(ItemImageResult::Internal(format!(
+                                    "image item {id_for_task} has no content blob"
+                                )))
+                            }
+                        };
+                        let meta_json = match item.blob_ref.as_deref() {
+                            Some(s) => s,
+                            None => {
+                                return Ok(ItemImageResult::Internal(format!(
+                                    "image item {id_for_task} missing blob_ref metadata"
+                                )))
+                            }
+                        };
+                        let file_id = match parse_image_file_id(meta_json) {
+                            Ok(fid) => fid,
+                            Err(e) => {
+                                return Ok(ItemImageResult::Internal(format!(
+                                    "image item {id_for_task} blob_ref parse error: {e}"
+                                )))
+                            }
+                        };
+                        let chunks = match chunks_from_blob(&content) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return Ok(ItemImageResult::Internal(format!(
+                                    "image item {id_for_task} chunks_from_blob failed: {e}"
+                                )))
+                            }
+                        };
+                        let v2_key = derive_v2(&v1_key);
+                        let key_to_use = if item.key_version == 1 {
+                            &v1_key
+                        } else {
+                            &*v2_key
+                        };
+                        let png_bytes = match decode_image(&chunks, key_to_use, &file_id) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                return Ok(ItemImageResult::Auth(format!(
+                                    "image item {id_for_task} decode failed: {e}"
+                                )))
+                            }
+                        };
+                        use base64::Engine as _;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                        // CopyPaste-eq9m: free the decoded image bytes before we build
+                        // the URI so the base64 string is the only large allocation
+                        // still alive when we format the data URI.
+                        drop(png_bytes);
+                        // The stored content_type is "image" (legacy) or a real MIME
+                        // type. For the data URI we always emit "image/png" because
+                        // decode_image always returns PNG bytes.
+                        let data_uri = format!("data:image/png;base64,{b64}");
+                        Ok(ItemImageResult::Ok(data_uri))
+                    })
+                    .await;
                 match join {
                     Ok(Ok(ItemImageResult::Ok(data_uri))) => {
                         Response::ok(req.id, serde_json::json!({ "data_uri": data_uri }))
@@ -4156,78 +4154,79 @@ impl IpcServer {
                     Internal(String),
                     Auth(String),
                 }
-                let join = tokio::task::spawn_blocking(move || -> anyhow::Result<ItemFileResult> {
-                    let item = {
-                        let db = db_arc.blocking_lock();
-                        get_item_by_id(&*db, &id_for_task)?
-                    };
-                    let mut item = match item {
-                        Some(it) => it,
-                        None => return Ok(ItemFileResult::NotFound),
-                    };
-                    if item.content_type != "file" {
-                        return Ok(ItemFileResult::NotFile(format!(
-                            "item {id_for_task} is not a file (content_type: {})",
-                            item.content_type
-                        )));
-                    }
-                    let content = match item.content.take() {
-                        Some(b) => b,
-                        None => {
-                            return Ok(ItemFileResult::Internal(format!(
-                                "file item {id_for_task} has no content blob"
-                            )))
+                let join =
+                    tokio::task::spawn_blocking(move || -> anyhow::Result<ItemFileResult> {
+                        let item = {
+                            let db = db_arc.blocking_lock();
+                            get_item_by_id(&*db, &id_for_task)?
+                        };
+                        let mut item = match item {
+                            Some(it) => it,
+                            None => return Ok(ItemFileResult::NotFound),
+                        };
+                        if item.content_type != "file" {
+                            return Ok(ItemFileResult::NotFile(format!(
+                                "item {id_for_task} is not a file (content_type: {})",
+                                item.content_type
+                            )));
                         }
-                    };
-                    let meta_json = match item.blob_ref.as_deref() {
-                        Some(s) => s,
-                        None => {
-                            return Ok(ItemFileResult::Internal(format!(
-                                "file item {id_for_task} missing blob_ref metadata"
-                            )))
-                        }
-                    };
-                    let file_meta = match parse_file_meta(meta_json) {
-                        Ok(m) => m,
-                        Err(e) => {
-                            return Ok(ItemFileResult::Internal(format!(
-                                "file item {id_for_task} blob_ref parse error: {e}"
-                            )))
-                        }
-                    };
-                    let chunks = match chunks_from_blob(&content) {
-                        Ok(c) => c,
-                        Err(e) => {
-                            return Ok(ItemFileResult::Internal(format!(
-                                "file item {id_for_task} chunks_from_blob failed: {e}"
-                            )))
-                        }
-                    };
-                    let v2_key = derive_v2(&v1_key);
-                    let key_to_use = if item.key_version == 1 {
-                        &v1_key
-                    } else {
-                        &*v2_key
-                    };
-                    let raw_bytes = match decode_file(&chunks, key_to_use, &file_meta.file_id) {
-                        Ok(b) => b,
-                        Err(e) => {
-                            return Ok(ItemFileResult::Auth(format!(
-                                "file item {id_for_task} decode failed: {e}"
-                            )))
-                        }
-                    };
-                    use base64::Engine as _;
-                    let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
-                    // CopyPaste-eq9m: free the decoded file bytes before returning.
-                    drop(raw_bytes);
-                    Ok(ItemFileResult::Ok {
-                        filename: file_meta.filename,
-                        mime: file_meta.mime,
-                        data_b64,
+                        let content = match item.content.take() {
+                            Some(b) => b,
+                            None => {
+                                return Ok(ItemFileResult::Internal(format!(
+                                    "file item {id_for_task} has no content blob"
+                                )))
+                            }
+                        };
+                        let meta_json = match item.blob_ref.as_deref() {
+                            Some(s) => s,
+                            None => {
+                                return Ok(ItemFileResult::Internal(format!(
+                                    "file item {id_for_task} missing blob_ref metadata"
+                                )))
+                            }
+                        };
+                        let file_meta = match parse_file_meta(meta_json) {
+                            Ok(m) => m,
+                            Err(e) => {
+                                return Ok(ItemFileResult::Internal(format!(
+                                    "file item {id_for_task} blob_ref parse error: {e}"
+                                )))
+                            }
+                        };
+                        let chunks = match chunks_from_blob(&content) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                return Ok(ItemFileResult::Internal(format!(
+                                    "file item {id_for_task} chunks_from_blob failed: {e}"
+                                )))
+                            }
+                        };
+                        let v2_key = derive_v2(&v1_key);
+                        let key_to_use = if item.key_version == 1 {
+                            &v1_key
+                        } else {
+                            &*v2_key
+                        };
+                        let raw_bytes = match decode_file(&chunks, key_to_use, &file_meta.file_id) {
+                            Ok(b) => b,
+                            Err(e) => {
+                                return Ok(ItemFileResult::Auth(format!(
+                                    "file item {id_for_task} decode failed: {e}"
+                                )))
+                            }
+                        };
+                        use base64::Engine as _;
+                        let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
+                        // CopyPaste-eq9m: free the decoded file bytes before returning.
+                        drop(raw_bytes);
+                        Ok(ItemFileResult::Ok {
+                            filename: file_meta.filename,
+                            mime: file_meta.mime,
+                            data_b64,
+                        })
                     })
-                })
-                .await;
+                    .await;
                 match join {
                     Ok(Ok(ItemFileResult::Ok {
                         filename,
@@ -4637,9 +4636,7 @@ impl IpcServer {
                 let auth =
                     copypaste_supabase::auth::AuthClient::new(&cfg.supabase_url, &cfg.anon_key);
                 let sign_in_result = match (cfg.email.as_deref(), cfg.password.as_deref()) {
-                    (Some(email), Some(password))
-                        if !email.is_empty() && !password.is_empty() =>
-                    {
+                    (Some(email), Some(password)) if !email.is_empty() && !password.is_empty() => {
                         auth.sign_in(email, password).await.map(|_| ())
                     }
                     // No email/password → anon key is the bearer; sign-in
@@ -4679,9 +4676,7 @@ impl IpcServer {
             // are not available. Return not_implemented so clients see a
             // machine-readable error_code rather than "method not found".
             #[cfg(not(feature = "cloud-sync"))]
-            "cloud_sign_in" | "cloud_sign_out" => {
-                Response::not_implemented(req.id, "cloud-sync")
-            }
+            "cloud_sign_in" | "cloud_sign_out" => Response::not_implemented(req.id, "cloud-sync"),
 
             // ── cloud-sync IPC methods ──────────────────────────────────────
             //
@@ -5257,9 +5252,7 @@ impl IpcServer {
                     // Stat the file before any writes so we can report
                     // reclaimed bytes.  The stat uses the filesystem path, not
                     // in-memory pages, so it accurately reflects WAL state.
-                    let size_before = std::fs::metadata(&db_path)
-                        .map(|m| m.len())
-                        .unwrap_or(0);
+                    let size_before = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
 
                     if dry_run {
                         // Verify the connection is healthy by running a cheap
@@ -5275,8 +5268,9 @@ impl IpcServer {
                         // Flush WAL pages into the main file before VACUUM so
                         // the "after" size reflects the fully compacted state.
                         // A failed checkpoint is non-fatal — log and continue.
-                        if let Err(e) =
-                            guard.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                        if let Err(e) = guard
+                            .conn()
+                            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
                         {
                             tracing::warn!(
                                 error = %e,
@@ -12509,7 +12503,10 @@ mod tests {
         let resp = server
             .dispatch(r#"{"id":"1","method":"cloud_sign_in"}"#)
             .await;
-        assert!(!resp.ok, "cloud_sign_in with no config must fail; got {resp:?}");
+        assert!(
+            !resp.ok,
+            "cloud_sign_in with no config must fail; got {resp:?}"
+        );
         assert_eq!(
             resp.error_code,
             Some(ERR_CODE_INVALID_ARGUMENT),

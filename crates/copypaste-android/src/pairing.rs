@@ -851,7 +851,11 @@ mod tests {
             !c.try_begin(PairingRole::Responder),
             "try_begin must be refused while Initiating"
         );
-        assert_eq!(c.snapshot().role(), Some(PairingRole::Initiator), "state must be unchanged");
+        assert_eq!(
+            c.snapshot().role(),
+            Some(PairingRole::Initiator),
+            "state must be unchanged"
+        );
 
         // Refused while AwaitingSas.
         let _rx = c.enter_awaiting_sas("999999".to_string(), PairingRole::Initiator);
@@ -860,7 +864,11 @@ mod tests {
             !c.try_begin(PairingRole::Responder),
             "try_begin must be refused while AwaitingSas"
         );
-        assert_eq!(c.snapshot().as_str(), "awaiting_sas", "state must be unchanged");
+        assert_eq!(
+            c.snapshot().as_str(),
+            "awaiting_sas",
+            "state must be unchanged"
+        );
     }
 
     #[test]

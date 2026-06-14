@@ -151,7 +151,9 @@ impl SyncCrypto {
     /// `peer_sinks`. `peers.json` stores colon-hex (e.g. `"aa:bb:cc"`); we
     /// normalise via `canonical_fingerprint` so lookups by `DeviceFingerprint`
     /// always hit (CopyPaste-716 secondary fix).
-    fn load_keys_from_peers(peers_path: &std::path::Path) -> std::collections::HashMap<String, [u8; 32]> {
+    fn load_keys_from_peers(
+        peers_path: &std::path::Path,
+    ) -> std::collections::HashMap<String, [u8; 32]> {
         use base64::Engine as _;
         crate::peers::load_peers(peers_path)
             .into_iter()
@@ -185,7 +187,10 @@ impl SyncCrypto {
             .cached_peer_keys
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        guard.get(canonical.as_str()).copied().map(SyncKey::from_bytes)
+        guard
+            .get(canonical.as_str())
+            .copied()
+            .map(SyncKey::from_bytes)
     }
 
     /// Return ANY available shared content sync key (if any peer has one).
@@ -2069,7 +2074,7 @@ mod tests {
     fn three_device_fanout_uses_per_peer_key_not_first_peer_key() {
         use base64::Engine as _;
         use copypaste_core::{
-            build_item_aad_v2, derive_v2, decrypt_from_cloud, encrypt_item_with_aad,
+            build_item_aad_v2, decrypt_from_cloud, derive_v2, encrypt_item_with_aad,
             AAD_SCHEMA_VERSION_V4,
         };
         use tempfile::tempdir;
@@ -2171,8 +2176,8 @@ mod tests {
 
         // ── Verify: B's blob decrypts under K_AB ─────────────────────────────
         let key_b = copypaste_core::SyncKey::from_bytes(k_ab);
-        let decrypted_b = decrypt_from_cloud(&key_b, &item_id, &blob_b)
-            .expect("blob_b must decrypt under K_AB");
+        let decrypted_b =
+            decrypt_from_cloud(&key_b, &item_id, &blob_b).expect("blob_b must decrypt under K_AB");
         assert_eq!(
             decrypted_b, plaintext,
             "B recovers A's original plaintext from its blob"
@@ -2180,8 +2185,8 @@ mod tests {
 
         // ── Verify: C's blob decrypts under K_AC ─────────────────────────────
         let key_c = copypaste_core::SyncKey::from_bytes(k_ac);
-        let decrypted_c = decrypt_from_cloud(&key_c, &item_id, &blob_c)
-            .expect("blob_c must decrypt under K_AC");
+        let decrypted_c =
+            decrypt_from_cloud(&key_c, &item_id, &blob_c).expect("blob_c must decrypt under K_AC");
         assert_eq!(
             decrypted_c, plaintext,
             "C recovers A's original plaintext from its blob"
@@ -2220,8 +2225,8 @@ mod tests {
     async fn catchup_items_uses_per_peer_key_not_first_peer_key() {
         use base64::Engine as _;
         use copypaste_core::{
-            build_item_aad_v2, derive_v2, decrypt_from_cloud, encrypt_item_with_aad,
-            insert_item, AAD_SCHEMA_VERSION_V4,
+            build_item_aad_v2, decrypt_from_cloud, derive_v2, encrypt_item_with_aad, insert_item,
+            AAD_SCHEMA_VERSION_V4,
         };
         use tempfile::tempdir;
 
@@ -2271,7 +2276,10 @@ mod tests {
         let key_b = copypaste_core::SyncKey::from_bytes(k_ab);
         let dec_b = decrypt_from_cloud(&key_b, &item_id, &blob_b)
             .expect("B's catch-up blob must decrypt under K_AB");
-        assert_eq!(dec_b, plaintext, "B recovers original plaintext from catch-up");
+        assert_eq!(
+            dec_b, plaintext,
+            "B recovers original plaintext from catch-up"
+        );
 
         // Catch-up for peer C: items must be encrypted under K_AC.
         let items_for_c = catchup_items(&db_guard, "device-A", &crypto_a, fp_c);
@@ -2280,7 +2288,10 @@ mod tests {
         let key_c = copypaste_core::SyncKey::from_bytes(k_ac);
         let dec_c = decrypt_from_cloud(&key_c, &item_id, &blob_c)
             .expect("C's catch-up blob must decrypt under K_AC");
-        assert_eq!(dec_c, plaintext, "C recovers original plaintext from catch-up");
+        assert_eq!(
+            dec_c, plaintext,
+            "C recovers original plaintext from catch-up"
+        );
 
         // Key isolation: C's catch-up blob must NOT decrypt under K_AB.
         assert!(
@@ -2487,7 +2498,10 @@ mod tests {
             let row = copypaste_core::get_item_by_item_id(&g, "ghost-iid")
                 .unwrap()
                 .expect("tombstone row must exist");
-            assert!(row.deleted, "unknown-item tombstone must persist as deleted");
+            assert!(
+                row.deleted,
+                "unknown-item tombstone must persist as deleted"
+            );
             // The user-facing list must not show it.
             assert!(
                 copypaste_core::get_page(&*g, 10, 0).unwrap().is_empty(),
@@ -2505,7 +2519,10 @@ mod tests {
         let row = copypaste_core::get_item_by_item_id(&g, "ghost-iid")
             .unwrap()
             .expect("row still present");
-        assert!(row.deleted, "item must stay deleted after the racing create");
+        assert!(
+            row.deleted,
+            "item must stay deleted after the racing create"
+        );
         assert!(
             copypaste_core::get_page(&*g, 10, 0).unwrap().is_empty(),
             "item must remain hidden from history"
@@ -2708,9 +2725,12 @@ mod tests {
         let item_id_sensitive = "kcf-sensitive".to_string();
         // A real AWS access key triggers the detector at confidence 0.99.
         let sensitive_plaintext = "AKIAIOSFODNN7EXAMPLE";
-        let blob_sensitive =
-            encrypt_for_cloud(&key_sync, &item_id_sensitive, sensitive_plaintext.as_bytes())
-                .expect("encrypt sensitive");
+        let blob_sensitive = encrypt_for_cloud(
+            &key_sync,
+            &item_id_sensitive,
+            sensitive_plaintext.as_bytes(),
+        )
+        .expect("encrypt sensitive");
 
         let wire_sensitive = WireItem {
             deleted: false,
@@ -2751,9 +2771,8 @@ mod tests {
         // ── Test 2: non-sensitive plaintext → is_sensitive = false ───────────
         let item_id_plain = "kcf-plain".to_string();
         let plain_text = "hello world, nothing secret here";
-        let blob_plain =
-            encrypt_for_cloud(&key_sync, &item_id_plain, plain_text.as_bytes())
-                .expect("encrypt plain");
+        let blob_plain = encrypt_for_cloud(&key_sync, &item_id_plain, plain_text.as_bytes())
+            .expect("encrypt plain");
 
         let wire_plain = WireItem {
             deleted: false,

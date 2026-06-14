@@ -25,8 +25,8 @@
 //!   public-key and from every other key-derivation use of the sync key, so one
 //!   value can never be substituted for another.
 
-use hmac::{Hmac, Mac};
 use hkdf::Hkdf;
+use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
 /// HMAC-SHA256 context prefix for the relay proof-of-possession (PoP).
@@ -115,8 +115,8 @@ pub fn derive_relay_public_key(sync_key: &[u8; 32]) -> [u8; 32] {
 /// Derived from secret key material; do not log.
 pub fn derive_relay_registration_pop(sync_key: &[u8; 32], device_id: &str) -> [u8; 32] {
     // HMAC-SHA256(key=sync_key, msg="relay-registration-pop-v1:" + device_id)
-    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(sync_key)
-        .expect("HMAC accepts any key length");
+    let mut mac =
+        <Hmac<Sha256> as Mac>::new_from_slice(sync_key).expect("HMAC accepts any key length");
     mac.update(RELAY_POP_PREFIX);
     mac.update(device_id.as_bytes());
     let result = mac.finalize().into_bytes();

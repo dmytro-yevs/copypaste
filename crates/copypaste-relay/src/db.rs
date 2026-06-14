@@ -457,8 +457,17 @@ mod tests {
     #[test]
     fn insert_load_roundtrip() {
         let db = Db::open(IN_MEMORY_PATH).unwrap();
-        db.insert_device("d1", "Dev", "pk", "free", Some("10.0.0.1"), 100, 200, "AAAA")
-            .unwrap();
+        db.insert_device(
+            "d1",
+            "Dev",
+            "pk",
+            "free",
+            Some("10.0.0.1"),
+            100,
+            200,
+            "AAAA",
+        )
+        .unwrap();
         db.replace_tokens("d1", &[("tok-a".into(), 999), ("tok-b".into(), 1000)])
             .unwrap();
         db.insert_item("d1", 1, "text", "Yg==", 1000, 50).unwrap();

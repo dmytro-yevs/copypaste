@@ -169,6 +169,16 @@ jobs:
           key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-msrv-
 
+      - name: Install Tauri Linux system deps (glib/gtk/webkit for copypaste-ui)
+        # copypaste-ui (Tauri 2) pulls glib-sys/gtk/webkit2gtk-4.1 + soup3 via
+        # pkg-config; without these the MSRV check fails with
+        # "system library `glib-2.0` ... not found" before it ever type-checks.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libayatana-appindicator3-dev
+
       - name: cargo check (MSRV)
         # --workspace --all-targets catches all lib/bin/test/bench targets;
         # --locked pins to the committed Cargo.lock so the MSRV is not masked

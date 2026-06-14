@@ -139,7 +139,6 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;

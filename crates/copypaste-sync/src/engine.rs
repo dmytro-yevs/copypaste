@@ -303,13 +303,7 @@ impl SyncEngine {
         // --- WANT exchange ---
         // CopyPaste-ux2i: move `we_want` into the message (it is dead after this
         // send) instead of cloning the whole Vec<String>.
-        send_message(
-            stream,
-            &Message::Want {
-                item_ids: we_want,
-            },
-        )
-        .await?;
+        send_message(stream, &Message::Want { item_ids: we_want }).await?;
 
         let peer_want_msg = recv_message(stream).await?;
         let items_peer_wants: Vec<String> = match peer_want_msg {
@@ -978,10 +972,7 @@ mod tests {
             "A must converge: exactly 1 upsert for shared-clip"
         );
         assert_eq!(upsert_a[0].item_id, "shared-clip");
-        assert_eq!(
-            upsert_a[0].lamport_ts, 15,
-            "higher-lamport (B) wins LWW"
-        );
+        assert_eq!(upsert_a[0].lamport_ts, 15, "higher-lamport (B) wins LWW");
         assert_eq!(
             upsert_a[0].content,
             Some(b"hello from B (newer)".to_vec()),

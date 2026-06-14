@@ -258,7 +258,11 @@ fn try_decrypt_one(item: &EncryptedItem, key: &[u8; 32]) -> Option<Vec<u8>> {
     let nonce: [u8; NONCE_SIZE] = item.nonce.as_slice().try_into().ok()?;
     let aad = match item.key_version {
         1 => build_item_aad(&item.item_id, AAD_SCHEMA_VERSION),
-        2 => build_item_aad_v2(&item.item_id, AAD_SCHEMA_VERSION_V4, u32::from(item.key_version)),
+        2 => build_item_aad_v2(
+            &item.item_id,
+            AAD_SCHEMA_VERSION_V4,
+            u32::from(item.key_version),
+        ),
         // Unknown key_version: undecryptable by definition — skip.
         _ => return None,
     };
@@ -1634,7 +1638,9 @@ pub fn sync_with_peer(
                         Err(_elapsed) => break,
                     }
                 }
-                Ok::<(Vec<WireItem>, bool), copypaste_p2p::transport::TransportError>((got, unpaired))
+                Ok::<(Vec<WireItem>, bool), copypaste_p2p::transport::TransportError>((
+                    got, unpaired,
+                ))
             })
             .map_err(
                 |e: copypaste_p2p::transport::TransportError| CopypasteError::P2pError {
@@ -2403,10 +2409,8 @@ pub fn add_clipboard_item(
         // persistent LamportClock in SharedPreferences).  A per-process atomic
         // gives correct logical ordering within this process; cross-session
         // ordering is maintained by the daemon's observe() on ingest.
-        static LAMPORT_COUNTER: std::sync::atomic::AtomicI64 =
-            std::sync::atomic::AtomicI64::new(1);
-        let lamport_ts = LAMPORT_COUNTER
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        static LAMPORT_COUNTER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+        let lamport_ts = LAMPORT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let mut item =
             copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
@@ -2576,7 +2580,10 @@ mod tests {
             ("item-B".to_string(), b"bravo".to_vec()),
         ];
         want.sort();
-        assert_eq!(got, want, "only the decryptable items, with correct plaintext");
+        assert_eq!(
+            got, want,
+            "only the decryptable items, with correct plaintext"
+        );
     }
 
     /// CopyPaste-00zz: an unknown `key_version` is undecryptable by definition
@@ -3964,8 +3971,7 @@ mod tests {
         let key = test_key();
         let item_id = "zeroize-test".to_string();
         // Use key_version=2 (current daemon default).
-        let blob =
-            encrypt_text(item_id.clone(), b"zeroize path check", &key, 2).expect("encrypt");
+        let blob = encrypt_text(item_id.clone(), b"zeroize path check", &key, 2).expect("encrypt");
         let pt = decrypt_text(item_id, &blob.ciphertext, &blob.nonce, &key, 2).expect("decrypt");
         assert_eq!(pt, b"zeroize path check");
     }

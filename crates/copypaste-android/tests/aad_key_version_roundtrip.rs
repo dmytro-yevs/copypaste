@@ -21,7 +21,9 @@ use copypaste_core::{
 
 /// Deterministic 32-byte test key (not secret — tests only).
 fn test_key() -> Vec<u8> {
-    (0u8..32u8).map(|i| i.wrapping_mul(11).wrapping_add(7)).collect()
+    (0u8..32u8)
+        .map(|i| i.wrapping_mul(11).wrapping_add(7))
+        .collect()
 }
 
 fn test_key_arr() -> [u8; 32] {
@@ -116,8 +118,8 @@ fn daemon_v2_ciphertext_decrypts_via_ffi_decrypt_text_v2() {
 
     // Daemon-side encryption path (mirrors decrypt_item_by_version arm for v=2).
     let daemon_aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2);
-    let (nonce, ciphertext) =
-        encrypt_item_with_aad(plaintext, &key, &daemon_aad).expect("daemon-side encrypt must succeed");
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &daemon_aad)
+        .expect("daemon-side encrypt must succeed");
 
     // Android FFI decrypt path.
     let recovered = decrypt_text(
@@ -146,8 +148,8 @@ fn daemon_v1_ciphertext_decrypts_via_ffi_decrypt_text_v1() {
     let plaintext = b"daemon wrote this with key_version=1 (legacy)";
 
     let daemon_aad = build_item_aad(item_id, AAD_SCHEMA_VERSION);
-    let (nonce, ciphertext) =
-        encrypt_item_with_aad(plaintext, &key, &daemon_aad).expect("daemon v1 encrypt must succeed");
+    let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &daemon_aad)
+        .expect("daemon v1 encrypt must succeed");
 
     let recovered = decrypt_text(
         item_id.to_string(),
@@ -181,10 +183,8 @@ fn v1_aad_content_is_item_id_pipe_3() {
     // Construct the expected v1 AAD explicitly.
     let expected_aad = format!("{item_id}|3").into_bytes();
 
-    let recovered =
-        decrypt_item_with_aad(&blob.ciphertext, &nonce, &key, &expected_aad).expect(
-            "direct decrypt with v1 AAD must succeed — confirms FFI uses \"{item_id}|3\"",
-        );
+    let recovered = decrypt_item_with_aad(&blob.ciphertext, &nonce, &key, &expected_aad)
+        .expect("direct decrypt with v1 AAD must succeed — confirms FFI uses \"{item_id}|3\"");
     assert_eq!(recovered, plaintext);
 }
 
@@ -202,9 +202,7 @@ fn v2_aad_content_is_item_id_pipe_4_pipe_2() {
     // Construct the expected v2 AAD explicitly.
     let expected_aad = format!("{item_id}|4|2").into_bytes();
 
-    let recovered =
-        decrypt_item_with_aad(&blob.ciphertext, &nonce, &key, &expected_aad).expect(
-            "direct decrypt with v2 AAD must succeed — confirms FFI uses \"{item_id}|4|2\"",
-        );
+    let recovered = decrypt_item_with_aad(&blob.ciphertext, &nonce, &key, &expected_aad)
+        .expect("direct decrypt with v2 AAD must succeed — confirms FFI uses \"{item_id}|4|2\"");
     assert_eq!(recovered, plaintext);
 }

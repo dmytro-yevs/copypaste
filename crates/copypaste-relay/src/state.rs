@@ -880,13 +880,7 @@ impl RelayStore {
         public_key_b64: String,
         pop_b64: String,
     ) -> Result<(String, i64), RelayError> {
-        self.register_device_with_tier(
-            device_id,
-            device_name,
-            public_key_b64,
-            pop_b64,
-            Tier::Free,
-        )
+        self.register_device_with_tier(device_id, device_name, public_key_b64, pop_b64, Tier::Free)
     }
 
     /// Register a new device using the default tier (`Tier::Free`), scoped to
@@ -1551,7 +1545,12 @@ mod tests {
     fn register_returns_bearer_token() {
         let mut store = make_store();
         let (token, expires_at) = store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         assert_eq!(token.len(), 32);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
@@ -1567,7 +1566,12 @@ mod tests {
         // device would be Unauthorized on its next request.
         let mut store = make_store();
         let (token, expires_at) = store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let now_unix = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1591,10 +1595,20 @@ mod tests {
         // keeping the original valid. BOTH tokens must authorize.
         let mut store = make_store();
         let (token1, _) = store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let (token2, _) = store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         assert_ne!(token1, token2, "co-registration must mint a distinct token");
         assert!(
@@ -1619,7 +1633,12 @@ mod tests {
         let mut tokens = Vec::new();
         for _ in 0..(MAX_TOKENS_PER_DEVICE + 1) {
             let (t, _) = store
-                .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+                .register_device(
+                    device_a_id(),
+                    "Device A".into(),
+                    valid_key_b64(),
+                    valid_pop_b64(),
+                )
                 .unwrap();
             tokens.push(t);
         }
@@ -1648,13 +1667,23 @@ mod tests {
         // co-registration rather than counting toward the cap.
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         // Forcibly expire the sole token.
         store.devices.get_mut(&device_a_id()).unwrap().tokens[0].expires_at_unix = 1;
         // Co-register: the expired entry is pruned, leaving only the new token.
         let (fresh, _) = store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let tokens = &store.devices[&device_a_id()].tokens;
         assert_eq!(tokens.len(), 1, "expired token must be pruned on add");
@@ -1666,7 +1695,12 @@ mod tests {
     fn verify_token_ok() {
         let mut store = make_store();
         let (token, _) = store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         assert!(store.verify_token(&device_a_id(), &token).is_ok());
     }
@@ -1675,7 +1709,12 @@ mod tests {
     fn verify_token_wrong_token_is_unauthorized() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let err = store
             .verify_token(&device_a_id(), "badtoken00000000000000000000000")
@@ -1689,7 +1728,12 @@ mod tests {
         // a wrong token) so an attacker cannot distinguish the two cases.
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         // Forcibly expire the device's sole token by rewinding `expires_at_unix`.
         let record = store.devices.get_mut(&device_a_id()).unwrap();
@@ -1703,7 +1747,12 @@ mod tests {
     fn get_device_returns_correct_info() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "My Mac".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "My Mac".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let record = store.get_device(&device_a_id()).unwrap();
         assert_eq!(record.device_id, device_a_id());
@@ -1723,7 +1772,12 @@ mod tests {
     fn push_returns_ascending_ids() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let id1 = push_text(&mut store, &device_a_id(), 1000);
         let id2 = push_text(&mut store, &device_a_id(), 2000);
@@ -1734,7 +1788,12 @@ mod tests {
     fn pull_returns_items_since_wall_time() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         push_text(&mut store, &device_a_id(), 1000);
         push_text(&mut store, &device_a_id(), 2000);
@@ -1751,7 +1810,12 @@ mod tests {
     fn pull_since_zero_returns_all() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         push_text(&mut store, &device_a_id(), 100);
         push_text(&mut store, &device_a_id(), 200);
@@ -1765,7 +1829,12 @@ mod tests {
     fn pull_sorted_ascending_by_wall_time() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         push_text(&mut store, &device_a_id(), 3000);
         push_text(&mut store, &device_a_id(), 1000);
@@ -1781,7 +1850,12 @@ mod tests {
     fn push_rejects_unknown_content_type() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let err = store
             .push_item(
@@ -1799,7 +1873,12 @@ mod tests {
     fn push_rejects_invalid_base64() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let err = store
             .push_item(
@@ -1817,7 +1896,12 @@ mod tests {
     fn push_rejects_oversized_payload() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         let big = B64.encode(b"hello world");
         let err = store
@@ -1830,7 +1914,12 @@ mod tests {
     fn push_quota_prunes_oldest_item() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 1) {
             push_text(&mut store, &device_a_id(), t);
@@ -1856,10 +1945,20 @@ mod tests {
     fn stats_counts_correctly() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         store
-            .register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32]), valid_pop_b64())
+            .register_device(
+                device_b_id(),
+                "Device B".into(),
+                B64.encode([1u8; 32]),
+                valid_pop_b64(),
+            )
             .unwrap();
         let (devices, items) = store.stats();
         assert_eq!(devices, 2);
@@ -1873,10 +1972,20 @@ mod tests {
     fn cleanup_removes_old_inactive_devices() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         store
-            .register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32]), valid_pop_b64())
+            .register_device(
+                device_b_id(),
+                "Device B".into(),
+                B64.encode([1u8; 32]),
+                valid_pop_b64(),
+            )
             .unwrap();
         let removed = store.cleanup_inactive_devices(0);
         assert_eq!(removed, 2);
@@ -1888,10 +1997,20 @@ mod tests {
     fn cleanup_keeps_recently_registered_devices() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         store
-            .register_device(device_b_id(), "Device B".into(), B64.encode([1u8; 32]), valid_pop_b64())
+            .register_device(
+                device_b_id(),
+                "Device B".into(),
+                B64.encode([1u8; 32]),
+                valid_pop_b64(),
+            )
             .unwrap();
         let removed = store.cleanup_inactive_devices(u64::MAX);
         assert_eq!(removed, 0);
@@ -1903,7 +2022,12 @@ mod tests {
     fn cleanup_keeps_devices_with_items() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         push_text(&mut store, &device_a_id(), 1000);
         let removed = store.cleanup_inactive_devices(0);
@@ -2005,7 +2129,12 @@ mod tests {
                 .unwrap();
         }
         let err = store
-            .register_device(unique_device_id(5), "Dev 5".into(), unique_key(5), valid_pop_b64())
+            .register_device(
+                unique_device_id(5),
+                "Dev 5".into(),
+                unique_key(5),
+                valid_pop_b64(),
+            )
             .unwrap_err();
         assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }));
     }
@@ -2057,7 +2186,13 @@ mod tests {
     fn pro_tier_history_is_bounded_only_by_hard_cap() {
         let mut store = make_store();
         store
-            .register_device_with_tier(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64(), Tier::Pro)
+            .register_device_with_tier(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+                Tier::Pro,
+            )
             .unwrap();
 
         for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 50) {
@@ -2322,7 +2457,12 @@ mod tests {
     fn update_last_seen_prevents_eviction_after_threshold() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
 
         // Simulate the device's last_seen being past the threshold by rewinding
@@ -2375,7 +2515,12 @@ mod tests {
     fn no_update_last_seen_causes_eviction_after_threshold() {
         let mut store = make_store();
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
 
         let threshold_secs = 60u64;
@@ -2410,7 +2555,12 @@ mod tests {
     fn verify_token_clock_error_returns_unauthorized() {
         let mut store = make_store();
         let (token, _) = store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         // None = simulated clock error → must fail closed.
         let err = store
@@ -2432,7 +2582,12 @@ mod tests {
         const CUSTOM_CAP: usize = 5;
         let mut store = RelayStore::new_with_cap(3600, CUSTOM_CAP);
         store
-            .register_device(device_a_id(), "Device A".into(), valid_key_b64(), valid_pop_b64())
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
             .unwrap();
         // Push more items than the custom cap.
         for t in 1u64..=(CUSTOM_CAP as u64 + 3) {

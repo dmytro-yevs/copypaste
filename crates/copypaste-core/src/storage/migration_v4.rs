@@ -1341,8 +1341,7 @@ mod tests {
         let v2_key = [0xA2u8; 32];
 
         let plaintext = b"mislabeled image bytes for repair test";
-        let (row_id, file_id, expected_pt) =
-            seed_mislabeled_kv2_image_row(&db, &v1_key, plaintext);
+        let (row_id, file_id, expected_pt) = seed_mislabeled_kv2_image_row(&db, &v1_key, plaintext);
 
         let repaired = repair_mislabeled_kv2_blob_rows(&db, &v1_key, &v2_key).unwrap();
         assert_eq!(repaired, 1, "exactly one mislabeled row must be repaired");
@@ -1418,7 +1417,10 @@ mod tests {
             .unwrap();
 
         let repaired = repair_mislabeled_kv2_blob_rows(&db, &v1_key, &v2_key).unwrap();
-        assert_eq!(repaired, 0, "correctly v2-encrypted row must NOT be repaired");
+        assert_eq!(
+            repaired, 0,
+            "correctly v2-encrypted row must NOT be repaired"
+        );
 
         // Content blob must be byte-for-byte identical (untouched).
         let stored_blob: Vec<u8> = db

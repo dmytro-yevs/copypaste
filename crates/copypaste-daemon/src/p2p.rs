@@ -3417,6 +3417,12 @@ mod tests {
     /// opt-out) while the real regression is caught by the "Some refreshes"
     /// assertion which fails if the plumbing accidentally passes None again.
     #[tokio::test]
+    // The TEST_ENV_LOCK guard is deliberately held across the awaited
+    // persist_paired_peer calls below: it serialises COPYPASTE_CONFIG_DIR so a
+    // parallel test cannot clobber the env var mid-await. Dropping the guard
+    // before the await would reintroduce the exact race this lock exists to
+    // prevent, so the await-holding-lock lint is suppressed here.
+    #[allow(clippy::await_holding_lock)]
     async fn persist_paired_peer_refreshes_sync_crypto_cache_iff_handle_supplied() {
         // ── shared setup ────────────────────────────────────────────────────
         let tmp = tempfile::tempdir().unwrap();
@@ -3648,7 +3654,10 @@ mod tests {
 
         match rx.recv().await.expect("should receive Connected event") {
             PeerEvent::Connected { fingerprint } => {
-                assert_eq!(fingerprint, fp, "Connected fingerprint must match the inserted peer");
+                assert_eq!(
+                    fingerprint, fp,
+                    "Connected fingerprint must match the inserted peer"
+                );
             }
             PeerEvent::Disconnected { .. } => panic!("expected Connected, got Disconnected"),
         }

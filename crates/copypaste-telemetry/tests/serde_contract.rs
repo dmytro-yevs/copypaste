@@ -35,12 +35,7 @@ fn reportable_error_round_trips() {
 /// (`error_class` → `error_kind`, etc.) the downstream consumer breaks.
 #[test]
 fn reportable_error_field_names_are_stable() {
-    let evt = ReportableError::new(
-        "copypaste-core",
-        "0.6.0",
-        "db.open_failed",
-        OsTag::Android,
-    );
+    let evt = ReportableError::new("copypaste-core", "0.6.0", "db.open_failed", OsTag::Android);
 
     let json = serde_json::to_string(&evt).expect("serialize");
 
@@ -117,7 +112,11 @@ fn os_tag_current_is_valid() {
     assert_eq!(back, tag);
 
     #[cfg(target_os = "macos")]
-    assert_eq!(tag, OsTag::MacOs, "on macOS, OsTag::current() must be MacOs");
+    assert_eq!(
+        tag,
+        OsTag::MacOs,
+        "on macOS, OsTag::current() must be MacOs"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +129,8 @@ fn os_tag_current_is_valid() {
 fn reportable_error_empty_strings_are_valid() {
     let evt = ReportableError::new("", "", "", OsTag::Unknown);
     let json = serde_json::to_string(&evt).expect("serialize empty-string event");
-    let back: ReportableError = serde_json::from_str(&json).expect("deserialize empty-string event");
+    let back: ReportableError =
+        serde_json::from_str(&json).expect("deserialize empty-string event");
     assert_eq!(back.crate_name, "");
     assert_eq!(back.error_class, "");
     assert_eq!(back.os, OsTag::Unknown);
@@ -143,7 +143,7 @@ fn reportable_error_unicode_error_class_round_trips() {
     let evt = ReportableError::new(
         "copypaste-daemon",
         "1.0.0",
-        "错误.io_失败",   // CJK + ASCII mix (regression guard)
+        "错误.io_失败", // CJK + ASCII mix (regression guard)
         OsTag::Unknown,
     );
     let json = serde_json::to_string(&evt).expect("serialize unicode event");

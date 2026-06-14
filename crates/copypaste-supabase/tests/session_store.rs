@@ -70,13 +70,13 @@ fn second_save_overwrites_previous_session() {
 fn clear_removes_session() {
     let store = InMemoryStore::new();
     store.save(&make_session("tok-X", "rt-X", 5_000));
-    assert!(store.load().is_some(), "session must be present before clear");
+    assert!(
+        store.load().is_some(),
+        "session must be present before clear"
+    );
 
     store.clear();
-    assert!(
-        store.load().is_none(),
-        "session must be absent after clear"
-    );
+    assert!(store.load().is_none(), "session must be absent after clear");
 }
 
 #[test]
@@ -193,11 +193,7 @@ fn store_is_thread_safe_under_concurrent_access() {
     for i in 0..8usize {
         let s = Arc::clone(&store);
         handles.push(thread::spawn(move || {
-            let session = make_session(
-                &format!("tok-{i}"),
-                &format!("rt-{i}"),
-                i as u64 * 1_000,
-            );
+            let session = make_session(&format!("tok-{i}"), &format!("rt-{i}"), i as u64 * 1_000);
             s.save(&session);
             let _ = s.load();
         }));

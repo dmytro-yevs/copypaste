@@ -141,9 +141,14 @@ async fn sse_delivers_item_pushed_after_subscribe() {
 
     let b_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_B.to_string(),
+            "Device B".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // Open the SSE subscription with an empty inbox (since=0).
@@ -194,9 +199,14 @@ async fn sse_backfills_preexisting_item_on_connect() {
 
     let b_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_B.to_string(),
+            "Device B".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // Pre-existing item BEFORE any subscription exists.
@@ -251,9 +261,14 @@ async fn sse_producer_tears_down_on_client_disconnect_idle_inbox() {
 
     let b_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key(), valid_pop())
-            .unwrap()
-            .0
+        s.register_device(
+            DEVICE_B.to_string(),
+            "Device B".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
     };
 
     // Open the subscription against an EMPTY inbox: the producer backfills
@@ -331,8 +346,13 @@ async fn sse_rejects_missing_auth() {
     let (addr, state) = spawn_relay().await;
     {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key(), valid_pop())
-            .unwrap();
+        s.register_device(
+            DEVICE_B.to_string(),
+            "Device B".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap();
     }
 
     let mut stream = TcpStream::connect(addr).await.unwrap();

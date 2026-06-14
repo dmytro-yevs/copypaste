@@ -54,13 +54,8 @@ async fn gap_a_pending_unpair_delivered_on_reconnect() {
     // --- "Offline at unpair time": queue the durable pending-unpair record. ---
     // A's live `try_send` would have been dropped here (no live sink to B), so
     // the IPC handler instead persists B's fingerprint + last-known address.
-    peers::queue_pending_unpair(
-        &pending_path,
-        &b_fp,
-        Some(&b_addr.to_string()),
-        "device-B",
-    )
-    .unwrap();
+    peers::queue_pending_unpair(&pending_path, &b_fp, Some(&b_addr.to_string()), "device-B")
+        .unwrap();
     assert_eq!(
         peers::load_pending_unpairs(&pending_path).len(),
         1,
@@ -85,8 +80,11 @@ async fn gap_a_pending_unpair_delivered_on_reconnect() {
     // --- A's connector delivery steps (mirrors `deliver_pending_unpairs`). ---
     // A pins B only transiently to dial; A's own live allowlist starts empty.
     let a_live = PairedPeers::new();
-    let a_transport =
-        PeerTransport::from_cert(a_cert.cert_der.clone(), a_cert.key_der.clone(), a_live.clone());
+    let a_transport = PeerTransport::from_cert(
+        a_cert.cert_der.clone(),
+        a_cert.key_der.clone(),
+        a_live.clone(),
+    );
 
     let pending = peers::load_pending_unpairs(&pending_path);
     assert_eq!(pending.len(), 1);
@@ -94,7 +92,10 @@ async fn gap_a_pending_unpair_delivered_on_reconnect() {
 
     // Step 2: temporarily allow-list B.
     a_live.add(entry.fingerprint.clone(), entry.name.clone());
-    assert!(a_live.is_known(&b_fp), "B must be transiently allow-listed for the dial");
+    assert!(
+        a_live.is_known(&b_fp),
+        "B must be transiently allow-listed for the dial"
+    );
 
     // Step 3: dial + send a single Unpair frame.
     let addr: std::net::SocketAddr = entry.address.as_deref().unwrap().parse().unwrap();

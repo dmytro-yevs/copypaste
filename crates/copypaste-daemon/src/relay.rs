@@ -262,10 +262,7 @@ fn encrypt_relay_token(
 ///
 /// Returns `Some(token)` on success, `None` if the blob is malformed or the
 /// AEAD tag does not verify (caller should treat the file as absent).
-fn decrypt_relay_token(
-    encoded: &str,
-    local_key: &zeroize::Zeroizing<[u8; 32]>,
-) -> Option<String> {
+fn decrypt_relay_token(encoded: &str, local_key: &zeroize::Zeroizing<[u8; 32]>) -> Option<String> {
     let blob = base64::engine::general_purpose::STANDARD
         .decode(encoded.trim())
         .ok()?;
@@ -705,9 +702,15 @@ async fn push_with_reauth(
     cached_token: &mut Option<String>,
     local_key: &zeroize::Zeroizing<[u8; 32]>,
 ) -> Result<(), RelayError> {
-    let token =
-        ensure_token(client, relay_url, sync_key_bytes, device_name, cached_token, local_key)
-            .await?;
+    let token = ensure_token(
+        client,
+        relay_url,
+        sync_key_bytes,
+        device_name,
+        cached_token,
+        local_key,
+    )
+    .await?;
     match push_item(
         client,
         relay_url,
@@ -724,9 +727,15 @@ async fn push_with_reauth(
             // 401: token stale. Drop it, re-register, retry once.
             tracing::info!("relay-sync: push got 401; re-registering and retrying once");
             *cached_token = None;
-            let token =
-                ensure_token(client, relay_url, sync_key_bytes, device_name, cached_token, local_key)
-                    .await?;
+            let token = ensure_token(
+                client,
+                relay_url,
+                sync_key_bytes,
+                device_name,
+                cached_token,
+                local_key,
+            )
+            .await?;
             match push_item(
                 client,
                 relay_url,
@@ -906,9 +915,7 @@ fn ingest_page_blocking(
                 match soft_delete_item(db, local_pk, env.lamport_ts, env_wall) {
                     Ok(n) if n > 0 => {
                         stored += 1;
-                        tracing::info!(
-                            "relay-sync: applied tombstone (item known locally)"
-                        );
+                        tracing::info!("relay-sync: applied tombstone (item known locally)");
                     }
                     Ok(_) => {}
                     Err(e) => tracing::warn!("relay-sync: soft_delete_item failed: {e}"),
@@ -1246,25 +1253,43 @@ mod tests {
     /// relay_should_skip_wifi: returns true iff sync_on_wifi_only=true AND not on wifi.
     #[test]
     fn wifi_guard_skips_when_setting_on_and_not_on_wifi() {
-        assert!(relay_should_skip_wifi(true, false), "must skip: setting=true, wifi=false");
+        assert!(
+            relay_should_skip_wifi(true, false),
+            "must skip: setting=true, wifi=false"
+        );
     }
 
     #[test]
     fn wifi_guard_allows_when_setting_off() {
-        assert!(!relay_should_skip_wifi(false, false), "must not skip: setting=false even if no wifi");
-        assert!(!relay_should_skip_wifi(false, true), "must not skip: setting=false, on wifi");
+        assert!(
+            !relay_should_skip_wifi(false, false),
+            "must not skip: setting=false even if no wifi"
+        );
+        assert!(
+            !relay_should_skip_wifi(false, true),
+            "must not skip: setting=false, on wifi"
+        );
     }
 
     #[test]
     fn wifi_guard_allows_when_on_wifi_and_setting_on() {
-        assert!(!relay_should_skip_wifi(true, true), "must not skip: setting=true but on wifi");
+        assert!(
+            !relay_should_skip_wifi(true, true),
+            "must not skip: setting=true but on wifi"
+        );
     }
 
     /// relay_should_auto_apply: mirrors the auto_apply_synced_clip flag.
     #[test]
     fn auto_apply_guard_respects_flag() {
-        assert!(relay_should_auto_apply(true), "auto_apply=true → should auto-apply");
-        assert!(!relay_should_auto_apply(false), "auto_apply=false → must not auto-apply");
+        assert!(
+            relay_should_auto_apply(true),
+            "auto_apply=true → should auto-apply"
+        );
+        assert!(
+            !relay_should_auto_apply(false),
+            "auto_apply=false → must not auto-apply"
+        );
     }
 
     /// derive_relay_inbox_id determinism (daemon-side sanity; core also tests it).
@@ -1500,7 +1525,10 @@ mod tests {
         let key_b = zeroize::Zeroizing::new([0x22u8; 32]);
         let encoded = encrypt_relay_token("secret-token", &key_a).expect("encrypt");
         let result = decrypt_relay_token(&encoded, &key_b);
-        assert!(result.is_none(), "wrong key must yield None, not a recovered token");
+        assert!(
+            result.is_none(),
+            "wrong key must yield None, not a recovered token"
+        );
     }
 
     /// Tampered ciphertext → decrypt returns None (not a panic).
@@ -1536,8 +1564,10 @@ mod tests {
         let raw = std::fs::read_to_string(&token_file).expect("read");
         let trimmed = raw.trim();
         // Decrypting legacy plaintext must return None (it is not a valid blob).
-        assert!(decrypt_relay_token(trimmed, &key).is_none(),
-            "legacy plaintext must not decrypt successfully");
+        assert!(
+            decrypt_relay_token(trimmed, &key).is_none(),
+            "legacy plaintext must not decrypt successfully"
+        );
         // The migration path should return the raw trimmed string as the token.
         // Simulate what load_cached_token does after decrypt_relay_token returns None:
         let fallback = trimmed.to_owned();
@@ -1557,9 +1587,12 @@ mod tests {
         // Empty / whitespace-only file → treated as absent.
         assert!(trimmed.is_empty());
         // Simulates the `if trimmed.is_empty() { return None; }` guard.
-        assert!(
-            if trimmed.is_empty() { None::<String> } else { decrypt_relay_token(trimmed, &key) }.is_none()
-        );
+        assert!(if trimmed.is_empty() {
+            None::<String>
+        } else {
+            decrypt_relay_token(trimmed, &key)
+        }
+        .is_none());
     }
 
     // ── test helpers ──────────────────────────────────────────────────────────
@@ -1654,12 +1687,7 @@ mod tests {
     }
 
     /// Build a relay `PullItem` carrying a TOMBSTONE (deleted=true, empty ct).
-    fn make_tombstone_pull(
-        id: i64,
-        item_id: &str,
-        lamport_ts: i64,
-        wall_time: u64,
-    ) -> PullItem {
+    fn make_tombstone_pull(id: i64, item_id: &str, lamport_ts: i64, wall_time: u64) -> PullItem {
         let env = RelayEnvelope {
             item_id: item_id.to_owned(),
             lamport_ts,
@@ -1740,7 +1768,10 @@ mod tests {
         );
         assert_eq!(stored2, 1, "tombstone applied");
         let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
-        assert!(row.deleted, "relay tombstone must soft-delete the local item");
+        assert!(
+            row.deleted,
+            "relay tombstone must soft-delete the local item"
+        );
         assert!(row.content.is_none(), "tombstone wipes content");
     }
 
@@ -1838,8 +1869,7 @@ mod tests {
 
             let item_id = "item-parity";
             // Seed a LOCAL item: lamport 5, wall 1000, origin "mmm".
-            let mut seed =
-                make_local_text_item(item_id, b"local-content", &local_key, 5, 1000);
+            let mut seed = make_local_text_item(item_id, b"local-content", &local_key, 5, 1000);
             seed.origin_device_id = "mmm".to_owned();
             insert_item(&g, &seed).unwrap();
 
@@ -1855,9 +1885,8 @@ mod tests {
             let env = RelayEnvelope {
                 item_id: item_id.to_owned(),
                 lamport_ts: 5,
-                ct_b64: base64::engine::general_purpose::STANDARD.encode(
-                    encrypt_for_cloud(&sync_key, item_id, b"remote-content").unwrap(),
-                ),
+                ct_b64: base64::engine::general_purpose::STANDARD
+                    .encode(encrypt_for_cloud(&sync_key, item_id, b"remote-content").unwrap()),
                 deleted: false,
                 pinned: false,
                 pin_order: None,
@@ -1881,7 +1910,11 @@ mod tests {
             );
             // Confirm the stored row's origin matches the chosen winner.
             let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
-            let expected_origin = if remote_should_win { remote_origin } else { "mmm" };
+            let expected_origin = if remote_should_win {
+                remote_origin
+            } else {
+                "mmm"
+            };
             assert_eq!(
                 row.origin_device_id, expected_origin,
                 "winning origin must persist for deterministic future tie-breaks"
@@ -1915,7 +1948,10 @@ mod tests {
         );
         assert_eq!(stored1, 1, "tombstone inserted for unknown item");
         let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
-        assert!(row.deleted, "unknown-item tombstone must persist as deleted");
+        assert!(
+            row.deleted,
+            "unknown-item tombstone must persist as deleted"
+        );
 
         // Create arrives LATER with a LOWER lamport (10 < 20) — must lose LWW.
         let create = make_pull_item(2, item_id, b"resurrected?", &sync_key, 10, 1000);
@@ -1929,6 +1965,9 @@ mod tests {
         );
         assert_eq!(stored2, 0, "late lower-lamport create must NOT resurrect");
         let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
-        assert!(row.deleted, "item must stay deleted after the racing create");
+        assert!(
+            row.deleted,
+            "item must stay deleted after the racing create"
+        );
     }
 }

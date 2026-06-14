@@ -269,7 +269,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             } else {
                 0
             };
-            Ok::<(usize, usize, usize, usize), copypaste_core::DbError>((rotated, repaired, dead, purged))
+            Ok::<(usize, usize, usize, usize), copypaste_core::DbError>((
+                rotated, repaired, dead, purged,
+            ))
         })
         .await
         {
@@ -409,8 +411,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // lan_visibility is persisted in config.toml (overlaid by update_core_config
     // on set_config). Read it here so start_p2p can gate mDNS at startup.
     let lan_visibility_at_start = {
-        let core = copypaste_core::AppConfig::load(&crate::paths::config_path())
-            .unwrap_or_default();
+        let core =
+            copypaste_core::AppConfig::load(&crate::paths::config_path()).unwrap_or_default();
         core.lan_visibility
     };
     let p2p_peers: Option<copypaste_p2p::transport::PairedPeers> = if p2p_enabled {
@@ -543,10 +545,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // cost exactly once; all subsequent calls to `collect_own_peer_meta` and
     // `get_own_device_info` are instant cache reads (OnceLock — wait-free after
     // the first write).
-    match tokio::task::spawn_blocking(|| {
-        crate::device_meta::warm_cache(env!("CARGO_PKG_VERSION"))
-    })
-    .await
+    match tokio::task::spawn_blocking(|| crate::device_meta::warm_cache(env!("CARGO_PKG_VERSION")))
+        .await
     {
         Ok(()) => tracing::debug!("device_meta: startup cache warmed"),
         Err(e) => tracing::warn!(
@@ -781,210 +781,211 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // the cert is the identity the transport presents and that pairing advertises,
     // and the DiscoveryService must be the SAME Arc handed to the IPC server so
     // list_discovered sees live peers (LAN/SAS Phase 0, CRITICAL-1).
-    let _p2p_handle: Option<p2p::P2pHandle> =
-        if let (Some(p2p_peers), Some(p2p_cert), Some(p2p_disc)) =
-            (p2p_peers, p2p_cert, p2p_discovery)
-        {
-            // Reuse the persistent device_id loaded above (load_or_create_device_id
-            // was called once already; parsing it back to Uuid is cheap).
-            let device_id =
-                uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
-            let device_name = resolve_device_name();
+    let _p2p_handle: Option<p2p::P2pHandle> = if let (
+        Some(p2p_peers),
+        Some(p2p_cert),
+        Some(p2p_disc),
+    ) = (p2p_peers, p2p_cert, p2p_discovery)
+    {
+        // Reuse the persistent device_id loaded above (load_or_create_device_id
+        // was called once already; parsing it back to Uuid is cheap).
+        let device_id =
+            uuid::Uuid::parse_str(&local_device_id).unwrap_or_else(|_| uuid::Uuid::new_v4());
+        let device_name = resolve_device_name();
 
-            let p2p_config = p2p::P2pConfig {
-                listen_port: 0,
-                device_name,
-                enabled: true,
-                lan_visibility: lan_visibility_at_start,
-            };
+        let p2p_config = p2p::P2pConfig {
+            listen_port: 0,
+            device_name,
+            enabled: true,
+            lan_visibility: lan_visibility_at_start,
+        };
 
-            // P2P Phase 3 (sync-on-connect catch-up): build a provider that
-            // replays the current local history — already re-keyed under the
-            // shared sync key, exactly like normal outbound — into each peer the
-            // instant a link is established. Without this, an item produced
-            // before the link came up is never delivered (fanout is
-            // fire-and-forget to currently-connected sinks). Uses the same
-            // `SyncCrypto` construction as the orchestrator below.
-            // CopyPaste-716: the closure now takes the connecting peer's
-            // fingerprint so `catchup_items` uses that peer's specific pairwise
-            // sync key rather than the first cached key for all peers.
-            let catchup: p2p::CatchupProvider = {
-                let catchup_db = db.clone();
-                let catchup_device_id = local_device_id.clone();
-                let catchup_seed: [u8; 32] = **local_key_arc;
-                Arc::new(move |peer_fingerprint: &str| {
-                    let crypto =
-                        sync_orch::SyncCrypto::new(catchup_seed, crate::ipc::peers_file_path());
-                    // The closure is `Fn` (sync) but the DB sits behind a tokio
-                    // Mutex; `block_in_place` + `blocking_lock` safely acquires
-                    // it on the multi-thread runtime without blocking the worker.
-                    let fp = peer_fingerprint.to_owned();
-                    tokio::task::block_in_place(|| {
-                        let db = catchup_db.blocking_lock();
-                        sync_orch::catchup_items(&db, &catchup_device_id, &crypto, &fp)
-                    })
+        // P2P Phase 3 (sync-on-connect catch-up): build a provider that
+        // replays the current local history — already re-keyed under the
+        // shared sync key, exactly like normal outbound — into each peer the
+        // instant a link is established. Without this, an item produced
+        // before the link came up is never delivered (fanout is
+        // fire-and-forget to currently-connected sinks). Uses the same
+        // `SyncCrypto` construction as the orchestrator below.
+        // CopyPaste-716: the closure now takes the connecting peer's
+        // fingerprint so `catchup_items` uses that peer's specific pairwise
+        // sync key rather than the first cached key for all peers.
+        let catchup: p2p::CatchupProvider = {
+            let catchup_db = db.clone();
+            let catchup_device_id = local_device_id.clone();
+            let catchup_seed: [u8; 32] = **local_key_arc;
+            Arc::new(move |peer_fingerprint: &str| {
+                let crypto =
+                    sync_orch::SyncCrypto::new(catchup_seed, crate::ipc::peers_file_path());
+                // The closure is `Fn` (sync) but the DB sits behind a tokio
+                // Mutex; `block_in_place` + `blocking_lock` safely acquires
+                // it on the multi-thread runtime without blocking the worker.
+                let fp = peer_fingerprint.to_owned();
+                tokio::task::block_in_place(|| {
+                    let db = catchup_db.blocking_lock();
+                    sync_orch::catchup_items(&db, &catchup_device_id, &crypto, &fp)
                 })
-            };
+            })
+        };
 
-            // Hand the SAME live allowlist already shared with the IPC server
-            // (fix/p2p-c-review #2), the SAME cert whose fingerprint the IPC
-            // pairing handlers advertise (CRITICAL-1), and the SAME
-            // DiscoveryService handed to the IPC server so list_discovered sees
-            // live peers (LAN/SAS Phase 0). `start_p2p` seeds the allowlist
-            // from peers.json.
-            match p2p::start_p2p(
-                p2p_config,
-                db.clone(),
-                device_id,
-                (*local_key_arc).clone(),
-                p2p_cert,
-                p2p_peers,
-                new_item_tx.subscribe(),
-                sync_incoming_tx.clone(),
-                sync_outbound_rx,
-                catchup,
-                p2p_disc,
-                // LAN/SAS Phase 2: the SAME pairing coordinator the IPC server
-                // exposes, and the SAME sync-addr slot, so the standing
-                // discovery-pairing responder routes its SAS through the shared
-                // state machine and advertises a routable sync address in-band.
-                std::sync::Arc::clone(&pairing_coordinator),
-                std::sync::Arc::clone(&p2p_sync_addr_slot),
-                // B1: the SAME public-IP cache the IPC server reads and the STUN
-                // refresh task writes, so the standing LAN/SAS responder advertises
-                // our own global IP in-band exactly like the IPC pairing paths.
-                std::sync::Arc::clone(&public_ip_cache),
-                // CopyPaste-1w7 (H8 fix): share a SyncCrypto clone with the
-                // standing responder so it can call reload_sync_key after a
-                // successful button-pair.  All clones share the same
-                // Arc<Mutex<…>> backing store built above.
-                sync_crypto.clone(),
-            )
-            .await
-            {
-                Ok(handle) => {
-                    tracing::info!(port = handle.actual_port, "P2P subsystem running");
-                    // P2P Phase 2: publish this daemon's now-bound sync-listener
-                    // address into the shared slot the IPC pairing handlers read.
-                    //
-                    // The listener binds `0.0.0.0:actual_port`, so it is reachable
-                    // on every interface — but the address we ADVERTISE to a peer
-                    // (sent in-band during pairing and persisted into the peer's
-                    // `peers.json`) must be a concrete LAN-routable host, never
-                    // `127.0.0.1`. A loopback advertisement is why background sync
-                    // only worked in the emulator / loopback case: a real phone on
-                    // Wi-Fi cannot route to 127.0.0.1. `advertise_sync_addr`
-                    // selects a real LAN address via the same interface filter the
-                    // QR `addr_hint` uses, falling back to loopback only when no
-                    // LAN interface exists (single-host / loopback test).
-                    #[cfg(unix)]
-                    {
-                        let addr =
-                            copypaste_p2p::interfaces::advertise_sync_addr(handle.actual_port)
-                                .to_string();
-                        tracing::info!(
-                            sync_addr = %addr,
-                            "P2P advertising LAN-routable sync-listener address"
-                        );
-                        let mut slot = p2p_sync_addr_slot
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        *slot = Some(addr);
-                    }
-                    {
-                        // Populate the single shared slot used for both online-status
-                        // (list_peers) and mutual-unpair signalling (unpair/revoke).
-                        // live_sinks and peer_sinks on P2pHandle are Arc clones of the
-                        // same underlying map; we write live_sinks here.
-                        let mut slot = live_sinks_slot
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        *slot = Some(std::sync::Arc::clone(&handle.live_sinks));
-                    }
-                    {
-                        // Populate the RTT slot so list_peers can include latency_ms.
-                        let mut slot = live_rtt_ms_slot
-                            .lock()
-                            .unwrap_or_else(|poisoned| poisoned.into_inner());
-                        *slot = Some(std::sync::Arc::clone(&handle.peer_rtt_ms));
-                    }
-                    {
-                        // Subscribe to peer connect/disconnect events and relay
-                        // them into the IPC queue so `poll_peer_events` callers
-                        // (e.g. the Tauri event bridge) can push live presence
-                        // updates to the UI without waiting for the 10 s poll.
-                        let mut event_rx = handle.peer_event_tx.subscribe();
-                        let event_queue = std::sync::Arc::clone(&peer_event_queue);
-                        let event_shutdown = handle.shutdown_token.clone();
-                        tokio::spawn(async move {
-                            loop {
-                                tokio::select! {
-                                    biased;
-                                    _ = event_shutdown.cancelled() => { break; }
-                                    recv = event_rx.recv() => {
-                                        match recv {
-                                            Ok(ev) => {
-                                                let record = match &ev {
-                                                    crate::p2p::PeerEvent::Connected { fingerprint } => {
-                                                        crate::ipc::PeerEventRecord {
-                                                            kind: "connected",
-                                                            fingerprint: fingerprint.clone(),
-                                                        }
+        // Hand the SAME live allowlist already shared with the IPC server
+        // (fix/p2p-c-review #2), the SAME cert whose fingerprint the IPC
+        // pairing handlers advertise (CRITICAL-1), and the SAME
+        // DiscoveryService handed to the IPC server so list_discovered sees
+        // live peers (LAN/SAS Phase 0). `start_p2p` seeds the allowlist
+        // from peers.json.
+        match p2p::start_p2p(
+            p2p_config,
+            db.clone(),
+            device_id,
+            (*local_key_arc).clone(),
+            p2p_cert,
+            p2p_peers,
+            new_item_tx.subscribe(),
+            sync_incoming_tx.clone(),
+            sync_outbound_rx,
+            catchup,
+            p2p_disc,
+            // LAN/SAS Phase 2: the SAME pairing coordinator the IPC server
+            // exposes, and the SAME sync-addr slot, so the standing
+            // discovery-pairing responder routes its SAS through the shared
+            // state machine and advertises a routable sync address in-band.
+            std::sync::Arc::clone(&pairing_coordinator),
+            std::sync::Arc::clone(&p2p_sync_addr_slot),
+            // B1: the SAME public-IP cache the IPC server reads and the STUN
+            // refresh task writes, so the standing LAN/SAS responder advertises
+            // our own global IP in-band exactly like the IPC pairing paths.
+            std::sync::Arc::clone(&public_ip_cache),
+            // CopyPaste-1w7 (H8 fix): share a SyncCrypto clone with the
+            // standing responder so it can call reload_sync_key after a
+            // successful button-pair.  All clones share the same
+            // Arc<Mutex<…>> backing store built above.
+            sync_crypto.clone(),
+        )
+        .await
+        {
+            Ok(handle) => {
+                tracing::info!(port = handle.actual_port, "P2P subsystem running");
+                // P2P Phase 2: publish this daemon's now-bound sync-listener
+                // address into the shared slot the IPC pairing handlers read.
+                //
+                // The listener binds `0.0.0.0:actual_port`, so it is reachable
+                // on every interface — but the address we ADVERTISE to a peer
+                // (sent in-band during pairing and persisted into the peer's
+                // `peers.json`) must be a concrete LAN-routable host, never
+                // `127.0.0.1`. A loopback advertisement is why background sync
+                // only worked in the emulator / loopback case: a real phone on
+                // Wi-Fi cannot route to 127.0.0.1. `advertise_sync_addr`
+                // selects a real LAN address via the same interface filter the
+                // QR `addr_hint` uses, falling back to loopback only when no
+                // LAN interface exists (single-host / loopback test).
+                #[cfg(unix)]
+                {
+                    let addr = copypaste_p2p::interfaces::advertise_sync_addr(handle.actual_port)
+                        .to_string();
+                    tracing::info!(
+                        sync_addr = %addr,
+                        "P2P advertising LAN-routable sync-listener address"
+                    );
+                    let mut slot = p2p_sync_addr_slot
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *slot = Some(addr);
+                }
+                {
+                    // Populate the single shared slot used for both online-status
+                    // (list_peers) and mutual-unpair signalling (unpair/revoke).
+                    // live_sinks and peer_sinks on P2pHandle are Arc clones of the
+                    // same underlying map; we write live_sinks here.
+                    let mut slot = live_sinks_slot
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *slot = Some(std::sync::Arc::clone(&handle.live_sinks));
+                }
+                {
+                    // Populate the RTT slot so list_peers can include latency_ms.
+                    let mut slot = live_rtt_ms_slot
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *slot = Some(std::sync::Arc::clone(&handle.peer_rtt_ms));
+                }
+                {
+                    // Subscribe to peer connect/disconnect events and relay
+                    // them into the IPC queue so `poll_peer_events` callers
+                    // (e.g. the Tauri event bridge) can push live presence
+                    // updates to the UI without waiting for the 10 s poll.
+                    let mut event_rx = handle.peer_event_tx.subscribe();
+                    let event_queue = std::sync::Arc::clone(&peer_event_queue);
+                    let event_shutdown = handle.shutdown_token.clone();
+                    tokio::spawn(async move {
+                        loop {
+                            tokio::select! {
+                                biased;
+                                _ = event_shutdown.cancelled() => { break; }
+                                recv = event_rx.recv() => {
+                                    match recv {
+                                        Ok(ev) => {
+                                            let record = match &ev {
+                                                crate::p2p::PeerEvent::Connected { fingerprint } => {
+                                                    crate::ipc::PeerEventRecord {
+                                                        kind: "connected",
+                                                        fingerprint: fingerprint.clone(),
                                                     }
-                                                    crate::p2p::PeerEvent::Disconnected { fingerprint } => {
-                                                        crate::ipc::PeerEventRecord {
-                                                            kind: "disconnected",
-                                                            fingerprint: fingerprint.clone(),
-                                                        }
-                                                    }
-                                                };
-                                                let mut q = event_queue
-                                                    .lock()
-                                                    .unwrap_or_else(|p| p.into_inner());
-                                                // Cap the queue to avoid unbounded growth
-                                                // when no consumer is draining it.
-                                                if q.len() >= crate::ipc::PEER_EVENT_QUEUE_CAP {
-                                                    q.pop_front();
                                                 }
-                                                q.push_back(record);
+                                                crate::p2p::PeerEvent::Disconnected { fingerprint } => {
+                                                    crate::ipc::PeerEventRecord {
+                                                        kind: "disconnected",
+                                                        fingerprint: fingerprint.clone(),
+                                                    }
+                                                }
+                                            };
+                                            let mut q = event_queue
+                                                .lock()
+                                                .unwrap_or_else(|p| p.into_inner());
+                                            // Cap the queue to avoid unbounded growth
+                                            // when no consumer is draining it.
+                                            if q.len() >= crate::ipc::PEER_EVENT_QUEUE_CAP {
+                                                q.pop_front();
                                             }
-                                            // Broadcast lagged: receiver fell behind.
-                                            // The channel stays open — log and continue
-                                            // so live-presence push survives event bursts
-                                            // (network flaps etc.).
-                                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                                                tracing::warn!(
-                                                    skipped = n,
-                                                    "P2P event bridge lagged; skipped {n} events"
-                                                );
-                                                continue;
-                                            }
-                                            // The sender dropped (P2P shutdown) — exit.
-                                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                                            q.push_back(record);
                                         }
+                                        // Broadcast lagged: receiver fell behind.
+                                        // The channel stays open — log and continue
+                                        // so live-presence push survives event bursts
+                                        // (network flaps etc.).
+                                        Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                            tracing::warn!(
+                                                skipped = n,
+                                                "P2P event bridge lagged; skipped {n} events"
+                                            );
+                                            continue;
+                                        }
+                                        // The sender dropped (P2P shutdown) — exit.
+                                        Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                                     }
                                 }
                             }
-                        });
-                    }
-                    Some(handle)
+                        }
+                    });
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to start P2P subsystem: {e}");
-                    None
-                }
+                Some(handle)
             }
-        } else {
-            tracing::debug!(
-                "P2P disabled (via COPYPASTE_P2P=0 or persisted p2p_enabled=false in config.json; \
+            Err(e) => {
+                tracing::warn!("Failed to start P2P subsystem: {e}");
+                None
+            }
+        }
+    } else {
+        tracing::debug!(
+            "P2P disabled (via COPYPASTE_P2P=0 or persisted p2p_enabled=false in config.json; \
                  set COPYPASTE_P2P=1 or toggle in Settings to enable)"
-            );
-            // Drop sync_outbound_rx — no consumer. sync_orch will log debug
-            // on each outbound send (harmless: closed receiver just means no
-            // peers are connected).
-            drop(sync_outbound_rx);
-            None
-        };
+        );
+        // Drop sync_outbound_rx — no consumer. sync_orch will log debug
+        // on each outbound send (harmless: closed receiver just means no
+        // peers are connected).
+        drop(sync_outbound_rx);
+        None
+    };
 
     // Beta W2.2 (arch-1): start the sync orchestrator.
     //
@@ -1677,11 +1678,9 @@ async fn handle_tick(
             // this tokio worker is not stalled on potentially large I/O
             // (e.g. a 100 MiB file). spawn_blocking runs the closure on a
             // blocking-IO thread from the tokio blocking pool.
-            let max_file_bytes =
-                usize::try_from(config.max_file_size_bytes).unwrap_or(usize::MAX);
+            let max_file_bytes = usize::try_from(config.max_file_size_bytes).unwrap_or(usize::MAX);
             let path_clone = path.clone();
-            let read_result = tokio::task::spawn_blocking(move || std::fs::read(&path_clone))
-                .await;
+            let read_result = tokio::task::spawn_blocking(move || std::fs::read(&path_clone)).await;
             match read_result {
                 Ok(Ok(bytes)) => {
                     if bytes.len() > max_file_bytes {
@@ -3218,8 +3217,8 @@ mod tests {
         for (x, y, px) in buf.enumerate_pixels_mut() {
             *px = image::Rgba([(x % 256) as u8, (y % 256) as u8, 128, 255]);
         }
-        let raw_png = copypaste_core::encode_as_png(&DynamicImage::ImageRgba8(buf))
-            .expect("encode test PNG");
+        let raw_png =
+            copypaste_core::encode_as_png(&DynamicImage::ImageRgba8(buf)).expect("encode test PNG");
 
         let img_item = handle_image(raw_png.clone(), &db, &local_key, &config, "reg-device")
             .await
@@ -3273,7 +3272,8 @@ mod tests {
             let path = socket_path.clone();
             async move {
                 let mut stream = UnixStream::connect(&path).await.unwrap();
-                let req = format!("{{\"id\":\"r1\",\"method\":\"{method}\",\"params\":{params}}}\n");
+                let req =
+                    format!("{{\"id\":\"r1\",\"method\":\"{method}\",\"params\":{params}}}\n");
                 stream.write_all(req.as_bytes()).await.unwrap();
                 let mut reader = BufReader::new(stream);
                 let mut line = String::new();
@@ -3496,7 +3496,7 @@ mod tests {
         {
             let guard = db.lock().await;
             assert!(
-                !copypaste_core::has_sensitive_items(&*guard),
+                !copypaste_core::has_sensitive_items(&guard),
                 "no sensitive items must be present initially"
             );
         }
