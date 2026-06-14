@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { Briefcase, Copy, RefreshCw, Zap, AlertCircle } from "lucide-react";
 import {
   api,
   ipcErrorMessage,
@@ -64,15 +65,25 @@ function StatusDot({
     ? "Online"
     : `Offline · last seen ${formatLastSeen(lastSeenSecs)}`;
   return (
-    <span
-      title={title}
-      aria-label={title}
-      className={[
-        "inline-block shrink-0 rounded-full",
-        "w-2 h-2",
-        online ? "bg-ide-success" : "bg-ide-faint/50",
-      ].join(" ")}
-    />
+    // relative wrapper so the pulse ring can be absolutely positioned behind the dot
+    <span className="relative inline-flex shrink-0 items-center justify-center w-2 h-2">
+      {/* Expanding-ring pulse — only when online; respects prefers-reduced-motion */}
+      {online && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 animate-pulse-ping rounded-full bg-ide-success/50 motion-reduce:animate-none"
+        />
+      )}
+      <span
+        title={title}
+        aria-label={title}
+        className={[
+          "relative inline-block shrink-0 rounded-full",
+          "w-2 h-2",
+          online ? "bg-ide-success" : "bg-ide-faint/50",
+        ].join(" ")}
+      />
+    </span>
   );
 }
 
@@ -88,7 +99,8 @@ function MetaRow({ label, value }: { label: string; value: string | null | undef
   return (
     <>
       <span className="text-[11px] text-ide-dim whitespace-nowrap">{label}</span>
-      <span className="text-[11px] text-ide-faint break-all">{value}</span>
+      {/* tabular-nums keeps time/numeric values from causing layout shifts */}
+      <span className="text-[11px] text-ide-faint break-all tabular-nums">{value}</span>
     </>
   );
 }
@@ -117,6 +129,28 @@ function ThisDeviceCard({
 }: {
   info: OwnDeviceInfo;
 }) {
+  const [fpCopied, setFpCopied] = useState(false);
+  const fpCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (fpCopyTimer.current !== null) clearTimeout(fpCopyTimer.current);
+    };
+  }, []);
+
+  const handleCopyFp = () => {
+    if (!info.fingerprint) return;
+    navigator.clipboard.writeText(info.fingerprint).then(
+      () => {
+        setFpCopied(true);
+        if (fpCopyTimer.current !== null) clearTimeout(fpCopyTimer.current);
+        fpCopyTimer.current = setTimeout(() => setFpCopied(false), 1500);
+      },
+      () => {
+        // Clipboard denied — non-fatal; fingerprint is visible on screen.
+      }
+    );
+  };
+
   return (
     <div className="px-3 py-2.5">
       {/* Name + online dot + "This Mac" badge */}
@@ -138,6 +172,27 @@ function ThisDeviceCard({
         <MetaRow label="Local IP" value={info.local_ip} />
         <MetaRow label="Public IP" value={info.public_ip ?? undefined} />
       </DeviceMetaGrid>
+
+      {/* Full fingerprint in mono + copy button */}
+      {info.fingerprint && (
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <span className="font-mono text-[10px] text-ide-faint break-all select-all">
+            {info.fingerprint}
+          </span>
+          <button
+            type="button"
+            onClick={handleCopyFp}
+            title="Copy fingerprint"
+            aria-label="Copy fingerprint"
+            className="shrink-0 rounded p-0.5 text-ide-faint hover:text-ide-dim hover:bg-ide-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent"
+          >
+            {fpCopied
+              ? <span className="text-[10px] text-ide-success">✓</span>
+              : <Copy size={12} strokeWidth={1.5} aria-hidden="true" />
+            }
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -175,11 +230,45 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
   const pairedStr = (peer.added_at ?? 0) > 0 ? formatEpochSecs(peer.added_at) : null;
   const lastSyncStr = formatEpochSecs(peer.last_sync_at);
 
+  // Transport chip: P2P when we have a local LAN address/ip; Cloud otherwise.
+  // Defensive: no crash when address/local_ip are absent.
+  const isP2p = !!(peer.local_ip || peer.address);
+  const transportLabel = isP2p ? "P2P" : "Cloud";
+  const transportClass = isP2p
+    ? "text-ide-info bg-ide-info/12"
+    : "text-ide-accent bg-ide-accent/12";
+
+  // Truncated fingerprint: first 16 chars + ellipsis + last 8 chars.
+  const fp = peer.fingerprint;
+  const truncatedFp = fp.length > 24 ? fp.slice(0, 16) + "…" + fp.slice(-8) : fp;
+
+  const [fpCopied, setFpCopied] = useState(false);
+  const fpCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (fpCopyTimer.current !== null) clearTimeout(fpCopyTimer.current);
+    };
+  }, []);
+
+  const handleCopyFp = () => {
+    navigator.clipboard.writeText(fp).then(
+      () => {
+        setFpCopied(true);
+        if (fpCopyTimer.current !== null) clearTimeout(fpCopyTimer.current);
+        fpCopyTimer.current = setTimeout(() => setFpCopied(false), 1500);
+      },
+      () => {
+        // Clipboard denied — non-fatal.
+      }
+    );
+  };
+
   return (
-    <div className="px-3 py-2.5 hover:bg-ide-hover">
+    // 'group' enables hover-reveal on the Revoke button
+    <div className="group px-3 py-2.5 hover:bg-ide-hover">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          {/* Name + online dot */}
+          {/* Name + online dot + transport chip */}
           <div className="flex items-center gap-1.5">
             <StatusDot
               online={liveOnline !== undefined ? liveOnline : peer.online === true}
@@ -188,6 +277,15 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
             <p className="truncate text-[13px] font-medium text-ide-text">
               {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
             </p>
+            {/* Transport chip: 10px uppercase pill */}
+            <span
+              className={[
+                "shrink-0 rounded px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                transportClass,
+              ].join(" ")}
+            >
+              {transportLabel}
+            </span>
           </div>
 
           {/* Aligned two-column metadata grid — labels line up vertically */}
@@ -204,6 +302,32 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
               value={peer.latency_ms !== undefined ? `${peer.latency_ms} ms` : null}
             />
           </DeviceMetaGrid>
+
+          {/* Truncated fingerprint + hover-reveal copy button */}
+          <div className="mt-1 flex items-center gap-1">
+            <span className="font-mono text-[10px] text-ide-faint select-all">
+              {truncatedFp}
+            </span>
+            <button
+              type="button"
+              onClick={handleCopyFp}
+              title="Copy fingerprint"
+              aria-label="Copy fingerprint"
+              className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 rounded p-0.5 text-ide-faint hover:text-ide-dim hover:bg-ide-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent"
+            >
+              {fpCopied
+                ? <span className="text-[10px] text-ide-success">✓</span>
+                : <Copy size={12} strokeWidth={1.5} aria-hidden="true" />
+              }
+            </button>
+          </div>
+
+          {/* Sync line: "Synced X ago" from last_sync_at */}
+          {lastSyncStr && (
+            <p className="mt-0.5 text-[11px] text-ide-faint tabular-nums">
+              Synced {lastSyncStr}
+            </p>
+          )}
 
           {/* Revoked / error states — kept on their own line for visual weight */}
           {revokedAt !== null && (
@@ -225,10 +349,11 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
           >
             {isPending ? "..." : "Unpair"}
           </button>
+          {/* Revoke is a dangerous action — hover-reveal so it's not accidentally clicked */}
           <button
             onClick={() => onRevoke(peer.fingerprint)}
             disabled={isPending}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isPending ? "..." : "Revoke"}
           </button>
@@ -1253,11 +1378,7 @@ export function DevicesView({
       <ViewShell title="Devices" actions={actions}>
         <EmptyState
           className="h-full"
-          icon={
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-          }
+          icon={<Zap width={28} height={28} strokeWidth={1.5} />}
           title="Clipboard service offline"
           body="The daemon is not running."
           action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
@@ -1272,13 +1393,7 @@ export function DevicesView({
       <ViewShell title="Devices" actions={actions}>
         <EmptyState
           className="h-full"
-          icon={
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-warning">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-          }
+          icon={<AlertCircle width={28} height={28} strokeWidth={1.5} className="text-ide-warning" />}
           title="Database degraded"
           body="Device list unavailable. Reset the database in History to recover."
           action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
@@ -1293,13 +1408,7 @@ export function DevicesView({
       <ViewShell title="Devices" actions={actions}>
         <EmptyState
           className="h-full"
-          icon={
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-          }
+          icon={<AlertCircle width={28} height={28} strokeWidth={1.5} />}
           title="Failed to load devices"
           body="Try restarting the daemon."
           action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
@@ -1354,10 +1463,8 @@ export function DevicesView({
         )}
         {loadState === "ready" && peers.length === 0 && (
           <div className="px-3 py-3 flex items-center gap-2">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-ide-faint shrink-0">
-              <rect x="2" y="7" width="20" height="14" rx="2" />
-              <path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" />
-            </svg>
+            {/* Briefcase icon via lucide-react (§9: replace inline SVGs) */}
+            <Briefcase size={14} strokeWidth={1.5} className="text-ide-faint shrink-0" />
             <p className="text-[13px] text-ide-dim">No paired devices yet.</p>
           </div>
         )}
@@ -1407,22 +1514,13 @@ export function DevicesView({
           className="flex items-center gap-1 rounded-ide px-2 py-0.5 text-[11px] font-medium text-ide-accent hover:bg-ide-hover disabled:opacity-50 disabled:cursor-default"
           title="Rescan the local network for devices"
         >
-          {/* Refresh icon — spins while rescanning; reduced-motion: static */}
-          <svg
-            width="11"
-            height="11"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          {/* RefreshCw from lucide-react; spins while rescanning; reduced-motion: static */}
+          <RefreshCw
+            size={11}
+            strokeWidth={2.2}
             aria-hidden="true"
             className={rescanning ? "animate-spin motion-reduce:animate-none" : ""}
-          >
-            <path d="M21 12a9 9 0 1 1-9-9" />
-            <polyline points="21 3 21 9 15 9" />
-          </svg>
+          />
           {rescanning ? "Scanning…" : "Refresh"}
         </button>
       </div>
@@ -1481,13 +1579,34 @@ export function DevicesView({
                 {qrState.qr.payload}
               </p>
               {qrSecsLeft !== null && qrSecsLeft > 0 && (
-                <p className="text-[11px] text-ide-dim">
-                  Expires in{" "}
-                  <span className={qrSecsLeft <= 20 ? "text-ide-warning font-medium" : ""}>
-                    {qrSecsLeft}s
-                  </span>
-                  {" "}· click QR to regenerate
-                </p>
+                <>
+                  {/* Determinate drain bar: width drains from 100% to 0 as time runs out */}
+                  {(() => {
+                    const ttl = qrState.status === "ready" && qrState.qr.expires_in_secs > 0
+                      ? qrState.qr.expires_in_secs
+                      : QR_TTL_SECS;
+                    const pct = Math.min(100, Math.max(0, (qrSecsLeft / ttl) * 100));
+                    return (
+                      <div className="w-full h-0.5 rounded-full bg-ide-elevated overflow-hidden">
+                        <div
+                          data-testid="qr-drain-bar"
+                          className={[
+                            "h-full rounded-full transition-[width] duration-1000 ease-linear",
+                            qrSecsLeft <= 20 ? "bg-ide-warning" : "bg-ide-accent",
+                          ].join(" ")}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    );
+                  })()}
+                  <p className="text-[11px] text-ide-dim">
+                    Expires in{" "}
+                    <span className={qrSecsLeft <= 20 ? "text-ide-warning font-medium tabular-nums" : "tabular-nums"}>
+                      {qrSecsLeft}s
+                    </span>
+                    {" "}· click QR to regenerate
+                  </p>
+                </>
               )}
               <p className="text-[11px] text-ide-faint">
                 Scan from CopyPaste on another device to pair automatically.
