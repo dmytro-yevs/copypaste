@@ -13,6 +13,7 @@ import {
   type PairingQr,
   type PairSasStatus,
 } from "../lib/ipc";
+import { usePeerPresence } from "../lib/peerPresence";
 import { ViewShell } from "../components/ViewShell";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
@@ -152,9 +153,16 @@ interface PeerRowProps {
   onRevoke: (fp: string) => void;
   /** A-4: live-adjusted last_seen_secs so the "Xm ago" label ticks every 1 s. */
   liveLastSeenSecs: number | undefined;
+  /**
+   * Live presence override from the peer-event broadcast channel.  When
+   * `undefined`, falls back to `peer.online` from the last `list_peers` poll.
+   * This lets the online dot react within ~1 s of a connect/disconnect without
+   * waiting for the 10 s poll cycle.
+   */
+  liveOnline?: boolean;
 }
 
-function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs }: PeerRowProps) {
+function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline }: PeerRowProps) {
   const isPending = rowSt?.pending ?? false;
   const revokedAt = rowSt?.revokedAt ?? null;
   const rowError = rowSt?.error ?? null;
@@ -173,7 +181,10 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs }: PeerRowP
         <div className="min-w-0 flex-1">
           {/* Name + online dot */}
           <div className="flex items-center gap-1.5">
-            <StatusDot online={peer.online === true} lastSeenSecs={liveLastSeenSecs} />
+            <StatusDot
+              online={liveOnline !== undefined ? liveOnline : peer.online === true}
+              lastSeenSecs={liveLastSeenSecs}
+            />
             <p className="truncate text-[13px] font-medium text-ide-text">
               {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
             </p>
@@ -698,6 +709,12 @@ export function DevicesView({
    */
   incomingPairing?: PairSasStatus | null;
 } = {}) {
+  // --- Live peer-presence from the global event-broadcast store ---
+  // Updated ~every 1 s by `App.tsx`'s `startPeerPresencePolling()` loop.
+  // Used as a high-frequency overlay on top of the 10 s `list_peers` poll so
+  // online dots change within ~1 s of a real connect/disconnect.
+  const presenceOnline = usePeerPresence((s) => s.online);
+
   // --- Own device info ---
   const [ownState, setOwnState] = useState<OwnDeviceState>({ status: "loading" });
   // Ref that always holds the latest own fingerprint so loadPeers (a useCallback)
@@ -1294,9 +1311,9 @@ export function DevicesView({
   return (
     <ViewShell title="Devices" actions={actions}>
       {/* ── Devices section header — with online count ──────────── */}
-      {/* The online count is derived SOLELY from peer.online (single source of
-          truth from the daemon live-connection table), so the footer and each
-          card dot always agree. */}
+      {/* The online count uses the live presence store when available (updated
+          ~every 1 s from peer events); falls back to peer.online from the last
+          10 s list_peers poll when the store has no entry yet. */}
       <div className="mb-2 flex items-center justify-between">
         <p className="text-[11px] font-medium uppercase tracking-wider text-ide-faint">
           Devices
@@ -1304,7 +1321,10 @@ export function DevicesView({
         {loadState === "ready" && peers.length > 0 && (
           <span className="text-[11px] text-ide-faint">
             <span className="inline-block w-2 h-2 rounded-full bg-ide-success mr-1 align-middle" />
-            {peers.filter((p) => p.online === true).length} online
+            {peers.filter((p) => {
+              const live = presenceOnline[p.fingerprint];
+              return live !== undefined ? live : p.online === true;
+            }).length} online
           </span>
         )}
       </div>
@@ -1355,6 +1375,10 @@ export function DevicesView({
                 peer={peer}
                 rowSt={rowState[peer.fingerprint]}
                 liveLastSeenSecs={liveLastSeenSecs}
+                // Live presence overlay: if the event-broadcast store has seen
+                // a connect/disconnect for this peer, use it; otherwise fall back
+                // to the value from the last `list_peers` poll.
+                liveOnline={presenceOnline[peer.fingerprint]}
                 onUnpair={(fp) => void handleUnpair(fp)}
                 onRevoke={(fp) => {
                   setRotatePassphrase("");

@@ -620,6 +620,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         p2p_sync_addr_slot,
         live_sinks_slot,
         live_rtt_ms_slot,
+        peer_event_queue,
         pairing_coordinator,
         _ipc_handle,
         // B1: surfaced out of this block so the P2P subsystem (below) can share
@@ -717,6 +718,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         let live_sinks_slot = server.live_peer_sinks_slot();
         // RTT slot — populated after start_p2p returns, read by list_peers.
         let live_rtt_ms_slot = server.live_peer_rtt_ms_slot();
+        // Peer-event queue — drained by `poll_peer_events` IPC handler; fed by
+        // the background task below that subscribes to P2pHandle::peer_event_tx.
+        let peer_event_queue = server.peer_event_queue();
         // LAN/SAS Phase 2: grab a clone of the shared discovery-pairing
         // coordinator so the standing responder in `start_p2p` routes its SAS
         // through the SAME state machine the IPC handlers observe.
@@ -750,6 +754,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             sync_addr_slot,
             live_sinks_slot,
             live_rtt_ms_slot,
+            peer_event_queue,
             pairing_coordinator,
             handle,
             public_ip_cache,
@@ -900,6 +905,55 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
                         *slot = Some(std::sync::Arc::clone(&handle.peer_rtt_ms));
+                    }
+                    {
+                        // Subscribe to peer connect/disconnect events and relay
+                        // them into the IPC queue so `poll_peer_events` callers
+                        // (e.g. the Tauri event bridge) can push live presence
+                        // updates to the UI without waiting for the 10 s poll.
+                        let mut event_rx = handle.peer_event_tx.subscribe();
+                        let event_queue = std::sync::Arc::clone(&peer_event_queue);
+                        let event_shutdown = handle.shutdown_token.clone();
+                        tokio::spawn(async move {
+                            loop {
+                                tokio::select! {
+                                    biased;
+                                    _ = event_shutdown.cancelled() => { break; }
+                                    recv = event_rx.recv() => {
+                                        match recv {
+                                            Ok(ev) => {
+                                                let record = match &ev {
+                                                    crate::p2p::PeerEvent::Connected { fingerprint } => {
+                                                        crate::ipc::PeerEventRecord {
+                                                            kind: "connected",
+                                                            fingerprint: fingerprint.clone(),
+                                                        }
+                                                    }
+                                                    crate::p2p::PeerEvent::Disconnected { fingerprint } => {
+                                                        crate::ipc::PeerEventRecord {
+                                                            kind: "disconnected",
+                                                            fingerprint: fingerprint.clone(),
+                                                        }
+                                                    }
+                                                };
+                                                let mut q = event_queue
+                                                    .lock()
+                                                    .unwrap_or_else(|p| p.into_inner());
+                                                // Cap the queue to avoid unbounded growth
+                                                // when no consumer is draining it.
+                                                if q.len() >= crate::ipc::PEER_EVENT_QUEUE_CAP {
+                                                    q.pop_front();
+                                                }
+                                                q.push_back(record);
+                                            }
+                                            // The sender dropped (P2P shutdown) or we
+                                            // lagged — exit gracefully.
+                                            Err(_) => break,
+                                        }
+                                    }
+                                }
+                            }
+                        });
                     }
                     Some(handle)
                 }

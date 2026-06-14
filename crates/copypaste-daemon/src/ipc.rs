@@ -1237,7 +1237,35 @@ pub struct IpcServer {
     /// Protected by a `tokio::sync::Mutex` because the critical section includes
     /// an `.await` (waiting on the JoinHandle).
     pending_bootstrap: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+
+    /// Bounded queue of recent peer connect/disconnect events, drained by the
+    /// `poll_peer_events` IPC handler.
+    ///
+    /// Populated by a background task in `daemon.rs` that subscribes to
+    /// `P2pHandle::peer_event_tx` and enqueues each event here. Capped at
+    /// `PEER_EVENT_QUEUE_CAP` to prevent unbounded growth when no consumer
+    /// drains it (e.g. the Tauri UI is not open). The `poll_peer_events`
+    /// handler drains and returns all pending events atomically.
+    ///
+    /// `std::sync::Mutex` (not tokio's) because the critical section is a
+    /// short drain with no `.await`.
+    peer_event_queue: Arc<std::sync::Mutex<std::collections::VecDeque<PeerEventRecord>>>,
 }
+
+/// Wire-serialisable peer event record returned by `poll_peer_events`.
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct PeerEventRecord {
+    /// `"connected"` or `"disconnected"`.
+    pub kind: &'static str,
+    /// Canonical lowercase colon-free hex fingerprint of the peer's cert.
+    pub fingerprint: String,
+}
+
+/// Maximum number of [`PeerEventRecord`]s held in the IPC queue between polls.
+///
+/// The Tauri bridge polls every ~1 s; 64 is far more than enough to buffer a
+/// burst of connections/disconnections before the next drain.
+pub const PEER_EVENT_QUEUE_CAP: usize = 64;
 
 /// Canonical `status.degraded_reason` value for the keychain-locked /
 /// DB-unavailable degraded startup (the post-reinstall regression). The UI
@@ -1334,6 +1362,14 @@ impl IpcServer {
         &self,
     ) -> Arc<std::sync::Mutex<Option<crate::p2p::PeerRttMs>>> {
         Arc::clone(&self.live_peer_rtt_ms)
+    }
+
+    /// Return the shared peer-event queue that `daemon.rs` enqueues into and
+    /// the `poll_peer_events` IPC handler drains.
+    pub fn peer_event_queue(
+        &self,
+    ) -> Arc<std::sync::Mutex<std::collections::VecDeque<PeerEventRecord>>> {
+        Arc::clone(&self.peer_event_queue)
     }
 
     /// Attach a clone of the running sync orchestrator's `SyncCrypto` context
@@ -1482,6 +1518,9 @@ impl IpcServer {
             live_peer_rtt_ms: Arc::new(std::sync::Mutex::new(None)),
             p2p_sync_crypto: None,
             pending_bootstrap: Arc::new(tokio::sync::Mutex::new(None)),
+            peer_event_queue: Arc::new(std::sync::Mutex::new(
+                std::collections::VecDeque::new(),
+            )),
         }
     }
 
@@ -5124,6 +5163,28 @@ impl IpcServer {
                 }
                 Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
                 }
+            }
+
+            // Drain all pending peer connect/disconnect events and return them
+            // as an array. Called by the Tauri event bridge every ~1 s so the
+            // UI can update online presence dots without waiting for the next
+            // full `list_peers` poll.
+            //
+            // Response: { events: [{ kind: "connected"|"disconnected",
+            //                        fingerprint: "<hex>" }] }
+            //
+            // An empty `events` array is a valid response (no changes since the
+            // last poll). This is a draining read — once returned, events are
+            // removed from the queue.
+            "poll_peer_events" => {
+                let events: Vec<PeerEventRecord> = {
+                    let mut q = self
+                        .peer_event_queue
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
+                    q.drain(..).collect()
+                };
+                Response::ok(req.id, serde_json::json!({ "events": events }))
             }
 
             // LAN/SAS Phase 0: return discovered peers (mDNS) cross-referenced

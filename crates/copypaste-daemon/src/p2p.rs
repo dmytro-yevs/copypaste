@@ -98,6 +98,25 @@ pub struct P2pConfig {
 pub type LivePeerSinks =
     Arc<Mutex<HashMap<copypaste_p2p::transport::DeviceFingerprint, mpsc::Sender<PeerFrame>>>>;
 
+/// A peer connection-state change emitted by the P2P subsystem.
+///
+/// Published on [`P2pHandle::peer_event_tx`] whenever a verified mTLS
+/// connection is established or torn down.  Subscribers (e.g. `daemon.rs`
+/// bridging into Tauri events) can use this to push live presence updates to
+/// the UI without waiting for the next `list_peers` poll.
+#[derive(Debug, Clone)]
+pub enum PeerEvent {
+    /// A verified mTLS connection was established (either inbound accept or
+    /// outbound dial succeeded). `fingerprint` is the canonical lowercase
+    /// colon-free hex fingerprint of the peer's cert.
+    Connected { fingerprint: DeviceFingerprint },
+    /// An established mTLS connection was closed. `fingerprint` matches the
+    /// value emitted in the preceding [`Connected`] event.
+    ///
+    /// [`Connected`]: PeerEvent::Connected
+    Disconnected { fingerprint: DeviceFingerprint },
+}
+
 /// Live handle to a running P2P subsystem (returned from [`start_p2p`]).
 pub struct P2pHandle {
     /// The actual TCP port bound by the listener (useful when `listen_port` was 0).
@@ -122,6 +141,14 @@ pub struct P2pHandle {
     /// the `latency_ms` field in each peer entry. Entries are removed when
     /// the corresponding connection closes (same cleanup as `peer_sinks`).
     pub peer_rtt_ms: PeerRttMs,
+    /// Broadcast channel for peer connection / disconnection events.
+    ///
+    /// Subscribers clone a [`broadcast::Receiver`] from this sender via
+    /// [`broadcast::Sender::subscribe`]. The capacity is intentionally small
+    /// (16) because consumers (e.g. the Tauri event bridge in `daemon.rs`)
+    /// drain the queue quickly; lagged receivers simply miss stale events and
+    /// will re-sync on the next `list_peers` call.
+    pub peer_event_tx: broadcast::Sender<PeerEvent>,
 }
 
 /// Lightweight, synchronously-constructed P2P state used by the IPC layer.
@@ -386,6 +413,12 @@ pub async fn start_p2p(
     // handler can add latency_ms to each peer entry.
     let peer_rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
 
+    // ── peer-event broadcast channel ──────────────────────────────────────────
+    // Capacity 16: the event bridge in daemon.rs drains quickly; a lagged
+    // subscriber simply misses a stale event and re-syncs on the next
+    // list_peers call (acceptable degradation).
+    let (peer_event_tx, _) = broadcast::channel::<PeerEvent>(16);
+
     // ── standing discovery-pairing bootstrap listener (LAN/SAS Phase 2) ────────
     // Bind ONE bootstrap listener up front so we learn the OS-assigned port and
     // can advertise it in the mDNS `bport` TXT key. The standing responder loop
@@ -501,6 +534,7 @@ pub async fn start_p2p(
         // per-connection task so an inbound unpair evicts from it immediately.
         let accept_peers = peers.clone();
         let accept_rtt_ms = Arc::clone(&peer_rtt_ms);
+        let accept_event_tx = peer_event_tx.clone();
         tokio::spawn(async move {
             accept_loop(
                 listener,
@@ -511,6 +545,7 @@ pub async fn start_p2p(
                 catchup,
                 accept_peers,
                 accept_rtt_ms,
+                accept_event_tx,
             )
             .await;
         });
@@ -556,6 +591,7 @@ pub async fn start_p2p(
         //     it and deliver the deferred `ControlMsg::Unpair` frame.
         let connector_peers = peers.clone();
         let connector_rtt_ms = Arc::clone(&peer_rtt_ms);
+        let connector_event_tx = peer_event_tx.clone();
         tokio::spawn(async move {
             peer_connector_loop(
                 transport,
@@ -567,6 +603,7 @@ pub async fn start_p2p(
                 connector_shutdown,
                 connector_peers,
                 connector_rtt_ms,
+                connector_event_tx,
             )
             .await;
         });
@@ -609,6 +646,7 @@ pub async fn start_p2p(
         live_sinks: Arc::clone(&peer_sinks),
         peer_sinks,
         peer_rtt_ms,
+        peer_event_tx,
     })
 }
 
@@ -623,6 +661,7 @@ pub async fn start_p2p(
 ///
 /// The per-peer sender is stored in `peer_sinks` (keyed by the peer's cert
 /// fingerprint) so the outbound fanout loop can deliver outgoing items.
+#[allow(clippy::too_many_arguments)] // RTT + event params pushed count over 8
 async fn accept_loop(
     listener: TcpListener,
     shutdown: CancellationToken,
@@ -636,6 +675,8 @@ async fn accept_loop(
     live_peers: PairedPeers,
     // Shared RTT map — updated by the ping task spawned per connection.
     peer_rtt_ms: PeerRttMs,
+    // Broadcast channel for peer connect/disconnect events.
+    peer_event_tx: broadcast::Sender<PeerEvent>,
 ) {
     // fix/p2p-c-review #3: the previous `"unknown".parse().unwrap()` fallback
     // panicked because `"unknown"` is not a valid `SocketAddr`. `local_addr`
@@ -689,6 +730,14 @@ async fn accept_loop(
                             sinks.insert(peer_key.clone(), peer_tx);
                         }
 
+                        // Notify subscribers (e.g. Tauri event bridge) that
+                        // this peer is now online. `send` returns an error when
+                        // there are no active receivers — that is fine; just
+                        // ignore it (no subscriber yet or all have dropped).
+                        let _ = peer_event_tx.send(PeerEvent::Connected {
+                            fingerprint: peer_fp.clone(),
+                        });
+
                         // Stamp first/last sync times for this peer (once per
                         // established connection — see `stamp_peer_sync`).
                         stamp_peer_sync(&crate::ipc::peers_file_path(), &peer_fp);
@@ -710,6 +759,9 @@ async fn accept_loop(
                         let peer_sinks = Arc::clone(&peer_sinks);
                         let peer_fp_for_task = peer_fp.clone();
                         let live_peers_for_task = live_peers.clone();
+                        // Clone the event sender for the cleanup task that fires
+                        // the Disconnected event when the connection drops.
+                        let disconnect_event_tx = peer_event_tx.clone();
 
                         // RTT: create a per-connection pending-pings map shared
                         // between the ping sender task and the connection task.
@@ -748,6 +800,11 @@ async fn accept_loop(
                                 .is_some_and(|tx| tx.same_channel(&cleanup_tx))
                             {
                                 sinks.remove(&peer_key);
+                                // Emit Disconnected only when we actually removed
+                                // the sink (not when superseded by a reconnect).
+                                let _ = disconnect_event_tx.send(PeerEvent::Disconnected {
+                                    fingerprint: peer_key.clone(),
+                                });
                             }
                             drop(sinks);
                             tracing::debug!(%peer_addr, %peer_fp, "peer connection closed");
@@ -966,7 +1023,7 @@ fn dialable_peers_from_path(path: &std::path::Path) -> Vec<DialablePeer> {
 /// its (now-unreferenced) sink and exits when the stream closes — no duplicate
 /// fan-out. We additionally re-check `contains_key` immediately before dialing
 /// to skip a peer the accept loop just connected.
-#[allow(clippy::too_many_arguments)] // RTT params (pending_pings, peer_rtt_ms) pushed count to 9
+#[allow(clippy::too_many_arguments)] // RTT + event params pushed count over 9
 async fn peer_connector_loop(
     transport: Arc<PeerTransport>,
     peer_sinks: PeerSinks,
@@ -984,6 +1041,8 @@ async fn peer_connector_loop(
     live_peers: PairedPeers,
     // Shared RTT map — updated by the ping task spawned per connection.
     peer_rtt_ms: PeerRttMs,
+    // Broadcast channel for peer connect/disconnect events.
+    peer_event_tx: broadcast::Sender<PeerEvent>,
 ) {
     tracing::debug!(%own_fp, "P2P peer connector loop running");
     let peers_path = crate::ipc::peers_file_path();
@@ -1106,6 +1165,11 @@ async fn peer_connector_loop(
                         sinks.insert(peer.fingerprint.clone(), peer_tx);
                         drop(sinks);
 
+                        // Notify subscribers that this peer is now online.
+                        let _ = peer_event_tx.send(PeerEvent::Connected {
+                            fingerprint: peer.fingerprint.clone(),
+                        });
+
                         tracing::info!(fingerprint = %peer.fingerprint, addr = %peer.addr, "connector established outbound mTLS link");
 
                         // Stamp first/last sync times for this peer (once per
@@ -1127,6 +1191,8 @@ async fn peer_connector_loop(
                         let peer_key = peer.fingerprint.clone();
                         let peer_fp_for_task = peer.fingerprint.clone();
                         let live_peers_for_task = live_peers.clone();
+                        // Clone for the cleanup task's Disconnected event.
+                        let disconnect_event_tx = peer_event_tx.clone();
 
                         // RTT: per-connection pending-pings map shared between
                         // the ping sender task and the connection task.
@@ -1158,6 +1224,10 @@ async fn peer_connector_loop(
                                 .is_some_and(|tx| tx.same_channel(&cleanup_tx))
                             {
                                 sinks.remove(&peer_key);
+                                // Emit Disconnected only when we owned the sink.
+                                let _ = disconnect_event_tx.send(PeerEvent::Disconnected {
+                                    fingerprint: peer_key.clone(),
+                                });
                             }
                             drop(sinks);
                             tracing::debug!(fingerprint = %peer_key, "connector outbound connection closed");
@@ -2484,6 +2554,7 @@ mod tests {
             let catchup: CatchupProvider = Arc::new(|_fp: &str| Vec::new());
             let token = token.clone();
             let rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
+            let (event_tx, _) = broadcast::channel::<PeerEvent>(4);
             tokio::spawn(async move {
                 accept_loop(
                     listener,
@@ -2494,6 +2565,7 @@ mod tests {
                     catchup,
                     PairedPeers::new(),
                     rtt_ms,
+                    event_tx,
                 )
                 .await;
             })
@@ -2563,6 +2635,7 @@ mod tests {
             let discovery = Arc::new(DiscoveryService::new());
             let token = token.clone();
             let rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
+            let (event_tx, _) = broadcast::channel::<PeerEvent>(4);
             tokio::spawn(async move {
                 peer_connector_loop(
                     transport,
@@ -2574,6 +2647,7 @@ mod tests {
                     token,
                     PairedPeers::new(),
                     rtt_ms,
+                    event_tx,
                 )
                 .await;
             })
@@ -3487,6 +3561,99 @@ mod tests {
             pending_pings.lock().await.len(),
             0,
             "pending_pings must be empty after Pong processing removes the nonce"
+        );
+    }
+
+    // ── PeerEvent broadcast tests ─────────────────────────────────────────────
+
+    /// When a peer is inserted into the sinks map (simulating accept/connect),
+    /// the caller sends `PeerEvent::Connected` on the broadcast channel and
+    /// a subscriber receives it immediately.
+    #[tokio::test]
+    async fn peer_event_connected_is_broadcast() {
+        let (tx, mut rx) = broadcast::channel::<PeerEvent>(16);
+        let fp = "aabbcc001122".to_string();
+
+        // Simulate what accept_loop does after inserting the sink.
+        let _ = tx.send(PeerEvent::Connected {
+            fingerprint: fp.clone(),
+        });
+
+        match rx.recv().await.expect("should receive Connected event") {
+            PeerEvent::Connected { fingerprint } => {
+                assert_eq!(fingerprint, fp, "Connected fingerprint must match the inserted peer");
+            }
+            PeerEvent::Disconnected { .. } => panic!("expected Connected, got Disconnected"),
+        }
+    }
+
+    /// When a peer's connection task removes it from the sinks map (simulating
+    /// disconnect), the caller sends `PeerEvent::Disconnected` and a subscriber
+    /// receives it.
+    #[tokio::test]
+    async fn peer_event_disconnected_is_broadcast() {
+        let (tx, mut rx) = broadcast::channel::<PeerEvent>(16);
+        let fp = "ddeeff334455".to_string();
+
+        // Simulate what the cleanup task does after removing the sink.
+        let _ = tx.send(PeerEvent::Disconnected {
+            fingerprint: fp.clone(),
+        });
+
+        match rx.recv().await.expect("should receive Disconnected event") {
+            PeerEvent::Disconnected { fingerprint } => {
+                assert_eq!(
+                    fingerprint, fp,
+                    "Disconnected fingerprint must match the removed peer"
+                );
+            }
+            PeerEvent::Connected { .. } => panic!("expected Disconnected, got Connected"),
+        }
+    }
+
+    /// A subscriber that joins after a connect+disconnect sequence receives both
+    /// events in order.
+    #[tokio::test]
+    async fn peer_event_sequence_connected_then_disconnected() {
+        let (tx, mut rx) = broadcast::channel::<PeerEvent>(16);
+        let fp = "ff00aa112233".to_string();
+
+        let _ = tx.send(PeerEvent::Connected {
+            fingerprint: fp.clone(),
+        });
+        let _ = tx.send(PeerEvent::Disconnected {
+            fingerprint: fp.clone(),
+        });
+
+        let first = rx.recv().await.expect("first event");
+        let second = rx.recv().await.expect("second event");
+
+        assert!(
+            matches!(first, PeerEvent::Connected { .. }),
+            "first event must be Connected"
+        );
+        assert!(
+            matches!(second, PeerEvent::Disconnected { .. }),
+            "second event must be Disconnected"
+        );
+    }
+
+    /// When no subscribers are active, `send` on the event channel returns an
+    /// error (no receivers) — the P2P code must not panic or fail on that.
+    #[test]
+    fn peer_event_send_with_no_receivers_is_ok_to_discard() {
+        let (tx, rx) = broadcast::channel::<PeerEvent>(16);
+        // Drop the only receiver so the channel has no subscribers.
+        drop(rx);
+
+        // The `let _ =` pattern we use in p2p.rs must not panic.
+        let result = tx.send(PeerEvent::Connected {
+            fingerprint: "aabbcc".to_string(),
+        });
+        // `Err` is expected (no receivers), but we must not panic.
+        assert!(
+            result.is_err(),
+            "send with no receivers should return Err (not panic)"
         );
     }
 }

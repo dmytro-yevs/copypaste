@@ -567,6 +567,18 @@ export const api = {
     ipcCall<{ qr: string; expires_in_secs: number }>("pair_generate_qr", {}),
   listPeers: () => ipcCall<{ peers: PairedDevice[] }>("list_peers"),
 
+  /**
+   * Drain all pending peer connect/disconnect events since the last call.
+   * Returns an empty array when nothing changed.  Called by the Tauri event
+   * bridge roughly every second; individual UI components subscribe to the
+   * `usePeerPresence` store instead of calling this directly.
+   */
+  pollPeerEvents: () =>
+    ipcCall<{ events: Array<{ kind: "connected" | "disconnected"; fingerprint: string }> }>(
+      "poll_peer_events",
+      {},
+    ),
+
   /** List peers currently visible on the LAN via mDNS-SD. */
   listDiscovered: () =>
     ipcCall<{ devices: DiscoveredDevice[] }>("list_discovered", {}),

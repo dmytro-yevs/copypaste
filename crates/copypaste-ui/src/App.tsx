@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
 import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError, type PairSasStatus } from "./lib/ipc";
 import { listen } from "@tauri-apps/api/event";
+import { startPeerPresencePolling, stopPeerPresencePolling } from "./lib/peerPresence";
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
 import { SettingsView } from "./views/SettingsView";
@@ -79,6 +80,18 @@ export default function App() {
       unlisten?.();
     };
   }, [setView]);
+
+  // ---------------------------------------------------------------------------
+  // Live peer-presence polling (app-global, always-on)
+  // ---------------------------------------------------------------------------
+  // Polls `poll_peer_events` every ~1 s so the DevicesView online dots update
+  // in real time without requiring the user to open the Devices page.
+  // The polling is intentionally app-global (not per-view) so presence state
+  // persists across tab switches and the sidebar badge (if added later) works.
+  useEffect(() => {
+    startPeerPresencePolling();
+    return () => { stopPeerPresencePolling(); };
+  }, []);
 
   // Apply/remove the no-translucency root class whenever the pref changes.
   // When translucency is OFF we add "no-translucency" on <html> so the CSS
