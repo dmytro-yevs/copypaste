@@ -88,7 +88,8 @@ export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
       return (
         <Image
           {...shared}
-          className="shrink-0 text-ide-violet"
+          // 1hqt: IMAGE uses sky token (same family as URL), not violet
+          className="shrink-0 text-ide-sky"
         />
       );
     case "code":
@@ -173,7 +174,9 @@ export function KindChip({ contentType, kind }: KindChipProps) {
       ? "text-ide-warning border-ide-warning/45 bg-ide-warning/14"
       : label === "JSON" || label === "PRIVATE" || label === "SENSITIVE"
       ? "text-ide-danger border-ide-danger/45 bg-ide-danger/14"
-      : label === "CODE" || label === "IMAGE"
+      : label === "IMAGE"
+      ? "text-ide-sky border-ide-sky/45 bg-ide-sky/14"
+      : label === "CODE"
       ? "text-ide-violet border-ide-violet/45 bg-ide-violet/14"
       : label === "FILE"
       ? "text-ide-dim border-ide-dim/45 bg-ide-dim/14"
