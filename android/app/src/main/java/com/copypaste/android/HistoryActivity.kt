@@ -1749,20 +1749,22 @@ private fun TooLargeBadge() {
  * Matches the first #RGB / #RRGGBB / #AARRGGBB token in the snippet.
  * Returns null when no valid hex color is found.
  */
-private fun parseHexColor(snippet: String): Color? = try {
-    val hex = Regex("#[0-9A-Fa-f]{3,8}").find(snippet)?.value ?: return null
-    val cleaned = hex.removePrefix("#")
-    val argb = when (cleaned.length) {
-        3 -> {
-            // Expand #RGB → #RRGGBB
-            val r = cleaned[0]; val g = cleaned[1]; val b = cleaned[2]
-            android.graphics.Color.parseColor("#$r$r$g$g$b$b")
+private fun parseHexColor(snippet: String): Color? {
+    return try {
+        val hex = Regex("#[0-9A-Fa-f]{3,8}").find(snippet)?.value ?: return null
+        val cleaned = hex.removePrefix("#")
+        val argb = when (cleaned.length) {
+            3 -> {
+                // Expand #RGB → #RRGGBB
+                val r = cleaned[0]; val g = cleaned[1]; val b = cleaned[2]
+                android.graphics.Color.parseColor("#$r$r$g$g$b$b")
+            }
+            6, 8 -> android.graphics.Color.parseColor(hex)
+            else -> return null
         }
-        6, 8 -> android.graphics.Color.parseColor(hex)
-        else -> return null
-    }
-    Color(argb)
-} catch (_: Exception) { null }
+        Color(argb)
+    } catch (_: Exception) { null }
+}
 
 /**
  * egsf: 26dp kind-tinted icon tile — styleguide .ci (L250).
