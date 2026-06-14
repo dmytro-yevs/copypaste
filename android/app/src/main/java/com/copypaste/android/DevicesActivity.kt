@@ -1,6 +1,9 @@
 package com.copypaste.android
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -15,6 +18,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,6 +49,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -57,6 +67,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -70,14 +81,19 @@ import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.IdeAccent
+import com.copypaste.android.ui.theme.IdeAccentDim
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdeElevated
 import com.copypaste.android.ui.theme.IdeFaint
+import com.copypaste.android.ui.theme.IdeInfo
+import com.copypaste.android.ui.theme.IdeInfoDim
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
+import com.copypaste.android.ui.theme.IdeWarning
+import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.SectionLabel
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
@@ -90,6 +106,64 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+// ─────────────────────────────────────────────────────────────────────────────
+// §7 Liquid Glass Devices parity — pure logic helpers (testable without SDK)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Transport chip variants shown on each peer card.
+ * P2P = direct local network; Cloud = relay/Supabase.
+ */
+internal enum class TransportChip { P2P, Cloud }
+
+/**
+ * Derive the transport chip for [peer]:
+ * - P2P when [PairedPeer.syncAddr] or [PairedPeer.peerLocalIp] is non-blank,
+ *   meaning we have a local-network address for this peer.
+ * - Cloud otherwise (relay or Supabase-only peer).
+ *
+ * Defensive: never throws on null/blank fields.
+ */
+internal fun transportChipFor(peer: PairedPeer): TransportChip =
+    if (peer.syncAddr.isNotBlank() || peer.peerLocalIp?.isNotBlank() == true)
+        TransportChip.P2P
+    else
+        TransportChip.Cloud
+
+/**
+ * Format the own-device fingerprint: always shown in full (no truncation).
+ * Mirrors §7 "full fingerprint+copy on own".
+ */
+internal fun formatOwnFingerprint(fp: String): String = fp
+
+/**
+ * Format a peer fingerprint: take(16)+"…"+takeLast(8).
+ * Mirrors §7 "16…8 truncated+hover-copy on peers".
+ */
+internal fun formatPeerFingerprint(fp: String): String =
+    fp.take(16) + "…" + fp.takeLast(8)
+
+/**
+ * QR countdown drain-bar progress in [0f, 1f].
+ * [remainingSeconds] / [totalSeconds], clamped to [0f, 1f].
+ */
+internal fun qrCountdownProgress(remainingSeconds: Int, totalSeconds: Int): Float =
+    (remainingSeconds.toFloat() / totalSeconds.toFloat()).coerceIn(0f, 1f)
+
+/**
+ * True when the QR is in the warning zone (≤15 s remaining).
+ * Matches [DEVICES_QR_URGENT_THRESHOLD_SECONDS].
+ */
+internal fun isQrWarning(remainingSeconds: Int): Boolean =
+    remainingSeconds <= DEVICES_QR_URGENT_THRESHOLD_SECONDS
+
+/**
+ * True when the PulseDot should animate: [online] && ![ reducedMotion].
+ * Extracted so unit tests can verify the gate without Compose.
+ */
+internal fun shouldPulse(online: Boolean, reducedMotion: Boolean): Boolean =
+    online && !reducedMotion
 
 /**
  * "Online" recency threshold for the per-peer green dot.
@@ -872,13 +946,23 @@ private fun OwnQrSection(settings: Settings) {
                 }
             }
 
-            // Countdown / expiry label.
+            // §7 Countdown / expiry label + drain bar.
             if (qr != null && !expired) {
-                val urgent = remainingSeconds <= DEVICES_QR_URGENT_THRESHOLD_SECONDS
+                val urgent = isQrWarning(remainingSeconds)
                 Text(
                     text = stringResource(R.string.pair_token_expires_in_seconds, remainingSeconds),
                     style = MaterialTheme.typography.bodySmall,
                     color = if (urgent) IdeDanger else IdeFaint,
+                )
+                // §7 QR countdown drain bar: thin determinate progress bar that
+                // drains from full (1f) to empty (0f) over the 120 s TTL.
+                // Colour switches to IdeWarning when ≤15 s remain (spec: "warning <20s";
+                // we use the same threshold as DEVICES_QR_URGENT_THRESHOLD_SECONDS = 15).
+                LinearProgressIndicator(
+                    progress = { qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS) },
+                    modifier = Modifier.fillMaxWidth(),
+                    color = if (urgent) IdeWarning else IdeFaint,
+                    trackColor = IdeBorder,
                 )
             }
 
@@ -926,7 +1010,9 @@ private fun PeerCard(
     onUnpair: () -> Unit,
     onRevoke: () -> Unit,
 ) {
+    val ctx = LocalContext.current
     val dotColor = if (online) IdeSuccess else IdeFaint
+    val chip = transportChipFor(peer)
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -935,27 +1021,26 @@ private fun PeerCard(
         border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // ── Header row: dot + name + status ─────────────────────────────
+            // ── Header row: pulse dot + name + status + transport chip ───────
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(dotColor),
-                )
+                // §7 online pulse ring (replaces plain dot).
+                PulseDot(online = online, modifier = Modifier.size(10.dp))
                 Text(
                     text = peer.name.ifBlank { "Paired device" },
                     color = IdeText,
                     style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 Text(
                     text = if (online) "Online" else "Offline",
                     color = dotColor,
                     style = MaterialTheme.typography.labelMedium,
                 )
+                // §7 transport chip: P2P (IdeInfo) or Cloud (IdeAccent).
+                TransportChipLabel(chip = chip)
             }
 
             Spacer(Modifier.height(10.dp))
@@ -1002,6 +1087,16 @@ private fun PeerCard(
                 // FgsSyncLoop instrumentation (Ping/Pong over mTLS) deferred to CopyPaste-8dd.
                 peer.latencyMs?.let {
                     MetaRow(label = "RTT", value = "$it ms")
+                }
+                // §7 Fingerprint row: peer shows take(16)+…+takeLast(8) + tap-to-copy.
+                // Defensive: only shown when fingerprint is non-blank.
+                peer.fingerprint.takeIf { it.isNotBlank() }?.let { fp ->
+                    val truncated = formatPeerFingerprint(fp)
+                    MonoMetaRow(
+                        label = "Fingerprint",
+                        value = truncated,
+                        onTap = { copyToSystemClipboard(ctx, fp) },
+                    )
                 }
             }
 
@@ -1083,6 +1178,7 @@ private fun OwnDeviceCard(
     // platform (Build/BuildConfig) and a LAN-IPv4 enumeration. No synchronous
     // public-IP source on-device, so that row is omitted (matches the bootstrap
     // path, which sends public_ip = None for this device).
+    val ctx = LocalContext.current
     val model = Build.MODEL.orEmpty().ifBlank { "Android" }
     val osVersion = "Android " + Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
@@ -1100,27 +1196,36 @@ private fun OwnDeviceCard(
         border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header: online dot (this device is always online) + model name
-            // + "This Device" badge mirroring macOS "This Mac".
+            // Header: §7 pulse dot (always online) + model name + "Online"
+            // + §7 "This Device" accent badge (parity with macOS "This Mac").
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(IdeSuccess),
-                )
+                // Own device is always online — pulse ring always animates (unless
+                // reduced motion is enabled).
+                PulseDot(online = true, modifier = Modifier.size(10.dp))
                 Text(
                     text = model,
                     color = IdeText,
                     style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f, fill = false),
                 )
                 Text(
                     text = "Online",
                     color = IdeSuccess,
                     style = MaterialTheme.typography.labelMedium,
+                )
+                // §7 "This Device" accent badge.
+                Text(
+                    text = "This Device",
+                    color = IdeAccent,
+                    fontSize = 10.sp,
+                    letterSpacing = 0.4.sp,
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .background(IdeAccentDim, RoundedCornerShape(4.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
                 )
             }
 
@@ -1132,13 +1237,15 @@ private fun OwnDeviceCard(
                 MetaRow(label = "OS", value = osVersion)
                 MetaRow(label = "Version", value = appVersion)
                 localIp?.let { MetaRow(label = "Local IP", value = it) }
-                // Fingerprint shown instead of raw Device ID — parity with macOS ThisDeviceCard.
-                MetaRow(
-                    label = "Fingerprint",
-                    value = if (identity.fingerprint.length > 24)
-                        "${identity.fingerprint.take(16)}…${identity.fingerprint.takeLast(8)}"
-                    else identity.fingerprint,
-                )
+                // §7 Fingerprint: own device shows FULL fingerprint + tap-to-copy.
+                // Defensive: only shown when fingerprint is non-blank.
+                identity.fingerprint.takeIf { it.isNotBlank() }?.let { fp ->
+                    MonoMetaRow(
+                        label = "Fingerprint",
+                        value = formatOwnFingerprint(fp),
+                        onTap = { copyToSystemClipboard(ctx, fp) },
+                    )
+                }
             }
         }
     }
@@ -1593,6 +1700,108 @@ private fun SasPairingDialog(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// §7 Liquid Glass Devices parity — Compose helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Read the system "remove animations" / "reduce motion" accessibility setting.
+ * Returns true when the user has disabled animations (scale = 0) so [PulseDot]
+ * shows a static dot instead of the expanding ring.
+ */
+@Composable
+private fun rememberReducedMotion(): Boolean {
+    val ctx = LocalContext.current
+    return remember {
+        val scale = android.provider.Settings.Global.getFloat(
+            ctx.contentResolver,
+            android.provider.Settings.Global.ANIMATOR_DURATION_SCALE,
+            1f,
+        )
+        scale == 0f
+    }
+}
+
+/**
+ * Online presence indicator: a solid [IdeSuccess] dot with an expanding
+ * semi-transparent ring when [online] is true and reduced-motion is off.
+ *
+ * Animation: [rememberInfiniteTransition] drives a scale 1→2 + alpha 0.4→0
+ * on a 2 s tween loop. Ring is drawn BEHIND the solid dot so the dot itself
+ * stays crisply visible while the ring expands and fades.
+ *
+ * Gate: animated only when [online] == true and the system "remove animations"
+ * scale is not 0 (matches §7 / §8 "Respect prefers-reduced-motion").
+ */
+@Composable
+private fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
+    val reducedMotion = rememberReducedMotion()
+    val dotColor = if (online) IdeSuccess else IdeFaint
+    val animate = shouldPulse(online = online, reducedMotion = reducedMotion)
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (animate) {
+            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+            val pulseScale by infiniteTransition.animateFloat(
+                initialValue = 1f,
+                targetValue = 2.2f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Restart,
+                ),
+                label = "pulseScale",
+            )
+            val pulseAlpha by infiniteTransition.animateFloat(
+                initialValue = 0.4f,
+                targetValue = 0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
+                    repeatMode = RepeatMode.Restart,
+                ),
+                label = "pulseAlpha",
+            )
+            Box(
+                modifier = Modifier
+                    .size(10.dp)
+                    .scale(pulseScale)
+                    .clip(CircleShape)
+                    .background(IdeSuccess.copy(alpha = pulseAlpha)),
+            )
+        }
+        // Solid dot always on top.
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(dotColor),
+        )
+    }
+}
+
+/**
+ * Transport chip pill: 10 sp uppercase label in a tinted rounded pill.
+ * P2P = [IdeInfo] / [IdeInfoDim]; Cloud = [IdeAccent] / [IdeAccentDim].
+ * Defensive: never crashes on absent transport info — callers derive [chip]
+ * via [transportChipFor] which is always non-null.
+ */
+@Composable
+private fun TransportChipLabel(chip: TransportChip) {
+    val (text, fg, bg) = when (chip) {
+        TransportChip.P2P -> Triple("P2P", IdeInfo, IdeInfoDim)
+        TransportChip.Cloud -> Triple("CLOUD", IdeAccent, IdeAccentDim)
+    }
+    Text(
+        text = text,
+        color = fg,
+        fontSize = 10.sp,
+        letterSpacing = 0.6.sp,
+        style = MaterialTheme.typography.labelSmall,
+        modifier = Modifier
+            .background(bg, RoundedCornerShape(4.dp))
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Shared helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1627,6 +1836,46 @@ private fun MetaRow(label: String, value: String) {
             modifier = Modifier.weight(1f),
         )
     }
+}
+
+/**
+ * Like [MetaRow] but uses [MonoFontFamily] for the value and wraps the whole row
+ * in a [clickable] that calls [onTap] — used for fingerprint rows where tap-to-copy
+ * is desired (§7). [onTap] may be null if copy is not needed.
+ */
+@Composable
+private fun MonoMetaRow(label: String, value: String, onTap: (() -> Unit)? = null) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier),
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = IdeDim,
+            fontSize = 11.sp,
+            modifier = Modifier.width(META_LABEL_WIDTH),
+        )
+        Text(
+            text = value,
+            // §7 fingerprint uses MonoFontFamily (bundled JetBrains Mono) per §1/§10.
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
+            color = IdeText,
+            fontSize = 11.sp,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/**
+ * Copy [text] to the Android system clipboard using [ClipboardManager].
+ * Used by fingerprint rows (§7 "tap-to-copy").
+ */
+private fun copyToSystemClipboard(ctx: Context, text: String) {
+    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    cm.setPrimaryClip(ClipData.newPlainText("Fingerprint", text))
 }
 
 @Composable
