@@ -3042,7 +3042,7 @@ mod tests {
         // so the read path must also decrypt with the v2-derived key.
         let v2_key = copypaste_core::derive_v2(&local_key);
         let recovered_png =
-            copypaste_core::decode_image(&chunks, &*v2_key, &file_id).expect("decode_image");
+            copypaste_core::decode_image(&chunks, &v2_key, &file_id).expect("decode_image");
 
         // `handle_image` re-encodes the raw clipboard bytes to PNG before
         // chunking, so the recovered bytes are the canonical PNG of the
@@ -3093,7 +3093,7 @@ mod tests {
         // rotated key's v2 derivation ≠ the original key's v2 derivation, so
         // decoding must fail explicitly — never silently return wrong bytes.
         let rotated_v2_key = copypaste_core::derive_v2(&rotated_key);
-        let result = copypaste_core::decode_image(&chunks, &*rotated_v2_key, &file_id);
+        let result = copypaste_core::decode_image(&chunks, &rotated_v2_key, &file_id);
         assert!(
             result.is_err(),
             "a pre-rotation image row must NOT silently decode under a rotated key"
@@ -3102,7 +3102,7 @@ mod tests {
         // And the original key's v2 derivation must still decode it (rotation
         // does not destroy the existing row's recoverability under its own key).
         let old_v2_key = copypaste_core::derive_v2(&old_key);
-        let recovered = copypaste_core::decode_image(&chunks, &*old_v2_key, &file_id)
+        let recovered = copypaste_core::decode_image(&chunks, &old_v2_key, &file_id)
             .expect("the pre-rotation row must still decode under its original key");
         let reference_png = copypaste_core::encode_as_png(
             &copypaste_core::decode_clipboard_image(&png).expect("decode raw"),

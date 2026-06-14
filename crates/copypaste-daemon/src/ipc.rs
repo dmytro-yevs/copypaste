@@ -8798,7 +8798,7 @@ mod tests {
         let fp = "aabb";
         // Only 10 bytes — shorter than the 24-byte nonce.
         use base64::Engine as _;
-        let short_b64 = base64::engine::general_purpose::STANDARD.encode(&[0u8; 10]);
+        let short_b64 = base64::engine::general_purpose::STANDARD.encode([0u8; 10]);
         let result = decrypt_pake_password_file(&short_b64, fp, &local_key);
         assert!(
             result.is_err(),
@@ -12864,7 +12864,7 @@ mod tests {
 
         let (meta, chunks, thumb_blob, thumb_w, thumb_h) = copypaste_core::encode_image_full(
             &raw,
-            &*v2_key,
+            &v2_key,
             &file_id,
             &thumb_file_id,
             0,
@@ -12885,7 +12885,7 @@ mod tests {
 
         // A second image item with NO thumbnail (full-image-only legacy path).
         let (meta2, chunks2) =
-            copypaste_core::encode_image_with_limit(&raw, &*v2_key, &file_id, 0, 64).unwrap();
+            copypaste_core::encode_image_with_limit(&raw, &v2_key, &file_id, 0, 64).unwrap();
         let blob2 = copypaste_core::chunks_to_blob(&chunks2).unwrap();
         let meta_json2 = format!(
             r#"{{"width":{},"height":{},"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
@@ -12992,7 +12992,7 @@ mod tests {
 
         let file_id = crate::clipboard::image_content_hash(&raw);
         let (meta, chunks) =
-            copypaste_core::encode_image_with_limit(&raw, &*v2_key, &file_id, 0, 64).unwrap();
+            copypaste_core::encode_image_with_limit(&raw, &v2_key, &file_id, 0, 64).unwrap();
         let blob = copypaste_core::chunks_to_blob(&chunks).unwrap();
 
         // Legacy meta_json: no thumb_file_id / thumb_w / thumb_h fields.
@@ -13390,7 +13390,7 @@ mod tests {
         let v2_key = derive_v2(&key); // server reads kv=2 rows with this
         let file_id = [0xAAu8; 16]; // fixed content-hash stand-in for test
         let (meta, chunks) =
-            copypaste_core::encode_file(raw, "hello.txt", "text/plain", &*v2_key, &file_id, 0)
+            copypaste_core::encode_file(raw, "hello.txt", "text/plain", &v2_key, &file_id, 0)
                 .expect("encode_file must succeed");
         let blob = copypaste_core::chunks_to_blob(&chunks).expect("chunks_to_blob must succeed");
         let meta_json = crate::clipboard::build_file_meta_json(&meta);
