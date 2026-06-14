@@ -47,7 +47,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -71,6 +70,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -988,16 +988,24 @@ private fun OwnQrSection(settings: Settings) {
                     style = MaterialTheme.typography.bodySmall,
                     color = if (urgent) c.warning else c.faint,
                 )
-                // §10 QR countdown drain bar: thin determinate progress bar that
-                // drains from full (1f) to empty (0f) over the 120 s TTL.
-                // Audit #26: fill is ACCENT normally, switching to WARNING when
-                // ≤20 s remain (DEVICES_QR_URGENT_THRESHOLD_SECONDS).
-                LinearProgressIndicator(
-                    progress = { qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS) },
-                    modifier = Modifier.fillMaxWidth(),
-                    color = if (urgent) c.warning else c.accent,
-                    trackColor = c.border,
-                )
+                // §10 QR countdown drain bar: styleguide-conformant thin track
+                // (2dp, corners 999dp) replacing the Material LinearProgressIndicator.
+                // Track is mute@35% (calm hairline); fill is ACCENT normally,
+                // switching to WARNING when ≤20 s remain. Countdown logic preserved.
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(2.dp)
+                        .clip(RoundedCornerShape(999.dp))
+                        .background(c.mute.copy(alpha = 0.35f)),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS))
+                            .height(2.dp)
+                            .background(if (urgent) c.warning else c.accent),
+                    )
+                }
             }
 
             errorMsg?.let { msg ->
@@ -1660,16 +1668,41 @@ private fun SasPairingDialog(
                             color = c.dim,
                             style = MaterialTheme.typography.bodySmall,
                         )
-                        Text(
-                            text = status.sas ?: "",
-                            color = c.text,
-                            textAlign = TextAlign.Center,
-                            fontFamily = MonoFontFamily,
-                            fontSize = 32.sp,
+                        // §10 SAS per-digit cells — styleguide .sas: each digit in its
+                        // own 38dp-wide centered mono cell, 28sp/600, letterSpacing 1.1sp
+                        // (≈.04em at 28sp), gap 8dp, whole row tap-to-copy.
+                        val sasFull = status.sas ?: ""
+                        val ctx = LocalContext.current
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                        )
+                                .padding(vertical = 8.dp)
+                                .clickable(onClickLabel = "Copy code") {
+                                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                                        as ClipboardManager
+                                    cm.setPrimaryClip(ClipData.newPlainText("SAS code", sasFull))
+                                    android.widget.Toast.makeText(ctx, "Code copied", android.widget.Toast.LENGTH_SHORT).show()
+                                },
+                        ) {
+                            sasFull.forEach { digit ->
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier.width(38.dp),
+                                ) {
+                                    Text(
+                                        text = digit.toString(),
+                                        color = c.text,
+                                        fontFamily = MonoFontFamily,
+                                        fontSize = 28.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        letterSpacing = 1.1.sp,
+                                        textAlign = TextAlign.Center,
+                                    )
+                                }
+                            }
+                        }
                     }
                     status.state == "awaiting_sas" -> {
                         // Accepted locally; waiting for the peer to also accept.
