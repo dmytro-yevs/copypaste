@@ -45,8 +45,8 @@ base64.workspace = true
 subtle.workspace = true
 
 [dev-dependencies]
-# Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
-tempfile = ">=3.0, <3.14"
+# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.89. Pin removed 2026-06-14.
+tempfile = "3"
 criterion.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
 hkdf.workspace = true

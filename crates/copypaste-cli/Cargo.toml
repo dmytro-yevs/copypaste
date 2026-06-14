@@ -34,7 +34,5 @@ rpassword = "7"
 security-framework.workspace = true
 
 [dev-dependencies]
-# Pin below 3.14 — tempfile ≥3.14 pulls getrandom 0.4 which requires Rust 1.85+
-# (our MSRV is 1.89 so this is already satisfied, but the pin keeps the
-# lock consistent with copypaste-core and avoids an accidental bump).
-tempfile = ">=3.0, <3.14"
+# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.89. Pin removed 2026-06-14.
+tempfile = "3"

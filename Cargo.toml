@@ -62,8 +62,8 @@ tracing = "0.1"
 # Errors
 thiserror = "1"
 # Misc
-# Pin to <1.21 retained for now; MSRV bumped to 1.89 (current floor), relax post-beta.
-uuid = { version = ">=1.0, <1.21", features = ["v4"] }
+# uuid 1.21+ requires Rust 1.85; safe at MSRV 1.89. Upper bound removed 2026-06-14.
+uuid = { version = "1", features = ["v4"] }
 # Async runtime
 tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros", "signal", "sync", "time"] }
 # Serialization
@@ -82,14 +82,14 @@ security-framework = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Rotating file appender for daemon logs
 tracing-appender = "0.2"
-# home dir (pin retained from Rust 1.75 era; safe to relax post-beta now MSRV=1.89)
-home = "=0.5.9"
+# home dir (0.5.12 requires Rust 1.88; safe at MSRV 1.89). Exact pin removed 2026-06-14.
+home = "0.5"
 # platform config / data dirs
 dirs = "5"
 # error handling
 anyhow = "1"
-# CLI argument parsing (pin retained; relax post-beta now MSRV=1.89 supports edition2024)
-clap = { version = ">=4.0, <4.5.40", features = ["derive"] }
+# clap 4.6+ uses edition 2024 (MSRV 1.85); safe at MSRV 1.89. Upper bound removed 2026-06-14.
+clap = { version = "4", features = ["derive"] }
 # Base64 encoding
 base64 = "0.22"
 # QR code generation (pure-Rust). Used by the CLI to render a scannable pairing

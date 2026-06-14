@@ -17,8 +17,8 @@ clap = { workspace = true, features = ["derive"] }
 criterion.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-# tempfile pinned to match copypaste-core dev-deps (Rust 1.75 MSRV).
-tempfile = ">=3.0, <3.14"
+# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.89. Pin removed 2026-06-14.
+tempfile = "3"
 
 [[bench]]
 name = "encryption"
