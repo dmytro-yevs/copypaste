@@ -245,8 +245,13 @@ body {
      blur is clearly visible THROUGH every glass surface. Opaque on purpose — we
      render our own depth rather than relying on fragile macOS NSVisualEffectView
      vibrancy, so the glass reads identically in the browser, the Tauri window,
-     and (mirrored) on Android. */
+     and (mirrored) on Android.
+     Overlay E+F (small centre blobs, stacked FIRST = topmost): add mid-canvas
+     depth so the blur "obviously does something" even when the large corner blobs
+     are outside the viewport centre. */
   background:
+    radial-gradient(28% 28% at 50% 38%, rgba(61, 139, 255, 0.22) 0%, transparent 65%),
+    radial-gradient(20% 20% at 30% 60%, rgba(217, 163, 67, 0.16) 0%, transparent 65%),
     radial-gradient(120% 90% at 6% -18%, rgba(61, 139, 255, 0.42) 0%, transparent 50%),
     radial-gradient(110% 85% at 108% 118%, rgba(198, 120, 221, 0.38) 0%, transparent 50%),
     radial-gradient(85% 70% at 95% -12%, rgba(86, 182, 194, 0.28) 0%, transparent 46%),
@@ -289,10 +294,18 @@ body {
 
    The old .ide-translucent class is kept as an alias so existing uses don't break. */
 
+/* ── Glass blur tier-split (canonical spec):
+     chrome/card tier → 28px (enough to read colour, not over-blurred)
+     strong tier (modals/popovers) → 40px (heavier frosted glass)
+   Matches Android GlassTier: GLASS/CARD=28dp, STRONG=40dp. */
 .surface-glass,
 .surface-card,
-.surface-glass-strong,
 .ide-translucent {
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+}
+
+.surface-glass-strong {
   backdrop-filter: blur(40px) saturate(180%);
   -webkit-backdrop-filter: blur(40px) saturate(180%);
 }
@@ -376,15 +389,19 @@ body {
 
 /* Light/greyish canvas — soft neutral grey with a RICH cool vibrancy, so the
    frosted surfaces read as real glass (replaces the dark aurora in light mode).
-   The colour blobs are saturated enough that the blur is clearly visible behind
-   the near-white frosted panels — macOS Tahoe "Liquid Glass" over a tinted desk. */
+   Canonical spec (CopyPaste-esph):
+     Blobs positioned INSIDE canvas edges (12%/88%/80%/18%) for better distribution.
+     Blob-B violet = 128 90 213 (AA-darkened from raw systemPurple 175 82 222 — per styleguide).
+     Overlay E+F (small centre blobs, topmost) add mid-canvas depth. */
 :root[data-theme="light"] body {
   background:
-    radial-gradient(120% 85% at 8% -14%, rgba(0, 122, 255, 0.22) 0%, transparent 52%),
-    radial-gradient(110% 80% at 106% 114%, rgba(175, 82, 222, 0.20) 0%, transparent 50%),
-    radial-gradient(85% 65% at 98% -8%, rgba(50, 173, 230, 0.16) 0%, transparent 46%),
-    radial-gradient(90% 70% at -8% 108%, rgba(52, 199, 89, 0.12) 0%, transparent 48%),
-    linear-gradient(160deg, #ECECF3 0%, #E2E3EC 50%, #D8DAE4 100%);
+    radial-gradient(28% 28% at 50% 38%, rgba(0, 122, 255, 0.14) 0%, transparent 65%),
+    radial-gradient(20% 20% at 30% 60%, rgba(217, 163, 67, 0.12) 0%, transparent 65%),
+    radial-gradient(120% 90% at 12% 8%, rgba(0, 122, 255, 0.22) 0%, transparent 55%),
+    radial-gradient(110% 85% at 88% 12%, rgba(128, 90, 213, 0.20) 0%, transparent 55%),
+    radial-gradient(90% 75% at 80% 92%, rgba(20, 120, 170, 0.18) 0%, transparent 58%),
+    radial-gradient(95% 80% at 18% 88%, rgba(40, 140, 70, 0.14) 0%, transparent 56%),
+    linear-gradient(160deg, #ECECF3 0%, #E3E3EC 50%, #D9DAE4 100%);
   background-attachment: fixed;
 }
 
