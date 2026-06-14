@@ -133,15 +133,13 @@ pub fn open_pool_with_cache_mb(
     let cache_pragma = crate::storage::db::cache_size_pragma(cache_mb);
     // Build the full PRAGMA string inside a Zeroizing buffer so the key hex
     // material in the PRAGMA string is also scrubbed from the heap on drop.
+    // The per-connection pragmas are sourced from `db::CONNECTION_PRAGMAS` so
+    // both the single-connection path and the pool path stay in sync — a diff
+    // to one will be visible in the other.
     let pragma_str: Zeroizing<String> = Zeroizing::new(format!(
-        "PRAGMA key = \"x'{}'\";\n\
-         PRAGMA journal_mode = WAL;\n\
-         PRAGMA busy_timeout = 5000;\n\
-         PRAGMA synchronous = NORMAL;\n\
-         PRAGMA foreign_keys = ON;\n\
-         PRAGMA temp_store = MEMORY;\n\
-         {}",
+        "PRAGMA key = \"x'{}'\";\nPRAGMA journal_mode = WAL;\n{}{}",
         key_hex.as_str(),
+        crate::storage::db::CONNECTION_PRAGMAS,
         cache_pragma.trim_end()
     ));
     let manager = SqliteConnectionManager::file(path).with_init(move |conn| {
@@ -153,7 +151,7 @@ pub fn open_pool_with_cache_mb(
         // file) and MUST be re-applied each time the pool hands out a fresh
         // connection — otherwise UI reader / daemon writer races surface as
         // silent `SQLITE_BUSY` and foreign-key checks silently no-op.
-        // Kept in sync with `db::CONNECTION_PRAGMAS`.
+        // Built from `db::CONNECTION_PRAGMAS` above — single source of truth.
         conn.execute_batch(pragma_str.as_str())
     });
 

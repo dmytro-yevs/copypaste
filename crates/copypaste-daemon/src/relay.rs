@@ -59,13 +59,8 @@ use copypaste_core::{
 
 use crate::sync_common::{
     build_local_item, decode_payload_ct, decrypt_item_plaintext, replace_cloud_item_by_item_id,
-    wrap_and_check_cloud_upload_plaintext,
+    wrap_and_check_cloud_upload_plaintext, SYNC_HTTP_TIMEOUT,
 };
-
-// ── Tuning ──────────────────────────────────────────────────────────────────
-
-/// Per-request HTTP timeout. A stalled relay must not hang a loop forever.
-const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 
 // ── Settings guards ───────────────────────────────────────────────────────────
 
@@ -1108,7 +1103,7 @@ mod tests {
 
     fn test_client() -> reqwest::Client {
         reqwest::Client::builder()
-            .timeout(HTTP_TIMEOUT)
+            .timeout(SYNC_HTTP_TIMEOUT)
             .build()
             .expect("client")
     }

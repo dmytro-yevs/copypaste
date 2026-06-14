@@ -55,7 +55,7 @@ use crate::sync_common::{
     build_local_item, decode_cloud_file_payload, decode_payload_ct, decrypt_item_plaintext,
     encode_cloud_file_payload, replace_cloud_item_by_item_id,
     wrap_and_check_cloud_upload_plaintext, wrap_cloud_upload_plaintext, CLOUD_FILE_HEADER_VERSION,
-    CLOUD_FILE_LEGACY_MIME, CLOUD_FILE_LEGACY_NAME,
+    CLOUD_FILE_LEGACY_MIME, CLOUD_FILE_LEGACY_NAME, SYNC_HTTP_TIMEOUT,
 };
 
 // Beta W2.3 (arch-1): canonical auth client lives in copypaste-supabase. The
@@ -811,12 +811,9 @@ async fn push_loop(
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
     // P1: set a per-request timeout so a stalled Supabase endpoint cannot hang
-    // this loop indefinitely. 30 s is generous for the REST operations here
-    // (single-row upserts / small batch reads) while still bounding worst-case
-    // latency to a recoverable window. Without a timeout reqwest's default is
-    // infinite, meaning one unresponsive endpoint blocks the whole push loop.
+    // this loop indefinitely. See `sync_common::SYNC_HTTP_TIMEOUT` for rationale.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(SYNC_HTTP_TIMEOUT)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
@@ -1715,10 +1712,9 @@ async fn realtime_loop(
     // set_config changes take effect without a daemon restart.
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
-    // P1: same 30 s timeout as push_loop — prevents a stalled endpoint from
-    // hanging the poll loop indefinitely.
+    // P1: same timeout as push_loop — see `sync_common::SYNC_HTTP_TIMEOUT`.
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(30))
+        .timeout(SYNC_HTTP_TIMEOUT)
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
     // Start at the fallback (full-speed) interval; the tick period is

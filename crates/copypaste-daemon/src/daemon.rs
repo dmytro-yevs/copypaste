@@ -1085,7 +1085,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         if let Some(relay_url) = relay_url {
             tracing::info!("relay-sync: relay_url configured, starting relay orchestrator");
             let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
+                .timeout(crate::sync_common::SYNC_HTTP_TIMEOUT)
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
             match crate::relay::start_relay(

@@ -120,6 +120,9 @@ impl SessionKey {
     pub fn derive_xchacha_key(&self, salt: &[u8]) -> zeroize::Zeroizing<[u8; 32]> {
         let hk = Hkdf::<Sha256>::new(Some(salt), &self.0);
         let mut out = [0u8; 32];
+        // SAFETY: HKDF-SHA256 can produce up to 255 * 32 = 8160 bytes; 32 bytes
+        // is a fixed compile-time constant far below that ceiling, so expand()
+        // is infallible when given a properly-sized output slice.
         hk.expand(b"copypaste-xchacha20-key-v1", &mut out)
             .expect("32 bytes is well within HKDF-SHA256 output limit");
         zeroize::Zeroizing::new(out)
@@ -170,6 +173,9 @@ impl SessionKey {
         assert!(!tls_binder.is_empty(), "tls_binder must not be empty");
         let hk = Hkdf::<Sha256>::new(Some(tls_binder), &self.0);
         let mut out = [0u8; 32];
+        // SAFETY: HKDF-SHA256 can produce up to 255 * 32 = 8160 bytes; 32 bytes
+        // is a fixed compile-time constant far below that ceiling, so expand()
+        // is infallible when given a properly-sized output slice.
         hk.expand(b"copypaste/p2p/channel-binding/v1", &mut out)
             .expect("32 bytes is well within HKDF-SHA256 output limit");
         zeroize::Zeroizing::new(out)
@@ -215,6 +221,9 @@ pub fn channel_confirmation_tag(bound_key: &[u8; 32], role: ConfirmRole) -> [u8;
     };
     let hk = Hkdf::<Sha256>::new(None, bound_key);
     let mut tag = [0u8; CONFIRM_TAG_LEN];
+    // SAFETY: HKDF-SHA256 can produce up to 255 * 32 = 8160 bytes; CONFIRM_TAG_LEN
+    // is a fixed compile-time constant (32 bytes) far below that ceiling, so
+    // expand() is infallible when given a properly-sized output slice.
     hk.expand(info, &mut tag)
         .expect("32 bytes is well within HKDF-SHA256 output limit");
     tag
@@ -254,6 +263,9 @@ pub const SAS_DIGITS: usize = 6;
 pub fn derive_sas(bound_key: &[u8; 32]) -> String {
     let hk = Hkdf::<Sha256>::new(None, bound_key);
     let mut out = [0u8; 4];
+    // SAFETY: HKDF-SHA256 can produce up to 255 * 32 = 8160 bytes; 4 bytes is a
+    // fixed compile-time constant far below that ceiling, so expand() is
+    // infallible when given a properly-sized output slice.
     hk.expand(b"copypaste/p2p/sas/v1", &mut out)
         .expect("4 bytes is well within HKDF-SHA256 output limit");
     let n = u32::from_be_bytes(out) % 1_000_000;

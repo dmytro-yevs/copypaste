@@ -8076,9 +8076,14 @@ fn probe_listening_daemon(socket_path: &std::path::Path) -> Option<ProbedDaemon>
     use std::io::{BufRead, BufReader, Write};
     use std::time::Duration;
 
+    // Short timeout for the takeover-probe handshake: must be fast enough that
+    // startup is not delayed if the old daemon is unresponsive, but long enough
+    // to complete a loopback JSON-RPC round-trip on a loaded machine.
+    const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+
     let stream = std::os::unix::net::UnixStream::connect(socket_path).ok()?;
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(3)));
-    let _ = stream.set_write_timeout(Some(Duration::from_secs(3)));
+    let _ = stream.set_read_timeout(Some(PROBE_TIMEOUT));
+    let _ = stream.set_write_timeout(Some(PROBE_TIMEOUT));
 
     let mut req = serde_json::to_string(
         &serde_json::json!({"id":"takeover-probe","method":"status","params":{}}),

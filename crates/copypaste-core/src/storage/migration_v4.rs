@@ -71,14 +71,31 @@ pub const INTER_BATCH_SLEEP: std::time::Duration = std::time::Duration::from_mil
 /// but pinned here so the migration can never be silently desynced by an
 /// unrelated bump of that constant.
 const AAD_SCHEMA_V3: u32 = 3;
+// Compile-time guard: if the canonical const ever changes, this migration
+// file must be revisited before it will compile again.
+const _: () = assert!(
+    AAD_SCHEMA_V3 == crate::crypto::encrypt::AAD_SCHEMA_VERSION,
+    "AAD_SCHEMA_V3 is out of sync with crate::crypto::encrypt::AAD_SCHEMA_VERSION"
+);
 
 /// AAD schema version stamped into the v4 (key-versioned) AAD format. Same
 /// caveat as `AAD_SCHEMA_V3` re: pinning.
 const AAD_SCHEMA_V4: u32 = 4;
+// Compile-time guard: same rationale as above.
+const _: () = assert!(
+    AAD_SCHEMA_V4 == crate::crypto::encrypt::AAD_SCHEMA_VERSION_V4,
+    "AAD_SCHEMA_V4 is out of sync with crate::crypto::encrypt::AAD_SCHEMA_VERSION_V4"
+);
 
 /// `key_version` value written into newly-rotated rows. Must match
 /// [`super::items::ITEM_KEY_VERSION_CURRENT`].
 const KEY_VERSION_V2: i64 = 2;
+// Compile-time guard: if ITEM_KEY_VERSION_CURRENT is ever bumped this assert
+// will fail, prompting a review of whether the migration constant is still correct.
+const _: () = assert!(
+    KEY_VERSION_V2 == super::items::ITEM_KEY_VERSION_CURRENT,
+    "KEY_VERSION_V2 is out of sync with super::items::ITEM_KEY_VERSION_CURRENT"
+);
 
 #[derive(Debug, Error)]
 pub enum MigrationV4Error {

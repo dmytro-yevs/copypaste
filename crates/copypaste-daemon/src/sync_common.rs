@@ -48,6 +48,14 @@ use copypaste_core::{
 // check fails we treat the ENTIRE plaintext as raw file bytes with the legacy
 // name="file" / mime="application/octet-stream" (the pre-fix behaviour).
 
+/// Per-request HTTP timeout shared by all sync paths (cloud push/poll and
+/// relay push/poll). 30 s is generous for single-row REST operations while
+/// still bounding worst-case latency to a recoverable window. Without a
+/// timeout, reqwest's default is infinite — one unresponsive endpoint would
+/// block the whole sync loop permanently.
+pub(crate) const SYNC_HTTP_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_secs(30);
+
 /// Version byte for the cloud file-identity header. Bump only with a matching
 /// decoder branch.
 pub(crate) const CLOUD_FILE_HEADER_VERSION: u8 = 1;
