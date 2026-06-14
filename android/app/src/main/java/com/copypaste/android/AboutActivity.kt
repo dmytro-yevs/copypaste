@@ -21,7 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -43,6 +43,7 @@ import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdeFaint
+import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
 
 /**
@@ -178,9 +179,10 @@ fun AboutScreen(
                     ABOUT_FEATURES.forEach { feature ->
                         Row(verticalAlignment = Alignment.Top) {
                             Icon(
-                                Icons.Filled.Check,
+                                // §5: thin Outlined check, tinted §3 success green.
+                                Icons.Outlined.Check,
                                 contentDescription = null,
-                                tint = IdeAccent,
+                                tint = IdeSuccess,
                                 modifier = Modifier
                                     .padding(end = 8.dp, top = 2.dp)
                                     .height(16.dp),

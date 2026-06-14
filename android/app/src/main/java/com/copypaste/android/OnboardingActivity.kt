@@ -29,7 +29,7 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhonelinkSetup
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.AlertDialog
+import com.copypaste.android.ui.theme.GlassAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -271,7 +271,7 @@ private fun CrashDetectedDialog(
     onExport: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    GlassAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(R.string.crash_detected_title)) },
         text = { Text(stringResource(R.string.crash_detected_message)) },

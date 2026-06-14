@@ -22,9 +22,11 @@ import android.util.Log
 import android.view.SoundEffectConstants
 import android.view.View
 import android.view.WindowManager
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.ServiceCompat
+import com.copypaste.android.ui.theme.IdeAccent
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -1514,7 +1516,7 @@ class ClipboardService : Service() {
                 .setContentTitle(title)
                 .setContentText(content)
                 .setSmallIcon(android.R.drawable.ic_menu_edit)
-                .setColor(0xFF3D8BFF.toInt())
+                .setColor(IdeAccent.toArgb())
                 .setOngoing(true)
                 .setShowWhen(false)
                 .setOnlyAlertOnce(true)

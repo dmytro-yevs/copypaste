@@ -442,6 +442,18 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("mask_sensitive_content", v).apply()
 
     /**
+     * Number of preview lines per history row (PARITY-SPEC §3, audit P1 #9).
+     *
+     * Mirrors the web `niApp` setting (store.ts): how many lines of preview text
+     * a row shows before ellipsis. 1 line (default) = single-line ellipsis; >1 =
+     * multi-line clamp. Range 1–6 (matches web's clamp). Honoured by the history
+     * row as `maxLines`.
+     */
+    var previewLines: Int
+        get() = prefs.getInt("preview_lines", 1).coerceIn(1, 6)
+        set(v) = prefs.edit().putInt("preview_lines", v.coerceIn(1, 6)).apply()
+
+    /**
      * When true (default), the foreground service is actively monitoring the
      * clipboard. Toggled by the notification's Pause/Resume action; consumed
      * by [ClipboardService] before storing each detected change.

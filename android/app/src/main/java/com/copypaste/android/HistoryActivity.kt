@@ -116,10 +116,13 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
@@ -147,6 +150,9 @@ import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.GlassAlertDialog
+import com.copypaste.android.ui.theme.LiquidGlassSurface
+import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.rememberReducedMotion
@@ -419,6 +425,9 @@ fun HistoryScreen(
     // §8 a11y: skip animated transitions when the user has requested reduced motion
     // (Accessibility → Remove animations, or Developer Options → Animator duration scale = 0).
     val reducedMotion = rememberReducedMotion()
+    // §2/P0: glass pref + theme for the frosted header (LiquidGlassSurface).
+    val translucent = rememberTranslucency()
+    val dark = isDarkTheme()
     val loadErrorTemplate = stringResource(R.string.error_load_history)
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
 
@@ -744,7 +753,17 @@ fun HistoryScreen(
                 val keyboardController = LocalSoftwareKeyboardController.current
                 val clearRecentLabel = stringResource(R.string.action_clear_recent_searches)
 
-                Column(modifier = Modifier.background(c.panel)) {
+                // §2/P0 + P1#3: route the History header through the canonical
+                // glass surface (real API-31 RenderEffect blur, flat §2 tint
+                // fallback < 31) instead of the solid c.panel Column background.
+                LiquidGlassSurface(
+                    shape = RectangleShape,
+                    translucent = translucent,
+                    dark = dark,
+                    solid = MaterialTheme.colorScheme.surface,
+                    contentColor = c.text,
+                ) {
+                  Column {
                     TopAppBar(
                         title = {
                             Row(
@@ -884,7 +903,8 @@ fun HistoryScreen(
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor             = c.panel,
+                            // Glass backdrop carries the fill (LiquidGlassSurface).
+                            containerColor             = Color.Transparent,
                             titleContentColor          = c.text,
                             actionIconContentColor     = c.dim,
                             navigationIconContentColor = c.dim,
@@ -1000,7 +1020,8 @@ fun HistoryScreen(
                             }
                         }
                     }
-                }
+                  } // Column
+                } // LiquidGlassSurface (glass header)
 
                 // Request keyboard focus once search bar becomes visible.
                 LaunchedEffect(searchExpanded) {
@@ -1744,6 +1765,8 @@ private fun HistoryList(
     val maskSensitive = remember(settingsVersion) { settings.maskSensitiveContent }
     val imageMaxHeightDp = remember(settingsVersion) { settings.imageMaxHeight }
     val previewDelayMs = remember(settingsVersion) { settings.previewDelay }
+    // §3/P1#9: honour the preview-lines pref as the row's preview maxLines.
+    val previewLines = remember(settingsVersion) { settings.previewLines }
     // §2 density-aware row height: read the same "density" key the Settings store
     // (Settings.density) writes — it persists the Density enum *name* ("COMPACT"/
     // "COMFORTABLE"), so compare case-insensitively. Default to comfortable (34dp)
@@ -1942,6 +1965,7 @@ private fun HistoryList(
                         maskSensitive = maskSensitive,
                         imageMaxHeightDp = imageMaxHeightDp,
                         previewDelayMs = previewDelayMs,
+                        previewLines = previewLines,
                         isCompact = isCompact,
                         selectionMode = selectionMode,
                         isSelected = selectedIds.contains(item.id),
@@ -2014,6 +2038,8 @@ private fun HistoryRow(
     maskSensitive: Boolean,
     imageMaxHeightDp: Int,
     previewDelayMs: Long,
+    /** §3/P1#9: number of preview lines per row (1=single-line ellipsis, >1 clamp). */
+    previewLines: Int = 1,
     /** §2 Density pref: compact=28dp text rows, comfortable (default)=34dp. */
     isCompact: Boolean = false,
     selectionMode: Boolean,
@@ -2046,6 +2072,10 @@ private fun HistoryRow(
     // CompositionLocal read — CopyPaste-998).
     val c = colors
     val detectedSensitive = item.isSensitive
+    // §10/P1#10: tap-to-reveal a masked sensitive row. While unrevealed the actual
+    // snippet renders BLURRED (web parity: blur + reveal, not a bullet substitution);
+    // tapping flips this true to unblur. Keyed on item.id so a recycled row re-masks.
+    var revealed by remember(item.id) { mutableStateOf(false) }
     // §8 a11y: skip animated transitions when the user has requested reduced motion.
     val reducedMotion = rememberReducedMotion()
 
@@ -2112,9 +2142,15 @@ private fun HistoryRow(
         }
     }
 
+    // §10/P1#10: the row is masked when sensitive + the pref is on + not yet revealed.
+    // On API 31+ we keep the REAL snippet text and BLUR it (web parity: blur + reveal);
+    // tapping unblurs. On API < 31 Modifier.blur is a no-op, so to avoid LEAKING the
+    // sensitive text we fall back to the bullet substitution there until revealed.
+    val masked = detectedSensitive && maskSensitive && !revealed
+    val canBlur = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
     val maskString = stringResource(R.string.sensitive_preview_mask)
     val display = when {
-        detectedSensitive && maskSensitive -> maskString
+        masked && !canBlur -> maskString
         item.snippet.isBlank() -> stringResource(R.string.empty_history)
         else -> item.snippet
     }
@@ -2172,7 +2208,14 @@ private fun HistoryRow(
                 onClick = {
                     if (selectionMode) {
                         onCheckboxTap()
+                    } else if (masked) {
+                        // §10/P1#10: first tap on a masked sensitive row reveals it
+                        // (unblur), matching web's tap-to-reveal. Still surface the
+                        // hint so the user knows a copy needs the explicit action.
+                        revealed = true
+                        onSensitiveTap()
                     } else if (detectedSensitive) {
+                        // Revealed sensitive row: keep the deliberate-copy guard.
                         onSensitiveTap()
                     } else {
                         copyFlashTrigger++   // §5/§8 trigger 90ms success flash
@@ -2453,19 +2496,32 @@ private fun HistoryRow(
                     }
                     Text(
                         text = annotated,
+                        // §3: preview pinned to 13sp (bodyLarge).
                         style = MaterialTheme.typography.bodyLarge,
-                        maxLines = 1,
+                        // §3/P1#9: honour the preview-lines pref (URL host+path is one
+                        // logical line, but respect the clamp so multi-line prefs apply).
+                        maxLines = previewLines,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
                     )
                 } else {
                     Text(
                         text = display,
+                        // §3: preview pinned to 13sp (bodyLarge).
                         style = MaterialTheme.typography.bodyLarge,
                         color = if (detectedSensitive) c.dim else c.text,
-                        maxLines = 1,
+                        // §3/P1#9: honour the preview-lines pref as maxLines (was hard 1).
+                        maxLines = previewLines,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        // §10/P1#10: blur the real text while masked (tap reveals). On
+                        // API < 31 `display` is the bullet mask instead (blur is a no-op
+                        // there and must not leak the text), so blur only when canBlur.
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(
+                                if (masked && canBlur) Modifier.blur(8.dp, BlurredEdgeTreatment.Unbounded)
+                                else Modifier
+                            ),
                     )
                 }
                 Spacer(Modifier.width(6.dp))

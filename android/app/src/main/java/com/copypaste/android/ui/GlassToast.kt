@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.Motion
-import com.copypaste.android.ui.theme.glassFillForTheme
+import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
@@ -133,8 +133,8 @@ class GlassToastState {
  * the screen content so the toast floats above the list.
  *
  * Respects reduced-motion: the slide is suppressed when the user disabled
- * animations. Honours the translucency pref via [glassFillForTheme] so the
- * toast is the §2 glass fill (or an opaque elevated surface when off).
+ * animations. Honours the translucency pref via [LiquidGlassSurface] so the
+ * toast is the §2 frosted glass (or an opaque elevated surface when off).
  */
 @Composable
 fun GlassToastHost(
@@ -189,15 +189,7 @@ fun GlassToastHost(
 private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
-
-    // §2 canonical glass fill (warm-near-white light / deep dark) at the §2
-    // alpha when translucent, else the opaque elevated surface — same material
-    // the CopyPasteCard uses so the toast reads as part of the glass system.
-    val containerColor = glassFillForTheme(
-        solid = MaterialTheme.colorScheme.surfaceContainerHigh,
-        translucent = translucent,
-        dark = dark,
-    )
+    val toastShape = RoundedCornerShape(10.dp)
 
     val dotColor: Color = when (data.kind) {
         GlassToastKind.SUCCESS -> c.success
@@ -206,10 +198,13 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
         GlassToastKind.ACCENT -> c.accent
     }
 
+    // §2/P0: the Material Surface stays TRANSPARENT and supplies only the §4
+    // shadow + hairline border + shape clip; the real frosted blur + §2 tint
+    // comes from LiquidGlassSurface (API-31 RenderEffect blur, flat tint < 31).
     Surface(
         // §4 radii: 10dp control/toast radius (matches web toast borderRadius 10).
-        shape = RoundedCornerShape(10.dp),
-        color = containerColor,
+        shape = toastShape,
+        color = Color.Transparent,
         contentColor = c.text,
         // §4: single 1dp hairline border (subtle, like CopyPasteCard).
         border = androidx.compose.foundation.BorderStroke(1.dp, c.border),
@@ -217,28 +212,36 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
         shadowElevation = 6.dp,
         modifier = Modifier
             .padding(horizontal = 16.dp)
-            .clip(RoundedCornerShape(10.dp)),
+            .clip(toastShape),
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+        LiquidGlassSurface(
+            shape = toastShape,
+            translucent = translucent,
+            dark = dark,
+            solid = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = c.text,
         ) {
-            // 6dp semantic dot (web parity).
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .drawBehind { drawCircle(dotColor) },
-            )
-            Text(
-                text = data.message,
-                color = c.text,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Normal,
-                ),
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+            ) {
+                // 6dp semantic dot (web parity).
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .drawBehind { drawCircle(dotColor) },
+                )
+                Text(
+                    text = data.message,
+                    color = c.text,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal,
+                    ),
+                )
+            }
         }
     }
 }

@@ -7,7 +7,6 @@ import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -296,28 +295,8 @@ fun CopyPasteTheme(
 }
 
 // ---------------------------------------------------------------------------
-// Shared component color overrides — used at call sites to keep all screens
-// consistent without repeating the same color arguments everywhere.
+// Switch styling moved to the bespoke IdeSwitch composable in Components.kt
+// (PARITY-SPEC §7): the stock Material Switch could not express the canonical
+// 34×18 dp track + 12 dp white thumb (both states) without a glow/state-layer
+// halo, so a hand-drawn composable replaced the old ideSwitchColors() helper.
 // ---------------------------------------------------------------------------
-
-/**
- * IDE-styled Switch colors: accent thumb when checked, ide-elevated track
- * with ide-border outline when unchecked. Matches the macOS Toggle component.
- */
-@Composable
-fun ideSwitchColors(): androidx.compose.material3.SwitchColors {
-    val c = LocalIdeColors.current
-    return SwitchDefaults.colors(
-        checkedThumbColor        = Color.White,
-        checkedTrackColor        = c.accent,
-        checkedBorderColor       = c.accent,
-        uncheckedThumbColor      = c.dim,
-        uncheckedTrackColor      = c.elevated,
-        uncheckedBorderColor     = c.border,
-        // PARITY-SPEC §4: disabled opacity 0.40 (was Material's 0.38).
-        disabledCheckedThumbColor    = Color.White.copy(alpha = 0.40f),
-        disabledCheckedTrackColor    = c.accent.copy(alpha = 0.40f),
-        disabledUncheckedThumbColor  = c.dim.copy(alpha = 0.40f),
-        disabledUncheckedTrackColor  = c.elevated.copy(alpha = 0.40f),
-    )
-}

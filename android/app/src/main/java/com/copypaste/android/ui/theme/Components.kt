@@ -2,17 +2,29 @@
 
 package com.copypaste.android.ui.theme
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -20,22 +32,37 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.ProvideTextStyle
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -77,6 +104,123 @@ val GlassFillLight = Color(0xFFFAFAFC)
 
 /** PARITY-SPEC §2 DARK glass fill — rgba(30,32,42). */
 val GlassFillDark = Color(0xFF1E202A)
+
+// ---------------------------------------------------------------------------
+// Real frosted blur (PARITY-SPEC §2, audit P0).
+//
+// Android glass was a FLAT alpha-fill; web is `backdrop-filter: blur(40px)`.
+// We add a genuine API-31+ blur behind every glass surface via
+// `android.graphics.RenderEffect.createBlurEffect(...)` applied (through
+// `graphicsLayer { renderEffect = … }`) to a backdrop layer that draws the
+// opaque canvas gradient §2 mandates ("Canvas behind glass must be opaque so
+// blur has something to sample"). Below API 31 RenderEffect is unavailable, so
+// we fall back to the EXISTING flat `glassFillForTheme()` alpha-fill, which also
+// tints the blur on ≥31. The §2 tint + a top sheen highlight are layered on top.
+//
+// The blur radius mirrors web's blur(40px); 40dp is a touch heavy for the
+// gradient-only backdrop, so we use the §2-equivalent 32px (the canonical glass
+// blur radius documented in PARITY-SPEC §2: "blur(32px) saturate(180%)").
+// ---------------------------------------------------------------------------
+
+/** §2 canonical glass blur radius (mirrors web `backdrop-filter: blur(32px)`). */
+val GLASS_BLUR_RADIUS = 32.dp
+
+/** True when the platform can render a real RenderEffect blur (API 31+). */
+val supportsGlassBlur: Boolean
+    get() = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+
+/**
+ * Opaque canvas gradient that sits BEHIND glass so the blur has real colour to
+ * sample (PARITY-SPEC §2). Mirrors index.css: a base linear gradient (light =
+ * soft greys; dark = deep aurora). Used both as the screen backdrop and as the
+ * per-surface blur source.
+ */
+fun glassCanvasBrush(dark: Boolean): Brush =
+    if (dark) {
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF1A1F33), Color(0xFF121526), Color(0xFF0B0D17)),
+        )
+    } else {
+        Brush.linearGradient(
+            colors = listOf(Color(0xFFECECF1), Color(0xFFE3E3E9), Color(0xFFDADAE1)),
+        )
+    }
+
+/**
+ * Frosted-glass surface wrapper (PARITY-SPEC §2, audit P0). Stacks, bottom→top:
+ *   1. a backdrop layer drawing [glassCanvasBrush] with an API-31 RenderEffect
+ *      blur ([GLASS_BLUR_RADIUS]) — the real frost. Gated on [supportsGlassBlur];
+ *      omitted below 31 (the flat tint then carries the whole look).
+ *   2. the §2 [glassFillForTheme] tint (which also tints the blur on ≥31).
+ *   3. a 1 dp top sheen highlight (web's top inset highlight).
+ *   4. the caller's [content].
+ *
+ * When [translucent] is false the blur + sheen are skipped and the surface is
+ * the opaque solid colour — the pre-glass look. [shape] clips all layers so the
+ * frost respects the surface's corner radius.
+ *
+ * This is the single mechanism behind CopyPasteCard, the History/standard top
+ * bars, GlassToast and GlassAlertDialog so every glass surface frosts uniformly.
+ */
+@Composable
+fun LiquidGlassSurface(
+    shape: Shape,
+    translucent: Boolean,
+    dark: Boolean,
+    solid: Color,
+    modifier: Modifier = Modifier,
+    contentColor: Color = LocalIdeColors.current.text,
+    content: @Composable BoxScope.() -> Unit,
+) {
+    val tint = glassFillForTheme(solid = solid, translucent = translucent, dark = dark)
+    // Top sheen: a near-white highlight fading out — web's `rgba(255,255,255,…)`
+    // top inset. Subtle on dark, brighter on light (Apple frosted near-white).
+    val sheen = if (dark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.45f)
+    val canvas = remember(dark) { glassCanvasBrush(dark) }
+
+    Box(
+        modifier = modifier.clip(shape),
+        propagateMinConstraints = true,
+    ) {
+        if (translucent && supportsGlassBlur) {
+            // Real frosted backdrop: the opaque canvas gradient, RenderEffect-blurred.
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .graphicsLayer {
+                        renderEffect = android.graphics.RenderEffect
+                            .createBlurEffect(
+                                GLASS_BLUR_RADIUS.toPx(),
+                                GLASS_BLUR_RADIUS.toPx(),
+                                android.graphics.Shader.TileMode.CLAMP,
+                            )
+                            .asComposeRenderEffect()
+                    }
+                    .drawBehind { drawRect(canvas) },
+            )
+        }
+        // §2 tint fill (also tints the blur on ≥31; the whole look below 31).
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .drawBehind {
+                    drawRect(tint)
+                    if (translucent) {
+                        // Top sheen highlight — a thin gradient fading down.
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(sheen, Color.Transparent),
+                                endY = size.height * 0.5f,
+                            ),
+                        )
+                    }
+                },
+        )
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            content()
+        }
+    }
+}
 
 /**
  * Returns the container-surface alpha for the given [translucent] flag.
@@ -205,48 +349,55 @@ fun CopyPasteTopBar(
 ) {
     // Active light/dark ramp — read once so the bar themes in lockstep (§1).
     val c = LocalIdeColors.current
-    // §2 glass header: warm-near-white (light) / deep (dark) fill at the §2
-    // alpha when translucent, else the opaque theme panel surface.
-    val containerColor = glassFillForTheme(
-        solid = MaterialTheme.colorScheme.surface,
-        translucent = translucent,
-        dark = isDarkTheme(),
-    )
+    val dark = isDarkTheme()
 
-    TopAppBar(
-        title = {
-            // §3 view title: 14 sp medium (titleLarge), theme text color.
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleLarge,
-                color = c.text,
-            )
-        },
-        navigationIcon = {
-            if (showBackButton) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = backContentDescription,
-                        tint = c.dim,
-                        modifier = Modifier.size(18.dp),
-                    )
+    // §2/P0: the TopAppBar is TRANSPARENT and a LiquidGlassSurface backdrop
+    // (API-31 RenderEffect blur, flat §2 tint fallback < 31) sits behind it,
+    // sized to the bar incl. the status-bar inset via matchParentSize.
+    Box {
+        LiquidGlassSurface(
+            shape = RectangleShape,
+            translucent = translucent,
+            dark = dark,
+            solid = MaterialTheme.colorScheme.surface,
+            modifier = Modifier.matchParentSize(),
+            content = {},
+        )
+        TopAppBar(
+            title = {
+                // §3 view title: 14 sp medium (titleLarge), theme text color.
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleLarge,
+                    color = c.text,
+                )
+            },
+            navigationIcon = {
+                if (showBackButton) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = backContentDescription,
+                            tint = c.dim,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                 }
-            }
-        },
-        actions = actions,
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor             = containerColor, // glass when translucent, solid panel when off
-            titleContentColor          = c.text,
-            actionIconContentColor     = c.dim,
-            navigationIconContentColor = c.dim,
-        ),
-        // Apply the status-bar / display-cutout inset as TOP PADDING so the
-        // bar's content sits *below* the notch, never under it. A hard fixed
-        // height must NOT be set here — it would clip the header on notched
-        // phones because the inset eats into the fixed total height.
-        windowInsets = windowInsets,
-    )
+            },
+            actions = actions,
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor             = Color.Transparent, // glass backdrop carries the fill
+                titleContentColor          = c.text,
+                actionIconContentColor     = c.dim,
+                navigationIconContentColor = c.dim,
+            ),
+            // Apply the status-bar / display-cutout inset as TOP PADDING so the
+            // bar's content sits *below* the notch, never under it. A hard fixed
+            // height must NOT be set here — it would clip the header on notched
+            // phones because the inset eats into the fixed total height.
+            windowInsets = windowInsets,
+        )
+    }
 }
 
 /**
@@ -271,24 +422,22 @@ fun CopyPasteCard(
     translucent: Boolean = rememberTranslucency(),
     content: @Composable (androidx.compose.foundation.layout.ColumnScope.() -> Unit),
 ) {
-    // §2 canonical glass: warm-near-white (light) / deep (dark) fill at the §2
-    // alpha when translucent, else the opaque theme elevated surface.
-    val containerColor = glassFillForTheme(
-        solid = MaterialTheme.colorScheme.surfaceContainerHigh,
-        translucent = translucent,
-        dark = isDarkTheme(),
-    )
+    val dark = isDarkTheme()
+    val cardShape = RoundedCornerShape(12.dp)
 
+    // §2/P0: the Card supplies the §4 hairline border + one e2 shadow and stays
+    // TRANSPARENT; the real frosted blur + §2 tint comes from LiquidGlassSurface
+    // (API-31 RenderEffect blur, flat tint fallback < 31).
     Card(
         modifier = modifier.fillMaxWidth(),
         // §4 card radius 12 dp.
-        shape = RoundedCornerShape(12.dp),
+        shape = cardShape,
         colors = CardDefaults.cardColors(
-            containerColor = containerColor,
+            containerColor = Color.Transparent,
             contentColor   = MaterialTheme.colorScheme.onSurface,
         ),
         // §4: single 1 dp hairline.
-        border = androidx.compose.foundation.BorderStroke(1.dp, accent),
+        border = BorderStroke(1.dp, accent),
         // §4 elevation: drop Material tonal-elevation drift (no pressed/hovered
         // jumps) — a flat hairline + one subtle e2-equivalent shadow only.
         elevation = CardDefaults.cardElevation(
@@ -300,7 +449,15 @@ fun CopyPasteCard(
             disabledElevation  = 2.dp,
         ),
     ) {
-        Column(content = content)
+        LiquidGlassSurface(
+            shape = cardShape,
+            translucent = translucent,
+            dark = dark,
+            solid = MaterialTheme.colorScheme.surfaceContainerHigh,
+            contentColor = MaterialTheme.colorScheme.onSurface,
+        ) {
+            Column(content = content)
+        }
     }
 }
 
@@ -324,18 +481,16 @@ fun glassDialogContainerColor(translucent: Boolean = rememberTranslucency()): Co
 }
 
 /**
- * Glass restyle of Material [AlertDialog] (PARITY-SPEC §8, audit #10).
+ * Glass restyle of Material [AlertDialog] (PARITY-SPEC §8, audit #6/#10, P0 blur).
  *
  * Appearance only — the LOGIC (callbacks, button content, dismiss) is whatever
- * the caller passes. The container is the §8 glass fill, the corner radius is
- * the §4 modal radius (16 dp), and the scrim is dimmed (Material's default
- * scrim drawn behind the dialog) so the frosted card floats above a darkened
- * backdrop. Title/text colors come from the active ramp; the caller styles its
- * own buttons (destructive actions in `c.danger`).
- *
- * Signature mirrors the slots of Material AlertDialog the call sites use, so it
- * is a near drop-in: rename `AlertDialog(` → `GlassAlertDialog(` and remove any
- * explicit `containerColor`.
+ * the caller passes. Built on a bare [Dialog] + [LiquidGlassSurface] so the
+ * modal gets a REAL API-31 RenderEffect frosted backdrop (flat §8 tint fallback
+ * < 31), the §4 modal radius (16 dp), a §4 hairline border, and Material's
+ * dimmed scrim behind it. The slot layout mirrors Material's AlertDialog (title,
+ * supporting text, then a trailing buttons row: dismiss left of confirm) so the
+ * call-site signature is a near drop-in. Title/text colors come from the active
+ * ramp; the caller styles its own buttons (destructive actions in `c.danger`).
  */
 @Composable
 fun GlassAlertDialog(
@@ -349,22 +504,156 @@ fun GlassAlertDialog(
     properties: DialogProperties = DialogProperties(),
 ) {
     val c = LocalIdeColors.current
-    AlertDialog(
+    val dark = isDarkTheme()
+    val dialogShape = RoundedCornerShape(16.dp)
+
+    Dialog(
         onDismissRequest = onDismissRequest,
-        confirmButton = confirmButton,
-        modifier = modifier,
-        dismissButton = dismissButton,
-        title = title,
-        text = text,
-        // §8 glass container over the dimmed scrim.
-        containerColor = glassDialogContainerColor(translucent),
-        // §4 modal radius 16 dp.
-        shape = RoundedCornerShape(16.dp),
-        titleContentColor = c.text,
-        textContentColor = c.dim,
-        // §8 dimmed scrim — Material draws its default scrim behind the dialog.
         properties = properties,
+    ) {
+        // §4 hairline + e2 shadow on a transparent Surface; LiquidGlassSurface
+        // supplies the frosted blur + §8 tint.
+        Surface(
+            modifier = modifier.widthIn(min = 280.dp, max = 560.dp),
+            shape = dialogShape,
+            color = Color.Transparent,
+            border = BorderStroke(1.dp, c.border),
+            shadowElevation = 6.dp,
+        ) {
+            LiquidGlassSurface(
+                shape = dialogShape,
+                translucent = translucent,
+                dark = dark,
+                // §8: dialogs use the higher-floor glass fill so text stays legible
+                // over the scrim. Passing the slightly-opaque fill as `solid` makes
+                // the no-blur (< 31 / translucency-off) path match §8 exactly.
+                solid = glassDialogContainerColor(translucent),
+                contentColor = c.text,
+            ) {
+                Column(modifier = Modifier.padding(24.dp)) {
+                    if (title != null) {
+                        CompositionLocalProvider(LocalContentColor provides c.text) {
+                            ProvideTextStyle(
+                                MaterialTheme.typography.titleLarge.copy(color = c.text),
+                            ) { title() }
+                        }
+                        Spacer(Modifier.size(16.dp))
+                    }
+                    if (text != null) {
+                        CompositionLocalProvider(LocalContentColor provides c.dim) {
+                            ProvideTextStyle(
+                                MaterialTheme.typography.bodyMedium.copy(color = c.dim),
+                            ) { text() }
+                        }
+                        Spacer(Modifier.size(24.dp))
+                    }
+                    // Trailing buttons row: dismiss left of confirm (Material order).
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (dismissButton != null) dismissButton()
+                        confirmButton()
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IdeSwitch — bespoke "Liquid Glass" toggle (PARITY-SPEC §7, audit P1 #1).
+//
+// One geometry across both platforms: a 34×18 dp track with a 12 dp WHITE thumb
+// in BOTH states (the Material default unchecked thumb was a smaller `c.dim`
+// dot). Accent track when checked, `c.elevated` + `c.border` hairline when
+// unchecked. NO glow/state-layer halo. The thumb glides with tween(120) — the
+// §11 "instant" feel — and the track color cross-fades over the same window.
+//
+// Drawn by hand (Box + offset/animateDpAsState) rather than Material Switch so
+// the exact 34×18 / 12 dp geometry and the no-glow requirement are guaranteed;
+// Material's Switch enforces its own touch target with a pressed state-layer we
+// cannot fully suppress. `toggleable` (no indication) supplies the click +
+// a11y Switch role without any ripple/glow.
+// ---------------------------------------------------------------------------
+
+/**
+ * Custom 34×18 dp switch with a 12 dp white thumb in both states (§7).
+ *
+ * @param checked  current on/off state.
+ * @param onCheckedChange invoked with the toggled value when tapped (null = read-only).
+ * @param enabled  when false, the control is dimmed to §4 disabled opacity (0.40)
+ *                 and taps are ignored.
+ */
+@Composable
+fun IdeSwitch(
+    checked: Boolean,
+    onCheckedChange: ((Boolean) -> Unit)?,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val c = LocalIdeColors.current
+
+    // §7 geometry. Thumb travels from the left inset to (track − thumb − inset).
+    val trackW = 34.dp
+    val trackH = 18.dp
+    val thumb = 12.dp
+    val inset = 3.dp
+
+    val disabledAlpha = if (enabled) 1f else 0.40f
+
+    // §11 instant (120ms) thumb glide + track cross-fade — no glow.
+    val thumbOffset by animateDpAsState(
+        targetValue = if (checked) trackW - thumb - inset else inset,
+        animationSpec = tween(120, easing = EaseStandard),
+        label = "ideSwitchThumb",
     )
+    val trackColor by animateColorAsState(
+        targetValue = if (checked) c.accent else c.elevated,
+        animationSpec = tween(120, easing = EaseStandard),
+        label = "ideSwitchTrack",
+    )
+    val borderColor = if (checked) c.accent else c.border
+
+    // toggleable with indication=null → click + Switch a11y role, NO ripple/glow.
+    val clickMod = if (enabled && onCheckedChange != null) {
+        Modifier.toggleable(
+            value = checked,
+            enabled = true,
+            role = Role.Switch,
+            interactionSource = remember { MutableInteractionSource() },
+            indication = null,
+            onValueChange = onCheckedChange,
+        )
+    } else {
+        Modifier
+    }
+
+    Box(
+        modifier = modifier
+            .then(clickMod)
+            .size(width = trackW, height = trackH)
+            .alpha(disabledAlpha)
+            .clip(RoundedCornerShape(percent = 50))
+            .drawBehind {
+                drawRoundRect(
+                    color = trackColor,
+                    cornerRadius = CornerRadius(size.height / 2f),
+                )
+            }
+            .border(1.dp, borderColor, RoundedCornerShape(percent = 50)),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        Box(
+            modifier = Modifier
+                .offset(x = thumbOffset)
+                .size(thumb)
+                .clip(CircleShape)
+                // §7: white thumb in BOTH states (no glow shadow).
+                .drawBehind { drawCircle(Color.White) },
+        )
+    }
 }
 
 /**
@@ -392,11 +681,40 @@ fun SectionLabel(
 }
 
 // ---------------------------------------------------------------------------
+// GlassSliderThumb — bespoke 14 dp white slider thumb (PARITY-SPEC §7, P1 #2).
+//
+// Material's default thumb draws a pressed/hovered state-layer halo (an
+// expanding translucent ring). The web slider has none — just a small round
+// thumb on a thin track. We replace the thumb slot with a hand-drawn 14 dp white
+// circle (1 dp hairline border so it reads on the white light surface) and pass
+// our OWN MutableInteractionSource that we never feed to SliderDefaults.Thumb,
+// so NO state-layer interactions are ever rendered. The default Track stays
+// (it is already the §7 4 dp thin track in Material3 1.2.x).
+// ---------------------------------------------------------------------------
+
+/**
+ * 14 dp white slider thumb with a 1 dp hairline border and no state-layer halo.
+ * Drawn standalone (not SliderDefaults.Thumb) so the Material pressed/hovered
+ * ring is suppressed entirely (§7).
+ */
+@Composable
+private fun GlassSliderThumb() {
+    val c = LocalIdeColors.current
+    Box(
+        modifier = Modifier
+            .size(14.dp)
+            .clip(CircleShape)
+            .drawBehind { drawCircle(Color.White) }
+            .border(1.dp, c.border, CircleShape),
+    )
+}
+
+// ---------------------------------------------------------------------------
 // SteppedSliderRow — discrete step slider for Storage limit settings.
 //
 // Mirrors DESIGN-SYSTEM-v2.md §6 and the desktop StepSlider.tsx component:
 //   - Material3 Slider with steps = array.size - 2 (discrete between endpoints)
-//   - Accent-colored active track / thumb
+//   - Accent-colored active track, custom 14 dp white thumb (no state-layer halo)
 //   - Fixed-width value label right-aligned showing human string
 //   - Saves on drag-end (onRelease)
 //
@@ -467,6 +785,16 @@ fun SteppedSliderRow(
             )
         }
 
+        // §7: own interactionSource never fed to a default Thumb → no state-layer
+        // halo; custom 14 dp white thumb slot replaces Material's larger thumb.
+        val interactionSource = remember { MutableInteractionSource() }
+        val sliderColors = SliderDefaults.colors(
+            thumbColor              = c.accent,
+            activeTrackColor        = c.accent,
+            inactiveTrackColor      = c.border,
+            activeTickColor         = c.accent.copy(alpha = 0.7f),
+            inactiveTickColor       = c.border.copy(alpha = 0.5f),
+        )
         Slider(
             value = sliderPosition,
             onValueChange = { sliderPosition = it },
@@ -476,13 +804,15 @@ fun SteppedSliderRow(
             },
             valueRange = 0f..maxIdx,
             steps = discreteSteps,
-            colors = SliderDefaults.colors(
-                thumbColor              = c.accent,
-                activeTrackColor        = c.accent,
-                inactiveTrackColor      = c.border,
-                activeTickColor         = c.accent.copy(alpha = 0.7f),
-                inactiveTickColor       = c.border.copy(alpha = 0.5f),
-            ),
+            colors = sliderColors,
+            interactionSource = interactionSource,
+            thumb = { GlassSliderThumb() },
+            track = { sliderState ->
+                SliderDefaults.Track(
+                    sliderState = sliderState,
+                    colors = sliderColors,
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
         )
     }
@@ -545,6 +875,13 @@ fun ContinuousSliderRow(
             )
         }
 
+        // §7: own interactionSource + custom 14 dp white thumb → no state-layer halo.
+        val interactionSource = remember { MutableInteractionSource() }
+        val sliderColors = SliderDefaults.colors(
+            thumbColor         = c.accent,
+            activeTrackColor   = c.accent,
+            inactiveTrackColor = c.border,
+        )
         Slider(
             value = sliderPos,
             onValueChange = { sliderPos = it },
@@ -552,11 +889,15 @@ fun ContinuousSliderRow(
                 onRelease(sliderPos.toInt().coerceIn(min, max))
             },
             valueRange = min.toFloat()..max.toFloat(),
-            colors = SliderDefaults.colors(
-                thumbColor         = c.accent,
-                activeTrackColor   = c.accent,
-                inactiveTrackColor = c.border,
-            ),
+            colors = sliderColors,
+            interactionSource = interactionSource,
+            thumb = { GlassSliderThumb() },
+            track = { sliderState ->
+                SliderDefaults.Track(
+                    sliderState = sliderState,
+                    colors = sliderColors,
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
         )
     }

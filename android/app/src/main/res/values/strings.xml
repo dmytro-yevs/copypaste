@@ -80,6 +80,7 @@
     <string name="setting_image_max_height_hint">1–200 dp (default 40)</string>
     <string name="setting_preview_delay_label">Action-row auto-close delay (ms)</string>
     <string name="setting_preview_delay_hint">200–30000 ms (default 1500)</string>
+    <string name="setting_preview_lines_label">Preview lines per row</string>
 
     <!-- Settings — Storage / Limits (no item-count cap — size only) -->
     <string name="setting_max_text_size_label">Max text item size (MB)</string>

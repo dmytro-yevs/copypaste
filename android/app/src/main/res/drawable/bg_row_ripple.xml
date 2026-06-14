@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    List-row pressed-state ripple over a transparent base, using the Darcula
-    hover tint (#34373b). Used by View-based list rows.
+    List-row pressed-state ripple over a transparent base, using the IdeRaised
+    pressed/hover token (#2D2F34 — nearest IdeColors ramp value, was #34373B).
+    Used by View-based list rows.
 -->
 <ripple xmlns:android="http://schemas.android.com/apk/res/android"
-    android:color="#34373B">
+    android:color="@color/ide_raised">
     <item android:id="@android:id/mask">
         <shape android:shape="rectangle">
-            <solid android:color="#34373B" />
+            <solid android:color="@color/ide_raised" />
         </shape>
     </item>
 </ripple>

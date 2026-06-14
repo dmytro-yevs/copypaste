@@ -33,7 +33,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
@@ -41,8 +40,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -58,6 +55,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalClipboardManager
@@ -69,17 +68,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeElevated
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
+import com.copypaste.android.ui.theme.IdeWarning
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.journeyapps.barcodescanner.ScanContract
@@ -98,7 +101,7 @@ import uniffi.copypaste_android.bootstrapPairInitiator
 private const val PAIR_TOKEN_TTL_SECONDS = 120
 
 /** Threshold below which the countdown switches to an urgency color. */
-private const val PAIR_TOKEN_URGENT_THRESHOLD_SECONDS = 15
+private const val PAIR_TOKEN_URGENT_THRESHOLD_SECONDS = 20
 
 /**
  * Side of the rendered QR image, in dp. The QR, the placeholder icon, and the
@@ -385,11 +388,12 @@ fun PairScreen(
     // Set at the end of runPairAndSync; cleared when the popup is dismissed.
     var pairedPeerForPopup by remember { mutableStateOf<PairedPeer?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
-    val snackbarHostState = remember { SnackbarHostState() }
+    // QR blur+reveal: starts blurred; first tap reveals; regeneration re-blurs.
+    var qrRevealed by remember { mutableStateOf(false) }
+    val toastState = remember { GlassToastState() }
     val scope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
     val errorTemplate = stringResource(R.string.error_pairing)
-    val dismissLabel = stringResource(R.string.snackbar_dismiss)
 
     val expired = qr != null && remainingSeconds <= 0
 
@@ -406,6 +410,7 @@ fun PairScreen(
                 }
                 qr = result
                 qrBitmap = bmp
+                qrRevealed = false  // re-blur whenever a fresh QR is generated
             } catch (e: Exception) {
                 errorMessage = e.message ?: e.javaClass.simpleName
             } finally {
@@ -789,6 +794,7 @@ fun PairScreen(
             }
             qr = result
             qrBitmap = bmp
+            qrRevealed = false  // start blurred
             // Initial load complete.
         } catch (e: Exception) {
             errorMessage = e.message ?: e.javaClass.simpleName
@@ -830,22 +836,16 @@ fun PairScreen(
     }
 
     // Surface a malformed deep-link (cppair:// with unrecognised payload) as a
-    // snackbar so the user gets explicit feedback instead of nothing happening.
+    // toast so the user gets explicit feedback instead of nothing happening.
     LaunchedEffect(incomingDeepLinkError) {
         val errMsg = incomingDeepLinkError ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(
-            message = errMsg,
-            actionLabel = dismissLabel,
-        )
+        toastState.show(errMsg, GlassToastKind.DANGER)
         onDeepLinkErrorConsumed()
     }
 
     LaunchedEffect(errorMessage) {
         val msg = errorMessage ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(
-            message = errorTemplate.format(msg),
-            actionLabel = dismissLabel,
-        )
+        toastState.show(errorTemplate.format(msg), GlassToastKind.DANGER)
         errorMessage = null
     }
 
@@ -859,6 +859,7 @@ fun PairScreen(
         onAutoScanConsumed()
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         modifier = modifier,
         containerColor = IdeBg,
@@ -870,7 +871,6 @@ fun PairScreen(
                 backContentDescription = stringResource(R.string.cd_back),
             )
         },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) }
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -937,12 +937,18 @@ fun PairScreen(
                                 // QR needs a light, high-contrast backing to scan
                                 // reliably — sit the code on a white rounded plate
                                 // that fills the reserved slot exactly.
-                                // Tap to regenerate the QR code.
+                                // First tap reveals (if blurred); tap while revealed regenerates.
                                 Box(
                                     modifier = Modifier
                                         .size(QR_SLOT_SIZE_DP.dp)
                                         .clip(RoundedCornerShape(12.dp))
-                                        .clickable { generateQr() },
+                                        .clickable {
+                                            if (!qrRevealed) {
+                                                qrRevealed = true
+                                            } else {
+                                                generateQr()
+                                            }
+                                        },
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     // White plate with QR image.
@@ -956,8 +962,34 @@ fun PairScreen(
                                         Image(
                                             bitmap = bmp.asImageBitmap(),
                                             contentDescription = "Pairing QR code",
-                                            modifier = Modifier.size(QR_IMAGE_SIZE_DP.dp)
+                                            modifier = Modifier
+                                                .size(QR_IMAGE_SIZE_DP.dp)
+                                                .then(
+                                                    if (!qrRevealed)
+                                                        Modifier.blur(16.dp, BlurredEdgeTreatment.Unbounded)
+                                                    else
+                                                        Modifier
+                                                )
                                         )
+                                    }
+                                    // Tap-to-reveal overlay shown while the QR is blurred.
+                                    if (!qrRevealed) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(QR_SLOT_SIZE_DP.dp)
+                                                .background(
+                                                    androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f),
+                                                    RoundedCornerShape(12.dp),
+                                                ),
+                                            contentAlignment = Alignment.Center,
+                                        ) {
+                                            Text(
+                                                text = "Tap to reveal",
+                                                style = MaterialTheme.typography.labelMedium,
+                                                color = androidx.compose.ui.graphics.Color.White,
+                                                textAlign = TextAlign.Center,
+                                            )
+                                        }
                                     }
                                 }
                             }
@@ -992,7 +1024,7 @@ fun PairScreen(
                                         remainingSeconds
                                     ),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = if (urgent) IdeDanger else IdeDim
+                                    color = if (urgent) IdeWarning else IdeAccent
                                 )
                             }
                         }
@@ -1064,7 +1096,7 @@ fun PairScreen(
                             modifier = Modifier.clickable {
                                 clipboardManager.setText(AnnotatedString(peer.fingerprint))
                                 scope.launch {
-                                    snackbarHostState.showSnackbar("Fingerprint copied")
+                                    toastState.show("Fingerprint copied", GlassToastKind.ACCENT)
                                 }
                             },
                         )
@@ -1130,7 +1162,7 @@ fun PairScreen(
                                 modifier = Modifier.clickable {
                                     clipboardManager.setText(AnnotatedString(pairedFingerprint))
                                     scope.launch {
-                                        snackbarHostState.showSnackbar("Fingerprint copied")
+                                        toastState.show("Fingerprint copied", GlassToastKind.ACCENT)
                                     }
                                 },
                             )
@@ -1147,6 +1179,8 @@ fun PairScreen(
             }
         }
     }
+    GlassToastHost(state = toastState)
+    } // end Box
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1171,9 +1205,8 @@ private fun PairedSuccessPopup(
     peer: PairedPeer,
     onDismiss: () -> Unit,
 ) {
-    AlertDialog(
+    GlassAlertDialog(
         onDismissRequest = onDismiss,
-        containerColor = IdeElevated,
         title = {
             Text(
                 text = "Paired successfully",

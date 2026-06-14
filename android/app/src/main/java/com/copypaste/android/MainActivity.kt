@@ -15,10 +15,11 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentPaste
-import androidx.compose.material.icons.filled.Devices
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.ContentPaste
+import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -34,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
@@ -213,9 +215,9 @@ class MainActivity : ComponentActivity() {
 // reads R.string.title_devices ("Devices") instead of the old hardcoded "Pair",
 // matching the Devices screen title — pairing lives INSIDE that screen now.
 internal enum class NavTab(@StringRes val labelRes: Int, val icon: ImageVector) {
-    CLIPS(R.string.title_history, Icons.Filled.ContentPaste),
-    DEVICES(R.string.title_devices, Icons.Filled.Devices),
-    SETTINGS(R.string.title_settings, Icons.Filled.Settings),
+    CLIPS(R.string.title_history, Icons.Outlined.ContentPaste),
+    DEVICES(R.string.title_devices, Icons.Outlined.Devices),
+    SETTINGS(R.string.title_settings, Icons.Outlined.Settings),
 }
 
 @Composable
@@ -270,7 +272,8 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                                 selectedTab = index
                             }
                         },
-                        icon = { Icon(tab.icon, contentDescription = label) },
+                        // §5/§9: 20dp Outlined nav glyph.
+                        icon = { Icon(tab.icon, contentDescription = label, modifier = Modifier.size(20.dp)) },
                         label = { Text(label) },
                         // §9 spec: active = accent, inactive = uniform dim, indicator = accent/15.
                         colors = NavigationBarItemDefaults.colors(

@@ -11,6 +11,8 @@
     -->
     <color name="ide_bg">#13141A</color>
     <color name="ide_panel">#1B1C22</color>
+    <color name="ide_raised">#2D2F34</color>
+    <color name="ide_border">#383B42</color>
     <color name="ide_text">#E8EAED</color>
     <color name="ide_accent">#3D8BFF</color>
     <color name="ide_accent_dark">#2E6FD6</color>

@@ -37,7 +37,6 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -77,7 +76,7 @@ import com.copypaste.android.ui.theme.ContinuousSliderRow
 import com.copypaste.android.ui.theme.SteppedSliderRow
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
-import com.copypaste.android.ui.theme.ideSwitchColors
+import com.copypaste.android.ui.theme.IdeSwitch
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -175,6 +174,8 @@ fun SettingsScreen(
     var translucency by remember { mutableStateOf(settings.translucency) }
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.coerceIn(10, 200)) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
+    // §3/P1#9: preview lines per history row (mirrors web niApp, 1–6).
+    var previewLines by remember { mutableStateOf(settings.previewLines) }
     var imageQuality by remember { mutableStateOf(settings.imageQuality) }
 
     // ── Storage ──
@@ -260,6 +261,8 @@ fun SettingsScreen(
         settings.maxFileSizeBytes = maxFileSizeBytes
         settings.sensitiveTtlSecs = sensitiveTtlSecs
         settings.density = density
+        // §3/P1#9: preview-lines pref is pref-only (no daemon IPC), like density.
+        settings.previewLines = previewLines
         // maxItems: pref-only sentinel (100_000 = Unlimited). No daemon IPC yet.
         settings.maxHistoryItems = maxItems.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         settings.collectPublicIp = collectPublicIp
@@ -392,6 +395,8 @@ fun SettingsScreen(
                         onImageMaxHeightChange = { imageMaxHeight = it; persistAll() },
                         previewDelay = previewDelay,
                         onPreviewDelayChange = { previewDelay = it; persistAll() },
+                        previewLines = previewLines,
+                        onPreviewLinesChange = { previewLines = it; persistAll() },
                         imageQuality = imageQuality,
                         onImageQualityChange = { imageQuality = it; persistAll() },
                         settings = settings,
@@ -626,6 +631,8 @@ private fun DisplayTab(
     onImageMaxHeightChange: (Int) -> Unit,
     previewDelay: Int,
     onPreviewDelayChange: (Int) -> Unit,
+    previewLines: Int,
+    onPreviewLinesChange: (Int) -> Unit,
     imageQuality: Int,
     onImageQualityChange: (Int) -> Unit,
     settings: Settings,
@@ -738,6 +745,16 @@ private fun DisplayTab(
                         }
                     },
                     onRelease = onPreviewDelayChange,
+                )
+                SettingsCardDivider()
+                // §3/P1#9: preview-lines slider 1–6 (mirrors web niApp).
+                ContinuousSliderRow(
+                    label = stringResource(R.string.setting_preview_lines_label),
+                    value = previewLines,
+                    min = 1,
+                    max = 6,
+                    formatValue = { if (it == 1) "1 line" else "$it lines" },
+                    onRelease = onPreviewLinesChange,
                 )
                 SettingsCardDivider()
                 // HW-A14: image quality slider — no separate Save button; persisted via main Save.
@@ -1273,10 +1290,9 @@ private fun SettingsRow(
                 color = c.dim,
             )
         }
-        Switch(
+        IdeSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = ideSwitchColors(),
         )
     }
 }

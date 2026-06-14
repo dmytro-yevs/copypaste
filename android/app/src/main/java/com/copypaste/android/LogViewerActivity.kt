@@ -21,7 +21,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material3.AlertDialog
+import com.copypaste.android.ui.theme.GlassAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,7 +50,6 @@ import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeElevated
 import com.copypaste.android.ui.theme.IdeFaint
 import com.copypaste.android.ui.theme.IdePanel
 import com.copypaste.android.ui.theme.IdeText
@@ -141,9 +140,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
 
     // ── Clear-logs confirmation dialog ──────────────────────────────────────
     if (showClearDialog) {
-        AlertDialog(
+        GlassAlertDialog(
             onDismissRequest = { showClearDialog = false },
-            containerColor = IdeElevated,
             title = {
                 Text(
                     text = "Clear Logs",

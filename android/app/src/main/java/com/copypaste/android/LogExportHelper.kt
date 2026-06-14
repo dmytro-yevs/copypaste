@@ -14,8 +14,9 @@ import java.util.zip.ZipOutputStream
  * Bundles all log files into a single zip and fires a Share intent so
  * the user can send them via email, Drive, Slack, etc.
  *
- * Uses FileProvider (authority: `com.copypaste.android.fileprovider`) to
- * produce a content:// URI that is safe to pass to third-party apps.
+ * Uses FileProvider (authority derived from `${context.packageName}.fileprovider`,
+ * matching HistoryActivity) to produce a content:// URI that is safe to pass to
+ * third-party apps.
  *
  * The zip is written to internal cache (not the external log dir) so it is
  * automatically cleaned up by the OS and is never accidentally adb-pulled.
@@ -23,7 +24,6 @@ import java.util.zip.ZipOutputStream
 object LogExportHelper {
 
     private const val TAG = "LogExportHelper"
-    private const val AUTHORITY = "com.copypaste.android.fileprovider"
 
     /**
      * Zip all log files and start a chooser Share intent.
@@ -44,7 +44,9 @@ object LogExportHelper {
         }
 
         val uri: Uri = try {
-            FileProvider.getUriForFile(context, AUTHORITY, zipFile)
+            // Derive the authority from the package name (matches HistoryActivity)
+            // so a build-variant applicationId suffix can't desync it.
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
         } catch (e: Exception) {
             AppLogger.e(TAG, "FileProvider failed", e)
             Toast.makeText(context, context.getString(R.string.log_export_failed), Toast.LENGTH_SHORT).show()
