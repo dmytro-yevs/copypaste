@@ -2208,7 +2208,8 @@ async fn standing_pairing_responder_loop(
                     &outcome.session_key,
                     &peer_meta,
                     sync_crypto.as_ref(),
-                );
+                )
+                .await;
                 pairing.finish(crate::pairing_sm::PairingState::Confirmed);
             }
             Err(e) => {
@@ -3415,8 +3416,8 @@ mod tests {
     /// remains correct after the fix (None is still a valid caller-supplied
     /// opt-out) while the real regression is caught by the "Some refreshes"
     /// assertion which fails if the plumbing accidentally passes None again.
-    #[test]
-    fn persist_paired_peer_refreshes_sync_crypto_cache_iff_handle_supplied() {
+    #[tokio::test]
+    async fn persist_paired_peer_refreshes_sync_crypto_cache_iff_handle_supplied() {
         // ── shared setup ────────────────────────────────────────────────────
         let tmp = tempfile::tempdir().unwrap();
 
@@ -3460,7 +3461,8 @@ mod tests {
             &session_key,
             &peer_meta,
             None,
-        );
+        )
+        .await;
 
         // None was passed → reload_sync_key was never called → cache still empty.
         // This assertion PASSES before the fix, pinning the bug.
@@ -3486,7 +3488,8 @@ mod tests {
             &session_key,
             &peer_meta,
             Some(&crypto_some),
-        );
+        )
+        .await;
 
         // Some(&crypto) was passed → reload_sync_key ran → cache is now populated.
         // This assertion FAILS before the fix because the standing responder

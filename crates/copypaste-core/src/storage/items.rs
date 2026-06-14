@@ -800,6 +800,25 @@ pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
     Ok(changed)
 }
 
+/// Return `true` when there is at least one non-pinned sensitive item in the
+/// database, `false` otherwise.
+///
+/// This is a cheap `SELECT EXISTS` probe used as a pre-flight guard by
+/// `run_ttl_cleanup` (CopyPaste-98ja): when the table has no sensitive rows at
+/// all there is nothing to prune, so the full `delete_sensitive_expired` scan
+/// is skipped entirely.  The query touches only the `is_sensitive` + `pinned`
+/// columns which are covered by the primary-key/clustered index and completes
+/// in O(1) on an empty result.
+pub fn has_sensitive_items(db: &Database) -> bool {
+    db.conn()
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM clipboard_items WHERE is_sensitive = 1 AND pinned = 0)",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .unwrap_or(false)
+}
+
 /// Delete sensitive items whose `wall_time` is older than `sensitive_ttl_ms` milliseconds ago.
 /// This enforces a local auto-wipe TTL for items marked `is_sensitive = 1`.
 ///
