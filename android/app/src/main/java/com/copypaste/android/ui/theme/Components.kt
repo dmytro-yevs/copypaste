@@ -291,12 +291,32 @@ private val AURORA_DARK = listOf(
 )
 
 // Light-mode aurora — softer cool blobs so frosted near-white panels still read
-// as glass. Mirrors `:root[data-theme="light"] body` (0.22/0.20/0.16/0.12).
+// as glass. Blob positions shifted inward per canonical styleguide spec (esph):
+// A (0.12,0.08), B (0.88,0.12), C (0.80,0.92), D (0.18,0.88).
+// Blob-B violet updated from systemPurple 0xAF52DE → AA-darkened 0x805AD5 (rgb 128,90,213).
 private val AURORA_LIGHT = listOf(
-    AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.22f), 0.08f, -0.14f, 1.05f, 0.52f),
-    AuroraBlob(Color(0xFFAF52DE).copy(alpha = 0.20f), 1.06f, 1.14f, 1.00f, 0.50f),
-    AuroraBlob(Color(0xFF32ADE6).copy(alpha = 0.16f), 0.98f, -0.08f, 0.82f, 0.46f),
-    AuroraBlob(Color(0xFF34C759).copy(alpha = 0.12f), -0.08f, 1.08f, 0.86f, 0.48f),
+    AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.22f), 0.12f,  0.08f, 1.05f, 0.52f), // A blue
+    AuroraBlob(Color(0xFF805AD5).copy(alpha = 0.20f), 0.88f,  0.12f, 1.00f, 0.50f), // B violet (AA-darkened)
+    AuroraBlob(Color(0xFF32ADE6).copy(alpha = 0.18f), 0.80f,  0.92f, 0.82f, 0.46f), // C sky
+    AuroraBlob(Color(0xFF34C759).copy(alpha = 0.14f), 0.18f,  0.88f, 0.86f, 0.48f), // D green
+)
+
+// Mid-canvas overlay blobs (esph) — two small centre blobs that add depth and
+// make the blur "obviously do something" in the centre of the glass canvas.
+// Mirrors the styleguide ::after floating accent+amber overlay layer.
+// Painted AFTER the 4 main blobs in auroraCanvas().
+private val AURORA_OVERLAY_LIGHT = listOf(
+    // E — accent blue, centre-left; radiusFrac ~0.28 of diagonal, stop 65%
+    AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.14f), 0.50f, 0.38f, 0.28f, 0.65f),
+    // F — amber, slightly lower-left; radiusFrac ~0.20, stop 65%
+    AuroraBlob(Color(0xFFD9A343).copy(alpha = 0.12f), 0.30f, 0.60f, 0.20f, 0.65f),
+)
+
+private val AURORA_OVERLAY_DARK = listOf(
+    // E — accent blue (slightly brighter than light theme for dark canvas contrast)
+    AuroraBlob(Color(0xFF3D8BFF).copy(alpha = 0.22f), 0.50f, 0.38f, 0.28f, 0.65f),
+    // F — amber
+    AuroraBlob(Color(0xFFD9A343).copy(alpha = 0.16f), 0.30f, 0.60f, 0.20f, 0.65f),
 )
 
 /**
@@ -305,6 +325,9 @@ private val AURORA_LIGHT = listOf(
  * web `body` aurora, so [LiquidGlassSurface] has a genuinely COLOURED canvas to
  * frost — closing the biggest visual gap (screens were a flat `c.bg`).
  *
+ * Two small mid-canvas overlay blobs (E+F, accent+amber) are painted last (esph)
+ * to add depth in the centre and make the glass blur more visually apparent.
+ *
  * Apply to a `Modifier.fillMaxSize()` Box that sits BEHIND the glass surfaces; the
  * hosting Scaffold/container must be `Color.Transparent` so this shows through.
  * Theme-aware via [dark].
@@ -312,6 +335,7 @@ private val AURORA_LIGHT = listOf(
 fun Modifier.auroraCanvas(dark: Boolean): Modifier {
     val base = glassCanvasBrush(dark)
     val blobs = if (dark) AURORA_DARK else AURORA_LIGHT
+    val overlayBlobs = if (dark) AURORA_OVERLAY_DARK else AURORA_OVERLAY_LIGHT
     return this.drawBehind {
         // Base linear gradient (opaque — gives the canvas real colour, §1).
         drawRect(base)
@@ -319,6 +343,20 @@ fun Modifier.auroraCanvas(dark: Boolean): Modifier {
         // proportions on any aspect ratio.
         val diag = kotlin.math.hypot(size.width, size.height)
         for (b in blobs) {
+            drawRect(
+                brush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to b.color,
+                        b.stopFrac to Color.Transparent,
+                    ),
+                    center = Offset(size.width * b.fx, size.height * b.fy),
+                    radius = diag * b.radiusFrac,
+                ),
+            )
+        }
+        // Overlay blobs (esph) — small mid-canvas accent+amber radials painted last
+        // so they sit above the main aurora without being clipped by the base blobs.
+        for (b in overlayBlobs) {
             drawRect(
                 brush = Brush.radialGradient(
                     colorStops = arrayOf(
