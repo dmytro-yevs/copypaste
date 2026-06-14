@@ -174,7 +174,7 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
       style={{ maxWidth: "100%" }}
     >
       {/* File icon — amber/orange to distinguish from image/text */}
-      <FileIcon className="shrink-0 text-[#e5c07b]" />
+      <FileIcon className="shrink-0 text-ide-warning" />
 
       {/* Filename + optional size */}
       <span className="flex min-w-0 flex-col">

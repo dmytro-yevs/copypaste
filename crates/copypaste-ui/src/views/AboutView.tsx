@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { ViewShell } from "../components/ViewShell";
 import { probeStatus, type StatusProbe } from "../lib/ipc";
@@ -64,7 +65,7 @@ export function AboutView() {
 
           {/* Identity */}
           <div className="flex flex-col items-center gap-1 border-b border-ide-divider px-8 py-6 text-center">
-            <h2 className="text-[17px] font-semibold text-ide-text">CopyPaste</h2>
+            <h2 className="text-[18px] font-semibold text-ide-text">CopyPaste</h2>
             <span className="text-[12px] text-ide-faint">{version ?? "—"}</span>
             <p className="mt-1.5 text-[13px] text-ide-dim">Encrypted clipboard manager for macOS</p>
           </div>
@@ -77,7 +78,7 @@ export function AboutView() {
             <ul className="flex flex-col gap-1.5">
               {FEATURES.map((feature) => (
                 <li key={feature} className="flex items-start gap-2 text-[13px] text-ide-dim">
-                  <span className="mt-px shrink-0 select-none text-ide-accent">✓</span>
+                  <Check size={16} className="mt-px shrink-0 text-ide-success" aria-hidden="true" />
                   {feature}
                 </li>
               ))}
@@ -92,7 +93,9 @@ export function AboutView() {
                 <span className="text-ide-faint">Checking…</span>
               )}
               {daemon.kind === "connected" && (
-                <span className="text-ide-success">Connected ✓</span>
+                <span className="inline-flex items-center gap-1 text-ide-success">
+                  Connected <Check size={16} aria-hidden="true" />
+                </span>
               )}
               {daemon.kind === "degraded" && (
                 <span className="text-ide-warning">

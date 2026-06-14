@@ -50,7 +50,7 @@ export function LogView() {
   }, [content]);
 
   return (
-    <div className="flex h-full flex-col bg-ide-bg">
+    <div className="surface-glass flex h-full flex-col bg-ide-bg">
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-ide-border bg-ide-panel px-4 py-3">
         <div>

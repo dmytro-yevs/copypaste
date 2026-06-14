@@ -40,10 +40,13 @@ describe("AboutView visual structure (JetBrains tokens)", () => {
   });
 
   it("renders all three feature items with accent checkmarks", () => {
-    render(<AboutView />);
-    // Each feature should be preceded by a checkmark character
-    const checks = screen.getAllByText("✓");
-    expect(checks.length).toBeGreaterThanOrEqual(3);
+    const { container } = render(<AboutView />);
+    // Each feature is preceded by a lucide Check SVG icon (replaced ✓ char with icon in §2)
+    // The feature list <ul> contains 3 <li> items each with an SVG check icon.
+    const featureList = container.querySelector("ul");
+    expect(featureList).not.toBeNull();
+    const svgChecks = featureList!.querySelectorAll("svg");
+    expect(svgChecks.length).toBeGreaterThanOrEqual(3);
   });
 
   it("renders the Features section label in uppercase", () => {
