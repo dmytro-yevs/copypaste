@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Bundled Inter font family — DESIGN-SYSTEM-v2 §1 / §10
+  Pixel-identical body text across macOS (web) and Android.
+
+  DROP-IN REQUIRED: the .ttf binary files are NOT committed to git.
+  Download from https://github.com/rsms/inter/releases and copy:
+    • inter_regular.ttf  (weight 400)
+    • inter_medium.ttf   (weight 500)
+    • inter_semibold.ttf (weight 600)
+  into android/app/src/main/res/font/ before building.
+
+  The fontFamily="@font/inter" reference in Type.kt is safe when the .ttf
+  files are absent at compile time — the app will crash at font-load time if
+  the files are truly missing, so ensure they are present before a release
+  build. For development without drop-ins, temporarily revert Type.kt to
+  FontFamily.Default (the inter* entries in this XML will be ignored).
+-->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <font
+        android:font="@font/inter_regular"
+        android:fontWeight="400"
+        android:fontStyle="normal"
+        app:font="@font/inter_regular"
+        app:fontWeight="400"
+        app:fontStyle="normal" />
+
+    <font
+        android:font="@font/inter_medium"
+        android:fontWeight="500"
+        android:fontStyle="normal"
+        app:font="@font/inter_medium"
+        app:fontWeight="500"
+        app:fontStyle="normal" />
+
+    <font
+        android:font="@font/inter_semibold"
+        android:fontWeight="600"
+        android:fontStyle="normal"
+        app:font="@font/inter_semibold"
+        app:fontWeight="600"
+        app:fontStyle="normal" />
+
+</font-family>

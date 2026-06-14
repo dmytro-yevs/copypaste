@@ -2,6 +2,70 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── §1 Bundled fonts — pixel-identical typography across macOS + Android ────
+   Inter (UI text) and JetBrains Mono (code/mono) are bundled as .woff2 so
+   rendering is identical on every platform (DESIGN-SYSTEM-v2 §1 / §10).
+
+   DROP-IN REQUIRED: the .woff2 binary files are NOT committed to git (large
+   binaries). You must copy them into src/assets/fonts/ before building:
+
+     Inter — download from https://github.com/rsms/inter/releases (Inter.woff2
+             or the variable font Inter[wght].woff2 at the same URL)
+       • inter-regular.woff2  (weight 400)
+       • inter-medium.woff2   (weight 500)
+       • inter-semibold.woff2 (weight 600)
+
+     JetBrains Mono — download from
+             https://github.com/JetBrains/JetBrainsMono/releases
+       • jetbrains-mono-regular.woff2  (weight 400)
+       • jetbrains-mono-medium.woff2   (weight 500)
+
+   The @font-face declarations below are intentionally "safe-to-miss": if the
+   .woff2 files are absent the browser skips the rule and falls through to the
+   system-font fallbacks in the font-family stack (system-ui / monospace). The
+   UI remains fully functional; it just uses the local system font instead.
+────────────────────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/inter-regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/inter-medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../assets/fonts/inter-semibold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../assets/fonts/jetbrains-mono-regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/jetbrains-mono-medium.woff2") format("woff2");
+}
+
 /* ── Design System v2 "Quiet Precision" — token foundation ──────────────────
    §0  Canonical palette (reconciled web/Android to ONE ramp)
    §3  Semantic colours + elevation + interaction state tokens
@@ -93,7 +157,9 @@ body {
   /* Transparent so the native macOS vibrancy (NSVisualEffectView) shows through. */
   background: transparent;
   color: var(--ide-text);
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter var", "Inter", system-ui, sans-serif;
+  /* Bundled Inter leads so rendering is identical across macOS + Android.
+     System fonts trail as safe fallback when the .woff2 drop-in is absent. */
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   font-size: 13px;
   line-height: 1.4;
   -webkit-font-smoothing: antialiased;

@@ -52,8 +52,11 @@ export default {
         }
       },
       fontFamily: {
-        sans: ["-apple-system", "BlinkMacSystemFont", '"SF Pro Text"', '"Inter var"', "Inter", "system-ui", "sans-serif"],
-        mono: ['"SF Mono"', "ui-monospace", '"JetBrains Mono"', "Menlo", "monospace"]
+        // Bundled Inter/JetBrains Mono lead → pixel-identical across macOS + Android.
+        // System fonts trail as safe fallback when .woff2 drop-ins are absent.
+        // (DESIGN-SYSTEM-v2 §1 / §10)
+        sans: ["Inter", "-apple-system", "BlinkMacSystemFont", '"SF Pro Text"', "system-ui", "sans-serif"],
+        mono: ['"JetBrains Mono"', '"SF Mono"', "ui-monospace", "Menlo", "monospace"],
       },
       borderRadius: {
         ide:      "6px",   // inputs, buttons

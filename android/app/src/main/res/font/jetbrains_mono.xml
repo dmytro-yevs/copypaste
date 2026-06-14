@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Bundled JetBrains Mono font family — DESIGN-SYSTEM-v2 §10
+  Pixel-identical mono / code rendering across macOS (web) and Android.
+
+  DROP-IN REQUIRED: the .ttf binary files are NOT committed to git.
+  Download from https://github.com/JetBrains/JetBrainsMono/releases and copy:
+    • jetbrains_mono_regular.ttf  (weight 400)
+    • jetbrains_mono_medium.ttf   (weight 500)
+  into android/app/src/main/res/font/ before building.
+
+  Used by Type.kt MonoFontFamily for mono/code text roles.
+-->
+<font-family xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
+
+    <font
+        android:font="@font/jetbrains_mono_regular"
+        android:fontWeight="400"
+        android:fontStyle="normal"
+        app:font="@font/jetbrains_mono_regular"
+        app:fontWeight="400"
+        app:fontStyle="normal" />
+
+    <font
+        android:font="@font/jetbrains_mono_medium"
+        android:fontWeight="500"
+        android:fontStyle="normal"
+        app:font="@font/jetbrains_mono_medium"
+        app:fontWeight="500"
+        app:fontStyle="normal" />
+
+</font-family>

@@ -6,3 +6,8 @@ dist
 # Tauri
 src-tauri/target
 src-tauri/gen/schemas
+
+# Bundled font binaries (drop-in required — see src/assets/fonts/.gitkeep)
+src/assets/fonts/*.woff2
+src/assets/fonts/*.woff
+src/assets/fonts/*.ttf

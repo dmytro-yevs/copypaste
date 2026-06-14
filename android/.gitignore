@@ -1,3 +1,7 @@
 
 # Local Android SDK path (machine-specific)
 local.properties
+
+# Bundled font binaries (drop-in required — see res/font/*.xml descriptors)
+app/src/main/res/font/*.ttf
+app/src/main/res/font/*.otf
