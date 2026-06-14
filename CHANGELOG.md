@@ -1,5 +1,42 @@
 # Changelog
 
+## [0.7.0] - 2026-06-14
+
+"Liquid Glass" design-system v2 ("Quiet Precision") rolled out across desktop and
+Android, plus a hardening pass that closed the open backlog and **unbroke the Android
+build** (it did not compile on `main` before this release). Verified release: web
+`tsc` + 129 vitest + production bundle; full Rust workspace `cargo test` (97 suites, 0
+failures) + `clippy --all-targets`; Android `assembleDebug` APK + 212 JVM unit tests;
+macOS `.app` + `.dmg` bundled.
+
+### Added
+- **Liquid Glass UI (desktop/React).** Shared `ContentIcon`/`KindChip` component; row
+  `density` preference (comfortable/compact). Popup §4: selection-glide layer, keycap
+  pills, Lucide icon sweep, restart-on-offline empty state. History §5: density-aware
+  rows, 90ms copy-flash, mount-only stagger, selection glide, URL host highlighting.
+  Settings §6: animated sliding tab underline, stepped max-items slider, tick marks,
+  density toggle. Devices §7: online pulse ring, P2P/Cloud transport chip, fingerprint
+  rows, per-peer sync line, QR-countdown drain bar. WCAG-AA light theme.
+- **`vacuum` IPC verb** in the daemon; `copypaste-cli` no longer links `copypaste-core`
+  (IPC-only invariant restored).
+- **Open-file action** for file-type clipboard items on all platforms.
+- Live peer-presence push (online dots update without opening Devices).
+- Bundled Inter + JetBrains Mono fonts (both platforms; SIL OFL 1.1).
+
+### Changed
+- PAKE PasswordFile is now **encrypted at rest** in `peers.json` (XChaCha20-Poly1305
+  under the device key; plaintext field retired from IPC).
+- Relaxed stale dependency pins (uuid/clap/home/tempfile) now that MSRV 1.89 is the floor.
+- CI: vitest, Android JVM tests, cargo-deny, MSRV, and fuzz now run on `main`/PRs.
+
+### Fixed
+- **Android build restored to green**: `Theme.kt` used a non-existent
+  `AccessibilityManager.isAnimationEnabled` (→ `ValueAnimator.areAnimatorsEnabled()`);
+  `PairActivity.kt` referenced an out-of-scope `bootstrap`; the `buildCargoNdk` Gradle
+  task broke the configuration cache (script-object capture → local Boolean); the
+  Inter/JetBrains-Mono `.ttf` binaries referenced by the font XML were never committed
+  (AAPT link failure → committed); three never-compiled unit tests fixed.
+
 ## [0.6.0] - 2026-06-03
 
 Three independent sync transports, full QR provisioning, and Android device-management

@@ -5,4 +5,5 @@ local.properties
 # Bundled font binaries are now COMMITTED (required build inputs — the res/font/*.xml
 # descriptors reference them; AAPT resource-linking fails without them). Inter and
 # JetBrains Mono are redistributable under the SIL Open Font License 1.1 — see
-# app/src/main/res/font/OFL-NOTICE.txt. Do NOT re-ignore *.ttf here.
+# app/src/main/assets/FONT-OFL-NOTICE.txt (res/font/ only permits .ttf/.otf/.xml,
+# so the notice ships as an asset). Do NOT re-ignore *.ttf here.
