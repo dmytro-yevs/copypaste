@@ -91,7 +91,26 @@ export function Popup() {
     notifyOnCopy = true,
     // M4: popup now has its own independent preview line count
     previewLinesPopup = 1,
+    // Theme + translucency drive the popup's glass material (mirrors App.tsx).
+    theme = "light",
+    translucency = true,
   } = useUI((s) => s.prefs);
+
+  // Apply the persisted theme + translucency to the popup's <html> at runtime.
+  // popup.html ships data-theme="light" so the FIRST paint is correct (no longer
+  // always-dark — the confirmed theming bug); this effect re-syncs to the saved
+  // pref and toggles the .no-translucency fallback exactly like App.tsx does.
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (translucency) {
+      document.documentElement.classList.remove("no-translucency");
+    } else {
+      document.documentElement.classList.add("no-translucency");
+    }
+  }, [translucency]);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -429,16 +448,14 @@ export function Popup() {
     // §4 popup: radius 14, E3 glass; entrance animation on SHOW only.
     // CRITICAL: no exit animation — hide fires invoke("hide_popup") immediately.
     <div
-      className="popup-enter flex flex-col h-screen overflow-hidden"
+      data-popup-root
+      // surface-glass-strong = the canonical floating frosted-glass material:
+      // translucent fill + backdrop-blur(40px) + specular highlight + float
+      // shadow, theme-aware (light/dark). Replaces the hardcoded dark-only
+      // rgba(19,20,26,0.82) so the popup is a real glass material on BOTH themes.
+      className="surface-glass-strong popup-enter flex flex-col h-screen overflow-hidden"
       style={{
         borderRadius: 14,
-        // Popup glass: same recipe as .surface-glass (§3) but alpha=0.82 for
-        // extra depth on the floating popup vs. panel surfaces (0.72).
-        background: "rgba(19, 20, 26, 0.82)",
-        backdropFilter: "blur(30px) saturate(180%)",
-        WebkitBackdropFilter: "blur(30px) saturate(180%)",
-        border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "var(--ide-e3)",
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -451,7 +468,8 @@ export function Popup() {
         className="flex items-center gap-2 px-3 shrink-0"
         style={{
           height: 44,
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          // Token divider (was hardcoded white) so it's visible on light glass too.
+          borderBottom: "1px solid var(--ide-divider)",
         }}
       >
         {/* Search icon — lucide-react, 16px stroke 1.5 */}
@@ -475,13 +493,14 @@ export function Popup() {
             border: "none",
             boxShadow: "none",
             borderRadius: 0,
-            color: "rgba(255,255,255,0.90)",
+            // Token text (was hardcoded white) — legible on light + dark glass.
+            color: "var(--ide-text)",
             fontSize: "13px",
             outline: "none",
             flex: 1,
             padding: 0,
           }}
-          className="placeholder:text-white/25"
+          className="placeholder:text-ide-faint"
         />
 
         {/* Right: N of M result count (right-aligned, tabular-nums) */}
@@ -585,7 +604,8 @@ export function Popup() {
       <div
         className="flex items-center justify-between px-3 py-1.5 shrink-0"
         style={{
-          borderTop: "1px solid rgba(255,255,255,0.07)",
+          // Token divider (was hardcoded white) so it shows on light glass too.
+          borderTop: "1px solid var(--ide-divider)",
           color: "var(--ide-ghost)",
         }}
       >
@@ -797,7 +817,8 @@ function PopupRow({
         <span
           className="flex-1 min-w-0 text-[13px]"
           style={{
-            color: blurred ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.88)",
+            // Token text (was hardcoded white) — legible on light + dark glass.
+            color: blurred ? "var(--ide-faint)" : "var(--ide-text)",
             // M4: multi-line clamp when previewLines > 1, single-line ellipsis otherwise
             ...(previewLines > 1
               ? {
@@ -845,11 +866,13 @@ function PopupRow({
         const appLabel = sourceAppLabel(item.app_bundle_id);
         return appLabel ? (
           <span
+            // Theme-aware subtle pill (was hardcoded white fill/border, invisible
+            // on light): reuse the .keycap surface tokens which adapt per theme.
             className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5 rounded-ide-sm"
             style={{
               color: "var(--ide-ghost)",
-              background: "rgba(255,255,255,0.06)",
-              border: "1px solid rgba(255,255,255,0.08)",
+              background: "var(--ide-hover)",
+              border: "1px solid var(--ide-divider)",
             }}
             title={item.app_bundle_id ?? undefined}
           >

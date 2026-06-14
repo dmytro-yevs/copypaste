@@ -50,9 +50,11 @@ export function LogView() {
   }, [content]);
 
   return (
-    <div className="surface-glass flex h-full flex-col bg-ide-bg">
-      {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-ide-border bg-ide-panel px-4 py-3">
+    // surface-glass on the frame; the opaque bg-ide-bg was DEFEATING the glass —
+    // removed so the aurora canvas blurs through.
+    <div className="surface-glass flex h-full flex-col">
+      {/* Header — glass too, so it reads as a layered material, not an opaque bar. */}
+      <div className="surface-card flex shrink-0 items-center justify-between border-b border-ide-border px-4 py-3">
         <div>
           <h2 className="text-[13px] font-medium text-ide-text">Daemon Logs</h2>
           {logPath && (

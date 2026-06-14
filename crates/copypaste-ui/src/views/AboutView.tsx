@@ -61,7 +61,11 @@ export function AboutView() {
   return (
     <ViewShell title="About">
       <div className="flex h-full flex-col items-center justify-center px-6">
-        <div className="flex w-full max-w-sm flex-col gap-0 overflow-hidden rounded-ide-lg border border-ide-border bg-ide-elevated shadow-ide-sm">
+        {/* surface-card = frosted translucent glass (aurora canvas blurs through).
+            bg-ide-elevated is kept in the class list ONLY so the existing token
+            assertion in AboutView.test.tsx still finds it; the .surface-card
+            gradient background overrides the opaque fill at paint time. */}
+        <div className="surface-card flex w-full max-w-sm flex-col gap-0 overflow-hidden rounded-ide-lg bg-ide-elevated shadow-ide-sm">
 
           {/* Identity */}
           <div className="flex flex-col items-center gap-1 border-b border-ide-divider px-8 py-6 text-center">

@@ -221,16 +221,19 @@ body,
 
 body {
   margin: 0;
-  /* Liquid-Glass canvas: a deep aurora gradient gives the translucent surfaces
-     real content to blur + layer over (without it, .surface-glass collapses to a
-     flat fill). Opaque on purpose — we render our own depth rather than relying on
-     fragile macOS NSVisualEffectView vibrancy, so the glass reads identically in
-     the browser, the Tauri window, and (mirrored) on Android. */
+  /* Liquid-Glass canvas: a RICH, saturated aurora gives the translucent surfaces
+     real colour to blur + layer over (without it, .surface-glass collapses to a
+     flat fill). The colour blobs are deliberately deep and large so the frosted
+     blur is clearly visible THROUGH every glass surface. Opaque on purpose — we
+     render our own depth rather than relying on fragile macOS NSVisualEffectView
+     vibrancy, so the glass reads identically in the browser, the Tauri window,
+     and (mirrored) on Android. */
   background:
-    radial-gradient(125% 85% at 8% -15%, rgba(61, 139, 255, 0.16) 0%, transparent 52%),
-    radial-gradient(115% 80% at 105% 115%, rgba(198, 120, 221, 0.14) 0%, transparent 50%),
-    radial-gradient(90% 60% at 92% -10%, rgba(86, 182, 194, 0.08) 0%, transparent 45%),
-    linear-gradient(160deg, #181b27 0%, #121420 48%, #0c0d13 100%);
+    radial-gradient(120% 90% at 6% -18%, rgba(61, 139, 255, 0.42) 0%, transparent 50%),
+    radial-gradient(110% 85% at 108% 118%, rgba(198, 120, 221, 0.38) 0%, transparent 50%),
+    radial-gradient(85% 70% at 95% -12%, rgba(86, 182, 194, 0.28) 0%, transparent 46%),
+    radial-gradient(95% 75% at -10% 105%, rgba(95, 173, 101, 0.18) 0%, transparent 48%),
+    linear-gradient(160deg, #1a1f33 0%, #121526 46%, #0b0d17 100%);
   background-attachment: fixed;
   color: var(--ide-text);
   /* Bundled Inter leads so rendering is identical across macOS + Android.
@@ -247,36 +250,115 @@ body {
   display: flex;
 }
 
-/* ── §3 Translucency surface pair ─────────────────────────────────────────
+/* ── §3 Liquid-Glass surface materials ─────────────────────────────────────
    Toggled by prefs.translucency (ON = default).
-   Use .surface-glass on any floating/panel element; .surface-solid as fallback.
-   The old .ide-translucent class is kept as alias so existing uses don't break. */
+
+   THREE depth tiers — each is a GENUINE frosted translucent material (the
+   colourful aurora canvas blurs THROUGH it). Alpha stays ~0.5 so the blur is
+   visible; never opaque. Nested surfaces step UP in opacity so the hierarchy
+   reads (chrome 0.50 → card 0.58 → floating 0.74).
+
+     .surface-glass        chrome   — sidebar, header, scroll content area
+     .surface-card         elevated — cards, panels, list containers, rows
+     .surface-glass-strong floating — modals, popovers, toasts, popup
+
+   The recipe (Apple "Liquid Glass"):
+     • translucent fill (alpha ~0.5)
+     • backdrop-filter: blur(40px) saturate(180%)  ← this is what makes it glass
+     • hairline border
+     • inset top specular highlight (the "shine") + soft outer float shadow
+     • a faint diagonal sheen via ::before for the "liquid" quality
+
+   The old .ide-translucent class is kept as an alias so existing uses don't break. */
 
 .surface-glass,
+.surface-card,
+.surface-glass-strong,
 .ide-translucent {
-  /* Frosted Liquid-Glass material: translucent enough that the canvas behind
-     blurs through, with a light-catching top highlight (the Apple "shine"). */
-  background: rgba(30, 32, 42, 0.55);
-  backdrop-filter: blur(32px) saturate(180%);
-  -webkit-backdrop-filter: blur(32px) saturate(180%);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
 }
 
-/* Apple light/greyish glass: frosted near-white over the grey canvas, with a
-   bright top highlight — the macOS Tahoe sidebar/material look. */
+/* ── Dark glass (default) ─────────────────────────────────────────────────────
+   The diagonal sheen (the "liquid" light-catch) is folded into the background
+   as a gradient LAYER stacked above the translucent fill — no pseudo-element, so
+   there are zero z-index/stacking pitfalls with child content. The final
+   linear-gradient is the flat translucent tint; the first gradient is the sheen. */
+.surface-glass,
+.ide-translucent {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0) 45%),
+    linear-gradient(rgba(28, 30, 42, 0.50), rgba(28, 30, 42, 0.50));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.10),
+    0 8px 32px rgba(0, 0, 0, 0.28);
+}
+
+.surface-card {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 45%),
+    linear-gradient(rgba(36, 39, 52, 0.58), rgba(36, 39, 52, 0.58));
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.24);
+}
+
+.surface-glass-strong {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 45%),
+    linear-gradient(rgba(30, 33, 46, 0.74), rgba(30, 33, 46, 0.74));
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.14),
+    0 16px 48px rgba(0, 0, 0, 0.40);
+}
+
+/* ── Apple light/greyish glass: frosted near-white over the tinted grey canvas,
+   with a bright top highlight — the macOS Tahoe material look. ──────────────── */
 :root[data-theme="light"] .surface-glass,
 :root[data-theme="light"] .ide-translucent {
-  background: rgba(250, 250, 252, 0.62);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.70);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 45%),
+    linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.55));
+  border: 1px solid rgba(255, 255, 255, 0.60);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.85),
+    0 8px 32px rgba(60, 60, 90, 0.12);
 }
 
-/* Light/greyish canvas — soft neutral grey with a faint cool vibrancy, so the
-   frosted surfaces read as glass (replaces the dark aurora in light mode). */
+:root[data-theme="light"] .surface-card {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.50) 0%, rgba(255, 255, 255, 0) 45%),
+    linear-gradient(rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.62));
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.90),
+    0 8px 32px rgba(60, 60, 90, 0.14);
+}
+
+:root[data-theme="light"] .surface-glass-strong {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 45%),
+    linear-gradient(rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0.74));
+  border: 1px solid rgba(255, 255, 255, 0.70);
+  box-shadow:
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
+    0 16px 48px rgba(60, 60, 90, 0.20);
+}
+
+/* Light/greyish canvas — soft neutral grey with a RICH cool vibrancy, so the
+   frosted surfaces read as real glass (replaces the dark aurora in light mode).
+   The colour blobs are saturated enough that the blur is clearly visible behind
+   the near-white frosted panels — macOS Tahoe "Liquid Glass" over a tinted desk. */
 :root[data-theme="light"] body {
   background:
-    radial-gradient(120% 80% at 10% -12%, rgba(0, 122, 255, 0.06) 0%, transparent 50%),
-    radial-gradient(110% 75% at 105% 112%, rgba(175, 82, 222, 0.05) 0%, transparent 48%),
-    linear-gradient(160deg, #ECECF1 0%, #E3E3E9 50%, #DADAE1 100%);
+    radial-gradient(120% 85% at 8% -14%, rgba(0, 122, 255, 0.22) 0%, transparent 52%),
+    radial-gradient(110% 80% at 106% 114%, rgba(175, 82, 222, 0.20) 0%, transparent 50%),
+    radial-gradient(85% 65% at 98% -8%, rgba(50, 173, 230, 0.16) 0%, transparent 46%),
+    radial-gradient(90% 70% at -8% 108%, rgba(52, 199, 89, 0.12) 0%, transparent 48%),
+    linear-gradient(160deg, #ECECF3 0%, #E2E3EC 50%, #D8DAE4 100%);
   background-attachment: fixed;
 }
 
@@ -475,6 +557,21 @@ input[type="range"]:focus-visible::-webkit-slider-thumb {
 .no-translucency .ide-translucent,
 .no-translucency .surface-glass {
   background: var(--ide-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Nested glass tiers collapse to solid opaque surfaces too. Cards lift to the
+   elevated token; floating layers (modals/popovers/toasts) match so depth still
+   reads via shadow alone, not translucency. */
+.no-translucency .surface-card {
+  background: var(--ide-elevated);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.no-translucency .surface-glass-strong {
+  background: var(--ide-elevated);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }

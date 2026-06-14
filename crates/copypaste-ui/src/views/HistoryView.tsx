@@ -42,20 +42,15 @@ type ToastKind = "success" | "error";
 function Toast({ message, kind }: { message: string; kind: ToastKind }) {
   return (
     <div
-      className="toast-in fixed bottom-3 left-1/2 z-50 pointer-events-none"
+      // surface-glass-strong = the canonical floating frosted-glass material:
+      // translucent fill + backdrop-blur + specular highlight + float shadow,
+      // themed for light/dark. Replaces the hardcoded dark-only rgba(35,37,45,0.92).
+      className="surface-glass-strong toast-in fixed bottom-3 left-1/2 z-50 pointer-events-none"
       style={{
         // translate is baked into the toast-in animation start; keep it in
         // final state so the element stays centred after the animation settles.
         transform: "translateX(-50%)",
         borderRadius: 10,
-        border: "1px solid rgba(255,255,255,0.10)",
-        // Toast glass: elevated surface at 92% opacity with subtle blur (§8 toast).
-        // Using ide-elevated base (#23252D) for the toast panel—slightly more opaque
-        // than surface-glass so it reads as a distinct notification layer.
-        background: "rgba(35,37,45,0.92)",
-        backdropFilter: "blur(20px) saturate(160%)",
-        WebkitBackdropFilter: "blur(20px) saturate(160%)",
-        boxShadow: "var(--ide-e2)",
         padding: "6px 14px 6px 10px",
         display: "flex",
         alignItems: "center",
@@ -73,7 +68,9 @@ function Toast({ message, kind }: { message: string; kind: ToastKind }) {
           background: kind === "error" ? "var(--ide-danger)" : "var(--ide-success)",
         }}
       />
-      <span className="text-[12px]" style={{ color: "rgba(255,255,255,0.82)" }}>
+      {/* Token colour (was hardcoded white) so the toast text stays WCAG-legible
+          on the now theme-aware glass — white was invisible on the light material. */}
+      <span className="text-[12px] text-ide-text">
         {message}
       </span>
     </div>
@@ -751,7 +748,8 @@ function BulkActionBar({
   return (
     <div
       className={[
-        "flex items-center gap-2 border-b border-ide-border/60 bg-ide-elevated px-3 py-1.5",
+        // surface-card glass: the bulk bar floats over the list as a frosted layer.
+        "surface-card flex items-center gap-2 border-b border-ide-border/60 px-3 py-1.5",
         "text-[12px] text-ide-text",
       ].join(" ")}
     >
@@ -917,7 +915,9 @@ function DetailsModal({
       style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
     >
       <div
-        className="relative flex max-h-[80vh] w-[480px] max-w-[90vw] flex-col overflow-hidden rounded-xl border border-ide-border bg-ide-elevated shadow-xl"
+        // surface-glass-strong = floating frosted-glass dialog: the dimmed,
+        // blurred content behind the scrim shows through the translucent panel.
+        className="surface-glass-strong relative flex max-h-[80vh] w-[480px] max-w-[90vw] flex-col overflow-hidden rounded-xl shadow-xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -2530,16 +2530,12 @@ export function HistoryView() {
       {/* F11: Undo-delete toast — shown while a deferred delete is pending */}
       {undoPending !== null && (
         <div
-          className="toast-in fixed bottom-3 left-1/2 z-[9999] pointer-events-auto"
+          // surface-glass-strong = same floating frosted-glass material as Toast,
+          // theme-aware (replaces the hardcoded dark-only rgba fill + blur).
+          className="surface-glass-strong toast-in fixed bottom-3 left-1/2 z-[9999] pointer-events-auto"
           style={{
             transform: "translateX(-50%)",
             borderRadius: 10,
-            border: "1px solid rgba(255,255,255,0.10)",
-            // Same toast glass recipe as Toast component (§8 toast, elevated panel).
-            background: "rgba(35,37,45,0.92)",
-            backdropFilter: "blur(20px) saturate(160%)",
-            WebkitBackdropFilter: "blur(20px) saturate(160%)",
-            boxShadow: "var(--ide-e2)",
             padding: "6px 14px 6px 10px",
             display: "flex",
             alignItems: "center",
@@ -2556,7 +2552,7 @@ export function HistoryView() {
               background: "var(--ide-danger, #e06c75)",
             }}
           />
-          <span className="text-[12px]" style={{ color: "rgba(255,255,255,0.82)" }}>
+          <span className="text-[12px] text-ide-text">
             Deleted &ldquo;
             {undoPending.preview.length > 40
               ? `${undoPending.preview.slice(0, 40)}…`
@@ -2565,9 +2561,8 @@ export function HistoryView() {
           </span>
           <button
             onClick={handleUndo}
-            className="text-[12px] font-semibold"
+            className="text-[12px] font-semibold text-ide-accent"
             style={{
-              color: "#7EC8E3",
               background: "none",
               border: "none",
               cursor: "pointer",

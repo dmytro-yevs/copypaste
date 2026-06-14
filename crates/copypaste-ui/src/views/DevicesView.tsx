@@ -618,7 +618,8 @@ function SasPairingModal({
       aria-modal="true"
       aria-label="Pair device"
     >
-      <div className="w-full max-w-sm rounded-ide-lg border border-ide-border bg-ide-elevated p-5 shadow-ide-lg">
+      {/* surface-glass-strong = floating frosted-glass pairing dialog. */}
+      <div className="surface-glass-strong w-full max-w-sm rounded-ide-lg p-5 shadow-ide-lg">
         <p className="mb-1 text-[13px] font-medium text-ide-text">
           {isResponder ? `"${peerName}" wants to pair` : `Pair "${peerName}"`}
         </p>
@@ -1453,7 +1454,8 @@ export function DevicesView({
       </div>
 
       {/* ── Single unified device list (this Mac first, then peers) ── */}
-      <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
+      {/* surface-card glass: the list container is a frosted layer over the aurora. */}
+      <div className="surface-card flex flex-col divide-y divide-ide-divider rounded-ide">
         {/* This device — always first */}
         {ownState.status === "loading" && (
           <div className="px-3 py-2.5">
@@ -1539,7 +1541,7 @@ export function DevicesView({
         </button>
       </div>
       {discovered.length > 0 ? (
-        <div className="flex flex-col divide-y divide-ide-divider rounded-ide border border-ide-border bg-ide-panel/60">
+        <div className="surface-card flex flex-col divide-y divide-ide-divider rounded-ide">
           {discovered.map((device) => (
             <DiscoveredRow
               key={device.device_id}
@@ -1564,7 +1566,7 @@ export function DevicesView({
         Pair a new device
       </p>
 
-      <section className="rounded-ide-lg border border-ide-border bg-ide-elevated p-4 space-y-3 shadow-ide-sm">
+      <section className="surface-card rounded-ide-lg p-4 space-y-3 shadow-ide-sm">
         {qrState.status === "loading" && (
           <p className="text-[12px] text-ide-dim animate-pulse">Generating...</p>
         )}
@@ -1708,7 +1710,8 @@ export function DevicesView({
           aria-modal="true"
           aria-label="Revoke device"
         >
-          <div className="w-full max-w-sm rounded-ide-lg border border-ide-border bg-ide-elevated p-5 shadow-ide-lg">
+          {/* surface-glass-strong = floating frosted-glass revoke dialog. */}
+          <div className="surface-glass-strong w-full max-w-sm rounded-ide-lg p-5 shadow-ide-lg">
             <p className="mb-1 text-[13px] font-medium text-ide-text">
               Revoke "{revokePrompt.name}"
             </p>

@@ -148,7 +148,10 @@ function Panel({ children }: { children: React.ReactNode }) {
   // bottom-borders to the panel's rounded corners without clipping the popover,
   // which floats above the outer div via z-50.
   return (
-    <div className="rounded-ide-lg border border-ide-border bg-ide-elevated shadow-ide-sm">
+    // surface-card = frosted translucent glass: the colourful aurora canvas blurs
+    // THROUGH the panel (backdrop-filter), with the hairline border + specular
+    // top highlight from the .surface-card recipe. No longer an opaque fill.
+    <div className="surface-card rounded-ide-lg shadow-ide-sm">
       <div className="overflow-hidden rounded-ide-lg">
         {children}
       </div>
@@ -293,7 +296,7 @@ function InfoPopover({ text }: { text: string }) {
     ? ReactDOM.createPortal(
         <div
           ref={popoverRef}
-          className="z-[9999] w-56 rounded-ide border border-ide-border bg-ide-elevated p-2 text-[11px] text-ide-dim shadow-ide-sm"
+          className="surface-glass-strong z-[9999] w-56 rounded-ide p-2 text-[11px] text-ide-dim shadow-ide-sm"
           style={{
             position: "fixed",
             top: pos.top,
@@ -1584,7 +1587,7 @@ export function SettingsView() {
           syncStatus.supabase_configured &&
           syncStatus.signed_in &&
           syncStatus.email && (
-            <div className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-2 text-[12px] text-ide-dim">
+            <div className="surface-card rounded-ide px-3 py-2 text-[12px] text-ide-dim">
               <span className="font-medium text-ide-text">Signed in as {syncStatus.email}</span>
               <span className="ml-1">— All devices must use this same account to sync.</span>
             </div>
@@ -2042,7 +2045,7 @@ export function SettingsView() {
   function renderAdvanced() {
     return (
       <div className="space-y-2">
-        <div className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-3 text-[13px] text-ide-dim">
+        <div className="surface-card rounded-ide px-3 py-3 text-[13px] text-ide-dim">
           Advanced daemon and storage limits will appear here in a future release.
         </div>
       </div>
@@ -2069,7 +2072,7 @@ export function SettingsView() {
 
       {/* Offline banner */}
       {loadState === "offline" && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-ide-lg border border-ide-border bg-ide-elevated px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs">
+        <div className="surface-card mb-4 flex items-center justify-between gap-3 rounded-ide-lg px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs">
           <span>Daemon not running — clipboard sync paused.</span>
           <div className="flex shrink-0 items-center gap-2">
             <RestartDaemonButton
