@@ -1403,10 +1403,27 @@ export function DevicesView({
           type="button"
           onClick={() => void handleRescan()}
           disabled={rescanning}
-          className="rounded-ide px-2 py-0.5 text-[11px] font-medium text-ide-accent hover:bg-ide-hover disabled:opacity-50 disabled:cursor-default"
+          aria-label={rescanning ? "Scanning…" : "Rescan local network"}
+          className="flex items-center gap-1 rounded-ide px-2 py-0.5 text-[11px] font-medium text-ide-accent hover:bg-ide-hover disabled:opacity-50 disabled:cursor-default"
           title="Rescan the local network for devices"
         >
-          {rescanning ? "Refreshing…" : "Refresh"}
+          {/* Refresh icon — spins while rescanning; reduced-motion: static */}
+          <svg
+            width="11"
+            height="11"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+            className={rescanning ? "animate-spin motion-reduce:animate-none" : ""}
+          >
+            <path d="M21 12a9 9 0 1 1-9-9" />
+            <polyline points="21 3 21 9 15 9" />
+          </svg>
+          {rescanning ? "Scanning…" : "Refresh"}
         </button>
       </div>
       {discovered.length > 0 ? (
