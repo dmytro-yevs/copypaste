@@ -267,74 +267,59 @@ pub fn log_dir_path() -> String {
     }
 }
 
-/// Ingest a file at a host-filesystem path into the clipboard history.
+/// Classify a file extension as executable/script (dangerous) or safe to open directly.
 ///
-/// Reads the file, infers its MIME type from the extension, base64-encodes the
-/// bytes, and forwards them to the daemon as an `add_file_item` IPC call.  The
-/// daemon encrypts, stores, and deduplicates the file exactly as it does for
-/// files captured from NSPasteboard.
-///
-/// Runs on the blocking thread pool because both `std::fs::read` and the IPC
-/// call are blocking.
-fn ingest_path_blocking(path: std::path::PathBuf) -> Result<serde_json::Value, String> {
-    let filename = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("file")
-        .to_string();
-
-    // Infer MIME from the extension; fall back to octet-stream.
-    let mime = mime_from_extension(path.extension().and_then(|e| e.to_str()).unwrap_or(""));
-
-    let raw_bytes = std::fs::read(&path).map_err(|e| format!("read '{}': {e}", path.display()))?;
-
-    use base64::Engine as _;
-    let data_b64 = base64::engine::general_purpose::STANDARD.encode(&raw_bytes);
-
-    call(
-        "add_file_item",
-        serde_json::json!({
-            "filename": filename,
-            "mime":     mime,
-            "data_b64": data_b64,
-        }),
+/// # Security context
+/// File items can arrive from a PAIRED PEER via P2P/relay sync.  The peer
+/// controls the filename (and therefore the extension) stored by the daemon.
+/// A malicious peer could send a file named `evil.command`, `evil.sh`, or
+/// `evil.app` — when the local user clicks "Open", macOS would execute the
+/// payload directly without any further prompt.  We therefore block direct
+/// `open` for all executable/script/bundle extensions and instead reveal the
+/// file in Finder (`open -R`) so the user must consciously decide what to do.
+fn is_dangerous_extension(ext: &str) -> bool {
+    // Explicit denylist of macOS/Unix/Windows executable and script extensions.
+    // Err on the side of caution: any extension not in the SAFE list below
+    // should be treated as potentially dangerous.  Add here whenever a new
+    // executable type becomes relevant — never remove without security review.
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        // macOS-specific execution vectors
+        | "app" | "action" | "workflow" | "definition"
+        | "scpt" | "scptd" | "applescript"
+        | "terminal" | "command" | "tool"
+        // Shell scripts
+        | "sh" | "bash" | "zsh" | "csh" | "fish" | "ksh"
+        // Interpreted languages
+        | "py" | "rb" | "pl" | "php" | "lua" | "tcl" | "r"
+        // JavaScript (node / browser)
+        | "js" | "mjs" | "cjs"
+        // JVM
+        | "jar" | "class"
+        // Windows executables / scripts (not primary target but included for safety)
+        | "exe" | "bat" | "cmd" | "com" | "msi" | "ps1"
+        | "vb" | "vbs" | "ws" | "wsf" | "scr"
+        // Native libraries that can be injected
+        | "dylib" | "so" | "dll"
     )
-    .map_err(|e| format!("IPC error: {e}"))
-    .and_then(|reply| {
-        if reply.ok {
-            Ok(reply.data.unwrap_or(serde_json::json!({})))
-        } else {
-            Err(reply.error.unwrap_or_else(|| "add_file_item failed".into()))
-        }
-    })
 }
 
-/// Return a MIME type string for a given file extension (lowercase, no dot).
-/// Covers the most common types; unknown extensions fall back to
-/// `application/octet-stream`.
-fn mime_from_extension(ext: &str) -> &'static str {
-    match ext.to_ascii_lowercase().as_str() {
-        "txt" | "text" | "log" | "md" => "text/plain",
-        "html" | "htm" => "text/html",
-        "css" => "text/css",
-        "js" | "mjs" => "application/javascript",
-        "json" => "application/json",
-        "xml" => "application/xml",
-        "csv" => "text/csv",
-        "pdf" => "application/pdf",
-        "zip" => "application/zip",
-        "tar" => "application/x-tar",
-        "gz" => "application/gzip",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "svg" => "image/svg+xml",
-        "mp4" => "video/mp4",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "rs" | "py" | "ts" | "tsx" | "sh" => "text/plain",
-        _ => "application/octet-stream",
+/// Sanitise a peer-supplied filename for safe materialisation on disk.
+///
+/// Strips everything except alphanumerics, dots, dashes, underscores, and
+/// spaces, and removes control characters.  Path separators are already
+/// stripped by the `file_name()` call at the call site; this is an additional
+/// layer that prevents other shell-special characters from appearing in the
+/// temp-file name.
+fn sanitize_filename(name: &str) -> String {
+    let sanitized: String = name
+        .chars()
+        .filter(|c| c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' '))
+        .collect();
+    if sanitized.is_empty() {
+        "clipboard_file".to_string()
+    } else {
+        sanitized
     }
 }
 
@@ -352,6 +337,12 @@ fn mime_from_extension(ext: &str) -> &'static str {
 /// next boot will clean it up (standard behaviour for preview-and-forget
 /// workflows).  The file is written to `$TMPDIR/copypaste_open/<filename>` so
 /// all "open" temporaries are grouped in one place.
+///
+/// # Security: dangerous extension blocking
+/// Files with executable or script extensions (`.sh`, `.command`, `.app`, etc.)
+/// are NOT opened directly. Instead, we reveal them in Finder (`open -R`) so
+/// the user must consciously act on the file.  See [`is_dangerous_extension`]
+/// and [`sanitize_filename`] for details.
 ///
 /// On error the function returns an `Err(String)` that the frontend surfaces as
 /// a toast.
@@ -393,35 +384,72 @@ pub async fn open_item_file(id: String) -> Result<(), String> {
         // Sanitise the filename: strip path separators so a malicious filename
         // cannot escape the temp directory (defence-in-depth; daemon should
         // never send such filenames, but we guard at the boundary here too).
-        let safe_name = std::path::Path::new(&filename)
+        // Additionally sanitize to alphanumerics/.-_ space to prevent
+        // shell-special characters in the temp-file path (peer-supplied name).
+        let base_name = std::path::Path::new(&filename)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("clipboard_file")
             .to_string();
+        let safe_name = sanitize_filename(&base_name);
+
+        // 4. Check extension before writing — avoid materialising executable
+        //    content at an OS-openable path if we won't directly open it.
+        let extension = std::path::Path::new(&safe_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string();
+        let dangerous = is_dangerous_extension(&extension);
 
         let tmp_path = tmp_dir.join(&safe_name);
         std::fs::write(&tmp_path, &bytes)
             .map_err(|e| format!("write temp file failed: {e}"))?;
 
-        // 4. Open with OS default app.
+        // 5. Open with OS default app, or reveal in Finder for dangerous types.
         #[cfg(target_os = "macos")]
-        let open_cmd = "/usr/bin/open";
-        #[cfg(target_os = "linux")]
-        let open_cmd = "xdg-open";
-        #[cfg(windows)]
-        let (open_cmd, _windows_flag) = ("cmd", "/c");
-
-        #[cfg(not(windows))]
         {
-            std::process::Command::new(open_cmd)
+            if dangerous {
+                // Reveal in Finder instead of executing — the user can inspect
+                // and decide. This prevents one-click code execution from a
+                // peer-supplied file with an executable extension.
+                std::process::Command::new("/usr/bin/open")
+                    .arg("-R")
+                    .arg(&tmp_path)
+                    .spawn()
+                    .map_err(|e| format!("open -R command failed: {e}"))?;
+            } else {
+                std::process::Command::new("/usr/bin/open")
+                    .arg(&tmp_path)
+                    .spawn()
+                    .map_err(|e| format!("open command failed: {e}"))?;
+            }
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if dangerous {
+                return Err(format!(
+                    "File type '.{extension}' is blocked for direct opening. \
+                     Find the file at: {}",
+                    tmp_path.display()
+                ));
+            }
+            std::process::Command::new("xdg-open")
                 .arg(&tmp_path)
                 .spawn()
                 .map_err(|e| format!("open command failed: {e}"))?;
         }
         #[cfg(windows)]
         {
-            std::process::Command::new(open_cmd)
-                .args(["c", "start", "", &tmp_path.to_string_lossy()])
+            if dangerous {
+                return Err(format!(
+                    "File type '.{extension}' is blocked for direct opening. \
+                     Find the file at: {}",
+                    tmp_path.display()
+                ));
+            }
+            std::process::Command::new("cmd")
+                .args(["/c", "start", "", &tmp_path.to_string_lossy()])
                 .spawn()
                 .map_err(|e| format!("open command failed: {e}"))?;
         }
@@ -430,30 +458,6 @@ pub async fn open_item_file(id: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("open_item_file task join error: {e}"))?
-}
-
-/// Ingest one or more files dropped onto the app window.
-///
-/// Called from the frontend via `invoke("ingest_dropped_files", { paths })`.
-/// Each path is read, base64-encoded, and sent to the daemon via `add_file_item`.
-/// Errors for individual files are collected in the result array so the frontend
-/// can surface them as toasts without aborting the whole batch.
-#[tauri::command]
-pub async fn ingest_dropped_files(paths: Vec<String>) -> Result<Vec<serde_json::Value>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        paths
-            .into_iter()
-            .map(|p| {
-                let path = std::path::PathBuf::from(&p);
-                match ingest_path_blocking(path) {
-                    Ok(v) => v,
-                    Err(e) => serde_json::json!({ "error": e, "path": p }),
-                }
-            })
-            .collect::<Vec<_>>()
-    })
-    .await
-    .map_err(|e| format!("blocking task error: {e}"))
 }
 
 /// Render `payload` as an inline SVG QR code string.
