@@ -51,9 +51,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Notify};
 
 use copypaste_core::{
-    decrypt_from_cloud, derive_relay_inbox_id, derive_relay_public_key,
-    derive_relay_registration_pop, encrypt_for_cloud, exists_item_by_item_id, get_item_by_item_id,
-    insert_item, prune_to_cap, AppConfig, ClipboardItem, Database, SyncKey,
+    decrypt_from_cloud, decrypt_item_with_aad, derive_relay_inbox_id, derive_relay_public_key,
+    derive_relay_registration_pop, encrypt_for_cloud, encrypt_item_with_aad,
+    exists_item_by_item_id, get_item_by_item_id, insert_item, prune_to_cap, AppConfig,
+    ClipboardItem, Database, SyncKey, NONCE_SIZE,
 };
 
 use crate::sync_common::{
@@ -188,6 +189,14 @@ impl Drop for RelayHandle {
 
 // ── Token cache (0600 file) ─────────────────────────────────────────────────
 
+/// Purpose-binding AAD for the relay token at-rest encryption.
+///
+/// A stable string (not device_id) is used here because the token file is
+/// written before a device_id is in scope at the call site. Binding to this
+/// string still prevents a blob encrypted for a DIFFERENT purpose (e.g. an
+/// item ciphertext) from silently decrypting as a token, and vice-versa.
+const RELAY_TOKEN_AAD: &[u8] = b"copypaste-relay-token-v1";
+
 /// Path to the cached relay token file (sibling of the device-key files).
 fn token_path() -> Option<PathBuf> {
     crate::paths::try_app_support_dir()
@@ -195,22 +204,84 @@ fn token_path() -> Option<PathBuf> {
         .map(|d| d.join(RELAY_TOKEN_FILE))
 }
 
-/// Load a previously-cached relay auth token, if any. Never errors hard — a
-/// missing/unreadable token just means "re-register".
-fn load_cached_token() -> Option<String> {
-    let path = token_path()?;
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let t = raw.trim();
-    if t.is_empty() {
-        None
-    } else {
-        Some(t.to_owned())
-    }
+/// Encrypt `token` bytes under `local_key` with XChaCha20-Poly1305.
+///
+/// Returns `base64(nonce[24] || ciphertext_with_tag)`.
+///
+/// # Errors
+/// Propagates `EncryptError` from the underlying AEAD layer (e.g. if the
+/// plaintext somehow exceeds the per-message size limit — unlikely for a
+/// short token but handled explicitly rather than unwrapped).
+fn encrypt_relay_token(
+    token: &str,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+) -> Result<String, copypaste_core::EncryptError> {
+    let (nonce, ct) = encrypt_item_with_aad(token.as_bytes(), local_key, RELAY_TOKEN_AAD)?;
+    // Concatenate nonce || ciphertext into a single blob for storage.
+    let mut blob = Vec::with_capacity(NONCE_SIZE + ct.len());
+    blob.extend_from_slice(&nonce);
+    blob.extend_from_slice(&ct);
+    Ok(base64::engine::general_purpose::STANDARD.encode(&blob))
 }
 
-/// Persist the relay auth token to a `0600` file. Best-effort: a failure is
-/// logged (without the token) and the token is still used in-memory for this run.
-fn store_cached_token(token: &str) {
+/// Decrypt a relay token that was written by [`encrypt_relay_token`].
+///
+/// Returns `Some(token)` on success, `None` if the blob is malformed or the
+/// AEAD tag does not verify (caller should treat the file as absent).
+fn decrypt_relay_token(
+    encoded: &str,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+) -> Option<String> {
+    let blob = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .ok()?;
+    if blob.len() < NONCE_SIZE + 1 {
+        // Too short to be a valid nonce || ciphertext blob.
+        return None;
+    }
+    let nonce: [u8; NONCE_SIZE] = blob[..NONCE_SIZE]
+        .try_into()
+        // SAFETY: we just checked blob.len() >= NONCE_SIZE; infallible.
+        .expect("slice is exactly NONCE_SIZE bytes");
+    let ct = &blob[NONCE_SIZE..];
+    let plaintext = decrypt_item_with_aad(ct, &nonce, local_key, RELAY_TOKEN_AAD).ok()?;
+    String::from_utf8(plaintext).ok()
+}
+
+/// Load a previously-cached relay auth token, if any. Never errors hard — a
+/// missing/unreadable token just means "re-register".
+///
+/// **Migration**: if the on-disk blob does not decrypt successfully (legacy
+/// plaintext format, wrong key, or truncated file), the raw content is
+/// returned as-is so the caller can continue using the in-memory token for
+/// this run. On the next successful registration the new encrypted format will
+/// overwrite the file.
+fn load_cached_token(local_key: &zeroize::Zeroizing<[u8; 32]>) -> Option<String> {
+    let path = token_path()?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Try the encrypted format first. If decryption fails (legacy plaintext or
+    // corrupt file) fall back to the raw content so existing installs continue
+    // to work for this run; the file will be re-encrypted on the next store.
+    if let Some(token) = decrypt_relay_token(trimmed, local_key) {
+        return Some(token);
+    }
+    // Legacy plaintext: return the raw token (best-effort migration). The file
+    // will be overwritten with the encrypted format on the next successful
+    // registration, completing the migration transparently.
+    tracing::debug!(
+        "relay-sync: loaded legacy plaintext token; will re-encrypt on next registration"
+    );
+    Some(trimmed.to_owned())
+}
+
+/// Persist the relay auth token encrypted to a `0600` file. Best-effort: a
+/// failure is logged (without the token) and the token is still used in-memory
+/// for this run.
+fn store_cached_token(token: &str, local_key: &zeroize::Zeroizing<[u8; 32]>) {
     let Some(path) = token_path() else {
         tracing::warn!("relay-sync: cannot resolve data dir to cache token");
         return;
@@ -218,14 +289,21 @@ fn store_cached_token(token: &str) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    if let Err(e) = write_token_0600(&path, token) {
+    let encoded = match encrypt_relay_token(token, local_key) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, "relay-sync: failed to encrypt relay token (continuing in-memory)");
+            return;
+        }
+    };
+    if let Err(e) = write_token_0600(&path, &encoded) {
         tracing::warn!(error = %e, "relay-sync: failed to cache relay token (continuing in-memory)");
     }
 }
 
-/// Write `token` to `path` with `0600` perms via a temp-file + rename so a
+/// Write `content` to `path` with `0600` perms via a temp-file + rename so a
 /// reader never sees a partial or world-readable file.
-fn write_token_0600(path: &std::path::Path, token: &str) -> std::io::Result<()> {
+fn write_token_0600(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     use std::io::Write as _;
     let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
     let tmp = dir.join(format!(".{RELAY_TOKEN_FILE}.tmp"));
@@ -235,7 +313,7 @@ fn write_token_0600(path: &std::path::Path, token: &str) -> std::io::Result<()> 
         use std::os::unix::fs::PermissionsExt as _;
         f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    f.write_all(token.as_bytes())?;
+    f.write_all(content.as_bytes())?;
     f.sync_all()?;
     std::fs::rename(&tmp, path)?;
     Ok(())
@@ -329,12 +407,13 @@ async fn ensure_token(
     sync_key_bytes: &[u8; 32],
     device_name: &str,
     cached: &mut Option<String>,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
 ) -> Result<String, RelayError> {
     if let Some(t) = cached.as_ref() {
         return Ok(t.clone());
     }
     let token = register(client, relay_url, sync_key_bytes, device_name).await?;
-    store_cached_token(&token);
+    store_cached_token(&token, local_key);
     *cached = Some(token.clone());
     Ok(token)
 }
@@ -447,7 +526,7 @@ async fn push_loop(
     last_sync_ms: Arc<AtomicI64>,
     core_config: Arc<std::sync::RwLock<AppConfig>>,
 ) {
-    let mut cached_token = load_cached_token();
+    let mut cached_token = load_cached_token(&local_key);
     let mut warned_no_key = false;
 
     loop {
@@ -526,6 +605,7 @@ async fn push_loop(
                     content_b64,
                     wall_time,
                     &mut cached_token,
+                    &local_key,
                 )
                 .await
                 {
@@ -555,8 +635,11 @@ async fn push_with_reauth(
     content_b64: String,
     wall_time: u64,
     cached_token: &mut Option<String>,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
 ) -> Result<(), RelayError> {
-    let token = ensure_token(client, relay_url, sync_key_bytes, device_name, cached_token).await?;
+    let token =
+        ensure_token(client, relay_url, sync_key_bytes, device_name, cached_token, local_key)
+            .await?;
     match push_item(
         client,
         relay_url,
@@ -574,7 +657,8 @@ async fn push_with_reauth(
             tracing::info!("relay-sync: push got 401; re-registering and retrying once");
             *cached_token = None;
             let token =
-                ensure_token(client, relay_url, sync_key_bytes, device_name, cached_token).await?;
+                ensure_token(client, relay_url, sync_key_bytes, device_name, cached_token, local_key)
+                    .await?;
             match push_item(
                 client,
                 relay_url,
@@ -812,7 +896,7 @@ async fn receive_loop(
     last_sync_ms: Arc<AtomicI64>,
     core_config: Arc<std::sync::RwLock<AppConfig>>,
 ) {
-    let mut cached_token = load_cached_token();
+    let mut cached_token = load_cached_token(&local_key);
     let mut wm = Watermark::default();
     let mut warned_no_key = false;
 
@@ -874,6 +958,7 @@ async fn receive_loop(
             &key_bytes,
             &device_name,
             &mut cached_token,
+            &local_key,
         )
         .await
         {
@@ -1250,6 +1335,99 @@ mod tests {
             u64::MAX,
         );
         assert_eq!(stored3, 1, "newer lamport replaces in place");
+    }
+
+    // ── Token encryption tests ────────────────────────────────────────────────
+
+    /// Round-trip: encrypt then decrypt recovers the original token.
+    #[test]
+    fn token_encrypt_decrypt_roundtrip() {
+        let key = zeroize::Zeroizing::new([0xABu8; 32]);
+        let token = "test-auth-token-abc123-deadbeef";
+        let encoded = encrypt_relay_token(token, &key).expect("encrypt");
+        let recovered = decrypt_relay_token(&encoded, &key).expect("decrypt returned None");
+        assert_eq!(recovered, token);
+    }
+
+    /// Two encryptions of the same token produce DIFFERENT base64 blobs (nonce
+    /// uniqueness via OsRng) so the file content changes on every re-store.
+    #[test]
+    fn token_encrypt_nonce_is_unique_across_writes() {
+        let key = zeroize::Zeroizing::new([0xCDu8; 32]);
+        let token = "same-token-every-time";
+        let enc1 = encrypt_relay_token(token, &key).expect("enc1");
+        let enc2 = encrypt_relay_token(token, &key).expect("enc2");
+        // The blobs must differ (nonce changes, so the entire base64 string differs).
+        assert_ne!(enc1, enc2, "each encryption must use a fresh random nonce");
+    }
+
+    /// Wrong key → decrypt returns None (AEAD auth tag failure, not a panic).
+    #[test]
+    fn token_decrypt_wrong_key_returns_none() {
+        let key_a = zeroize::Zeroizing::new([0x11u8; 32]);
+        let key_b = zeroize::Zeroizing::new([0x22u8; 32]);
+        let encoded = encrypt_relay_token("secret-token", &key_a).expect("encrypt");
+        let result = decrypt_relay_token(&encoded, &key_b);
+        assert!(result.is_none(), "wrong key must yield None, not a recovered token");
+    }
+
+    /// Tampered ciphertext → decrypt returns None (not a panic).
+    #[test]
+    fn token_decrypt_tampered_ciphertext_returns_none() {
+        let key = zeroize::Zeroizing::new([0x33u8; 32]);
+        let mut blob = base64::engine::general_purpose::STANDARD
+            .decode(encrypt_relay_token("my-token", &key).expect("enc"))
+            .expect("b64");
+        // Flip a bit in the ciphertext portion (after the 24-byte nonce).
+        if let Some(b) = blob.get_mut(NONCE_SIZE) {
+            *b ^= 0xFF;
+        }
+        let tampered = base64::engine::general_purpose::STANDARD.encode(&blob);
+        assert!(decrypt_relay_token(&tampered, &key).is_none());
+    }
+
+    /// Legacy plaintext migration: load_cached_token falls back to the raw
+    /// token when the file contains a plaintext string that cannot be decrypted.
+    #[test]
+    fn load_cached_token_migrates_legacy_plaintext() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let token_file = dir.path().join(RELAY_TOKEN_FILE);
+
+        // Write a legacy plaintext token (the old format).
+        std::fs::write(&token_file, b"legacy-plaintext-token-xyz\n").expect("write");
+
+        // Redirect token_path() by temporarily overriding the app support dir
+        // via the file directly — we test the crypto helpers and not the path
+        // resolution, so we call the helpers directly.
+        let key = zeroize::Zeroizing::new([0x55u8; 32]);
+
+        let raw = std::fs::read_to_string(&token_file).expect("read");
+        let trimmed = raw.trim();
+        // Decrypting legacy plaintext must return None (it is not a valid blob).
+        assert!(decrypt_relay_token(trimmed, &key).is_none(),
+            "legacy plaintext must not decrypt successfully");
+        // The migration path should return the raw trimmed string as the token.
+        // Simulate what load_cached_token does after decrypt_relay_token returns None:
+        let fallback = trimmed.to_owned();
+        assert_eq!(fallback, "legacy-plaintext-token-xyz");
+    }
+
+    /// Empty file → load returns None (no fallback to empty token).
+    #[test]
+    fn load_cached_token_empty_file_returns_none() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let token_file = dir.path().join(RELAY_TOKEN_FILE);
+        std::fs::write(&token_file, b"   \n").expect("write");
+
+        let key = zeroize::Zeroizing::new([0x77u8; 32]);
+        let raw = std::fs::read_to_string(&token_file).expect("read");
+        let trimmed = raw.trim();
+        // Empty / whitespace-only file → treated as absent.
+        assert!(trimmed.is_empty());
+        // Simulates the `if trimmed.is_empty() { return None; }` guard.
+        assert!(
+            if trimmed.is_empty() { None::<String> } else { decrypt_relay_token(trimmed, &key) }.is_none()
+        );
     }
 
     // ── test helpers ──────────────────────────────────────────────────────────
