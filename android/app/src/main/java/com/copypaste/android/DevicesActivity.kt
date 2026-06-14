@@ -71,7 +71,6 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -1625,7 +1624,7 @@ private fun SasPairingDialog(
                             text = status.sas ?: "",
                             color = IdeText,
                             textAlign = TextAlign.Center,
-                            fontFamily = FontFamily.Monospace,
+                            fontFamily = MonoFontFamily,
                             fontSize = 32.sp,
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1830,7 +1829,7 @@ private fun MetaRow(label: String, value: String) {
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
             color = IdeText,
             fontSize = 11.sp,
             modifier = Modifier.weight(1f),
@@ -1888,7 +1887,7 @@ private fun DeviceField(label: String, value: String) {
         )
         Text(
             text = value,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
             color = IdeText,
             fontSize = 11.sp,
         )

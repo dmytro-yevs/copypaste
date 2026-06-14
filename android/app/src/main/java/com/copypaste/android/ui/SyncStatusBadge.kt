@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
@@ -26,6 +25,7 @@ import com.copypaste.android.DevicesOnlineState
 import com.copypaste.android.Settings
 import com.copypaste.android.ui.theme.IdeFaint
 import com.copypaste.android.ui.theme.IdeSuccess
+import com.copypaste.android.ui.theme.MonoFontFamily
 import kotlinx.coroutines.delay
 
 /**
@@ -102,7 +102,7 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
                 text = count.toString(),
                 color = IdeFaint,
                 fontSize = 10.sp,
-                fontFamily = FontFamily.Monospace,
+                fontFamily = MonoFontFamily,
                 modifier = Modifier.padding(start = 6.dp),
             )
         }

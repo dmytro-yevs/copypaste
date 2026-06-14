@@ -40,10 +40,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
@@ -357,7 +357,7 @@ private fun LogLine(line: String) {
     Text(
         text = line,
         style = MaterialTheme.typography.bodySmall.copy(
-            fontFamily = FontFamily.Monospace,
+            fontFamily = MonoFontFamily,
             fontSize = 11.sp,
             lineHeight = 16.sp,
         ),

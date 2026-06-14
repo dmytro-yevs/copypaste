@@ -62,7 +62,7 @@ import com.copypaste.android.ui.theme.IdeText
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.text.font.FontFamily
+import com.copypaste.android.ui.theme.MonoFontFamily
 
 /**
  * First-run permission onboarding screen.
@@ -648,7 +648,7 @@ private fun AdbCommandRow(
         )
         Text(
             text = command,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
             color = IdeText,
             modifier = Modifier
                 .fillMaxWidth()

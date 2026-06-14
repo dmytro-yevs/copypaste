@@ -48,7 +48,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -70,6 +69,7 @@ import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_LABELS
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_LABELS
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
+import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.SectionLabel
 import com.copypaste.android.ui.theme.ContinuousSliderRow
 import com.copypaste.android.ui.theme.SteppedSliderRow
@@ -1162,7 +1162,7 @@ private fun AdbCmdRow(
     )
     Text(
         text = cmd,
-        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+        style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
         color = IdeAccent,
         modifier = Modifier
             .fillMaxWidth()
