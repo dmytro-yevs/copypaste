@@ -51,6 +51,12 @@ export interface UIPrefs {
    * Applied via <html data-theme="…"> in App.tsx.
    */
   theme: "dark" | "light";
+  /**
+   * Row density for the History view (Design System v2 §9 — Liquid Glass redesign).
+   * "comfortable" (default) = standard row spacing; "compact" = reduced row height.
+   * Consumed by HistoryView / SettingsView agents; not yet wired into views.
+   */
+  density: "comfortable" | "compact";
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -63,6 +69,7 @@ const DEFAULT_PREFS: UIPrefs = {
   notifyOnCopy: true,
   translucency: true,
   theme: "dark",
+  density: "comfortable",
 };
 
 function loadPrefs(): UIPrefs {
