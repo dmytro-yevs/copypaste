@@ -26,6 +26,7 @@ export default function App() {
   const view = useUI((s) => s.view);
   const setView = useUI((s) => s.setView);
   const translucency = useUI((s) => s.prefs.translucency);
+  const theme = useUI((s) => s.prefs.theme);
   const { Component: View, label } = VIEWS[view];
 
   // The popup window emits "open-settings" (after showing this main window) when
@@ -103,6 +104,13 @@ export default function App() {
       document.documentElement.classList.add("no-translucency");
     }
   }, [translucency]);
+
+  // Apply the data-theme attribute whenever the pref changes.
+  // CSS custom property overrides in :root[data-theme="light"] take effect
+  // immediately; no JS class toggling needed beyond setting this one attribute.
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme ?? "dark");
+  }, [theme]);
 
   // ---------------------------------------------------------------------------
   // Daemon spawn error banner (non-dismissible, installation-incomplete)

@@ -45,6 +45,12 @@ export interface UIPrefs {
    * use solid opaque backgrounds — useful for accessibility or low-end GPUs.
    */
   translucency: boolean;
+  /**
+   * UI color theme. "dark" (default) uses the Design System v2 dark palette;
+   * "light" uses the WCAG-AA light overrides defined in index.css.
+   * Applied via <html data-theme="…"> in App.tsx.
+   */
+  theme: "dark" | "light";
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -56,6 +62,7 @@ const DEFAULT_PREFS: UIPrefs = {
   playSoundOnCopy: true,
   notifyOnCopy: true,
   translucency: true,
+  theme: "dark",
 };
 
 function loadPrefs(): UIPrefs {

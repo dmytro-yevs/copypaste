@@ -1409,6 +1409,37 @@ export function SettingsView() {
 
         <SubsectionHeader label="Window" hint="Visual style of the application window." />
         <Panel>
+          <SettingsRow label="Color theme">
+            <div className="flex items-center gap-2">
+              <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette." />
+              <div className="flex items-center gap-1 rounded-ide border border-ide-border bg-ide-bg p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setPrefs({ theme: "light" })}
+                  className={[
+                    "rounded px-2.5 py-1 text-[12px] transition-colors",
+                    (prefs.theme ?? "dark") === "light"
+                      ? "bg-ide-elevated text-ide-text shadow-ide-xs"
+                      : "text-ide-dim hover:text-ide-text",
+                  ].join(" ")}
+                >
+                  Light
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrefs({ theme: "dark" })}
+                  className={[
+                    "rounded px-2.5 py-1 text-[12px] transition-colors",
+                    (prefs.theme ?? "dark") === "dark"
+                      ? "bg-ide-elevated text-ide-text shadow-ide-xs"
+                      : "text-ide-dim hover:text-ide-text",
+                  ].join(" ")}
+                >
+                  Dark
+                </button>
+              </div>
+            </div>
+          </SettingsRow>
           <SettingsRow label="Translucency / vibrancy">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />

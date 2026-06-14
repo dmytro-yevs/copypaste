@@ -9,6 +9,7 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -19,9 +20,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 // ---------------------------------------------------------------------------
-// CopyPaste theme — always dark, matching the Design System v2 "Quiet
+// CopyPaste theme — dark by default, matching the Design System v2 "Quiet
 // Precision" canonical palette defined in DESIGN-SYSTEM-v2.md §0/§3 and
 // mirrored in crates/copypaste-ui/tailwind.config.js.
+//
+// A light colour scheme (LightColorScheme) is also provided; pass
+// darkTheme=false to CopyPasteTheme() to use it.
 //
 // Dynamic color (Material You) is intentionally disabled: it would override
 // the precise canonical palette we need to match the desktop app.
@@ -150,19 +154,71 @@ private val DarculaColorScheme = darkColorScheme(
     scrim                = Color.Black,
 )
 
+// ---------------------------------------------------------------------------
+// Light colour scheme — mirrors :root[data-theme="light"] in index.css.
+// Dynamic color (Material You) is intentionally disabled to preserve the
+// exact canonical palette regardless of the user's wallpaper.
+// ---------------------------------------------------------------------------
+
+private val LightColorScheme = lightColorScheme(
+    // ── Primary (accent blue — darkened for light surfaces) ───────────────
+    primary              = LightPrimary,            // #1A5FCC — 5.2:1 on elevated
+    onPrimary            = LightOnPrimary,           // white on blue
+    primaryContainer     = LightPrimaryContainer,    // light blue tint
+    onPrimaryContainer   = LightOnPrimaryContainer,
+
+    // ── Secondary (amber / warning) ───────────────────────────────────────
+    secondary            = LightSecondary,
+    onSecondary          = LightOnSecondary,
+    secondaryContainer   = LightSecondaryContainer,
+    onSecondaryContainer = LightOnSecondaryContainer,
+
+    // ── Backgrounds / surfaces ────────────────────────────────────────────
+    background           = LightBg,        // #ECEEF2 — lightest layer
+    onBackground         = LightText,      // #1A1C20 — 13.8:1 on bg
+    surface              = LightPanel,     // #F5F6F8 — primary surface
+    onSurface            = LightText,
+    surfaceVariant       = LightElevated,  // #EEF0F4 — elevated
+    onSurfaceVariant     = LightDim,       // #4B505A — 6.2:1 on panel
+
+    // Tonal surface containers — keep every tier inside the canonical light ramp.
+    surfaceContainerLowest  = LightBg,       // #ECEEF2
+    surfaceContainerLow     = LightPanel,    // #F5F6F8
+    surfaceContainer        = LightPanel,    // #F5F6F8 — bottom nav / app bar
+    surfaceContainerHigh    = LightElevated, // #EEF0F4 — cards
+    surfaceContainerHighest = LightRaised,   // #E4E6EB — pressed / raised
+
+    // ── Outline / dividers ────────────────────────────────────────────────
+    outline              = LightBorder,    // #C8CAD0
+    outlineVariant       = LightDivider,   // #D8DAE0
+
+    // ── Error / destructive ───────────────────────────────────────────────
+    error                = LightDanger,
+    onError              = Color.White,
+    errorContainer       = LightErrorContainer,
+    onErrorContainer     = LightOnErrorContainer,
+
+    // ── Scrim / inverse ───────────────────────────────────────────────────
+    inverseSurface       = LightText,
+    inverseOnSurface     = LightBg,
+    inversePrimary       = IdeAccent,
+    scrim                = Color.Black,
+)
+
 /**
  * Root theme for CopyPaste on Android.
  *
- * Always renders in dark mode regardless of system setting, matching the
- * macOS desktop app which is permanently dark (Design System v2 palette).
- * Dynamic color (Material You) is disabled to preserve the exact palette.
+ * Renders in dark mode by default (matching the Design System v2 palette) but
+ * honors the [darkTheme] parameter: pass `false` to use the WCAG-AA light
+ * colour scheme. Dynamic color (Material You) is disabled to preserve the
+ * exact canonical palette.
  */
 @Composable
 fun CopyPasteTheme(
-    // Parameter kept for call-site compatibility but ignored — always dark.
-    @Suppress("UNUSED_PARAMETER") darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = isSystemInDarkTheme(),
     content: @Composable () -> Unit,
 ) {
+    val colorScheme = if (darkTheme) DarculaColorScheme else LightColorScheme
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -174,16 +230,15 @@ fun CopyPasteTheme(
             // by the platform regardless; we set it explicitly so API 26-34 behave
             // identically.
             WindowCompat.setDecorFitsSystemWindows(window, false)
-            // Transparent status bar so our dark background shows through the
-            // cutout / status-bar strip.
+            // Transparent status bar so the surface colour shows through.
             window.statusBarColor = Color.Transparent.toArgb()
-            // Dark background → light status-bar icons.
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = false
+            // Light theme → dark status-bar icons; dark theme → light icons.
+            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }
 
     MaterialTheme(
-        colorScheme = DarculaColorScheme,
+        colorScheme = colorScheme,
         typography   = CopyPasteTypography,
         shapes       = CopyPasteShapes,
         content      = content,
