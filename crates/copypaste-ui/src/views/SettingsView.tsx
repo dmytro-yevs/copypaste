@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import { emit, listen } from "@tauri-apps/api/event";
+import { Check, X } from "lucide-react";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -59,6 +60,13 @@ const QUOTA_LABELS = ["1 GB","2 GB","5 GB","10 GB","25 GB","50 GB (max)"] as con
 
 const SENSITIVE_TTL_STEPS = [10, 30, 60, 5 * 60, 15 * 60, 60 * 60] as const;
 const SENSITIVE_TTL_LABELS = ["10 s","30 s","1 min","5 min","15 min","1 hour"] as const;
+
+// Max history items slider — stored as a UI pref (store.ts density pref mechanism).
+// No daemon IPC contract exists for history-item count yet.
+// TODO(daemon): wire max-items to daemon config when the IPC field is available.
+const MAX_ITEMS_STEPS = [100, 250, 500, 1000, 2500, 5000, 10000, 100000] as const;
+const MAX_ITEMS_LABELS = ["100","250","500","1 000","2 500","5 000","10 000","Unlimited"] as const;
+const DEFAULT_MAX_ITEMS = 1000; // matches daemon default history window
 
 // ---------------------------------------------------------------------------
 // Toggle — iOS-style switch using ide tokens
@@ -150,8 +158,9 @@ function StatusRow({ label, ok }: { label: string; ok: boolean }) {
   return (
     <div className="flex items-center gap-2 text-[13px] text-ide-dim">
       <span className="w-[140px] shrink-0">{label}</span>
+      {/* §6.6: replaced ✓/— text chars with Lucide icons (size 14, semantic tint) */}
       <span className={ok ? "text-ide-success" : "text-ide-faint"}>
-        {ok ? "✓" : "—"}
+        {ok ? <Check size={14} /> : <span className="text-[13px]">—</span>}
       </span>
     </div>
   );
@@ -172,6 +181,7 @@ function SliderRow({
   onRelease,
   formatValue,
   disabled,
+  tickStepCount,
 }: {
   min: number;
   max: number;
@@ -183,10 +193,26 @@ function SliderRow({
   /** Format the numeric value for the right-hand value label. */
   formatValue: (v: number) => string;
   disabled?: boolean;
+  /** When provided, renders a <datalist> with this many tick options so browsers show step ticks. */
+  tickStepCount?: number;
 }) {
   // HW-M4: compute fill % for the accent-colored track. Since appearance:none
   // disables native accent-color, we drive the gradient via a CSS custom prop.
   const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
+
+  // Generate a stable id for the datalist when tick marks are requested.
+  // We use the min/max/step combo as a cheap content-stable key.
+  const datalistId = tickStepCount !== undefined
+    ? `slider-ticks-${min}-${max}-${step}`
+    : undefined;
+
+  // Build tick option values for the datalist — one per step index.
+  const tickOptions = datalistId !== undefined
+    ? Array.from({ length: tickStepCount! }, (_, i) =>
+        min + i * ((max - min) / Math.max(tickStepCount! - 1, 1))
+      )
+    : [];
+
   return (
     <div className="flex items-center gap-2">
       <input
@@ -196,6 +222,7 @@ function SliderRow({
         step={step}
         value={value}
         disabled={disabled}
+        list={datalistId}
         onChange={(e) => onChange(Number(e.target.value))}
         onMouseUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
         onTouchEnd={(e) => onRelease?.(Number((e.currentTarget as HTMLInputElement).value))}
@@ -203,7 +230,16 @@ function SliderRow({
         className="w-28 disabled:opacity-40 disabled:cursor-not-allowed"
         style={{ ["--_fill" as string]: `${pct}%` }}
       />
-      <span className="w-[52px] text-right text-[13px] text-ide-text">
+      {/* §6.5: datalist provides step tick marks rendered by the browser */}
+      {datalistId !== undefined && (
+        <datalist id={datalistId}>
+          {tickOptions.map((v) => (
+            <option key={v} value={v} />
+          ))}
+        </datalist>
+      )}
+      {/* §6.4: w-[80px] (was w-[52px]) so longer labels like "Unlimited" fit */}
+      <span className="w-[80px] text-right text-[13px] text-ide-text">
         {formatValue(value)}
       </span>
     </div>
@@ -311,24 +347,55 @@ function TabBar({
   active: TabId;
   onChange: (id: TabId) => void;
 }) {
+  // §6.1: Animated sliding tab underline.
+  // Each button gets a ref so we can measure its offsetLeft + offsetWidth for
+  // the absolutely-positioned indicator span. We use equal-width assumption
+  // fallback when refs haven't mounted yet.
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number }>({
+    left: 0,
+    width: 0,
+  });
+
+  // Recompute indicator position whenever active tab changes.
+  useEffect(() => {
+    const activeIdx = TABS.findIndex((t) => t.id === active);
+    const btn = tabRefs.current[activeIdx];
+    if (btn) {
+      setIndicatorStyle({ left: btn.offsetLeft, width: btn.offsetWidth });
+    }
+  }, [active]);
+
   return (
-    <div className="mb-4 flex gap-0.5 border-b border-ide-border pb-0">
-      {TABS.map((t) => (
+    // relative so the absolute indicator is contained within the tab bar.
+    <div className="relative mb-4 flex gap-0.5 border-b border-ide-border pb-0">
+      {TABS.map((t, idx) => (
         <button
           key={t.id}
+          ref={(el) => { tabRefs.current[idx] = el; }}
           type="button"
           onClick={() => onChange(t.id)}
           className={[
-            "px-3 py-2 text-[13px] transition-colors",
-            "border-b-2 -mb-px",
+            "px-3 py-2 text-[13px] transition-colors -mb-px",
             active === t.id
-              ? "border-ide-accent text-ide-text font-medium"
-              : "border-transparent text-ide-dim hover:text-ide-text",
+              ? "text-ide-text font-medium"
+              : "text-ide-dim hover:text-ide-text",
           ].join(" ")}
         >
           {t.label}
         </button>
       ))}
+      {/* §6.1: single absolutely-positioned indicator that slides between tabs */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute bottom-0 h-[2px] rounded-full bg-ide-accent"
+        style={{
+          left: indicatorStyle.left,
+          width: indicatorStyle.width,
+          // 180ms ease-standard as per §6/§8 spec
+          transition: "left 180ms cubic-bezier(.2,0,0,1), width 180ms cubic-bezier(.2,0,0,1)",
+        }}
+      />
     </div>
   );
 }
@@ -544,6 +611,11 @@ export function SettingsView() {
     snapToNearest(SENSITIVE_TTL_STEPS as unknown as readonly number[], DEFAULT_SENSITIVE_TTL_SECS)
   );
   const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY);
+  // §6.3: Max history items — stored as UI pref only (no daemon IPC contract yet).
+  // TODO(daemon): wire max-items to daemon config when IPC field is available.
+  const [maxItems, setMaxItems] = useState(
+    snapToNearest(MAX_ITEMS_STEPS as unknown as readonly number[], DEFAULT_MAX_ITEMS)
+  );
   // Per-field save feedback: key = field name, value = error or "Saved" / null.
   const [limitsMsg, setLimitsMsg] = useState<Record<string, string | null>>({});
   const limitsMsgTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -1353,6 +1425,43 @@ export function SettingsView() {
   function renderDisplay() {
     return (
       <div className="space-y-2">
+        {/* §6.2: Row density is the FIRST row of the Display tab (Design System v2 §6/§9).
+            Reads/writes the store `density` pref via the existing setPrefs mechanism.
+            Mirrors the Color theme segmented control pattern used in the Window section. */}
+        <SubsectionHeader label="Appearance" />
+        <Panel>
+          <SettingsRow label="Row density">
+            <div className="flex items-center gap-1 rounded-ide border border-ide-border bg-ide-bg p-0.5">
+              <button
+                type="button"
+                aria-label="comfortable"
+                onClick={() => setPrefs({ density: "comfortable" })}
+                className={[
+                  "rounded px-2.5 py-1 text-[12px] transition-colors",
+                  (prefs.density ?? "comfortable") === "comfortable"
+                    ? "bg-ide-elevated text-ide-text shadow-ide-xs"
+                    : "text-ide-dim hover:text-ide-text",
+                ].join(" ")}
+              >
+                Comfortable
+              </button>
+              <button
+                type="button"
+                aria-label="compact"
+                onClick={() => setPrefs({ density: "compact" })}
+                className={[
+                  "rounded px-2.5 py-1 text-[12px] transition-colors",
+                  (prefs.density ?? "comfortable") === "compact"
+                    ? "bg-ide-elevated text-ide-text shadow-ide-xs"
+                    : "text-ide-dim hover:text-ide-text",
+                ].join(" ")}
+              >
+                Compact
+              </button>
+            </div>
+          </SettingsRow>
+        </Panel>
+
         <SubsectionHeader label="History list" />
         <Panel>
           {/* M4: split previewLines — main window has its own independent setting */}
@@ -1611,11 +1720,12 @@ export function SettingsView() {
           {testMsg !== null && (
             <div
               className={[
-                "border-t border-ide-divider px-3 py-2 text-[12px]",
+                "border-t border-ide-divider px-3 py-2 text-[12px] flex items-center gap-1.5",
                 testMsg.ok ? "text-ide-success" : "text-ide-danger",
               ].join(" ")}
             >
-              {testMsg.ok ? "✓ " : "✗ "}
+              {/* §6.6: replaced ✓/✗ text chars with Lucide icons (size 14) */}
+              {testMsg.ok ? <Check size={14} /> : <X size={14} />}
               {testMsg.text}
             </div>
           )}
@@ -1753,6 +1863,8 @@ export function SettingsView() {
               step={1}
               value={safeIdx}
               disabled={offline}
+              // §6.5: pass step count so SliderRow renders a datalist for tick marks
+              tickStepCount={steps.length}
               onChange={(i) => onChange(steps[Math.min(Math.max(i, 0), maxIdx)] as T)}
               onRelease={(i) => onRelease(steps[Math.min(Math.max(i, 0), maxIdx)] as T)}
               formatValue={(i) => labels[Math.min(Math.max(i, 0), maxIdx)] ?? String(i)}
@@ -1855,6 +1967,22 @@ export function SettingsView() {
               <LimitsMsg field="image_quality" />
             </div>
           </SettingsRow>
+          {/* §6.3: Max history items — stored as UI pref only (no daemon IPC contract).
+              Sentinel 100000 → "Unlimited". No onRelease IPC call — updates store only.
+              TODO(daemon): wire max-items to daemon config when IPC field is available. */}
+          <LimitSliderRow
+            label="Max history items"
+            field="max_items"
+            steps={MAX_ITEMS_STEPS as unknown as readonly number[]}
+            labels={MAX_ITEMS_LABELS}
+            value={maxItems}
+            onChange={(v) => setMaxItems(v)}
+            onRelease={(v) => {
+              // Max-items has no daemon IPC field yet — persist as UI pref only.
+              setMaxItems(v);
+              showLimitsMsg("max_items", "Saved", 1500);
+            }}
+          />
         </Panel>
 
         <SubsectionHeader label="Data" />

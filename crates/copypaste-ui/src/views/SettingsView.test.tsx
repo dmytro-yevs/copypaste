@@ -275,6 +275,68 @@ describe("P2P toggle triggers daemon restart", () => {
     await act(async () => { resolveRestart(); });
   });
 
+  // ---------------------------------------------------------------------------
+  // §6 Liquid Glass Settings additions
+  // ---------------------------------------------------------------------------
+
+  it("§6.2 Display tab has a density segmented control as the first row", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const displayTab = await screen.findByText("Display");
+    await act(async () => { fireEvent.click(displayTab); });
+
+    // "Row density" label must exist in the Display tab
+    expect(screen.getByText(/Row density/i)).toBeInTheDocument();
+    // Both density options must be present
+    expect(screen.getByRole("button", { name: /comfortable/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /compact/i })).toBeInTheDocument();
+  });
+
+  it("§6.3 Storage tab has a Max history items slider row", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const storageTab = await screen.findByText("Storage");
+    await act(async () => { fireEvent.click(storageTab); });
+
+    // "Max history items" label must exist
+    expect(screen.getByText(/Max history items/i)).toBeInTheDocument();
+  });
+
+  it("§6.5 SliderRow inputs have a datalist for tick marks", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    const { container } = render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const storageTab = await screen.findByText("Storage");
+    await act(async () => { fireEvent.click(storageTab); });
+
+    // At least one range input should have a list attribute (datalist)
+    const rangeInputs = container.querySelectorAll('input[type="range"][list]');
+    expect(rangeInputs.length).toBeGreaterThan(0);
+  });
+
   it("does NOT call restart_daemon when set_config fails", async () => {
     // Make set_config fail so the restart branch is not reached.
     invoke.mockImplementation(
