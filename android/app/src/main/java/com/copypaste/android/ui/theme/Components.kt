@@ -297,8 +297,8 @@ private val AURORA_DARK = listOf(
 private val AURORA_LIGHT = listOf(
     AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.22f), 0.12f,  0.08f, 1.05f, 0.52f), // A blue
     AuroraBlob(Color(0xFF805AD5).copy(alpha = 0.20f), 0.88f,  0.12f, 1.00f, 0.50f), // B violet (AA-darkened)
-    AuroraBlob(Color(0xFF32ADE6).copy(alpha = 0.18f), 0.80f,  0.92f, 0.82f, 0.46f), // C sky
-    AuroraBlob(Color(0xFF34C759).copy(alpha = 0.14f), 0.18f,  0.88f, 0.86f, 0.48f), // D green
+    AuroraBlob(Color(0xFF1478AA).copy(alpha = 0.18f), 0.80f,  0.92f, 0.82f, 0.46f), // C sky (20 120 170, parity w/ web)
+    AuroraBlob(Color(0xFF288C46).copy(alpha = 0.14f), 0.18f,  0.88f, 0.86f, 0.48f), // D green (40 140 70, parity w/ web)
 )
 
 // Mid-canvas overlay blobs (esph) — two small centre blobs that add depth and
@@ -307,9 +307,9 @@ private val AURORA_LIGHT = listOf(
 // Painted AFTER the 4 main blobs in auroraCanvas().
 private val AURORA_OVERLAY_LIGHT = listOf(
     // E — accent blue, centre-left; radiusFrac ~0.28 of diagonal, stop 65%
-    AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.14f), 0.50f, 0.38f, 0.28f, 0.65f),
+    AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.18f), 0.50f, 0.38f, 0.28f, 0.65f),
     // F — amber, slightly lower-left; radiusFrac ~0.20, stop 65%
-    AuroraBlob(Color(0xFFD9A343).copy(alpha = 0.12f), 0.30f, 0.60f, 0.20f, 0.65f),
+    AuroraBlob(Color(0xFFD9A343).copy(alpha = 0.16f), 0.30f, 0.60f, 0.20f, 0.65f),
 )
 
 private val AURORA_OVERLAY_DARK = listOf(
