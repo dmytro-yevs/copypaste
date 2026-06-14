@@ -7,7 +7,7 @@ dist
 src-tauri/target
 src-tauri/gen/schemas
 
-# Bundled font binaries (drop-in required — see src/assets/fonts/.gitkeep)
-src/assets/fonts/*.woff2
-src/assets/fonts/*.woff
-src/assets/fonts/*.ttf
+# Bundled font binaries — committed (small subsets, ~24KB each) so the build is
+# reproducible from a fresh clone (a missing woff2 404s → SPA fallback serves
+# index.html → OTS "invalid sfntVersion"). Inter + JetBrains Mono, @font-face
+# refs in src/index.css use ./assets/fonts/ (relative to src/, the file's dir).

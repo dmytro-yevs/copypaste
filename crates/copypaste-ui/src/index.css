@@ -31,7 +31,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("../assets/fonts/inter-regular.woff2") format("woff2");
+  src: url("./assets/fonts/inter-regular.woff2") format("woff2");
 }
 
 @font-face {
@@ -39,7 +39,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url("../assets/fonts/inter-medium.woff2") format("woff2");
+  src: url("./assets/fonts/inter-medium.woff2") format("woff2");
 }
 
 @font-face {
@@ -47,7 +47,7 @@
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url("../assets/fonts/inter-semibold.woff2") format("woff2");
+  src: url("./assets/fonts/inter-semibold.woff2") format("woff2");
 }
 
 @font-face {
@@ -55,7 +55,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("../assets/fonts/jetbrains-mono-regular.woff2") format("woff2");
+  src: url("./assets/fonts/jetbrains-mono-regular.woff2") format("woff2");
 }
 
 @font-face {
@@ -63,7 +63,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src: url("../assets/fonts/jetbrains-mono-medium.woff2") format("woff2");
+  src: url("./assets/fonts/jetbrains-mono-medium.woff2") format("woff2");
 }
 
 /* ── Design System v2 "Quiet Precision" — token foundation ──────────────────
@@ -84,13 +84,18 @@
 :root {
   color-scheme: dark;
 
-  /* ── §0 Canonical surface palette ────────────────────────────────────── */
-  --ide-bg:           #13141A;   /* root window / darkest layer            */
-  --ide-panel:        #1B1C22;   /* primary surface: sidebar, list bg       */
-  --ide-elevated:     #23252D;   /* cards, inputs                           */
-  --ide-raised:       #2d2f34;   /* hover / pressed on elevated             */
-  --ide-border:       #383b42;   /* outline borders                         */
-  --ide-divider:      #2e3035;   /* row separators, subtler than border     */
+  /* ── §0 Canonical surface palette ──────────────────────────────────────
+     Stored as RGB channel triplets (--ide-*-rgb) so Tailwind utilities can
+     inject alpha (e.g. bg-ide-panel/60 → rgb(... / .6)) AND the data-theme
+     cascade can re-theme them. The derived --ide-* full-colour vars keep raw
+     CSS consumers (input/select/range/focus-ring) working unchanged: the
+     light theme only overrides the -rgb channels, --ide-* re-resolves lazily. */
+  --ide-bg-rgb:        19 20 26;     --ide-bg:        rgb(var(--ide-bg-rgb));
+  --ide-panel-rgb:     27 28 34;     --ide-panel:     rgb(var(--ide-panel-rgb));
+  --ide-elevated-rgb:  35 37 45;     --ide-elevated:  rgb(var(--ide-elevated-rgb));
+  --ide-raised-rgb:    45 47 52;     --ide-raised:    rgb(var(--ide-raised-rgb));
+  --ide-border-rgb:    56 59 66;     --ide-border:    rgb(var(--ide-border-rgb));
+  --ide-divider-rgb:   46 48 53;     --ide-divider:   rgb(var(--ide-divider-rgb));
 
   /* ── §3 Interaction state tokens (kill bg-white/10 magic) ───────────── */
   --ide-hover:        rgba(255,255,255,0.045);
@@ -99,10 +104,10 @@
   --ide-multi-sel:    rgba(61,139,255,0.20);
 
   /* ── §0 Text hierarchy ───────────────────────────────────────────────── */
-  --ide-text:         #E8EAED;
-  --ide-dim:          #9da0a8;
+  --ide-text-rgb:     232 234 237;   --ide-text:  rgb(var(--ide-text-rgb));
+  --ide-dim-rgb:      157 160 168;   --ide-dim:   rgb(var(--ide-dim-rgb));
   /* Raised from #6b6f78 (3.37:1) to meet WCAG AA 4.5:1 on panel (#1B1C22). */
-  --ide-faint:        #82868f;
+  --ide-faint-rgb:    130 134 143;   --ide-faint: rgb(var(--ide-faint-rgb));
   /* Ghost: rgba(255,255,255,0.46) composited on panel = 4.56:1 — WCAG AA.
      Replaces inline magic rgba(255,255,255,0.28/.30/.35) in Popup/EmptyState.
      Use for secondary metadata text (time, count, placeholder icons). */
@@ -112,16 +117,16 @@
   --ide-ghost-deco:   rgba(255,255,255,0.33);
 
   /* ── §0 Brand ────────────────────────────────────────────────────────── */
-  --ide-accent:       #3D8BFF;
-  --ide-accent-hover: #5aacff;
+  --ide-accent-rgb:       61 139 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb: 90 172 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
   --ide-accent-dim:   rgba(61,139,255,0.12);
 
   /* ── §3 Semantic colours (base / container) ──────────────────────────── */
-  --ide-danger:       #E05C5C;   --ide-danger-dim:   rgba(224,92,92,0.10);
-  --ide-success:      #5FAD65;   --ide-success-dim:  rgba(95,173,101,0.10);
-  --ide-warning:      #D9A343;   --ide-warning-dim:  rgba(217,163,67,0.10);
-  --ide-info:         #56B6C2;   --ide-info-dim:     rgba(86,182,194,0.12);
-  --ide-violet:       #C678DD;   --ide-violet-dim:   rgba(198,120,221,0.12);
+  --ide-danger-rgb:   224 92 92;   --ide-danger:  rgb(var(--ide-danger-rgb));   --ide-danger-dim:   rgba(224,92,92,0.10);
+  --ide-success-rgb:  95 173 101;  --ide-success: rgb(var(--ide-success-rgb));  --ide-success-dim:  rgba(95,173,101,0.10);
+  --ide-warning-rgb:  217 163 67;  --ide-warning: rgb(var(--ide-warning-rgb));  --ide-warning-dim:  rgba(217,163,67,0.10);
+  --ide-info-rgb:     86 182 194;  --ide-info:    rgb(var(--ide-info-rgb));     --ide-info-dim:     rgba(86,182,194,0.12);
+  --ide-violet-rgb:   198 120 221; --ide-violet:  rgb(var(--ide-violet-rgb));   --ide-violet-dim:   rgba(198,120,221,0.12);
 
   /* ── §3 Elevation (E0-E3 exact shadows) ──────────────────────────────── */
   --ide-e0: none;
@@ -158,38 +163,41 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* ── §0 Surface palette — light ramp ─────────────────────────────────── */
-  --ide-bg:           #ECEEF2;   /* root / lightest layer                   */
-  --ide-panel:        #F5F6F8;   /* primary surface: sidebar, list bg        */
-  --ide-elevated:     #EEF0F4;   /* cards, inputs                            */
-  --ide-raised:       #E4E6EB;   /* hover / pressed on elevated              */
-  --ide-border:       #C8CAD0;   /* outline borders                          */
-  --ide-divider:      #D8DAE0;   /* row separators, subtler than border      */
+  /* ── Apple macOS Tahoe "Liquid Glass" — light/greyish surface ramp ─────
+     Neutral system greys (NSColor windowBackground / systemGray ramp). The
+     canvas is a soft grey; panels are near-white frosted glass; cards lift to
+     white. Borders/dividers use Apple's translucent separator. ─────────────── */
+  --ide-bg-rgb:        227 227 232;   /* window canvas — greyish (systemGray5) */
+  --ide-panel-rgb:     242 242 245;   /* sidebar / list — frosted near-white   */
+  --ide-elevated-rgb:  255 255 255;   /* cards, inputs — white                 */
+  --ide-raised-rgb:    236 236 240;   /* hover / pressed on elevated           */
+  --ide-border-rgb:    211 211 216;   /* separators (opaque)                   */
+  --ide-divider-rgb:   226 226 230;   /* row separators, subtler               */
 
-  /* ── §3 Interaction state tokens ─────────────────────────────────────── */
-  --ide-hover:        rgba(0,0,0,0.045);
-  --ide-pressed:      rgba(0,0,0,0.07);
-  --ide-selection:    rgba(26,95,204,0.12);
-  --ide-multi-sel:    rgba(26,95,204,0.16);
+  /* ── Interaction states (Apple fill colors) ──────────────────────────── */
+  --ide-hover:        rgba(0,0,0,0.04);
+  --ide-pressed:      rgba(0,0,0,0.08);
+  --ide-selection:    rgba(0,122,255,0.14);
+  --ide-multi-sel:    rgba(0,122,255,0.20);
 
-  /* ── §0 Text hierarchy ───────────────────────────────────────────────── */
-  --ide-text:         #1A1C20;   /* 13.8:1 on panel — WCAG AAA              */
-  --ide-dim:          #4B505A;   /*  6.2:1 on panel — WCAG AA               */
-  --ide-faint:        #6B7280;   /*  4.6:1 on panel — WCAG AA               */
-  --ide-ghost:        rgba(26,28,32,0.55);   /* 5.1:1 on panel — WCAG AA    */
-  --ide-ghost-deco:   rgba(26,28,32,0.35);   /* 3.2:1 — decorative/large    */
+  /* ── Text hierarchy (Apple label colors) ─────────────────────────────── */
+  --ide-text-rgb:     29 29 31;       /* labelColor                          */
+  --ide-dim-rgb:      91 91 96;       /* secondaryLabel                      */
+  --ide-faint-rgb:    138 138 142;    /* tertiaryLabel                       */
+  --ide-ghost:        rgba(60,60,67,0.55);
+  --ide-ghost-deco:   rgba(60,60,67,0.32);
 
-  /* ── §0 Brand (darkened for light surfaces) ──────────────────────────── */
-  --ide-accent:       #1A5FCC;   /* 5.2:1 on elevated — WCAG AA             */
-  --ide-accent-hover: #1452B3;
-  --ide-accent-dim:   rgba(26,95,204,0.10);
+  /* ── Brand — Apple systemBlue (light) ────────────────────────────────── */
+  --ide-accent-rgb:       0 122 255;
+  --ide-accent-hover-rgb: 0 99 209;
+  --ide-accent-dim:   rgba(0,122,255,0.12);
 
-  /* ── §3 Semantic colours (darkened for WCAG AA on light bg) ─────────── */
-  --ide-danger:       #C0392B;   --ide-danger-dim:   rgba(192,57,43,0.09);
-  --ide-success:      #267A2E;   --ide-success-dim:  rgba(38,122,46,0.09);
-  --ide-warning:      #A0610A;   --ide-warning-dim:  rgba(160,97,10,0.09);
-  --ide-info:         #1A7A88;   --ide-info-dim:     rgba(26,122,136,0.10);
-  --ide-violet:       #8832A8;   --ide-violet-dim:   rgba(136,50,168,0.10);
+  /* ── Semantic — Apple system colors (light) ──────────────────────────── */
+  --ide-danger-rgb:   255 59 48;   --ide-danger-dim:   rgba(255,59,48,0.12);
+  --ide-success-rgb:  52 199 89;   --ide-success-dim:  rgba(52,199,89,0.14);
+  --ide-warning-rgb:  255 149 0;   --ide-warning-dim:  rgba(255,149,0,0.14);
+  --ide-info-rgb:     50 173 230;  --ide-info-dim:     rgba(50,173,230,0.14);
+  --ide-violet-rgb:   175 82 222;  --ide-violet-dim:   rgba(175,82,222,0.14);
 
   /* ── §3 Elevation (lighter shadows for light theme) ──────────────────── */
   --ide-e0: none;
@@ -213,8 +221,17 @@ body,
 
 body {
   margin: 0;
-  /* Transparent so the native macOS vibrancy (NSVisualEffectView) shows through. */
-  background: transparent;
+  /* Liquid-Glass canvas: a deep aurora gradient gives the translucent surfaces
+     real content to blur + layer over (without it, .surface-glass collapses to a
+     flat fill). Opaque on purpose — we render our own depth rather than relying on
+     fragile macOS NSVisualEffectView vibrancy, so the glass reads identically in
+     the browser, the Tauri window, and (mirrored) on Android. */
+  background:
+    radial-gradient(125% 85% at 8% -15%, rgba(61, 139, 255, 0.16) 0%, transparent 52%),
+    radial-gradient(115% 80% at 105% 115%, rgba(198, 120, 221, 0.14) 0%, transparent 50%),
+    radial-gradient(90% 60% at 92% -10%, rgba(86, 182, 194, 0.08) 0%, transparent 45%),
+    linear-gradient(160deg, #181b27 0%, #121420 48%, #0c0d13 100%);
+  background-attachment: fixed;
   color: var(--ide-text);
   /* Bundled Inter leads so rendering is identical across macOS + Android.
      System fonts trail as safe fallback when the .woff2 drop-in is absent. */
@@ -237,15 +254,30 @@ body {
 
 .surface-glass,
 .ide-translucent {
-  background: rgba(19, 20, 26, 0.72);
-  backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  /* Frosted Liquid-Glass material: translucent enough that the canvas behind
+     blurs through, with a light-catching top highlight (the Apple "shine"). */
+  background: rgba(30, 32, 42, 0.55);
+  backdrop-filter: blur(32px) saturate(180%);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
 }
 
-/* Light mode: glass uses a warm-white frosted tint instead of dark smoke. */
+/* Apple light/greyish glass: frosted near-white over the grey canvas, with a
+   bright top highlight — the macOS Tahoe sidebar/material look. */
 :root[data-theme="light"] .surface-glass,
 :root[data-theme="light"] .ide-translucent {
-  background: rgba(245, 246, 248, 0.80);
+  background: rgba(250, 250, 252, 0.62);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.70);
+}
+
+/* Light/greyish canvas — soft neutral grey with a faint cool vibrancy, so the
+   frosted surfaces read as glass (replaces the dark aurora in light mode). */
+:root[data-theme="light"] body {
+  background:
+    radial-gradient(120% 80% at 10% -12%, rgba(0, 122, 255, 0.06) 0%, transparent 50%),
+    radial-gradient(110% 75% at 105% 112%, rgba(175, 82, 222, 0.05) 0%, transparent 48%),
+    linear-gradient(160deg, #ECECF1 0%, #E3E3E9 50%, #DADAE1 100%);
+  background-attachment: fixed;
 }
 
 .surface-solid {

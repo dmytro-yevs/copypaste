@@ -4,51 +4,52 @@ export default {
   theme: {
     extend: {
       colors: {
-        // ── Design System v2 "Quiet Precision" — canonical palette §0 ──────────
-        // Single source of truth: web + Android must mirror these exact values.
+        // ── Apple macOS Tahoe "Liquid Glass" — themeable palette ───────────────
+        // Solid colours reference the --ide-*-rgb CHANNEL triplets defined in
+        // index.css, wrapped as rgb(... / <alpha-value>) so opacity modifiers
+        // (bg-ide-panel/60) work AND the data-theme="light" cascade re-themes
+        // every utility. Pre-composited alpha tokens (selection/hover/dim/ghost/
+        // *Dim) map straight to their --ide-* var. Light overrides live in
+        // index.css :root[data-theme="light"]. (docs/PARITY-SPEC.md §1)
         ide: {
           // Surface hierarchy: bg → panel → elevated → raised
-          bg:        "#13141A",   // §0 canonical bg
-          panel:     "#1B1C22",   // §0 canonical panel
-          elevated:  "#23252D",   // §0 canonical elevated
-          raised:    "#2d2f34",   // pressed / hover-on-elevated depth tier
+          bg:        "rgb(var(--ide-bg-rgb) / <alpha-value>)",
+          panel:     "rgb(var(--ide-panel-rgb) / <alpha-value>)",
+          elevated:  "rgb(var(--ide-elevated-rgb) / <alpha-value>)",
+          raised:    "rgb(var(--ide-raised-rgb) / <alpha-value>)",
 
           // Borders & dividers — hairline single-pixel style
-          border:    "#383b42",   // outline borders
-          divider:   "#2e3035",   // row separators, subtler than border
+          border:    "rgb(var(--ide-border-rgb) / <alpha-value>)",
+          divider:   "rgb(var(--ide-divider-rgb) / <alpha-value>)",
 
-          // Interaction states (tokenised — §3 kill bg-white/10 magic)
-          selection: "rgba(61,139,255,0.16)", // selected row fill
-          hover:     "rgba(255,255,255,0.045)", // panel surface hover
-          pressed:   "rgba(255,255,255,0.07)",  // press state
+          // Interaction states (pre-composited alpha — pass through)
+          selection: "var(--ide-selection)",
+          hover:     "var(--ide-hover)",
+          pressed:   "var(--ide-pressed)",
 
           // Text hierarchy
-          text:  "#E8EAED",       // §0 canonical text
-          dim:   "#9da0a8",       // secondary
-          // Raised from #6b6f78 (3.37:1) to meet WCAG AA 4.5:1 on panel (#1B1C22).
-          faint: "#82868f",       // timestamps, placeholders
-          // Ghost token: rgba(255,255,255,0.46) = 4.56:1 on panel. Replaces inline
-          // rgba magic in Popup/EmptyState. Use for secondary metadata text.
-          ghost: "rgba(255,255,255,0.46)",
-          // Decorative-icon: 3.01:1 on panel — WCAG AA large/decorative (≥3:1).
-          "ghost-deco": "rgba(255,255,255,0.33)",
+          text:  "rgb(var(--ide-text-rgb) / <alpha-value>)",
+          dim:   "rgb(var(--ide-dim-rgb) / <alpha-value>)",
+          faint: "rgb(var(--ide-faint-rgb) / <alpha-value>)",
+          ghost: "var(--ide-ghost)",
+          "ghost-deco": "var(--ide-ghost-deco)",
 
           // Brand
-          accent:      "#3D8BFF", // §0 canonical accent
-          accentHover: "#5aacff", // hover state
-          accentDim:   "rgba(61,139,255,0.12)", // accent container tint
+          accent:      "rgb(var(--ide-accent-rgb) / <alpha-value>)",
+          accentHover: "rgb(var(--ide-accent-hover-rgb) / <alpha-value>)",
+          accentDim:   "var(--ide-accent-dim)",
 
-          // Semantic colours (§3) — base / container @~10-12%
-          danger:      "#E05C5C",
-          dangerDim:   "rgba(224,92,92,0.10)",
-          success:     "#5FAD65",
-          successDim:  "rgba(95,173,101,0.10)",
-          warning:     "#D9A343",
-          warningDim:  "rgba(217,163,67,0.10)",
-          info:        "#56B6C2",  // url / info
-          infoDim:     "rgba(86,182,194,0.12)",
-          violet:      "#C678DD",  // image / code
-          violetDim:   "rgba(198,120,221,0.12)",
+          // Semantic colours (§3) — base channel + pre-composited container tint
+          danger:      "rgb(var(--ide-danger-rgb) / <alpha-value>)",
+          dangerDim:   "var(--ide-danger-dim)",
+          success:     "rgb(var(--ide-success-rgb) / <alpha-value>)",
+          successDim:  "var(--ide-success-dim)",
+          warning:     "rgb(var(--ide-warning-rgb) / <alpha-value>)",
+          warningDim:  "var(--ide-warning-dim)",
+          info:        "rgb(var(--ide-info-rgb) / <alpha-value>)",
+          infoDim:     "var(--ide-info-dim)",
+          violet:      "rgb(var(--ide-violet-rgb) / <alpha-value>)",
+          violetDim:   "var(--ide-violet-dim)",
         }
       },
       fontFamily: {
@@ -65,16 +66,18 @@ export default {
         "ide-xl": "14px",  // popup
       },
       boxShadow: {
-        // Exact elevation levels §3 E0-E3
-        "ide-e0": "none",
-        "ide-e1": "0 1px 2px rgba(0,0,0,0.40), 0 0 0 1px rgba(255,255,255,0.04) inset",
-        "ide-e2": "0 2px 8px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.35)",
-        "ide-e3": "0 12px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.06)",
-        // Legacy aliases — keep so no existing class breaks
-        "ide-xs":    "0 1px 2px rgba(0,0,0,0.40)",
-        "ide-sm":    "0 2px 8px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.35)",
-        "ide-md":    "0 4px 14px rgba(0,0,0,0.55), 0 2px 4px rgba(0,0,0,0.38)",
-        "ide-popup": "0 12px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.06)",
+        // Theme-aware elevation §3 E0-E3 — the actual shadow values live in
+        // index.css (--ide-e*) and differ per theme (heavy dark drops vs soft
+        // light drops), so light cards don't keep muddy dark shadows.
+        "ide-e0": "var(--ide-e0)",
+        "ide-e1": "var(--ide-e1)",
+        "ide-e2": "var(--ide-e2)",
+        "ide-e3": "var(--ide-e3)",
+        // Legacy aliases → map onto the same theme-aware tiers
+        "ide-xs":    "var(--ide-e1)",
+        "ide-sm":    "var(--ide-e2)",
+        "ide-md":    "var(--ide-e3)",
+        "ide-popup": "var(--ide-e3)",
       },
       // Motion tokens §8 — 4 durations
       transitionDuration: {

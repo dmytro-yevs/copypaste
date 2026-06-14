@@ -109,7 +109,7 @@ export default function App() {
   // CSS custom property overrides in :root[data-theme="light"] take effect
   // immediately; no JS class toggling needed beyond setting this one attribute.
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme ?? "dark");
+    document.documentElement.setAttribute("data-theme", theme ?? "light");
   }, [theme]);
 
   // ---------------------------------------------------------------------------

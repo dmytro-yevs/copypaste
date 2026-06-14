@@ -68,7 +68,8 @@ const DEFAULT_PREFS: UIPrefs = {
   playSoundOnCopy: true,
   notifyOnCopy: true,
   translucency: true,
-  theme: "dark",
+  // Default to the Apple macOS Tahoe light/greyish Liquid Glass look.
+  theme: "light",
   density: "comfortable",
 };
 
