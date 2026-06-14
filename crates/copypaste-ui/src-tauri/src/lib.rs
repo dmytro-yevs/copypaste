@@ -210,6 +210,7 @@ pub fn run() {
             ipc::read_logs,
             ipc::log_dir_path,
             ipc::ingest_dropped_files,
+            ipc::open_item_file,
             focus_main_window,
         ])
         .setup(|app| {

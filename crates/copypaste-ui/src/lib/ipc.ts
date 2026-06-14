@@ -535,6 +535,22 @@ export const api = {
     ipcCall<{ filename: string; mime: string; data_b64: string }>("get_item_file", { id }),
 
   /**
+   * Open a file-type clipboard item with the OS default application.
+   *
+   * The Tauri backend fetches the file bytes from the daemon, writes them to a
+   * temp file under `$TMPDIR/copypaste_open/`, and calls the OS open command
+   * (`/usr/bin/open` on macOS, `xdg-open` on Linux).  The temp file is not
+   * cleaned up automatically — it lives until the next system temp-dir purge.
+   *
+   * Use this for "Open" (open-in-place, no save dialog) as distinct from
+   * `getItemFile` which triggers a browser download ("Save As…").
+   *
+   * Throws `IpcError` when the item is not found, not a file, or the OS open
+   * command fails.
+   */
+  openItemFile: (id: string) => invoke<void>("open_item_file", { id }),
+
+  /**
    * Fetch the pre-computed thumbnail for a clipboard image item. Returns
    * `{ thumbnail: "data:image/webp;base64,…" }` when the daemon has a thumb,
    * or `{ thumbnail: null }` when thumbnails are not available for this item

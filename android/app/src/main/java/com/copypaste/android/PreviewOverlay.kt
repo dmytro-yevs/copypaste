@@ -35,6 +35,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.BookmarkAdded
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
@@ -215,6 +216,8 @@ fun PreviewOverlay(
     onSetPinned: (Boolean) -> Unit,
     onDelete: () -> Unit,
     onSaveFile: () -> Unit,
+    /** Open the file with the OS default application. Null when item is not a file. */
+    onOpenFile: (() -> Unit)? = null,
 ) {
     if (phase == PreviewPhase.Idle || item == null) return
 
@@ -393,6 +396,7 @@ fun PreviewOverlay(
                         onSetPinned = onSetPinned,
                         onDelete = onDelete,
                         onSaveFile = if (item.isFile) onSaveFile else null,
+                        onOpenFile = if (item.isFile) onOpenFile else null,
                     )
                 }
             }
@@ -620,6 +624,8 @@ private fun PreviewActionRow(
     onSetPinned: (Boolean) -> Unit,
     onDelete: () -> Unit,
     onSaveFile: (() -> Unit)?,
+    /** Open with default app. Non-null only for file items. */
+    onOpenFile: (() -> Unit)? = null,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -645,6 +651,18 @@ private fun PreviewActionRow(
                 tint = if (item.pinned) IdeWarning else IdeDim,
                 modifier = Modifier.size(18.dp),
             )
+        }
+        // Open with default app — shown only for file items
+        if (onOpenFile != null) {
+            Spacer(Modifier.width(4.dp))
+            IconButton(onClick = onOpenFile, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    imageVector = Icons.Filled.OpenInNew,
+                    contentDescription = stringResource(R.string.cd_open_file),
+                    tint = IdeAccent,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
         if (onSaveFile != null) {
             Spacer(Modifier.width(4.dp))

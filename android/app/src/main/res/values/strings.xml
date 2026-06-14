@@ -230,6 +230,11 @@
     <string name="cd_select_all">Select all</string>
     <string name="cd_close_selection">Close selection mode</string>
 
+    <!-- History — file item actions -->
+    <string name="action_open_file">Open file</string>
+    <string name="cd_open_file">Open with default app</string>
+    <string name="file_open_no_app">No app found to open this file type</string>
+
     <!-- History — bulk / pin actions -->
     <string name="action_pin">Pin</string>
     <string name="action_unpin">Unpin</string>

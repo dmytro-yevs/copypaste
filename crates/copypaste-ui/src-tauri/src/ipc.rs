@@ -338,6 +338,100 @@ fn mime_from_extension(ext: &str) -> &'static str {
     }
 }
 
+/// Open a file-type clipboard item with the OS default application.
+///
+/// Fetches the file bytes from the daemon (`get_item_file`), writes them to a
+/// temporary file under the system temp directory, and then opens the file
+/// with the OS default application:
+///   - macOS: `/usr/bin/open <path>`
+///   - Linux: `xdg-open <path>`
+///   - Windows: `cmd /c start "" <path>` (not the primary target; included for
+///     completeness).
+///
+/// The temp file is **not** deleted automatically — the OS file manager or the
+/// next boot will clean it up (standard behaviour for preview-and-forget
+/// workflows).  The file is written to `$TMPDIR/copypaste_open/<filename>` so
+/// all "open" temporaries are grouped in one place.
+///
+/// On error the function returns an `Err(String)` that the frontend surfaces as
+/// a toast.
+#[tauri::command]
+pub async fn open_item_file(id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // 1. Fetch file data from daemon.
+        let reply = call("get_item_file", serde_json::json!({ "id": id }))
+            .map_err(|e| format!("IPC error: {e}"))?;
+        if !reply.ok {
+            return Err(reply
+                .error
+                .unwrap_or_else(|| "get_item_file failed".into()));
+        }
+        let data = reply
+            .data
+            .ok_or_else(|| "daemon returned no data for get_item_file".to_string())?;
+
+        let filename = data["filename"]
+            .as_str()
+            .filter(|s| !s.is_empty())
+            .unwrap_or("clipboard_file")
+            .to_string();
+        let data_b64 = data["data_b64"]
+            .as_str()
+            .ok_or_else(|| "get_item_file response missing data_b64".to_string())?;
+
+        // 2. Decode base64.
+        use base64::Engine as _;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data_b64)
+            .map_err(|e| format!("base64 decode error: {e}"))?;
+
+        // 3. Write to temp file.
+        let tmp_dir = std::env::temp_dir().join("copypaste_open");
+        std::fs::create_dir_all(&tmp_dir)
+            .map_err(|e| format!("create temp dir failed: {e}"))?;
+
+        // Sanitise the filename: strip path separators so a malicious filename
+        // cannot escape the temp directory (defence-in-depth; daemon should
+        // never send such filenames, but we guard at the boundary here too).
+        let safe_name = std::path::Path::new(&filename)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("clipboard_file")
+            .to_string();
+
+        let tmp_path = tmp_dir.join(&safe_name);
+        std::fs::write(&tmp_path, &bytes)
+            .map_err(|e| format!("write temp file failed: {e}"))?;
+
+        // 4. Open with OS default app.
+        #[cfg(target_os = "macos")]
+        let open_cmd = "/usr/bin/open";
+        #[cfg(target_os = "linux")]
+        let open_cmd = "xdg-open";
+        #[cfg(windows)]
+        let (open_cmd, _windows_flag) = ("cmd", "/c");
+
+        #[cfg(not(windows))]
+        {
+            std::process::Command::new(open_cmd)
+                .arg(&tmp_path)
+                .spawn()
+                .map_err(|e| format!("open command failed: {e}"))?;
+        }
+        #[cfg(windows)]
+        {
+            std::process::Command::new(open_cmd)
+                .args(["c", "start", "", &tmp_path.to_string_lossy()])
+                .spawn()
+                .map_err(|e| format!("open command failed: {e}"))?;
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("open_item_file task join error: {e}"))?
+}
+
 /// Ingest one or more files dropped onto the app window.
 ///
 /// Called from the frontend via `invoke("ingest_dropped_files", { paths })`.

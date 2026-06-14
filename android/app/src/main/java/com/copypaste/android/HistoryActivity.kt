@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.SaveAlt
@@ -1081,6 +1082,52 @@ fun HistoryScreen(
                             )
                         }
                     },
+                    onOpenFile = { id ->
+                        // Write file bytes to a cache temp file and open with the OS default app.
+                        // Uses the same file_copy FileProvider path as the copy-back flow.
+                        scope.launch {
+                            val repository = ClipboardRepository(ctx)
+                            val (opened, errorMsg) = withContext(Dispatchers.IO) {
+                                try {
+                                    val fileBytes = repository.getFileBytes(id)
+                                        ?: return@withContext false to ctx.getString(R.string.file_save_failed)
+                                    val (fileName, mime) = repository.getFileMeta(id)
+                                    val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                                    val mimeType = mime ?: "application/octet-stream"
+                                    val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
+                                    val file = File(dir, safeName)
+                                    file.writeBytes(fileBytes)
+                                    val uri = FileProvider.getUriForFile(
+                                        ctx,
+                                        "${ctx.packageName}.fileprovider",
+                                        file,
+                                    )
+                                    true to uri.toString()
+                                } catch (e: Exception) {
+                                    android.util.Log.w("HistoryActivity", "openFile failed for $id: ${e.message}")
+                                    false to ctx.getString(R.string.file_save_failed)
+                                }
+                            }
+                            if (opened) {
+                                // errorMsg holds the URI string on success
+                                val uri = android.net.Uri.parse(errorMsg)
+                                val (_, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, mime ?: "*/*")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                // Check if any app can handle this intent before startActivity.
+                                if (ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                                    ctx.startActivity(intent)
+                                } else {
+                                    snackbarHostState.showSnackbar(ctx.getString(R.string.file_open_no_app))
+                                }
+                            } else {
+                                snackbarHostState.showSnackbar(errorMsg)
+                            }
+                        }
+                    },
                     onPreviewPeek = { id ->
                         previewItemId = id
                         previewPhase = PreviewPhase.Peeking
@@ -1210,6 +1257,50 @@ fun HistoryScreen(
                         if (saved) ctx.getString(R.string.file_saved_ok)
                         else ctx.getString(R.string.file_save_failed)
                     )
+                }
+            },
+            onOpenFile = {
+                val id = previewItemId ?: return@PreviewOverlay
+                // Open the previewed file with the OS default application.
+                // Same implementation as the list-row open action.
+                scope.launch {
+                    val repository = ClipboardRepository(ctx)
+                    val (opened, payload) = withContext(Dispatchers.IO) {
+                        try {
+                            val fileBytes = repository.getFileBytes(id)
+                                ?: return@withContext false to ctx.getString(R.string.file_save_failed)
+                            val (fileName, mime) = repository.getFileMeta(id)
+                            val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                            val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
+                            val file = File(dir, safeName)
+                            file.writeBytes(fileBytes)
+                            val uri = FileProvider.getUriForFile(
+                                ctx,
+                                "${ctx.packageName}.fileprovider",
+                                file,
+                            )
+                            true to uri.toString()
+                        } catch (e: Exception) {
+                            android.util.Log.w("HistoryActivity", "preview openFile failed for $id: ${e.message}")
+                            false to ctx.getString(R.string.file_save_failed)
+                        }
+                    }
+                    if (opened) {
+                        val uri = android.net.Uri.parse(payload)
+                        val (_, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, mime ?: "*/*")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        if (ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                            ctx.startActivity(intent)
+                        } else {
+                            snackbarHostState.showSnackbar(ctx.getString(R.string.file_open_no_app))
+                        }
+                    } else {
+                        snackbarHostState.showSnackbar(payload)
+                    }
                 }
             },
         )
@@ -1533,6 +1624,8 @@ private fun HistoryList(
     onSensitiveTap: () -> Unit = {},
     /** Called when the user taps Save on a file row; receives the item id. */
     onSaveFile: (String) -> Unit = {},
+    /** Called when the user taps Open on a file row; receives the item id. */
+    onOpenFile: (String) -> Unit = {},
     /** Called when long-press starts — shows the peek preview card. */
     onPreviewPeek: (String) -> Unit = {},
     /** Called when drag-up commits — pins the preview card. */
@@ -1763,6 +1856,7 @@ private fun HistoryList(
                         onCheckboxTap = { onCheckboxTap(item.id) },
                         onSensitiveTap = onSensitiveTap,
                         onSaveFile = { onSaveFile(item.id) },
+                        onOpenFile = { onOpenFile(item.id) },
                         onPreviewPeek = onPreviewPeek,
                         onPreviewPin = onPreviewPin,
                         onPreviewDismiss = onPreviewDismiss,
@@ -1829,6 +1923,8 @@ private fun HistoryRow(
     onCheckboxTap: () -> Unit,
     onSensitiveTap: () -> Unit = {},
     onSaveFile: () -> Unit = {},
+    /** Open the file with the OS default application (write to cache, Intent.ACTION_VIEW). */
+    onOpenFile: () -> Unit = {},
     /** Long-press peek: called when hold starts (not in selection mode). */
     onPreviewPeek: (String) -> Unit = {},
     /** Long-press commit: called when drag-up crosses the threshold. */
@@ -2118,6 +2214,15 @@ private fun HistoryRow(
                 )
                 if (!selectionMode) {
                     Spacer(Modifier.width(2.dp))
+                    // Open action — write to cache temp file and open with default app
+                    ScaleIconButton(onClick = onOpenFile) {
+                        Icon(
+                            imageVector = Icons.Filled.OpenInNew,
+                            contentDescription = stringResource(R.string.cd_open_file),
+                            tint = IdeAccent,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
                     // Save action — write bytes to Downloads
                     ScaleIconButton(onClick = onSaveFile) {
                         Icon(

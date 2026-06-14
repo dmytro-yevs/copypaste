@@ -98,6 +98,8 @@ export interface FileChipProps {
 export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipProps) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [opening, setOpening] = useState(false);
+  const [openError, setOpenError] = useState<string | null>(null);
   const [copying, setCopying] = useState(false);
   const [resolvedSize, setResolvedSize] = useState<number | null>(sizeBytes ?? null);
   const mountedRef = useRef(true);
@@ -131,6 +133,23 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
       setSaveError(`Save failed: ${msg}`);
     } finally {
       if (mountedRef.current) setSaving(false);
+    }
+  };
+
+  // Open the file with the OS default application by writing it to a temp path.
+  // Uses the native open_item_file Tauri command (macOS: /usr/bin/open, Linux: xdg-open).
+  const handleOpen = async () => {
+    if (opening) return;
+    setOpening(true);
+    setOpenError(null);
+    try {
+      await api.openItemFile(id);
+    } catch (err) {
+      if (!mountedRef.current) return;
+      const msg = err instanceof Error ? err.message : String(err);
+      setOpenError(`Open failed: ${msg}`);
+    } finally {
+      if (mountedRef.current) setOpening(false);
     }
   };
 
@@ -172,13 +191,27 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
         )}
       </span>
 
-      {/* Error message when Save As fails */}
+      {/* Error message when Save As or Open fails */}
       {saveError !== null && (
         <span className="text-[11px] text-ide-danger shrink-0">{saveError}</span>
+      )}
+      {openError !== null && (
+        <span className="text-[11px] text-ide-danger shrink-0">{openError}</span>
       )}
 
       {/* Action buttons */}
       <span className="ml-auto flex shrink-0 items-center gap-1">
+        {/* Open — write to temp file and open with OS default app (no save dialog) */}
+        <button
+          type="button"
+          aria-label="Open"
+          title="Open with default app"
+          disabled={opening}
+          onClick={() => void handleOpen()}
+          className="flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+        >
+          {opening ? "Opening…" : "Open"}
+        </button>
         <button
           type="button"
           aria-label="Save As"
