@@ -11,8 +11,10 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -54,6 +56,16 @@ object Motion {
     const val Base    = 180
     const val Slow    = 240
 }
+
+// ---------------------------------------------------------------------------
+// LocalIdeColors — the active full-token ramp (light or dark), provided by
+// CopyPasteTheme. Screens read `LocalIdeColors.current.<token>` instead of the
+// hardcoded dark `Ide*` constants so they theme light-first (PARITY-SPEC §1).
+// staticCompositionLocalOf: the value only changes on a full theme switch
+// (activity recreation), never mid-composition, so static is correct + cheap.
+// Defaults to dark so any stray reader outside CopyPasteTheme is still defined.
+// ---------------------------------------------------------------------------
+val LocalIdeColors = staticCompositionLocalOf { DarkIdeColors }
 
 /** §8 out-expo easing — matches CSS cubic-bezier(.16,1,.3,1). */
 val EaseOutExpo = CubicBezierEasing(0.16f, 1.0f, 0.3f, 1.0f)
@@ -270,12 +282,17 @@ fun CopyPasteTheme(
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography   = CopyPasteTypography,
-        shapes       = CopyPasteShapes,
-        content      = content,
-    )
+    // Provide the active full-token ramp alongside the Material colorScheme so
+    // screens reading LocalIdeColors.current.<token> theme light/dark in lockstep.
+    val ideColors = if (darkTheme) DarkIdeColors else LightIdeColors
+    CompositionLocalProvider(LocalIdeColors provides ideColors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography   = CopyPasteTypography,
+            shapes       = CopyPasteShapes,
+            content      = content,
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -288,16 +305,19 @@ fun CopyPasteTheme(
  * with ide-border outline when unchecked. Matches the macOS Toggle component.
  */
 @Composable
-fun ideSwitchColors() = SwitchDefaults.colors(
-    checkedThumbColor        = Color.White,
-    checkedTrackColor        = IdeAccent,
-    checkedBorderColor       = IdeAccent,
-    uncheckedThumbColor      = IdeDim,
-    uncheckedTrackColor      = IdeElevated,
-    uncheckedBorderColor     = IdeBorder,
-    // PARITY-SPEC §4: disabled opacity 0.40 (was Material's 0.38).
-    disabledCheckedThumbColor    = Color.White.copy(alpha = 0.40f),
-    disabledCheckedTrackColor    = IdeAccent.copy(alpha = 0.40f),
-    disabledUncheckedThumbColor  = IdeDim.copy(alpha = 0.40f),
-    disabledUncheckedTrackColor  = IdeElevated.copy(alpha = 0.40f),
-)
+fun ideSwitchColors(): androidx.compose.material3.SwitchColors {
+    val c = LocalIdeColors.current
+    return SwitchDefaults.colors(
+        checkedThumbColor        = Color.White,
+        checkedTrackColor        = c.accent,
+        checkedBorderColor       = c.accent,
+        uncheckedThumbColor      = c.dim,
+        uncheckedTrackColor      = c.elevated,
+        uncheckedBorderColor     = c.border,
+        // PARITY-SPEC §4: disabled opacity 0.40 (was Material's 0.38).
+        disabledCheckedThumbColor    = Color.White.copy(alpha = 0.40f),
+        disabledCheckedTrackColor    = c.accent.copy(alpha = 0.40f),
+        disabledUncheckedThumbColor  = c.dim.copy(alpha = 0.40f),
+        disabledUncheckedTrackColor  = c.elevated.copy(alpha = 0.40f),
+    )
+}

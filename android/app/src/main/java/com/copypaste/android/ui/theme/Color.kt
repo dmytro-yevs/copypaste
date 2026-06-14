@@ -1,5 +1,6 @@
 package com.copypaste.android.ui.theme
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 
 // ---------------------------------------------------------------------------
@@ -132,3 +133,61 @@ val LightViolet    = Color(0xFFAF52DE)   // systemPurple
 // Error containers for light
 val LightErrorContainer    = Color(0xFFFF3B30).copy(alpha = 0.10f)
 val LightOnErrorContainer  = Color(0xFFFF3B30)
+
+// ---------------------------------------------------------------------------
+// IdeColors — the full theme-adaptive token set (PARITY-SPEC §1), the Android
+// mirror of the web --ide-* CSS custom properties. Screens historically used
+// the top-level dark `Ide*` constants directly (hardcoded dark); to make them
+// light-first they read `LocalIdeColors.current.<token>` instead, which carries
+// the ACTIVE ramp (light or dark) provided by CopyPasteTheme.
+//
+// Material's colorScheme only covers primary/surface/error slots; this holder
+// adds the semantic (success/info/violet/warning) + ghost + interaction tokens
+// the desktop app uses, so every screen themes identically to web.
+// ---------------------------------------------------------------------------
+@Immutable
+data class IdeColors(
+    val bg: Color, val panel: Color, val elevated: Color, val raised: Color,
+    val border: Color, val divider: Color,
+    val text: Color, val dim: Color, val faint: Color,
+    val ghost: Color, val ghostDeco: Color,
+    val accent: Color, val accentOn: Color, val accentDim: Color,
+    val selection: Color, val hover: Color,
+    val success: Color, val successDim: Color,
+    val warning: Color, val warningDim: Color,
+    val danger: Color, val dangerDim: Color,
+    val info: Color, val infoDim: Color,
+    val violet: Color, val violetDim: Color,
+)
+
+/** Dark ramp — the canonical Design System v2 dark values. */
+val DarkIdeColors = IdeColors(
+    bg = IdeBg, panel = IdePanel, elevated = IdeElevated, raised = IdeRaised,
+    border = IdeBorder, divider = IdeDivider,
+    text = IdeText, dim = IdeDim, faint = IdeFaint,
+    ghost = IdeGhost, ghostDeco = IdeGhostDeco,
+    accent = IdeAccent, accentOn = IdeAccentOn, accentDim = IdeAccentDim,
+    selection = IdeSelection, hover = IdeHover,
+    success = IdeSuccess, successDim = IdeSuccessDim,
+    warning = IdeWarning, warningDim = IdeWarningDim,
+    danger = IdeDanger, dangerDim = IdeDangerDim,
+    info = IdeInfo, infoDim = IdeInfoDim,
+    violet = IdeViolet, violetDim = IdeVioletDim,
+)
+
+/** Light ramp — Apple macOS Tahoe "Liquid Glass" (PARITY-SPEC §1). */
+val LightIdeColors = IdeColors(
+    bg = LightBg, panel = LightPanel, elevated = LightElevated, raised = LightRaised,
+    border = LightBorder, divider = LightDivider,
+    text = LightText, dim = LightDim, faint = LightFaint,
+    ghost = LightGhost, ghostDeco = LightGhostDeco,
+    accent = LightPrimary, accentOn = LightOnPrimary,
+    accentDim = LightPrimary.copy(alpha = 0.12f),
+    selection = LightPrimary.copy(alpha = 0.14f),
+    hover = Color.Black.copy(alpha = 0.04f),
+    success = LightSuccess, successDim = LightSuccess.copy(alpha = 0.14f),
+    warning = LightSecondary, warningDim = LightSecondary.copy(alpha = 0.14f),
+    danger = LightDanger, dangerDim = LightDanger.copy(alpha = 0.12f),
+    info = LightInfo, infoDim = LightInfo.copy(alpha = 0.14f),
+    violet = LightViolet, violetDim = LightViolet.copy(alpha = 0.14f),
+)
