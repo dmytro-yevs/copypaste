@@ -6,7 +6,12 @@ export type ViewId = "history" | "devices" | "settings" | "about" | "logs";
 // UI preferences persisted to localStorage
 // ---------------------------------------------------------------------------
 
-const PREFS_KEY = "copypaste-ui-prefs-v1";
+const PREFS_KEY = "copypaste-ui-prefs-v2";
+// Pre-Liquid-Glass key. v1 persisted theme:"dark" as the old default; on upgrade
+// we migrate non-theme fields and DROP the stored theme so the new light-first
+// default applies once (otherwise the stale "dark" overrides it and the user
+// keeps seeing the old palette). See loadPrefs().
+const LEGACY_PREFS_KEY = "copypaste-ui-prefs-v1";
 
 export interface UIPrefs {
   /**
@@ -75,9 +80,25 @@ const DEFAULT_PREFS: UIPrefs = {
 
 function loadPrefs(): UIPrefs {
   try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (!raw) return DEFAULT_PREFS;
+    let raw = localStorage.getItem(PREFS_KEY);
+    // ── Liquid Glass upgrade migration (v1 → v2) ──────────────────────────
+    // If only the legacy v1 prefs exist, adopt them but DROP the persisted
+    // theme so the new light-first default wins once. Then re-persist under v2.
+    let migratedFromLegacy = false;
+    if (!raw) {
+      const legacy = localStorage.getItem(LEGACY_PREFS_KEY);
+      if (legacy) {
+        raw = legacy;
+        migratedFromLegacy = true;
+      } else {
+        return DEFAULT_PREFS;
+      }
+    }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (migratedFromLegacy) {
+      // The old default was "dark"; clear it so DEFAULT_PREFS.theme ("light") applies.
+      delete parsed.theme;
+    }
 
     // ── v0.5.3 migration ──────────────────────────────────────────────────
     // Migrate the legacy `previewLines` (shared) field to the new split fields.
@@ -96,7 +117,13 @@ function loadPrefs(): UIPrefs {
     delete parsed.previewDelay;
     // ──────────────────────────────────────────────────────────────────────
 
-    return { ...DEFAULT_PREFS, ...parsed };
+    const merged = { ...DEFAULT_PREFS, ...parsed };
+    if (migratedFromLegacy) {
+      // Persist under v2 and drop the legacy key so this runs exactly once.
+      savePrefs(merged);
+      try { localStorage.removeItem(LEGACY_PREFS_KEY); } catch { /* ignore */ }
+    }
+    return merged;
   } catch (err) {
     console.warn("loadPrefs: failed to read localStorage, using defaults", err);
     return DEFAULT_PREFS;
