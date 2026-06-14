@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -32,6 +34,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
@@ -46,31 +51,28 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeAccent
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeBorder
-import com.copypaste.android.ui.theme.IdeDanger
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeSuccess
-import com.copypaste.android.ui.theme.IdeWarning
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
+import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_LABELS
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_LABELS
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
 import com.copypaste.android.ui.theme.MonoFontFamily
-import com.copypaste.android.ui.theme.SectionLabel
 import com.copypaste.android.ui.theme.ContinuousSliderRow
 import com.copypaste.android.ui.theme.SteppedSliderRow
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_LABELS
@@ -88,7 +90,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import com.copypaste.android.ui.theme.EaseStandard
 
 /**
@@ -97,6 +98,9 @@ import com.copypaste.android.ui.theme.EaseStandard
  *
  * AND3: Settings are split into tabs matching macOS panel tabs.
  * H5/U1: Auto-save on every change — no Save button, parity with macOS.
+ *
+ * Styled per PARITY-SPEC §7 (segmented controls), §8 (grouped rows / cards),
+ * §3 (grey section labels), §1 (LocalIdeColors theme-adaptive tokens).
  */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -146,6 +150,7 @@ fun SettingsScreen(
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
     val scope = rememberCoroutineScope()
+    val c = LocalIdeColors.current
 
     // ── Debounce jobs for text fields (300 ms) ──
     var supabaseUrlJob by remember { mutableStateOf<Job?>(null) }
@@ -295,7 +300,7 @@ fun SettingsScreen(
 
     Scaffold(
         modifier = modifier,
-        containerColor = IdeBg,
+        containerColor = c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_settings),
@@ -314,7 +319,7 @@ fun SettingsScreen(
             // AND3: Tab row with §8 animated underline (180ms EaseStandard).
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
-                containerColor = IdeBg,
+                containerColor = c.bg,
                 edgePadding = 0.dp,
                 indicator = { tabPositions ->
                     // Animate tab indicator position/width with tween(180, EaseStandard)
@@ -389,6 +394,8 @@ fun SettingsScreen(
                         onPreviewDelayChange = { previewDelay = it; persistAll() },
                         imageQuality = imageQuality,
                         onImageQualityChange = { imageQuality = it; persistAll() },
+                        settings = settings,
+                        ctx = ctx,
                     )
                     TAB_STORAGE -> StorageTab(
                         maxTextSizeBytes = maxTextSizeBytes,
@@ -488,111 +495,123 @@ private fun GeneralTab(
     logcatStatus: LogcatCaptureStatus,
     ctx: android.content.Context,
 ) {
-    Column {
-        SectionLabel(stringResource(R.string.section_general))
-        SettingsRow(
-            title = stringResource(R.string.setting_private_mode_title),
-            subtitle = stringResource(R.string.setting_private_mode_subtitle),
-            checked = privateMode,
-            onCheckedChange = onPrivateModeChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsRow(
-            title = stringResource(R.string.setting_sync_enabled_title),
-            subtitle = stringResource(R.string.setting_sync_enabled_subtitle),
-            checked = syncEnabled,
-            onCheckedChange = onSyncEnabledChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+    val c = LocalIdeColors.current
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // ── GENERAL section card ──────────────────────────────────────────
+        SettingsSectionLabel(stringResource(R.string.section_general))
+        SettingsCard {
+            SettingsRow(
+                title = stringResource(R.string.setting_private_mode_title),
+                subtitle = stringResource(R.string.setting_private_mode_subtitle),
+                checked = privateMode,
+                onCheckedChange = onPrivateModeChange,
+            )
+            SettingsCardDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_sync_enabled_title),
+                subtitle = stringResource(R.string.setting_sync_enabled_subtitle),
+                checked = syncEnabled,
+                onCheckedChange = onSyncEnabledChange,
+            )
+        }
 
-        // ── PRIVACY (macOS-parity config-via-FFI) — C-P1-1 ─────────────────────
-        SectionLabel(stringResource(R.string.section_privacy))
-        // "Discover public IP" — allow a one-off STUN request to learn this
-        // device's public IP (shown in the device-info card). Mirrors macOS.
-        SettingsRow(
-            title = stringResource(R.string.setting_collect_public_ip_title),
-            subtitle = stringResource(R.string.setting_collect_public_ip_subtitle),
-            checked = collectPublicIp,
-            onCheckedChange = onCollectPublicIpChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        // "Paste as plain text" — strip rich formatting (RTF/HTML) on paste. Mirrors macOS.
-        SettingsRow(
-            title = stringResource(R.string.setting_paste_as_plain_text_title),
-            subtitle = stringResource(R.string.setting_paste_as_plain_text_subtitle),
-            checked = pasteAsPlainText,
-            onCheckedChange = onPasteAsPlainTextChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsNavRow(
-            title = stringResource(R.string.setting_permissions_title),
-            subtitle = stringResource(R.string.setting_permissions_subtitle),
-            onClick = {
-                ctx.startActivity(Intent(ctx, PermissionsSettingsActivity::class.java))
-            }
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsNavRow(
-            title = stringResource(R.string.setting_devices_title),
-            subtitle = stringResource(R.string.setting_devices_subtitle),
-            onClick = {
-                ctx.startActivity(Intent(ctx, DevicesActivity::class.java))
-            }
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+        // ── PRIVACY section card ──────────────────────────────────────────
+        SettingsSectionLabel(stringResource(R.string.section_privacy))
+        SettingsCard {
+            // "Discover public IP" — allow a one-off STUN request to learn this
+            // device's public IP (shown in the device-info card). Mirrors macOS.
+            SettingsRow(
+                title = stringResource(R.string.setting_collect_public_ip_title),
+                subtitle = stringResource(R.string.setting_collect_public_ip_subtitle),
+                checked = collectPublicIp,
+                onCheckedChange = onCollectPublicIpChange,
+            )
+            SettingsCardDivider()
+            // "Paste as plain text" — strip rich formatting (RTF/HTML) on paste. Mirrors macOS.
+            SettingsRow(
+                title = stringResource(R.string.setting_paste_as_plain_text_title),
+                subtitle = stringResource(R.string.setting_paste_as_plain_text_subtitle),
+                checked = pasteAsPlainText,
+                onCheckedChange = onPasteAsPlainTextChange,
+            )
+            SettingsCardDivider()
+            SettingsNavRow(
+                title = stringResource(R.string.setting_permissions_title),
+                subtitle = stringResource(R.string.setting_permissions_subtitle),
+                onClick = {
+                    ctx.startActivity(Intent(ctx, PermissionsSettingsActivity::class.java))
+                }
+            )
+            SettingsCardDivider()
+            SettingsNavRow(
+                title = stringResource(R.string.setting_devices_title),
+                subtitle = stringResource(R.string.setting_devices_subtitle),
+                onClick = {
+                    ctx.startActivity(Intent(ctx, DevicesActivity::class.java))
+                }
+            )
+        }
 
-        // ── DIAGNOSTICS ────────────────────────────────────────────────────
-        SectionLabel(stringResource(R.string.section_diagnostics))
-        SettingsNavRow(
-            title = stringResource(R.string.log_viewer_button),
-            subtitle = stringResource(R.string.log_viewer_description),
-            onClick = {
-                ctx.startActivity(Intent(ctx, LogViewerActivity::class.java))
-            }
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        DiagnosticsNavRow(
-            title = stringResource(R.string.log_export_button),
-            subtitle = stringResource(R.string.log_export_description),
-            buttonLabel = stringResource(R.string.log_export_button),
-            onClick = { LogExportHelper.shareLogsZip(ctx) }
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+        // ── DIAGNOSTICS section card ──────────────────────────────────────
+        SettingsSectionLabel(stringResource(R.string.section_diagnostics))
+        SettingsCard {
+            SettingsNavRow(
+                title = stringResource(R.string.log_viewer_button),
+                subtitle = stringResource(R.string.log_viewer_description),
+                onClick = {
+                    ctx.startActivity(Intent(ctx, LogViewerActivity::class.java))
+                }
+            )
+            SettingsCardDivider()
+            DiagnosticsNavRow(
+                title = stringResource(R.string.log_export_button),
+                subtitle = stringResource(R.string.log_export_description),
+                buttonLabel = stringResource(R.string.log_export_button),
+                onClick = { LogExportHelper.shareLogsZip(ctx) }
+            )
+        }
 
-        // ── BACKGROUND CAPTURE (ADB) ─────────────────────────────────────────
-        SectionLabel(stringResource(R.string.bg_adb_section_title))
-        // Explainer
-        Text(
-            text = stringResource(R.string.bg_adb_explainer),
-            style = MaterialTheme.typography.bodySmall,
-            color = IdeDim,
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-        )
-        // Live status line
-        AdbCaptureStatusLine(logcatStatus = logcatStatus, ctx = ctx)
-        // Toggle: user can disable logcat capture even when READ_LOGS is granted
-        SettingsRow(
-            title = stringResource(R.string.setting_logcat_capture_title),
-            subtitle = stringResource(R.string.setting_logcat_capture_subtitle),
-            checked = logcatEnabled,
-            onCheckedChange = onLogcatEnabledChange,
-        )
-        // Tap-to-copy ADB commands
-        AdbCaptureCommandRows(ctx = ctx)
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+        // ── BACKGROUND CAPTURE (ADB) section card ────────────────────────
+        SettingsSectionLabel(stringResource(R.string.bg_adb_section_title))
+        SettingsCard {
+            // Explainer
+            Text(
+                text = stringResource(R.string.bg_adb_explainer),
+                style = MaterialTheme.typography.bodySmall,
+                color = c.dim,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+            // Live status line
+            AdbCaptureStatusLine(logcatStatus = logcatStatus, ctx = ctx)
+            SettingsCardDivider()
+            // Toggle: user can disable logcat capture even when READ_LOGS is granted
+            SettingsRow(
+                title = stringResource(R.string.setting_logcat_capture_title),
+                subtitle = stringResource(R.string.setting_logcat_capture_subtitle),
+                checked = logcatEnabled,
+                onCheckedChange = onLogcatEnabledChange,
+            )
+            SettingsCardDivider()
+            // Tap-to-copy ADB commands
+            AdbCaptureCommandRows(ctx = ctx)
+        }
 
-        // ── ABOUT (last General entry) ─────────────────────────────────────
-        SettingsNavRow(
-            title = stringResource(R.string.title_about),
-            subtitle = stringResource(R.string.about_tagline),
-            onClick = {
-                ctx.startActivity(Intent(ctx, AboutActivity::class.java))
-            }
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+        // ── ABOUT (last General entry) ────────────────────────────────────
+        Spacer(modifier = Modifier.height(8.dp))
+        SettingsCard {
+            SettingsNavRow(
+                title = stringResource(R.string.title_about),
+                subtitle = stringResource(R.string.about_tagline),
+                onClick = {
+                    ctx.startActivity(Intent(ctx, AboutActivity::class.java))
+                }
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DisplayTab(
     density: Density,
@@ -609,70 +628,130 @@ private fun DisplayTab(
     onPreviewDelayChange: (Int) -> Unit,
     imageQuality: Int,
     onImageQualityChange: (Int) -> Unit,
+    settings: Settings,
+    ctx: android.content.Context,
 ) {
-    Column {
-        SectionLabel(stringResource(R.string.section_display))
-        // §6/§10 density toggle — first row of Display tab (comfortable|compact).
-        // "Comfortable" = 34dp rows (default); "Compact" = 28dp rows (§2 spec).
-        DensityToggleRow(
-            density = density,
-            onDensityChange = onDensityChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsRow(
-            title = stringResource(R.string.setting_sensitive_warnings_title),
-            subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
-            checked = showWarnings,
-            onCheckedChange = onShowWarningsChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsRow(
-            title = stringResource(R.string.setting_mask_sensitive_title),
-            subtitle = stringResource(R.string.setting_mask_sensitive_subtitle),
-            checked = maskSensitive,
-            onCheckedChange = onMaskSensitiveChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsRow(
-            title = stringResource(R.string.setting_translucency_title),
-            subtitle = stringResource(R.string.setting_translucency_subtitle),
-            checked = translucency,
-            onCheckedChange = onTranslucencyChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        // AND5: continuous slider 10–200 dp for image thumbnail height.
-        ContinuousSliderRow(
-            label = stringResource(R.string.setting_image_max_height_label),
-            value = imageMaxHeight,
-            min = 10,
-            max = 200,
-            formatValue = { "${it} dp" },
-            onRelease = onImageMaxHeightChange,
-        )
-        // AND6: continuous slider 200–30000 ms for auto-close delay.
-        ContinuousSliderRow(
-            label = stringResource(R.string.setting_preview_delay_label),
-            value = previewDelay,
-            min = 200,
-            max = 30_000,
-            formatValue = { v ->
-                when {
-                    v < 1000 -> "${v} ms"
-                    else -> "${"%g".format(v / 1000.0).trimEnd('0').trimEnd('.')} s"
-                }
-            },
-            onRelease = onPreviewDelayChange,
-        )
-        // HW-A14: image quality slider — no separate Save button; persisted via main Save.
-        ContinuousSliderRow(
-            label = stringResource(R.string.setting_image_quality_label),
-            value = imageQuality,
-            min = 1,
-            max = 100,
-            formatValue = { "${it}%" },
-            onRelease = onImageQualityChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+    val c = LocalIdeColors.current
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // ── THEME PICKER (§7 spec) ────────────────────────────────────────
+        // System / Light / Dark segmented control — writes themeMode pref and
+        // recreates the activity (standard Android theme-switch flow).
+        SettingsSectionLabel("Theme")
+        SettingsCard {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    text = "Appearance",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = c.text,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                // Inline segmented control: System / Light / Dark
+                val themeModes = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
+                val themeLabels = listOf("System", "Light", "Dark")
+                val currentTheme = remember { settings.themeMode }
+                var selectedTheme by remember { mutableStateOf(currentTheme) }
+                IdeSegmentedControl(
+                    options = themeLabels,
+                    selectedIndex = themeModes.indexOf(selectedTheme).coerceAtLeast(0),
+                    onSelect = { idx ->
+                        val chosen = themeModes[idx]
+                        selectedTheme = chosen
+                        settings.themeMode = chosen
+                        // Standard Android theme-switch: recreate the activity so
+                        // CopyPasteTheme re-reads the new ThemeMode from SharedPrefs.
+                        (ctx as? android.app.Activity)?.recreate()
+                    },
+                )
+            }
+        }
+
+        // ── DISPLAY section card ──────────────────────────────────────────
+        SettingsSectionLabel(stringResource(R.string.section_display))
+        SettingsCard {
+            // §6/§10 density segmented control — comfortable|compact.
+            // Spec §7: segmented control replaces the density Switch.
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    text = stringResource(R.string.setting_density_title),
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = c.text,
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                IdeSegmentedControl(
+                    options = listOf(
+                        stringResource(R.string.setting_density_subtitle_comfortable),
+                        stringResource(R.string.setting_density_subtitle_compact),
+                    ),
+                    selectedIndex = if (density == Density.COMPACT) 1 else 0,
+                    onSelect = { idx ->
+                        onDensityChange(if (idx == 1) Density.COMPACT else Density.COMFORTABLE)
+                    },
+                )
+            }
+            SettingsCardDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_sensitive_warnings_title),
+                subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
+                checked = showWarnings,
+                onCheckedChange = onShowWarningsChange,
+            )
+            SettingsCardDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_mask_sensitive_title),
+                subtitle = stringResource(R.string.setting_mask_sensitive_subtitle),
+                checked = maskSensitive,
+                onCheckedChange = onMaskSensitiveChange,
+            )
+            SettingsCardDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_translucency_title),
+                subtitle = stringResource(R.string.setting_translucency_subtitle),
+                checked = translucency,
+                onCheckedChange = onTranslucencyChange,
+            )
+        }
+
+        // ── IMAGE & PREVIEW sliders ───────────────────────────────────────
+        SettingsSectionLabel("Sliders")
+        SettingsCard {
+            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                // AND5: continuous slider 10–200 dp for image thumbnail height.
+                ContinuousSliderRow(
+                    label = stringResource(R.string.setting_image_max_height_label),
+                    value = imageMaxHeight,
+                    min = 10,
+                    max = 200,
+                    formatValue = { "${it} dp" },
+                    onRelease = onImageMaxHeightChange,
+                )
+                SettingsCardDivider()
+                // AND6: continuous slider 200–30000 ms for auto-close delay.
+                ContinuousSliderRow(
+                    label = stringResource(R.string.setting_preview_delay_label),
+                    value = previewDelay,
+                    min = 200,
+                    max = 30_000,
+                    formatValue = { v ->
+                        when {
+                            v < 1000 -> "${v} ms"
+                            else -> "${"%g".format(v / 1000.0).trimEnd('0').trimEnd('.')} s"
+                        }
+                    },
+                    onRelease = onPreviewDelayChange,
+                )
+                SettingsCardDivider()
+                // HW-A14: image quality slider — no separate Save button; persisted via main Save.
+                ContinuousSliderRow(
+                    label = stringResource(R.string.setting_image_quality_label),
+                    value = imageQuality,
+                    min = 1,
+                    max = 100,
+                    formatValue = { "${it}%" },
+                    onRelease = onImageQualityChange,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -694,70 +773,86 @@ private fun StorageTab(
     onExcludedAppsChange: (List<String>) -> Unit,
     ctx: android.content.Context,
 ) {
-    Column {
-        SectionLabel(stringResource(R.string.section_storage_limits))
-        SteppedSliderRow(
-            label = stringResource(R.string.setting_max_text_size_label),
-            stepValues = TEXT_SIZE_STEP_VALUES,
-            stepLabels = TEXT_SIZE_STEP_LABELS,
-            currentValue = maxTextSizeBytes,
-            onRelease = onMaxTextSizeBytesChange,
-        )
-        SteppedSliderRow(
-            label = stringResource(R.string.setting_max_image_size_label),
-            stepValues = IMAGE_SIZE_STEP_VALUES,
-            stepLabels = IMAGE_SIZE_STEP_LABELS,
-            currentValue = maxImageSizeBytes,
-            onRelease = onMaxImageSizeBytesChange,
-        )
-        // C-P1-1: max clip file size — binary MiB steps (cap 100 MiB), macOS parity.
-        SteppedSliderRow(
-            label = stringResource(R.string.setting_max_file_size_label),
-            stepValues = FILE_SIZE_STEP_VALUES,
-            stepLabels = FILE_SIZE_STEP_LABELS,
-            currentValue = maxFileSizeBytes,
-            onRelease = onMaxFileSizeBytesChange,
-        )
-        SteppedSliderRow(
-            label = stringResource(R.string.setting_storage_quota_label),
-            stepValues = QUOTA_STEP_VALUES,
-            stepLabels = QUOTA_STEP_LABELS,
-            currentValue = storageQuotaBytes,
-            onRelease = onStorageQuotaBytesChange,
-        )
-        // C-P1-1: sensitive auto-clear TTL — stepped, 0 = disabled sentinel. macOS parity.
-        SteppedSliderRow(
-            label = stringResource(R.string.setting_sensitive_ttl_label),
-            stepValues = SENSITIVE_TTL_STEP_VALUES,
-            stepLabels = SENSITIVE_TTL_STEP_LABELS,
-            currentValue = sensitiveTtlSecs,
-            onRelease = onSensitiveTtlSecsChange,
-        )
-        // §6/§10 max-items slider — pref-only; Unlimited sentinel = 100_000.
-        // TODO(daemon): wire to daemon max_history_items config field when IPC lands.
-        SteppedSliderRow(
-            label = stringResource(R.string.setting_max_items_label),
-            stepValues = MAX_ITEMS_STEP_VALUES,
-            stepLabels = MAX_ITEMS_STEP_LABELS,
-            currentValue = maxItems,
-            onRelease = onMaxItemsChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-
-        // C-P1-1: excluded apps — editable list (text input + Add + removable chips).
-        ExcludedAppsRow(
-            excludedApps = excludedApps,
-            onExcludedAppsChange = onExcludedAppsChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsNavRow(
-            title = stringResource(R.string.setting_bg_capture_title),
-            subtitle = stringResource(R.string.setting_bg_capture_subtitle),
-            onClick = {
-                ctx.startActivity(Intent(ctx, BackgroundCaptureSetupActivity::class.java))
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        SettingsSectionLabel(stringResource(R.string.section_storage_limits))
+        SettingsCard {
+            Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                SteppedSliderRow(
+                    label = stringResource(R.string.setting_max_text_size_label),
+                    stepValues = TEXT_SIZE_STEP_VALUES,
+                    stepLabels = TEXT_SIZE_STEP_LABELS,
+                    currentValue = maxTextSizeBytes,
+                    onRelease = onMaxTextSizeBytesChange,
+                )
+                SettingsCardDivider()
+                SteppedSliderRow(
+                    label = stringResource(R.string.setting_max_image_size_label),
+                    stepValues = IMAGE_SIZE_STEP_VALUES,
+                    stepLabels = IMAGE_SIZE_STEP_LABELS,
+                    currentValue = maxImageSizeBytes,
+                    onRelease = onMaxImageSizeBytesChange,
+                )
+                SettingsCardDivider()
+                // C-P1-1: max clip file size — binary MiB steps (cap 100 MiB), macOS parity.
+                SteppedSliderRow(
+                    label = stringResource(R.string.setting_max_file_size_label),
+                    stepValues = FILE_SIZE_STEP_VALUES,
+                    stepLabels = FILE_SIZE_STEP_LABELS,
+                    currentValue = maxFileSizeBytes,
+                    onRelease = onMaxFileSizeBytesChange,
+                )
+                SettingsCardDivider()
+                SteppedSliderRow(
+                    label = stringResource(R.string.setting_storage_quota_label),
+                    stepValues = QUOTA_STEP_VALUES,
+                    stepLabels = QUOTA_STEP_LABELS,
+                    currentValue = storageQuotaBytes,
+                    onRelease = onStorageQuotaBytesChange,
+                )
+                SettingsCardDivider()
+                // C-P1-1: sensitive auto-clear TTL — stepped, 0 = disabled sentinel. macOS parity.
+                SteppedSliderRow(
+                    label = stringResource(R.string.setting_sensitive_ttl_label),
+                    stepValues = SENSITIVE_TTL_STEP_VALUES,
+                    stepLabels = SENSITIVE_TTL_STEP_LABELS,
+                    currentValue = sensitiveTtlSecs,
+                    onRelease = onSensitiveTtlSecsChange,
+                )
+                SettingsCardDivider()
+                // §6/§10 max-items slider — pref-only; Unlimited sentinel = 100_000.
+                // TODO(daemon): wire to daemon max_history_items config field when IPC lands.
+                SteppedSliderRow(
+                    label = stringResource(R.string.setting_max_items_label),
+                    stepValues = MAX_ITEMS_STEP_VALUES,
+                    stepLabels = MAX_ITEMS_STEP_LABELS,
+                    currentValue = maxItems,
+                    onRelease = onMaxItemsChange,
+                )
             }
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+        }
+
+        // ── EXCLUDED APPS ─────────────────────────────────────────────────
+        SettingsSectionLabel(stringResource(R.string.setting_excluded_apps_label))
+        SettingsCard {
+            // C-P1-1: excluded apps — editable list (text input + Add + removable chips).
+            ExcludedAppsRow(
+                excludedApps = excludedApps,
+                onExcludedAppsChange = onExcludedAppsChange,
+            )
+        }
+
+        // ── OTHER STORAGE ACTIONS ─────────────────────────────────────────
+        SettingsSectionLabel("")
+        SettingsCard {
+            SettingsNavRow(
+                title = stringResource(R.string.setting_bg_capture_title),
+                subtitle = stringResource(R.string.setting_bg_capture_subtitle),
+                onClick = {
+                    ctx.startActivity(Intent(ctx, BackgroundCaptureSetupActivity::class.java))
+                }
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -782,112 +877,118 @@ private fun SyncTab(
     relayUrl: String,
     onRelayUrlChange: (String) -> Unit,
 ) {
-    Column {
-        SectionLabel(stringResource(R.string.section_sync))
-        // HW-A9: P2P sync toggle — LAN direct device-to-device sync.
-        SettingsRow(
-            title = stringResource(R.string.setting_p2p_sync_title),
-            subtitle = stringResource(R.string.setting_p2p_sync_subtitle),
-            checked = p2pSyncEnabled,
-            onCheckedChange = onP2pSyncEnabledChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsRow(
-            title = stringResource(R.string.setting_sync_wifi_only_title),
-            subtitle = stringResource(R.string.setting_sync_wifi_only_subtitle),
-            checked = syncOnWifiOnly,
-            onCheckedChange = onSyncOnWifiOnlyChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsRow(
-            title = stringResource(R.string.setting_use_supabase_title),
-            subtitle = stringResource(R.string.setting_use_supabase_subtitle),
-            checked = syncBackend == SyncBackend.SUPABASE,
-            onCheckedChange = { useSupabase ->
-                onSyncBackendChange(if (useSupabase) SyncBackend.SUPABASE else SyncBackend.RELAY)
-            }
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+    val c = LocalIdeColors.current
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        SettingsSectionLabel(stringResource(R.string.section_sync))
+        SettingsCard {
+            // HW-A9: P2P sync toggle — LAN direct device-to-device sync.
+            SettingsRow(
+                title = stringResource(R.string.setting_p2p_sync_title),
+                subtitle = stringResource(R.string.setting_p2p_sync_subtitle),
+                checked = p2pSyncEnabled,
+                onCheckedChange = onP2pSyncEnabledChange,
+            )
+            SettingsCardDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_sync_wifi_only_title),
+                subtitle = stringResource(R.string.setting_sync_wifi_only_subtitle),
+                checked = syncOnWifiOnly,
+                onCheckedChange = onSyncOnWifiOnlyChange,
+            )
+            SettingsCardDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_use_supabase_title),
+                subtitle = stringResource(R.string.setting_use_supabase_subtitle),
+                checked = syncBackend == SyncBackend.SUPABASE,
+                onCheckedChange = { useSupabase ->
+                    onSyncBackendChange(if (useSupabase) SyncBackend.SUPABASE else SyncBackend.RELAY)
+                }
+            )
+        }
 
         // ── SUPABASE CONFIG ────────────────────────────────────────────────
         if (syncBackend == SyncBackend.SUPABASE) {
-            SectionLabel(stringResource(R.string.section_supabase_config))
-            SettingsTextField(
-                label = stringResource(R.string.setting_supabase_url_label),
-                hint = "https://your-project.supabase.co",
-                value = supabaseUrl,
-                onValueChange = onSupabaseUrlChange,
-            )
-            SettingsTextField(
-                label = stringResource(R.string.setting_supabase_anon_key_label),
-                hint = "eyJhbGci…",
-                value = supabaseAnonKey,
-                onValueChange = onSupabaseAnonKeyChange,
-                password = true,
-            )
-            SettingsTextField(
-                label = stringResource(R.string.setting_sync_passphrase_label),
-                hint = stringResource(R.string.setting_sync_passphrase_hint),
-                value = cloudPassphrase,
-                onValueChange = onCloudPassphraseChange,
-                password = true,
-            )
-
-            SectionLabel(stringResource(R.string.section_supabase_account))
-            Text(
-                text = stringResource(R.string.setting_supabase_account_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-            )
-
-            val accountDisplay = supabaseEmail.ifBlank { "(anon key — no sign-in)" }
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = "Signed-in account: $accountDisplay",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = "All your devices must use THIS SAME Supabase account to sync — " +
-                        "different accounts can't see each other's clips.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 2.dp),
-                )
+            SettingsSectionLabel(stringResource(R.string.section_supabase_config))
+            SettingsCard {
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    SettingsTextField(
+                        label = stringResource(R.string.setting_supabase_url_label),
+                        hint = "https://your-project.supabase.co",
+                        value = supabaseUrl,
+                        onValueChange = onSupabaseUrlChange,
+                    )
+                    SettingsTextField(
+                        label = stringResource(R.string.setting_supabase_anon_key_label),
+                        hint = "eyJhbGci…",
+                        value = supabaseAnonKey,
+                        onValueChange = onSupabaseAnonKeyChange,
+                        password = true,
+                    )
+                    SettingsTextField(
+                        label = stringResource(R.string.setting_sync_passphrase_label),
+                        hint = stringResource(R.string.setting_sync_passphrase_hint),
+                        value = cloudPassphrase,
+                        onValueChange = onCloudPassphraseChange,
+                        password = true,
+                    )
+                }
             }
 
-            SettingsTextField(
-                label = stringResource(R.string.setting_supabase_email_label),
-                hint = "user@example.com",
-                value = supabaseEmail,
-                onValueChange = onSupabaseEmailChange,
-            )
-            SettingsTextField(
-                label = stringResource(R.string.setting_supabase_password_label),
-                hint = "",
-                value = supabasePassword,
-                onValueChange = onSupabasePasswordChange,
-                password = true,
-            )
-            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+            SettingsSectionLabel(stringResource(R.string.section_supabase_account))
+            SettingsCard {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    Text(
+                        text = stringResource(R.string.setting_supabase_account_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.dim,
+                        modifier = Modifier.padding(bottom = 4.dp),
+                    )
+                    val accountDisplay = supabaseEmail.ifBlank { "(anon key — no sign-in)" }
+                    Text(
+                        text = "Signed-in account: $accountDisplay",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.text,
+                    )
+                    Text(
+                        text = "All your devices must use THIS SAME Supabase account to sync — " +
+                            "different accounts can't see each other's clips.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.danger,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                SettingsCardDivider()
+                Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                    SettingsTextField(
+                        label = stringResource(R.string.setting_supabase_email_label),
+                        hint = "user@example.com",
+                        value = supabaseEmail,
+                        onValueChange = onSupabaseEmailChange,
+                    )
+                    SettingsTextField(
+                        label = stringResource(R.string.setting_supabase_password_label),
+                        hint = "",
+                        value = supabasePassword,
+                        onValueChange = onSupabasePasswordChange,
+                        password = true,
+                    )
+                }
+            }
         }
 
         // ── RELAY CONFIG ───────────────────────────────────────────────────
         if (syncBackend == SyncBackend.RELAY) {
-            SectionLabel(stringResource(R.string.section_relay_config))
-            SettingsTextField(
-                label = stringResource(R.string.setting_relay_url_label),
-                hint = "http://localhost:8080",
-                value = relayUrl,
-                onValueChange = onRelayUrlChange,
-            )
-            HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+            SettingsSectionLabel(stringResource(R.string.section_relay_config))
+            SettingsCard {
+                SettingsTextField(
+                    label = stringResource(R.string.setting_relay_url_label),
+                    hint = "http://localhost:8080",
+                    value = relayUrl,
+                    onValueChange = onRelayUrlChange,
+                )
+            }
         }
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -898,53 +999,152 @@ private fun NotificationsTab(
     soundOnCopy: Boolean,
     onSoundOnCopyChange: (Boolean) -> Unit,
 ) {
-    Column {
-        SectionLabel(stringResource(R.string.section_notifications))
-        SettingsRow(
-            title = stringResource(R.string.setting_notify_on_copy_title),
-            subtitle = stringResource(R.string.setting_notify_on_copy_subtitle),
-            checked = notifyOnCopy,
-            onCheckedChange = onNotifyOnCopyChange,
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        SettingsSectionLabel(stringResource(R.string.section_notifications))
+        SettingsCard {
+            SettingsRow(
+                title = stringResource(R.string.setting_notify_on_copy_title),
+                subtitle = stringResource(R.string.setting_notify_on_copy_subtitle),
+                checked = notifyOnCopy,
+                onCheckedChange = onNotifyOnCopyChange,
+            )
+            SettingsCardDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_sound_on_copy_title),
+                subtitle = stringResource(R.string.setting_sound_on_copy_subtitle),
+                checked = soundOnCopy,
+                onCheckedChange = onSoundOnCopyChange,
+            )
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Grouped-card primitives (spec §8 — Apple grouped-inset style)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Section label: §3 spec — uppercase 11sp semibold, ide-dim (grey, NOT accent).
+ * Renders above the card group, left-padded per Apple HIG.
+ */
+@Composable
+private fun SettingsSectionLabel(text: String) {
+    val c = LocalIdeColors.current
+    if (text.isNotEmpty()) {
+        Text(
+            text = text.uppercase(),
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp,
+                letterSpacing = 0.8.sp,
+            ),
+            color = c.dim,
+            modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp),
         )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
-        SettingsRow(
-            title = stringResource(R.string.setting_sound_on_copy_title),
-            subtitle = stringResource(R.string.setting_sound_on_copy_subtitle),
-            checked = soundOnCopy,
-            onCheckedChange = onSoundOnCopyChange,
-        )
-        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
+    } else {
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+}
+
+/**
+ * Apple grouped-inset card container (§8). Holds a vertical list of rows with
+ * [SettingsCardDivider]s between them. Radius 12 dp (§4), ide-elevated fill,
+ * ide-border 1 dp hairline.
+ */
+@Composable
+private fun SettingsCard(content: @Composable () -> Unit) {
+    val c = LocalIdeColors.current
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(c.elevated)
+            .then(
+                Modifier.padding(0.dp) // border is applied via the clip + background trick
+            ),
+    ) {
+        // Wrap in a bordered container
+        androidx.compose.foundation.layout.Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(c.elevated)
+        ) {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                content()
+            }
+        }
+    }
+}
+
+/**
+ * Hairline divider between rows inside a [SettingsCard] — ide-divider colour,
+ * 1 dp (not 0.5 dp mix; spec §4 "kill the 0.5 dp mix").
+ */
+@Composable
+private fun SettingsCardDivider() {
+    val c = LocalIdeColors.current
+    HorizontalDivider(
+        color = c.divider,
+        thickness = 1.dp,
+        modifier = Modifier.padding(horizontal = 0.dp),
+    )
+}
+
+/**
+ * iOS-style segmented control (§7). Container uses ide-bg, selected pill uses
+ * ide-elevated with a subtle shadow effect (achieved via border contrast).
+ *
+ * @param options List of label strings, one per segment.
+ * @param selectedIndex Currently selected segment index.
+ * @param onSelect Called with the new index when user taps a segment.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun IdeSegmentedControl(
+    options: List<String>,
+    selectedIndex: Int,
+    onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val c = LocalIdeColors.current
+    SingleChoiceSegmentedButtonRow(
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        options.forEachIndexed { index, label ->
+            SegmentedButton(
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+                onClick = { onSelect(index) },
+                selected = index == selectedIndex,
+                colors = SegmentedButtonDefaults.colors(
+                    // Selected: elevated background (white in light, dark card in dark)
+                    activeContainerColor  = c.elevated,
+                    activeContentColor    = c.accent,
+                    activeBorderColor     = c.border,
+                    // Unselected: bg (grey canvas)
+                    inactiveContainerColor = c.bg,
+                    inactiveContentColor   = c.dim,
+                    inactiveBorderColor    = c.border,
+                ),
+                icon = {},
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
+                        fontSize = 13.sp,
+                    ),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared composables
 // ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Density toggle row — comfortable / compact toggle, first row of the Display tab.
- *
- * Mirrors the macOS/web `prefs.density` toggle (§2/§6 of DESIGN-SYSTEM-v2.md).
- * Uses the existing SettingsRow Switch pattern for visual consistency.
- * Comfortable (default) = 34dp rows; Compact = 28dp rows.
- */
-@Composable
-private fun DensityToggleRow(
-    density: Density,
-    onDensityChange: (Density) -> Unit,
-) {
-    SettingsRow(
-        title = stringResource(R.string.setting_density_title),
-        subtitle = if (density == Density.COMPACT)
-            stringResource(R.string.setting_density_subtitle_compact)
-        else
-            stringResource(R.string.setting_density_subtitle_comfortable),
-        checked = density == Density.COMPACT,
-        onCheckedChange = { compact ->
-            onDensityChange(if (compact) Density.COMPACT else Density.COMFORTABLE)
-        },
-    )
-}
 
 @Composable
 private fun SettingsTextField(
@@ -981,6 +1181,7 @@ private fun SettingsNavRow(
     subtitle: String,
     onClick: () -> Unit,
 ) {
+    val c = LocalIdeColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -995,12 +1196,12 @@ private fun SettingsNavRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                color = c.text,
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = c.dim,
             )
         }
     }
@@ -1017,6 +1218,7 @@ private fun DiagnosticsNavRow(
     buttonLabel: String,
     onClick: () -> Unit,
 ) {
+    val c = LocalIdeColors.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -1025,12 +1227,12 @@ private fun DiagnosticsNavRow(
         Text(
             text = title,
             style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = c.text,
         )
         Text(
             text = subtitle,
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = c.dim,
             modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
         )
         OutlinedButton(
@@ -1049,6 +1251,7 @@ private fun SettingsRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val c = LocalIdeColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1062,12 +1265,12 @@ private fun SettingsRow(
             Text(
                 text = title,
                 style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurface
+                color = c.text,
             )
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = c.dim,
             )
         }
         Switch(
@@ -1088,6 +1291,7 @@ private fun AdbCaptureStatusLine(
     logcatStatus: LogcatCaptureStatus,
     ctx: android.content.Context,
 ) {
+    val c = LocalIdeColors.current
     val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
     val overlayGranted: Boolean = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
         android.provider.Settings.canDrawOverlays(ctx)
@@ -1095,11 +1299,11 @@ private fun AdbCaptureStatusLine(
 
     val (captureText, captureColor) = when (logcatStatus) {
         LogcatCaptureStatus.WORKING ->
-            stringResource(R.string.bg_adb_status_capture_working) to IdeSuccess
+            stringResource(R.string.bg_adb_status_capture_working) to c.success
         LogcatCaptureStatus.DISABLED, LogcatCaptureStatus.NOT_GRANTED ->
-            stringResource(R.string.bg_adb_status_capture_inactive) to IdeDim
+            stringResource(R.string.bg_adb_status_capture_inactive) to c.dim
         LogcatCaptureStatus.GRANTED_NOT_WORKING ->
-            stringResource(R.string.bg_adb_status_capture_inactive) to IdeWarning
+            stringResource(R.string.bg_adb_status_capture_inactive) to c.warning
     }
 
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -1110,7 +1314,7 @@ private fun AdbCaptureStatusLine(
                 else
                     stringResource(R.string.bg_adb_status_read_logs_no),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (readLogsGranted) IdeSuccess else IdeDanger,
+                color = if (readLogsGranted) c.success else c.danger,
             )
             Text(
                 text = if (overlayGranted)
@@ -1118,7 +1322,7 @@ private fun AdbCaptureStatusLine(
                 else
                     stringResource(R.string.bg_adb_status_overlay_no),
                 style = MaterialTheme.typography.labelSmall,
-                color = if (overlayGranted) IdeSuccess else IdeDim,
+                color = if (overlayGranted) c.success else c.dim,
             )
         }
         Text(
@@ -1155,15 +1359,16 @@ private fun AdbCmdRow(
     toastText: String,
     ctx: android.content.Context,
 ) {
+    val c = LocalIdeColors.current
     Text(
         text = label,
         style = MaterialTheme.typography.labelSmall,
-        color = IdeDim,
+        color = c.dim,
     )
     Text(
         text = cmd,
         style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-        color = IdeAccent,
+        color = c.accent,
         modifier = Modifier
             .fillMaxWidth()
             .clickable {
@@ -1226,6 +1431,7 @@ private fun ExcludedAppsRow(
     excludedApps: List<String>,
     onExcludedAppsChange: (List<String>) -> Unit,
 ) {
+    val c = LocalIdeColors.current
     var newApp by rememberSaveable { mutableStateOf("") }
 
     val addCurrent: () -> Unit = {
@@ -1242,14 +1448,9 @@ private fun ExcludedAppsRow(
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
         Text(
-            text = stringResource(R.string.setting_excluded_apps_label),
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        Text(
             text = stringResource(R.string.setting_excluded_apps_subtitle),
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = c.dim,
             modifier = Modifier.padding(top = 2.dp),
         )
         Row(
