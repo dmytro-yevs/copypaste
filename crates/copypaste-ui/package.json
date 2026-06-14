@@ -36,6 +36,9 @@
     "vitest": "^3.2.6"
   },
   "pnpm": {
+    "overrides": {
+      "esbuild": ">=0.28.1"
+    },
     "onlyBuiltDependencies": [
       "esbuild"
     ]
