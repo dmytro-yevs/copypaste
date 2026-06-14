@@ -1,8 +1,12 @@
 name: fuzz-smoke
 
-# Short coverage-guided fuzz run on every push to the beta branch.
+# Short coverage-guided fuzz run on every push to main or beta branches and
+# on every PR targeting main. Also runs on manual dispatch.
 # Non-blocking: fuzzing is signal, not a gate. A crash here is loud (job
 # annotation + artifact upload) but does not stop the merge.
+#
+# Previously gated to release/v0.2.0-beta only; promoted to main/PRs so
+# parser and crypto fuzzing runs on every contribution.
 #
 # Security note: this workflow does NOT consume any untrusted event fields
 # (no issue/PR title, body, head.ref, commit messages). The only dynamic
@@ -10,7 +14,11 @@ name: fuzz-smoke
 on:
   push:
     branches:
+      - main
       - release/v0.2.0-beta
+  pull_request:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
