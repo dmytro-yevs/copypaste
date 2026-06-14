@@ -169,9 +169,16 @@ class SupabaseRealtimeClientTest {
 
     @Test
     fun wsReconnectBackoff_doublesAndClamps() {
-        assertEquals(1_000L, SupabaseRealtimeClient.reconnectDelayMs(1))
-        assertEquals(2_000L, SupabaseRealtimeClient.reconnectDelayMs(2))
-        assertEquals(4_000L, SupabaseRealtimeClient.reconnectDelayMs(3))
-        assertEquals(60_000L, SupabaseRealtimeClient.reconnectDelayMs(100))
+        // reconnectDelayMs applies ±20% jitter (factor 0.8..1.2) for thundering-herd
+        // avoidance, so pre-clamp values land in a window around the doubling
+        // sequence, not on exact powers. Assert the jittered window; run several
+        // iterations so an unlucky single draw can't mask a broken implementation.
+        // The final clamp to BACKOFF_MAX_MS is exact (base*2^30 >> max).
+        repeat(25) {
+            assertTrue(SupabaseRealtimeClient.reconnectDelayMs(1) in 800L..1_200L)
+            assertTrue(SupabaseRealtimeClient.reconnectDelayMs(2) in 1_600L..2_400L)
+            assertTrue(SupabaseRealtimeClient.reconnectDelayMs(3) in 3_200L..4_800L)
+            assertEquals(60_000L, SupabaseRealtimeClient.reconnectDelayMs(100))
+        }
     }
 }

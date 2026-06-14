@@ -27,8 +27,15 @@ val buildCargoNdk by tasks.registering(Exec::class) {
     group = "build"
     description = "Compile copypaste-android into .so libraries via cargo-ndk"
 
+    // Read the availability flag at configuration time into a plain local so the
+    // doFirst closure below captures a Boolean — NOT a reference to the build
+    // script object. Capturing the script-level `cargoNdkAvailable` lazy val
+    // directly makes the closure hold a `this$0` script reference that Gradle's
+    // configuration cache cannot serialize (it fails with
+    // "getCargoNdkAvailable() because this$0 is null" on cache restore).
+    val ndkAvailable = cargoNdkAvailable
     doFirst {
-        if (!cargoNdkAvailable) {
+        if (!ndkAvailable) {
             throw GradleException(
                 """
                 cargo-ndk is not installed or not on PATH.

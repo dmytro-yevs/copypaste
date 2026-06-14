@@ -83,12 +83,18 @@ class SettingsFlushOnDisposeTest {
         var job: DebounceJob? = null
         var pendingValue = ""
 
-        // Simulate onValueChange
+        // Simulate onValueChange. The fire action self-nulls the job handle (as the
+        // onDispose null-check below relies on — "job was self-nulled above"); without
+        // this the captured handle stays non-null and onDispose double-writes.
         pendingValue = "https://supabase.example.com"
         job?.cancel()
-        job = DebounceJob(50L) { persist(pendingValue) }
+        job = DebounceJob(50L) {
+            persist(pendingValue)
+            job = null
+        }
 
-        // Wait for the debounce to complete naturally
+        // Wait for the debounce to complete naturally (join() establishes
+        // happens-before, so the job=null from the fire action is visible here).
         job!!.join()
 
         // Simulate onDispose: cancel (no-op — job done) + flush only if job was still pending

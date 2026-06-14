@@ -88,13 +88,15 @@ fun rememberReducedMotion(): Boolean {
  * Checks both the accessibility and developer-options animation scales.
  */
 fun isReducedMotion(context: Context): Boolean {
-    // Signal 1: Accessibility → "Remove animations" (isAnimationEnabled = false).
-    // isAnimationEnabled was added in API 26; always available on our minSdk.
-    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
-    val animEnabled = am?.isAnimationEnabled ?: true   // true = animations on
-    if (!animEnabled) return true
+    // Signal 1: ValueAnimator.areAnimatorsEnabled() (API 26+) — false when the
+    // user has turned animations off via Accessibility "Remove animations" OR
+    // set the developer-options animator duration scale to 0. (AccessibilityManager
+    // has no public isAnimationEnabled property — that was the source of a build
+    // break; areAnimatorsEnabled is the supported signal.)
+    if (!android.animation.ValueAnimator.areAnimatorsEnabled()) return true
 
-    // Signal 2: Developer Options → "Animator duration scale = 0"
+    // Signal 2 (belt-and-suspenders): read the duration scale directly in case a
+    // ROM reports areAnimatorsEnabled()=true but pins the scale to 0.
     val scale = try {
         AndroidSettings.Global.getFloat(
             context.contentResolver,

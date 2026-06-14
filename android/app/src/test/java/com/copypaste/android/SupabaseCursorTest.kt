@@ -111,7 +111,7 @@ class SupabaseCursorTest {
     }
 
     @Test
-    fun `same wallTime: both concurrent advances serialised correctly`() {
+    fun `same wallTime — both concurrent advances serialised correctly`() {
         // FGS and Worker polled the same batch window (same wall_time) but
         // ended on different row ids (tie-break by id).
         val cursor = Cursor()
@@ -123,7 +123,7 @@ class SupabaseCursorTest {
     }
 
     @Test
-    fun `same wallTime: reversed order, smaller id loses`() {
+    fun `same wallTime — reversed order, smaller id loses`() {
         val cursor = Cursor()
         cursor.advance(100L, "uuid-z")
         cursor.advance(100L, "uuid-a") // same wallTime, earlier id — no-op
@@ -157,31 +157,31 @@ class SupabaseCursorTest {
     }
 
     @Test
-    fun `count-cap: no eviction when items within limit`() {
+    fun `count-cap — no eviction when items within limit`() {
         assertEquals(0, simulateCountPrune(itemCount = 50, pinnedCount = 0, maxItems = 1000))
     }
 
     @Test
-    fun `count-cap: evicts correct number when over limit`() {
+    fun `count-cap — evicts correct number when over limit`() {
         // 1100 items, limit 1000 → 100 should be evicted
         assertEquals(100, simulateCountPrune(itemCount = 1100, pinnedCount = 0, maxItems = 1000))
     }
 
     @Test
-    fun `count-cap: pinned items count toward limit but are not evicted`() {
+    fun `count-cap — pinned items count toward limit but are not evicted`() {
         // 1100 items (50 pinned), limit 1000. Only 1050 unpinned, must evict 100.
         assertEquals(100, simulateCountPrune(itemCount = 1100, pinnedCount = 50, maxItems = 1000))
     }
 
     @Test
-    fun `count-cap: cannot evict more than unpinned items available`() {
+    fun `count-cap — cannot evict more than unpinned items available`() {
         // 1100 items (1050 pinned, only 50 unpinned). Limit 1000 → need to evict
         // 100, but only 50 unpinned available → evict all 50, stop at 1050 items.
         assertEquals(50, simulateCountPrune(itemCount = 1100, pinnedCount = 1050, maxItems = 1000))
     }
 
     @Test
-    fun `count-cap: at exactly the limit no eviction occurs`() {
+    fun `count-cap — at exactly the limit no eviction occurs`() {
         assertEquals(0, simulateCountPrune(itemCount = 1000, pinnedCount = 0, maxItems = 1000))
     }
 }

@@ -527,6 +527,9 @@ fun PairScreen(
             syncResult = null
             try {
                 val key = settings.encryptionKey
+                // Captured inside the IO block (where `bootstrap` is in scope) so the
+                // success popup below can look the freshly-paired peer up by fingerprint.
+                var pairedFingerprint: String? = null
                 val message = withContext(Dispatchers.IO) {
                     val cert = deviceKeyStore.getOrCreate()
                     // Path A: advertise THIS device's inbound mTLS listener address
@@ -731,6 +734,7 @@ fun PairScreen(
                             peerPublicIp = bootstrap.peerPublicIp,
                         )
                     )
+                    pairedFingerprint = bootstrap.peerFingerprint
                     val peerCount = settings.pairedPeers.size
                     // HB-7a (ABI 14): surface the per-reason drop counters so a
                     // "received N stored 0" outcome reveals WHY items dropped.
@@ -744,7 +748,7 @@ fun PairScreen(
                 // Look it up from the roster by fingerprint so all ABI-14 fields
                 // (model/OS/version/IPs) are present for the card.
                 pairedPeerForPopup = settings.pairedPeers
-                    .firstOrNull { it.fingerprint == bootstrap.peerFingerprint }
+                    .firstOrNull { it.fingerprint == pairedFingerprint }
                 syncResult = message
                 scannedPeer = null
             } catch (e: Exception) {
