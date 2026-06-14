@@ -63,6 +63,54 @@ pub fn resolve(local: &ClipboardItem, remote: &WireItem) -> MergeOutcome {
     }
 }
 
+/// The three total-order sort keys a remote version carries, in priority order:
+/// `lamport_ts` → `wall_time` → `origin_device_id`.
+///
+/// Cloud (Supabase poll + websocket) and relay ingest paths decode these from
+/// their own wire formats and feed them to [`remote_wins`] so all three
+/// transports break ties by the SAME deterministic order that the P2P path
+/// already uses via [`resolve`]. Without this they diverged: cloud/relay used a
+/// bare `remote_lamport <= local -> keep`, which on EQUAL lamport ALWAYS kept
+/// the local copy (decided by arrival locality, not content) — so two devices
+/// holding the same `item_id` at equal lamport with different content would each
+/// keep their own copy and never converge (CopyPaste-ayvs).
+#[derive(Debug, Clone)]
+pub struct RemoteMeta<'a> {
+    /// Remote Lamport timestamp.
+    pub lamport_ts: i64,
+    /// Remote wall-clock time (Unix ms) — the second-priority tie-break.
+    pub wall_time: i64,
+    /// Remote originating device id — the final, deterministic tie-break.
+    pub origin_device_id: &'a str,
+}
+
+/// Decide whether a remote version should overwrite the local one, using the
+/// SAME total order as [`resolve`] (`lamport_ts` → `wall_time` →
+/// `origin_device_id`, larger wins).
+///
+/// Returns `true` when the remote wins (the caller should replace/apply the
+/// remote version), `false` when the local copy is kept. This is the
+/// transport-agnostic primitive the cloud and relay ingest paths share so every
+/// transport converges identically (CopyPaste-ayvs). The P2P path uses
+/// [`resolve`] against a full [`WireItem`]; this variant takes only the three
+/// sort keys because cloud/relay decode them out of distinct wire shapes.
+pub fn remote_wins(
+    local_lamport: i64,
+    local_wall: i64,
+    local_origin_device_id: &str,
+    remote: &RemoteMeta<'_>,
+) -> bool {
+    match remote.lamport_ts.cmp(&local_lamport) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => match remote.wall_time.cmp(&local_wall) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            std::cmp::Ordering::Equal => remote.origin_device_id > local_origin_device_id,
+        },
+    }
+}
+
 /// Convert a `WireItem` received from a peer into a `ClipboardItem` ready to
 /// be persisted locally, marking it as synced.
 pub fn wire_to_local(wire: WireItem) -> ClipboardItem {
@@ -518,6 +566,117 @@ mod tests {
             restored.pin_order,
             Some(2.5),
             "wire_to_local must restore pin_order"
+        );
+    }
+
+    // --- Tie-break parity: resolve() vs remote_wins() (CopyPaste-ayvs) ---
+
+    /// `remote_wins` must agree with `resolve` on the same inputs across the
+    /// whole decision space (lower / equal / higher lamport, wall, device id),
+    /// proving cloud/relay (which call `remote_wins`) converge identically to
+    /// P2P (which calls `resolve`).
+    #[test]
+    fn remote_wins_matches_resolve_across_decision_space() {
+        let lamports = [3i64, 5, 7];
+        let walls = [100i64, 200, 300];
+        let devices = ["aaa", "device-local", "zzz"];
+        for &ll in &lamports {
+            for &lw in &walls {
+                for ld in &devices {
+                    let mut local = make_local(ll, lw);
+                    local.origin_device_id = (*ld).to_string();
+                    for &rl in &lamports {
+                        for &rw in &walls {
+                            for rd in &devices {
+                                let remote = make_remote(rl, rw, rd);
+                                let via_resolve =
+                                    resolve(&local, &remote) == MergeOutcome::TakeRemote;
+                                let via_remote_wins = remote_wins(
+                                    local.lamport_ts,
+                                    local.wall_time,
+                                    &local.origin_device_id,
+                                    &RemoteMeta {
+                                        lamport_ts: remote.lamport_ts,
+                                        wall_time: remote.wall_time,
+                                        origin_device_id: &remote.origin_device_id,
+                                    },
+                                );
+                                assert_eq!(
+                                    via_resolve, via_remote_wins,
+                                    "resolve and remote_wins disagree for \
+                                     local=({ll},{lw},{ld}) remote=({rl},{rw},{rd})"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Equal lamport, equal wall, larger remote device id → remote wins (this is
+    /// the exact case the old cloud/relay `remote <= local -> keep` got wrong:
+    /// it kept local regardless of content).
+    #[test]
+    fn remote_wins_breaks_equal_lamport_tie_by_device_id() {
+        // remote device "zzz" > local "device-local" → remote wins.
+        assert!(remote_wins(
+            5,
+            1000,
+            "device-local",
+            &RemoteMeta {
+                lamport_ts: 5,
+                wall_time: 1000,
+                origin_device_id: "zzz"
+            }
+        ));
+        // remote device "aaa" < local "device-local" → local wins.
+        assert!(!remote_wins(
+            5,
+            1000,
+            "device-local",
+            &RemoteMeta {
+                lamport_ts: 5,
+                wall_time: 1000,
+                origin_device_id: "aaa"
+            }
+        ));
+    }
+
+    // --- Lamport unification regression (CopyPaste-ojhe) ---
+
+    /// A newer pin/delete stamped under the unified value space
+    /// (`next_lamport_ts`) beats an older recopy stamped at `now_ms`.
+    ///
+    /// Repro from the audit: device copies X via promote-on-copy (lamport ≈
+    /// now_ms, pinned=false); a peer then pins/deletes X. Under the unified
+    /// stamping the pin/delete is `max(now_ms_recopy + 1, now_ms_pin)` which is
+    /// strictly greater, so `resolve` returns TakeRemote and the pin/delete wins
+    /// instead of being discarded.
+    #[test]
+    fn unified_pin_delete_beats_older_recopy() {
+        use copypaste_core::next_lamport_ts;
+
+        // Older recopy: stamped at an earlier now_ms.
+        let recopy_now = 1_750_000_000_000i64;
+        let recopy_lamport = next_lamport_ts(0, recopy_now); // == recopy_now
+        let local = make_local(recopy_lamport, recopy_now);
+
+        // Newer pin/delete on the SAME item: a few ms later, derived from the
+        // recopy's lamport via the unified helper.
+        let pin_now = recopy_now + 5;
+        let pin_lamport = next_lamport_ts(recopy_lamport, pin_now);
+        assert!(
+            pin_lamport > recopy_lamport,
+            "unified pin lamport must strictly exceed the recopy"
+        );
+        let mut remote = make_remote(pin_lamport, pin_now, "peer-A");
+        remote.deleted = true; // model a delete; pin is the same lamport story
+
+        assert_eq!(
+            resolve(&local, &remote),
+            MergeOutcome::TakeRemote,
+            "a newer unified pin/delete must beat an older recopy"
         );
     }
 

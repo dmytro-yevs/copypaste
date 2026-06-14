@@ -1,5 +1,31 @@
 /// copypaste-sync — P2P clipboard sync engine.
 ///
+/// # ⚠️ Production path vs. dead code (read before maintaining)
+///
+/// The daemon does **NOT** drive sync through [`engine::SyncEngine`] or
+/// [`clock::LamportClock`]. As of the sync-correctness audit (CopyPaste-j6r)
+/// those types are **not on the production path** — they are retained for the
+/// HELLO/HAVE/WANT/ITEMS/DONE session protocol and its tests, but the live
+/// daemon never instantiates a `SyncEngine` and never advances a
+/// `LamportClock`.
+///
+/// What the daemon actually uses from this crate is **only**:
+///   * [`protocol::WireItem`] — the on-wire item shape, and
+///   * [`merge::resolve`] / [`merge::remote_wins`] / [`merge::wire_to_local`] /
+///     [`merge::local_to_wire`] — the Last-Write-Wins decision and conversions.
+///
+/// The daemon stamps `lamport_ts` itself via
+/// `copypaste_core::next_lamport_ts(prev, now_ms) = max(prev + 1, now_ms)` at
+/// every mutation (capture / recopy / pin / delete), giving one monotonic AND
+/// time-ordered value space (CopyPaste-ojhe). All three transports — P2P,
+/// Supabase cloud, and the relay — route their LWW through the SAME total order
+/// (`merge::resolve` / `merge::remote_wins`: lamport → wall_time →
+/// origin_device_id) so they converge identically (CopyPaste-ayvs).
+///
+/// Do not "revive" `SyncEngine`/`LamportClock` by wiring them into the daemon
+/// without re-validating against this contract; the `merge::resolve` path is
+/// the source of truth.
+///
 /// # Architecture
 ///
 /// ```text

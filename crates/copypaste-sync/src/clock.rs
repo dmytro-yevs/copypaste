@@ -1,5 +1,11 @@
 /// Lamport logical clock.
 ///
+/// **NOT on the daemon production path** (CopyPaste-j6r/ojhe): the live daemon
+/// does not advance a `LamportClock`. It stamps `lamport_ts` via
+/// `copypaste_core::next_lamport_ts` (`max(prev + 1, now_ms)`) and resolves
+/// conflicts through [`crate::merge::resolve`]. This type is retained for the
+/// session protocol + its tests; see the crate-root docs before reviving it.
+///
 /// Rules (Lamport 1978):
 ///  * On every local event: `tick()` — increments by 1.
 ///  * On receiving a message carrying clock value `r`: `observe(r)` — sets

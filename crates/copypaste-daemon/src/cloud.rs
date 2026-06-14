@@ -41,8 +41,12 @@ use tokio::sync::{Mutex, RwLock};
 use copypaste_core::storage::items::soft_delete_item;
 use copypaste_core::{
     decrypt_from_cloud, encrypt_for_cloud, exists_item_by_item_id, get_item_by_item_id,
-    insert_item, prune_to_cap, ClipboardItem, Database, SyncKey,
+    insert_item, insert_tombstone, prune_to_cap, ClipboardItem, Database, SyncKey,
 };
+// CopyPaste-ayvs: cloud LWW now routes through the SAME total order the P2P
+// path uses (lamport -> wall_time -> origin_device_id) so all transports
+// converge identically. `RemoteMeta`/`remote_wins` are the shared primitive.
+use copypaste_sync::merge::{remote_wins, RemoteMeta};
 
 // Shared sync pipeline helpers (extracted so the relay path can reuse the
 // byte-identical envelope without pulling copypaste-supabase). All the
@@ -2194,8 +2198,24 @@ async fn ws_ingest_loop(
                                     };
 
                                 let preserved_pk = if let Some(local) = existing.as_ref() {
-                                    if lamport_ts <= local.lamport_ts {
-                                        // Local is equal-or-newer — skip.
+                                    // CopyPaste-ayvs: use the SAME total order as
+                                    // P2P (lamport -> wall_time ->
+                                    // origin_device_id) so cloud-WS, cloud-poll,
+                                    // and P2P converge identically. The old bare
+                                    // `lamport_ts <= local -> skip` kept local on
+                                    // every equal-lamport tie.
+                                    let wins = remote_wins(
+                                        local.lamport_ts,
+                                        local.wall_time,
+                                        &local.origin_device_id,
+                                        &RemoteMeta {
+                                            lamport_ts,
+                                            wall_time,
+                                            origin_device_id: &origin_device_id,
+                                        },
+                                    );
+                                    if !wins {
+                                        // Local wins LWW — skip.
                                         zeroize::Zeroize::zeroize(&mut key_arr);
                                         return false;
                                     }
@@ -2243,6 +2263,34 @@ async fn ws_ingest_loop(
                                             Err(e) => {
                                                 tracing::warn!(
                                                     "ws_ingest_loop: soft_delete_item failed \
+                                                     for item_id={item_id_owned}: {e}"
+                                                );
+                                            }
+                                        }
+                                    } else {
+                                        // CopyPaste-bfiu: unknown item — the delete
+                                        // raced ahead of the create. Persist a
+                                        // tombstone so a later out-of-order create
+                                        // loses LWW instead of resurrecting it.
+                                        match insert_tombstone(
+                                            &db_guard,
+                                            &item_id_owned,
+                                            &item_id_owned,
+                                            lamport_ts,
+                                            wall_time,
+                                            &origin_device_id,
+                                        ) {
+                                            Ok(_) => {
+                                                tracing::info!(
+                                                    "ws_ingest_loop: inserted tombstone for \
+                                                     unknown item_id={item_id_owned} \
+                                                     (delete-before-create)"
+                                                );
+                                                return true;
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    "ws_ingest_loop: insert_tombstone failed \
                                                      for item_id={item_id_owned}: {e}"
                                                 );
                                             }
@@ -2506,10 +2554,29 @@ async fn poll_once(
                     continue;
                 }
             };
+            // Decode the remote total-order sort keys up front so the LWW
+            // decision and the tombstone paths share one source of truth.
+            let remote_lamport = row["lamport_ts"].as_i64().unwrap_or(0);
+            let remote_origin = row["device_id"].as_str().unwrap_or("");
+            let remote_deleted = row["deleted"].as_bool().unwrap_or(false);
+
             let preserved_pk = if let Some(local) = existing.as_ref() {
-                let remote_lamport = row["lamport_ts"].as_i64().unwrap_or(0);
-                if remote_lamport <= local.lamport_ts {
-                    // Local copy is newer-or-equal (LWW keeps local) — skip.
+                // CopyPaste-ayvs: use the SAME total order as P2P (lamport ->
+                // wall_time -> origin_device_id) instead of the old bare
+                // `remote_lamport <= local -> keep`, which on EQUAL lamport
+                // always kept local and never converged across transports.
+                let wins = remote_wins(
+                    local.lamport_ts,
+                    local.wall_time,
+                    &local.origin_device_id,
+                    &RemoteMeta {
+                        lamport_ts: remote_lamport,
+                        wall_time: row_wall,
+                        origin_device_id: remote_origin,
+                    },
+                );
+                if !wins {
+                    // Local copy wins LWW — skip.
                     continue;
                 }
                 // Remote wins LWW: replace in place, preserving the local PK so
@@ -2537,11 +2604,9 @@ async fn poll_once(
             // the item cannot resurrect on this device or re-broadcast incorrectly.
             // The cursor still advances (batch_max was updated above) so tombstones
             // are never re-requested.
-            let remote_deleted = row["deleted"].as_bool().unwrap_or(false);
             if remote_deleted {
+                let remote_wall = row_wall;
                 if let Some(local_pk) = preserved_pk.as_ref() {
-                    let remote_lamport = row["lamport_ts"].as_i64().unwrap_or(0);
-                    let remote_wall = row_wall;
                     match soft_delete_item(&db_guard, local_pk, remote_lamport, remote_wall) {
                         Ok(n) if n > 0 => {
                             synced += 1;
@@ -2563,8 +2628,34 @@ async fn poll_once(
                             );
                         }
                     }
+                } else {
+                    // CopyPaste-bfiu: the item is UNKNOWN locally (delete arrived
+                    // before the create). Persist a tombstone row so a later
+                    // out-of-order create loses LWW instead of resurrecting it.
+                    match insert_tombstone(
+                        &db_guard,
+                        item_id,
+                        item_id,
+                        remote_lamport,
+                        remote_wall,
+                        remote_origin,
+                    ) {
+                        Ok(_) => {
+                            synced += 1;
+                            tracing::info!(
+                                "cloud-sync poll_once: inserted tombstone for unknown \
+                                 item_id={item_id} (delete-before-create)"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "cloud-sync poll_once: insert_tombstone failed for \
+                                 item_id={item_id}: {e}"
+                            );
+                        }
+                    }
                 }
-                // Either soft-deleted or already absent — skip payload decode.
+                // Either soft-deleted / tombstoned / already absent — skip decode.
                 continue;
             }
 
@@ -4275,7 +4366,7 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1, "LWW replace must NOT create a duplicate row");
 
-        let row = copypaste_core::get_item_by_item_id(&*g, "shared-iid")
+        let row = copypaste_core::get_item_by_item_id(&g, "shared-iid")
             .unwrap()
             .expect("item must still exist");
         assert_eq!(row.id, "local-pk", "local primary key must be preserved");

@@ -53,14 +53,22 @@ use tokio::sync::{Mutex, Notify};
 use copypaste_core::{
     decrypt_from_cloud, decrypt_item_with_aad, derive_relay_inbox_id, derive_relay_public_key,
     derive_relay_registration_pop, encrypt_for_cloud, encrypt_item_with_aad,
-    exists_item_by_item_id, get_item_by_item_id, insert_item, prune_to_cap, AppConfig,
-    ClipboardItem, Database, SyncKey, NONCE_SIZE,
+    exists_item_by_item_id, get_item_by_item_id, insert_item, insert_tombstone, prune_to_cap,
+    soft_delete_item, AppConfig, ClipboardItem, Database, SyncKey, NONCE_SIZE,
 };
+// CopyPaste-ayvs: relay LWW now routes through the SAME total order the P2P and
+// cloud paths use (lamport -> wall_time -> origin_device_id) so all transports
+// converge identically.
+use copypaste_sync::merge::{remote_wins, RemoteMeta};
 
 use crate::sync_common::{
     build_local_item, decode_payload_ct, decrypt_item_plaintext, replace_cloud_item_by_item_id,
-    wrap_and_check_cloud_upload_plaintext, SYNC_HTTP_TIMEOUT,
+    wrap_and_check_cloud_upload_plaintext,
 };
+// `SYNC_HTTP_TIMEOUT` is referenced only by the test client builder; importing it
+// at module scope would be flagged unused in a non-test build under -D warnings.
+#[cfg(test)]
+use crate::sync_common::SYNC_HTTP_TIMEOUT;
 
 // ── Settings guards ───────────────────────────────────────────────────────────
 
@@ -100,11 +108,42 @@ const RELAY_TOKEN_FILE: &str = "relay_token";
 /// `base64(encrypt_for_cloud(sync_key, item_id, wrapped_plaintext))` — the SAME
 /// blob the Supabase path stores. This is the exact shape the Android SSE
 /// receiver already decodes.
+///
+/// CopyPaste-cm0u / CopyPaste-ayvs / CopyPaste-bfiu: the envelope now also
+/// carries `deleted` / `pinned` / `pin_order` (so deletes and pins propagate
+/// over relay-only topologies) and `wall_time` / `origin_device_id` (so relay
+/// LWW uses the SAME total order as P2P/cloud). All five are
+/// `#[serde(default)]` OPTIONAL-by-omission fields: an envelope written by an
+/// older daemon omits them and decodes to `deleted=false` / `pinned=false` /
+/// `pin_order=None` / `wall_time=0` / `origin_device_id=""` — i.e. exactly the
+/// pre-fix behaviour (a live, unpinned item with no origin tie-break key).
 #[derive(Debug, Serialize, Deserialize)]
 struct RelayEnvelope {
     item_id: String,
     lamport_ts: i64,
+    /// Present for live items; a tombstone envelope sets `deleted=true` and
+    /// carries an empty `ct_b64` (the content is NULL — there is nothing to
+    /// decrypt). Defaulted empty so older live envelopes (no field) parse.
+    #[serde(default)]
     ct_b64: String,
+    /// Soft-delete flag. Omitted (=> false) by older daemons.
+    #[serde(default)]
+    deleted: bool,
+    /// Pin flag. Omitted (=> false) by older daemons.
+    #[serde(default)]
+    pinned: bool,
+    /// Pin sort order. Omitted (=> None) by older daemons.
+    #[serde(default)]
+    pin_order: Option<f64>,
+    /// Wall-clock ms — the second LWW tie-break key. Omitted (=> 0) by older
+    /// daemons, which makes them lose every equal-lamport tie (acceptable: the
+    /// pre-fix relay path had no wall_time tie-break at all).
+    #[serde(default)]
+    wall_time: i64,
+    /// Originating device id — the final LWW tie-break key. Omitted (=> "") by
+    /// older daemons.
+    #[serde(default)]
+    origin_device_id: String,
 }
 
 /// Relay register request body.
@@ -425,35 +464,50 @@ fn build_content_b64(
     local_key: &zeroize::Zeroizing<[u8; 32]>,
     sync_key: &SyncKey,
 ) -> Option<String> {
-    let plaintext = match decrypt_item_plaintext(item, local_key) {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("relay-sync: decrypt id={} failed: {e}; skipping", item.id);
-            return None;
-        }
+    // CopyPaste-cm0u: a tombstone has content = NULL — there is nothing to
+    // decrypt. Emit a delete envelope (empty ct_b64, deleted=true) instead of
+    // calling decrypt_item_plaintext on NULL (which Err'd and dropped the
+    // delete, so deletes never propagated over relay-only topologies).
+    let ct_b64 = if item.deleted {
+        String::new()
+    } else {
+        let plaintext = match decrypt_item_plaintext(item, local_key) {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::warn!("relay-sync: decrypt id={} failed: {e}; skipping", item.id);
+                return None;
+            }
+        };
+        let wrapped = match wrap_and_check_cloud_upload_plaintext(item, plaintext) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::warn!("relay-sync: skip id={}: {e}", item.id);
+                return None;
+            }
+        };
+        let blob = match encrypt_for_cloud(sync_key, &item.item_id, &wrapped) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(
+                    "relay-sync: cloud encrypt id={} failed: {e}; skipping",
+                    item.id
+                );
+                return None;
+            }
+        };
+        base64::engine::general_purpose::STANDARD.encode(&blob)
     };
-    let wrapped = match wrap_and_check_cloud_upload_plaintext(item, plaintext) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::warn!("relay-sync: skip id={}: {e}", item.id);
-            return None;
-        }
-    };
-    let blob = match encrypt_for_cloud(sync_key, &item.item_id, &wrapped) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::warn!(
-                "relay-sync: cloud encrypt id={} failed: {e}; skipping",
-                item.id
-            );
-            return None;
-        }
-    };
-    let ct_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
     let envelope = RelayEnvelope {
         item_id: item.item_id.clone(),
         lamport_ts: item.lamport_ts,
         ct_b64,
+        // CopyPaste-cm0u: carry delete + pin state so they propagate over relay.
+        deleted: item.deleted,
+        pinned: item.pinned,
+        pin_order: item.pin_order,
+        // CopyPaste-ayvs: carry the LWW tie-break keys.
+        wall_time: item.wall_time,
+        origin_device_id: item.origin_device_id.clone(),
     };
     let json = match serde_json::to_vec(&envelope) {
         Ok(j) => j,
@@ -785,10 +839,29 @@ fn ingest_page_blocking(
                 continue;
             }
         };
+        // The envelope's wall_time is authoritative for LWW; fall back to the
+        // relay row's wall_time when an older envelope omitted it (=> 0).
+        let env_wall = if env.wall_time != 0 {
+            env.wall_time
+        } else {
+            row.wall_time as i64
+        };
         let preserved_pk = if let Some(local) = existing.as_ref() {
-            if env.lamport_ts <= local.lamport_ts {
-                // Local is newer-or-equal — keep it (this is the self-echo no-op
-                // for a row we pushed, and the LWW loser for a remote edit).
+            // CopyPaste-ayvs: same total order as P2P/cloud (lamport ->
+            // wall_time -> origin_device_id) instead of the old bare
+            // `env.lamport_ts <= local -> keep`, which never converged on ties.
+            let wins = remote_wins(
+                local.lamport_ts,
+                local.wall_time,
+                &local.origin_device_id,
+                &RemoteMeta {
+                    lamport_ts: env.lamport_ts,
+                    wall_time: env_wall,
+                    origin_device_id: &env.origin_device_id,
+                },
+            );
+            if !wins {
+                // Local wins LWW — keep it (self-echo no-op + remote-edit loser).
                 continue;
             }
             Some(local.id.clone())
@@ -802,6 +875,46 @@ fn ingest_page_blocking(
                 }
             }
         };
+
+        // ── Tombstone fast-path (CopyPaste-cm0u / CopyPaste-bfiu) ─────────────
+        // A delete envelope carries deleted=true and an empty ct_b64 (NULL
+        // content). Apply it via the SAME soft_delete / insert_tombstone path as
+        // P2P and cloud so deletes propagate over relay-only topologies, and a
+        // delete that races ahead of the create still leaves a tombstone the
+        // later create loses LWW against.
+        if env.deleted {
+            if let Some(local_pk) = preserved_pk.as_ref() {
+                match soft_delete_item(db, local_pk, env.lamport_ts, env_wall) {
+                    Ok(n) if n > 0 => {
+                        stored += 1;
+                        tracing::info!(
+                            "relay-sync: applied tombstone (item known locally)"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(e) => tracing::warn!("relay-sync: soft_delete_item failed: {e}"),
+                }
+            } else {
+                match insert_tombstone(
+                    db,
+                    &env.item_id,
+                    &env.item_id,
+                    env.lamport_ts,
+                    env_wall,
+                    &env.origin_device_id,
+                ) {
+                    Ok(_) => {
+                        stored += 1;
+                        tracing::info!(
+                            "relay-sync: inserted tombstone for unknown item \
+                             (delete-before-create)"
+                        );
+                    }
+                    Err(e) => tracing::warn!("relay-sync: insert_tombstone failed: {e}"),
+                }
+            }
+            continue;
+        }
 
         // Decrypt with the sync key (AAD = item_id + cloud schema v5).
         let plaintext = match decrypt_from_cloud(&sk, &env.item_id, &blob) {
@@ -823,10 +936,12 @@ fn ingest_page_blocking(
             &row.content_type,
             &plaintext,
             env.lamport_ts,
-            row.wall_time as i64,
+            env_wall,
             None,
             None,
-            String::new(),
+            // CopyPaste-ayvs: preserve the sender's origin so future tie-breaks
+            // on this device stay deterministic across hops.
+            env.origin_device_id.clone(),
             local_key,
         ) {
             Ok(i) => i,
@@ -836,16 +951,15 @@ fn ingest_page_blocking(
             }
         };
 
-        // LWW replace preserves the prior local row's PK + pin state.
+        // LWW replace preserves the prior local row's PK.
         if let Some(pk) = preserved_pk.as_ref() {
             local_item.id = pk.clone();
         }
-        if let Some(local) = existing.as_ref() {
-            local_item.pinned = local_item.pinned || local.pinned;
-            if local_item.pin_order.is_none() {
-                local_item.pin_order = local.pin_order;
-            }
-        }
+        // CopyPaste-cm0u: the envelope's pin state is authoritative (it travels
+        // with the item now). The pin LWW already won above (this is the
+        // TakeRemote branch), so apply the sender's pinned/pin_order directly.
+        local_item.pinned = env.pinned;
+        local_item.pin_order = env.pin_order;
 
         let write_res = if preserved_pk.is_some() {
             replace_cloud_item_by_item_id(db, &local_item)
@@ -1304,8 +1418,12 @@ mod tests {
             .expect("row present");
         assert_eq!(got.lamport_ts, 10);
 
-        // Re-pull the same item (equal lamport) → LWW no-op (self-echo dedup).
-        let pull2 = make_pull_item(2, item_id, plaintext, &sync_key, 10, 2001);
+        // Re-pull the SAME item with equal lamport, equal wall_time, and equal
+        // origin (a genuine self-echo of a row we pushed) → LWW no-op.
+        // CopyPaste-ayvs: the total order now tie-breaks on wall_time then
+        // origin, so a true echo must match ALL three keys (a higher wall_time
+        // would legitimately win — that is the convergence fix, not a regression).
+        let pull2 = make_pull_item(2, item_id, plaintext, &sync_key, 10, 2000);
         let (wm2, stored2) = ingest_page_blocking(
             &g,
             &local_key,
@@ -1314,9 +1432,9 @@ mod tests {
             wm1,
             u64::MAX,
         );
-        assert_eq!(stored2, 0, "equal-lamport echo is a no-op");
-        // Watermark still advances past the seen row so we don't re-fetch it.
-        assert_eq!(wm2.wall, 2001);
+        assert_eq!(stored2, 0, "equal lamport+wall+origin echo is a no-op");
+        // Watermark still advances past the seen row (id) so we don't re-fetch it.
+        assert_eq!(wm2.wall, 2000);
         assert_eq!(wm2.id, 2);
 
         // A strictly-newer lamport for the same item_id wins LWW (replace).
@@ -1490,14 +1608,308 @@ mod tests {
             item_id: item_id.to_owned(),
             lamport_ts,
             ct_b64,
+            deleted: false,
+            pinned: false,
+            pin_order: None,
+            wall_time: wall_time as i64,
+            origin_device_id: "dev-remote".to_owned(),
         };
+        envelope_to_pull(id, "text", &env, wall_time)
+    }
+
+    /// Wrap a `RelayEnvelope` into a `PullItem` (the relay-wire row shape).
+    fn envelope_to_pull(
+        id: i64,
+        content_type: &str,
+        env: &RelayEnvelope,
+        wall_time: u64,
+    ) -> PullItem {
         let content_b64 = base64::engine::general_purpose::STANDARD
-            .encode(serde_json::to_vec(&env).expect("env json"));
+            .encode(serde_json::to_vec(env).expect("env json"));
         PullItem {
             id,
-            content_type: "text".to_owned(),
+            content_type: content_type.to_owned(),
             content_b64,
             wall_time,
         }
+    }
+
+    /// Build a relay `PullItem` carrying a TOMBSTONE (deleted=true, empty ct).
+    fn make_tombstone_pull(
+        id: i64,
+        item_id: &str,
+        lamport_ts: i64,
+        wall_time: u64,
+    ) -> PullItem {
+        let env = RelayEnvelope {
+            item_id: item_id.to_owned(),
+            lamport_ts,
+            ct_b64: String::new(),
+            deleted: true,
+            pinned: false,
+            pin_order: None,
+            wall_time: wall_time as i64,
+            origin_device_id: "dev-remote".to_owned(),
+        };
+        envelope_to_pull(id, "text", &env, wall_time)
+    }
+
+    /// Build a relay `PullItem` carrying a PINNED text item.
+    fn make_pinned_pull(
+        id: i64,
+        item_id: &str,
+        plaintext: &[u8],
+        sync_key: &SyncKey,
+        lamport_ts: i64,
+        wall_time: u64,
+        pin_order: f64,
+    ) -> PullItem {
+        let blob = encrypt_for_cloud(sync_key, item_id, plaintext).expect("cloud encrypt");
+        let ct_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
+        let env = RelayEnvelope {
+            item_id: item_id.to_owned(),
+            lamport_ts,
+            ct_b64,
+            deleted: false,
+            pinned: true,
+            pin_order: Some(pin_order),
+            wall_time: wall_time as i64,
+            origin_device_id: "dev-remote".to_owned(),
+        };
+        envelope_to_pull(id, "text", &env, wall_time)
+    }
+
+    // ── CopyPaste-cm0u: delete + pin propagate over the relay envelope ────────
+
+    /// A delete envelope round-trips: build_content_b64 on a tombstone produces
+    /// a `deleted=true` / empty-ct envelope (no decrypt of NULL content), and
+    /// ingest applies it as a local soft-delete on a previously-live item.
+    #[test]
+    fn relay_tombstone_round_trip_soft_deletes_local() {
+        let db = open_mem_db();
+        let local_key = zeroize::Zeroizing::new([4u8; 32]);
+        let sync_bytes = skey("relay-tombstone-pass");
+        let sync_key = SyncKey::from_bytes(sync_bytes);
+        let g = db.blocking_lock();
+
+        // First ingest a live item (lamport 10).
+        let item_id = "item-del-1";
+        let live = make_pull_item(1, item_id, b"to be deleted", &sync_key, 10, 1000);
+        let (wm1, stored1) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&live),
+            Watermark::default(),
+            u64::MAX,
+        );
+        assert_eq!(stored1, 1, "live item inserted");
+        assert!(
+            !get_item_by_item_id(&g, item_id).unwrap().unwrap().deleted,
+            "item starts live"
+        );
+
+        // Now ingest a tombstone (lamport 11 > 10) — must soft-delete locally.
+        let tomb = make_tombstone_pull(2, item_id, 11, 2000);
+        let (_wm2, stored2) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&tomb),
+            wm1,
+            u64::MAX,
+        );
+        assert_eq!(stored2, 1, "tombstone applied");
+        let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
+        assert!(row.deleted, "relay tombstone must soft-delete the local item");
+        assert!(row.content.is_none(), "tombstone wipes content");
+    }
+
+    /// A tombstone built from a deleted ClipboardItem encodes as a
+    /// `deleted=true` envelope WITHOUT attempting to decrypt NULL content.
+    #[test]
+    fn build_content_b64_emits_tombstone_envelope_for_deleted_item() {
+        let local_key = zeroize::Zeroizing::new([6u8; 32]);
+        let sync_key = SyncKey::from_bytes(skey("relay-build-tomb-pass"));
+
+        // A tombstone row: deleted=true, content=None (as soft_delete_item leaves it).
+        let mut item = make_local_text_item("item-tomb", b"unused", &local_key, 9, 900);
+        item.deleted = true;
+        item.content = None;
+        item.content_nonce = None;
+
+        let content_b64 =
+            build_content_b64(&item, &local_key, &sync_key).expect("tombstone must build");
+        let env_bytes = base64::engine::general_purpose::STANDARD
+            .decode(&content_b64)
+            .expect("b64");
+        let env: RelayEnvelope = serde_json::from_slice(&env_bytes).expect("parse env");
+        assert!(env.deleted, "tombstone envelope carries deleted=true");
+        assert!(env.ct_b64.is_empty(), "tombstone envelope has empty ct_b64");
+        assert_eq!(env.item_id, "item-tomb");
+    }
+
+    /// Pin state propagates: a pinned envelope ingests as a pinned local row.
+    #[test]
+    fn relay_pin_round_trip_sets_pinned_local() {
+        let db = open_mem_db();
+        let local_key = zeroize::Zeroizing::new([8u8; 32]);
+        let sync_bytes = skey("relay-pin-pass");
+        let sync_key = SyncKey::from_bytes(sync_bytes);
+        let g = db.blocking_lock();
+
+        let item_id = "item-pin-1";
+        let pinned = make_pinned_pull(1, item_id, b"pin me", &sync_key, 5, 1000, 2.0);
+        let (_wm, stored) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&pinned),
+            Watermark::default(),
+            u64::MAX,
+        );
+        assert_eq!(stored, 1, "pinned item inserted");
+        let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
+        assert!(row.pinned, "relay must carry pinned=true");
+        assert_eq!(row.pin_order, Some(2.0), "relay must carry pin_order");
+    }
+
+    // ── CopyPaste-ayvs: transport tie-break parity (relay == P2P resolve) ─────
+
+    /// On EQUAL lamport, relay `ingest_page_blocking` must converge to the SAME
+    /// winner as the P2P `merge::resolve` (lamport -> wall_time ->
+    /// origin_device_id). Drive both with identical inputs and assert they agree
+    /// for both tie-break outcomes (remote-wins and local-wins on device id).
+    #[test]
+    fn relay_equal_lamport_tie_break_matches_p2p_resolve() {
+        use copypaste_sync::merge::{resolve, MergeOutcome};
+        use copypaste_sync::protocol::WireItem;
+
+        // Helper: build a P2P WireItem mirroring a relay envelope's keys.
+        fn wire(item_id: &str, lamport: i64, wall: i64, origin: &str) -> WireItem {
+            WireItem {
+                id: item_id.to_owned(),
+                item_id: item_id.to_owned(),
+                content_type: "text".to_owned(),
+                content: Some(vec![1, 2, 3]),
+                content_nonce: Some(vec![0u8; 24]),
+                blob_ref: None,
+                is_sensitive: false,
+                lamport_ts: lamport,
+                wall_time: wall,
+                expires_at: None,
+                app_bundle_id: None,
+                origin_device_id: origin.to_owned(),
+                key_version: 2,
+                file_name: None,
+                mime: None,
+                deleted: false,
+                pinned: false,
+                pin_order: None,
+            }
+        }
+
+        // Two cases: remote origin "zzz" (> local) must win; "aaa" (< local) loses.
+        for (remote_origin, remote_should_win) in [("zzz", true), ("aaa", false)] {
+            let db = open_mem_db();
+            let local_key = zeroize::Zeroizing::new([2u8; 32]);
+            let sync_bytes = skey("relay-parity-pass");
+            let sync_key = SyncKey::from_bytes(sync_bytes);
+            let g = db.blocking_lock();
+
+            let item_id = "item-parity";
+            // Seed a LOCAL item: lamport 5, wall 1000, origin "mmm".
+            let mut seed =
+                make_local_text_item(item_id, b"local-content", &local_key, 5, 1000);
+            seed.origin_device_id = "mmm".to_owned();
+            insert_item(&g, &seed).unwrap();
+
+            // P2P decision via resolve on identical keys.
+            let remote_wire = wire(item_id, 5, 1000, remote_origin);
+            let p2p_take_remote = matches!(resolve(&seed, &remote_wire), MergeOutcome::TakeRemote);
+            assert_eq!(
+                p2p_take_remote, remote_should_win,
+                "sanity: resolve decision for origin={remote_origin}"
+            );
+
+            // Relay decision: ingest an equal-lamport envelope with the same keys.
+            let env = RelayEnvelope {
+                item_id: item_id.to_owned(),
+                lamport_ts: 5,
+                ct_b64: base64::engine::general_purpose::STANDARD.encode(
+                    encrypt_for_cloud(&sync_key, item_id, b"remote-content").unwrap(),
+                ),
+                deleted: false,
+                pinned: false,
+                pin_order: None,
+                wall_time: 1000,
+                origin_device_id: remote_origin.to_owned(),
+            };
+            let pull = envelope_to_pull(1, "text", &env, 1000);
+            let (_wm, stored) = ingest_page_blocking(
+                &g,
+                &local_key,
+                &sync_bytes,
+                std::slice::from_ref(&pull),
+                Watermark::default(),
+                u64::MAX,
+            );
+            let relay_took_remote = stored == 1;
+            assert_eq!(
+                relay_took_remote, p2p_take_remote,
+                "relay ingest must converge to the SAME winner as P2P resolve \
+                 (origin={remote_origin}): relay={relay_took_remote}, p2p={p2p_take_remote}"
+            );
+            // Confirm the stored row's origin matches the chosen winner.
+            let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
+            let expected_origin = if remote_should_win { remote_origin } else { "mmm" };
+            assert_eq!(
+                row.origin_device_id, expected_origin,
+                "winning origin must persist for deterministic future tie-breaks"
+            );
+        }
+    }
+
+    // ── CopyPaste-bfiu: delete-before-create over relay must not resurrect ────
+
+    /// A tombstone for an UNKNOWN item_id inserts a tombstone row; a later
+    /// out-of-order create with a LOWER lamport then loses LWW and the item
+    /// stays deleted.
+    #[test]
+    fn relay_delete_before_create_does_not_resurrect() {
+        let db = open_mem_db();
+        let local_key = zeroize::Zeroizing::new([3u8; 32]);
+        let sync_bytes = skey("relay-dbc-pass");
+        let sync_key = SyncKey::from_bytes(sync_bytes);
+        let g = db.blocking_lock();
+
+        let item_id = "item-race-1";
+        // Delete arrives FIRST (lamport 20) for an item we have never seen.
+        let tomb = make_tombstone_pull(1, item_id, 20, 2000);
+        let (wm1, stored1) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&tomb),
+            Watermark::default(),
+            u64::MAX,
+        );
+        assert_eq!(stored1, 1, "tombstone inserted for unknown item");
+        let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
+        assert!(row.deleted, "unknown-item tombstone must persist as deleted");
+
+        // Create arrives LATER with a LOWER lamport (10 < 20) — must lose LWW.
+        let create = make_pull_item(2, item_id, b"resurrected?", &sync_key, 10, 1000);
+        let (_wm2, stored2) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&create),
+            wm1,
+            u64::MAX,
+        );
+        assert_eq!(stored2, 0, "late lower-lamport create must NOT resurrect");
+        let row = get_item_by_item_id(&g, item_id).unwrap().unwrap();
+        assert!(row.deleted, "item must stay deleted after the racing create");
     }
 }

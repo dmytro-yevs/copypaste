@@ -492,8 +492,9 @@ pub async fn merge_incoming_with_crypto(
             // (deleted=true), apply it locally without going through the full
             // rekey + replace path.
             //   • Row exists locally  → soft-delete it (wipe content, set deleted=1).
-            //   • Row does not exist  → skip; no point creating a tombstone for a
-            //     row we never held (the item was already absent here).
+            //   • Row does not exist  → insert a tombstone row (CopyPaste-bfiu)
+            //     so a later out-of-order create loses LWW instead of
+            //     resurrecting the item (delete-before-create race).
             if wire.deleted {
                 if exists {
                     let local_id = local_pk
@@ -516,7 +517,26 @@ pub async fn merge_incoming_with_crypto(
                         }
                     }
                 } else {
-                    debug!(item_id = %wire.item_id, "sync_orch: inbound tombstone for unknown item — skipping");
+                    // CopyPaste-bfiu: persist a tombstone for the unknown item so
+                    // a create that arrives after the delete (out-of-order over
+                    // P2P) is LWW-rejected and the item stays deleted. Honors the
+                    // soft_delete "an inbound delete cannot resurrect" contract.
+                    match copypaste_core::insert_tombstone(
+                        &db_guard,
+                        &wire.item_id,
+                        &wire.item_id,
+                        wire.lamport_ts,
+                        wire.wall_time,
+                        &wire.origin_device_id,
+                    ) {
+                        Ok(_) => {
+                            debug!(item_id = %wire.item_id, "sync_orch: inserted tombstone for unknown item (delete-before-create)");
+                            upserted += 1;
+                        }
+                        Err(e) => {
+                            warn!(item_id = %wire.item_id, "sync_orch: insert_tombstone failed: {e}");
+                        }
+                    }
                 }
                 continue;
             }
@@ -2437,6 +2457,54 @@ mod tests {
         let rows = copypaste_core::get_page(&*g, 10, 0).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].content, Some(vec![0x11]), "local payload preserved");
+    }
+
+    /// CopyPaste-bfiu: a P2P tombstone for an UNKNOWN item_id (delete arrives
+    /// before the create, out-of-order over P2P) must persist a tombstone row so
+    /// a later lower-lamport create is LWW-rejected and the item stays deleted —
+    /// instead of the old behaviour that silently skipped the tombstone and let
+    /// the create resurrect the item.
+    #[tokio::test]
+    async fn merge_incoming_delete_before_create_does_not_resurrect() {
+        let db = make_db();
+
+        // 1) DELETE arrives first for an item we have never seen (lamport 20).
+        let mut tomb = make_wire("ghost", 20, 0x00);
+        tomb.item_id = "ghost-iid".to_string();
+        tomb.deleted = true;
+        tomb.content = None;
+        tomb.content_nonce = None;
+        let upserted = merge_incoming(&db, vec![tomb]).await.unwrap();
+        assert_eq!(upserted, 1, "tombstone for unknown item must be persisted");
+
+        {
+            let g = db.lock().await;
+            let row = copypaste_core::get_item_by_item_id(&g, "ghost-iid")
+                .unwrap()
+                .expect("tombstone row must exist");
+            assert!(row.deleted, "unknown-item tombstone must persist as deleted");
+            // The user-facing list must not show it.
+            assert!(
+                copypaste_core::get_page(&*g, 10, 0).unwrap().is_empty(),
+                "tombstone must not appear in the history list"
+            );
+        }
+
+        // 2) CREATE arrives later with a LOWER lamport (10 < 20) → loses LWW.
+        let mut create = make_wire("ghost", 10, 0xAB);
+        create.item_id = "ghost-iid".to_string();
+        let upserted2 = merge_incoming(&db, vec![create]).await.unwrap();
+        assert_eq!(upserted2, 0, "late lower-lamport create must NOT resurrect");
+
+        let g = db.lock().await;
+        let row = copypaste_core::get_item_by_item_id(&g, "ghost-iid")
+            .unwrap()
+            .expect("row still present");
+        assert!(row.deleted, "item must stay deleted after the racing create");
+        assert!(
+            copypaste_core::get_page(&*g, 10, 0).unwrap().is_empty(),
+            "item must remain hidden from history"
+        );
     }
 
     /// CRDT identity + local-PK preservation: a TakeRemote (newer lamport) for

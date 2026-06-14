@@ -1817,7 +1817,18 @@ async fn handle_text(
                 // Identical content already in history: bump recency to now so
                 // the existing row rises to the top of the pinned-first,
                 // wall_time DESC sort. We do NOT insert a new row.
-                let new_lamport = now_ms; // use wall_time ms as lamport proxy
+                // CopyPaste-ojhe: stamp the unified lamport value space
+                // (max(existing + 1, now_ms)) so a recopy is monotonic relative
+                // to the row's own prior lamport AND time-ordered. Previously
+                // this used bare `now_ms`, which a later pin/delete deriving from
+                // a small counter could never overtake under lamport-only LWW.
+                let existing_lamport = get_item_by_id(&*db_guard, &existing_id)
+                    .ok()
+                    .flatten()
+                    .map(|r| r.lamport_ts)
+                    .unwrap_or(0);
+                let new_lamport =
+                    copypaste_core::next_lamport_ts(existing_lamport, now_ms);
                 match bump_item_recency(&db_guard, &existing_id, now_ms, new_lamport) {
                     Ok(changed) if changed > 0 => {
                         tracing::debug!(
@@ -1871,7 +1882,15 @@ async fn handle_text(
                     return None;
                 }
             };
-        let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
+        // CopyPaste-ojhe: stamp the unified lamport value space at capture
+        // (`next_lamport_ts(0, now_ms) == now_ms`) instead of a hardcoded 0.
+        // A fresh capture must outrank an older recopy/pin/delete of unrelated
+        // items under lamport-first LWW; a 0-stamped capture could never win.
+        let mut item = ClipboardItem::new_text(
+            ciphertext,
+            nonce.to_vec(),
+            copypaste_core::next_lamport_ts(0, now_ms),
+        );
         item.item_id = item_id;
         item.is_sensitive = is_sensitive;
         // Stamp the stable on-disk device_id so cloud/P2P peers attribute every
@@ -2026,6 +2045,11 @@ async fn handle_image(
                     Some(thumb_blob)
                 };
                 let mut item = ClipboardItem::new_image(blob, meta_json, 0, thumb);
+                // CopyPaste-ojhe: stamp the unified lamport value space at
+                // capture (`next_lamport_ts(0, wall_time) == wall_time`) instead
+                // of a hardcoded 0, so a fresh capture is time-ordered under
+                // lamport-first LWW. `new_image` set `wall_time = now` already.
+                item.lamport_ts = copypaste_core::next_lamport_ts(0, item.wall_time);
                 // Stable cross-device item identity (mirror handle_text, which
                 // sets `item.item_id` once at capture). `new_image` seeds a fresh
                 // random `item_id`; that would give the SAME image a different
@@ -2137,6 +2161,11 @@ async fn handle_file(
                 };
                 let meta_json = crate::clipboard::build_file_meta_json(&meta);
                 let mut item = ClipboardItem::new_file(blob, meta_json, 0);
+                // CopyPaste-ojhe: stamp the unified lamport value space at
+                // capture (`next_lamport_ts(0, wall_time) == wall_time`) instead
+                // of a hardcoded 0, so a fresh capture is time-ordered under
+                // lamport-first LWW. `new_file` set `wall_time = now` already.
+                item.lamport_ts = copypaste_core::next_lamport_ts(0, item.wall_time);
                 // Stable cross-device identity: derive item_id from the
                 // content-hash file_id (same pattern as handle_image).
                 item.item_id = uuid::Uuid::from_bytes(file_id).to_string();

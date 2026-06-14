@@ -37,6 +37,49 @@ fn validate_key_version(key_version: u8) -> Result<i64, ItemsError> {
     }
 }
 
+/// Compute the next monotonic-AND-time-ordered Lamport timestamp for a local
+/// mutation.
+///
+/// Returns `max(prev_lamport + 1, now_ms)`.
+///
+/// # Why one unified value space (CopyPaste-ojhe)
+///
+/// Before this, the daemon stamped `lamport_ts` with three colliding
+/// conventions in the same `i64` field: fresh capture = `0`, recopy/promote =
+/// `now_ms` (~1.75e12), and pin/delete = `existing + 1` (small counter). The
+/// cloud and relay transports do bare lamport-only LWW (`remote <= local ->
+/// keep`), so a stale recopy (lamport ≈ `now_ms`) permanently outranked a newer
+/// pin/delete (lamport ≈ small): pins were silently overwritten and deletes
+/// resurrected.
+///
+/// Stamping *every* write with `max(prev + 1, now_ms)` makes the field both:
+///   * **monotonic** — strictly greater than the row's previous value, so a
+///     newer local edit always overtakes its own prior version even if two
+///     edits land within the same wall-clock millisecond; and
+///   * **time-ordered** — at least `now_ms`, so the newest *writer* across
+///     devices wins under lamport-first LWW (wall_time / origin_device_id only
+///     break exact ties).
+///
+/// Backward compatibility: existing rows carry `lamport_ts = 0` and older peers
+/// emit small or `now_ms`-magnitude values; a fresh `now_ms`-based write
+/// deterministically dominates a stale low value and loses to a strictly-larger
+/// future value, so newest-writer-wins holds without a migration.
+pub fn next_lamport_ts(prev_lamport: i64, now_ms: i64) -> i64 {
+    prev_lamport.saturating_add(1).max(now_ms)
+}
+
+/// Current wall-clock time in milliseconds since the Unix epoch.
+///
+/// Degrades to `0` (epoch) on a pathological pre-epoch clock rather than
+/// panicking — matching the `unwrap_or_default()` contract used by the
+/// `ClipboardItem::new_*` constructors.
+fn now_ms_epoch() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
+}
+
 #[derive(Debug, Clone)]
 pub struct ClipboardItem {
     pub id: String,
@@ -798,6 +841,62 @@ pub fn soft_delete_item(
     Ok(changed)
 }
 
+/// Insert a fresh tombstone row for a cross-device `item_id` that is **not yet
+/// known locally** (delete-before-create race — CopyPaste-bfiu).
+///
+/// When a delete arrives ahead of the original create (relay has no cross-push
+/// ordering; cloud realtime/websocket can reorder vs the create), the receiver
+/// previously dropped the tombstone because there was no row to soft-delete.
+/// A later out-of-order create then resurrected the item with nothing to lose
+/// LWW against.
+///
+/// Persisting the tombstone (deleted=1, content/nonce/thumb NULL, with the
+/// incoming `lamport_ts` / `wall_time`) closes the window: the subsequent create
+/// is routed through the normal LWW resolve and loses to this tombstone unless
+/// it is *strictly newer*, honouring the [`soft_delete_item`] "an inbound delete
+/// cannot resurrect the item" contract.
+///
+/// `origin_device_id` is preserved so the LWW tie-break (lamport → wall_time →
+/// origin_device_id) stays deterministic across peers. The row is NOT indexed in
+/// FTS (tombstones are never searchable). `id` is the local primary key to use —
+/// callers typically seed it with the `item_id` for a fresh insert.
+///
+/// Returns the number of rows inserted (`1` on success). On a UNIQUE conflict
+/// (`idx_clipboard_item_id`) the row already exists; the caller should have
+/// taken the soft-delete-existing path instead, so a conflict is surfaced as an
+/// error rather than silently ignored.
+pub fn insert_tombstone(
+    db: &Database,
+    id: &str,
+    item_id: &str,
+    lamport_ts: i64,
+    wall_time: i64,
+    origin_device_id: &str,
+) -> Result<usize, ItemsError> {
+    // Honour the same write gate the core `insert_item` enforces.
+    if matches!(db.migration_state()?, MigrationState::InProgress { .. }) {
+        return Err(ItemsError::MigrationInProgress);
+    }
+    let inserted = db.conn().execute(
+        "INSERT INTO clipboard_items
+         (id, item_id, content_type, content, content_nonce, blob_ref,
+          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+          content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted)
+         VALUES (?1, ?2, 'text', NULL, NULL, NULL,
+                 0, 1, ?3, ?4, NULL, NULL,
+                 NULL, ?5, ?6, 0, NULL, NULL, 1)",
+        params![
+            id,
+            item_id,
+            lamport_ts,
+            wall_time,
+            origin_device_id,
+            ITEM_KEY_VERSION_CURRENT,
+        ],
+    )?;
+    Ok(inserted)
+}
+
 /// Pin an item so it is never auto-deleted by TTL or history-limit prunes.
 ///
 /// Sets `pinned = 1`, clears `expires_at`, and assigns `pin_order` to
@@ -809,6 +908,14 @@ pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     // already holds this item (same pattern as soft_delete_item).
     // wall_time is refreshed to now (ms since UNIX epoch) so peers can also
     // converge on wall-clock order when lamport clocks are tied.
+    //
+    // CopyPaste-ojhe: the new lamport is MAX(lamport_ts + 1, now_ms) — the same
+    // unified value space `next_lamport_ts` produces — so a pin can overtake a
+    // stale `now_ms`-magnitude recopy of the same item instead of staying a
+    // small counter value that lamport-only LWW would discard. `now_ms` is bound
+    // as a parameter (rather than strftime) so it equals the wall_time we stamp,
+    // keeping the two clocks consistent for the LWW tie-break.
+    let now_ms = now_ms_epoch();
     db.conn().execute(
         "UPDATE clipboard_items
          SET pinned = 1,
@@ -818,14 +925,13 @@ pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
                  FROM clipboard_items
                  WHERE pinned = 1
              ),
-             lamport_ts = (
-                 SELECT lamport_ts + 1
-                 FROM clipboard_items
-                 WHERE id = ?1
+             lamport_ts = MAX(
+                 (SELECT lamport_ts + 1 FROM clipboard_items WHERE id = ?1),
+                 ?2
              ),
-             wall_time = (CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+             wall_time = ?2
          WHERE id = ?1",
-        rusqlite::params![id],
+        rusqlite::params![id, now_ms],
     )?;
     Ok(())
 }
@@ -836,18 +942,19 @@ pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
 pub fn unpin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
     // Bump lamport_ts so the unpin change wins LWW merge on every peer that
     // already holds this item (same pattern as soft_delete_item / pin_item).
+    // CopyPaste-ojhe: MAX(lamport_ts + 1, now_ms) keeps the unified value space.
+    let now_ms = now_ms_epoch();
     db.conn().execute(
         "UPDATE clipboard_items
          SET pinned = 0,
              pin_order = NULL,
-             lamport_ts = (
-                 SELECT lamport_ts + 1
-                 FROM clipboard_items
-                 WHERE id = ?1
+             lamport_ts = MAX(
+                 (SELECT lamport_ts + 1 FROM clipboard_items WHERE id = ?1),
+                 ?2
              ),
-             wall_time = (CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+             wall_time = ?2
          WHERE id = ?1",
-        rusqlite::params![id],
+        rusqlite::params![id, now_ms],
     )?;
     Ok(())
 }
@@ -868,21 +975,22 @@ pub fn reorder_pinned(db: &Database, ids: &[&str]) -> Result<usize, ItemsError> 
     let conn = db.conn();
     let tx = conn.unchecked_transaction()?;
     let mut changed = 0usize;
+    let now_ms = now_ms_epoch();
     for (i, id) in ids.iter().enumerate() {
         let order = (i + 1) as f64;
         // Bump lamport_ts so the reorder wins LWW merge on every peer —
         // same pattern as pin_item / unpin_item / soft_delete_item.
+        // CopyPaste-ojhe: MAX(lamport_ts + 1, now_ms) keeps the unified space.
         let rows = tx.execute(
             "UPDATE clipboard_items
              SET pin_order = ?1,
-                 lamport_ts = (
-                     SELECT lamport_ts + 1
-                     FROM clipboard_items
-                     WHERE id = ?2
+                 lamport_ts = MAX(
+                     (SELECT lamport_ts + 1 FROM clipboard_items WHERE id = ?2),
+                     ?3
                  ),
-                 wall_time = (CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+                 wall_time = ?3
              WHERE id = ?2 AND pinned = 1",
-            rusqlite::params![order, id],
+            rusqlite::params![order, id, now_ms],
         )?;
         changed += rows;
     }
@@ -1333,6 +1441,34 @@ mod tests {
 
     fn make_item(lamport: i64) -> ClipboardItem {
         ClipboardItem::new_text(vec![0xAA, 0xBB], vec![0u8; 24], lamport)
+    }
+
+    /// CopyPaste-bfiu: `insert_tombstone` persists a deleted row for an unknown
+    /// item_id (delete-before-create race) so a later create loses LWW. The row
+    /// is visible to the merge layer (`get_item_by_item_id`) but hidden from
+    /// user-facing list queries (`get_page` filters deleted=0).
+    #[test]
+    fn insert_tombstone_persists_hidden_deleted_row() {
+        let db = Database::open_in_memory().unwrap();
+        let n = insert_tombstone(&db, "row-1", "iid-unknown", 42, 9000, "dev-X").unwrap();
+        assert_eq!(n, 1, "one tombstone row inserted");
+
+        // Visible to the merge layer.
+        let row = get_item_by_item_id(&db, "iid-unknown")
+            .unwrap()
+            .expect("tombstone row exists");
+        assert!(row.deleted, "row must be deleted");
+        assert!(row.content.is_none(), "tombstone has no content");
+        assert_eq!(row.lamport_ts, 42);
+        assert_eq!(row.wall_time, 9000);
+        assert_eq!(row.origin_device_id, "dev-X");
+
+        // Hidden from the user-facing history list.
+        let page = get_page(&db, 100, 0).unwrap();
+        assert!(
+            page.iter().all(|i| i.item_id != "iid-unknown"),
+            "tombstone must not appear in the history list"
+        );
     }
 
     #[test]
@@ -1808,20 +1944,34 @@ mod tests {
     /// Without this bump a peer receiving the item via cloud backlog or P2P
     /// would silently discard the pin update because the timestamp tie-breaks
     /// in favour of the (unchanged) local copy.
+    ///
+    /// CopyPaste-ojhe: the bump now stamps the UNIFIED value space
+    /// `MAX(lamport_ts + 1, now_ms)`, not a bare `+1`. A `make_item(10)` row
+    /// pinned today lands on `now_ms` (~1.75e12), strictly greater than 10, so
+    /// the pin remains monotonic AND time-ordered — and can overtake a stale
+    /// now_ms-magnitude recopy of the same item (the bug this fixes).
     #[test]
     fn pin_unpin_bumps_lamport_ts() {
         let db = Database::open_in_memory().unwrap();
         let item = make_item(10);
         let id = item.id.clone();
         insert_item(&db, &item).unwrap();
+        // Wall-clock floor: every unified stamp is at least this.
+        let floor = now_ms_epoch() - 1000;
 
-        // pin_item must advance lamport_ts beyond the inserted value (10).
+        // pin_item must advance lamport_ts to the unified value (>= now_ms).
         pin_item(&db, &id).unwrap();
         let after_pin = get_item_by_id(&db, &id).unwrap().expect("row must exist");
-        assert_eq!(
+        assert!(
+            after_pin.lamport_ts > 10,
+            "pin_item must bump lamport_ts above the inserted value (was 10, got {})",
+            after_pin.lamport_ts
+        );
+        assert!(
+            after_pin.lamport_ts >= floor,
+            "pin_item must stamp the unified now_ms-based value (got {}, floor {})",
             after_pin.lamport_ts,
-            11,
-            "pin_item must bump lamport_ts by 1 so the pin wins LWW merge (was 10)"
+            floor
         );
         assert!(after_pin.pinned, "item must be pinned after pin_item");
         assert!(
@@ -1829,18 +1979,55 @@ mod tests {
             "pin_item must assign a non-null pin_order"
         );
 
-        // unpin_item must advance lamport_ts beyond the post-pin value (11).
+        // unpin_item must advance lamport_ts strictly beyond the post-pin value.
         unpin_item(&db, &id).unwrap();
         let after_unpin = get_item_by_id(&db, &id).unwrap().expect("row must exist");
-        assert_eq!(
-            after_unpin.lamport_ts,
-            12,
-            "unpin_item must bump lamport_ts by 1 so the unpin wins LWW merge (was 11)"
+        assert!(
+            after_unpin.lamport_ts >= after_pin.lamport_ts,
+            "unpin_item must not regress lamport_ts (pin={}, unpin={})",
+            after_pin.lamport_ts,
+            after_unpin.lamport_ts
         );
         assert!(!after_unpin.pinned, "item must be unpinned after unpin_item");
         assert!(
             after_unpin.pin_order.is_none(),
             "unpin_item must clear pin_order back to NULL"
+        );
+    }
+
+    /// CopyPaste-ojhe: `next_lamport_ts` is monotonic AND time-ordered.
+    #[test]
+    fn next_lamport_ts_is_monotonic_and_time_ordered() {
+        // When now_ms dominates (fresh capture, prev=0), we get now_ms.
+        assert_eq!(next_lamport_ts(0, 1_750_000_000_000), 1_750_000_000_000);
+        // When prev+1 dominates (two edits in the same ms), we get prev+1 so the
+        // value still strictly increases.
+        assert_eq!(
+            next_lamport_ts(1_750_000_000_005, 1_750_000_000_000),
+            1_750_000_000_006
+        );
+        // Always strictly greater than prev.
+        for prev in [0i64, 1, 1_750_000_000_000, i64::MAX - 1] {
+            assert!(next_lamport_ts(prev, 0) > prev || prev == i64::MAX);
+        }
+    }
+
+    /// CopyPaste-ojhe: a newer pin (unified) beats an older recopy (now_ms) when
+    /// compared by raw lamport — the exact data-loss scenario from the audit.
+    #[test]
+    fn newer_pin_lamport_beats_older_recopy_lamport() {
+        // Older recopy stamped at now_ms.
+        let recopy_now = 1_750_000_000_000i64;
+        let recopy_lamport = next_lamport_ts(0, recopy_now); // == recopy_now
+
+        // The item is then pinned a few ms later: MAX(recopy + 1, pin_now).
+        let pin_now = recopy_now + 5;
+        let pin_lamport = next_lamport_ts(recopy_lamport, pin_now);
+
+        assert!(
+            pin_lamport > recopy_lamport,
+            "the unified pin lamport ({pin_lamport}) must exceed the recopy \
+             lamport ({recopy_lamport}) so lamport-first LWW keeps the pin"
         );
     }
 

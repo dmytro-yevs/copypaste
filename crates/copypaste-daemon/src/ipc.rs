@@ -3065,7 +3065,12 @@ impl IpcServer {
                 .as_millis() as i64;
             // Look up the current row to derive the new lamport_ts.
             let existing = get_item_by_id(&*db, &id_owned).map_err(|e| e.to_string())?;
-            let new_lamport = existing.as_ref().map(|r| r.lamport_ts + 1).unwrap_or(1);
+            // CopyPaste-ojhe: stamp the unified lamport value space
+            // (max(existing + 1, now_ms)) so the tombstone is both monotonic and
+            // time-ordered — it can overtake a stale now_ms-magnitude recopy of
+            // the same item that a small `existing + 1` could never beat.
+            let prev_lamport = existing.as_ref().map(|r| r.lamport_ts).unwrap_or(0);
+            let new_lamport = copypaste_core::next_lamport_ts(prev_lamport, now_ms);
             let changed =
                 soft_delete_item(&db, &id_owned, new_lamport, now_ms).map_err(|e| e.to_string())?;
             // Re-read the tombstone row so we can broadcast it to peers.
@@ -3324,7 +3329,18 @@ impl IpcServer {
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_millis() as i64)
                                     .unwrap_or(0);
-                                bump_item_recency(&db, &item_id_bump, now_ms, now_ms)
+                                // CopyPaste-ojhe: unified lamport value space —
+                                // max(existing + 1, now_ms) keeps the promote
+                                // monotonic vs the row's own prior lamport so a
+                                // later pin/delete (also unified) can overtake it.
+                                let prev_lamport = get_item_by_id(&*db, &item_id_bump)
+                                    .ok()
+                                    .flatten()
+                                    .map(|r| r.lamport_ts)
+                                    .unwrap_or(0);
+                                let new_lamport =
+                                    copypaste_core::next_lamport_ts(prev_lamport, now_ms);
+                                bump_item_recency(&db, &item_id_bump, now_ms, new_lamport)
                             })
                             .await
                             {
@@ -3687,7 +3703,18 @@ impl IpcServer {
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_millis() as i64)
                                     .unwrap_or(0);
-                                bump_item_recency(&db, &item_id_bump, now_ms, now_ms)
+                                // CopyPaste-ojhe: unified lamport value space —
+                                // max(existing + 1, now_ms) keeps the promote
+                                // monotonic vs the row's own prior lamport so a
+                                // later pin/delete (also unified) can overtake it.
+                                let prev_lamport = get_item_by_id(&*db, &item_id_bump)
+                                    .ok()
+                                    .flatten()
+                                    .map(|r| r.lamport_ts)
+                                    .unwrap_or(0);
+                                let new_lamport =
+                                    copypaste_core::next_lamport_ts(prev_lamport, now_ms);
+                                bump_item_recency(&db, &item_id_bump, now_ms, new_lamport)
                             })
                             .await
                             {
@@ -9373,6 +9400,12 @@ mod tests {
     /// W3.6 — stubbed methods (`cloud_sign_in`, `cloud_sign_out`) must carry
     /// a stable machine-readable `error_code: "not_implemented"` so clients
     /// can branch deterministically without parsing the English `error` text.
+    ///
+    /// Only meaningful when `cloud-sync` is OFF: that is the only build where
+    /// `cloud_sign_in` is the not-implemented STUB. With `cloud-sync` enabled
+    /// the real handler runs and (correctly) returns `invalid_argument` for the
+    /// missing-params request used here, so the assertion does not apply.
+    #[cfg(not(feature = "cloud-sync"))]
     #[tokio::test]
     async fn ipc_responses_carry_machine_readable_error_code() {
         let dir = tempdir().unwrap();
@@ -12384,7 +12417,7 @@ mod tests {
             .await;
         assert!(!resp.ok, "cloud_sign_in with no config must fail; got {resp:?}");
         assert_eq!(
-            resp.error_code.as_deref(),
+            resp.error_code,
             Some(ERR_CODE_INVALID_ARGUMENT),
             "must return invalid_argument when Supabase is not configured"
         );

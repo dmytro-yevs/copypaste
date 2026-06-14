@@ -1,5 +1,12 @@
 /// P2P sync engine.
 ///
+/// **NOT on the daemon production path** (CopyPaste-j6r/ayvs): the live daemon
+/// does not instantiate `SyncEngine`. P2P sync in the daemon runs through
+/// `copypaste-daemon::sync_orch` (which calls [`crate::merge::resolve`]
+/// directly), and cloud/relay reuse the same [`crate::merge::remote_wins`]
+/// total order. This engine + its HELLO/HAVE/WANT/ITEMS/DONE protocol are kept
+/// for completeness and tests; see the crate-root docs before wiring them in.
+///
 /// `SyncEngine` orchestrates the item exchange loop between two peers over a
 /// bidirectional byte stream (typically a TLS TCP socket).  It is intentionally
 /// transport-agnostic: callers pass in an `AsyncRead + AsyncWrite` and the
