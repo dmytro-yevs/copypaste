@@ -150,7 +150,7 @@ fun unpairPeer(settings: Settings, fingerprint: String) {
 
 /**
  * Devices screen — shows the full roster of paired P2P peers, each as a card
- * with a real-presence online dot, sync address, fingerprint, last-sync time,
+ * with a real-presence online dot, model, OS, version, IP fields, last-sync time,
  * and per-peer Unpair / Revoke actions. Parity with the macOS DevicesView.
  *
  * Navigation: launched from the DEVICES tab in [MainActivity] bottom nav, and
@@ -977,13 +977,6 @@ private fun PeerCard(
             } else null
 
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Fingerprint (short) — parity with macOS PeerRow.
-                MetaRow(
-                    label = "Fingerprint",
-                    value = if (peer.fingerprint.length > 24)
-                        "${peer.fingerprint.take(16)}…${peer.fingerprint.takeLast(8)}"
-                    else peer.fingerprint,
-                )
                 peer.peerModel?.takeIf { it.isNotBlank() }?.let {
                     MetaRow(label = "Model", value = it)
                 }
@@ -998,9 +991,6 @@ private fun PeerCard(
                 }
                 peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
                     MetaRow(label = "Public IP", value = it)
-                }
-                if (peer.syncAddr.isNotBlank()) {
-                    MetaRow(label = "Sync", value = peer.syncAddr)
                 }
                 if (peer.pairedAtMs > 0L) {
                     MetaRow(label = "Paired", value = formatEpochMs(peer.pairedAtMs))
