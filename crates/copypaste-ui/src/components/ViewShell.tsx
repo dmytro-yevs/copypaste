@@ -43,7 +43,8 @@ export function ViewShell({
       <header
         data-tauri-drag-region
         className={[
-          "surface-glass",
+          // §jxbx-6: card-in entrance — cubic-bezier spring from index.css utility.
+          "surface-glass card-in",
           "flex h-11 shrink-0 items-center justify-between px-4",
           "rounded-ide-lg",
           "shadow-ide-sm",
@@ -66,7 +67,8 @@ export function ViewShell({
         stays pinned (does not grow to push out of the window).
         rounded-ide-lg: same 14px radius as the header.
       */}
-      <div className="surface-glass min-h-0 flex-1 overflow-auto rounded-ide-lg p-4 shadow-ide-sm">
+      {/* §jxbx-7: reveal-up entrance — content panel rises after header settles. */}
+      <div className="surface-glass reveal-up min-h-0 flex-1 overflow-auto rounded-ide-lg p-4 shadow-ide-sm">
         {children}
       </div>
     </div>

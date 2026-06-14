@@ -24,6 +24,15 @@ const LEVEL_CLASS: Record<LogLevel, string> = {
   debug: "text-ide-faint",
 };
 
+// Per-level left-border accent so the row type reads at a glance.
+// Uses color-mix via inline style to stay token-only (no hardcoded hex).
+const LEVEL_BORDER: Record<LogLevel, string> = {
+  error: "border-l-ide-danger",
+  warn: "border-l-ide-warning",
+  info: "border-l-transparent",
+  debug: "border-l-transparent",
+};
+
 export function LogView() {
   const [content, setContent] = useState<string>("");
   const [logPath, setLogPath] = useState<string>("");
@@ -70,12 +79,15 @@ export function LogView() {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, [content]);
 
+  const lines = content.split("\n");
+  const lastLineIdx = lines.length - 1;
+
   return (
     // surface-glass on the frame; the opaque bg-ide-bg was DEFEATING the glass —
     // removed so the aurora canvas blurs through.
     <div className="surface-glass flex h-full flex-col">
       {/* Header — glass too, so it reads as a layered material, not an opaque bar. */}
-      <div className="surface-card flex shrink-0 items-center justify-between border-b border-ide-border px-4 py-3">
+      <div className="surface-card reveal-up flex shrink-0 items-center justify-between border-b border-ide-border px-4 py-3">
         <div>
           <h2 className="text-[13px] font-medium text-ide-text">Daemon Logs</h2>
           {logPath && (
@@ -86,15 +98,18 @@ export function LogView() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={() => { setLoading(true); void load(); }}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+            onClick={() => {
+              setLoading(true);
+              void load();
+            }}
+            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text"
           >
             Refresh
           </button>
           <button
             onClick={handleExport}
             disabled={!content || content === "(no log entries)"}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs disabled:opacity-40"
+            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text disabled:opacity-40"
           >
             Export
           </button>
@@ -112,20 +127,51 @@ export function LogView() {
             <p className="text-[13px] text-ide-danger">{error}</p>
           </div>
         ) : (
-          // audit P2: colorized, per-line log view (replaces the flat textarea).
-          // Selectable text is preserved (select-text) so users can still copy.
+          // Scrollable log area — no extra wrapper border; the rows live directly
+          // on the content panel surface (one cohesive glass surface, no box-in-box).
+          // select-text preserved so users can still copy lines.
           <div
             ref={scrollRef}
-            className="h-full w-full overflow-auto rounded-ide border border-ide-border bg-ide-raised p-3 font-mono text-[11px] leading-relaxed select-text"
+            className="h-full w-full overflow-auto select-text"
           >
-            {content.split("\n").map((line, i) => (
-              <div
-                key={i}
-                className={`whitespace-pre-wrap break-words ${LEVEL_CLASS[levelOf(line)]}`}
-              >
-                {line || " "}
-              </div>
-            ))}
+            {lines.map((line, i) => {
+              const level = levelOf(line);
+              const isLast = i === lastLineIdx;
+              return (
+                // Each row is a .mono-line glass pill — hover accent border via
+                // Tailwind group and inline transition (mirrors source.html §870-896).
+                // border-l-2 gives a per-level accent stripe (error/warn only).
+                <div
+                  key={i}
+                  className={[
+                    "list-item-in",
+                    "group flex items-start gap-2",
+                    "rounded border border-ide-border bg-black/10",
+                    "px-2 py-1 font-mono text-[11px] leading-relaxed",
+                    "mb-1 last:mb-0",
+                    "border-l-2",
+                    LEVEL_BORDER[level],
+                    LEVEL_CLASS[level],
+                    // Hover: accent-tinted border + subtle bg fill (mirrors .mono-line:hover)
+                    "transition-[border-color,background] duration-200 ease-out",
+                    "hover:border-ide-accent/40 hover:bg-ide-accent/5",
+                    "cursor-default whitespace-pre-wrap break-words",
+                  ]
+                    .filter(Boolean)
+                    .join(" ")}
+                  style={{ animationDelay: `${Math.min(i * 8, 200)}ms` }}
+                >
+                  <code className="flex-1 overflow-hidden">{line || " "}</code>
+                  {/* Terminal cursor blink on the last (live) line. */}
+                  {isLast && (
+                    <span
+                      className="cursor-blink ml-0.5 inline-block h-[1em] w-[6px] shrink-0 rounded-sm bg-current opacity-70"
+                      aria-hidden="true"
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

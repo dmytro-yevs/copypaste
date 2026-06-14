@@ -117,6 +117,9 @@ pub enum KeychainError {
     #[cfg(not(target_os = "macos"))]
     #[error("Keychain not supported on this platform")]
     Unsupported,
+    #[cfg(not(target_os = "macos"))]
+    #[error("Keychain file I/O error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("Core key error: {0}")]
     Key(#[from] copypaste_core::KeyError),
     // ── v0.3 ACL surface (macOS only) ──────────────────────────────────────

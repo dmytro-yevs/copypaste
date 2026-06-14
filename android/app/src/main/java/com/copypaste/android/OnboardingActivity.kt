@@ -13,15 +13,26 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Battery5Bar
@@ -29,22 +40,26 @@ import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.PhonelinkSetup
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Check
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -53,19 +68,24 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeBorder
-import com.copypaste.android.ui.theme.IdeDanger
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeSuccess
-import com.copypaste.android.ui.theme.IdeText
+import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.MonoFontFamily
+import com.copypaste.android.ui.theme.Motion
+import com.copypaste.android.ui.theme.RadiusChip
+import com.copypaste.android.ui.theme.auroraCanvas
+import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.motionDuration
+import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.rememberReducedMotion
+import com.copypaste.android.ui.theme.rememberTranslucency
 import android.content.ClipData
 import android.content.ClipboardManager
-import androidx.compose.foundation.clickable
-import com.copypaste.android.ui.theme.MonoFontFamily
 
 /**
  * First-run permission onboarding screen.
@@ -312,6 +332,12 @@ fun OnboardingScreen(
     onDone: () -> Unit,
 ) {
     val ctx = LocalContext.current
+    val c = LocalIdeColors.current
+    val dark = isDarkTheme()
+    val translucent = rememberTranslucency()
+    val reduced = rememberReducedMotion()
+    val slowDur = motionDuration(Motion.Slow)
+    val baseDur = motionDuration(Motion.Base)
 
     // Re-evaluated every recomposition (triggered by refreshTrigger)
     val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -340,8 +366,13 @@ fun OnboardingScreen(
 
     val allDone = notifGranted
 
+    // Entrance reveal — card-by-card staggered fade-in
+    var entered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { entered = true }
+
     Scaffold(
-        containerColor = IdeBg,
+        containerColor = if (translucent) Color.Transparent else c.bg,
+        modifier = if (translucent) Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else Modifier,
         topBar = {
             CopyPasteTopBar(title = "Set up CopyPaste")
         }
@@ -350,16 +381,23 @@ fun OnboardingScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // Intro text
+            val introAlpha by animateFloatAsState(
+                targetValue = if (entered) 1f else 0f,
+                animationSpec = tween(if (reduced) 0 else slowDur),
+                label = "onboardIntroAlpha",
+            )
             Text(
                 text = "CopyPaste needs a few permissions to monitor and sync your clipboard.",
                 style = MaterialTheme.typography.bodyLarge,
-                color = IdeText
+                color = c.text,
+                modifier = Modifier.alpha(introAlpha),
             )
-            Spacer(modifier = Modifier.height(4.dp))
 
             // 1. Notification permission
             PermissionCard(
@@ -371,6 +409,8 @@ fun OnboardingScreen(
                 buttonLabel = if (notifGranted) "Granted" else "Grant",
                 onClick = onRequestNotification,
                 required = true,
+                enterDelayMs = if (reduced) 0 else (baseDur / 4),
+                entered = entered,
             )
 
             // 2. Background Capture (ADB)
@@ -379,6 +419,8 @@ fun OnboardingScreen(
                 overlayGranted = overlayGranted,
                 onRequestOverlay = onRequestOverlay,
                 ctx = ctx,
+                enterDelayMs = if (reduced) 0 else (baseDur / 2),
+                entered = entered,
             )
 
             // 3. Battery Optimization
@@ -391,6 +433,8 @@ fun OnboardingScreen(
                 buttonLabel = if (batteryExempt) "Exempt" else "Request Exemption",
                 onClick = onRequestBattery,
                 required = false,
+                enterDelayMs = if (reduced) 0 else (baseDur * 3 / 4),
+                entered = entered,
             )
 
             // 4. OEM autostart (shown only on devices where we have a known screen)
@@ -419,6 +463,8 @@ fun OnboardingScreen(
                     onClick = onOpenOemAutoStart,
                     required = false,
                     alwaysShowButton = true,
+                    enterDelayMs = if (reduced) 0 else baseDur,
+                    entered = entered,
                 )
             }
 
@@ -431,13 +477,23 @@ fun OnboardingScreen(
                 buttonLabel = "Granted",
                 onClick = {},
                 required = false,
+                enterDelayMs = if (reduced) 0 else (baseDur * 5 / 4),
+                entered = entered,
             )
 
             // 6. Export Logs
             // Log files are always adb-pullable without root, even when the app is closed:
             //   adb pull /sdcard/Android/data/com.copypaste.android/files/logs/
             // This card provides an in-app Share path for users without adb access.
-            CopyPasteCard(accent = IdeBorder) {
+            val logsAlpha by animateFloatAsState(
+                targetValue = if (entered) 1f else 0f,
+                animationSpec = tween(
+                    durationMillis = if (reduced) 0 else slowDur,
+                    delayMillis = if (reduced) 0 else (baseDur * 6 / 4),
+                ),
+                label = "onboardLogsAlpha",
+            )
+            CopyPasteCard(modifier = Modifier.alpha(logsAlpha)) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -446,12 +502,12 @@ fun OnboardingScreen(
                         Icon(
                             imageVector = Icons.Filled.BugReport,
                             contentDescription = null,
-                            tint = IdeDim
+                            tint = c.dim,
                         )
                         Text(
                             text = stringResource(R.string.log_export_button),
                             style = MaterialTheme.typography.titleMedium,
-                            color = IdeText,
+                            color = c.text,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -459,31 +515,47 @@ fun OnboardingScreen(
                     Text(
                         text = stringResource(R.string.log_export_description),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = IdeDim
+                        color = c.dim,
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedButton(
+                    Spacer(modifier = Modifier.height(10.dp))
+                    CopyPasteButton(
                         onClick = onExportLogs,
-                        modifier = Modifier.align(Alignment.End)
+                        variant = ButtonVariant.SECONDARY,
+                        modifier = Modifier.align(Alignment.End),
                     ) {
                         Text(stringResource(R.string.log_export_button))
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(4.dp))
 
+            // Primary CTA — full-width, PRIMARY variant when all done; SECONDARY ghost skip when not
+            val ctaAlpha by animateFloatAsState(
+                targetValue = if (entered) 1f else 0f,
+                animationSpec = tween(
+                    durationMillis = if (reduced) 0 else slowDur,
+                    delayMillis = if (reduced) 0 else (baseDur * 7 / 4),
+                ),
+                label = "onboardCtaAlpha",
+            )
             if (allDone) {
-                Button(
+                CopyPasteButton(
                     onClick = onDone,
-                    modifier = Modifier.fillMaxWidth()
+                    variant = ButtonVariant.PRIMARY,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(ctaAlpha),
                 ) {
                     Text("Continue to CopyPaste")
                 }
             } else {
-                OutlinedButton(
+                CopyPasteButton(
                     onClick = onDone,
-                    modifier = Modifier.fillMaxWidth()
+                    variant = ButtonVariant.SECONDARY,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .alpha(ctaAlpha),
                 ) {
                     Text("Skip for now")
                 }
@@ -502,51 +574,96 @@ private fun PermissionCard(
     onClick: () -> Unit,
     required: Boolean,
     alwaysShowButton: Boolean = false,
+    enterDelayMs: Int = 0,
+    entered: Boolean = true,
 ) {
-    // Status-colored hairline border instead of a flooded card background:
-    //   granted  → green   missing+required → red   otherwise → neutral grey.
+    val c = LocalIdeColors.current
+    val reduced = rememberReducedMotion()
+    val slowDur = motionDuration(Motion.Slow)
+
+    // Status-colored hairline border: granted → success; missing+required → danger; neutral.
     val borderColor = when {
-        granted              -> IdeSuccess
-        required             -> IdeDanger
-        else                 -> IdeBorder
+        granted  -> c.success
+        required -> c.danger
+        else     -> c.border
     }
 
-    CopyPasteCard(accent = borderColor) {
+    val alpha by animateFloatAsState(
+        targetValue = if (entered) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (reduced) 0 else slowDur,
+            delayMillis = enterDelayMs,
+        ),
+        label = "permCard_$title",
+    )
+
+    CopyPasteCard(accent = borderColor, modifier = Modifier.alpha(alpha)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = if (granted) IdeSuccess else IdeDim
-                )
+                // Icon with status tint — success-colored circle when granted
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (granted) c.successDim else c.accentDim
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (granted) {
+                        Icon(
+                            imageVector = Icons.Outlined.Check,
+                            contentDescription = null,
+                            tint = c.success,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    } else {
+                        Icon(
+                            imageVector = icon,
+                            contentDescription = null,
+                            tint = c.accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = IdeText,
+                    color = c.text,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
-                    Text(
-                        text = "required",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = IdeDanger
-                    )
+                    // Required badge — accent-tinted chip pill
+                    Box(
+                        modifier = Modifier
+                            .background(c.dangerDim, RadiusChip)
+                            .border(0.5.dp, c.danger.copy(alpha = 0.35f), RadiusChip)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            text = "required",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = c.danger,
+                        )
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(6.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
-                color = IdeDim
+                color = c.dim,
             )
-            Spacer(modifier = Modifier.height(8.dp))
-            Button(
+            Spacer(modifier = Modifier.height(10.dp))
+            CopyPasteButton(
                 onClick = onClick,
                 enabled = !granted || alwaysShowButton,
-                modifier = Modifier.align(Alignment.End)
+                variant = if (granted && !alwaysShowButton) ButtonVariant.GHOST
+                          else ButtonVariant.PRIMARY,
+                modifier = Modifier.align(Alignment.End),
             ) {
                 Text(buttonLabel)
             }
@@ -569,40 +686,54 @@ private fun AdbBackgroundCaptureCard(
     overlayGranted: Boolean,
     onRequestOverlay: () -> Unit,
     ctx: android.content.Context,
+    enterDelayMs: Int = 0,
+    entered: Boolean = true,
 ) {
-    val borderColor = if (readLogsGranted && overlayGranted) IdeSuccess else IdeBorder
-    CopyPasteCard(accent = borderColor) {
+    val c = LocalIdeColors.current
+    val reduced = rememberReducedMotion()
+    val slowDur = motionDuration(Motion.Slow)
+
+    val borderColor = if (readLogsGranted && overlayGranted) c.success else c.border
+
+    val alpha by animateFloatAsState(
+        targetValue = if (entered) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (reduced) 0 else slowDur,
+            delayMillis = enterDelayMs,
+        ),
+        label = "adbCard",
+    )
+
+    CopyPasteCard(accent = borderColor, modifier = Modifier.alpha(alpha)) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = stringResource(R.string.bg_adb_section_title),
                 style = MaterialTheme.typography.titleMedium,
-                color = IdeText,
+                color = c.text,
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = stringResource(R.string.bg_adb_explainer),
                 style = MaterialTheme.typography.bodyMedium,
-                color = IdeDim,
+                color = c.dim,
             )
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Status row
+            // Status row — pills instead of plain text labels
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
+                StatusPill(
                     text = if (readLogsGranted)
                         stringResource(R.string.bg_adb_status_read_logs_ok)
                     else
                         stringResource(R.string.bg_adb_status_read_logs_no),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (readLogsGranted) IdeSuccess else IdeDim,
+                    ok = readLogsGranted,
                 )
-                Text(
+                StatusPill(
                     text = if (overlayGranted)
                         stringResource(R.string.bg_adb_status_overlay_ok)
                     else
                         stringResource(R.string.bg_adb_status_overlay_no),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (overlayGranted) IdeSuccess else IdeDim,
+                    ok = overlayGranted,
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))
@@ -634,14 +765,37 @@ private fun AdbBackgroundCaptureCard(
             Spacer(modifier = Modifier.height(10.dp))
             // Overlay button — can be granted without ADB on Android M+
             if (!overlayGranted) {
-                Button(
+                CopyPasteButton(
                     onClick = onRequestOverlay,
+                    variant = ButtonVariant.PRIMARY,
                     modifier = Modifier.align(Alignment.End),
                 ) {
                     Text("Grant Overlay Permission")
                 }
             }
         }
+    }
+}
+
+/** Status badge pill — green on granted, muted otherwise. */
+@Composable
+private fun StatusPill(text: String, ok: Boolean) {
+    val c = LocalIdeColors.current
+    Box(
+        modifier = Modifier
+            .background(if (ok) c.successDim else c.accentDim, RadiusChip)
+            .border(
+                0.5.dp,
+                if (ok) c.success.copy(alpha = 0.35f) else c.border.copy(alpha = 0.35f),
+                RadiusChip,
+            )
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (ok) c.success else c.dim,
+        )
     }
 }
 
@@ -653,16 +807,17 @@ private fun AdbCommandRow(
     toastText: String,
     ctx: android.content.Context,
 ) {
+    val c = LocalIdeColors.current
     Column {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = IdeDim,
+            color = c.dim,
         )
         Text(
             text = command,
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = IdeText,
+            color = c.text,
             modifier = Modifier
                 .fillMaxWidth()
                 // CopyPaste-n7ff: announce as a Button with a "Copy command" action

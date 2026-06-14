@@ -1242,10 +1242,23 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // SIGTERM handling on non-macOS — previously only SIGINT was wired,
         // so launchd/systemd sending SIGTERM would terminate the process
         // without running our cleanup branch (sock file removal, log flush).
-        #[cfg(unix)]
-        let mut sigterm = {
-            use tokio::signal::unix::{signal, SignalKind};
-            signal(SignalKind::terminate())?
+        // SIGTERM future: a real terminate-signal stream on unix, a never-resolving
+        // future elsewhere. Boxed + always-defined so the select! branch below needs
+        // NO in-macro #[cfg] attribute — tokio 1.52's select! macro rejects attributes
+        // on branches ("no rules expected `}`", CopyPaste-l07l).
+        let mut sigterm_fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = {
+            #[cfg(unix)]
+            {
+                use tokio::signal::unix::{signal, SignalKind};
+                let mut sig = signal(SignalKind::terminate())?;
+                Box::pin(async move {
+                    sig.recv().await;
+                })
+            }
+            #[cfg(not(unix))]
+            {
+                Box::pin(std::future::pending::<()>())
+            }
         };
         loop {
             tokio::select! {
@@ -1297,8 +1310,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     shutdown_token.cancel();
                     break;
                 }
-                #[cfg(unix)]
-                _ = sigterm.recv() => {
+                _ = &mut sigterm_fut => {
                     tracing::info!("SIGTERM received, shutting down");
                     // D3: broadcast shutdown to all tasks.
                     shutdown_token.cancel();

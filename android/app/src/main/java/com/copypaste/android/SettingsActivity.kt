@@ -51,6 +51,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.app.Activity
+import android.view.WindowManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -101,6 +103,12 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TextButton
 import com.copypaste.android.ui.theme.EaseStandard
+import com.copypaste.android.ui.theme.Palette
+import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.paletteIdeColors
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 
 /**
  * Settings screen — grouped into tabs mirroring the macOS settings layout:
@@ -344,6 +352,14 @@ fun SettingsScreen(
         }
     }
 
+    // Shared save action — called from both the header button and the sticky bottom bar.
+    // Extracted here so neither call site duplicates the persistence / dirty-reset logic.
+    fun doSave() {
+        persistAll()
+        dirty = false
+        onSaved()
+    }
+
     Scaffold(
         modifier = if (translucency && paintCanvasBackdrop) modifier.auroraCanvas(dark) else modifier,
         containerColor = if (translucency) androidx.compose.ui.graphics.Color.Transparent else c.bg,
@@ -353,17 +369,27 @@ fun SettingsScreen(
                 showBackButton = showBackButton,
                 onBack = guardedOnBack,
                 backContentDescription = stringResource(R.string.cd_back),
+                // CopyPaste-65x6: header Save affordance — mirrors the sticky bottom Save but
+                // lives in the top-bar actions slot so it is always reachable without scrolling.
+                // Enabled only when dirty (unsaved changes exist); uses PRIMARY liquid-glass
+                // style to match the accent-accent bottom button.
+                actions = {
+                    CopyPasteButton(
+                        onClick = { doSave() },
+                        variant = ButtonVariant.PRIMARY,
+                        enabled = dirty,
+                        modifier = androidx.compose.ui.Modifier.padding(end = 8.dp),
+                    ) {
+                        Text(text = "Save")
+                    }
+                },
             )
         },
         bottomBar = {
             // CopyPaste-u30t: sticky Save button — enabled only when there are unsaved changes.
-            // Full-width, accent-coloured, glass-style. Calls persistAll() then onSaved().
+            // Full-width, accent-coloured, glass-style. Calls doSave() (same as header button).
             Button(
-                onClick = {
-                    persistAll()
-                    dirty = false
-                    onSaved()
-                },
+                onClick = { doSave() },
                 enabled = dirty,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = c.accent,
@@ -661,7 +687,7 @@ private fun GeneralTab(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun DisplayTab(
     density: Density,
@@ -684,19 +710,32 @@ private fun DisplayTab(
     ctx: android.content.Context,
 ) {
     val c = LocalIdeColors.current
+    // Active palette name is read directly from prefs (not deferred to Save);
+    // the picker writes + recreates immediately, so the current name always reflects
+    // what's on-screen.
+    val activePaletteName = remember { settings.paletteName }
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        // ── THEME PICKER (§7 spec) ────────────────────────────────────────
-        // System / Light / Dark segmented control — writes themeMode pref and
-        // recreates the activity (standard Android theme-switch flow).
-        SettingsSectionLabel("Theme")
+
+        // ── APPEARANCE section card (hvr4) ─────────────────────────────────
+        // Palette picker: grid of all Palette entries; tapping rethemes + recreates.
+        // Theme picker: System / Light / Dark segmented control.
+        SettingsSectionLabel("Appearance")
         SettingsCard {
+            // ── Palette swatches ──────────────────────────────────────────
+            PalettePicker(
+                activePaletteName = activePaletteName,
+                settings = settings,
+                ctx = ctx,
+            )
+            SettingsCardDivider()
+            // ── Theme mode (System / Light / Dark) ────────────────────────
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
-                    text = "Appearance",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = c.text,
+                    text = "Color scheme",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.dim,
+                    modifier = Modifier.padding(bottom = 8.dp),
                 )
-                Spacer(modifier = Modifier.height(8.dp))
                 // Inline segmented control: System / Light / Dark
                 val themeModes = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
                 val themeLabels = listOf("System", "Light", "Dark")
@@ -725,10 +764,10 @@ private fun DisplayTab(
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
                     text = stringResource(R.string.setting_density_title),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = c.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.dim,
+                    modifier = Modifier.padding(bottom = 8.dp),
                 )
-                Spacer(modifier = Modifier.height(8.dp))
                 IdeSegmentedControl(
                     options = listOf(
                         stringResource(R.string.setting_density_subtitle_comfortable),
@@ -753,6 +792,25 @@ private fun DisplayTab(
                 subtitle = stringResource(R.string.setting_mask_sensitive_subtitle),
                 checked = maskSensitive,
                 onCheckedChange = onMaskSensitiveChange,
+            )
+            SettingsCardDivider()
+            // Privacy: FLAG_SECURE toggle. Applied immediately to the current
+            // window; CopyPasteTheme re-applies it on every other screen's next
+            // composition/launch (so the recents preview is also covered).
+            val screenshotActivity = LocalContext.current as? Activity
+            var allowScreenshots by remember { mutableStateOf(settings.allowScreenshots) }
+            SettingsRow(
+                title = stringResource(R.string.setting_allow_screenshots_title),
+                subtitle = stringResource(R.string.setting_allow_screenshots_subtitle),
+                checked = allowScreenshots,
+                onCheckedChange = { v ->
+                    allowScreenshots = v
+                    settings.allowScreenshots = v
+                    screenshotActivity?.window?.let { w ->
+                        if (v) w.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        else w.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                    }
+                },
             )
             SettingsCardDivider()
             SettingsRow(
@@ -1083,6 +1141,145 @@ private fun NotificationsTab(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Appearance helpers — palette picker / display label
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Derives a human-readable display label from a [Palette] enum entry.
+ * "GRAPHITE_MIST" → "Graphite Mist".
+ * Mirrors the logic tested in AppearanceSectionTest.paletteDisplayLabel.
+ */
+private fun paletteDisplayLabel(palette: Palette): String =
+    palette.name
+        .split("_")
+        .joinToString(" ") { word ->
+            word.lowercase().replaceFirstChar { it.uppercaseChar() }
+        }
+
+/**
+ * Palette picker row — a horizontal flow of swatch circles, one per [Palette].
+ * The swatch is filled with the palette's accent color and is marked active (ring)
+ * when it matches [activePaletteName].
+ *
+ * Tapping a swatch writes [Settings.paletteName] immediately (not deferred to
+ * the Save button — palette is an immediate-effect pref, like themeMode) and
+ * calls [ctx]'s [Activity.recreate] so the whole app rethemes.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PalettePicker(
+    activePaletteName: String,
+    settings: Settings,
+    ctx: android.content.Context,
+) {
+    val c = LocalIdeColors.current
+    // Palette entries split by scheme so dark/light groups are visually separated.
+    val darkPalettes = Palette.entries.filter { it.isDark }
+    val lightPalettes = Palette.entries.filter { !it.isDark }
+
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        // ── Dark palettes row ─────────────────────────────────────────────
+        Text(
+            text = "Dark",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp,
+                letterSpacing = 0.5.sp,
+            ),
+            color = c.dim,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            darkPalettes.forEach { palette ->
+                PaletteSwatchItem(
+                    palette = palette,
+                    isActive = palette.name == activePaletteName,
+                    onClick = {
+                        settings.paletteName = palette.name
+                        (ctx as? android.app.Activity)?.recreate()
+                    },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(12.dp))
+        // ── Light palettes row ────────────────────────────────────────────
+        Text(
+            text = "Light",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.SemiBold,
+                fontSize = 11.sp,
+                letterSpacing = 0.5.sp,
+            ),
+            color = c.dim,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            lightPalettes.forEach { palette ->
+                PaletteSwatchItem(
+                    palette = palette,
+                    isActive = palette.name == activePaletteName,
+                    onClick = {
+                        settings.paletteName = palette.name
+                        (ctx as? android.app.Activity)?.recreate()
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * A single swatch + label for [palette]. The circle is filled with the palette
+ * accent; an active ring (2dp border in c.accent) marks the selected palette.
+ */
+@Composable
+private fun PaletteSwatchItem(
+    palette: Palette,
+    isActive: Boolean,
+    onClick: () -> Unit,
+) {
+    val c = LocalIdeColors.current
+    val accentColor = paletteIdeColors(palette).accent
+    // Active ring: 2dp border in active-theme accent; inactive: 1dp hairline divider.
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .semantics { role = Role.Button },
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(accentColor)
+                .then(
+                    if (isActive)
+                        Modifier.border(2.dp, c.text.copy(alpha = 0.8f), CircleShape)
+                    else
+                        Modifier.border(1.dp, c.divider, CircleShape)
+                ),
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = paletteDisplayLabel(palette),
+            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+            color = if (isActive) c.text else c.dim,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            modifier = Modifier.width(52.dp),
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Grouped-card primitives (spec §8 — Apple grouped-inset style)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1250,15 +1447,17 @@ private fun SettingsNavRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    // CopyPaste-hffp: density-aware vertical padding
-    density: String = "comfortable",
 ) {
     val c = LocalIdeColors.current
+    // CopyPaste-hffp: density-aware padding — read active pref so COMPACT rows are
+    // 8dp vertical vs. 12dp for COMFORTABLE, matching the compact Type scale intent.
+    val ctx = LocalContext.current
+    val isCompact = remember(ctx) { Settings(ctx).density == Density.COMPACT }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = if (density == "compact") 8.dp else 12.dp),
+            .padding(horizontal = 16.dp, vertical = if (isCompact) 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1267,12 +1466,14 @@ private fun SettingsNavRow(
             .padding(end = 12.dp)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                // hffp: compact density → bodyMedium (14sp), comfortable → bodyLarge (16sp)
+                style = if (isCompact) MaterialTheme.typography.bodyMedium
+                        else MaterialTheme.typography.bodyLarge,
                 color = c.text,
             )
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = c.dim,
             )
         }
@@ -1322,10 +1523,12 @@ private fun SettingsRow(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    // CopyPaste-hffp: density-aware vertical padding — compact=8dp, comfortable=12dp
-    density: String = "comfortable",
 ) {
     val c = LocalIdeColors.current
+    // CopyPaste-hffp: density-aware vertical padding and text scale.
+    // COMPACT → 8dp padding, bodyMedium title; COMFORTABLE → 12dp, bodyLarge.
+    val ctx = LocalContext.current
+    val isCompact = remember(ctx) { Settings(ctx).density == Density.COMPACT }
     Row(
         // CopyPaste-aod: merge the title + subtitle + switch into ONE TalkBack node
         // labelled with the title so it reads "<title>, <subtitle>, On/Off" instead
@@ -1333,7 +1536,7 @@ private fun SettingsRow(
         modifier = Modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {}
-            .padding(horizontal = 16.dp, vertical = if (density == "compact") 8.dp else 12.dp),
+            .padding(horizontal = 16.dp, vertical = if (isCompact) 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1342,12 +1545,14 @@ private fun SettingsRow(
             .padding(end = 12.dp)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge,
+                // hffp: compact density → bodyMedium (14sp), comfortable → bodyLarge (16sp)
+                style = if (isCompact) MaterialTheme.typography.bodyMedium
+                        else MaterialTheme.typography.bodyLarge,
                 color = c.text,
             )
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = c.dim,
             )
         }

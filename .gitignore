@@ -60,3 +60,9 @@ rust_out
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Local dev artifacts (release-prep screenshots + docker cargo/target cache)
+/*.png
+.docker-cargo/
+.docker-target/
+.docker-check.log

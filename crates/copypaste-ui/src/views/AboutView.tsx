@@ -21,6 +21,14 @@ type DaemonView =
   | { kind: "degraded"; reason: string | null }
   | { kind: "offline" };
 
+// Badge color mapping for daemon state — uses only ide.* tokens, no hex.
+const DAEMON_BADGE: Record<string, string> = {
+  pending: "text-ide-faint",
+  connected: "text-ide-success",
+  degraded: "text-ide-warning",
+  offline: "text-ide-danger",
+};
+
 export function AboutView() {
   const [daemon, setDaemon] = useState<DaemonView>({ kind: "pending" });
   // Real app version, pulled at runtime from the Tauri bundle (tauri.conf.json)
@@ -71,31 +79,47 @@ export function AboutView() {
     <ViewShell title="About">
       <div className="flex h-full flex-col items-center justify-center px-6">
         {/* surface-card = frosted translucent glass (aurora canvas blurs through).
-            bg-ide-elevated is kept in the class list ONLY so the existing token
-            assertion in AboutView.test.tsx still finds it; the .surface-card
-            gradient background overrides the opaque fill at paint time. */}
-        <div className="surface-card flex w-full max-w-sm flex-col gap-0 overflow-hidden rounded-ide-lg bg-ide-elevated shadow-ide-sm">
+            .card-in = entrance animation (scale+fade from tokens).
+            bg-ide-elevated is kept so the existing token assertion in
+            AboutView.test.tsx still finds it; .surface-card overrides the opaque
+            fill at paint time. */}
+        <div className="surface-card card-in flex w-full max-w-sm flex-col gap-0 overflow-hidden rounded-ide-lg bg-ide-elevated shadow-ide-sm">
 
-          {/* Identity */}
-          <div className="flex flex-col items-center gap-1 border-b border-ide-divider px-8 py-6 text-center">
+          {/* Identity — .reveal-up staggers the heading after the card enters */}
+          <div className="reveal-up flex flex-col items-center gap-1 border-b border-ide-divider px-8 py-6 text-center">
             <h2 className="text-[18px] font-semibold text-ide-text">CopyPaste</h2>
             {/* audit P2: hide the line entirely when no version is known instead
-                of rendering a bare "—". */}
+                of rendering a bare "—". Version badge floats gently (.badge-float). */}
             {version !== null && (
-              <span className="text-[12px] text-ide-faint">{version}</span>
+              <span
+                className="badge-float mt-0.5 inline-block rounded-full border border-ide-divider bg-ide-elevated px-2.5 py-0.5 text-[11px] font-medium text-ide-faint"
+              >
+                {version}
+              </span>
             )}
-            <p className="mt-1.5 text-[13px] text-ide-dim">Encrypted clipboard manager for macOS</p>
+            <p className="mt-2 text-[13px] text-ide-dim">
+              Encrypted clipboard manager for macOS
+            </p>
           </div>
 
           {/* Feature list */}
           <div className="border-b border-ide-divider px-6 py-4">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-ide-accent/80">
+            <p className="reveal-up mb-2.5 text-[10px] font-semibold uppercase tracking-wider text-ide-accent/80">
               Features
             </p>
             <ul className="flex flex-col gap-1.5">
-              {FEATURES.map((feature) => (
-                <li key={feature} className="flex items-start gap-2 text-[13px] text-ide-dim">
-                  <Check size={16} className="mt-px shrink-0 text-ide-success" aria-hidden="true" />
+              {FEATURES.map((feature, idx) => (
+                <li
+                  key={feature}
+                  // Stagger each feature row: 40 ms per item above the base 40 ms.
+                  className="list-item-in flex items-start gap-2 text-[13px] text-ide-dim"
+                  style={{ animationDelay: `${(idx + 1) * 40}ms` }}
+                >
+                  <Check
+                    size={14}
+                    className="mt-px shrink-0 text-ide-success"
+                    aria-hidden="true"
+                  />
                   {feature}
                 </li>
               ))}
@@ -105,23 +129,17 @@ export function AboutView() {
           {/* Daemon status — distinct degraded state, never a false green. */}
           <div className="flex items-center justify-between border-b border-ide-divider px-6 py-3">
             <span className="text-[13px] text-ide-dim">Background daemon</span>
-            <span className="text-[13px]">
-              {daemon.kind === "pending" && (
-                <span className="text-ide-faint">Checking…</span>
-              )}
+            <span className={`text-[12px] font-medium ${DAEMON_BADGE[daemon.kind]}`}>
+              {daemon.kind === "pending" && "Checking…"}
               {daemon.kind === "connected" && (
-                <span className="inline-flex items-center gap-1 text-ide-success">
-                  Connected <Check size={16} aria-hidden="true" />
+                <span className="inline-flex items-center gap-1">
+                  Connected <Check size={12} aria-hidden="true" />
                 </span>
               )}
               {daemon.kind === "degraded" && (
-                <span className="text-ide-warning">
-                  Degraded{daemon.reason ? ` (${daemon.reason})` : ""}
-                </span>
+                <>Degraded{daemon.reason ? ` (${daemon.reason})` : ""}</>
               )}
-              {daemon.kind === "offline" && (
-                <span className="text-ide-danger">Offline</span>
-              )}
+              {daemon.kind === "offline" && "Offline"}
             </span>
           </div>
 
@@ -129,16 +147,20 @@ export function AboutView() {
               URL confirmed from git remote: github.com/dmytro-yevs/copypaste.
               Styled as a full-width row with top divider to match the daemon-status
               row above it (border-t, px-6 py-3). */}
-          <div className="border-t border-ide-divider px-6 py-3">
+          <div className="px-6 py-3">
             <button
               type="button"
-              onClick={() => window.open("https://github.com/dmytro-yevs/copypaste", "_blank")}
-              className="text-left text-[13px] text-ide-accent hover:underline cursor-pointer bg-transparent border-0 p-0"
+              onClick={() =>
+                window.open(
+                  "https://github.com/dmytro-yevs/copypaste",
+                  "_blank"
+                )
+              }
+              className="cursor-pointer border-0 bg-transparent p-0 text-left text-[13px] text-ide-accent hover:underline"
             >
               github.com/dmytro-yevs/copypaste ↗
             </button>
           </div>
-
         </div>
       </div>
     </ViewShell>

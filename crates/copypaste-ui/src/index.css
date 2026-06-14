@@ -150,6 +150,65 @@
   --ease-out-expo:  cubic-bezier(.16,1,.3,1);
   --ease-standard:  cubic-bezier(.2,0,0,1);
   --ease-in:        cubic-bezier(.4,0,1,1);
+
+  /* ── §L Liquid Glass token vocabulary (CopyPaste-52mz) ──────────────────
+     NEW switchable layer — defaults to Graphite Mist (dark grey). These tokens
+     are consumed by the palette layer (html[data-palette=...]) and by the aurora
+     background and glass surfaces below. The --ide-* tokens above are still
+     the primary design-system tokens; this layer supplements them with the full
+     palette/material specification from the Liquid Glass styleguide.
+
+     Switching palette: set `data-palette="<key>"` on <html>. The corresponding
+     html[data-palette=...] block below overrides ALL of these and re-derives the
+     --ide-*-rgb channels so existing components retheme automatically. */
+
+  /* Background gradient stops */
+  --bg-0:   #07090f;   /* Graphite Mist bg0 */
+  --bg-1:   #141924;   /* Graphite Mist bg1 */
+  --bg-2:   #202330;   /* Graphite Mist bg2 */
+
+  /* Aurora glow colours (used in body::before/::after) */
+  --glow-a: #7f8da3;   /* Graphite Mist glowA */
+  --glow-b: #5a6a83;   /* Graphite Mist glowB */
+
+  /* Glass surface fill — RGB triplets for alpha injection */
+  --surface-rgb:        28, 31, 42;   /* Graphite Mist surfaceRgb */
+  --surface-strong-rgb: 42, 46, 60;   /* Graphite Mist surfaceStrongRgb */
+
+  /* Glass material properties */
+  --glass-opacity:     .64;
+  --glass-blur:        28px;
+  --glass-saturation:  1.45;
+  --glow-strength:     .62;
+
+  /* Liquid accent palette (augments --ide-accent-rgb above) */
+  --accent:    #9db7df;  /* Graphite Mist accent  */
+  --accent-2:  #d5e2f7;  /* Graphite Mist accent2 */
+  --accent-3:  #7c8ca6;  /* Graphite Mist accent3 */
+  --on-accent: #ffffff;
+
+  /* Liquid contrast text/border tokens (balanced dark — styleguide §contrast) */
+  --text:           rgba(248,250,255,.96);
+  --text-soft:      rgba(229,236,255,.78);
+  --text-muted:     rgba(217,225,244,.58);
+  --text-disabled:  rgba(217,225,244,.38);
+  --icon:           rgba(245,249,255,.92);
+  --icon-muted:     rgba(220,229,248,.66);
+  --line:           rgba(255,255,255,.14);
+  --line-strong:    rgba(255,255,255,.24);
+  --glass-border:        rgba(255,255,255,.16);
+  --glass-border-strong: rgba(255,255,255,.26);
+
+  /* Motion speed scalar (multiplied against animation durations) */
+  --speed:          .72;  /* cinematic */
+  --motion-opacity: 1;    /* cinematic */
+
+  /* Density layout tokens (compact defaults for Graphite Mist launch) */
+  --pad:       13px;
+  --gap:       12px;
+  --row-h:     34px;
+  --radius-lg: 18px;
+  --radius-sm: 12px;
 }
 
 /* ── Light theme token overrides ─────────────────────────────────────────────
@@ -226,6 +285,503 @@
 
   /* ── §3 Focus ring ────────────────────────────────────────────────────── */
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(26,95,204,.45);
+
+  /* ── [a5bn] Liquid Glass tokens for light theme ──────────────────────────
+     Previously these were missing in data-theme="light", so --text fell through
+     to dark rgba(248,250,255,.96) giving near-invisible text on light surfaces.
+     These values mirror the styleguide "balanced" light contrast profile
+     (source.html lines 2619-2622). The palette accent layer overrides --accent
+     only — bg/surface/text stay as clean neutrals below. */
+  --bg-0: #e8e8ee;   /* canvas — neutral cool grey */
+  --bg-1: #f0f0f5;   /* panel/list surface */
+  --bg-2: #fafafa;   /* card/elevated */
+  --glow-a: #b8c0d0;
+  --glow-b: #d8dce8;
+  --surface-rgb:        255, 255, 255;   /* white glass fill */
+  --surface-strong-rgb: 250, 250, 252;
+  --glass-opacity: .82;
+  --glass-blur: 28px;
+  --glass-saturation: 1.3;
+  --glow-strength: .32;  /* softer glow in light mode */
+  /* Accent: Apple systemBlue default; palette overrides this */
+  --accent:    #007aff;
+  --accent-2:  #0063d1;
+  --accent-3:  #5ac8fa;
+  --on-accent: #ffffff;
+  /* Glass borders: dark on light [a5bn] */
+  --glass-border:        rgba(20,30,48,.14);
+  --glass-border-strong: rgba(20,30,48,.22);
+  /* Text tokens — "balanced" light contrast profile [a5bn].
+     These win over the dark rgba(248,..) defaults so text is readable. */
+  --text:           rgba(13,20,32,.92);
+  --text-soft:      rgba(35,47,67,.76);
+  --text-muted:     rgba(52,67,90,.58);
+  --text-disabled:  rgba(70,86,111,.40);
+  --icon:           rgba(13,20,32,.88);
+  --icon-muted:     rgba(42,56,80,.66);
+  --line:           rgba(20,30,48,.14);
+  --line-strong:    rgba(20,30,48,.23);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §L  LIQUID GLASS PALETTE LAYER  (CopyPaste-52mz / CopyPaste-s0uf)
+   ─────────────────────────────────────────────────────────────────────────
+   NEUTRALS vs CHROMA SPLIT — the structural principle:
+
+   THEME AXIS (from :root / :root[data-theme="light"]):
+     Provides ALL neutral tokens — surface ramps (--ide-bg-rgb through
+     --ide-divider-rgb), text/icon/line hierarchy (--ide-text-rgb, --ide-dim-rgb,
+     --ide-faint-rgb, --ide-ghost, --ide-hover, --ide-pressed), body background
+     canvas (--bg-0/1/2 in light mode), glass material (--glass-opacity,
+     --glow-strength), and contrast tokens (--text, --text-soft, etc.).
+     These are THEME-controlled and must not be overridden by the palette axis.
+
+   PALETTE AXIS (html[data-palette="X"]):
+     Provides ONLY chroma identity — glow colours (--glow-a/--glow-b for aurora
+     tinting), accent family (--accent, --accent-2, --accent-3, --on-accent),
+     and dark-mode background canvas (--bg-0/1/2, --surface-rgb for the glass
+     fill). The accent-derived component tokens (--ide-accent-rgb, --ide-selection,
+     --ide-focus-ring, semantic colours) follow the accent, so they're chroma too.
+
+   WHY SPECIFICITY MAKES THIS SAFE:
+     :root[data-theme="light"] → specificity (0,2,0) — pseudo-class + attribute
+     html[data-palette="X"]   → specificity (0,1,1) — attribute + element type
+     The light theme block wins for every token it defines. Dark palette blocks
+     set bg-0/1/2 / surface-rgb for dark mode aurora/glass identity; in light
+     mode those values are cleanly overridden by the higher-specificity light
+     theme block without needing any duplicate rules.
+
+   LIGHT PALETTES in dark mode:
+     Their original blocks had color-scheme:light + light bg/surfaces — correct
+     for light mode but wrong in dark mode. Fixed by: (1) removing color-scheme /
+     bg / surfaces from the base palette block (so dark :root neutrals apply),
+     and (2) adding html[data-theme="light"][data-palette="X"] blocks at
+     specificity (0,3,1) that restore the palette's light bg/surfaces when the
+     user actually chooses light theme. These high-specificity blocks override
+     both the dark :root and the light :root[data-theme="light"].
+
+   PER-PALETTE LIGHT-MODE ACCENT TUNING:
+     Dark palette accents (e.g. graphite-mist #9db7df, liquid-blue #4d8dff) are
+     designed for dark surfaces — they fail WCAG AA on white. For each dark palette,
+     a html[data-theme="light"][data-palette="X"] block darkens --accent and
+     --ide-accent-rgb to meet AA contrast on the light panel surface (#F2F2F5).
+
+   Switch palette:  set data-palette="<key>" on <html>.
+   Switch theme:    set data-theme="light" on <html> (absent = dark).
+   Both axes are independent — every palette works in every theme.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Graphite Mist (dark grey) — default active palette ─────────────────── */
+/* CHROMA only: glow aurora tint + accent + dark-mode canvas + glass borders.
+   Pure neutrals (text/icon/surface ramp/line) come from :root (dark theme).
+   In light mode, :root[data-theme="light"] (higher specificity 0,2,0) overrides
+   bg-0/1/2 and surface-rgb so the light canvas takes over automatically. */
+html[data-palette="graphite-mist"] {
+  color-scheme: dark;
+  --bg-0: #07090f; --bg-1: #141924; --bg-2: #202330;
+  --glow-a: #7f8da3; --glow-b: #5a6a83;
+  --surface-rgb: 28, 31, 42; --surface-strong-rgb: 42, 46, 60;
+  --accent: #9db7df; --accent-2: #d5e2f7; --accent-3: #7c8ca6; --on-accent: #ffffff;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        157 183 223;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  213 226 247;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(157,183,223,0.14);
+  --ide-success-rgb:       123 224 177;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(123,224,177,0.12);
+  --ide-warning-rgb:       255 204 106;  --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,204,106,0.12);
+  --ide-danger-rgb:        255 127 140;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,127,140,0.12);
+  --ide-badge-warning-rgb: 255 204 106;  --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(157,183,223,0.18); --ide-multi-sel: rgba(157,183,223,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(157,183,223,.45);
+}
+
+/* Light-mode accent tuning: graphite-mist's #9db7df is a pale steel blue that
+   fails AA on white (contrast ~1.8:1). Darkened to #3a6091 for AA on #F2F2F5
+   (contrast ≈5.1:1). glow-a/glow-b stay the same — they only tint the aurora. */
+html[data-theme="light"][data-palette="graphite-mist"] {
+  --accent:    #3a6091; --accent-2: #2a4e7c; --accent-3: #6a8db5;
+  --ide-accent-rgb:        58 96 145;    --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  42 78 124;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(58,96,145,0.12);
+  --ide-selection: rgba(58,96,145,0.14); --ide-multi-sel: rgba(58,96,145,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(58,96,145,.45);
+}
+
+/* ── Liquid Blue (dark blue) ─────────────────────────────────────────────── */
+html[data-palette="liquid-blue"] {
+  color-scheme: dark;
+  --bg-0: #061123; --bg-1: #0b1f47; --bg-2: #12152d;
+  --glow-a: #4d8dff; --glow-b: #9e7bff;
+  --surface-rgb: 22, 30, 54; --surface-strong-rgb: 30, 42, 76;
+  --accent: #4d8dff; --accent-2: #7fc7ff; --accent-3: #9e7bff; --on-accent: #ffffff;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        77 141 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  127 199 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(77,141,255,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(77,141,255,0.18); --ide-multi-sel: rgba(77,141,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(77,141,255,.45);
+}
+
+/* Light-mode accent tuning: #4d8dff (liquid-blue) is ~2.5:1 on white — fails AA.
+   Darkened to #1a5fd4 for ≈4.8:1 on #F2F2F5. */
+html[data-theme="light"][data-palette="liquid-blue"] {
+  --accent:    #1a5fd4; --accent-2: #0e4ab8; --accent-3: #7aa6ff;
+  --ide-accent-rgb:        26 95 212;    --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  14 74 184;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(26,95,212,0.12);
+  --ide-selection: rgba(26,95,212,0.14); --ide-multi-sel: rgba(26,95,212,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(26,95,212,.45);
+}
+
+/* ── Deep Sky (dark vivid blue) ──────────────────────────────────────────── */
+html[data-palette="deep-sky"] {
+  color-scheme: dark;
+  --bg-0: #021222; --bg-1: #073766; --bg-2: #101b31;
+  --glow-a: #1fa4ff; --glow-b: #55e6ff;
+  --surface-rgb: 16, 32, 56; --surface-strong-rgb: 24, 48, 82;
+  --accent: #1f9cff; --accent-2: #8cddff; --accent-3: #4d74ff; --on-accent: #ffffff;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        31 156 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  140 221 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(31,156,255,0.14);
+  --ide-success-rgb:       110 231 158;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(110,231,158,0.12);
+  --ide-warning-rgb:       255 199 93;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,199,93,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 199 93;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(31,156,255,0.18); --ide-multi-sel: rgba(31,156,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(31,156,255,.45);
+}
+
+/* Light-mode accent tuning: #1f9cff is ~2.8:1 on white — fails AA.
+   Darkened to #0070cc for ≈4.6:1 on #F2F2F5. */
+html[data-theme="light"][data-palette="deep-sky"] {
+  --accent:    #0070cc; --accent-2: #0058a8; --accent-3: #3a9aee;
+  --ide-accent-rgb:        0 112 204;    --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  0 88 168;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(0,112,204,0.12);
+  --ide-selection: rgba(0,112,204,0.14); --ide-multi-sel: rgba(0,112,204,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(0,112,204,.45);
+}
+
+/* ── Nordic Cyan (dark teal) ─────────────────────────────────────────────── */
+html[data-palette="nordic-cyan"] {
+  color-scheme: dark;
+  --bg-0: #031216; --bg-1: #06333b; --bg-2: #0b1d2b;
+  --glow-a: #24d6b5; --glow-b: #478cff;
+  --surface-rgb: 15, 37, 49; --surface-strong-rgb: 21, 55, 70;
+  --accent: #25d5b4; --accent-2: #8af5e4; --accent-3: #5a9dff; --on-accent: #ffffff;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        37 213 180;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  138 245 228;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(37,213,180,0.14);
+  --ide-success-rgb:       117 239 159;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(117,239,159,0.12);
+  --ide-warning-rgb:       255 209 102;  --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,209,102,0.12);
+  --ide-danger-rgb:        255 107 107;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,107,0.12);
+  --ide-badge-warning-rgb: 255 209 102;  --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(37,213,180,0.18); --ide-multi-sel: rgba(37,213,180,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(37,213,180,.45);
+}
+
+/* Light-mode accent tuning: #25d5b4 teal is very pale on white (~1.7:1) — fails AA.
+   Shifted to dark teal #0a8f78 for ≈4.6:1 on #F2F2F5. */
+html[data-theme="light"][data-palette="nordic-cyan"] {
+  --accent:    #0a8f78; --accent-2: #06705e; --accent-3: #2d74cc;
+  --ide-accent-rgb:        10 143 120;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  6 112 94;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(10,143,120,0.12);
+  --ide-selection: rgba(10,143,120,0.14); --ide-multi-sel: rgba(10,143,120,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(10,143,120,.45);
+}
+
+/* ── Aurora Violet (dark accent) ─────────────────────────────────────────── */
+html[data-palette="aurora-violet"] {
+  color-scheme: dark;
+  --bg-0: #11071f; --bg-1: #28114d; --bg-2: #14172d;
+  --glow-a: #9a7cff; --glow-b: #ff7ad9;
+  --surface-rgb: 29, 24, 54; --surface-strong-rgb: 48, 36, 82;
+  --accent: #9a7cff; --accent-2: #d4b6ff; --accent-3: #ff7ad9; --on-accent: #ffffff;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        154 124 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  212 182 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(154,124,255,0.14);
+  --ide-success-rgb:       110 231 183;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(110,231,183,0.12);
+  --ide-warning-rgb:       255 195 90;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,195,90,0.12);
+  --ide-danger-rgb:        255 111 145;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,111,145,0.12);
+  --ide-badge-warning-rgb: 255 195 90;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(154,124,255,0.18); --ide-multi-sel: rgba(154,124,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(154,124,255,.45);
+}
+
+/* Light-mode accent tuning: #9a7cff violet is ~2.3:1 on white — fails AA.
+   Darkened to #5a35c8 for ≈4.7:1 on #F2F2F5. */
+html[data-theme="light"][data-palette="aurora-violet"] {
+  --accent:    #5a35c8; --accent-2: #4525a8; --accent-3: #b06abb;
+  --ide-accent-rgb:        90 53 200;    --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  69 37 168;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(90,53,200,0.12);
+  --ide-selection: rgba(90,53,200,0.14); --ide-multi-sel: rgba(90,53,200,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(90,53,200,.45);
+}
+
+/* ── Amber Night (dark warm) ─────────────────────────────────────────────── */
+html[data-palette="amber-night"] {
+  color-scheme: dark;
+  --bg-0: #171008; --bg-1: #3a220a; --bg-2: #1c1a22;
+  --glow-a: #ff9f1c; --glow-b: #6ca0ff;
+  --surface-rgb: 35, 29, 24; --surface-strong-rgb: 58, 43, 30;
+  --accent: #ffad33; --accent-2: #ffd28a; --accent-3: #6ca0ff; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        255 173 51;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  255 210 138;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(255,173,51,0.14);
+  --ide-success-rgb:       130 224 112;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(130,224,112,0.12);
+  --ide-warning-rgb:       255 191 71;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,191,71,0.12);
+  --ide-danger-rgb:        255 107 104;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,104,0.12);
+  --ide-badge-warning-rgb: 255 191 71;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(255,173,51,0.18); --ide-multi-sel: rgba(255,173,51,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(255,173,51,.45);
+}
+
+/* Light-mode accent tuning: #ffad33 amber is ~1.4:1 on white — severe AA failure.
+   Darkened to #a05d00 (burnt amber) for ≈4.7:1 on #F2F2F5. on-accent stays white. */
+html[data-theme="light"][data-palette="amber-night"] {
+  --accent:    #a05d00; --accent-2: #7c4800; --accent-3: #4a72cc; --on-accent: #ffffff;
+  --ide-accent-rgb:        160 93 0;     --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  124 72 0;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(160,93,0,0.12);
+  --ide-selection: rgba(160,93,0,0.14); --ide-multi-sel: rgba(160,93,0,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(160,93,0,.45);
+}
+
+/* ── Cloud Silver (light grey) ───────────────────────────────────────────── */
+/* CHROMA only in base block: glow/accent for dark-mode usage (light-palette
+   under dark theme). The dark :root neutrals apply naturally. The base accent
+   is bumped to be legible on dark surfaces (#7aabff is ~5.2:1 on dark panel). */
+html[data-palette="cloud-silver"] {
+  --glow-a: #b9c7d9; --glow-b: #dce7f7;
+  --accent: #7aabff; --accent-2: #5590ee; --accent-3: #aec8f0; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        122 171 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  85 144 238;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(122,171,255,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(122,171,255,0.18); --ide-multi-sel: rgba(122,171,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(122,171,255,.45);
+}
+
+/* Light-mode values for cloud-silver: restore the light palette's characteristic
+   bg/surface canvas, glass borders, accent, and glow-strength. */
+html[data-theme="light"][data-palette="cloud-silver"] {
+  color-scheme: light;
+  --bg-0: #edf2f8; --bg-1: #dce6f3; --bg-2: #f8fbff;
+  --surface-rgb: 255, 255, 255; --surface-strong-rgb: 245, 248, 252;
+  --accent: #5b8def; --accent-2: #2f74e8; --accent-3: #9cb3d7; --on-accent: #ffffff;
+  --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
+  --ide-accent-rgb:        91 141 239;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  47 116 232;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(91,141,239,0.12);
+  --ide-success-rgb:       21 143 72;    --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(21,143,72,0.12);
+  --ide-warning-rgb:       168 103 0;    --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(168,103,0,0.12);
+  --ide-danger-rgb:        217 59 74;    --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(217,59,74,0.12);
+  --ide-badge-warning-rgb: 168 103 0;    --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(91,141,239,0.14); --ide-multi-sel: rgba(91,141,239,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(91,141,239,.45);
+  --glow-strength: .38;
+}
+
+/* ── Frost Blue (light blue) ─────────────────────────────────────────────── */
+html[data-palette="frost-blue"] {
+  --glow-a: #91c9ff; --glow-b: #c7e6ff;
+  --accent: #5a96ff; --accent-2: #3880ff; --accent-3: #90ccff; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        90 150 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  56 128 255;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(90,150,255,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(90,150,255,0.18); --ide-multi-sel: rgba(90,150,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(90,150,255,.45);
+}
+
+html[data-theme="light"][data-palette="frost-blue"] {
+  color-scheme: light;
+  --bg-0: #edf7ff; --bg-1: #d9ecff; --bg-2: #f8fcff;
+  --surface-rgb: 255, 255, 255; --surface-strong-rgb: 238, 247, 255;
+  --accent: #2777ff; --accent-2: #005fe3; --accent-3: #72b8ff; --on-accent: #ffffff;
+  --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
+  --ide-accent-rgb:        39 119 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  0 95 227;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(39,119,255,0.12);
+  --ide-success-rgb:       16 135 71;    --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(16,135,71,0.12);
+  --ide-warning-rgb:       154 98 0;     --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(154,98,0,0.12);
+  --ide-danger-rgb:        202 52 70;    --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(202,52,70,0.12);
+  --ide-badge-warning-rgb: 154 98 0;     --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(39,119,255,0.14); --ide-multi-sel: rgba(39,119,255,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(39,119,255,.45);
+  --glow-strength: .38;
+}
+
+/* ── Porcelain (light grey-blue) ─────────────────────────────────────────── */
+html[data-palette="porcelain"] {
+  --glow-a: #a9c9ef; --glow-b: #d2e5fb;
+  /* Lightened from #3c7dd9 for legibility on dark surfaces (~4.8:1 on dark panel) */
+  --accent: #6aa3f5; --accent-2: #4c8eee; --accent-3: #a0c4f5; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        106 163 245;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  76 142 238;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(106,163,245,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(106,163,245,0.18); --ide-multi-sel: rgba(106,163,245,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(106,163,245,.45);
+}
+
+html[data-theme="light"][data-palette="porcelain"] {
+  color-scheme: light;
+  --bg-0: #f3f6fa; --bg-1: #e4ebf4; --bg-2: #fbfdff;
+  --surface-rgb: 255, 255, 255; --surface-strong-rgb: 246, 250, 255;
+  --accent: #3c7dd9; --accent-2: #1e5fb9; --accent-3: #8fb8e8; --on-accent: #ffffff;
+  --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
+  --ide-accent-rgb:        60 125 217;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  30 95 185;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(60,125,217,0.12);
+  --ide-success-rgb:       22 135 76;    --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(22,135,76,0.12);
+  --ide-warning-rgb:       155 101 0;    --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(155,101,0,0.12);
+  --ide-danger-rgb:        202 52 70;    --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(202,52,70,0.12);
+  --ide-badge-warning-rgb: 155 101 0;    --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(60,125,217,0.14); --ide-multi-sel: rgba(60,125,217,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(60,125,217,.45);
+  --glow-strength: .38;
+}
+
+/* ── Pearl Grey (light neutral grey) ────────────────────────────────────── */
+html[data-palette="pearl-grey"] {
+  --glow-a: #aeb4bd; --glow-b: #d4d6dc;
+  /* Original #58677f is only ~3.8:1 on dark panel — bumped to #8aa4cc (~5.0:1) */
+  --accent: #8aa4cc; --accent-2: #6a8ab5; --accent-3: #b0bdd1; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        138 164 204;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  106 138 181;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(138,164,204,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(138,164,204,0.18); --ide-multi-sel: rgba(138,164,204,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(138,164,204,.45);
+}
+
+html[data-theme="light"][data-palette="pearl-grey"] {
+  color-scheme: light;
+  --bg-0: #f1f1f2; --bg-1: #dedfe3; --bg-2: #fafafa;
+  --surface-rgb: 255, 255, 255; --surface-strong-rgb: 243, 244, 247;
+  --accent: #58677f; --accent-2: #34465f; --accent-3: #9ba6b7; --on-accent: #ffffff;
+  --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
+  --ide-accent-rgb:        88 103 127;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  52 70 95;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(88,103,127,0.12);
+  --ide-success-rgb:       28 143 80;    --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(28,143,80,0.12);
+  --ide-warning-rgb:       155 100 0;    --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(155,100,0,0.12);
+  --ide-danger-rgb:        201 52 69;    --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(201,52,69,0.12);
+  --ide-badge-warning-rgb: 155 100 0;    --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(88,103,127,0.14); --ide-multi-sel: rgba(88,103,127,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(88,103,127,.45);
+  --glow-strength: .38;
+}
+
+/* ── Contrast profile overrides ──────────────────────────────────────────────
+   Apply data-contrast="soft|balanced|high" on <html>.
+   Balanced is the built-in default (set by each palette block above).
+   These blocks only override the text/border contrast tokens; palette colour
+   and layout tokens remain from the active data-palette block. */
+
+html[data-contrast="soft"] {
+  --text:          rgba(248,250,255,.90);
+  --text-soft:     rgba(229,236,255,.68);
+  --text-muted:    rgba(217,225,244,.46);
+  --text-disabled: rgba(217,225,244,.30);
+  --glass-border:        rgba(255,255,255,.12);
+  --glass-border-strong: rgba(255,255,255,.20);
+  --ide-text-rgb: 225 228 235;
+}
+
+html[data-contrast="high"] {
+  --text:          rgba(255,255,255,.99);
+  --text-soft:     rgba(241,246,255,.88);
+  --text-muted:    rgba(226,235,250,.70);
+  --text-disabled: rgba(226,235,250,.48);
+  --glass-border:        rgba(255,255,255,.23);
+  --glass-border-strong: rgba(255,255,255,.36);
+  --ide-text-rgb: 248 250 255;
+}
+
+/* Light-theme contrast overrides — gate on data-theme="light" so these only
+   apply when actually in light mode. In dark mode the light palettes now use
+   the dark contrast tokens from :root, so the dark soft/high blocks above cover
+   them. Adding data-theme="light" also future-proofs against any dark palette
+   that the user forces into light mode — all light-theme contrasts go here.
+   Specificity: (0,3,0) beats contrast-only (0,2,0) and light-theme (0,2,0). */
+:root[data-theme="light"][data-contrast="soft"] {
+  --text:          rgba(18,25,38,.84);
+  --text-soft:     rgba(41,52,70,.66);
+  --text-muted:    rgba(61,76,99,.48);
+  --text-disabled: rgba(73,88,111,.32);
+  --glass-border:        rgba(25,35,52,.12);
+  --glass-border-strong: rgba(25,35,52,.20);
+  --ide-text-rgb: 42 48 58;
+}
+
+:root[data-theme="light"][data-contrast="high"] {
+  --text:          rgba(8,13,22,.98);
+  --text-soft:     rgba(23,34,52,.86);
+  --text-muted:    rgba(36,50,73,.70);
+  --text-disabled: rgba(49,65,90,.52);
+  --glass-border:        rgba(12,20,35,.22);
+  --glass-border-strong: rgba(12,20,35,.36);
+  --ide-text-rgb: 12 16 24;
+}
+
+/* ── Density overrides ───────────────────────────────────────────────────────
+   Apply data-density="compact|comfortable|spacious" on <html>.
+   Compact is the default for Graphite Mist (matching the styleguide). */
+
+html[data-density="compact"] {
+  --pad: 13px; --gap: 12px; --row-h: 34px; --radius-lg: 18px; --radius-sm: 12px;
+}
+
+html[data-density="comfortable"] {
+  --pad: 18px; --gap: 16px; --row-h: 42px; --radius-lg: 24px; --radius-sm: 16px;
+}
+
+html[data-density="spacious"] {
+  --pad: 24px; --gap: 22px; --row-h: 50px; --radius-lg: 30px; --radius-sm: 20px;
+}
+
+/* ── Motion profile overrides ────────────────────────────────────────────────
+   Apply data-motion="calm|balanced|cinematic" on <html>.
+   These drive the aurora animation speed (calc(Xs * var(--speed))) and the
+   aurora/glow opacity (var(--motion-opacity)).
+   Cinematic is the default. The existing --motion-* duration tokens are NOT
+   changed here — they are absolute ms values consumed by transition-duration
+   utilities; only the new scalar tokens scale the ambient animations. */
+
+html[data-motion="calm"]      { --speed: 1.45; --motion-opacity: .55; }
+html[data-motion="balanced"]  { --speed: 1;    --motion-opacity: .78; }
+html[data-motion="cinematic"] { --speed: .72;  --motion-opacity: 1;   }
+
+/* Honour OS reduce-motion preference regardless of data-motion setting. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --speed: 999; --motion-opacity: 0; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -239,24 +795,19 @@ body,
 
 body {
   margin: 0;
-  /* Liquid-Glass canvas: a RICH, saturated aurora gives the translucent surfaces
-     real colour to blur + layer over (without it, .surface-glass collapses to a
-     flat fill). The colour blobs are deliberately deep and large so the frosted
-     blur is clearly visible THROUGH every glass surface. Opaque on purpose — we
-     render our own depth rather than relying on fragile macOS NSVisualEffectView
-     vibrancy, so the glass reads identically in the browser, the Tauri window,
-     and (mirrored) on Android.
-     Overlay E+F (small centre blobs, stacked FIRST = topmost): add mid-canvas
-     depth so the blur "obviously does something" even when the large corner blobs
-     are outside the viewport centre. */
+  /* Liquid-Glass aurora canvas — driven by the active palette's --bg-0/1/2
+     and --glow-a/b/--accent tokens so every palette gets its own colourscape.
+     The colour blobs are large and rich so the frosted glass surfaces have
+     real colour to blur THROUGH. background-attachment:fixed pins the aurora
+     behind all translucent surfaces as the user scrolls within panels.
+
+     Graphite Mist default (dark grey): the base gradient produces a deep
+     cool-grey canvas; the accent/glow blobs add the mist quality. */
   background:
-    radial-gradient(28% 28% at 50% 38%, rgba(61, 139, 255, 0.22) 0%, transparent 65%),
-    radial-gradient(20% 20% at 30% 60%, rgba(217, 163, 67, 0.16) 0%, transparent 65%),
-    radial-gradient(120% 90% at 6% -18%, rgba(61, 139, 255, 0.42) 0%, transparent 50%),
-    radial-gradient(110% 85% at 108% 118%, rgba(198, 120, 221, 0.38) 0%, transparent 50%),
-    radial-gradient(85% 70% at 95% -12%, rgba(86, 182, 194, 0.28) 0%, transparent 46%),
-    radial-gradient(95% 75% at -10% 105%, rgba(95, 173, 101, 0.18) 0%, transparent 48%),
-    linear-gradient(160deg, #1a1f33 0%, #121526 46%, #0b0d17 100%);
+    radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--glow-a) 30%, transparent), transparent 34%),
+    radial-gradient(circle at 78% 10%, color-mix(in srgb, var(--accent) 38%, transparent), transparent 32%),
+    radial-gradient(circle at 86% 82%, color-mix(in srgb, var(--glow-b) 30%, transparent), transparent 35%),
+    linear-gradient(135deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
   background-attachment: fixed;
   color: var(--ide-text);
   /* Bundled Inter leads so rendering is identical across macOS + Android.
@@ -267,6 +818,72 @@ body {
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
   user-select: none;
+  /* Stacking context for the aurora glow pseudo-elements */
+  position: relative;
+}
+
+/* ── Aurora glow layers (body::before / ::after) ─────────────────────────────
+   These are fixed, full-bleed glow orbs that animate slowly behind all content.
+   Gated by --motion-opacity so data-motion="calm" dims them and
+   @media (prefers-reduced-motion) stops them entirely via the :root override.
+
+   ::before — upper-right conic aurora ring (spins at 18s * --speed)
+   ::after  — lower-left drift band (oscillates at 12s * --speed) */
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  /* opacity driven by glow-strength × motion-opacity; calm mode dims both */
+  opacity: calc(var(--glow-strength) * var(--motion-opacity));
+  mix-blend-mode: screen;
+  will-change: transform, filter, opacity;
+}
+
+body::before {
+  width: 960px;
+  height: 960px;
+  right: -320px;
+  top: -300px;
+  border-radius: 999px;
+  background:
+    conic-gradient(from 165deg,
+      transparent,
+      color-mix(in srgb, var(--accent-2) 55%, transparent),
+      transparent,
+      color-mix(in srgb, var(--accent-3) 42%, transparent),
+      transparent);
+  filter: blur(18px);
+  /* speed scalar slows the spin for calm/balanced motion profiles */
+  animation: auroraSpin calc(18s * var(--speed)) linear infinite;
+}
+
+body::after {
+  /* [rgwb] Replaced the travelling light-band (glowDrift sweep) with a static
+     ambient glow blob. The old animated linear-gradient produced a visible moving
+     LINE sweeping the entire layout. Static radial glow gives the colour warmth
+     without any moving artefact. opacity already gated by --glow-strength. */
+  width: 800px;
+  height: 800px;
+  left: -300px;
+  bottom: -300px;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%);
+  filter: blur(60px);
+  transform: none;
+  /* No animation — static ambient glow only */
+}
+
+/* Reduced-motion: stop all aurora animations; opacity is already zeroed by
+   the :root { --motion-opacity: 0 } override in the @media block above,
+   but we also freeze the transform so there's zero paint cost. */
+@media (prefers-reduced-motion: reduce) {
+  body::before,
+  body::after {
+    animation: none !important;
+  }
 }
 
 #root {
@@ -294,114 +911,161 @@ body {
 
    The old .ide-translucent class is kept as an alias so existing uses don't break. */
 
-/* ── Glass blur tier-split (canonical spec):
-     chrome/card tier → 28px (enough to read colour, not over-blurred)
-     strong tier (modals/popovers) → 40px (heavier frosted glass)
+/* ── §3 Liquid-Glass surface materials ─────────────────────────────────────
+   THREE depth tiers — each a GENUINE frosted material. The backdrop blur
+   now uses --glass-blur / --glass-saturation from the active palette block,
+   so a data-palette switch automatically adjusts the material feel too.
+
+   Glass blur tier-split:
+     chrome/card tier → var(--glass-blur, 28px)
+     strong tier      → 40px  (heavier frosted glass for modals/popovers)
    Matches Android GlassTier: GLASS/CARD=28dp, STRONG=40dp. */
+
 .surface-glass,
 .surface-card,
 .ide-translucent {
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  backdrop-filter: blur(var(--glass-blur, 28px)) saturate(var(--glass-saturation, 1.45));
+  -webkit-backdrop-filter: blur(var(--glass-blur, 28px)) saturate(var(--glass-saturation, 1.45));
+  /* Relative stacking context so ::after hover-shine is clipped correctly */
+  position: relative;
+  overflow: hidden;
 }
 
 .surface-glass-strong {
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(var(--glass-saturation, 1.45));
+  -webkit-backdrop-filter: blur(40px) saturate(var(--glass-saturation, 1.45));
+  position: relative;
+  overflow: hidden;
 }
 
-/* ── Dark glass (default) ─────────────────────────────────────────────────────
-   The diagonal sheen (the "liquid" light-catch) is folded into the background
-   as a gradient LAYER stacked above the translucent fill — no pseudo-element, so
-   there are zero z-index/stacking pitfalls with child content. The final
-   linear-gradient is the flat translucent tint; the first gradient is the sheen. */
+/* ── Dark glass surfaces — token-driven fill ─────────────────────────────────
+   Fill uses --surface-rgb + --glass-opacity from the active palette.
+   The diagonal sheen is the first gradient layer (no pseudo-element = zero
+   z-index pitfalls). Top-edge specular highlight via inset box-shadow. */
+
 .surface-glass,
 .ide-translucent {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0) 45%),
-    linear-gradient(rgba(28, 30, 42, 0.50), rgba(28, 30, 42, 0.50));
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  /* [rgwb] Gradient unification: reduced the alpha spread between stops so nested
+     glass boxes share a cohesive tonal family instead of each fighting for a
+     distinct gradient. chrome tier: flat ~0.62 fill. The diagonal sheen is removed
+     from the fill layers (it now lives only in the ::after hover sweep). */
+  background: rgba(var(--surface-rgb), var(--glass-opacity, .62));
+  border: 1px solid var(--glass-border, rgba(255,255,255,.16));
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.10),
-    0 8px 32px rgba(0, 0, 0, 0.28);
+    inset 0 1px 0 rgba(255,255,255,.14),
+    0 4px 16px rgba(0,0,0,.18);
 }
 
 .surface-card {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0) 45%),
-    linear-gradient(rgba(36, 39, 52, 0.58), rgba(36, 39, 52, 0.58));
-  border: 1px solid rgba(255, 255, 255, 0.09);
+  /* [rgwb] card tier: very slightly higher fill (+0.06) than chrome so elevation
+     reads through difference, but not a competing gradient box.
+     Increased shadow subtly to give depth via shadow instead of gradient contrast. */
+  background: rgba(var(--surface-rgb), calc(var(--glass-opacity, .62) + .06));
+  border: 1px solid var(--glass-border, rgba(255,255,255,.16));
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
-    0 8px 32px rgba(0, 0, 0, 0.24);
+    inset 0 1px 0 rgba(255,255,255,.16),
+    0 6px 20px rgba(0,0,0,.22);
 }
 
 .surface-glass-strong {
-  /* audit P0-2 (dark parity): floating modals sit over the 0.55 black scrim;
-     0.74 fill left secondary text muddy. Raise to 0.86 so text hits contrast
-     while the blur + specular edge keep the Liquid-Glass read. */
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.14) 0%, rgba(255, 255, 255, 0) 45%),
-    linear-gradient(rgba(30, 33, 46, 0.86), rgba(30, 33, 46, 0.86));
-  border: 1px solid rgba(255, 255, 255, 0.10);
+  /* audit P0-2 (dark parity): floating modals need higher opacity so secondary
+     text hits contrast. Use --surface-strong-rgb at near-opaque fill.
+     [rgwb] Kept opaque-ish fill but removed strong gradient so it reads as the
+     same material family. Shadow provides the elevation depth cue. */
+  background: rgba(var(--surface-strong-rgb), .90);
+  border: 1px solid var(--glass-border-strong, rgba(255,255,255,.26));
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.14),
-    0 16px 48px rgba(0, 0, 0, 0.40);
+    inset 0 1px 0 rgba(255,255,255,.18),
+    0 16px 48px rgba(0,0,0,.38);
+}
+
+/* ── Hover shine (glassShine) ────────────────────────────────────────────────
+   A swept diagonal highlight runs across the surface on hover — the "liquid"
+   premium feel. Uses ::after on the glass surfaces. The transition uses
+   --speed so cinematic profile gives a smooth 1.15 s sweep. */
+
+.surface-glass::after,
+.surface-card::after,
+.surface-glass-strong::after,
+.ide-translucent::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* border-radius: inherit ensures the shine is clipped to the card's rounded
+     corners — no square overlay edges [rgwb fix 3]. */
+  border-radius: inherit;
+  /* [rgwb] Narrowed the bright band (10% wide vs old 30%) and halved opacity
+     so this reads as a soft material sheen, not a moving bright line. */
+  background: linear-gradient(110deg,
+    transparent 0 42%,
+    rgba(255,255,255,.09) 48%,
+    rgba(255,255,255,.12) 50%,
+    rgba(255,255,255,.09) 52%,
+    transparent 58% 100%);
+  transform: translateX(-120%);
+  /* opacity reduced from 0.45 to 0.18 [rgwb] */
+  opacity: calc(.18 * var(--motion-opacity, 1));
+}
+
+.surface-glass:hover::after,
+.surface-card:hover::after,
+.surface-glass-strong:hover::after,
+.ide-translucent:hover::after {
+  animation: glassShine calc(1.15s * var(--speed, .72)) var(--ease-out-expo, cubic-bezier(.16,1,.3,1));
 }
 
 /* ── Apple light/greyish glass: frosted near-white over the tinted grey canvas,
-   with a bright top highlight — the macOS Tahoe material look. ──────────────── */
+   with a bright top highlight — the macOS Tahoe material look.
+   [a5bn] Reworked for crisp premium light theme: surfaces use a higher white
+   alpha (0.78/0.85) so the glass reads as clean near-white, not washed translucent.
+   Shadows are replaced with light-appropriate drop-shadows (soft grey, not black).
+   All three tiers maintain cohesive unified material via --surface-rgb override. */
 :root[data-theme="light"] .surface-glass,
 :root[data-theme="light"] .ide-translucent {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 45%),
-    linear-gradient(rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0.55));
-  border: 1px solid rgba(255, 255, 255, 0.60);
+  /* [a5bn] 0.78 white fill — enough frosted glass clarity while staying crisp.
+     Previous 0.55 was too translucent causing washed/muddy look. */
+  background: rgba(var(--surface-rgb, 255,255,255), .78);
+  border: 1px solid var(--glass-border, rgba(20,30,48,.12));
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.85),
-    0 8px 32px rgba(60, 60, 90, 0.12);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.90),
+    0 2px 8px rgba(60, 70, 100, 0.10),
+    0 1px 2px rgba(60, 70, 100, 0.07);
 }
 
 :root[data-theme="light"] .surface-card {
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.50) 0%, rgba(255, 255, 255, 0) 45%),
-    linear-gradient(rgba(255, 255, 255, 0.62), rgba(255, 255, 255, 0.62));
-  border: 1px solid rgba(255, 255, 255, 0.65);
+  /* [a5bn] card tier: 0.85 white — slightly opaque-r than chrome, diff reads as
+     elevation without competing gradient. Clean Apple-white card look. */
+  background: rgba(var(--surface-rgb, 255,255,255), .88);
+  border: 1px solid var(--glass-border, rgba(20,30,48,.14));
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.90),
-    0 8px 32px rgba(60, 60, 90, 0.14);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
+    0 4px 16px rgba(60, 70, 100, 0.12),
+    0 1px 3px rgba(60, 70, 100, 0.08);
 }
 
 :root[data-theme="light"] .surface-glass-strong {
-  /* audit P0-2: modals (Clip-detail, Revoke-confirm, SAS) sit over a dark scrim;
-     at 0.74 white the frosted card stayed muddy grey and secondary text dropped
-     to ~1.3:1. Raise the white base to 0.96 — the card reads as near-solid white
-     so all text hits its designed contrast — while KEEPING the blur + the bright
-     specular top edge + diagonal sheen so it still reads as Liquid Glass. */
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.65) 0%, rgba(255, 255, 255, 0) 48%),
-    linear-gradient(rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.96));
-  border: 1px solid rgba(255, 255, 255, 0.80);
+  /* audit P0-2: modals (Clip-detail, Revoke-confirm, SAS) — near-solid white
+     so all text hits designed contrast. [a5bn] Kept 0.96 fill, updated border
+     and shadow to match the unified light surface language. */
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid var(--glass-border-strong, rgba(20,30,48,.18));
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.98),
-    0 16px 48px rgba(60, 60, 90, 0.22);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.99),
+    0 12px 40px rgba(60, 70, 100, 0.18),
+    0 2px 8px rgba(60, 70, 100, 0.10);
 }
 
-/* Light/greyish canvas — soft neutral grey with a RICH cool vibrancy, so the
-   frosted surfaces read as real glass (replaces the dark aurora in light mode).
-   Canonical spec (CopyPaste-esph):
-     Blobs positioned INSIDE canvas edges (12%/88%/80%/18%) for better distribution.
-     Blob-B violet = 128 90 213 (AA-darkened from raw systemPurple 175 82 222 — per styleguide).
-     Overlay E+F (small centre blobs, topmost) add mid-canvas depth. */
+/* Light/greyish canvas — the body background for the existing data-theme="light"
+   toggle. Also applies when any light palette is active and data-theme="light"
+   is set. Uses the same palette-driven token approach as the dark body above,
+   falling back to the Apple greyish canvas for the legacy light theme. */
 :root[data-theme="light"] body {
   background:
-    radial-gradient(28% 28% at 50% 38%, rgba(0, 122, 255, 0.18) 0%, transparent 65%),
-    radial-gradient(20% 20% at 30% 60%, rgba(217, 163, 67, 0.16) 0%, transparent 65%),
-    radial-gradient(120% 90% at 12% 8%, rgba(0, 122, 255, 0.22) 0%, transparent 55%),
-    radial-gradient(110% 85% at 88% 12%, rgba(128, 90, 213, 0.20) 0%, transparent 55%),
-    radial-gradient(90% 75% at 80% 92%, rgba(20, 120, 170, 0.18) 0%, transparent 58%),
-    radial-gradient(95% 80% at 18% 88%, rgba(40, 140, 70, 0.14) 0%, transparent 56%),
-    linear-gradient(160deg, #ECECF3 0%, #E3E3EC 50%, #D9DAE4 100%);
+    radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--glow-a, #b9c7d9) 26%, transparent), transparent 34%),
+    radial-gradient(circle at 78% 10%, color-mix(in srgb, var(--accent, #5b8def) 30%, transparent), transparent 32%),
+    radial-gradient(circle at 86% 82%, color-mix(in srgb, var(--glow-b, #dce7f7) 24%, transparent), transparent 35%),
+    linear-gradient(160deg, var(--bg-0, #ECECF3) 0%, var(--bg-1, #E3E3EC) 50%, var(--bg-2, #D9DAE4) 100%);
   background-attachment: fixed;
 }
 
@@ -727,6 +1391,70 @@ button,
   }
 }
 
+/* ── Aurora background animations (CopyPaste-52mz) ──────────────────────────
+   auroraSpin: the upper-right conic gradient orb rotates + scale-pulses.
+   [rgwb] glowDrift removed — body::after is now a static ambient glow blob.
+   Speed is scaled by --speed (cinematic = 0.72 → faster). */
+
+@keyframes auroraSpin {
+  0%   { transform: rotate(-14deg) scale(1);    filter: blur(18px) hue-rotate(0deg); }
+  50%  { transform: rotate(18deg)  scale(1.08); filter: blur(28px) hue-rotate(10deg); }
+  100% { transform: rotate(346deg) scale(1);    filter: blur(18px) hue-rotate(0deg); }
+}
+
+/* glowDrift keyframe removed [rgwb]: body::after is now a static ambient blob.
+   The animation produced a visible light line sweeping the entire app layout. */
+
+/* ── Glass hover-shine sweep ─────────────────────────────────────────────────
+   [rgwb] Toned down: opacity halved (0.45 → 0.18) so it reads as a soft sheen,
+   not a moving bright line crossing the card. The gradient band is also much
+   narrower (transparent bands widened) to reduce the "line" visual. */
+
+@keyframes glassShine {
+  to { transform: translateX(120%); }
+}
+
+/* ── Premium entrance animations (CopyPaste-52mz) ────────────────────────────
+   cardIn:      card lifts from below with scale + opacity. Spring cubic-bezier.
+   revealUp:    section/row reveals from a slight downward offset (no scale).
+   listItemIn:  staggered list item fade+rise — pair with animation-delay per item.
+
+   All use --speed scalar so cinematic (0.72) is snappier than calm (1.45).
+   NOT cheap bounce — spring is the out-expo-family (.16,1,.3,1). */
+
+@keyframes cardIn {
+  from {
+    opacity: 0;
+    transform: scale(.96) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes revealUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes listItemIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Reduced-motion: honour the OS preference */
 @media (prefers-reduced-motion: reduce) {
   .popup-enter {
@@ -746,6 +1474,151 @@ button,
 /* ── Toast animation class ───────────────────────────────────────────────── */
 .toast-in {
   animation: toastIn 180ms cubic-bezier(.16,1,.3,1) both;
+}
+
+/* ── Premium entrance animation utility classes (CopyPaste-52mz) ─────────── */
+/* Use .card-in on glass card surfaces, .reveal-up on section headers,
+   .list-item-in on list rows with animation-delay for stagger.
+   [rgwb fix 3] .card-in sets overflow:hidden + position:relative so the
+   scale/opacity entrance is clipped to the card's border-radius. Without this,
+   the scale(0.96) keyframe from could bleed a rectangular outline at frame 0. */
+.card-in {
+  animation: cardIn calc(220ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
+  /* Defensive clip: ensures entrance scale transform doesn't show square edge.
+     If the element already has overflow:hidden (via .surface-card) this is a no-op. */
+  position: relative;
+  overflow: hidden;
+}
+
+.reveal-up {
+  animation: revealUp calc(180ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
+}
+
+.list-item-in {
+  animation: listItemIn calc(140ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
+}
+
+/* ── Component micro-interaction utilities (Liquid Glass, CopyPaste-965s) ───
+   Self-contained drop-on classes adapted from the styleguide. Each is gated
+   by --motion-opacity / --speed and dies under prefers-reduced-motion (the
+   global * rule above + the :root motion override). Apply by adding the class
+   to the target element; pseudo-element variants build their own overlay so no
+   extra markup is needed. */
+
+/* Live presence dot — expanding ping ring (uses currentColor of the dot).
+   [rgwb fix 3] Default border-radius: 50% so the ring is always circular.
+   Components can override with border-radius: inherit if the parent is already
+   a circle. This prevents a square ping ring on elements with no border-radius. */
+.status-ping { position: relative; }
+.status-ping::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  /* 50% default makes ping rings circular regardless of parent shape.
+     Square ping rings were visible on device presence dots [rgwb fix 3]. */
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, currentColor 60%, transparent);
+  animation: statusPing calc(2.4s * var(--speed, .72)) ease-out infinite;
+  opacity: var(--motion-opacity, 1);
+  pointer-events: none;
+}
+@keyframes statusPing {
+  0% { opacity: .7; transform: scale(.5); }
+  100% { opacity: 0; transform: scale(1.8); }
+}
+
+/* Gentle floating glyph (history/quick-tile icons). */
+.icon-float { animation: iconFloat calc(4s * var(--speed, .72)) ease-in-out infinite; }
+@keyframes iconFloat {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-2px) rotate(.8deg); }
+}
+
+/* Discovery network rings (empty-state icon).
+   [rgwb fix 3] Default border-radius: 50% so rings are always circular
+   expanding from the icon. Square rings were visible when the parent icon
+   container had no explicit border-radius. */
+.network-rings { position: relative; }
+.network-rings::before,
+.network-rings::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  /* 50% so rings are circles regardless of icon container shape [rgwb fix 3] */
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
+  animation: networkRing calc(2.7s * var(--speed, .72)) ease-out infinite;
+  opacity: var(--motion-opacity, 1);
+  pointer-events: none;
+}
+.network-rings::after { animation-delay: calc(1.1s * var(--speed, .72)); }
+@keyframes networkRing {
+  0% { transform: scale(.78); opacity: .5; }
+  100% { transform: scale(1.35); opacity: 0; }
+}
+
+/* QR scan sweep (apply to the QR container; it builds its own scan line). */
+.qr-scan { position: relative; overflow: hidden; }
+.qr-scan::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  top: 14px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  box-shadow: 0 0 18px var(--accent);
+  animation: qrScan calc(2.5s * var(--speed, .72)) ease-in-out infinite;
+  opacity: var(--motion-opacity, 1);
+  pointer-events: none;
+}
+@keyframes qrScan {
+  0%, 100% { transform: translateY(4px); opacity: 0; }
+  12%, 88% { opacity: .9; }
+  50% { transform: translateY(144px); }
+}
+
+/* Sidebar active nav-item breathing glow. */
+.nav-active-glow { animation: navActivePulse calc(3.2s * var(--speed, .72)) ease-in-out infinite; }
+@keyframes navActivePulse {
+  0%, 100% { box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 28%, transparent), inset 0 1px 0 rgba(255,255,255,.30); }
+  50% { box-shadow: 0 10px 32px color-mix(in srgb, var(--accent) 46%, transparent), inset 0 1px 0 rgba(255,255,255,.40); }
+}
+
+/* Badge gentle float. */
+.badge-float { animation: badgeFloat calc(3.4s * var(--speed, .72)) ease-in-out infinite; }
+@keyframes badgeFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1px); }
+}
+
+/* Progress bar brightness pulse. */
+.progress-pulse { animation: progressPulse calc(2.6s * var(--speed, .72)) ease-in-out infinite; }
+@keyframes progressPulse {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.25); }
+}
+
+/* Toggle thumb spring pop (toggle on togglePop class to the thumb on change). */
+.toggle-pop { animation: togglePop calc(.36s * var(--speed, .72)) cubic-bezier(.2,1.24,.28,1); }
+@keyframes togglePop {
+  0% { transform: scale(.86); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+/* Tab active indicator grow. */
+.tab-indicator { animation: tabIndicator calc(.42s * var(--speed, .72)) cubic-bezier(.2,1.24,.28,1) both; transform-origin: center; }
+@keyframes tabIndicator {
+  from { transform: scaleX(.4); opacity: 0; }
+  to { transform: scaleX(1); opacity: 1; }
+}
+
+/* Terminal cursor blink (logs). */
+.cursor-blink { animation: cursorBlink 1.1s steps(1) infinite; }
+@keyframes cursorBlink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
 }
 
 /* ── Content-type chip (shared across popup + history) ───────────────────── */

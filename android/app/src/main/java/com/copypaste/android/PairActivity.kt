@@ -54,6 +54,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -77,8 +78,24 @@ import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import com.copypaste.android.ui.theme.LocalLiquidTokens
+import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.motionDuration
+import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
@@ -894,13 +911,24 @@ fun PairScreen(
     }
 
     val c = LocalIdeColors.current
+    val lt = LocalLiquidTokens.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
+    val reduced = rememberReducedMotion()
+
+    // Entrance alpha for the QR card — fades in on first composition.
+    var pairEntered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { pairEntered = true }
+    val cardEntranceAlpha by animateFloatAsState(
+        targetValue = if (pairEntered) 1f else 0f,
+        animationSpec = tween(if (reduced) 0 else motionDuration(Motion.Slow)),
+        label = "pairCardAlpha",
+    )
 
     Box(Modifier.fillMaxSize()) {
     // 9g57: aurora canvas backdrop — mirrors DevicesScreen pattern.
     Scaffold(
-        modifier = if (translucent) modifier.auroraCanvas(dark) else modifier,
+        modifier = if (translucent) modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else modifier,
         containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
@@ -940,7 +968,7 @@ fun PairScreen(
             }
 
             if (scannedPeer == null) {
-            CopyPasteCard {
+            CopyPasteCard(modifier = Modifier.alpha(cardEntranceAlpha)) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1010,6 +1038,69 @@ fun PairScreen(
                                                         Modifier
                                                 )
                                         )
+                                        // Animated scan line — drawn over the QR when revealed and
+                                        // reduced motion is OFF. Sweeps top→bottom in 2.5 s on a
+                                        // FastOutSlowIn curve, matching the web qrScan keyframe.
+                                        // The line is a 2dp accent gradient with a glow shadow,
+                                        // zeroed (invisible) at both ends so it fades gracefully.
+                                        if (qrRevealed && !reduced) {
+                                            val scanTransition = rememberInfiniteTransition(label = "qrScan")
+                                            val scanProgress by scanTransition.animateFloat(
+                                                initialValue = 0f,
+                                                targetValue = 1f,
+                                                animationSpec = infiniteRepeatable(
+                                                    animation = tween(
+                                                        // 2500ms matches web qrScan 2.5s.
+                                                        durationMillis = (2500 * lt.motionScale).toInt(),
+                                                        easing = FastOutSlowInEasing,
+                                                    ),
+                                                    repeatMode = RepeatMode.Restart,
+                                                ),
+                                                label = "qrScanProgress",
+                                            )
+                                            // Fade the line in from 0 → opaque at 12% → opaque at
+                                            // 88% → back to 0, matching the web opacity keyframes.
+                                            val scanAlpha = when {
+                                                scanProgress < 0.12f -> scanProgress / 0.12f
+                                                scanProgress > 0.88f -> (1f - scanProgress) / 0.12f
+                                                else -> 1f
+                                            } * 0.9f
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(QR_IMAGE_SIZE_DP.dp)
+                                                    .drawBehind {
+                                                        // Compute Y position of the scan line.
+                                                        val scanY = size.height * scanProgress
+                                                        // 2dp glow line: accent gradient fades to transparent at edges.
+                                                        drawRect(
+                                                            brush = Brush.horizontalGradient(
+                                                                colors = listOf(
+                                                                    androidx.compose.ui.graphics.Color.Transparent,
+                                                                    c.accent.copy(alpha = scanAlpha),
+                                                                    c.accent.copy(alpha = scanAlpha),
+                                                                    androidx.compose.ui.graphics.Color.Transparent,
+                                                                ),
+                                                            ),
+                                                            topLeft = Offset(0f, scanY - 1.dp.toPx()),
+                                                            size = androidx.compose.ui.geometry.Size(size.width, 2.dp.toPx()),
+                                                        )
+                                                        // Soft glow halo below the line (widens the visible effect).
+                                                        drawRect(
+                                                            brush = Brush.verticalGradient(
+                                                                colors = listOf(
+                                                                    c.accent.copy(alpha = scanAlpha * 0.35f),
+                                                                    androidx.compose.ui.graphics.Color.Transparent,
+                                                                ),
+                                                                startY = scanY,
+                                                                endY = scanY + 18.dp.toPx(),
+                                                            ),
+                                                            topLeft = Offset(0f, scanY),
+                                                            size = androidx.compose.ui.geometry.Size(size.width, 18.dp.toPx()),
+                                                        )
+                                                    },
+                                            )
+                                        }
                                     }
                                     // 9luz: tap-to-reveal — glass-tinted overlay instead of
                                     // dark 35% scrim. Accent-tinted translucent pill label

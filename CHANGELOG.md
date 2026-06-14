@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.7.2] - 2026-06-14
+
+Liquid Glass "Graphite Mist" theming pass: every palette now works in **both** dark
+and light, plus UI polish, two P0 fixes, and a CI/MSRV unblock.
+
+### Added
+- **Switchable color palettes** (10) on desktop + Android, each readable in dark **and**
+  light (neutrals follow the theme, accent follows the palette). Appearance picker in
+  Settings (palette / density / theme).
+- **Graphite Mist** default theme; aurora background, premium glass + cinematic spring
+  motion, floating tab bar (Android), SF-like nav icons (both platforms).
+- Android privacy toggle **"Allow Screenshots"** (FLAG_SECURE) for clipboard contents.
+
+### Fixed
+- **macOS pairing "device unavailable"** (j2vf): Android mDNS advertised syncPort=0
+  before the inbound listener bound — now polls until the port is live.
+- **Android LAN "Discovered on your network" section vanished** (pkd0): restored the
+  section label + scanning empty-state.
+- **CI/MSRV build** (l07l): tokio 1.52 `select!` rejected an in-macro `#[cfg(unix)]`
+  branch — rewrote the SIGTERM branch as a boxed future; MSRV floor 1.89 → 1.96 (tokio
+  kept latest); fixed pre-existing non-macOS daemon compile errors (zeroize/subtle dep
+  scoping, `KeychainError::Io`, cfg-gated imports).
+- Desktop: removed device fingerprint display, smoother tab transitions, unified glass
+  surfaces, readable light theme, content-type icons in History, Logs cleanup.
+
+### Changed
+- MSRV metadata 1.89 → 1.96; CI MSRV job updated accordingly.
+
 ## [0.7.1] - 2026-06-14
 
 "Liquid Glass" design-system v2 ("Quiet Precision") rolled out across desktop and

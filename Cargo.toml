@@ -16,11 +16,14 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.1"
+version = "0.7.2"
 edition = "2021"
-# Metadata only — we follow stable (see rust-toolchain.toml). 1.89 is the
-# current Cargo.lock-implied floor (smol_str 0.3.6). Bump when lockfile bumps.
-rust-version = "1.89"
+# Metadata only — we follow stable (see rust-toolchain.toml). 1.96 is the
+# current Cargo.lock-implied floor (tokio 1.52 select!). Bump when lockfile bumps.
+# MSRV tracks current stable (see rust-toolchain.toml: ship via Homebrew only,
+# no downstream MSRV obligation — floor = whatever the lock resolves under stable).
+# Bumped 1.89 → 1.96 (CopyPaste-l07l) so tokio 1.52+ select! compiles.
+rust-version = "1.96"
 authors = ["CopyPaste"]
 license = "MIT OR Apache-2.0"
 description = "Encrypted clipboard manager for macOS and Android"

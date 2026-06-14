@@ -337,6 +337,100 @@ describe("P2P toggle triggers daemon restart", () => {
     expect(rangeInputs.length).toBeGreaterThan(0);
   });
 
+  // ---------------------------------------------------------------------------
+  // §hn5v Appearance section — palette / density / theme pickers
+  // ---------------------------------------------------------------------------
+
+  it("§hn5v Display tab has an Appearance section with palette picker", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const displayTab = await screen.findByText("Display");
+    await act(async () => { fireEvent.click(displayTab); });
+
+    // "Appearance" subsection heading must be present (exact text, not "Popup appearance")
+    expect(screen.getAllByText(/Appearance/i).some((el) => el.textContent === "Appearance")).toBe(true);
+
+    // palette picker grid is data-testid="palette-picker"
+    expect(document.querySelector('[data-testid="palette-picker"]')).not.toBeNull();
+
+    // All 10 palettes rendered as swatch buttons (aria-label = palette name)
+    expect(screen.getByRole("button", { name: /Graphite Mist/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Liquid Blue/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Aurora Violet/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Amber Night/i })).toBeInTheDocument();
+  });
+
+  it("§hn5v clicking a palette swatch updates the store (aria-pressed reflects active)", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const displayTab = await screen.findByText("Display");
+    await act(async () => { fireEvent.click(displayTab); });
+
+    // Click "Liquid Blue" swatch — it should become pressed
+    const liquidBlueBtn = screen.getByRole("button", { name: /Liquid Blue/i });
+    await act(async () => { fireEvent.click(liquidBlueBtn); });
+
+    // After click the button must be aria-pressed="true"
+    expect(liquidBlueBtn.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("§hn5v Display tab has density picker with compact/comfortable/spacious", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const displayTab = await screen.findByText("Display");
+    await act(async () => { fireEvent.click(displayTab); });
+
+    // All three density options present
+    expect(screen.getByRole("button", { name: /^compact$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^comfortable$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^spacious$/i })).toBeInTheDocument();
+  });
+
+  it("§hn5v Display tab has theme picker with dark/light/system", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const displayTab = await screen.findByText("Display");
+    await act(async () => { fireEvent.click(displayTab); });
+
+    // Theme row in Appearance section
+    expect(screen.getByText(/Color theme/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^light$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^dark$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^system$/i })).toBeInTheDocument();
+  });
+
   it("does NOT call restart_daemon when set_config fails", async () => {
     // Make set_config fail so the restart branch is not reached.
     invoke.mockImplementation(

@@ -121,12 +121,47 @@ export default {
           "0%":   { transform: "scale(1)", opacity: "1" },
           "75%, 100%": { transform: "scale(2.2)", opacity: "0" },
         },
+        // Liquid Glass aurora background animations (CopyPaste-52mz)
+        auroraSpin: {
+          "0%":   { transform: "rotate(-14deg) scale(1)",    filter: "blur(18px) hue-rotate(0deg)" },
+          "50%":  { transform: "rotate(18deg) scale(1.08)", filter: "blur(28px) hue-rotate(10deg)" },
+          "100%": { transform: "rotate(346deg) scale(1)",   filter: "blur(18px) hue-rotate(0deg)" },
+        },
+        glowDrift: {
+          "from": { transform: "translate3d(-4%, 0, 0) rotate(-12deg) scale(1)" },
+          "to":   { transform: "translate3d(8%, -6%, 0) rotate(-8deg) scale(1.08)" },
+        },
+        glassShine: {
+          "to": { transform: "translateX(120%)" },
+        },
+        // Premium entrance animations (CopyPaste-52mz) — spring cubic-bezier, NOT bounce
+        cardIn: {
+          "0%":   { opacity: "0", transform: "scale(.96) translateY(10px)" },
+          "100%": { opacity: "1", transform: "scale(1) translateY(0)" },
+        },
+        revealUp: {
+          "0%":   { opacity: "0", transform: "translateY(6px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        listItemIn: {
+          "0%":   { opacity: "0", transform: "translateY(4px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
       },
       animation: {
-        "popup-enter": "popupEnter 160ms cubic-bezier(.16,1,.3,1) both",
-        "toast-in":    "toastIn 180ms cubic-bezier(.16,1,.3,1) both",
-        "fade-in":     "fadeIn 130ms ease both",
-        "pulse-ping":  "pulsePing 2s cubic-bezier(0,0,0.2,1) infinite",
+        "popup-enter":   "popupEnter 160ms cubic-bezier(.16,1,.3,1) both",
+        "toast-in":      "toastIn 180ms cubic-bezier(.16,1,.3,1) both",
+        "fade-in":       "fadeIn 130ms ease both",
+        "pulse-ping":    "pulsePing 2s cubic-bezier(0,0,0.2,1) infinite",
+        // Liquid Glass aurora + entrance (CopyPaste-52mz)
+        // Note: aurora speed is scaled by --speed CSS token inline via calc() in CSS;
+        // these Tailwind shorthands use the cinematic default durations.
+        "aurora-spin":   "auroraSpin 12.96s linear infinite",   /* 18s × 0.72 */
+        "glow-drift":    "glowDrift 8.64s ease-in-out infinite alternate", /* 12s × 0.72 */
+        "glass-shine":   "glassShine .83s cubic-bezier(.16,1,.3,1)",       /* 1.15s × 0.72 */
+        "card-in":       "cardIn 158ms cubic-bezier(.16,1,.3,1) both",    /* 220ms × 0.72 */
+        "reveal-up":     "revealUp 130ms cubic-bezier(.16,1,.3,1) both",  /* 180ms × 0.72 */
+        "list-item-in":  "listItemIn 101ms cubic-bezier(.16,1,.3,1) both", /* 140ms × 0.72 */
       },
     }
   },

@@ -12,20 +12,19 @@
         — keep this purely color + accent so it merges cleanly. Hook left below.
     -->
     <style name="Theme.CopyPaste" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Accent — Design System v2 §0 action blue #3D8BFF (matches Compose theme) -->
+        <!-- Accent — Graphite Mist §0 cool-grey accent #9DB7DF (c48e default palette) -->
         <item name="colorPrimary">@color/ide_accent</item>
         <item name="colorPrimaryDark">@color/ide_accent_dark</item>
         <item name="colorAccent">@color/ide_accent</item>
 
-        <!-- Dark window/launch background so there's no white flash before Compose -->
+        <!-- Graphite Mist bg0 #07090F launch background — no colour flash at cold start -->
         <item name="android:windowBackground">@color/ide_bg</item>
         <item name="android:colorBackground">@color/ide_bg</item>
 
         <!-- Edge-to-edge: transparent system bars; Compose applies the insets. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <!-- The app is permanently dark (Darcula). Status bar sits on a dark
-             background, so use LIGHT icons (windowLightStatusBar = false). -->
+        <!-- Default palette (Graphite Mist) is dark — use LIGHT status-bar icons. -->
         <item name="android:windowLightStatusBar">false</item>
         <!-- Render into the display cutout (notch / punch-hole) area on the short
              edges; combined with the Compose insets this lets the header use

@@ -8,15 +8,24 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -28,18 +37,37 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalLiquidTokens
+import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.Motion
+import com.copypaste.android.ui.theme.RadiusChip
+import com.copypaste.android.ui.theme.auroraCanvas
+import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.motionDuration
+import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.rememberReducedMotion
+import com.copypaste.android.ui.theme.rememberTranslucency
 
 /**
  * "About" screen — mirrors the macOS About view
@@ -69,7 +97,12 @@ class AboutActivity : ComponentActivity() {
         setContent {
             CopyPasteTheme {
                 val c = LocalIdeColors.current
-                Scaffold(containerColor = c.bg) { innerPadding ->
+                val dark = isDarkTheme()
+                val translucent = rememberTranslucency()
+                Scaffold(
+                    containerColor = if (translucent) Color.Transparent else c.bg,
+                    modifier = if (translucent) Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else Modifier,
+                ) { innerPadding ->
                     AboutScreen(
                         modifier = Modifier.padding(innerPadding),
                         showBackButton = true,
@@ -99,6 +132,9 @@ private fun versionLabel(): String =
  * [AboutActivity]. Styled with the shared IDE-theme components
  * (CopyPasteTopBar / CopyPasteCard / IDE color tokens) so it reads as a sibling
  * of the History / Pair / Settings screens.
+ *
+ * Premium entrance: the identity card slides up and fades in; feature rows stagger
+ * in with a slight delay each. All animation is zeroed when reduced motion is active.
  */
 @Composable
 fun AboutScreen(
@@ -108,10 +144,27 @@ fun AboutScreen(
 ) {
     val context = LocalContext.current
     val c = LocalIdeColors.current
+    val lt = LocalLiquidTokens.current
+    val dark = isDarkTheme()
+    val translucent = rememberTranslucency()
+    val reduced = rememberReducedMotion()
+    val slowDur = motionDuration(Motion.Slow)
+    val baseDur = motionDuration(Motion.Base)
+
+    // Entrance trigger — flip to true on first composition so the card reveals.
+    var entered by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { entered = true }
+
+    // Card slide-up + fade entrance — 0ms when reduced motion is active.
+    val cardAlpha by animateFloatAsState(
+        targetValue = if (entered) 1f else 0f,
+        animationSpec = tween(if (reduced) 0 else slowDur),
+        label = "aboutCardAlpha",
+    )
 
     Scaffold(
         modifier = modifier,
-        containerColor = c.bg,
+        containerColor = Color.Transparent,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_about),
@@ -125,29 +178,48 @@ fun AboutScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .verticalScroll(rememberScrollState())
-                .padding(16.dp),
+                .windowInsetsPadding(WindowInsets.navigationBars)
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            CopyPasteCard {
-                // ── Identity ─────────────────────────────────────────────
+            // ── Identity + Features card ──────────────────────────────────────
+            // Single glass card contains both blocks so they read as one premium unit.
+            CopyPasteCard(
+                modifier = Modifier.alpha(cardAlpha),
+            ) {
+                // ── Identity ─────────────────────────────────────────────────
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 24.dp),
+                        .padding(horizontal = 24.dp, vertical = 28.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
+                    // App name — headline display (largest type)
                     Text(
                         text = stringResource(R.string.app_name),
                         style = MaterialTheme.typography.displayLarge,
                         color = c.text,
+                        textAlign = TextAlign.Center,
                     )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = versionLabel(),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = c.faint,
-                    )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
+                    // Version badge — small glass chip pill
+                    Box(
+                        modifier = Modifier
+                            .background(c.accentDim, RadiusChip)
+                            .border(0.5.dp, c.accent.copy(alpha = 0.35f), RadiusChip)
+                            .padding(horizontal = 10.dp, vertical = 3.dp),
+                    ) {
+                        Text(
+                            text = versionLabel(),
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontFamily = com.copypaste.android.ui.theme.MonoFontFamily,
+                                fontSize = 11.sp,
+                            ),
+                            color = c.accent,
+                        )
+                    }
+                    Spacer(Modifier.height(10.dp))
                     Text(
                         text = stringResource(R.string.about_tagline),
                         style = MaterialTheme.typography.bodyMedium,
@@ -156,13 +228,22 @@ fun AboutScreen(
                     )
                 }
 
-                // ── Feature list ─────────────────────────────────────────
+                // Hairline divider between identity and feature list
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(0.5.dp)
+                        .background(c.divider),
+                )
+
+                // ── Feature list ─────────────────────────────────────────────
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(horizontal = 20.dp, vertical = 18.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
+                    // Section label — muted uppercase Apple-style header
                     Text(
                         text = stringResource(R.string.about_features).uppercase(),
                         style = MaterialTheme.typography.labelSmall.copy(
@@ -170,18 +251,31 @@ fun AboutScreen(
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 0.8.sp,
                         ),
-                        color = c.accent.copy(alpha = 0.80f),
+                        color = lt.accent2.copy(alpha = 0.70f),
                     )
-                    ABOUT_FEATURES.forEach { feature ->
-                        Row(verticalAlignment = Alignment.Top) {
+                    ABOUT_FEATURES.forEachIndexed { idx, feature ->
+                        // Each feature row fades in with a small stagger delay.
+                        val rowAlpha by animateFloatAsState(
+                            targetValue = if (entered) 1f else 0f,
+                            animationSpec = tween(
+                                durationMillis = if (reduced) 0 else baseDur,
+                                delayMillis = if (reduced) 0 else (idx * 60),
+                            ),
+                            label = "featureRow$idx",
+                        )
+                        Row(
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.alpha(rowAlpha),
+                        ) {
+                            // Success-tinted check icon — maps to c.success
                             Icon(
-                                // §5: thin Outlined check, tinted §3 success green.
                                 Icons.Outlined.Check,
                                 contentDescription = null,
                                 tint = c.success,
                                 modifier = Modifier
-                                    .padding(end = 8.dp, top = 2.dp)
-                                    .height(16.dp),
+                                    .padding(top = 1.dp)
+                                    .size(16.dp),
                             )
                             Text(
                                 text = feature,
@@ -191,23 +285,34 @@ fun AboutScreen(
                         }
                     }
                 }
+            }
 
-                // ── GitHub link ──────────────────────────────────────────
+            // ── GitHub link chip ──────────────────────────────────────────────
+            // Tasteful standalone chip below the card; fades in after card.
+            val linkAlpha by animateFloatAsState(
+                targetValue = if (entered) 1f else 0f,
+                animationSpec = tween(
+                    durationMillis = if (reduced) 0 else slowDur,
+                    delayMillis = if (reduced) 0 else (baseDur / 2),
+                ),
+                label = "aboutLinkAlpha",
+            )
+            CopyPasteButton(
+                onClick = {
+                    runCatching {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL))
+                        )
+                    }
+                },
+                variant = ButtonVariant.SECONDARY,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .alpha(linkAlpha),
+            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable {
-                            // Open in the system browser; guarded so a device
-                            // without a browser does not crash the app.
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_URL))
-                                )
-                            }
-                        }
-                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text(
                         text = "github.com/dmytro-yevs/copypaste",
@@ -218,10 +323,12 @@ fun AboutScreen(
                         Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = stringResource(R.string.about_open_github),
                         tint = c.accent,
-                        modifier = Modifier.height(16.dp),
+                        modifier = Modifier.size(16.dp),
                     )
                 }
             }
+
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

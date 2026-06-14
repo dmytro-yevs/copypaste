@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Briefcase, Copy, RefreshCw, Zap, AlertCircle } from "lucide-react";
+import { Briefcase, RefreshCw, Zap, AlertCircle } from "lucide-react";
 import {
   api,
   ipcErrorMessage,
@@ -72,7 +72,14 @@ function StatusDot({
     : `Offline · last seen ${formatLastSeen(lastSeenSecs)}`;
   return (
     // relative wrapper so the pulse ring can be absolutely positioned behind the dot
-    <span className="relative inline-flex shrink-0 items-center justify-center w-2 h-2">
+    // status-ping: adds a CSS ::after expanding ring (styleguide §presence) in addition to
+    // the Tailwind animate-pulse-ping span kept for test-compatibility.
+    <span
+      className={[
+        "relative inline-flex shrink-0 items-center justify-center w-2 h-2",
+        online ? "status-ping" : "",
+      ].join(" ")}
+    >
       {/* Expanding-ring pulse — only when online; respects prefers-reduced-motion */}
       {online && (
         <span
@@ -89,6 +96,8 @@ function StatusDot({
           // mztl: offline dot → danger red (matches SyncStatusChip and styleguide .dot-offline)
           online ? "bg-ide-success" : "bg-ide-danger",
         ].join(" ")}
+        // success glow: soft halo matching the --success token (styleguide §presence)
+        style={online ? { boxShadow: "0 0 10px color-mix(in srgb, var(--success) 55%, transparent)" } : undefined}
       />
     </span>
   );
@@ -136,28 +145,6 @@ function ThisDeviceCard({
 }: {
   info: OwnDeviceInfo;
 }) {
-  const [fpCopied, setFpCopied] = useState(false);
-  const fpCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (fpCopyTimer.current !== null) clearTimeout(fpCopyTimer.current);
-    };
-  }, []);
-
-  const handleCopyFp = () => {
-    if (!info.fingerprint) return;
-    navigator.clipboard.writeText(info.fingerprint).then(
-      () => {
-        setFpCopied(true);
-        if (fpCopyTimer.current !== null) clearTimeout(fpCopyTimer.current);
-        fpCopyTimer.current = setTimeout(() => setFpCopied(false), 1500);
-      },
-      () => {
-        // Clipboard denied — non-fatal; fingerprint is visible on screen.
-      }
-    );
-  };
-
   return (
     <div className="px-3 py-2.5">
       {/* Name + online dot + "This Mac" badge */}
@@ -166,8 +153,8 @@ function ThisDeviceCard({
         <p className="truncate text-[13px] font-medium text-ide-text">
           {info.device_name ?? "This Device"}
         </p>
-        {/* nmea: pill with hairline border matching accent tint */}
-        <span className="shrink-0 rounded-full border border-ide-accent/30 px-1.5 py-0.5 text-[10px] font-medium bg-ide-accent/14 text-ide-accent">
+        {/* nmea: pill with hairline border matching accent tint; badge-float adds subtle levitate */}
+        <span className="badge-float shrink-0 rounded-full border border-ide-accent/30 px-1.5 py-0.5 text-[10px] font-medium bg-ide-accent/14 text-ide-accent">
           This Mac
         </span>
       </div>
@@ -180,27 +167,6 @@ function ThisDeviceCard({
         <MetaRow label="Local IP" value={info.local_ip} />
         <MetaRow label="Public IP" value={info.public_ip ?? undefined} />
       </DeviceMetaGrid>
-
-      {/* Full fingerprint in mono + copy button */}
-      {info.fingerprint && (
-        <div className="mt-1.5 flex items-center gap-1.5">
-          <span className="font-mono text-[10px] text-ide-faint break-all select-all">
-            {info.fingerprint}
-          </span>
-          <button
-            type="button"
-            onClick={handleCopyFp}
-            title="Copy fingerprint"
-            aria-label="Copy fingerprint"
-            className="shrink-0 rounded p-0.5 text-ide-faint hover:text-ide-dim hover:bg-ide-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent"
-          >
-            {fpCopied
-              ? <span className="text-[10px] text-ide-success">✓</span>
-              : <Copy size={12} strokeWidth={1.5} aria-hidden="true" />
-            }
-          </button>
-        </div>
-      )}
     </div>
   );
 }
@@ -248,33 +214,9 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
     ? "text-ide-sky bg-ide-sky/14 border border-ide-sky/30 rounded-full"
     : "text-ide-accent bg-ide-accent/14 border border-ide-accent/30 rounded-full";
 
-  // Truncated fingerprint: first 16 chars + ellipsis + last 8 chars.
-  const fp = peer.fingerprint;
-  const truncatedFp = fp.length > 24 ? fp.slice(0, 16) + "…" + fp.slice(-8) : fp;
-
-  const [fpCopied, setFpCopied] = useState(false);
-  const fpCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    return () => {
-      if (fpCopyTimer.current !== null) clearTimeout(fpCopyTimer.current);
-    };
-  }, []);
-
-  const handleCopyFp = () => {
-    navigator.clipboard.writeText(fp).then(
-      () => {
-        setFpCopied(true);
-        if (fpCopyTimer.current !== null) clearTimeout(fpCopyTimer.current);
-        fpCopyTimer.current = setTimeout(() => setFpCopied(false), 1500);
-      },
-      () => {
-        // Clipboard denied — non-fatal.
-      }
-    );
-  };
-
   return (
-    <div className="px-3 py-2.5 hover:bg-ide-hover">
+    // card-in: glass entrance fade-up (styleguide §device-card)
+    <div className="card-in px-3 py-2.5 hover:bg-ide-hover">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           {/* Name + online dot + transport chip */}
@@ -286,10 +228,10 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
             <p className="truncate text-[13px] font-medium text-ide-text">
               {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
             </p>
-            {/* nmea: transport chip — full-radius pill with hairline border */}
+            {/* nmea: transport chip — full-radius pill with hairline border; badge-float adds levitate */}
             <span
               className={[
-                "shrink-0 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                "badge-float shrink-0 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
                 transportClass,
               ].join(" ")}
             >
@@ -311,25 +253,6 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
               value={peer.latency_ms !== undefined ? `${peer.latency_ms} ms` : null}
             />
           </DeviceMetaGrid>
-
-          {/* Truncated fingerprint + hover-reveal copy button */}
-          <div className="mt-1 flex items-center gap-1">
-            <span className="font-mono text-[10px] text-ide-faint select-all">
-              {truncatedFp}
-            </span>
-            <button
-              type="button"
-              onClick={handleCopyFp}
-              title="Copy fingerprint"
-              aria-label="Copy fingerprint"
-              className="shrink-0 rounded p-0.5 text-ide-faint hover:text-ide-dim hover:bg-ide-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent"
-            >
-              {fpCopied
-                ? <span className="text-[10px] text-ide-success">✓</span>
-                : <Copy size={12} strokeWidth={1.5} aria-hidden="true" />
-              }
-            </button>
-          </div>
 
           {/* Sync line: "Synced X ago" from last_sync_at */}
           {lastSyncStr && (
@@ -809,10 +732,13 @@ function DiscoveredRow({
   device,
   onPair,
   busy,
+  index = 0,
 }: {
   device: DiscoveredDevice;
   onPair: (device: DiscoveredDevice) => void;
   busy: boolean;
+  /** Row index for stagger timing (list-item-in). */
+  index?: number;
 }) {
   // Show all resolved IPs (comma-joined); fall back to a single address.
   const ips =
@@ -820,14 +746,17 @@ function DiscoveredRow({
   // v1 peers without a bootstrap port cannot do SAS pairing.
   const pairable = device.bport !== null;
   return (
-    <div className="px-3 py-2.5 hover:bg-ide-hover">
+    // list-item-in: staggered entrance; stagger delay = index × 60 ms (styleguide §list)
+    <div
+      className="list-item-in px-3 py-2.5 hover:bg-ide-hover"
+      style={{ animationDelay: `${index * 60}ms` }}
+    >
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-medium text-ide-text">
             {device.device_name || `Device ${device.device_id.slice(0, 8)}`}
           </p>
           <MetaRow label="Addresses" value={ips} />
-          <MetaRow label="Fingerprint" value={device.device_id || null} />
         </div>
         <button
           onClick={() => onPair(device)}
@@ -1664,17 +1593,37 @@ export function DevicesView({
       </div>
       {discovered.length > 0 ? (
         <div className="surface-card flex flex-col divide-y divide-ide-divider rounded-ide">
-          {discovered.map((device) => (
+          {discovered.map((device, idx) => (
             <DiscoveredRow
               key={device.device_id}
               device={device}
+              index={idx}
               onPair={(d) => void handlePairDiscovered(d)}
               busy={pairStarting || pairingDevice !== null}
             />
           ))}
         </div>
       ) : (
-        <p className="text-[11px] text-ide-faint">No devices found on the network yet.</p>
+        // reveal-up: section fades up into view; network-rings on icon = expanding discovery rings
+        <div className="reveal-up flex items-center gap-3 py-1">
+          <span
+            aria-hidden="true"
+            className="network-rings shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl text-ide-accent"
+            style={{
+              background: "color-mix(in srgb, var(--accent) 15%, rgba(var(--surface-strong-rgb, 0 0 0) / .35))",
+              border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--line, rgba(255,255,255,.08)))",
+            }}
+          >
+            {/* Wifi-style discovery icon (inline SVG, lucide signal shape) */}
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M5 12.55a11 11 0 0 1 14.08 0" />
+              <path d="M1.42 9a16 16 0 0 1 21.16 0" />
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0" />
+              <circle cx="12" cy="20" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
+          <p className="text-[11px] text-ide-faint">No devices found on the network yet.</p>
+        </div>
       )}
       {discoverError !== null && (
         <p className="mt-2 text-[11px] text-ide-danger">{discoverError}</p>
@@ -1684,11 +1633,13 @@ export function DevicesView({
       <div className="my-5 border-t border-ide-divider" />
 
       {/* ── Pair via QR — full width, compact code ───────────────── */}
-      <p className="mb-2 text-[11px] font-medium uppercase tracking-wider text-ide-faint">
+      {/* reveal-up: header fades up into view (styleguide §section-headers) */}
+      <p className="reveal-up mb-2 text-[11px] font-medium uppercase tracking-wider text-ide-faint">
         Pair a new device
       </p>
 
-      <section className="surface-card rounded-ide-lg p-4 space-y-3 shadow-ide-sm">
+      {/* card-in: glass card entrance (styleguide §device-card) */}
+      <section className="card-in surface-card rounded-ide-lg p-4 space-y-3 shadow-ide-sm">
         {qrState.status === "loading" && (
           <p className="text-[12px] text-ide-dim animate-pulse">Generating...</p>
         )}
@@ -1697,9 +1648,10 @@ export function DevicesView({
           <div className="flex items-start gap-5">
             {/* QR code — SVG comes from our own Tauri backend and never
                 contains remote markup — dangerouslySetInnerHTML is safe here.
-                Privacy-first: blurred by default, revealed on click (spec §10). */}
+                Privacy-first: blurred by default, revealed on click (spec §10).
+                qr-scan: adds an animated scan-line via CSS ::after (styleguide §qr). */}
             <div
-              className="relative shrink-0 rounded-ide bg-white p-2 overflow-hidden"
+              className="qr-scan relative shrink-0 rounded-ide bg-white p-2 overflow-hidden"
               style={{ width: 190, height: 190 }}
             >
               <div
@@ -1744,8 +1696,9 @@ export function DevicesView({
                       <div className="w-full h-0.5 rounded-full bg-ide-elevated overflow-hidden">
                         <div
                           data-testid="qr-drain-bar"
+                          // progress-pulse: subtle brightness breathe (styleguide §progress)
                           className={[
-                            "h-full rounded-full transition-[width] duration-1000 ease-linear",
+                            "progress-pulse h-full rounded-full transition-[width] duration-1000 ease-linear",
                             qrSecsLeft <= 20 ? "bg-ide-warning" : "bg-ide-accent",
                           ].join(" ")}
                           style={{ width: `${pct}%` }}

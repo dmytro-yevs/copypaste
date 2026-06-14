@@ -33,18 +33,20 @@ enum class Density {
 }
 
 /**
- * App theme mode — mirrors the web's System/Light/Dark theme control
- * (PARITY-SPEC §0). The app is **light-first**: [DEFAULT] is [LIGHT], NOT
- * follow-OS. The user may pick [SYSTEM] to follow the OS dark/light setting.
+ * App theme mode — mirrors the web's System/Light/Dark theme control.
+ *
+ * c48e: default changed from LIGHT to DARK (Graphite Mist is the new default
+ * palette, which is dark). Light palettes remain accessible via palette picker.
+ * The user may pick [SYSTEM] to follow the OS dark/light setting.
  */
 enum class ThemeMode {
     SYSTEM, // follow OS (isSystemInDarkTheme)
-    LIGHT,  // force light (default)
-    DARK;   // force dark
+    LIGHT,  // force light
+    DARK;   // force dark (c48e: default — Graphite Mist is dark)
 
     companion object {
-        /** PARITY-SPEC §0: default is LIGHT (light-first), not OS-follow. */
-        val DEFAULT = LIGHT
+        /** c48e: default is DARK (Graphite Mist dark palette). */
+        val DEFAULT = DARK
     }
 }
 
@@ -442,6 +444,19 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("mask_sensitive_content", v).apply()
 
     /**
+     * Whether the OS is allowed to capture this app's screens. When true
+     * (default) screenshots, screen recording and the recents-thumbnail all
+     * work normally. When false we set WindowManager FLAG_SECURE on every app
+     * window so the clipboard contents cannot be screenshotted / recorded /
+     * shown in the recents preview — a privacy guard for sensitive pastes.
+     * Applied centrally in CopyPasteTheme; toggling recreates the activity so
+     * the flag change takes effect (same pattern as the palette/theme switch).
+     */
+    var allowScreenshots: Boolean
+        get() = prefs.getBoolean("allow_screenshots", true)
+        set(v) = prefs.edit().putBoolean("allow_screenshots", v).apply()
+
+    /**
      * Number of preview lines per history row (PARITY-SPEC §3, audit P1 #9).
      *
      * Mirrors the web `niApp` setting (store.ts): how many lines of preview text
@@ -515,10 +530,26 @@ class Settings(context: Context) {
     var themeMode: ThemeMode
         get() = when (prefs.getString("theme_mode", ThemeMode.DEFAULT.name)) {
             ThemeMode.SYSTEM.name -> ThemeMode.SYSTEM
-            ThemeMode.DARK.name -> ThemeMode.DARK
-            else -> ThemeMode.LIGHT
+            ThemeMode.LIGHT.name  -> ThemeMode.LIGHT
+            else -> ThemeMode.DARK  // c48e: default is DARK (Graphite Mist)
         }
         set(v) = prefs.edit().putString("theme_mode", v.name).apply()
+
+    /**
+     * Active visual palette (c48e Liquid-Glass refresh).
+     *
+     * Default is "GRAPHITE_MIST" (dark, cool grey) per c48e spec. Stored as the
+     * [com.copypaste.android.ui.theme.Palette] enum name string so new variants can be added
+     * without a migration. Falls back to DEFAULT (GRAPHITE_MIST) on an
+     * unrecognised value.
+     *
+     * Theme.kt's [com.copypaste.android.ui.theme.rememberPalette] reads this and
+     * resolves the enum; callers that want to write call `settings.paletteName =
+     * Palette.XXXX.name`.
+     */
+    var paletteName: String
+        get() = prefs.getString("palette", "GRAPHITE_MIST") ?: "GRAPHITE_MIST"
+        set(v) = prefs.edit().putString("palette", v).apply()
 
     /**
      * One-time upgrade migration to the Apple "Liquid Glass" light-first release.

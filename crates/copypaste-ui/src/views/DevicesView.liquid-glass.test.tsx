@@ -2,7 +2,7 @@
  * Tests for Liquid Glass §7 DevicesView enhancements (CopyPaste-9ug):
  * 1. StatusDot online pulse ring (animate-pulse-ping)
  * 2. Transport chip P2P/Cloud on PeerRow
- * 3. Fingerprint: full mono + copy on ThisDeviceCard; truncated + copy on PeerRow
+ * 3. Fingerprint display removed from device cards (CopyPaste-55vf) — asserts absence
  * 4. Per-peer sync line "Synced X ago" / last sync on PeerRow
  * 5. QR countdown drain bar
  * 6. PeerRow Revoke button hover-reveal (group / opacity-0)
@@ -180,30 +180,28 @@ describe("§7.2 Transport chip P2P/Cloud", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §7.3 Fingerprint display
+// §7.3 Fingerprint display — fingerprint hex removed from device cards (CopyPaste-55vf)
 // ---------------------------------------------------------------------------
 describe("§7.3 Fingerprint display", () => {
-  it("ThisDeviceCard shows full fingerprint in font-mono", async () => {
+  it("ThisDeviceCard does NOT show the fingerprint hex string", async () => {
     render(<DevicesView />);
     await screen.findByText("Test Mac");
 
-    // The full fingerprint should appear
+    // Fingerprint display was removed; the hex string must not appear in the card.
     const fp = BASE_OWN_INFO.fingerprint;
-    const fpEl = await screen.findByText(fp);
-    expect(fpEl).toBeInTheDocument();
-    expect(fpEl.className).toMatch(/font-mono/);
+    expect(screen.queryByText(fp)).toBeNull();
   });
 
-  it("ThisDeviceCard has a copy button for fingerprint", async () => {
+  it("ThisDeviceCard has no copy-fingerprint button", async () => {
     render(<DevicesView />);
     await screen.findByText("Test Mac");
 
-    // A copy button near the fingerprint
-    const copyBtns = await screen.findAllByTitle(/copy fingerprint/i);
-    expect(copyBtns.length).toBeGreaterThanOrEqual(1);
+    // No copy button for fingerprint should be present.
+    const copyBtns = screen.queryAllByTitle(/copy fingerprint/i);
+    expect(copyBtns).toHaveLength(0);
   });
 
-  it("PeerRow shows truncated fingerprint (16+…+8)", async () => {
+  it("PeerRow does NOT show truncated fingerprint", async () => {
     listPeers.mockResolvedValue({
       peers: [BASE_PEER],
     });
@@ -213,19 +211,18 @@ describe("§7.3 Fingerprint display", () => {
 
     const fp = BASE_PEER.fingerprint;
     const truncated = fp.slice(0, 16) + "…" + fp.slice(-8);
-    expect(screen.getByText(truncated)).toBeInTheDocument();
+    expect(screen.queryByText(truncated)).toBeNull();
   });
 
-  it("PeerRow truncated fingerprint is in font-mono", async () => {
+  it("PeerRow has no copy-fingerprint button", async () => {
     listPeers.mockResolvedValue({ peers: [BASE_PEER] });
 
     render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
-    const fp = BASE_PEER.fingerprint;
-    const truncated = fp.slice(0, 16) + "…" + fp.slice(-8);
-    const fpEl = screen.getByText(truncated);
-    expect(fpEl.className).toMatch(/font-mono/);
+    // After the fingerprint row was removed there should be no such button.
+    const copyBtns = screen.queryAllByTitle(/copy fingerprint/i);
+    expect(copyBtns).toHaveLength(0);
   });
 });
 

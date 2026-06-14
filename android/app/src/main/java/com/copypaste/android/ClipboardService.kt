@@ -287,7 +287,23 @@ class ClipboardService : Service() {
                 val cert = withContext(Dispatchers.IO) {
                     deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
                 }
-                val syncPort = activeListenerPort.coerceAtLeast(0)
+                // Race guard (j2vf): startInboundP2pListener binds the OS-assigned
+                // port asynchronously on Dispatchers.IO. Do NOT advertise before it
+                // is non-zero, else Android publishes syncPort=0 over mDNS and Mac
+                // peers see "device unavailable". Poll up to ~3 s (20ms→500ms backoff).
+                val syncPort = withContext(Dispatchers.IO) {
+                    val deadlineMs = System.currentTimeMillis() + 3_000L
+                    var backoffMs = 20L
+                    while (activeListenerPort == 0 && System.currentTimeMillis() < deadlineMs) {
+                        delay(backoffMs)
+                        backoffMs = (backoffMs * 2).coerceAtMost(500L)
+                    }
+                    val port = activeListenerPort
+                    if (port == 0) {
+                        Log.w(TAG, "startFgsDiscovery: listener port still 0 after wait — advertising port 0 (Mac may not reach us)")
+                    }
+                    port
+                }
                 withContext(Dispatchers.IO) {
                     startDiscovery(
                         deviceId = cert.deviceId,

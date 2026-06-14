@@ -1,8 +1,9 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode } from "react";
 import { useUI, type ViewId } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
+import styles from "./ViewTransition.module.css";
 import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError, type PairSasStatus } from "./lib/ipc";
 import { listen } from "@tauri-apps/api/event";
 import { startPeerPresencePolling, stopPeerPresencePolling } from "./lib/peerPresence";
@@ -20,6 +21,48 @@ import { LogView } from "./views/LogView";
 const HAS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
+// ---------------------------------------------------------------------------
+// ViewTransitionWrapper — smooth crossfade when the active view changes
+// (CopyPaste-2bhh)
+// ---------------------------------------------------------------------------
+// Wraps each view with a gentle opacity+translate entrance so that switching
+// sidebar tabs feels Apple-like (~180ms cubic-bezier spring) rather than the
+// harsh immediate-remount snap.  Keyed by `viewKey` in App's <main> so React
+// unmounts the old wrapper and mounts a new one on every tab change, triggering
+// the animation.  prefers-reduced-motion: the animation duration collapses to 0ms
+// so no motion occurs.  card-in / reveal-up on ViewShell continue to fire on
+// mount (intentional — they are the semantic per-element entrance), but they're
+// now visually dominated by the outer crossfade which sets the overall pace.
+export function ViewTransitionWrapper({
+  viewKey: _viewKey,
+  children,
+}: {
+  viewKey: string;
+  children: ReactNode;
+}) {
+  // Detect reduced-motion preference at render time (synchronous — avoids a
+  // flash of animated content before a useEffect could suppress it).
+  const prefersReduced =
+    typeof window !== "undefined" &&
+    window.matchMedia != null &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  return (
+    <div
+      data-testid="view-transition"
+      className={["h-full", !prefersReduced ? styles["view-fade-in"] : ""].join(" ").trim()}
+      style={{
+        // Inline timing/fill so jsdom tests can assert the values without
+        // needing to parse CSS stylesheets.
+        animationDuration: prefersReduced ? "0ms" : "180ms",
+        animationFillMode: "forwards",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 // Views that take no extra props — routed generically via ComponentType.
 // DevicesView is rendered separately below so it can receive `incomingPairing`.
 const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
@@ -35,6 +78,8 @@ export default function App() {
   const setView = useUI((s) => s.setView);
   const translucency = useUI((s) => s.prefs.translucency);
   const theme = useUI((s) => s.prefs.theme);
+  const palette = useUI((s) => s.prefs.palette);
+  const density = useUI((s) => s.prefs.density);
   const { Component: View, label } = VIEWS[view];
 
   // The popup window emits "open-settings" (after showing this main window) when
@@ -115,14 +160,30 @@ export default function App() {
     }
   }, [translucency]);
 
+  // Apply the data-palette attribute whenever the pref changes.
+  // Each html[data-palette="<key>"] block in index.css overrides all liquid
+  // tokens AND re-derives --ide-*-rgb channels so existing components retheme.
+  // Default: "graphite-mist" (set in DEFAULT_PREFS and index.html).
+  useEffect(() => {
+    const p = palette ?? "graphite-mist";
+    document.documentElement.setAttribute("data-palette", p);
+  }, [palette]);
+
+  // Apply the data-density attribute whenever the pref changes.
+  // html[data-density="<v>"] in index.css scales --pad/--gap/--row-h/--radius
+  // so the whole UI tightens/loosens. Default: "compact" (CopyPaste-52mz).
+  useEffect(() => {
+    document.documentElement.setAttribute("data-density", density ?? "compact");
+  }, [density]);
+
   // Apply the data-theme attribute whenever the pref changes.
   // CSS custom property overrides in :root[data-theme="light"] take effect
   // immediately; no JS class toggling needed beyond setting this one attribute.
   //
   // theme:"system" follows the OS `prefers-color-scheme` LIVE — we resolve it
   // here via matchMedia and re-resolve when the OS preference flips (no manual
-  // refresh). "light"/"dark" are applied verbatim. Light-first default: an
-  // absent pref still resolves to "light". (web parity — CopyPaste-7qy §0)
+  // refresh). "light"/"dark" are applied verbatim. Dark-first default: an
+  // absent pref resolves to "dark" (Graphite Mist default — CopyPaste-52mz).
   useEffect(() => {
     const resolve = (t: typeof theme): "light" | "dark" => {
       if (t === "dark" || t === "light") return t;
@@ -132,7 +193,8 @@ export default function App() {
           ? "dark"
           : "light";
       }
-      return "light";
+      // Graphite Mist is the new default — fall back to dark (CopyPaste-52mz).
+      return "dark";
     };
 
     document.documentElement.setAttribute("data-theme", resolve(theme));
@@ -358,21 +420,26 @@ export default function App() {
           )}
 
           <main className="min-h-0 flex-1 overflow-hidden">
-            {/* Per-view boundary keyed on the view id: a crash in one screen
-                stays contained, and navigating away then back (new key)
-                remounts a fresh, non-crashed subtree. */}
-            <ErrorBoundary key={view} label={label}>
-              {view === "devices" ? (
-                // DevicesView gets `incomingPairing` so the SAS modal opens
-                // even when the user wasn't on the Devices tab when the request
-                // arrived.  We clear it once DevicesView mounts (the prop is
-                // stable for that render cycle; DevicesView owns the modal
-                // lifetime after that).
-                <DevicesView incomingPairing={incomingPairing} />
-              ) : (
-                <View />
-              )}
-            </ErrorBoundary>
+            {/* ViewTransitionWrapper is keyed on the view id so React unmounts
+                the old wrapper and mounts a new one on every tab switch,
+                triggering the gentle crossfade (CopyPaste-2bhh).
+                ErrorBoundary is inside the wrapper so a crash in one screen
+                stays contained, and navigating away then back remounts a fresh
+                non-crashed subtree. */}
+            <ViewTransitionWrapper key={view} viewKey={view}>
+              <ErrorBoundary label={label}>
+                {view === "devices" ? (
+                  // DevicesView gets `incomingPairing` so the SAS modal opens
+                  // even when the user wasn't on the Devices tab when the request
+                  // arrived.  We clear it once DevicesView mounts (the prop is
+                  // stable for that render cycle; DevicesView owns the modal
+                  // lifetime after that).
+                  <DevicesView incomingPairing={incomingPairing} />
+                ) : (
+                  <View />
+                )}
+              </ErrorBoundary>
+            </ViewTransitionWrapper>
           </main>
         </div>
       </div>

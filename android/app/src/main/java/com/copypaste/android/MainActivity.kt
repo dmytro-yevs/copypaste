@@ -11,20 +11,29 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.annotation.StringRes
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.ContentPaste
-import androidx.compose.material.icons.outlined.Devices
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Hub
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
-import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,21 +44,30 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
-import androidx.compose.ui.graphics.RectangleShape
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.GlassTier
 import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.auroraCanvas
+import com.copypaste.android.ui.theme.glassFloatShadow
 import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -246,8 +264,12 @@ class MainActivity : ComponentActivity() {
 // reads R.string.title_devices ("Devices") instead of the old hardcoded "Pair",
 // matching the Devices screen title — pairing lives INSIDE that screen now.
 internal enum class NavTab(@StringRes val labelRes: Int, val icon: ImageVector) {
-    CLIPS(R.string.title_history, Icons.Outlined.ContentPaste),
-    DEVICES(R.string.title_devices, Icons.Outlined.Devices),
+    // SF-like outline icons — thin stroke, ~1.8 dp optical weight (dm51 android):
+    //   CLIPS   → History  (clock + anticlockwise arrow, SF "clock.arrow.circlepath")
+    //   DEVICES → Hub      (6-spoke radial, SF "network" / "wifi.router" — paired devices)
+    //   SETTINGS→ Settings (thin gear — SF "gearshape", universally recognised)
+    CLIPS(R.string.title_history, Icons.Outlined.History),
+    DEVICES(R.string.title_devices, Icons.Outlined.Hub),
     SETTINGS(R.string.title_settings, Icons.Outlined.Settings),
 }
 
@@ -264,124 +286,219 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     }
 
     // §3 Translucency: read once at the shell level so the pref is consistent
-    // across the NavigationBar and all child screens. CopyPasteTopBar and
+    // across the floating tab bar and all child screens. CopyPasteTopBar and
     // CopyPasteCard read it independently via rememberTranslucency() for
     // screens rendered without MainShell (standalone activities).
     val c = LocalIdeColors.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-    // phyb: removed legacy glassContainerColor (flat GLASS_ALPHA_DARK for both themes).
-    // oc74: NavigationBar now wraps LiquidGlassSurface (GlassTier.GLASS) so it gets
-    // real blur + sheen + hairline — matching CopyPasteTopBar's glass recipe.
+    val palette = LocalPalette.current
+
+    // Styleguide floating tab bar geometry:
+    //   side margin 12 dp, bottom margin 10 dp (matching web `.tabbar` margin)
+    //   radius 28 dp, internal padding 8 dp top/sides + 12 dp bottom
+    //   height driven by content — no fixed min-height (Android wraps tightly)
+    val tabBarShape = RoundedCornerShape(28.dp)
+    // Bottom safe-area (nav bar) inset so the bar clears the system nav buttons.
+    val navBarInsetDp = WindowInsets.navigationBars
+        .asPaddingValues()
+        .calculateBottomPadding()
+    // Total bottom clearance for screen content: tab bar min-height ~74dp + 10dp
+    // margin + nav inset. 74dp accounts for icon+label rows at normal density.
+    val tabBarEstimatedHeight = 74.dp
+    val contentBottomPadding = tabBarEstimatedHeight + 10.dp + navBarInsetDp
 
     // §1 aurora canvas backdrop: a COLOURED radial-glow gradient behind the whole
-    // shell so the glass surfaces (nav bar, cards) frost over real colour instead
+    // shell so the glass surfaces (tab bar, cards) frost over real colour instead
     // of a flat fill. Only when translucent — otherwise keep the opaque c.bg so the
     // solid look is unchanged. The Scaffold container goes transparent so this shows.
-    Box(modifier = Modifier.fillMaxSize().then(
-        if (translucent) Modifier.auroraCanvas(dark) else Modifier
-    )) {
-    Scaffold(
-        containerColor = if (translucent) Color.Transparent else c.bg,
-        // The NavigationBar (bottomBar) consumes the navigation-bar inset itself.
-        // We zero the Scaffold's *content* insets so the TOP (status-bar / cutout)
-        // inset is NOT also added to innerPadding — each embedded screen's own
-        // TopAppBar already applies that top inset, and applying it twice would
-        // push the header down by a doubled status-bar height. Without this the
-        // inner screens would be either double-inset (here) or clipped (if the
-        // TopAppBar inset were removed). See HistoryScreen / PairScreen / etc.
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = {
-            // oc74/phyb: LiquidGlassSurface (GlassTier.GLASS, RectangleShape) provides
-            // real API-31 backdrop-filter blur + saturate(180%) + per-tier white-alpha
-            // gradient fill + .5px top-sheen — matching the top-bar glass recipe exactly.
-            // The NavigationBar itself is transparent; the glass surface handles the fill.
-            LiquidGlassSurface(
-                shape = RectangleShape,
-                translucent = translucent,
-                dark = dark,
-                solid = c.panel,
-                tier = GlassTier.GLASS,
-                // No rim on the full-bleed rectangular nav bar (matches CopyPasteTopBar).
-                hairline = false,
-            ) {
-            NavigationBar(
-                containerColor = Color.Transparent,
-            ) {
-                NavTab.entries.forEachIndexed { index, tab ->
-                    val label = stringResource(tab.labelRes)
-                    NavigationBarItem(
-                        selected = selectedTab == index,
-                        onClick = {
-                            val leavingSettings =
-                                NavTab.entries[selectedTab] == NavTab.SETTINGS && index != selectedTab
-                            val guard = settingsNavGuard
-                            if (leavingSettings && guard != null) {
-                                // Intercept: the guard shows the Discard dialog and
-                                // only runs `proceed` if the user confirms (or there
-                                // are no unsaved changes).
-                                guard { selectedTab = index }
-                            } else {
-                                selectedTab = index
-                            }
-                        },
-                        // §5/§9: 18dp Outlined nav glyph (9730: styleguide sidebar glyph
-                        // .gi / icon-btn is 18px; was 20dp).
-                        // CopyPaste-n7ff: contentDescription = null — the visible label
-                        // below already names the tab; describing the icon too makes
-                        // TalkBack announce the name twice.
-                        icon = { Icon(tab.icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                        label = { Text(label) },
-                        // pe0c: active item = solid accent pill (full opacity indicatorColor)
-                        // + white text+icon (accentOn). Inactive = faint (42i4: styleguide
-                        // .nav-item inactive = rgb(var(--ide-faint)), not --ide-dim). Styleguide
-                        // .nav-item.active is `background: rgb(var(--ide-accent))` + `color: #fff`
-                        // — NOT the old faint 15% tint with accent-colored label.
-                        colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor       = c.accentOn,
-                            selectedTextColor       = c.accentOn,
-                            indicatorColor          = c.accent,
-                            unselectedIconColor     = c.faint,
-                            unselectedTextColor     = c.faint,
-                        ),
-                    )
+    Box(
+        modifier = Modifier.fillMaxSize().then(
+            if (translucent) Modifier.auroraCanvas(dark, paletteAurora(palette)) else Modifier
+        ),
+    ) {
+        Scaffold(
+            containerColor = if (translucent) Color.Transparent else c.bg,
+            // Zero all Scaffold insets: the TOP inset is handled by each screen's own
+            // TopAppBar, and the BOTTOM is handled by explicit content padding below so
+            // the list clears the floating tab bar. Applying insets here would double-
+            // inset the top (status-bar) on every screen that already adds it.
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        ) { innerPadding ->
+            // Stack the active screen above a slim sync-status strip. contentBottomPadding
+            // ensures the list body is never hidden behind the floating tab bar.
+            Column(modifier = Modifier.padding(innerPadding)) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(bottom = contentBottomPadding),
+                ) {
+                    when (NavTab.entries[selectedTab]) {
+                        NavTab.CLIPS -> HistoryScreen(
+                            viewModel = viewModel,
+                            showBackButton = false,
+                            onBack = {},
+                            // Shell already paints the full-window aurora behind everything.
+                            paintCanvasBackdrop = false,
+                        )
+                        NavTab.DEVICES -> DevicesScreen(
+                            showBackButton = false,
+                            onBack = {},
+                            paintCanvasBackdrop = false,
+                        )
+                        NavTab.SETTINGS -> SettingsScreen(
+                            showBackButton = false,
+                            onBack = {},
+                            onRegisterNavGuard = { guard -> settingsNavGuard = guard },
+                            paintCanvasBackdrop = false,
+                            // CopyPaste-u30t: navigate to the History/home tab after saving.
+                            onSaved = { selectedTab = NavTab.CLIPS.ordinal },
+                        )
+                    }
                 }
-            }
+                SyncStatusBadge()
             }
         }
-    ) { innerPadding ->
-        // Stack the active screen above a slim sync-status strip. The strip
-        // hosts the online-devices badge (Android parity for the macOS sidebar
-        // SyncStatusChip): app label on the left, coloured dot + count on the
-        // right. innerPadding is applied to the Column so the screen content and
-        // the strip both clear the bottom NavigationBar inset.
-        Column(modifier = Modifier.padding(innerPadding)) {
-            Box(modifier = Modifier.weight(1f)) {
-                when (NavTab.entries[selectedTab]) {
-                    NavTab.CLIPS -> HistoryScreen(
-                        viewModel = viewModel,
-                        showBackButton = false,
-                        onBack = {},
-                        // Shell already paints the full-window aurora behind everything.
-                        paintCanvasBackdrop = false,
-                    )
-                    NavTab.DEVICES -> DevicesScreen(
-                        showBackButton = false,
-                        onBack = {},
-                        paintCanvasBackdrop = false,
-                    )
-                    NavTab.SETTINGS -> SettingsScreen(
-                        showBackButton = false,
-                        onBack = {},
-                        onRegisterNavGuard = { guard -> settingsNavGuard = guard },
-                        paintCanvasBackdrop = false,
-                        // CopyPaste-u30t: navigate to the History/home tab after saving.
-                        onSaved = { selectedTab = NavTab.CLIPS.ordinal },
-                    )
+
+        // ── Floating glass tab bar ──────────────────────────────────────────
+        // Detached from the Scaffold bottomBar slot so it floats over the content
+        // with side margins (12 dp) and a rounded glass pill (radius 28 dp).
+        // Positioned via Alignment.BottomCenter + padding, clears the system nav bar.
+        FloatingTabBar(
+            modifier = Modifier.align(Alignment.BottomCenter),
+            selectedTab = selectedTab,
+            translucent = translucent,
+            dark = dark,
+            tabBarShape = tabBarShape,
+            navBarBottomPadding = navBarInsetDp,
+            onTabSelected = { index ->
+                val leavingSettings =
+                    NavTab.entries[selectedTab] == NavTab.SETTINGS && index != selectedTab
+                val guard = settingsNavGuard
+                if (leavingSettings && guard != null) {
+                    // Intercept: the guard shows the Discard dialog and
+                    // only runs `proceed` if the user confirms (or there
+                    // are no unsaved changes).
+                    guard { selectedTab = index }
+                } else {
+                    selectedTab = index
                 }
-            }
-            SyncStatusBadge()
-        }
+            },
+        )
     }
+}
+
+/**
+ * Floating glass tab bar (styleguide `.tabbar` floating treatment).
+ *
+ * Detached from the screen edge — sits 10 dp above the system navigation bar,
+ * with 12 dp side margins and a 28 dp corner radius. The glass surface is
+ * [GlassTier.GLASS] (blur 28dp, saturate 180%, per-tier white gradient fill +
+ * hairline rim). Soft float shadow (0 18dp 45dp rgb(0,0,0/.20)) sits behind it.
+ *
+ * Active tab: accent-tinted pill background (accent@75%) + [c.accentOn] icon/label
+ * + a spring pop scale (0.94 → 1.06 → 1.0) gated by [motionDuration].
+ * Inactive: [c.faint] icon/label, no background.
+ */
+@Composable
+private fun FloatingTabBar(
+    modifier: Modifier = Modifier,
+    selectedTab: Int,
+    translucent: Boolean,
+    dark: Boolean,
+    tabBarShape: RoundedCornerShape,
+    navBarBottomPadding: androidx.compose.ui.unit.Dp,
+    onTabSelected: (Int) -> Unit,
+) {
+    val c = LocalIdeColors.current
+    val reducedMotion = rememberReducedMotion()
+    // Spring spec for the active-tab scale pop: stiffness Low → smooth spring,
+    // dampingRatio NoBouncy → one clean overshoot then settle.
+    val springSpec = spring<Float>(
+        dampingRatio = Spring.DampingRatioLowBouncy,
+        stiffness = Spring.StiffnessMedium,
+    )
+
+    LiquidGlassSurface(
+        shape = tabBarShape,
+        translucent = translucent,
+        dark = dark,
+        solid = c.panel,
+        tier = GlassTier.GLASS,
+        // The hairline glass rim gives the pill its edge definition.
+        hairline = true,
+        modifier = modifier
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .padding(bottom = navBarBottomPadding)
+            // Styleguide: box-shadow 0 18px 45px rgba(0,0,0,.20) — soft float shadow.
+            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.GLASS, 28.dp) else Modifier)
+            .fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 8.dp)
+                .padding(bottom = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            NavTab.entries.forEachIndexed { index, tab ->
+                val isSelected = selectedTab == index
+                val label = stringResource(tab.labelRes)
+
+                // Spring pop on selection: 0.94 → 1.06 → 1.0 (matches web activeTabPop
+                // keyframes @0%:scale(.94), @60%:scale(1.06), @100%:scale(1)).
+                // Gated: reducedMotion → instant snap to 1.0f, no animation.
+                val scale by animateFloatAsState(
+                    targetValue = if (isSelected) 1.0f else 0.97f,
+                    animationSpec = if (reducedMotion) spring(stiffness = Spring.StiffnessHigh) else springSpec,
+                    label = "tabScale_$index",
+                )
+
+                val iconColor = if (isSelected) c.accentOn else c.faint
+                val textColor = if (isSelected) c.accentOn else c.faint
+                // Active pill: styleguide `color-mix(in srgb, var(--accent) 75%, transparent)`
+                val pillColor = if (isSelected) c.accent.copy(alpha = 0.75f) else Color.Transparent
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .scale(scale)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(pillColor)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            role = Role.Tab,
+                            onClick = { onTabSelected(index) },
+                        )
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                    ) {
+                        Icon(
+                            imageVector = tab.icon,
+                            // CopyPaste-n7ff: null — the visible label already names the tab;
+                            // describing the icon too makes TalkBack announce the name twice.
+                            contentDescription = null,
+                            tint = iconColor,
+                            modifier = Modifier.size(22.dp),
+                        )
+                        Text(
+                            text = label,
+                            color = textColor,
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.W700,
+                                letterSpacing = 0.sp,
+                            ),
+                        )
+                    }
+                }
+            }
+        }
     }
 }

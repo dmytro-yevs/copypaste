@@ -17,6 +17,7 @@ import {
 } from "../lib/ipc";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
+import { PALETTE_KEYS, PALETTES } from "../lib/liquid-tokens";
 // Step arrays (moved from StepSlider.tsx — StepSlider component deleted in v0.5.3,
 // all sliders now use the unified SliderRow component).
 
@@ -1492,43 +1493,119 @@ export function SettingsView() {
   }
 
   function renderDisplay() {
+    const activePalette = prefs.palette ?? "graphite-mist";
+    const activeDensity = prefs.density ?? "compact";
+
     return (
       <div className="space-y-2">
-        {/* §6.2: Row density is the FIRST row of the Display tab (Design System v2 §6/§9).
-            Reads/writes the store `density` pref via the existing setPrefs mechanism.
-            Mirrors the Color theme segmented control pattern used in the Window section. */}
+        {/* ── Appearance ──────────────────────────────────────────────────────
+            CopyPaste-hn5v: full palette + density + theme controls.
+            Palette picker re-themes the whole app live via App.tsx
+            data-palette attribute sync (already wired). */}
         <SubsectionHeader label="Appearance" />
         <Panel>
-          {/* bpax: styleguide §form-controls segmented control — mute/.18 group bg,
-              selected = white/.90 + e1 shadow, 7px inner radius */}
+          {/* Palette picker — grid of 10 swatches */}
+          <div className="border-b border-ide-divider/70 px-3 py-3 last:border-b-0">
+            <div className="mb-2 text-[12px] text-ide-dim">Color palette</div>
+            <div
+              data-testid="palette-picker"
+              className="grid grid-cols-5 gap-2"
+            >
+              {PALETTE_KEYS.map((key) => {
+                const def = PALETTES[key];
+                const isActive = activePalette === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    aria-label={def.name}
+                    aria-pressed={isActive}
+                    title={def.name}
+                    onClick={() => setPrefs({ palette: key })}
+                    className={[
+                      "group relative flex flex-col items-center gap-1 rounded-[8px] p-1.5 transition-all",
+                      isActive
+                        ? "ring-2 ring-ide-accent ring-offset-1 ring-offset-transparent bg-ide-elevated shadow-ide-e1"
+                        : "hover:bg-ide-faint/12",
+                    ].join(" ")}
+                  >
+                    {/* Swatch circle using the palette's accent colour inline */}
+                    <span
+                      className="h-7 w-7 rounded-full shadow-ide-xs"
+                      style={{ background: def.accent }}
+                      aria-hidden="true"
+                    />
+                    <span className="max-w-full truncate text-center text-[10px] leading-tight text-ide-dim group-hover:text-ide-text">
+                      {def.name}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Density segmented control — compact / comfortable / spacious */}
           <SettingsRow label="Row density">
+            {/* bpax: styleguide §form-controls segmented control — mute/.18 group bg,
+                selected = white/.90 + e1 shadow, 7px inner radius */}
             <div className="flex items-center gap-0.5 rounded-[10px] bg-ide-faint/18 p-0.5">
-              <button
-                type="button"
-                aria-label="comfortable"
-                onClick={() => setPrefs({ density: "comfortable" })}
-                className={[
-                  "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
-                  (prefs.density ?? "comfortable") === "comfortable"
-                    ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                    : "text-ide-dim hover:text-ide-text",
-                ].join(" ")}
-              >
-                Comfortable
-              </button>
-              <button
-                type="button"
-                aria-label="compact"
-                onClick={() => setPrefs({ density: "compact" })}
-                className={[
-                  "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
-                  (prefs.density ?? "comfortable") === "compact"
-                    ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                    : "text-ide-dim hover:text-ide-text",
-                ].join(" ")}
-              >
-                Compact
-              </button>
+              {(["compact", "comfortable", "spacious"] as const).map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  aria-label={opt}
+                  onClick={() => setPrefs({ density: opt as "comfortable" | "compact" })}
+                  className={[
+                    "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
+                    activeDensity === opt
+                      ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
+                      : "text-ide-dim hover:text-ide-text",
+                  ].join(" ")}
+                >
+                  {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                </button>
+              ))}
+            </div>
+          </SettingsRow>
+
+          {/* Color theme — matches styleguide §form-controls segmented control */}
+          <SettingsRow label="Color theme">
+            <div className="flex items-center gap-2">
+              <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />
+              {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
+                  Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius */}
+              <div className="flex items-center gap-0.5 rounded-[10px] bg-ide-faint/18 p-0.5">
+                {(["light", "dark", "system"] as const).map((opt) => {
+                  const selected = (prefs.theme ?? "dark") === opt;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      aria-label={opt}
+                      onClick={() => setPrefs({ theme: opt })}
+                      className={[
+                        "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
+                        selected
+                          ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
+                          : "text-ide-dim hover:text-ide-text",
+                      ].join(" ")}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </SettingsRow>
+
+          {/* Translucency — kept here so all visual appearance controls are together */}
+          <SettingsRow label="Translucency / vibrancy">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />
+              <Toggle
+                checked={prefs.translucency ?? true}
+                onChange={(v) => setPrefs({ translucency: v })}
+              />
             </div>
           </SettingsRow>
         </Panel>
@@ -1582,46 +1659,6 @@ export function SettingsView() {
                 value={prefs.previewLinesPopup}
                 onChange={(v) => setPrefs({ previewLinesPopup: v })}
                 formatValue={(v) => String(v)}
-              />
-            </div>
-          </SettingsRow>
-        </Panel>
-
-        <SubsectionHeader label="Window" hint="Visual style of the application window." />
-        <Panel>
-          <SettingsRow label="Color theme">
-            <div className="flex items-center gap-2">
-              <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />
-              {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
-                  Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius */}
-              <div className="flex items-center gap-0.5 rounded-[10px] bg-ide-faint/18 p-0.5">
-                {(["light", "dark", "system"] as const).map((opt) => {
-                  const selected = (prefs.theme ?? "light") === opt;
-                  return (
-                    <button
-                      key={opt}
-                      type="button"
-                      onClick={() => setPrefs({ theme: opt })}
-                      className={[
-                        "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
-                        selected
-                          ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                          : "text-ide-dim hover:text-ide-text",
-                      ].join(" ")}
-                    >
-                      {opt}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Translucency / vibrancy">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />
-              <Toggle
-                checked={prefs.translucency ?? true}
-                onChange={(v) => setPrefs({ translucency: v })}
               />
             </div>
           </SettingsRow>

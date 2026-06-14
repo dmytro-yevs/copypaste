@@ -17,13 +17,19 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -170,6 +176,12 @@ import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.IdeColors
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.Motion
+// Liquid glass / palette tokens for aurora backdrop and cinematic motion.
+import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.LocalLiquidTokens
+import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.motionDuration
+import com.copypaste.android.ui.theme.paletteAurora
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -728,7 +740,11 @@ fun HistoryScreen(
         // §1 aurora canvas: when translucent, the coloured radial backdrop is painted
         // either here (standalone) or by the MainShell (embedded). Either way the
         // container goes transparent so the aurora shows through the glass surfaces.
-        modifier = if (translucent && paintCanvasBackdrop) modifier.auroraCanvas(dark) else modifier,
+        // §1 palette-aware aurora: pass the per-palette AuroraDef so Graphite Mist
+        // gets its specific cool-blue/steel glow rather than the generic default.
+        modifier = if (translucent && paintCanvasBackdrop)
+            modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+        else modifier,
         containerColor = if (translucent) Color.Transparent else c.bg,
         topBar = {
             if (selectionMode) {
@@ -1539,10 +1555,11 @@ private fun ConfirmationDialog(
 @Composable
 private fun LoadingBox(padding: PaddingValues) {
     val c = LocalIdeColors.current
+    val translucent = rememberTranslucency()
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(c.bg)
+            .background(if (translucent) Color.Transparent else c.bg)
             .padding(padding),
         contentAlignment = Alignment.Center,
     ) {
@@ -1559,40 +1576,131 @@ private fun LoadingBox(padding: PaddingValues) {
 // Matches desktop HistoryView empty pattern exactly.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** §9 Empty state: history is empty — clipboard icon + "Nothing copied yet". */
+/** §9 Empty state: history is empty — clipboard icon + "Nothing copied yet".
+ *
+ * Styleguide .empty-state / .empty-icon (L937–979):
+ *   - Grid layout: 58dp icon + text column.
+ *   - Icon box: radial-gradient bg (accent@15%) + accent border + pulsing ring halo.
+ *   - Entrance: fade + scale-in, motionDuration(Motion.Slow), EaseOutExpo.
+ */
 @Composable
 private fun EmptyHistoryState(padding: PaddingValues) {
     val c = LocalIdeColors.current
+    val translucent = rememberTranslucency()
+    val reducedMotion = rememberReducedMotion()
+    val enterDurMs = motionDuration(Motion.Slow)
+
+    // Accent halo: pulsing ring that expands from 0.78→1.35 scale and fades out,
+    // mirrors .empty-icon::before/::after (networkRing animation, 2.7s infinite).
+    val haloAlpha: Float = if (reducedMotion) 0f else {
+        val infiniteTransition = rememberInfiniteTransition(label = "emptyHalo")
+        infiniteTransition.animateFloat(
+            initialValue = 0.5f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 2700, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "haloAlpha",
+        ).value
+    }
+    val haloScale: Float = if (reducedMotion) 1.0f else {
+        val infiniteTransition = rememberInfiniteTransition(label = "emptyHaloScale")
+        infiniteTransition.animateFloat(
+            initialValue = 0.78f,
+            targetValue = 1.35f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 2700, easing = LinearEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "haloScale",
+        ).value
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(c.bg)
+            .background(if (translucent) Color.Transparent else c.bg)
             .padding(padding)
-            .padding(24.dp),
+            .padding(horizontal = 32.dp, vertical = 24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        AnimatedVisibility(
+            visible = true,
+            enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None
+                    else fadeIn(tween(enterDurMs, easing = EaseOutExpo)) +
+                         scaleIn(
+                             tween(enterDurMs, easing = EaseOutExpo),
+                             initialScale = 0.92f,
+                         ),
         ) {
-            // §7/§9 hero: clipboard icon 28dp — decorative, uses the ghostDeco token
-            // (PARITY-SPEC §1: 24px+ decorative icons), never accent.
-            Icon(
-                imageVector = Icons.Outlined.ContentCopy,
-                contentDescription = null,
-                tint = c.ghostDeco,
-                modifier = Modifier.size(28.dp),
-            )
-            Text(
-                text = stringResource(R.string.empty_history),
-                style = MaterialTheme.typography.bodyLarge,
-                color = c.dim,
-            )
-            Text(
-                text = stringResource(R.string.empty_history_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                color = c.ghost,
-            )
+            CopyPasteCard(
+                modifier = Modifier.widthIn(max = 400.dp),
+                accent = MaterialTheme.colorScheme.outline, // neutral border, not semantic
+                translucent = translucent,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Icon box: 58dp, accent-tinted bg, with accent2 halo ring.
+                    Box(
+                        modifier = Modifier.size(58.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        // Pulsing accent halo ring — mirrors .empty-icon::before/::after.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .scale(haloScale)
+                                .background(
+                                    color = Color.Transparent,
+                                    shape = RoundedCornerShape(20.dp),
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = LocalLiquidTokens.current.accent2.copy(alpha = haloAlpha),
+                                    shape = RoundedCornerShape(20.dp),
+                                ),
+                        )
+                        // Icon container: accent@15% bg with gradient shimmer border.
+                        Box(
+                            modifier = Modifier
+                                .size(58.dp)
+                                .background(
+                                    color = c.accent.copy(alpha = 0.15f),
+                                    shape = RoundedCornerShape(20.dp),
+                                )
+                                .border(
+                                    width = 1.dp,
+                                    color = c.accent.copy(alpha = 0.28f),
+                                    shape = RoundedCornerShape(20.dp),
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.ContentCopy,
+                                contentDescription = null,
+                                tint = LocalLiquidTokens.current.accent2,
+                                modifier = Modifier.size(26.dp),
+                            )
+                        }
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = stringResource(R.string.empty_history),
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = c.text,
+                        )
+                        Text(
+                            text = stringResource(R.string.empty_history_subtitle),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = c.dim,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1601,35 +1709,73 @@ private fun EmptyHistoryState(padding: PaddingValues) {
 @Composable
 private fun EmptySearchState(padding: PaddingValues, query: String) {
     val c = LocalIdeColors.current
+    val translucent = rememberTranslucency()
+    val reducedMotion = rememberReducedMotion()
+    val enterDurMs = motionDuration(Motion.Slow)
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(c.bg)
+            .background(if (translucent) Color.Transparent else c.bg)
             .padding(padding)
-            .padding(24.dp),
+            .padding(horizontal = 32.dp, vertical = 24.dp),
         contentAlignment = Alignment.Center,
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+        AnimatedVisibility(
+            visible = true,
+            enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None
+                    else fadeIn(tween(enterDurMs, easing = EaseOutExpo)) +
+                         scaleIn(
+                             tween(enterDurMs, easing = EaseOutExpo),
+                             initialScale = 0.92f,
+                         ),
         ) {
-            // §7/§9 hero: SearchOff icon 28dp — decorative ghostDeco token (§1).
-            Icon(
-                imageVector = Icons.Outlined.SearchOff,
-                contentDescription = null,
-                tint = c.ghostDeco,
-                modifier = Modifier.size(28.dp),
-            )
-            Text(
-                text = stringResource(R.string.empty_search_title, query),
-                style = MaterialTheme.typography.bodyLarge,
-                color = c.dim,
-            )
-            Text(
-                text = stringResource(R.string.empty_search_subtitle),
-                style = MaterialTheme.typography.bodyMedium,
-                color = c.ghost,
-            )
+            CopyPasteCard(
+                modifier = Modifier.widthIn(max = 400.dp),
+                accent = MaterialTheme.colorScheme.outline,
+                translucent = translucent,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // Icon box: 58dp, accent-tinted bg, no halo for search-empty.
+                    Box(
+                        modifier = Modifier
+                            .size(58.dp)
+                            .background(
+                                color = c.accent.copy(alpha = 0.12f),
+                                shape = RoundedCornerShape(20.dp),
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = c.accent.copy(alpha = 0.24f),
+                                shape = RoundedCornerShape(20.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.SearchOff,
+                            contentDescription = null,
+                            tint = LocalLiquidTokens.current.accent2,
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = stringResource(R.string.empty_search_title, query),
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = c.text,
+                        )
+                        Text(
+                            text = stringResource(R.string.empty_search_subtitle),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = c.dim,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -1770,6 +1916,11 @@ private fun parseHexColor(snippet: String): Color? {
  * egsf: 26dp kind-tinted icon tile — styleguide .ci (L250).
  * Background = c.mute@0.16, glyph = c.faint, icon size = 12dp, radius = 7dp.
  * The icon is chosen by [chipLabel] to match the content kind.
+ *
+ * Styleguide .item-icon: gentle infinite float (translateY -2px, rotate 0.8deg,
+ * 4s ease-in-out infinite). Translated here as a subtle scale pulse (1f→1.04f)
+ * that mirrors the vertical float in a rotation-free Compose-safe way.
+ * Gated by reducedMotion — zero-duration when animations are disabled.
  */
 @Composable
 private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
@@ -1787,6 +1938,25 @@ private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
         "PRIVATE" -> Icons.Outlined.Lock
         else      -> Icons.Outlined.ContentCopy  // TEXT / fallback
     }
+
+    // Micro-motion: gentle scale pulse (styleguide .item-icon @keyframes iconFloat).
+    // 4s ease-in-out repeating cycle. Gated by reducedMotion — no-op when off.
+    val reducedMotion = rememberReducedMotion()
+    val iconScale: Float = if (reducedMotion) {
+        1.0f
+    } else {
+        val infiniteTransition = rememberInfiniteTransition(label = "iconFloat_$chipLabel")
+        infiniteTransition.animateFloat(
+            initialValue = 1.0f,
+            targetValue = 1.04f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 2000, easing = EaseOutExpo),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "iconFloatScale",
+        ).value
+    }
+
     Box(
         modifier = Modifier
             .size(26.dp)
@@ -1800,7 +1970,9 @@ private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
             imageVector = icon,
             contentDescription = null,
             tint = colors.faint,
-            modifier = Modifier.size(12.dp),
+            modifier = Modifier
+                .size(12.dp)
+                .scale(iconScale),
         )
     }
 }
@@ -2047,11 +2219,18 @@ private fun HistoryList(
         if (shouldLoadMore) onLoadMore()
     }
 
+    // §1 aurora: let the Scaffold's aurora backdrop show through the list when
+    // translucency is on. c.bg fill only in the solid (accessibility) mode.
+    val listTranslucent = rememberTranslucency()
+    // Hoist entrance duration once at list scope so it is NOT recomputed per row
+    // inside itemsIndexed (motionDuration reads LocalLiquidTokens — stable, but
+    // calling remember per-item still adds per-item composition state entries).
+    val rowEnterDurMs = motionDuration(Motion.Base)
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .background(c.bg)
+            .background(if (listTranslucent) Color.Transparent else c.bg)
             .padding(padding),
         contentPadding = PaddingValues(0.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -2068,22 +2247,26 @@ private fun HistoryList(
                 (index * ROW_STAGGER_STEP_MS).coerceAtMost(10 * ROW_STAGGER_STEP_MS)
             else 0
             // §8 a11y: suppress entrance animation entirely when reduced-motion is active.
+            // Styleguide .listItemIn: translateX(-12px) → 0, 0.55s out-expo — horizontal
+            // slide from left matches the web parity spec. rowEnterDurMs is hoisted at
+            // list scope (motionDuration is @Composable — per-item call adds state entries).
             AnimatedVisibility(
                 visible = true,
                 enter = if (reducedMotion || !isNewMount) androidx.compose.animation.EnterTransition.None
                         else fadeIn(
                             animationSpec = tween(
-                                durationMillis = Motion.Base,
+                                durationMillis = rowEnterDurMs,
                                 delayMillis = mountDelay,
                                 easing = EaseOutExpo,
                             )
-                        ) + slideInVertically(
+                        ) + slideInHorizontally(
                             animationSpec = tween(
-                                durationMillis = Motion.Base,
+                                durationMillis = rowEnterDurMs,
                                 delayMillis = mountDelay,
                                 easing = EaseOutExpo,
                             ),
-                            initialOffsetY = { it / 8 },
+                            // Styleguide: translateX(-12px) — small left-offset entrance.
+                            initialOffsetX = { -it / 5 },
                         ),
             ) {
                 Column(

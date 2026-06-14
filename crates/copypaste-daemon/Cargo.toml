@@ -21,6 +21,11 @@ cloud-sync = ["reqwest", "copypaste-supabase", "chacha20poly1305"]
 relay-sync = ["reqwest"]
 
 [dependencies]
+# Cross-platform: Zeroizing wraps secret buffers (used by the non-macOS file
+# keychain + ipc paths too — not just macOS) and subtle gives constant-time tag
+# compare. Must be general deps, NOT under the macOS target table (CopyPaste-l07l).
+zeroize = { version = "1.7", features = ["derive"] }
+subtle = { workspace = true }
 copypaste-core = { path = "../copypaste-core" }
 # Beta W2.1 (arch-1): real P2P stack — mDNS-SD discovery + mTLS transport.
 copypaste-p2p = { path = "../copypaste-p2p" }
@@ -87,12 +92,8 @@ security-framework.workspace = true
 core-foundation = "0.9"
 core-foundation-sys = "0.8"
 security-framework-sys = "2"
-# Beta-merge audit MED #4: read-path Vec<u8> from get_generic_password is
-# wrapped in Zeroizing so the heap buffer holding the device secret is
-# scrubbed the moment it falls out of scope.
-zeroize = { version = "1.7", features = ["derive"] }
-# S3 (CopyPaste-4ca): constant-time PAKE confirmation-tag comparison.
-subtle = { workspace = true }
+# (zeroize + subtle moved to the general [dependencies] table — they are used by
+# non-macOS code paths too, so they must not be macOS-only; see CopyPaste-l07l.)
 # tray-icon + png moved to copypaste-ui::tray_host (the daemon process
 # is launched by launchd and cannot host an NSApplication main run loop on
 # macOS, which tray-icon / muda::Menu both require).

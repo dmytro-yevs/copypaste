@@ -3,6 +3,7 @@ package com.copypaste.android.ui.theme
 import android.app.Activity
 import android.content.Context
 import android.provider.Settings as AndroidSettings
+import android.view.WindowManager
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -57,14 +58,13 @@ object Motion {
 }
 
 // ---------------------------------------------------------------------------
-// LocalIdeColors — the active full-token ramp (light or dark), provided by
-// CopyPasteTheme. Screens read `LocalIdeColors.current.<token>` instead of the
-// hardcoded dark `Ide*` constants so they theme light-first (PARITY-SPEC §1).
-// staticCompositionLocalOf: the value only changes on a full theme switch
-// (activity recreation), never mid-composition, so static is correct + cheap.
-// Defaults to dark so any stray reader outside CopyPasteTheme is still defined.
+// LocalIdeColors — the active full-token ramp, provided by CopyPasteTheme.
+// Screens read `LocalIdeColors.current.<token>` instead of hardcoded constants.
+// staticCompositionLocalOf: only changes on a full theme/palette switch
+// (activity recreation). Defaults to Graphite Mist so any stray reader outside
+// CopyPasteTheme is still defined with the new default palette (c48e).
 // ---------------------------------------------------------------------------
-val LocalIdeColors = staticCompositionLocalOf { DarkIdeColors }
+val LocalIdeColors = staticCompositionLocalOf<IdeColors> { GraphiteMistIdeColors }
 
 /** §8 out-expo easing — matches CSS cubic-bezier(.16,1,.3,1). */
 val EaseOutExpo = CubicBezierEasing(0.16f, 1.0f, 0.3f, 1.0f)
@@ -127,51 +127,62 @@ fun isReducedMotion(context: Context): Boolean {
 
 // ---------------------------------------------------------------------------
 
-private val DarculaColorScheme = darkColorScheme(
-    // ── Primary (accent blue) ─────────────────────────────────────────────
-    primary              = DarkPrimary,            // #3D8BFF — canonical accent
-    onPrimary            = DarkOnPrimary,           // white on blue
-    primaryContainer     = DarkPrimaryContainer,    // deep blue tint
-    onPrimaryContainer   = DarkOnPrimaryContainer,
+/**
+ * Builds a dark Material3 ColorScheme from an [IdeColors] ramp.
+ * Each palette gets its own scheme so primary/surface/error slots match the
+ * palette accent and backgrounds without hardcoding the old DS-v2 constants.
+ */
+private fun darkColorSchemeFromRamp(c: IdeColors) = darkColorScheme(
+    // ── Primary (accent) ──────────────────────────────────────────────────
+    primary              = c.accent,
+    onPrimary            = c.accentOn,
+    primaryContainer     = c.accentDim,
+    // onPrimaryContainer: accent text on the dim accent container.
+    // LiquidTokens.accent2 is the ideal value, but IdeColors doesn't carry it —
+    // use the lighter accent itself (readable on the dim container background).
+    onPrimaryContainer   = c.accent,
 
-    // ── Secondary (amber / warning) ───────────────────────────────────────
-    secondary            = DarkSecondary,
-    onSecondary          = DarkOnSecondary,
-    secondaryContainer   = DarkSecondaryContainer,
-    onSecondaryContainer = DarkOnSecondaryContainer,
+    // ── Secondary (warning / amber) ───────────────────────────────────────
+    secondary            = c.warning,
+    onSecondary          = c.accentOn,
+    secondaryContainer   = c.warningDim,
+    onSecondaryContainer = c.warning,
 
     // ── Backgrounds / surfaces ────────────────────────────────────────────
-    background           = IdeBg,        // #13141A — §0 canonical bg
-    onBackground         = IdeText,      // #E8EAED — §0 canonical text
-    surface              = IdePanel,     // #1B1C22 — §0 canonical panel
-    onSurface            = IdeText,
-    surfaceVariant       = IdeElevated,  // #23252D — §0 canonical elevated
-    onSurfaceVariant     = IdeDim,       // #9DA0A8
+    background           = c.bg,
+    onBackground         = c.text,
+    surface              = c.panel,
+    onSurface            = c.text,
+    surfaceVariant       = c.elevated,
+    onSurfaceVariant     = c.dim,
 
-    // Tonal surface containers — keep every elevation tier inside the canonical
-    // grey ramp instead of Material3's default purple-tinted auto-elevation.
-    surfaceContainerLowest  = IdeBg,       // #13141A
-    surfaceContainerLow     = IdePanel,    // #1B1C22
-    surfaceContainer        = IdePanel,    // #1B1C22 — bottom nav / app bar
-    surfaceContainerHigh    = IdeElevated, // #23252D — cards
-    surfaceContainerHighest = IdeRaised,   // #2D2F34 — pressed / raised
+    // Tonal surface containers — keep every tier inside the palette ramp.
+    surfaceContainerLowest  = c.bg,
+    surfaceContainerLow     = c.panel,
+    surfaceContainer        = c.panel,
+    surfaceContainerHigh    = c.elevated,
+    surfaceContainerHighest = c.raised,
 
     // ── Outline / dividers ────────────────────────────────────────────────
-    outline              = IdeBorder,    // #383B42
-    outlineVariant       = IdeDivider,   // #2E3035
+    outline              = c.border,
+    outlineVariant       = c.divider,
 
     // ── Error / destructive ───────────────────────────────────────────────
-    error                = IdeDanger,
+    error                = c.danger,
     onError              = Color.White,
-    errorContainer       = IdeErrorContainer,
-    onErrorContainer     = IdeOnErrorContainer,
+    errorContainer       = c.dangerDim,
+    onErrorContainer     = c.danger,
 
-    // ── Scrim / inverse (kept at safe defaults) ───────────────────────────
-    inverseSurface       = IdeText,
-    inverseOnSurface     = IdeBg,
-    inversePrimary       = IdeAccent,
+    // ── Scrim / inverse ───────────────────────────────────────────────────
+    inverseSurface       = c.text,
+    inverseOnSurface     = c.bg,
+    inversePrimary       = c.accent,
     scrim                = Color.Black,
 )
+
+// The original Darcula scheme is kept as a named reference (backwards compat for
+// any non-theme code that may import it directly; Theme.kt now builds per-palette).
+private val DarculaColorScheme = darkColorSchemeFromRamp(DarkIdeColors)
 
 // ---------------------------------------------------------------------------
 // Light colour scheme — mirrors :root[data-theme="light"] in index.css.
@@ -179,59 +190,64 @@ private val DarculaColorScheme = darkColorScheme(
 // exact canonical palette regardless of the user's wallpaper.
 // ---------------------------------------------------------------------------
 
-private val LightColorScheme = lightColorScheme(
-    // ── Primary (accent blue — darkened for light surfaces) ───────────────
-    primary              = LightPrimary,            // #1A5FCC — 5.2:1 on elevated
-    onPrimary            = LightOnPrimary,           // white on blue
-    primaryContainer     = LightPrimaryContainer,    // light blue tint
-    onPrimaryContainer   = LightOnPrimaryContainer,
+/**
+ * Builds a light Material3 ColorScheme from an [IdeColors] ramp.
+ * Mirrors [darkColorSchemeFromRamp] for the light palette path.
+ */
+private fun lightColorSchemeFromRamp(c: IdeColors) = lightColorScheme(
+    // ── Primary (accent) ──────────────────────────────────────────────────
+    primary              = c.accent,
+    onPrimary            = c.accentOn,
+    primaryContainer     = c.accentDim,
+    onPrimaryContainer   = c.accentPress,
 
-    // ── Secondary (amber / warning) ───────────────────────────────────────
-    secondary            = LightSecondary,
-    onSecondary          = LightOnSecondary,
-    secondaryContainer   = LightSecondaryContainer,
-    onSecondaryContainer = LightOnSecondaryContainer,
+    // ── Secondary (warning / amber) ───────────────────────────────────────
+    secondary            = c.warning,
+    onSecondary          = c.accentOn,
+    secondaryContainer   = c.warningDim,
+    onSecondaryContainer = c.warning,
 
-    // ── Backgrounds / surfaces — Apple greys (PARITY-SPEC §1) ─────────────
-    background           = LightBg,        // #E3E3E8 — window canvas (systemGray5)
-    onBackground         = LightText,      // #1D1D1F — labelColor
-    surface              = LightPanel,     // #F2F2F5 — sidebar / list
-    onSurface            = LightText,
-    surfaceVariant       = LightElevated,  // #FFFFFF — cards, inputs
-    onSurfaceVariant     = LightDim,       // #5B5B60 — secondaryLabel
+    // ── Backgrounds / surfaces ────────────────────────────────────────────
+    background           = c.bg,
+    onBackground         = c.text,
+    surface              = c.panel,
+    onSurface            = c.text,
+    surfaceVariant       = c.elevated,
+    onSurfaceVariant     = c.dim,
 
-    // Tonal surface containers — keep every tier inside the Apple light ramp.
-    surfaceContainerLowest  = LightBg,       // #E3E3E8
-    surfaceContainerLow     = LightPanel,    // #F2F2F5
-    surfaceContainer        = LightPanel,    // #F2F2F5 — bottom nav / app bar
-    surfaceContainerHigh    = LightElevated, // #FFFFFF — cards
-    surfaceContainerHighest = LightRaised,   // #ECECF0 — pressed / raised
+    // Tonal surface containers.
+    surfaceContainerLowest  = c.bg,
+    surfaceContainerLow     = c.panel,
+    surfaceContainer        = c.panel,
+    surfaceContainerHigh    = c.elevated,
+    surfaceContainerHighest = c.raised,
 
     // ── Outline / dividers ────────────────────────────────────────────────
-    outline              = LightBorder,    // #D3D3D8
-    outlineVariant       = LightDivider,   // #E2E2E6
+    outline              = c.border,
+    outlineVariant       = c.divider,
 
     // ── Error / destructive ───────────────────────────────────────────────
-    error                = LightDanger,
+    error                = c.danger,
     onError              = Color.White,
-    errorContainer       = LightErrorContainer,
-    onErrorContainer     = LightOnErrorContainer,
+    errorContainer       = c.dangerDim,
+    onErrorContainer     = c.danger,
 
     // ── Scrim / inverse ───────────────────────────────────────────────────
-    inverseSurface       = LightText,
-    inverseOnSurface     = LightBg,
-    inversePrimary       = IdeAccent,
+    inverseSurface       = c.text,
+    inverseOnSurface     = c.bg,
+    inversePrimary       = c.accent,
     scrim                = Color.Black,
 )
 
+// Original LightColorScheme kept for backwards compat.
+private val LightColorScheme = lightColorSchemeFromRamp(LightIdeColors)
+
 /**
  * Reads the persisted [ThemeMode] from SharedPreferences (key "theme_mode",
- * default [ThemeMode.LIGHT] — light-first per PARITY-SPEC §0).
+ * default [ThemeMode.DARK] — dark-first for Graphite Mist per c48e spec).
  *
- * Defensive: returns LIGHT when the key is absent (first launch) so new installs
- * see the Apple light theme immediately. `remember(ctx)` so the read is stable
- * across recompositions for the activity lifetime; a Settings change recreates
- * the activity (standard Android theme-switch flow), which re-reads it.
+ * `remember(ctx)` so the read is stable across recompositions for the activity
+ * lifetime; a Settings change recreates the activity, which re-reads it.
  */
 @Composable
 fun rememberThemeMode(): ThemeMode {
@@ -240,29 +256,70 @@ fun rememberThemeMode(): ThemeMode {
 }
 
 /**
+ * Reads the persisted [Palette] from SharedPreferences (key "palette",
+ * default [Palette.GRAPHITE_MIST] per c48e). Resolves unknown stored names
+ * to [Palette.DEFAULT] defensively. `remember(ctx)` — stable for the activity
+ * lifetime; a palette change recreates the activity.
+ */
+@Composable
+fun rememberPalette(): Palette {
+    val ctx = LocalContext.current
+    return remember(ctx) {
+        val name = Settings(ctx).paletteName
+        Palette.entries.firstOrNull { it.name == name } ?: Palette.DEFAULT
+    }
+}
+
+/**
  * Root theme for CopyPaste on Android.
  *
- * **Light-first** (PARITY-SPEC §0): the default is the Apple "Liquid Glass"
- * light scheme. The active scheme is resolved from [themeMode]:
- *   - [ThemeMode.LIGHT]  → light (default)
- *   - [ThemeMode.DARK]   → dark
+ * **Palette-driven** (c48e Liquid-Glass refresh): the active palette drives the
+ * IdeColors ramp, LiquidTokens, AuroraDef, and Material3 ColorScheme.
+ * Default palette is [Palette.GRAPHITE_MIST] (dark, cool grey).
+ *
+ * [themeMode] governs the light/dark axis independently of the palette:
+ *   - [ThemeMode.DARK]   → use [palette]'s dark ramp (default)
+ *   - [ThemeMode.LIGHT]  → use a light palette (falls back to [LightIdeColors]
+ *                          when the chosen palette is a dark one)
  *   - [ThemeMode.SYSTEM] → follow OS ([isSystemInDarkTheme])
  *
- * [themeMode] defaults to the persisted pref via [rememberThemeMode], so every
- * call site picks up the user's choice without per-site wiring. Dynamic color
- * (Material You) is disabled to preserve the exact canonical palette.
+ * Each palette carries [isDark] so a light-scheme palette selected via [palette]
+ * overrides [themeMode] automatically (a light palette is always light).
+ * Dynamic color (Material You) is disabled to preserve the exact canonical palette.
  */
 @Composable
 fun CopyPasteTheme(
     themeMode: ThemeMode = rememberThemeMode(),
+    palette: Palette = rememberPalette(),
     content: @Composable () -> Unit,
 ) {
+    // Determine dark/light axis: palette.isDark takes priority when a palette
+    // inherently belongs to a scheme (all current dark palettes are dark, light are
+    // light). ThemeMode overrides only when palette could serve either axis —
+    // but since the palette enum now carries isDark, we use it directly.
+    // ThemeMode.SYSTEM still follows the OS when the user hasn't picked a specific
+    // non-default palette (default is dark = Graphite Mist).
+    // Theme axis (dark/light) is driven purely by the user's themeMode — the
+    // palette is an independent CHROMA choice, so EVERY palette works in BOTH
+    // dark and light (CopyPaste-s0uf parity). SYSTEM follows the OS.
     val darkTheme = when (themeMode) {
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
+        ThemeMode.LIGHT  -> false
+        ThemeMode.DARK   -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    val colorScheme = if (darkTheme) DarculaColorScheme else LightColorScheme
+
+    // NEUTRALS from the theme axis, CHROMA (accent) from the palette.
+    val resolvedPalette = palette
+    val ideColors = paletteIdeColors(palette, darkTheme)
+    val liquidTokens = paletteLiquidTokens(palette)
+
+    // Build the Material3 ColorScheme from the resolved IdeColors ramp.
+    val colorScheme = if (darkTheme) {
+        darkColorSchemeFromRamp(ideColors)
+    } else {
+        lightColorSchemeFromRamp(ideColors)
+    }
+
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -276,15 +333,26 @@ fun CopyPasteTheme(
             WindowCompat.setDecorFitsSystemWindows(window, false)
             // Transparent status bar so the surface colour shows through.
             window.statusBarColor = Color.Transparent.toArgb()
-            // Light theme → dark status-bar icons; dark theme → light icons.
+            // Dark theme → light status-bar icons; light theme → dark icons.
             WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            // Privacy: when the user disallows screenshots, set FLAG_SECURE so the
+            // OS blocks screenshots, screen recording and the recents thumbnail for
+            // every screen wrapped in CopyPasteTheme. Clipboard contents are
+            // sensitive. The toggle recreate()s the activity so this re-applies.
+            if (Settings(view.context).allowScreenshots) {
+                window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            } else {
+                window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
         }
     }
 
-    // Provide the active full-token ramp alongside the Material colorScheme so
-    // screens reading LocalIdeColors.current.<token> theme light/dark in lockstep.
-    val ideColors = if (darkTheme) DarkIdeColors else LightIdeColors
-    CompositionLocalProvider(LocalIdeColors provides ideColors) {
+    // Provide all three palette locals alongside the Material colorScheme.
+    CompositionLocalProvider(
+        LocalPalette       provides resolvedPalette,
+        LocalIdeColors     provides ideColors,
+        LocalLiquidTokens  provides liquidTokens,
+    ) {
         MaterialTheme(
             colorScheme = colorScheme,
             typography   = CopyPasteTypography,
@@ -292,6 +360,30 @@ fun CopyPasteTheme(
             content      = content,
         )
     }
+}
+
+// ---------------------------------------------------------------------------
+// §8 Cinematic motion helpers (c48e)
+//
+// motionDuration(base) scales a [Motion] constant by the active palette's
+// [LiquidTokens.motionScale], clamped to 0 when reduced-motion is active.
+// Usage:
+//   val dur = motionDuration(Motion.Base)   // = 180 * 1.3 = 234ms for Graphite Mist
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the effective animation duration for [baseMs] (a [Motion] constant),
+ * scaled by the active palette's [LiquidTokens.motionScale] and zeroed when
+ * the user has requested reduced motion.
+ *
+ * Call from within a @Composable that has access to [LocalLiquidTokens] and
+ * [rememberReducedMotion]. The result is an Int suitable for [tween] durationMillis.
+ */
+@Composable
+fun motionDuration(baseMs: Int): Int {
+    val tokens = LocalLiquidTokens.current
+    val reduced = rememberReducedMotion()
+    return if (reduced) 0 else (baseMs * tokens.motionScale).toInt()
 }
 
 // ---------------------------------------------------------------------------

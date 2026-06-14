@@ -320,22 +320,81 @@ private val AURORA_OVERLAY_DARK = listOf(
 )
 
 /**
+ * Builds the 4 primary aurora [AuroraBlob]s from a palette [AuroraDef].
+ * Blob positions and radii are kept at the canonical layout (PARITY-SPEC §1);
+ * only the colors are sourced from the palette — so every palette gets the
+ * same spatial composition with its own mood colors.
+ *
+ * Layout:
+ *   A (top-left 6%,-18%) — glowA, large, the most visible blob
+ *   B (bottom-right 108%,118%) — glowB, echoes the opposite corner
+ *   C (top-right 95%,-12%) — glowA@0.65 lighter, right highlight
+ *   D (bottom-left -10%,105%) — glowB@0.55 softer, left ground
+ */
+private fun auroraBlobs(def: AuroraDef): List<AuroraBlob> = listOf(
+    AuroraBlob(def.glowA,                           0.06f, -0.18f, 1.05f, 0.50f),  // A
+    AuroraBlob(def.glowB,                           1.08f,  1.18f, 1.00f, 0.50f),  // B
+    AuroraBlob(def.glowA.copy(alpha = def.glowA.alpha * 0.65f), 0.95f, -0.12f, 0.82f, 0.46f),  // C
+    AuroraBlob(def.glowB.copy(alpha = def.glowB.alpha * 0.55f), -0.10f, 1.05f, 0.88f, 0.48f),  // D
+)
+
+/**
+ * Builds the 2 mid-canvas overlay [AuroraBlob]s from a palette [AuroraDef].
+ * Overlaid after the primary blobs (PARITY-SPEC §1 esph layer).
+ */
+private fun auroraOverlayBlobs(def: AuroraDef): List<AuroraBlob> = listOf(
+    AuroraBlob(def.overlayAccent, 0.50f, 0.38f, 0.28f, 0.65f),  // E — accent centre-left
+    AuroraBlob(def.overlayWarm,   0.30f, 0.60f, 0.20f, 0.65f),  // F — warm lower-left
+)
+
+/**
+ * Builds the base canvas [Brush] from a palette [AuroraDef]'s background ramp.
+ * Light palettes go lightest→middle→lightest (frosted near-white feel);
+ * dark palettes go darkest→middle→darkest (deep aurora base).
+ */
+private fun auroraCanvasBrush(def: AuroraDef, dark: Boolean): Brush =
+    if (dark) {
+        // Dark: deep bg0 → slightly lighter bg1 → back to bg2 for diagonal feel.
+        Brush.linearGradient(colors = listOf(def.bg1, def.bg2, def.bg0))
+    } else {
+        // Light: canvas bg2 (lightest) → bg0 (slightly richer) — gentle gradient.
+        Brush.linearGradient(colors = listOf(def.bg0, def.bg2, def.bg1))
+    }
+
+/**
  * Screen-level aurora canvas backdrop (PARITY-SPEC §1). Paints the opaque base
  * gradient ([glassCanvasBrush]) then layers four soft colour radials matching the
  * web `body` aurora, so [LiquidGlassSurface] has a genuinely COLOURED canvas to
  * frost — closing the biggest visual gap (screens were a flat `c.bg`).
  *
- * Two small mid-canvas overlay blobs (E+F, accent+amber) are painted last (esph)
+ * Two small mid-canvas overlay blobs (E+F, accent+ambient) are painted last (esph)
  * to add depth in the centre and make the glass blur more visually apparent.
  *
  * Apply to a `Modifier.fillMaxSize()` Box that sits BEHIND the glass surfaces; the
  * hosting Scaffold/container must be `Color.Transparent` so this shows through.
- * Theme-aware via [dark].
+ *
+ * **Palette-aware overload**: pass [auroraDef] from [paletteAurora(LocalPalette.current)]
+ * to get per-palette blob colors. When [auroraDef] is null, falls back to the
+ * legacy [dark]-boolean path (DS-v2 hardcoded blobs). Existing call sites
+ * (`auroraCanvas(dark = true)`) continue to compile unchanged.
  */
-fun Modifier.auroraCanvas(dark: Boolean): Modifier {
-    val base = glassCanvasBrush(dark)
-    val blobs = if (dark) AURORA_DARK else AURORA_LIGHT
-    val overlayBlobs = if (dark) AURORA_OVERLAY_DARK else AURORA_OVERLAY_LIGHT
+fun Modifier.auroraCanvas(dark: Boolean, auroraDef: AuroraDef? = null): Modifier {
+    val base: Brush
+    val blobs: List<AuroraBlob>
+    val overlayBlobs: List<AuroraBlob>
+
+    if (auroraDef != null) {
+        // c48e: palette-parameterized aurora
+        base = auroraCanvasBrush(auroraDef, dark)
+        blobs = auroraBlobs(auroraDef)
+        overlayBlobs = auroraOverlayBlobs(auroraDef)
+    } else {
+        // Legacy path: original hardcoded blobs
+        base = glassCanvasBrush(dark)
+        blobs = if (dark) AURORA_DARK else AURORA_LIGHT
+        overlayBlobs = if (dark) AURORA_OVERLAY_DARK else AURORA_OVERLAY_LIGHT
+    }
+
     return this.drawBehind {
         // Base linear gradient (opaque — gives the canvas real colour, §1).
         drawRect(base)
@@ -354,7 +413,7 @@ fun Modifier.auroraCanvas(dark: Boolean): Modifier {
                 ),
             )
         }
-        // Overlay blobs (esph) — small mid-canvas accent+amber radials painted last
+        // Overlay blobs (esph) — small mid-canvas accent+ambient radials painted last
         // so they sit above the main aurora without being clipped by the base blobs.
         for (b in overlayBlobs) {
             drawRect(
@@ -588,13 +647,19 @@ fun rememberTranslucency(): Boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Standard compact header. Dark panel surface, 18 sp SemiBold title (headlineSmall).
+ * Standard compact header — liquid-glass, full-bleed (edge-to-edge).
  *
  * When [translucent] is true (default: reads from the "copypaste" SharedPreferences
  * key "translucency"), the container is the §2 glass fill at GLASS_ALPHA so the
  * opaque window canvas bleeds through for a frosted/glass look. When false, the
  * bar is the fully opaque theme panel surface — the pre-glass solid look. All
  * text/icon colors come from the active light/dark ramp (LocalIdeColors).
+ *
+ * **Floating feel**: when translucent, a soft float shadow
+ * (`0 8dp 24dp rgb(60 60 90 / .14)`) is drawn below the bar, giving it the sense
+ * of hovering above screen content — matching the styleguide `.app-header` depth
+ * cue. The glass blur + saturate(180%) fills the surface (GLASS tier). A clean
+ * 18sp SemiBold title with muted icon tints keeps the hierarchy readable.
  *
  * windowInsets defaults to [TopAppBarDefaults.windowInsets] so the bar
  * automatically pads its content below the status-bar / display-cutout on
@@ -620,7 +685,11 @@ fun CopyPasteTopBar(
     // §2/P0: the TopAppBar is TRANSPARENT and a LiquidGlassSurface backdrop
     // (API-31 RenderEffect blur, flat §2 tint fallback < 31) sits behind it,
     // sized to the bar incl. the status-bar inset via matchParentSize.
-    Box {
+    // The outer Box carries the float shadow (downward, GLASS tier) so the header
+    // appears to hover above the content below it — the liquid-glass floating feel.
+    Box(
+        modifier = if (translucent) Modifier.glassFloatShadow(GlassTier.GLASS, radius = 0.dp) else Modifier,
+    ) {
         LiquidGlassSurface(
             shape = RectangleShape,
             translucent = translucent,
@@ -628,7 +697,7 @@ fun CopyPasteTopBar(
             solid = MaterialTheme.colorScheme.surface,
             modifier = Modifier.matchParentSize(),
             // Top bars are the styleguide tier-1 .surface-glass recipe. No hairline
-            // rim (a rectangular full-bleed bar reads cleaner with just its blur).
+            // rim on the full-bleed rectangular bar (the float shadow gives depth instead).
             tier = GlassTier.GLASS,
             hairline = false,
             content = {},

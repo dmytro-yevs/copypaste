@@ -52,8 +52,8 @@ export interface UIPrefs {
   translucency: boolean;
   /**
    * UI color theme.
-   *   "light"  (default) — Apple Liquid-Glass light/greyish palette.
-   *   "dark"             — Design System v2 dark palette.
+   *   "dark"   (default) — Graphite Mist dark palette (CopyPaste-52mz new default).
+   *   "light"            — Light palette (cloudSilver / system light look).
    *   "system"           — follow the OS `prefers-color-scheme` live (App.tsx
    *                        resolves it via matchMedia and re-resolves on change).
    * Applied via <html data-theme="light|dark"> in App.tsx.
@@ -61,10 +61,17 @@ export interface UIPrefs {
   theme: "dark" | "light" | "system";
   /**
    * Row density for the History view (Design System v2 §9 — Liquid Glass redesign).
-   * "comfortable" (default) = standard row spacing; "compact" = reduced row height.
-   * Consumed by HistoryView / SettingsView agents; not yet wired into views.
+   * "comfortable" = standard row spacing; "compact" (default) = reduced row height.
+   * Compact matches the Graphite Mist styleguide default density.
    */
   density: "comfortable" | "compact";
+  /**
+   * Active palette key. Drives data-palette attribute on <html>.
+   * Default: "graphite-mist" (dark grey — CopyPaste-52mz).
+   * A future palette picker writes this via setPrefs({ palette: "..." }).
+   * Consuming code: App.tsx sets document.documentElement.setAttribute("data-palette", ...).
+   */
+  palette: string;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -76,9 +83,10 @@ const DEFAULT_PREFS: UIPrefs = {
   playSoundOnCopy: true,
   notifyOnCopy: true,
   translucency: true,
-  // Default to the Apple macOS Tahoe light/greyish Liquid Glass look.
-  theme: "light",
-  density: "comfortable",
+  // Default to Graphite Mist dark — the new Liquid Glass dark grey look (CopyPaste-52mz).
+  theme: "dark",
+  density: "compact",
+  palette: "graphite-mist",
 };
 
 function loadPrefs(): UIPrefs {
@@ -86,7 +94,8 @@ function loadPrefs(): UIPrefs {
     let raw = localStorage.getItem(PREFS_KEY);
     // ── Liquid Glass upgrade migration (v1 → v2) ──────────────────────────
     // If only the legacy v1 prefs exist, adopt them but DROP the persisted
-    // theme so the new light-first default wins once. Then re-persist under v2.
+    // theme so the new Graphite Mist dark default wins once.
+    // Then re-persist under v2.
     let migratedFromLegacy = false;
     if (!raw) {
       const legacy = localStorage.getItem(LEGACY_PREFS_KEY);
@@ -99,8 +108,11 @@ function loadPrefs(): UIPrefs {
     }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (migratedFromLegacy) {
-      // The old default was "dark"; clear it so DEFAULT_PREFS.theme ("light") applies.
+      // The old v1 default was "dark" (pre-Liquid-Glass); we still want "dark"
+      // but the palette now defaults to "graphite-mist", so drop both and let
+      // DEFAULT_PREFS fill them in fresh.
       delete parsed.theme;
+      delete parsed.palette;
     }
 
     // ── v0.5.3 migration ──────────────────────────────────────────────────

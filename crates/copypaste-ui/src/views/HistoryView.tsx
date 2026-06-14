@@ -31,7 +31,7 @@ import { useUI } from "../store";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 import { FileChip } from "../components/FileChip";
-import { ContentIcon, KindChip } from "../components/ContentIcon";
+import { ContentIcon } from "../components/ContentIcon";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { Star, StarOff } from "lucide-react";
 
@@ -103,7 +103,28 @@ function parseFilename(preview: string): string {
 }
 
 
-// ContentIcon and KindChip are imported from ../components/ContentIcon (shared component).
+// ContentIcon is imported from ../components/ContentIcon (shared component).
+// KindChip (the text pill) was replaced with the icon-tile pattern in zzv5.
+
+/**
+ * Derive a human-readable kind label from the daemon kind string + content_type.
+ * Mirrors the KindChip kindFallback logic so aria-labels stay consistent with
+ * what the old text pill showed.
+ * Named getKindLabel (not kindLabel) to avoid shadowing the local `kindLabel`
+ * const inside HistoryRow (which is a simple string for the row aria-label).
+ */
+function getKindLabel(kind: string | undefined, contentType: string): string {
+  if (kind) return kind;
+  if (contentType === "url") return "URL";
+  if (contentType === "image" || contentType.startsWith("image/")) return "IMAGE";
+  if (
+    contentType === "code" ||
+    contentType.startsWith("text/x-") ||
+    contentType.startsWith("application/")
+  )
+    return "CODE";
+  return "TEXT";
+}
 
 // ---------------------------------------------------------------------------
 // Pin indicator (filled amber star — dm51: ★ styleguide §pin)
@@ -430,17 +451,11 @@ const HistoryRow = React.memo(function HistoryRow({
     }
   };
 
-  // §8 mount stagger: on initial mount of first ≤10 rows, apply a fade+translate
-  // animation with staggered delay (index * 18ms + 160ms base). After first render
-  // the animation-name is cleared so subsequent list changes are instant.
+  // §8 mount stagger: on initial mount of first ≤10 rows, apply .list-item-in
+  // (defined in index.css) with a staggered delay. After first render applyStagger
+  // is false so subsequent list changes are instant (no re-stagger on filter/search).
   const staggerStyle: React.CSSProperties = applyStagger
-    ? {
-        animationName: "row-stagger-in",
-        animationDuration: "160ms",
-        animationTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
-        animationFillMode: "both",
-        animationDelay: `${staggerIndex * 18}ms`,
-      }
+    ? { animationDelay: `${staggerIndex * 40}ms` }
     : {};
 
   // Build a concise screen-reader label: type + first 80 chars of preview.
@@ -472,7 +487,13 @@ const HistoryRow = React.memo(function HistoryRow({
       style={rowStyle}
       className={[
         `group relative flex cursor-pointer select-none items-center gap-2 px-3 ${rowPadding}`,
+        // Liquid-glass entrance stagger — .list-item-in is from index.css (listItemIn keyframe).
+        applyStagger ? "list-item-in" : "",
         "border-b text-[13px]",
+        // Smooth hover lift: translateX(5px)+scale per styleguide §history-item.
+        // transition covers transform + border-color + background (matching SG .28s spring).
+        "transition-[transform,border-color,background] duration-[280ms] ease-out",
+        "hover:[transform:translateX(5px)_scale(1.008)]",
         // §8 copy-flash: success tint for ~90ms after copy. Applied before pinned so
         // the flash is visible (pinned adds bg-ide-warningDim which would cover it).
         copyFlash ? "!bg-ide-success/10" : "",
@@ -481,8 +502,8 @@ const HistoryRow = React.memo(function HistoryRow({
         // 0.10 alpha is visible without overwhelming. border-b remains divider.
         // 8qzb: pinned rows use badge-warning (#D9A343) for left edge + tint
         entry.pinned
-          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10"
-          : "border-b border-ide-divider/50",
+          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10 hover:border-b-ide-accent/35"
+          : "border-b border-ide-divider/50 hover:border-b-ide-accent/35",
         multiSelected
           ? "bg-ide-selection text-ide-text"
           : selected
@@ -552,33 +573,33 @@ const HistoryRow = React.memo(function HistoryRow({
         </span>
       )}
 
-      {/* Type chip / glyph: image + file use their ContentIcon (visually distinct);
-          text items use a full-word KindChip powered by the daemon's classifier. */}
-      {isImage || isFile ? (
-        // i7x4: 26×26 content-icon tile — tinted rounded tile (mute/.16) with faint glyph
+      {/* Type glyph: 26×26 content-icon tile for every content type.
+          i7x4: tinted rounded tile (mute/.16) with lucide glyph — replaces
+          the old full-word KindChip pill (zzv5). The tile carries aria-label +
+          title equal to the kind name so screen-readers and tooltips still
+          convey the type (e.g. "URL", "EMAIL", "TEXT"). */}
+      <span className="flex shrink-0 items-center gap-1">
         <span
-          className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] bg-ide-faint/16"
-          aria-hidden="true"
+          className="icon-float flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] bg-ide-faint/16"
+          aria-label={getKindLabel(entry.kind, entry.content_type)}
+          title={getKindLabel(entry.kind, entry.content_type)}
+          role="img"
         >
-          <ContentIcon contentType={isImage ? "image" : "file"} size={14} />
+          <ContentIcon contentType={entry.content_type} size={14} />
         </span>
-      ) : (
-        <span className="flex shrink-0 items-center gap-1">
-          <KindChip kind={entry.kind} contentType={entry.content_type} />
-          {/* q8v1: COLOR-kind items get a live swatch of the actual color value */}
-          {entry.kind === "COLOR" && (() => {
-            // Extract a CSS color from the preview (e.g. "#D9A343", "rgb(255,0,0)")
-            const colorMatch = entry.preview.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsl[a]?\([^)]+\)/);
-            return colorMatch ? (
-              <span
-                className="inline-block h-[14px] w-[14px] shrink-0 rounded-[4px] border border-black/10"
-                style={{ backgroundColor: colorMatch[0] }}
-                aria-hidden="true"
-              />
-            ) : null;
-          })()}
-        </span>
-      )}
+        {/* q8v1: COLOR-kind items get a live swatch of the actual color value */}
+        {entry.kind === "COLOR" && (() => {
+          // Extract a CSS color from the preview (e.g. "#D9A343", "rgb(255,0,0)")
+          const colorMatch = entry.preview.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsl[a]?\([^)]+\)/);
+          return colorMatch ? (
+            <span
+              className="inline-block h-[14px] w-[14px] shrink-0 rounded-[4px] border border-black/10"
+              style={{ backgroundColor: colorMatch[0] }}
+              aria-hidden="true"
+            />
+          ) : null;
+        })()}
+      </span>
 
       {isImage ? (
         // M1: Maccy parity — image rows show ONLY the thumbnail, no text title.
@@ -2361,13 +2382,20 @@ export function HistoryView() {
           {totalCount} {totalCount === 1 ? "item" : "items"}
         </span>
       )}
+      {/* Search bar: premium focus ring — accent glow + smooth transition per styleguide §searchbar. */}
       <input
         ref={searchRef}
         type="search"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Filter…"
-        className="h-7 w-44 rounded-ide px-2 text-[12px]"
+        className={[
+          "h-7 w-44 rounded-ide px-2 text-[12px]",
+          "border border-ide-border bg-ide-elevated/80 text-ide-text placeholder:text-ide-faint",
+          "transition-[border-color,box-shadow] duration-200 ease-out",
+          "focus:outline-none focus:border-ide-accent/60",
+          "focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--ide-accent)_18%,transparent)]",
+        ].join(" ")}
       />
     </>
   );
@@ -2382,12 +2410,16 @@ export function HistoryView() {
     );
   } else if (loadState === "offline") {
     body = (
+      // reveal-up: glass-card entrance animation per styleguide §empty-state.
       <EmptyState
-        className="h-full"
+        className="h-full reveal-up"
         icon={
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
+          // network-rings: discovery ring pulse on the icon — matches §empty-icon ::before/::after.
+          <span className="network-rings inline-flex" style={{ borderRadius: 12 }}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </span>
         }
         title="Clipboard service offline"
         body="The daemon is not running."
@@ -2450,13 +2482,17 @@ export function HistoryView() {
     );
   } else if (filtered.length === 0 && items.length === 0) {
     body = (
+      // reveal-up: glass-card entrance animation per styleguide §empty-state.
       <EmptyState
-        className="h-full"
+        className="h-full reveal-up"
         icon={
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-          </svg>
+          // network-rings: discovery ring pulse on the icon — matches §empty-icon ::before/::after.
+          <span className="network-rings inline-flex" style={{ borderRadius: 12 }}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
+            </svg>
+          </span>
         }
         title="Nothing copied yet"
         body="Copy something and it will appear here."
@@ -2464,8 +2500,9 @@ export function HistoryView() {
     );
   } else if (filtered.length === 0) {
     body = (
+      // reveal-up entrance; no network-rings on the search-empty state (different semantic).
       <EmptyState
-        className="h-full"
+        className="h-full reveal-up"
         icon={
           <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="7" />
@@ -2473,7 +2510,7 @@ export function HistoryView() {
             <line x1="8" y1="11" x2="14" y2="11" />
           </svg>
         }
-        title={`No results for “${search}”`}
+        title={`No results for "${search}"`}
         body="Try a different search term."
       />
     );

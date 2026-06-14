@@ -19,6 +19,9 @@
 //! forwards bytes through these channels.
 
 use std::path::PathBuf;
+// l07l: AtomicI64/Ordering are only exercised by the macOS pasteboard
+// change-count path; allow them unused on non-macOS so -D warnings stays green.
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 

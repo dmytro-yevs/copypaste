@@ -1,0 +1,28 @@
+/* Co-located keyframe for the view-switch crossfade (CopyPaste-2bhh).
+ * A gentle opacity+translate entrance that acts as the primary motion when
+ * switching sidebar tabs, making the overall switch feel Apple-like and smooth.
+ * The `card-in` / `reveal-up` on ViewShell still play on mount, but they're
+ * now wrapped inside this outer fade so the overall impression is a soft
+ * crossfade rather than a harsh pop-in.
+ *
+ * NOT in index.css (another agent owns that file — CopyPaste-2bhh constraint).
+ */
+
+@keyframes viewFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.view-fade-in {
+  animation-name: viewFadeIn;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  /* duration and fill-mode come from inline styles so they are testable in
+   * jsdom (which doesn't parse stylesheets) and so prefers-reduced-motion
+   * can set duration=0ms via inline style without !important wars. */
+}

@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -66,6 +67,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -73,14 +75,17 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.SectionLabel
 import com.copypaste.android.ui.theme.auroraCanvas
@@ -709,15 +714,37 @@ fun DevicesScreen(
                     }
                 }
                 // Discovered (unpaired) LAN peers — only when P2P is enabled
-                // (discovery is gated on it).
+                // (discovery is gated on it). Always show the section label + an
+                // empty-state row while scanning so the LAN feature stays visible
+                // instead of silently vanishing (pkd0 regression). RowDivider
+                // between rows is added by the forEachIndexed renderer below.
                 if (p2pEnabled) {
-                    for (peer in discovered) {
+                    add {
+                        Text(
+                            text = "Discovered on your network",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = c.dim,
+                            modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 4.dp),
+                        )
+                    }
+                    if (discovered.isEmpty()) {
                         add {
-                            DiscoveredPeerRow(
-                                peer = peer,
-                                busy = pairStarting || pairingPeer != null,
-                                onPair = { startPairing(peer) },
+                            Text(
+                                text = "Searching for nearby devices…",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = c.faint,
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
                             )
+                        }
+                    } else {
+                        for (peer in discovered) {
+                            add {
+                                DiscoveredPeerRow(
+                                    peer = peer,
+                                    busy = pairStarting || pairingPeer != null,
+                                    onPair = { startPairing(peer) },
+                                )
+                            }
                         }
                     }
                 }
@@ -841,6 +868,8 @@ private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap {
 @Composable
 private fun OwnQrSection(settings: Settings) {
     val c = LocalIdeColors.current
+    val tokens = LocalLiquidTokens.current
+    val reducedMotion = rememberReducedMotion()
     val scope = rememberCoroutineScope()
     var qr by remember { mutableStateOf<PairingQrResult?>(null) }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -854,6 +883,35 @@ private fun OwnQrSection(settings: Settings) {
     var qrBlurred by remember { mutableStateOf(true) }
 
     val expired = qr != null && remainingSeconds <= 0
+
+    // Scan line animation — always created (must not be conditional in Compose).
+    // Active only when qr is revealed (!qrBlurred) and reduced-motion is off.
+    val scanDurationMs = (2500 * tokens.motionScale).toInt()
+    val scanTransition = rememberInfiniteTransition(label = "qrScan")
+    val scanLineProgressRaw by scanTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = scanDurationMs, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "qrScanY",
+    )
+
+    // Progress bar pulse animation — always created.
+    val progressPulseTransition = rememberInfiniteTransition(label = "qrProgress")
+    val progressAlphaRaw by progressPulseTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = (2600 * tokens.motionScale).toInt(),
+                easing = FastOutSlowInEasing,
+            ),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "progressAlpha",
+    )
 
     // Generate (or regenerate) the QR. Deliberately does NOT mutate [qrBlurred]:
     // blur is a separate, user-owned concern (see the v5a note above).
@@ -926,6 +984,20 @@ private fun OwnQrSection(settings: Settings) {
                         )
                     }
                     bmp != null && !expired -> {
+                        // Scan line — use top-level animated value; gate visibility here.
+                        val scanActive = !reducedMotion && !qrBlurred
+                        val scanLineProgress = if (scanActive) scanLineProgressRaw else 0f
+                        // Alpha envelope: fade in 0→12%, hold, fade out 88→100%
+                        // (mirrors qrScan: 0%,100% opacity=0; 12%,88% opacity=.9).
+                        val scanLineAlpha: Float = if (scanActive) {
+                            val p = scanLineProgressRaw
+                            when {
+                                p < 0.12f -> p / 0.12f * 0.9f
+                                p > 0.88f -> (1f - p) / 0.12f * 0.9f
+                                else -> 0.9f
+                            }
+                        } else 0f
+
                         Box(
                             modifier = Modifier
                                 .size(DEVICES_QR_SLOT_DP.dp)
@@ -944,7 +1016,7 @@ private fun OwnQrSection(settings: Settings) {
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            // White backing plate.
+                            // White backing plate with QR and animated scan line.
                             Box(
                                 modifier = Modifier
                                     .size(DEVICES_QR_SLOT_DP.dp)
@@ -957,6 +1029,37 @@ private fun OwnQrSection(settings: Settings) {
                                     contentDescription = "Your pairing QR code — tap to reveal",
                                     modifier = Modifier.size(DEVICES_QR_IMAGE_DP.dp),
                                 )
+                            }
+                            // Scan line overlay — 2 dp tall gradient beam across the QR.
+                            // Drawn OVER the white plate so it appears to scan the code.
+                            if (scanLineAlpha > 0f) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(DEVICES_QR_SLOT_DP.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .padding(horizontal = DEVICES_QR_PLATE_PADDING_DP.dp)
+                                        .offset {
+                                            IntOffset(
+                                                x = 0,
+                                                y = (scanLineProgress * (DEVICES_QR_IMAGE_DP - 4) * density).toInt(),
+                                            )
+                                        },
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(2.dp)
+                                            .background(
+                                                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                                                    colors = listOf(
+                                                        androidx.compose.ui.graphics.Color.Transparent,
+                                                        c.accent.copy(alpha = scanLineAlpha),
+                                                        androidx.compose.ui.graphics.Color.Transparent,
+                                                    ),
+                                                ),
+                                            ),
+                                    )
+                                }
                             }
                             // Reveal overlay (only while blurred).
                             if (qrBlurred) {
@@ -992,6 +1095,10 @@ private fun OwnQrSection(settings: Settings) {
                 // (2dp, corners 999dp) replacing the Material LinearProgressIndicator.
                 // Track is mute@35% (calm hairline); fill is ACCENT normally,
                 // switching to WARNING when ≤20 s remain. Countdown logic preserved.
+                // Styleguide `progressPulse`: fill brightness pulse — uses top-level
+                // progressAlphaRaw (gated on reduced-motion).
+                val progressAlpha = if (!reducedMotion) progressAlphaRaw else 1f
+
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1003,6 +1110,7 @@ private fun OwnQrSection(settings: Settings) {
                         modifier = Modifier
                             .fillMaxWidth(qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS))
                             .height(2.dp)
+                            .graphicsLayer { alpha = progressAlpha }
                             .background(if (urgent) c.warning else c.accent),
                     )
                 }
@@ -1067,7 +1175,6 @@ private fun PeerRow(
     onUnpair: () -> Unit,
     onRevoke: () -> Unit,
 ) {
-    val ctx = LocalContext.current
     val c = LocalIdeColors.current
     val dotColor = if (online) c.success else c.faint
     val chip = transportChipFor(peer)
@@ -1142,16 +1249,6 @@ private fun PeerRow(
             peer.latencyMs?.let {
                 MetaRow(label = "RTT", value = "$it ms")
             }
-            // §7 Fingerprint row: peer shows take(16)+…+takeLast(8) + tap-to-copy.
-            // Defensive: only shown when fingerprint is non-blank.
-            peer.fingerprint.takeIf { it.isNotBlank() }?.let { fp ->
-                val truncated = formatPeerFingerprint(fp)
-                MonoMetaRow(
-                    label = "Fingerprint",
-                    value = truncated,
-                    onTap = { copyToSystemClipboard(ctx, fp) },
-                )
-            }
         }
 
         // §4 single 1dp hairline above the per-row actions.
@@ -1190,23 +1287,142 @@ private fun PeerRow(
 private fun NoPeerCard(onPair: () -> Unit) {
     val c = LocalIdeColors.current
     CopyPasteCard(accent = c.border) {
-        Column(
+        Row(
             modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Discovery rings icon — concentric ping rings around the network symbol.
+            // Mirrors styleguide `networkRing` keyframe: scale .78→1.35, opacity .5→0,
+            // 2.7 s × motionScale loop; second ring delayed by 1.1 s × motionScale.
+            DiscoveryRingsIcon(size = 52.dp)
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = "No device paired",
+                    color = c.dim,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    text = "Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.",
+                    color = c.faint,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Button(onClick = onPair) {
+                    Text("Pair a device")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Network icon with two concentric discovery-ping rings animated outward.
+ * Mirrors the styleguide `.empty-icon::before/::after` + `networkRing` keyframe:
+ *   scale 0.78 → 1.35, opacity 0.5 → 0, ease-out, 2.7 s × motionScale loop.
+ * The second ring is delayed by 1.1 s × motionScale to stagger the pulses.
+ * Both rings are tinted [accent2] (styleguide `.empty-icon::before` uses accent-2).
+ * Gated on system reduced-motion.
+ */
+@Composable
+private fun DiscoveryRingsIcon(size: Dp = 58.dp) {
+    val c = LocalIdeColors.current
+    val tokens = LocalLiquidTokens.current
+    val reducedMotion = rememberReducedMotion()
+
+    val ringDurationMs = (2700 * tokens.motionScale).toInt()
+    val ringDelayMs = (1100 * tokens.motionScale).toInt()
+
+    // Both InfiniteTransitions must be created unconditionally (Compose rules).
+    // Animated values are gated via graphicsLayer alpha=0 when reduced-motion is on.
+    val ringATransition = rememberInfiniteTransition(label = "discoveryRingA")
+    val ringBTransition = rememberInfiniteTransition(label = "discoveryRingB")
+
+    // Ring A
+    val ringAScale by ringATransition.animateFloat(
+        initialValue = 0.78f,
+        targetValue = 1.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = ringDurationMs, easing = EaseOutExpo),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "ringAScale",
+    )
+    val ringAAlpha by ringATransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = ringDurationMs, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "ringAAlpha",
+    )
+
+    // Ring B — staggered by ringDelayMs via initialStartOffset
+    val ringBScale by ringBTransition.animateFloat(
+        initialValue = 0.78f,
+        targetValue = 1.35f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = ringDurationMs, easing = EaseOutExpo),
+            repeatMode = RepeatMode.Restart,
+            initialStartOffset = androidx.compose.animation.core.StartOffset(ringDelayMs),
+        ),
+        label = "ringBScale",
+    )
+    val ringBAlpha by ringBTransition.animateFloat(
+        initialValue = 0.5f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = ringDurationMs, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart,
+            initialStartOffset = androidx.compose.animation.core.StartOffset(ringDelayMs),
+        ),
+        label = "ringBAlpha",
+    )
+
+    Box(
+        modifier = Modifier.size(size),
+        contentAlignment = Alignment.Center,
+    ) {
+        // Ring A — expanding rounded square halo (hidden when reduced-motion is on)
+        Box(
+            modifier = Modifier
+                .size(size)
+                .graphicsLayer {
+                    alpha = if (reducedMotion) 0f else ringAAlpha
+                    scaleX = ringAScale
+                    scaleY = ringAScale
+                }
+                .clip(RoundedCornerShape(size / 3))
+                .background(c.accent.copy(alpha = 0.35f)),
+        )
+
+        // Ring B — same spec, delayed
+        Box(
+            modifier = Modifier
+                .size(size)
+                .graphicsLayer {
+                    alpha = if (reducedMotion) 0f else ringBAlpha
+                    scaleX = ringBScale
+                    scaleY = ringBScale
+                }
+                .clip(RoundedCornerShape(size / 3))
+                .background(c.accent.copy(alpha = 0.35f)),
+        )
+
+        // Icon surface — glass-tinted rounded square with network symbol (text).
+        Box(
+            modifier = Modifier
+                .size(size)
+                .clip(RoundedCornerShape(size / 3.5f))
+                .background(c.accentDim),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = "No device paired",
-                color = c.dim,
-                style = MaterialTheme.typography.bodyLarge,
+                text = "⊕",
+                color = c.accent,
+                fontSize = (size.value * 0.45f).sp,
             )
-            Text(
-                text = "Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.",
-                color = c.faint,
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Button(onClick = onPair) {
-                Text("Pair a device")
-            }
         }
     }
 }
@@ -1228,8 +1444,9 @@ private fun OwnDeviceRow(
     // platform (Build/BuildConfig) and a LAN-IPv4 enumeration. No synchronous
     // public-IP source on-device, so that row is omitted (matches the bootstrap
     // path, which sends public_ip = None for this device).
-    val ctx = LocalContext.current
     val c = LocalIdeColors.current
+    val tokens = LocalLiquidTokens.current
+    val reducedMotion = rememberReducedMotion()
     val model = Build.MODEL.orEmpty().ifBlank { "Android" }
     val osVersion = "Android " + Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
@@ -1239,6 +1456,22 @@ private fun OwnDeviceRow(
     // The bare `remember { lanIpv4Address() }` snapshot was stale on network
     // change because it was only evaluated once at first composition.
     val localIp = remember(nowMs / 5_000L) { lanIpv4Address() }
+
+    // "This Device" badge float — same 3.4 s ease-in-out loop as TransportChipLabel.
+    // Always create the InfiniteTransition (Compose composable call cannot be conditional);
+    // the animated value is masked to 0 when reduced-motion is on.
+    val floatDurationMs = (3400 * tokens.motionScale).toInt()
+    val badgeInfiniteTransition = rememberInfiniteTransition(label = "thisDeviceBadge")
+    val badgeFloatRaw by badgeInfiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = floatDurationMs, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "thisDeviceBadgeY",
+    )
+    val badgeFloatPx = if (!reducedMotion) badgeFloatRaw else 0f
 
     // Row content only — the enclosing CopyPasteCard provides the glass surface
     // (PARITY-SPEC §8 grouped inset list).
@@ -1263,7 +1496,7 @@ private fun OwnDeviceRow(
                 color = c.success,
                 style = MaterialTheme.typography.labelMedium,
             )
-            // §7 "This Device" accent badge.
+            // §7 "This Device" accent badge — subtle float animation.
             Text(
                 text = "This Device",
                 color = c.accent,
@@ -1271,6 +1504,7 @@ private fun OwnDeviceRow(
                 letterSpacing = 0.4.sp,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier
+                    .graphicsLayer { translationY = badgeFloatPx * density }
                     .background(c.accentDim, RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
@@ -1284,15 +1518,6 @@ private fun OwnDeviceRow(
             MetaRow(label = "OS", value = osVersion)
             MetaRow(label = "Version", value = appVersion)
             localIp?.let { MetaRow(label = "Local IP", value = it) }
-            // §7 Fingerprint: own device shows FULL fingerprint + tap-to-copy.
-            // Defensive: only shown when fingerprint is non-blank.
-            identity.fingerprint.takeIf { it.isNotBlank() }?.let { fp ->
-                MonoMetaRow(
-                    label = "Fingerprint",
-                    value = formatOwnFingerprint(fp),
-                    onTap = { copyToSystemClipboard(ctx, fp) },
-                )
-            }
         }
     }
 }
@@ -1332,6 +1557,9 @@ private fun DiscoveredPeerRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // Discovery icon with concentric rings — signals "device nearby, tap to pair".
+            DiscoveryRingsIcon(size = 40.dp)
+
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = peer.displayName(),
@@ -1794,12 +2022,12 @@ private fun rememberReducedMotion(): Boolean {
 }
 
 /**
- * Online presence indicator: a solid success-green dot with an expanding
- * semi-transparent ring when [online] is true and reduced-motion is off.
+ * Online presence indicator: a solid success-green dot with a smooth expanding
+ * ping ring when [online] is true and reduced-motion is off.
  *
- * Animation: [rememberInfiniteTransition] drives a scale 1→2 + alpha 0.4→0
- * on a 2 s tween loop. Ring is drawn BEHIND the solid dot so the dot itself
- * stays crisply visible while the ring expands and fades.
+ * Animation mirrors the styleguide `statusPing` keyframe:
+ *   scale 0.45 → 1.8, alpha 0.7 → 0, ease-out, 2.4 s × motionScale loop.
+ * Ring is drawn BEHIND the solid dot so the dot stays crisply visible.
  *
  * Gate: animated only when [online] == true and the system "remove animations"
  * scale is not 0 (matches §7 / §8 "Respect prefers-reduced-motion").
@@ -1807,39 +2035,52 @@ private fun rememberReducedMotion(): Boolean {
 @Composable
 private fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
     val c = LocalIdeColors.current
+    val tokens = LocalLiquidTokens.current
     val reducedMotion = rememberReducedMotion()
     val dotColor = if (online) c.success else c.faint
     val animate = shouldPulse(online = online, reducedMotion = reducedMotion)
 
+    // Duration mirrors styleguide 2.4s × motionScale (cinematic = 1.3 → ~3.1 s).
+    val pingDurationMs = (2400 * tokens.motionScale).toInt()
+
+    // Always create transition unconditionally (Compose rules — no conditional @Composable).
+    // Gate the visible ring via graphicsLayer alpha = 0 when not animating.
+    val pulseTransition = rememberInfiniteTransition(label = "pulse")
+    // Scale: 0.45 → 1.8 (styleguide statusPing scale(.45) → scale(1.8))
+    val pulseScale by pulseTransition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1.8f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = pingDurationMs, easing = EaseOutExpo),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "pulseScale",
+    )
+    // Alpha: 0.7 → 0 (styleguide statusPing opacity .7 → 0)
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.7f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = pingDurationMs, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "pulseAlpha",
+    )
+
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        if (animate) {
-            val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-            val pulseScale by infiniteTransition.animateFloat(
-                initialValue = 1f,
-                targetValue = 2.2f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Restart,
-                ),
-                label = "pulseScale",
-            )
-            val pulseAlpha by infiniteTransition.animateFloat(
-                initialValue = 0.4f,
-                targetValue = 0f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(durationMillis = 2000, easing = FastOutSlowInEasing),
-                    repeatMode = RepeatMode.Restart,
-                ),
-                label = "pulseAlpha",
-            )
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .scale(pulseScale)
-                    .clip(CircleShape)
-                    .background(c.success.copy(alpha = pulseAlpha)),
-            )
-        }
+        // Expanding ring — hidden (alpha=0) when not animating so the composable
+        // tree is stable and the InfiniteTransition is never conditionally created.
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .graphicsLayer {
+                    alpha = if (animate) pulseAlpha else 0f
+                    scaleX = pulseScale
+                    scaleY = pulseScale
+                }
+                .clip(CircleShape)
+                .background(c.success),
+        )
         // Solid dot always on top.
         Box(
             modifier = Modifier
@@ -1857,14 +2098,36 @@ private fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
  * "Cloud", not all-caps "CLOUD").
  * Defensive: never crashes on absent transport info — callers derive [chip]
  * via [transportChipFor] which is always non-null.
+ *
+ * Styleguide `badgeFloat`: a 3.4 s ease-in-out infinite Y offset of 0 → -1 dp
+ * gives the badge a living, breathing quality without distracting from content.
  */
 @Composable
 private fun TransportChipLabel(chip: TransportChip) {
     val c = LocalIdeColors.current
+    val tokens = LocalLiquidTokens.current
+    val reducedMotion = rememberReducedMotion()
     val (text, fg, bg) = when (chip) {
         TransportChip.P2P -> Triple("P2P", c.info, c.infoDim)
         TransportChip.Cloud -> Triple("Cloud", c.accent, c.accentDim)
     }
+
+    // Badge float animation — 3.4 s × motionScale, gated on reduced-motion.
+    // InfiniteTransition always created (Compose composable call cannot be conditional);
+    // value masked to 0 when reduced-motion is active.
+    val floatDurationMs = (3400 * tokens.motionScale).toInt()
+    val chipInfiniteTransition = rememberInfiniteTransition(label = "badgeFloat")
+    val floatOffsetRaw by chipInfiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = -1f,   // –1 dp; converted via graphicsLayer translationY
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = floatDurationMs, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "badgeFloatY",
+    )
+    val floatOffsetPx = if (!reducedMotion) floatOffsetRaw else 0f
+
     Text(
         text = text,
         color = fg,
@@ -1872,6 +2135,7 @@ private fun TransportChipLabel(chip: TransportChip) {
         letterSpacing = 0.6.sp,
         style = MaterialTheme.typography.labelSmall,
         modifier = Modifier
+            .graphicsLayer { translationY = floatOffsetPx * density }
             .background(bg, RoundedCornerShape(4.dp))
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
@@ -1915,59 +2179,6 @@ private fun MetaRow(label: String, value: String) {
     }
 }
 
-/**
- * Like [MetaRow] but uses [MonoFontFamily] for the value and wraps the whole row
- * in a [clickable] that calls [onTap] — used for fingerprint rows where tap-to-copy
- * is desired (§7). [onTap] may be null if copy is not needed.
- */
-@Composable
-private fun MonoMetaRow(label: String, value: String, onTap: (() -> Unit)? = null) {
-    val c = LocalIdeColors.current
-    // CopyPaste-3nyq: when the row is tappable (fingerprint copy), give TalkBack an
-    // explicit "Copy" action label AND merge label+value into one node with a
-    // contentDescription so the mono fingerprint reads as "<label>, <value>" and the
-    // user knows it can be double-tapped to copy.
-    val copyLabel = stringResource(R.string.cd_copy_fingerprint)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(
-                if (onTap != null) {
-                    Modifier
-                        .semantics(mergeDescendants = true) { contentDescription = "$label, $value" }
-                        .clickable(onClickLabel = copyLabel, onClick = onTap)
-                } else {
-                    Modifier
-                }
-            ),
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = c.dim,
-            fontSize = 11.sp,
-            modifier = Modifier.width(META_LABEL_WIDTH),
-        )
-        Text(
-            text = value,
-            // §7 fingerprint uses MonoFontFamily (bundled JetBrains Mono) per §1/§10.
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = c.text,
-            fontSize = 11.sp,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-/**
- * Copy [text] to the Android system clipboard using [ClipboardManager].
- * Used by fingerprint rows (§7 "tap-to-copy").
- */
-private fun copyToSystemClipboard(ctx: Context, text: String) {
-    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
-    cm.setPrimaryClip(ClipData.newPlainText("Fingerprint", text))
-}
 
 @Composable
 private fun DeviceField(label: String, value: String) {

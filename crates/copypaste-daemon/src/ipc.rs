@@ -17,8 +17,12 @@ use copypaste_core::{
     encrypt_item_with_aad, ensure_revoked_devices_table, fetch_text_preview,
     fetch_text_previews_batch, get_device_names, get_item_by_id, get_page, get_page_pinned_first,
     pin_item, reorder_pinned, revoke_device, revoke_devices, search_items, set_thumb, unpin_item,
-    Database, DbRead, EncryptError, FileMeta, SensitiveDetector, NONCE_SIZE,
+    Database, DbRead, FileMeta, SensitiveDetector, NONCE_SIZE,
 };
+// l07l: EncryptError is only matched on the macOS pasteboard decrypt path, so
+// gate it to macOS — otherwise it's an unused import on non-macOS (-D warnings).
+#[cfg(target_os = "macos")]
+use copypaste_core::EncryptError;
 // `soft_delete_item` is not yet re-exported from the crate root so we use the
 // full module path (the `storage` module is `pub`).
 use copypaste_core::storage::items::soft_delete_item;

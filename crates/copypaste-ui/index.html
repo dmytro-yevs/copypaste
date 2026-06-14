@@ -1,8 +1,19 @@
 <!doctype html>
-<!-- data-theme="light" on <html> makes the very first paint the Apple macOS Tahoe
-     light/greyish "Liquid Glass" look (light-first), with no flash of the dark
-     default before React's effect runs. App.tsx re-syncs this to the saved pref. -->
-<html lang="en" data-theme="light">
+<!-- Graphite Mist dark defaults (CopyPaste-52mz):
+       data-palette="graphite-mist"  — activates the grey dark palette token layer
+       data-density="compact"        — 13px pad / 12px gap / 34px row-h
+       data-motion="cinematic"       — --speed:.72, full aurora opacity
+       data-contrast="balanced"      — readable but not harsh; matches styleguide default
+       data-theme="dark"             — tells the existing light/dark CSS cascade "dark"
+     App.tsx re-syncs data-theme to prefs.theme on first render (which now defaults
+     to "dark" in DEFAULT_PREFS). The palette, density, motion, and contrast attributes
+     are static at launch; a future palette picker will write them dynamically. -->
+<html lang="en"
+  data-theme="dark"
+  data-palette="graphite-mist"
+  data-density="compact"
+  data-motion="cinematic"
+  data-contrast="balanced">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
