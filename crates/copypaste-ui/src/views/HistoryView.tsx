@@ -351,7 +351,7 @@ function parseUrl(raw: string): { host: string; rest: string } | null {
   }
 }
 
-function HistoryRow({
+const HistoryRow = React.memo(function HistoryRow({
   entry,
   selected,
   multiSelected,
@@ -690,7 +690,47 @@ function HistoryRow({
       </div>
     </div>
   );
-}
+// Custom comparator: skip re-render when entry data, selection state, display
+// settings, and drag state are all unchanged. Function references (handlers)
+// intentionally ignored — they are either stable useCallbacks or per-entry
+// closures that only change when the entry itself changes.
+}, (prev, next) => {
+  // Entry identity and mutable fields that affect render.
+  if (prev.entry.id !== next.entry.id) return false;
+  if (prev.entry.preview !== next.entry.preview) return false;
+  if (prev.entry.pinned !== next.entry.pinned) return false;
+  if (prev.entry.wall_time !== next.entry.wall_time) return false;
+  if (prev.entry.is_sensitive !== next.entry.is_sensitive) return false;
+  if (prev.entry.content_type !== next.entry.content_type) return false;
+  if (prev.entry.kind !== next.entry.kind) return false;
+  if (prev.entry.app_bundle_id !== next.entry.app_bundle_id) return false;
+  if (prev.entry.origin_device_id !== next.entry.origin_device_id) return false;
+  if (prev.entry.origin_device_name !== next.entry.origin_device_name) return false;
+  if (prev.entry.too_large_to_sync !== next.entry.too_large_to_sync) return false;
+  // Per-row display state.
+  if (prev.selected !== next.selected) return false;
+  if (prev.multiSelected !== next.multiSelected) return false;
+  if (prev.selectionMode !== next.selectionMode) return false;
+  if (prev.staggerIndex !== next.staggerIndex) return false;
+  if (prev.applyStagger !== next.applyStagger) return false;
+  // Display settings.
+  if (prev.previewLines !== next.previewLines) return false;
+  if (prev.imageMaxHeight !== next.imageMaxHeight) return false;
+  if (prev.maskSensitive !== next.maskSensitive) return false;
+  if (prev.density !== next.density) return false;
+  if (prev.ownDeviceId !== next.ownDeviceId) return false;
+  // Drag state (pinned rows only). Compare structural equality of the
+  // dragging/dropIndicator fields; function refs are not compared since they
+  // are rebuilt per entry.id and change only when drag/drop state changes.
+  const pd = prev.dragHandleProps;
+  const nd = next.dragHandleProps;
+  if ((pd === undefined) !== (nd === undefined)) return false;
+  if (pd !== undefined && nd !== undefined) {
+    if (pd.dragging !== nd.dragging) return false;
+    if (pd.dropIndicator !== nd.dropIndicator) return false;
+  }
+  return true;
+});
 
 function IconActionBtn({
   "aria-label": ariaLabel,
@@ -1125,9 +1165,19 @@ function VirtualList({
   const [viewportH, setViewportH] = useState(0);
 
   // Prefix-sum offsets: offsets[i] is the top of row i; offsets[n] is total height.
-  // density is passed through so the offset math stays in sync with rendered heights.
-  const offsets = buildOffsets(
-    items.map((it) => rowHeightFor(it, previewSize, imageMaxHeight, density))
+  // Memoized on item count/ids and display settings so scroll events (which only
+  // update scrollTop state) do NOT rebuild the full height table on every frame.
+  // Only recomputed when the item list, heights, or density actually change.
+  const offsets = useMemo(
+    () => buildOffsets(items.map((it) => rowHeightFor(it, previewSize, imageMaxHeight, density))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      // Stable reference identity: items array changes only when content changes.
+      items,
+      previewSize,
+      imageMaxHeight,
+      density,
+    ]
   );
   const totalH = offsets[items.length] ?? 0;
 

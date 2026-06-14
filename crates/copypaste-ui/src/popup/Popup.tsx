@@ -750,7 +750,7 @@ interface PopupRowProps {
   onPin: () => void;
 }
 
-function PopupRow({
+const PopupRow = React.memo(function PopupRow({
   item,
   index,
   selected,
@@ -958,4 +958,28 @@ function PopupRow({
       </div>
     </li>
   );
-}
+// Custom comparator: skip re-render when item data, display settings, and
+// selection state are all unchanged. Handler function references are ignored —
+// they are per-item closures whose effective inputs (item.id, item.pinned, idx)
+// are already covered by the structural checks below.
+}, (prev, next) => {
+  if (prev.item.id !== next.item.id) return false;
+  if (prev.item.preview !== next.item.preview) return false;
+  if (prev.item.pinned !== next.item.pinned) return false;
+  if (prev.item.wall_time !== next.item.wall_time) return false;
+  if (prev.item.is_sensitive !== next.item.is_sensitive) return false;
+  if (prev.item.content_type !== next.item.content_type) return false;
+  if (prev.item.app_bundle_id !== next.item.app_bundle_id) return false;
+  if (prev.index !== next.index) return false;
+  if (prev.selected !== next.selected) return false;
+  if (prev.textRowHeight !== next.textRowHeight) return false;
+  if (prev.imageMaxHeight !== next.imageMaxHeight) return false;
+  if (prev.maskSensitive !== next.maskSensitive) return false;
+  if (prev.previewLines !== next.previewLines) return false;
+  if (prev.showKeycap !== next.showKeycap) return false;
+  // matchPositions: compare by length + first element as a cheap heuristic
+  // (positions only change when the query changes, which also changes item order).
+  if (prev.matchPositions.length !== next.matchPositions.length) return false;
+  if (prev.matchPositions[0] !== next.matchPositions[0]) return false;
+  return true;
+});
