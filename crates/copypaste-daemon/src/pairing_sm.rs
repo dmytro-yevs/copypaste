@@ -260,14 +260,21 @@ impl PairingCoordinator {
     /// `peer` carries whatever peer identity information is known before dialling
     /// (initiator: mDNS device name / IPs / fingerprint; responder: default empty).
     ///
-    /// Returns `true` and transitions `Idle → Initiating` when no pairing is in
-    /// flight; returns `false` (leaving state unchanged) when one already is, so
-    /// the caller can reject the concurrent request with a rate-limited error.
+    /// Returns `true` and transitions to `Initiating` when no pairing is
+    /// genuinely in progress. Specifically:
+    /// - From `Idle`: claims immediately.
+    /// - From a stale **terminal** state (`Confirmed`/`Rejected`/`Aborted`/
+    ///   `TimedOut`): auto-resets (clears any stale pending channel) and claims,
+    ///   so the handler never needs to call `reset()` explicitly before a retry.
+    /// - From an **active** state (`Initiating`/`AwaitingSas`): returns `false`
+    ///   so the caller can reject the concurrent request with a rate-limited error.
     pub fn try_begin(&self, role: PairingRole, peer: PeerSnapshot) -> bool {
         let mut slot = self.lock_state();
-        if !slot.0.is_idle() {
-            return false;
+        if slot.0.is_active() {
+            return false; // genuine in-progress pairing — refuse
         }
+        // Idle OR stale terminal: clear any stale pending channel and claim.
+        let _ = self.lock_pending().take();
         slot.0 = PairingState::Initiating { role, peer };
         true
     }
@@ -468,6 +475,92 @@ mod tests {
         assert!(c.snapshot().is_idle());
         // A fresh pairing may begin after reset.
         assert!(c.try_begin(PairingRole::Responder, PeerSnapshot::default()));
+    }
+
+    /// After finish(terminal), try_begin must succeed WITHOUT requiring reset().
+    /// This is the LAN retry regression: stale terminal state must not block new pairings.
+    #[test]
+    fn try_begin_succeeds_after_terminal_without_reset() {
+        let c = PairingCoordinator::new();
+
+        // Confirmed terminal → next try_begin must succeed (auto-reset).
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
+        c.finish(PairingState::Confirmed);
+        assert_eq!(c.snapshot().as_str(), "confirmed");
+        assert!(
+            c.try_begin(PairingRole::Responder, PeerSnapshot::default()),
+            "try_begin must succeed after Confirmed without explicit reset"
+        );
+        assert_eq!(c.snapshot().as_str(), "initiating");
+
+        // Rejected terminal → next try_begin must also succeed.
+        c.finish(PairingState::Rejected);
+        assert!(
+            c.try_begin(PairingRole::Initiator, PeerSnapshot::default()),
+            "try_begin must succeed after Rejected without explicit reset"
+        );
+
+        // TimedOut terminal → same.
+        c.finish(PairingState::TimedOut);
+        assert!(
+            c.try_begin(PairingRole::Initiator, PeerSnapshot::default()),
+            "try_begin must succeed after TimedOut without explicit reset"
+        );
+    }
+
+    /// After abort(), try_begin must succeed (abort() leaves state as Aborted, a terminal).
+    #[test]
+    fn try_begin_succeeds_after_abort() {
+        let c = PairingCoordinator::new();
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
+        let _rx = c.enter_awaiting_sas(
+            "123456".to_string(),
+            PairingRole::Initiator,
+            PeerSnapshot::default(),
+        );
+        c.abort();
+        assert_eq!(c.snapshot().as_str(), "aborted");
+        assert!(
+            c.try_begin(PairingRole::Responder, PeerSnapshot::default()),
+            "try_begin must succeed after abort() without explicit reset"
+        );
+        assert_eq!(c.snapshot().as_str(), "initiating");
+    }
+
+    /// While genuinely active (Initiating or AwaitingSas), try_begin must still return false.
+    #[test]
+    fn try_begin_refused_while_active() {
+        let c = PairingCoordinator::new();
+
+        // Refused while Initiating.
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
+        assert_eq!(c.snapshot().as_str(), "initiating");
+        assert!(
+            !c.try_begin(PairingRole::Responder, PeerSnapshot::default()),
+            "try_begin must be refused while Initiating"
+        );
+        assert_eq!(
+            c.snapshot().role(),
+            Some(PairingRole::Initiator),
+            "state must be unchanged"
+        );
+
+        // Refused while AwaitingSas.
+        let _rx = c.enter_awaiting_sas(
+            "999999".to_string(),
+            PairingRole::Initiator,
+            PeerSnapshot::default(),
+        );
+        assert_eq!(c.snapshot().as_str(), "awaiting_sas");
+        assert!(
+            !c.try_begin(PairingRole::Responder, PeerSnapshot::default()),
+            "try_begin must be refused while AwaitingSas"
+        );
+        assert_eq!(
+            c.snapshot().as_str(),
+            "awaiting_sas",
+            "state must be unchanged"
+        );
     }
 
     // ── peer metadata surfacing ────────────────────────────────────────────────
