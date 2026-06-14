@@ -10,7 +10,6 @@ import android.graphics.drawable.Drawable
 import android.util.Base64
 import android.util.Log
 import java.io.ByteArrayOutputStream
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Extracts and caches source-app icons for display alongside clipboard items.
@@ -20,10 +19,10 @@ import java.util.concurrent.ConcurrentHashMap
  *   val b64: String? = AppIconHelper.getAppIconBase64(context, "com.google.android.gm")
  *   // b64 is a base64-encoded PNG (32×32 dp), or null if the package is not installed.
  *
- * The result is cached in a [ConcurrentHashMap] so AppKit / PackageManager is only
- * called once per bundle ID per process lifetime.  `null` results are cached as the
- * sentinel value [ABSENT] (empty string) because [ConcurrentHashMap] does not permit
- * null values; [getAppIconBase64] translates the sentinel back to `null` on read.
+ * The result is cached in a bounded LRU map so AppKit / PackageManager is only
+ * called once per bundle ID while it remains hot.  `null` results are cached as the
+ * sentinel value [ABSENT] (empty string); [getAppIconBase64] translates the sentinel
+ * back to `null` on read.
  */
 object AppIconHelper {
 
@@ -40,15 +39,47 @@ object AppIconHelper {
     private const val ABSENT = ""
 
     /**
-     * Thread-safe in-memory cache.  Keys are package names; values are base64 PNG
+     * Maximum number of resolved package→icon entries retained in [cache].
+     *
+     * Bounded to prevent unbounded growth over the process lifetime (one entry per
+     * distinct source package, including negative/[ABSENT] results).  Matches the web
+     * client's LRU-128 icon cache; the Rust macOS side caps at 256 (`ICON_CACHE_CAP`).
+     * 128 distinct foreground apps is far beyond realistic clipboard provenance, so
+     * evictions are rare in practice and cheap (one PackageManager re-resolve) when
+     * they do occur.
+     */
+    internal const val MAX_CACHE_ENTRIES = 128
+
+    /**
+     * Build a bounded, access-ordered LRU map: the least-recently-used entry is
+     * evicted once size exceeds [maxEntries].  Extracted so the eviction policy is
+     * unit-testable without a [Context] (see `AppIconCacheTest`).
+     *
+     * [LinkedHashMap] is NOT thread-safe and access-order mutates the structure on
+     * every read, so callers must guard it with a lock.
+     */
+    internal fun newIconCache(maxEntries: Int = MAX_CACHE_ENTRIES): LinkedHashMap<String, String> =
+        object : LinkedHashMap<String, String>(
+            /* initialCapacity = */ 16,
+            /* loadFactor = */ 0.75f,
+            /* accessOrder = */ true,
+        ) {
+            override fun removeEldestEntry(eldest: Map.Entry<String, String>): Boolean =
+                size > maxEntries
+        }
+
+    /**
+     * Bounded LRU in-memory cache.  Keys are package names; values are base64 PNG
      * strings or [ABSENT] meaning "already tried, not found".
      *
-     * [ConcurrentHashMap] allows concurrent reads from [Dispatchers.Default] without
-     * explicit locking.  A small TOCTOU race on a cache miss (two threads both seeing
-     * a miss and both calling [extractIcon] for the same key) is harmless — both will
-     * store the same result and the extra PackageManager call is cheap.
+     * All access goes through [cacheLock]; [getAppIconBase64] keeps the (potentially
+     * slow) [extractIcon] PackageManager call OUTSIDE the lock to avoid blocking
+     * concurrent readers.  A small TOCTOU race on a miss (two threads both resolving
+     * the same key) is harmless — both store the same result.
      */
-    private val cache = ConcurrentHashMap<String, String>()
+    private val cacheLock = Any()
+
+    private val cache = newIconCache()
 
     /**
      * Return a base64-encoded 48×48 PNG for [packageName], or `null` if the
@@ -58,14 +89,20 @@ object AppIconHelper {
      * dispatcher (e.g. [kotlinx.coroutines.Dispatchers.Default]).
      */
     fun getAppIconBase64(context: Context, packageName: String): String? {
-        // Fast path: already cached (including negative results).
-        cache[packageName]?.let { cached ->
-            return if (cached == ABSENT) null else cached
+        // Fast path: already cached (including negative results). The lock also
+        // refreshes LRU access-order for this key.
+        synchronized(cacheLock) {
+            cache[packageName]?.let { cached ->
+                return if (cached == ABSENT) null else cached
+            }
         }
 
+        // Resolve OUTSIDE the lock — PackageManager I/O must not block other readers.
         val result = extractIcon(context, packageName)
-        // Store the result or the ABSENT sentinel (ConcurrentHashMap rejects null values).
-        cache[packageName] = result ?: ABSENT
+        // Store the result or the ABSENT sentinel (empty string).
+        synchronized(cacheLock) {
+            cache[packageName] = result ?: ABSENT
+        }
         return result
     }
 
@@ -74,8 +111,13 @@ object AppIconHelper {
      * so that stale null entries are refreshed on the next query.
      */
     fun clearCache() {
-        cache.clear()
+        synchronized(cacheLock) {
+            cache.clear()
+        }
     }
+
+    /** Current number of cached entries (test/diagnostic helper). */
+    internal fun cacheSize(): Int = synchronized(cacheLock) { cache.size }
 
     // -------------------------------------------------------------------------
     // Private helpers
