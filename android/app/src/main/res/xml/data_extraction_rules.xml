@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Security (CopyPaste-731): CopyPaste stores the encrypted clipboard DB + device
+     keys locally. Exclude ALL app data from BOTH cloud backup and device-to-device
+     transfer so sensitive data never leaves the device or survives a clean
+     uninstall→reinstall via restore. allowBackup="false" disables legacy/auto
+     backup; these rules additionally cover the Android 12+ (API 31+) data-extraction
+     paths (cloud-backup + device-transfer). -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" />
+        <exclude domain="database" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" />
+        <exclude domain="database" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

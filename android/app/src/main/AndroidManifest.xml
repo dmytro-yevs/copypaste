@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Network: relay server + Supabase -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- SyncStatusBadge offline detection queries ConnectivityManager
+         (activeNetwork + NET_CAPABILITY_VALIDATED) — requires this normal perm. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Foreground service (API 28+) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -57,6 +60,9 @@
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:theme="@style/Theme.CopyPaste">
 
         <!-- Main entry point — hosts the bottom-nav shell (Clips / Devices / Settings) -->
