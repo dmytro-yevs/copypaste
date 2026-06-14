@@ -46,15 +46,7 @@ import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeAccent
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeBorder
-import com.copypaste.android.ui.theme.IdeDanger
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeFaint
-import com.copypaste.android.ui.theme.IdePanel
-import com.copypaste.android.ui.theme.IdeText
-import com.copypaste.android.ui.theme.IdeWarning
+import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -145,6 +137,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
         }
     }
 
+    val c = LocalIdeColors.current
+
     // ── Clear-logs confirmation dialog ──────────────────────────────────────
     if (showClearDialog) {
         GlassAlertDialog(
@@ -153,7 +147,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 Text(
                     text = "Clear Logs",
                     style = MaterialTheme.typography.titleMedium,
-                    color = IdeText,
+                    color = c.text,
                 )
             },
             text = {
@@ -161,7 +155,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     text = "Delete all log files (app.log, app.log.1, crash_*.txt)? " +
                         "This cannot be undone.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = IdeDim,
+                    color = c.dim,
                 )
             },
             confirmButton = {
@@ -172,12 +166,12 @@ fun LogViewerScreen(onBack: () -> Unit) {
                         loadLogs()
                     }
                 }) {
-                    Text("Clear", color = IdeDanger)
+                    Text("Clear", color = c.danger)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel", color = IdeDim)
+                    Text("Cancel", color = c.dim)
                 }
             },
         )
@@ -195,7 +189,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
-        containerColor = IdeBg,
+        containerColor = c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = "Logs",
@@ -213,7 +207,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                             imageVector = if (atBottom) Icons.Default.KeyboardArrowUp
                                           else Icons.Default.KeyboardArrowDown,
                             contentDescription = if (atBottom) "Scroll to top" else "Scroll to bottom",
-                            tint = IdeDim,
+                            tint = c.dim,
                         )
                     }
                     // Refresh
@@ -221,7 +215,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Refresh logs",
-                            tint = IdeDim,
+                            tint = c.dim,
                         )
                     }
                     // Share / Export
@@ -229,7 +223,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                         Icon(
                             imageVector = Icons.Default.Share,
                             contentDescription = "Export logs",
-                            tint = IdeDim,
+                            tint = c.dim,
                         )
                     }
                     // Clear logs
@@ -237,7 +231,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                         Icon(
                             imageVector = Icons.Default.Delete,
                             contentDescription = "Clear logs",
-                            tint = IdeDanger,
+                            tint = c.danger,
                         )
                     }
                 },
@@ -254,10 +248,10 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.labelSmall,
-                    color = IdeFaint,
+                    color = c.faint,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(IdePanel)
+                        .background(c.panel)
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
@@ -267,10 +261,10 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 Text(
                     text = "Showing last ${TAIL_BYTES / 1024} KB — older lines omitted to avoid OOM.",
                     style = MaterialTheme.typography.labelSmall,
-                    color = IdeWarning,
+                    color = c.warning,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(IdePanel)
+                        .background(c.panel)
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
@@ -283,7 +277,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     Text(
                         "Filter lines…",
                         style = MaterialTheme.typography.bodySmall,
-                        color = IdeFaint,
+                        color = c.faint,
                     )
                 },
                 singleLine = true,
@@ -302,7 +296,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     Text(
                         text = if (allLines.isEmpty()) "No log entries yet." else "No lines match filter.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = IdeDim,
+                        color = c.dim,
                     )
                 }
             } else {
@@ -311,7 +305,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                         state = listState,
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(IdeBg),
+                            .background(c.bg),
                     ) {
                         itemsIndexed(displayLines) { _, line ->
                             LogLine(line)
@@ -339,23 +333,24 @@ fun LogViewerScreen(onBack: () -> Unit) {
  */
 @Composable
 private fun LogLine(line: String) {
+    val c = LocalIdeColors.current
     val color = when {
         // Level codes come after the timestamp: "... E/Tag:" or "... W/Tag:"
         // Uses file-level precompiled regexes to avoid allocation on every recomposition.
         RE_LEVEL_ANY.containsMatchIn(line) -> {
             when {
-                RE_LEVEL_E.containsMatchIn(line) -> IdeDanger
-                RE_LEVEL_W.containsMatchIn(line) -> IdeWarning
-                RE_LEVEL_I.containsMatchIn(line) -> IdeText
-                RE_LEVEL_D.containsMatchIn(line) -> IdeDim
-                else -> IdeDim
+                RE_LEVEL_E.containsMatchIn(line) -> c.danger
+                RE_LEVEL_W.containsMatchIn(line) -> c.warning
+                RE_LEVEL_I.containsMatchIn(line) -> c.text
+                RE_LEVEL_D.containsMatchIn(line) -> c.dim
+                else -> c.dim
             }
         }
         // Stack trace lines
-        line.trimStart().startsWith("at ") -> IdeFaint
+        line.trimStart().startsWith("at ") -> c.faint
         // Crash report header lines (=== ... ===)
-        line.startsWith("=") -> IdeAccent
-        else -> IdeDim
+        line.startsWith("=") -> c.accent
+        else -> c.dim
     }
 
     // A6: soft-wrap long lines so everything is visible without horizontal scrolling

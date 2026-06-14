@@ -39,12 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeAccent
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeFaint
-import com.copypaste.android.ui.theme.IdeSuccess
-import com.copypaste.android.ui.theme.IdeText
+import com.copypaste.android.ui.theme.LocalIdeColors
 
 /**
  * "About" screen — mirrors the macOS About view
@@ -73,7 +68,8 @@ class AboutActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             CopyPasteTheme {
-                Scaffold(containerColor = IdeBg) { innerPadding ->
+                val c = LocalIdeColors.current
+                Scaffold(containerColor = c.bg) { innerPadding ->
                     AboutScreen(
                         modifier = Modifier.padding(innerPadding),
                         showBackButton = true,
@@ -111,10 +107,11 @@ fun AboutScreen(
     onBack: () -> Unit = {},
 ) {
     val context = LocalContext.current
+    val c = LocalIdeColors.current
 
     Scaffold(
         modifier = modifier,
-        containerColor = IdeBg,
+        containerColor = c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_about),
@@ -141,21 +138,20 @@ fun AboutScreen(
                 ) {
                     Text(
                         text = stringResource(R.string.app_name),
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = IdeText,
+                        style = MaterialTheme.typography.displayLarge,
+                        color = c.text,
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
                         text = versionLabel(),
                         style = MaterialTheme.typography.bodySmall,
-                        color = IdeFaint,
+                        color = c.faint,
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
                         text = stringResource(R.string.about_tagline),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = IdeDim,
+                        color = c.dim,
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -174,7 +170,7 @@ fun AboutScreen(
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 0.8.sp,
                         ),
-                        color = IdeAccent.copy(alpha = 0.80f),
+                        color = c.accent.copy(alpha = 0.80f),
                     )
                     ABOUT_FEATURES.forEach { feature ->
                         Row(verticalAlignment = Alignment.Top) {
@@ -182,7 +178,7 @@ fun AboutScreen(
                                 // §5: thin Outlined check, tinted §3 success green.
                                 Icons.Outlined.Check,
                                 contentDescription = null,
-                                tint = IdeSuccess,
+                                tint = c.success,
                                 modifier = Modifier
                                     .padding(end = 8.dp, top = 2.dp)
                                     .height(16.dp),
@@ -190,7 +186,7 @@ fun AboutScreen(
                             Text(
                                 text = feature,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = IdeDim,
+                                color = c.dim,
                             )
                         }
                     }
@@ -216,12 +212,12 @@ fun AboutScreen(
                     Text(
                         text = "github.com/dmytro-yevs/copypaste",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = IdeAccent,
+                        color = c.accent,
                     )
                     Icon(
                         Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = stringResource(R.string.about_open_github),
-                        tint = IdeAccent,
+                        tint = c.accent,
                         modifier = Modifier.height(16.dp),
                     )
                 }
