@@ -95,6 +95,14 @@ class LiveP2pSyncTest {
             keyDer = cert.keyDer,
             pakePassword = scanned.pakePassword,
             syncAddr = "",
+            // ABI-14 device metadata (mirrors PairActivity.runPairAndSync). A scanning
+            // device carries no provisioning of its own — it receives the peer's.
+            localProvisioning = null,
+            deviceName = android.os.Build.MODEL ?: "AndroidTest",
+            deviceModel = android.os.Build.MODEL ?: "AndroidTest",
+            osVersion = "Android " + android.os.Build.VERSION.RELEASE,
+            appVersion = "androidTest",
+            localIp = "",
         )
 
         // The daemon advertises its own_sync_addr as 127.0.0.1:<port> (host
@@ -110,6 +118,9 @@ class LiveP2pSyncTest {
             certDer = cert.certDer,
             keyDer = cert.keyDer,
             localItems = emptyList<LocalItem>(),
+            // ABI-14: this device's revocation set (none in the test) + stable id.
+            revokedFingerprints = emptyList(),
+            deviceId = "androidTest-device",
         )
 
         val plaintexts = result.items.map { String(it.plaintext.toByteArray(), Charsets.UTF_8) }
