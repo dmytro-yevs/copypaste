@@ -11,8 +11,11 @@ crate-type = ["rlib"]
 
 [dependencies]
 # TLS: rustls 0.23 works on Rust 1.65+; tokio-rustls 0.26 requires rustls 0.23
-rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
+# tls12 is intentionally NOT listed: all CopyPaste peers are first-party
+# rustls 0.23 clients, so TLS 1.2 downgrade is not needed and removing
+# the feature forces TLS 1.3 exclusively (CopyPaste-j21 hardening).
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging"] }
 # Certificate generation: rcgen 0.12 works on Rust 1.65+
 rcgen = { version = "0.12", default-features = false, features = ["ring"] }
 # Framed message transport

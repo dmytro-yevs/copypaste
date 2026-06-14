@@ -1,23 +1,18 @@
 //! `GET /metrics` — Prometheus text-format exposition endpoint.
 //!
-//! Emits three series:
-//!
-//! - `copypaste_relay_items_total` (counter) — total items ever stored
-//!   (incremented in [`crate::state::RelayStore::push_item`]).
-//! - `copypaste_relay_evictions_total` (counter) — total items evicted
-//!   by TTL (incremented in [`crate::state::RelayStore::prune_expired`]).
-//! - `copypaste_relay_active_devices` (gauge) — number of devices whose
-//!   inbox currently holds at least one item.
+//! Returns only a liveness gauge (`copypaste_relay_up 1`). Device/item/
+//! eviction counters are intentionally omitted from this unauthenticated
+//! endpoint to prevent anonymous callers from learning how many devices are
+//! registered or how much clipboard traffic the relay is processing
+//! (CopyPaste-j21 security hardening). A future phase may gate the full
+//! counter set behind an operator bearer token.
 //!
 //! The endpoint is intentionally rate-limit-exempt (same tier as
 //! `/health`, `/stats`) so a scraping Prometheus does not have to share
 //! the per-IP budget with real clients.
 
-use axum::extract::State;
 use axum::http::{header, StatusCode};
 use axum::response::IntoResponse;
-
-use crate::state::AppState;
 
 /// Prometheus text format `Content-Type` (version 0.0.4).
 ///
@@ -26,27 +21,15 @@ const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8"
 
 /// `GET /metrics` handler.
 ///
-/// Snapshots the three metric values from `RelayStore` under a single
-/// short-lived lock and formats them as Prometheus text.
-pub async fn handle(State(state): State<AppState>) -> impl IntoResponse {
-    let (items_total, evictions_total, active_devices) = {
-        // Survive mutex poisoning (security INFO #21) — same pattern as
-        // /health and /stats.
-        let store = state.lock().unwrap_or_else(|e| e.into_inner());
-        store.metrics_snapshot()
-    };
-
-    let body = format!(
-        "# HELP copypaste_relay_items_total Total items ever stored\n\
-         # TYPE copypaste_relay_items_total counter\n\
-         copypaste_relay_items_total {items_total}\n\
-         # HELP copypaste_relay_evictions_total Total items evicted by TTL\n\
-         # TYPE copypaste_relay_evictions_total counter\n\
-         copypaste_relay_evictions_total {evictions_total}\n\
-         # HELP copypaste_relay_active_devices Number of devices with inbox entries\n\
-         # TYPE copypaste_relay_active_devices gauge\n\
-         copypaste_relay_active_devices {active_devices}\n"
-    );
+/// Returns a minimal liveness gauge only. Device count, item count, and
+/// eviction count are not emitted here — those are operational metrics that
+/// should not be visible to unauthenticated scrapers (CopyPaste-j21).
+pub async fn handle() -> impl IntoResponse {
+    // A single "up" gauge so a Prometheus scraper can confirm the relay is
+    // reachable without the response leaking any device or item counters.
+    let body = "# HELP copypaste_relay_up Whether the relay is up (1 = yes)\n\
+                # TYPE copypaste_relay_up gauge\n\
+                copypaste_relay_up 1\n";
 
     (
         StatusCode::OK,

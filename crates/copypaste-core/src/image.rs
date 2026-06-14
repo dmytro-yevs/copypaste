@@ -483,12 +483,38 @@ pub fn encode_image_full(
         });
     }
 
-    // Decode ONCE; reuse for both the full re-encode and the thumbnail.
-    let img = decode_clipboard_image_limited(raw, max_decoded_mb)?;
-    let (width, height) = (img.width(), img.height());
+    // [PERF] Decode once and scope the large DynamicImage to the smallest
+    // possible block — it is dropped as soon as we have extracted:
+    //   (a) the dimensions (width, height) — two u32s
+    //   (b) the thumbnail bytes (encode_thumbnail_bytes downscales first, so
+    //       the intermediate thumb DynamicImage is only ~192×192 pixels)
+    //   (c) the PNG bytes (encode_as_png re-encodes the full-res image)
+    //
+    // After this block, `img` is freed. The expensive chunk encryption that
+    // follows operates on `png_bytes` and `thumb_bytes` only — the large
+    // decoded DynamicImage is no longer in memory. For a 4K image (~53 MB
+    // decoded) this cuts the peak RSS during encrypt_chunks by ~53 MB.
+    //
+    // Ordering within the scope: thumbnail first, then full PNG. This means
+    // both png_bytes (compressed, small) AND thumb_bytes (tiny) are live
+    // while img is still alive, but img is freed before the chunk encryption
+    // calls — the peak is raw + img + png_bytes + thumb_bytes rather than
+    // raw + img + png_bytes + thumb_bytes + all_chunk_ciphertexts.
+    let (width, height, png_bytes, thumb_bytes, thumb_w, thumb_h) = {
+        let img = decode_clipboard_image_limited(raw, max_decoded_mb)?;
+        let (width, height) = (img.width(), img.height());
+        // Thumbnail bytes are small (max 192×192 PNG) — generate first so the
+        // thumbnail downscale DynamicImage and img can both be freed together
+        // at the end of this scope rather than surviving into encrypt_chunks.
+        let (thumb_bytes, thumb_w, thumb_h) = encode_thumbnail_bytes(&img, thumb_max_dim)?;
+        // Full-resolution PNG re-encode. `img` is still alive here (needed
+        // for encode_as_png), but will be dropped at the end of this block.
+        let png_bytes = encode_as_png(&img)?;
+        // `img` is dropped here — before chunk encryption begins.
+        (width, height, png_bytes, thumb_bytes, thumb_w, thumb_h)
+    };
     let original_size = raw.len() as u64;
 
-    let png_bytes = encode_as_png(&img)?;
     // Same decode-amplification guard as encode_image_with_limit.
     if png_bytes.len() > max {
         return Err(ImageError::TooLarge {
@@ -501,8 +527,6 @@ pub fn encode_image_full(
     let chunk_count =
         u32::try_from(chunks.len()).map_err(|_| ImageError::Chunk(ChunkError::TooManyChunks))?;
 
-    // Thumbnail reuses the already-decoded image — no second decode.
-    let (thumb_bytes, thumb_w, thumb_h) = encode_thumbnail_bytes(&img, thumb_max_dim)?;
     let thumb_chunks = encrypt_chunks(&thumb_bytes, key, thumb_file_id, IMAGE_CHUNK_SIZE)?;
     let thumb_blob = chunks_to_blob(&thumb_chunks)?;
 

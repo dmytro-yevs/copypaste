@@ -107,9 +107,10 @@ pub struct PullParams {
 // Health
 // ---------------------------------------------------------------------------
 
+/// Unauthenticated liveness response. Intentionally contains no device or
+/// item counts — those are operational metrics that should not be visible
+/// to unauthenticated observers. See CopyPaste-j21 (security hardening).
 #[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: String,
-    pub devices: usize,
-    pub total_items: usize,
 }

@@ -69,9 +69,14 @@ pub struct AppConfig {
     /// binding request to `stun.l.google.com:19302` to learn the reflexive
     /// address; no personal data is included in that request.
     ///
-    /// Set to `false` to disable the lookup entirely — `public_ip` will then
-    /// always be `null` in `get_own_device_info`.  Default: `true`.
-    #[serde(default = "default_true")]
+    /// **Privacy opt-in** — defaults to `false`. The STUN lookup is not
+    /// performed until the user explicitly enables this setting. Existing
+    /// configs that contain an explicit `collect_public_ip = true` are
+    /// unaffected; only new/absent configs default to `false`.
+    ///
+    /// Set to `true` to enable the lookup — `public_ip` will then be
+    /// populated in `get_own_device_info` once the STUN response arrives.
+    #[serde(default)]
     pub collect_public_ip: bool,
 
     /// Base URL of the HTTP relay used for store-and-forward sync fan-out, e.g.
@@ -135,7 +140,7 @@ impl Default for AppConfig {
             paste_as_plain_text: false,
             sound_on_copy: true,
             notify_on_copy: true,
-            collect_public_ip: true,
+            collect_public_ip: false,
             relay_url: None,
             auto_apply_synced_clip: true,
             lan_visibility: true,

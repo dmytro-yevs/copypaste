@@ -55,7 +55,8 @@ async fn main() -> anyhow::Result<()> {
     let _evictor =
         store::spawn_ttl_evictor(state.clone(), config.sync_ttl_secs, TTL_EVICTOR_TICK_SECS);
 
-    let (app, retain_fns) = routes::relay_router(state, config.clone());
+    let (app, retain_fns) = routes::relay_router(state, config.clone())
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Background governor cleanup — evict stale per-key rate-limit buckets
     // every 60 s to bound resident memory (one entry per distinct client IP /

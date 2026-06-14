@@ -16,14 +16,29 @@
 //! key + v4-format AAD, and write the new ciphertext + nonce + bumped
 //! `key_version` back.
 //!
-//! ## Why batched
+//! ## How the sweep works
 //!
-//! The sweep runs on daemon startup and must not block the event loop. We
-//! process at most `BATCH_SIZE` rows per transaction and sleep
-//! `INTER_BATCH_SLEEP` between batches. The migration is idempotent: if
-//! the daemon is killed mid-sweep, the next startup picks up where it left
-//! off (any rows already at `key_version = 2` are filtered out by the
-//! `WHERE key_version = 1` predicate).
+//! The sweep runs on daemon startup and must not block the event loop.
+//! Each row is re-encrypted individually in its own implicit autocommit
+//! transaction (`rotate_one` issues a single `UPDATE` outside any
+//! explicit `BEGIN`). There is no multi-row batch transaction: the name
+//! `BATCH_SIZE` refers only to the fetch page size — how many row ids are
+//! loaded into memory per `SELECT` before processing them one-by-one.
+//!
+//! Progress tracking: `last_processed_id` is NOT written per row or per
+//! batch. Instead, crash-safety is achieved by the `WHERE key_version = 1`
+//! predicate itself — on restart the `SELECT` cursor skips every row that
+//! was already successfully rotated to `key_version = 2`. The predicate is
+//! therefore load-bearing for crash-safety and MUST NOT be removed or
+//! weakened; removing it would cause a restarted sweep to re-process
+//! already-rotated rows, which would fail AEAD authentication and leave
+//! them logged as undecryptable.
+//!
+//! `INTER_BATCH_SLEEP` is applied between fetch pages (not between
+//! individual rows) to yield the write lock to the daemon's hot path.
+//! The migration is idempotent: if the daemon is killed mid-sweep, the
+//! next startup picks up automatically because all already-rotated rows
+//! are excluded by `WHERE key_version = 1`.
 //!
 //! ## Scope
 //!

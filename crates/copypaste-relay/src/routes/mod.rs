@@ -99,7 +99,27 @@ impl KeyExtractor for DeviceIdKeyExtractor {
 /// Type alias for the list of retain callbacks returned alongside the router.
 pub type RetainFns = Vec<Box<dyn Fn() + Send + Sync + 'static>>;
 
-pub fn relay_router(state: AppState, config: RelayConfig) -> (Router, RetainFns) {
+/// Error returned when the rate-limit governor configuration is invalid.
+///
+/// In practice this only fires if a rate-limit constant is zero (which the
+/// `governor` crate rejects). All shipped constants are non-zero, so this
+/// error should never be seen in production — but propagating it prevents a
+/// process-level panic if an operator accidentally patches a constant to 0.
+#[derive(Debug)]
+pub struct GovernorConfigError(String);
+
+impl std::fmt::Display for GovernorConfigError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid governor configuration: {}", self.0)
+    }
+}
+
+impl std::error::Error for GovernorConfigError {}
+
+pub fn relay_router(
+    state: AppState,
+    config: RelayConfig,
+) -> Result<(Router, RetainFns), GovernorConfigError> {
     // M3: select the per-IP key extractor. By default we key on the
     // unspoofable TCP peer IP (`PeerIpKeyExtractor`). When the operator opts in
     // via `RELAY_TRUST_PROXY_HEADERS` — and *only* then — we honor
@@ -118,11 +138,15 @@ pub fn relay_router(state: AppState, config: RelayConfig) -> (Router, RetainFns)
 ///
 /// Generic over `PerIp` so the same wiring serves both the peer-IP and
 /// proxy-header (smart-IP) variants without duplicating the route table.
+///
+/// Returns `Err(GovernorConfigError)` if a rate-limit constant is invalid
+/// (e.g. zero). All shipped constants are non-zero so this should never
+/// fire in practice, but propagating the error prevents a process panic.
 fn build_router<PerIp>(
     state: AppState,
     config: RelayConfig,
     per_ip_key: PerIp,
-) -> (Router, RetainFns)
+) -> Result<(Router, RetainFns), GovernorConfigError>
 where
     PerIp: KeyExtractor + Send + Sync + 'static,
     PerIp::Key: Send + Sync + 'static,
@@ -147,7 +171,11 @@ where
             .burst_size(PER_IP_BURST_SIZE)
             .key_extractor(per_ip_key)
             .finish()
-            .expect("invalid per-IP governor configuration"),
+            .ok_or_else(|| {
+                GovernorConfigError(
+                    "per-IP: per_second or burst_size is zero".to_string(),
+                )
+            })?,
     );
 
     // ---- Per-device rate limit layer (60 req/min) ---------------------------
@@ -168,7 +196,11 @@ where
             .burst_size(PER_DEVICE_BURST_SIZE)
             .key_extractor(DeviceIdKeyExtractor)
             .finish()
-            .expect("invalid per-device governor configuration"),
+            .ok_or_else(|| {
+                GovernorConfigError(
+                    "per-device: per_second or burst_size is zero".to_string(),
+                )
+            })?,
     );
 
     // ---- Retain callbacks for background cleanup ---------------------------
@@ -232,16 +264,19 @@ where
         // instead of falling back to compile-time defaults (HIGH #2).
         .layer(axum::Extension(config));
 
-    (router, retain_fns)
+    Ok((router, retain_fns))
 }
 
-async fn stats_handler(State(state): State<AppState>) -> impl IntoResponse {
-    // Survive mutex poisoning (security INFO #21).
-    let store = state.lock().unwrap_or_else(|e| e.into_inner());
-    let (devices, items) = store.stats();
+/// `GET /stats` — bare version probe.
+///
+/// Device and item counts are intentionally omitted from this unauthenticated
+/// endpoint. Leaking counts to anonymous callers reveals the number of active
+/// devices and the volume of clipboard traffic, which is operational data that
+/// should require authentication. Only the relay protocol version is returned
+/// (CopyPaste-j21 security hardening). A future phase may gate detailed
+/// counters behind an operator bearer token.
+async fn stats_handler(State(_state): State<AppState>) -> impl IntoResponse {
     axum::Json(serde_json::json!({
-        "devices": devices,
-        "total_items": items,
         "version": "2"
     }))
 }
@@ -349,7 +384,8 @@ mod tests {
             // Must not panic while building either variant.
             // retain_fns is dropped here — no tokio runtime needed since the
             // closures are never spawned in the test context.
-            let (_router, _retain_fns) = relay_router(state, config);
+            let (_router, _retain_fns) = relay_router(state, config)
+                .expect("relay_router must succeed with valid rate-limit constants");
         }
     }
 }

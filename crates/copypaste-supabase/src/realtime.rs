@@ -297,13 +297,85 @@ pub(crate) fn build_join_payload(user_jwt: &str, user_id: Option<&str>) -> serde
     })
 }
 
+/// Return `true` if `host` refers to a loopback address (127.x.x.x,
+/// `::1`, or the hostname `"localhost"`), with or without a port suffix.
+fn is_loopback_host(host: &str) -> bool {
+    // Strip port suffix if present, being careful with IPv6 literals like
+    // `[::1]:4000` where we should not strip the last `:` inside the brackets.
+    let addr_part = if let Some(idx) = host.rfind(':') {
+        let candidate = &host[..idx];
+        // Only strip the trailing `:port` if what remains is either a
+        // bracketed IPv6 literal (`[...]`) or a plain hostname/IPv4 (no ':').
+        if candidate.ends_with(']') || !candidate.contains(':') {
+            candidate
+        } else {
+            host
+        }
+    } else {
+        host
+    };
+
+    // Hostname check (most common dev case).
+    if addr_part.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+
+    // Strip surrounding brackets from IPv6 literals like `[::1]`.
+    let addr_str = addr_part.trim_matches(|c| c == '[' || c == ']');
+    if let Ok(ip) = addr_str.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    false
+}
+
+/// Extract the host portion from a URL string (scheme://host[:port]/...).
+fn extract_host(url: &str) -> &str {
+    // Strip scheme.
+    let after_scheme = if let Some(idx) = url.find("://") {
+        &url[idx + 3..]
+    } else {
+        url
+    };
+    // Take up to the first '/' or end of string.
+    match after_scheme.find('/') {
+        Some(idx) => &after_scheme[..idx],
+        None => after_scheme,
+    }
+}
+
 /// Convert a Supabase REST URL to the Realtime WebSocket URL.
+///
+/// Security (CopyPaste-j21): a plain `http://` URL pointing at a non-loopback
+/// host is silently upgraded to `wss://` so that a misconfigured
+/// `SUPABASE_URL=http://…` cannot leak the anon API key over an unencrypted
+/// connection. `ws://` (plain WebSocket) is only permitted when the host
+/// resolves to loopback (127.x.x.x, `::1`, or `localhost`) — i.e. local dev.
 fn build_ws_url(base_url: &str, api_key: &str) -> String {
-    // Replace http/https scheme with ws/wss
+    // Determine whether the host is loopback-only (local dev).
+    let host = extract_host(base_url);
+    let host_is_loopback = is_loopback_host(host);
+
+    // Replace http/https scheme with ws/wss.
+    // For non-loopback hosts, http:// is upgraded to wss:// (not ws://)
+    // to prevent the anon key from travelling in plaintext.
     let ws_base = if base_url.starts_with("https://") {
         base_url.replacen("https://", "wss://", 1)
     } else if base_url.starts_with("http://") {
-        base_url.replacen("http://", "ws://", 1)
+        if host_is_loopback {
+            // Local dev: allow plain ws:// so developers can run a local
+            // Supabase instance without TLS.
+            base_url.replacen("http://", "ws://", 1)
+        } else {
+            // Remote host: upgrade to wss:// to prevent the API key from
+            // leaking over a plaintext connection.
+            tracing::warn!(
+                host = %host,
+                "Supabase URL uses plain http:// for a non-loopback host; \
+                 upgrading to wss:// to protect the API key. \
+                 Set SUPABASE_URL to https:// to suppress this warning."
+            );
+            base_url.replacen("http://", "wss://", 1)
+        }
     } else {
         format!("wss://{}", base_url)
     };
@@ -929,10 +1001,22 @@ mod tests {
 
     #[test]
     fn build_ws_url_converts_http() {
+        // Loopback host: plain ws:// is allowed for local dev.
         let url = build_ws_url("http://localhost:4000", "k");
         assert_eq!(
             url,
             "ws://localhost:4000/realtime/v1/websocket?apikey=k&vsn=1.0.0"
+        );
+    }
+
+    #[test]
+    fn build_ws_url_upgrades_http_remote_to_wss() {
+        // Non-loopback host: http:// must be silently upgraded to wss://
+        // to protect the API key (CopyPaste-j21).
+        let url = build_ws_url("http://abc.supabase.co", "k");
+        assert_eq!(
+            url,
+            "wss://abc.supabase.co/realtime/v1/websocket?apikey=k&vsn=1.0.0"
         );
     }
 

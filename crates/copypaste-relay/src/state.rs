@@ -1467,6 +1467,10 @@ impl RelayStore {
     // Stats
     // -----------------------------------------------------------------------
 
+    // stats() is retained for future use (e.g. an authenticated /stats endpoint
+    // or integration tests); the unauthenticated /health and /stats handlers no
+    // longer call it (CopyPaste-j21 — strip counts from unauthenticated endpoints).
+    #[allow(dead_code)]
     pub fn stats(&self) -> (usize, usize) {
         let total = self.sync_items.values().map(|v| v.len()).sum();
         (self.devices.len(), total)

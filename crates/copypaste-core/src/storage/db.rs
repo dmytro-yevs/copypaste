@@ -199,7 +199,21 @@ pub(crate) const CONNECTION_PRAGMAS: &str = "\
 PRAGMA busy_timeout = 5000;\n\
 PRAGMA synchronous = NORMAL;\n\
 PRAGMA foreign_keys = ON;\n\
-PRAGMA temp_store = MEMORY;\n";
+PRAGMA temp_store = MEMORY;\n\
+PRAGMA wal_autocheckpoint = 1000;\n\
+PRAGMA journal_size_limit = 67108864;\n";
+// wal_autocheckpoint=1000: trigger a passive checkpoint after every 1000
+// WAL pages (~4 MiB at the 4 KiB default page size). Without this the WAL
+// file grows without bound during the v4 migration sweep, which can write
+// tens of thousands of rows in a single session. The default is 1000 pages
+// (SQLite default), but explicitly setting it here ensures the pool and the
+// single-connection path both see the same value (CopyPaste-ayg).
+//
+// journal_size_limit=64 MiB: cap the WAL file size so even if the
+// checkpoint cannot shrink the file immediately (e.g. active reader holding
+// a snapshot), it is truncated back to at most 64 MiB on the next successful
+// checkpoint. This bounds disk usage during migration sweeps that touch many
+// rows in one run.
 
 /// Build the `PRAGMA cache_size` statement for `cache_mb` MiB of page cache.
 ///
