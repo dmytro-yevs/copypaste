@@ -713,8 +713,8 @@ function GlideHighlight({
         right: 0,
         top,
         height,
-        // §3 selection fill — matches the original row background colour.
-        background: "rgba(61,139,255,0.16)",
+        // §3 selection fill — token so it re-themes in light mode.
+        background: "var(--ide-selection)",
         // Glide animation: 130ms ease-standard. Skipped when reduced motion.
         transition: prefersReduced.current
           ? "none"
@@ -911,7 +911,7 @@ function PopupRow({
               fill="currentColor"
               aria-label="Pinned"
               className="absolute group-hover:opacity-0 transition-opacity"
-              style={{ color: "#D9A343", transitionDuration: "120ms", zIndex: 1 }}
+              style={{ color: "var(--ide-warning)", transitionDuration: "120ms", zIndex: 1 }}
             >
               <path d="M2 1.5A1.5 1.5 0 0 1 3.5 0h9A1.5 1.5 0 0 1 14 1.5v17.25l-6-3.75-6 3.75V1.5Z" />
             </svg>
@@ -930,7 +930,7 @@ function PopupRow({
             style={{ border: "none", background: "none", cursor: "pointer", zIndex: 2 }}
           >
             {item.pinned ? (
-              <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true" style={{ color: "#D9A343" }}>
+              <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true" style={{ color: "var(--ide-warning)" }}>
                 <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
               </svg>
             ) : (
