@@ -160,6 +160,8 @@ import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import com.copypaste.android.ui.theme.EaseOutExpo
+import com.copypaste.android.ui.theme.GlassTier
+import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.rememberReducedMotion
 // PARITY-SPEC §1: read the ACTIVE (light-first) ramp via LocalIdeColors.current.*
 // instead of the hardcoded dark Ide* constants, so the whole History screen
@@ -1408,71 +1410,84 @@ private fun SelectionTopBar(
     onUnpinSelected: () -> Unit,
 ) {
     val c = LocalIdeColors.current
-    // §5: NEUTRAL (not amber) multi-select bar — elevated container, not warning
-    TopAppBar(
-        title = {
-            Text(
-                text = stringResource(R.string.selection_count, selectedCount),
-                style = MaterialTheme.typography.titleLarge,
-                color = c.text,
-            )
-        },
-        navigationIcon = {
-            IconButton(onClick = onClose) {
-                Icon(
-                    Icons.Outlined.Close,
-                    contentDescription = stringResource(R.string.cd_close_selection),
-                    tint = c.dim,
-                    modifier = Modifier.size(18.dp),
+    val translucent = rememberTranslucency()
+    val dark = isDarkTheme()
+    // w67o: wrap in LiquidGlassSurface (tier GLASS = .surface-glass, frosted, parity styleguide
+    // bulk/selection bars = tier-1 surface-glass at L362). TopAppBar container → transparent so
+    // the glass surface shows through. Matches the main History header pattern at L783.
+    LiquidGlassSurface(
+        shape = RectangleShape,
+        translucent = translucent,
+        dark = dark,
+        solid = MaterialTheme.colorScheme.surface,
+        contentColor = c.text,
+        tier = GlassTier.GLASS,
+    ) {
+        TopAppBar(
+            title = {
+                Text(
+                    text = stringResource(R.string.selection_count, selectedCount),
+                    style = MaterialTheme.typography.titleLarge,
+                    color = c.text,
                 )
-            }
-        },
-        actions = {
-            val allSelected = selectedCount == totalCount && totalCount > 0
-            IconButton(onClick = onSelectAll) {
-                Icon(
-                    if (allSelected) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = stringResource(R.string.cd_select_all),
-                    tint = if (allSelected) c.accent else c.dim,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            if (selectedCount > 0) {
-                IconButton(onClick = onPinSelected) {
+            },
+            navigationIcon = {
+                IconButton(onClick = onClose) {
                     Icon(
-                        Icons.Outlined.BookmarkAdded,
-                        contentDescription = stringResource(R.string.action_pin_selected),
-                        tint = c.accent,
-                        modifier = Modifier.size(18.dp),
-                    )
-                }
-                IconButton(onClick = onUnpinSelected) {
-                    Icon(
-                        Icons.Outlined.BookmarkBorder,
-                        contentDescription = stringResource(R.string.action_unpin_selected),
+                        Icons.Outlined.Close,
+                        contentDescription = stringResource(R.string.cd_close_selection),
                         tint = c.dim,
                         modifier = Modifier.size(18.dp),
                     )
                 }
-                IconButton(onClick = onDeleteSelected) {
+            },
+            actions = {
+                val allSelected = selectedCount == totalCount && totalCount > 0
+                IconButton(onClick = onSelectAll) {
                     Icon(
-                        Icons.Outlined.Delete,
-                        contentDescription = stringResource(R.string.action_delete_selected),
-                        tint = c.danger,
+                        if (allSelected) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
+                        contentDescription = stringResource(R.string.cd_select_all),
+                        tint = if (allSelected) c.accent else c.dim,
                         modifier = Modifier.size(18.dp),
                     )
                 }
-            }
-        },
-        // §5 Neutral elevated container — NOT amber/warning (desktop parity)
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor             = c.elevated,
-            titleContentColor          = c.text,
-            actionIconContentColor     = c.dim,
-            navigationIconContentColor = c.dim,
-        ),
-        windowInsets = TopAppBarDefaults.windowInsets,
-    )
+                if (selectedCount > 0) {
+                    IconButton(onClick = onPinSelected) {
+                        Icon(
+                            Icons.Outlined.BookmarkAdded,
+                            contentDescription = stringResource(R.string.action_pin_selected),
+                            tint = c.accent,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    IconButton(onClick = onUnpinSelected) {
+                        Icon(
+                            Icons.Outlined.BookmarkBorder,
+                            contentDescription = stringResource(R.string.action_unpin_selected),
+                            tint = c.dim,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                    IconButton(onClick = onDeleteSelected) {
+                        Icon(
+                            Icons.Outlined.Delete,
+                            contentDescription = stringResource(R.string.action_delete_selected),
+                            tint = c.danger,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
+                }
+            },
+            // w67o: Transparent container — LiquidGlassSurface supplies the fill/blur.
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor             = Color.Transparent,
+                titleContentColor          = c.text,
+                actionIconContentColor     = c.dim,
+                navigationIconContentColor = c.dim,
+            ),
+            windowInsets = TopAppBarDefaults.windowInsets,
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1637,19 +1652,21 @@ private fun EmptySearchState(padding: PaddingValues, query: String) {
  * scroll recompositions.
  */
 private fun chipColorFor(kind: String, c: IdeColors): Color = when (kind) {
-    "TEXT"   -> c.accent
-    "URL"    -> c.info
-    "EMAIL"  -> c.success
-    "PHONE"  -> c.success
-    "COLOR"  -> c.warning
-    "NUMBER" -> c.warning
-    "PATH"   -> c.warning
-    "JSON"   -> c.danger
-    "CODE"   -> c.violet
-    "IMAGE"  -> c.violet
-    "FILE"   -> c.dim
+    // izio: TEXT→faint (styleguide .b-text = --ide-faint), IMAGE→info/sky (parity web KindChip),
+    // FILE→faint (styleguide .b-file = --ide-faint). All others unchanged.
+    "TEXT"    -> c.faint
+    "URL"     -> c.info
+    "EMAIL"   -> c.success
+    "PHONE"   -> c.success
+    "COLOR"   -> c.warning
+    "NUMBER"  -> c.warning
+    "PATH"    -> c.warning
+    "JSON"    -> c.danger
+    "CODE"    -> c.violet
+    "IMAGE"   -> c.info    // izio: was violet, now sky/info (parity web .b-image)
+    "FILE"    -> c.faint   // izio: was dim, now faint (parity web .b-file)
     "PRIVATE" -> c.danger
-    else     -> c.accent  // unknown text kinds default to the TEXT slot
+    else      -> c.faint   // unknown text kinds default to the TEXT slot
 }
 
 /**
@@ -1674,21 +1691,21 @@ private fun chipLabelFor(contentType: String, isSensitive: Boolean, snippet: Str
  */
 @Composable
 private fun ContentTypeChip(label: String, color: Color) {
+    // vzfn: radius 7dp (was 4dp) + 10sp (was 9sp) — parity styleguide .badge --radius-chip/10px
     Box(
         modifier = Modifier
-            .background(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(4.dp))
-            // §6: 1dp tinted border (was borderless).
+            .background(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(7.dp))
             .border(
                 width = 1.dp,
                 color = color.copy(alpha = 0.45f),
-                shape = RoundedCornerShape(4.dp),
+                shape = RoundedCornerShape(7.dp),
             )
             .padding(horizontal = 5.dp, vertical = 2.dp),
     ) {
         Text(
             text = label,
             style = TextStyle(
-                fontSize = 9.sp,                 // §3/§6 chip label: 9sp semibold uppercase
+                fontSize = 10.sp,                // vzfn: was 9sp, now 10sp (styleguide 10px)
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 0.4.sp,
             ),
@@ -1715,6 +1732,100 @@ private fun TooLargeBadge() {
         tint = c.warning.copy(alpha = 0.9f),
         modifier = Modifier.size(12.dp),
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// egsf — 26dp icon-tile: rounded RadiusChip(7) box, kind-tinted glyph inside.
+// Mirrors web .ci tile (liquid-glass-styleguide.html L250): 26x26, radius 7,
+// bg --ide-mute/.16, glyph --ide-faint 12px. Placed as the leading element of
+// each text/file row, before the ContentTypeChip.
+//
+// lbnp — COLOR-kind rows: instead of the icon tile, render a 14dp swatch square
+// filled with the parsed color value from the snippet. See parseHexColor().
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Attempt to parse a hex color string from [snippet] for COLOR-kind rows (lbnp).
+ * Matches the first #RGB / #RRGGBB / #AARRGGBB token in the snippet.
+ * Returns null when no valid hex color is found.
+ */
+private fun parseHexColor(snippet: String): Color? = try {
+    val hex = Regex("#[0-9A-Fa-f]{3,8}").find(snippet)?.value ?: return null
+    val cleaned = hex.removePrefix("#")
+    val argb = when (cleaned.length) {
+        3 -> {
+            // Expand #RGB → #RRGGBB
+            val r = cleaned[0]; val g = cleaned[1]; val b = cleaned[2]
+            android.graphics.Color.parseColor("#$r$r$g$g$b$b")
+        }
+        6, 8 -> android.graphics.Color.parseColor(hex)
+        else -> return null
+    }
+    Color(argb)
+} catch (_: Exception) { null }
+
+/**
+ * egsf: 26dp kind-tinted icon tile — styleguide .ci (L250).
+ * Background = c.mute@0.16, glyph = c.faint, icon size = 12dp, radius = 7dp.
+ * The icon is chosen by [chipLabel] to match the content kind.
+ */
+@Composable
+private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
+    val icon = when (chipLabel) {
+        "URL"     -> Icons.AutoMirrored.Outlined.OpenInNew
+        "IMAGE"   -> Icons.Outlined.Image
+        "CODE"    -> Icons.Outlined.ContentCopy  // closest available; Lock used for PRIVATE
+        "EMAIL"   -> Icons.Outlined.ContentCopy
+        "PHONE"   -> Icons.Outlined.ContentCopy
+        "COLOR"   -> Icons.Outlined.ContentCopy  // superseded by color swatch when chipLabel==COLOR
+        "NUMBER"  -> Icons.Outlined.ContentCopy
+        "PATH"    -> Icons.Outlined.AttachFile
+        "JSON"    -> Icons.Outlined.ContentCopy
+        "FILE"    -> Icons.AutoMirrored.Outlined.InsertDriveFile
+        "PRIVATE" -> Icons.Outlined.Lock
+        else      -> Icons.Outlined.ContentCopy  // TEXT / fallback
+    }
+    Box(
+        modifier = Modifier
+            .size(26.dp)
+            .background(
+                color = colors.mute.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(7.dp),
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = colors.faint,
+            modifier = Modifier.size(12.dp),
+        )
+    }
+}
+
+/**
+ * lbnp: Inline color swatch for COLOR-kind rows — styleguide .swatch-inline (L257).
+ * 14dp square, radius 4dp, 0.5dp hairline border. Renders the actual parsed color.
+ * Falls back to the icon tile when the hex color cannot be parsed.
+ */
+@Composable
+private fun ColorSwatchOrTile(snippet: String, colors: IdeColors) {
+    val parsed = remember(snippet) { parseHexColor(snippet) }
+    if (parsed != null) {
+        Box(
+            modifier = Modifier
+                .size(14.dp)
+                .background(color = parsed, shape = RoundedCornerShape(4.dp))
+                .border(
+                    width = 0.5.dp,
+                    color = colors.border.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(4.dp),
+                ),
+        )
+    } else {
+        // No parseable hex — fall back to the icon tile at reduced size
+        ContentIconTile(chipLabel = "COLOR", colors = colors)
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2277,9 +2388,13 @@ private fun HistoryRow(
         val bmp = imageBitmap
         if (item.isImage && bmp != null) {
             // ── Image thumbnail row ──────────────────────────────────────────
+            // qwyq/15f7: stable min-height 44dp (comfortable) / 34dp (compact) so entering
+            // selection mode never shrinks the row. The action buttons (ScaleIconButton,
+            // 48dp touch target) are hidden in selectionMode but the floor keeps height stable.
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = if (isCompact) 34.dp else 44.dp)
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -2293,7 +2408,10 @@ private fun HistoryRow(
                         .size(16.dp)
                         .clickable { onCheckboxTap() },
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
+                // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
+                ContentIconTile(chipLabel = chipLabel, colors = c)
+                Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
                         imageVector = Icons.Outlined.BookmarkAdded,
@@ -2303,7 +2421,7 @@ private fun HistoryRow(
                     )
                     Spacer(Modifier.width(4.dp))
                 }
-                // §5 content-type chip (violet for images)
+                // §5 content-type chip (sky for images — izio)
                 ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(8.dp))
@@ -2379,11 +2497,11 @@ private fun HistoryRow(
             }
         } else if (item.isFile) {
             // ── File row — icon + filename label + Save action ────────────────
+            // qwyq/15f7: stable min-height 44dp (comfortable) / 34dp (compact).
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // §2 density-aware: compact=28dp, comfortable (default)=34dp
-                    .heightIn(min = if (isCompact) 28.dp else 34.dp),
+                    .heightIn(min = if (isCompact) 34.dp else 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Checkbox
@@ -2396,7 +2514,10 @@ private fun HistoryRow(
                         .size(16.dp)
                         .clickable { onCheckboxTap() },
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
+                // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
+                ContentIconTile(chipLabel = chipLabel, colors = c)
+                Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
                         imageVector = Icons.Outlined.BookmarkAdded,
@@ -2406,39 +2527,32 @@ private fun HistoryRow(
                     )
                     Spacer(Modifier.width(4.dp))
                 }
-                // §3 content-type chip (file = dim/elevated)
+                // §3 content-type chip (faint for files — izio)
                 ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(6.dp))
-                // §7 file-row glyph: amber document icon (warning token) so file rows
-                // read distinctly from text rows, matching the desktop file-chip accent.
-                Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.InsertDriveFile,
-                    contentDescription = stringResource(R.string.cd_file_item),
-                    tint = c.warning,
-                    modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.width(4.dp))
                 // Filename / label — snippet holds "[file: name]" or "[file]"
-                Text(
-                    text = item.snippet,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = c.text,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Spacer(Modifier.width(6.dp))
-                Text(
-                    text = relativeTime(item.wallTimeMs),
-                    style = TextStyle(
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Normal,
-                        fontFeatureSettings = "tnum",
-                    ),
-                    color = c.faint,
-                    maxLines = 1,
-                )
+                // gq48: two-line body cell: preview on line 1, meta (timestamp) beneath.
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.snippet,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = c.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    // gq48 meta caption: timestamp + source on line 2 at 11sp faint
+                    Text(
+                        text = relativeTime(item.wallTimeMs),
+                        style = TextStyle(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Normal,
+                            fontFeatureSettings = "tnum",
+                        ),
+                        color = c.faint,
+                        maxLines = 1,
+                    )
+                }
                 if (!selectionMode) {
                     Spacer(Modifier.width(2.dp))
                     // Open action — write to cache temp file and open with default app
@@ -2482,12 +2596,16 @@ private fun HistoryRow(
                 }
             }
         } else {
-            // ── Text row — §5 density-aware min height (comfortable=34dp, compact=28dp)
+            // ── Text row — §5 density-aware min height
+            // qwyq/15f7: stable min-height 44dp comfortable / 34dp compact. Previously
+            // 34/28dp — action buttons (48dp ScaleIconButton) were the effective height
+            // floor; hiding them in selectionMode caused the row to collapse. The explicit
+            // heightIn floor means selection mode no longer changes row height.
+            val ctx = LocalContext.current
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // §2 density-aware: compact=28dp, comfortable (default)=34dp
-                    .heightIn(min = if (isCompact) 28.dp else 34.dp),
+                    .heightIn(min = if (isCompact) 34.dp else 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Checkbox
@@ -2500,7 +2618,15 @@ private fun HistoryRow(
                         .size(16.dp)
                         .clickable { onCheckboxTap() },
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
+                // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
+                // lbnp: for COLOR rows, replace the tile with an inline color swatch square.
+                if (chipLabel == "COLOR") {
+                    ColorSwatchOrTile(snippet = display, colors = c)
+                } else {
+                    ContentIconTile(chipLabel = chipLabel, colors = c)
+                }
+                Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
                         imageVector = Icons.Outlined.BookmarkAdded,
@@ -2510,134 +2636,142 @@ private fun HistoryRow(
                     )
                     Spacer(Modifier.width(4.dp))
                 }
-                // §5 content-type chip (tinted by type; text rows show richer kind label)
-                ContentTypeChip(label = chipLabel, color = chipColor)
-                if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
-                Spacer(Modifier.width(8.dp))
-                // Preview text. audit #13: URL rows render bold host + dim path (web
-                // parity); urlParts is pre-parsed/memoised above and null for non-URLs
-                // or masked-sensitive rows.
-                if (urlParts != null && !detectedSensitive) {
-                    val (host, path) = urlParts
-                    val annotated = remember(host, path, c.text, c.dim) {
-                        buildAnnotatedString {
-                            withStyle(SpanStyle(color = c.text, fontWeight = FontWeight.SemiBold)) {
-                                append(host)
-                            }
-                            if (path.isNotEmpty()) {
-                                withStyle(SpanStyle(color = c.dim)) { append(path) }
-                            }
-                        }
-                    }
-                    Text(
-                        text = annotated,
-                        // §3: preview pinned to 13sp (bodyLarge).
-                        style = MaterialTheme.typography.bodyLarge,
-                        // §3/P1#9: honour the preview-lines pref (URL host+path is one
-                        // logical line, but respect the clamp so multi-line prefs apply).
-                        maxLines = previewLines,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                } else {
-                    Text(
-                        text = display,
-                        // §3: preview pinned to 13sp (bodyLarge).
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = if (detectedSensitive) c.dim else c.text,
-                        // §3/P1#9: honour the preview-lines pref as maxLines (was hard 1).
-                        maxLines = previewLines,
-                        overflow = TextOverflow.Ellipsis,
-                        // §10/P1#10: blur the real text while masked (tap reveals). On
-                        // API < 31 `display` is the bullet mask instead (blur is a no-op
-                        // there and must not leak the text), so blur only when canBlur.
-                        modifier = Modifier
-                            .weight(1f)
-                            .then(
-                                if (masked && canBlur) Modifier.blur(8.dp, BlurredEdgeTreatment.Unbounded)
-                                else Modifier
-                            ),
-                    )
-                }
-                Spacer(Modifier.width(6.dp))
-                // §5 source-app icon + label chip (right of text, left of timestamp)
-                val ctx = LocalContext.current
-                sourceAppLabel(item.sourceApp)?.let { appLabel ->
-                    val iconBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
-                        initialValue = null,
-                        key1 = item.sourceApp,
-                    ) {
-                        value = item.sourceApp?.let { pkg ->
-                            withContext(Dispatchers.Default) {
-                                runCatching {
-                                    // Serve from the process-wide bitmap LRU first so repeated
-                                    // scrolls never re-decode the same package icon.
-                                    appIconBitmapCache.get(pkg)?.asImageBitmap()
-                                        ?: AppIconHelper.getAppIconBase64(ctx, pkg)
-                                            ?.let { b64 ->
-                                                val bytes = Base64.decode(b64, Base64.DEFAULT)
-                                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                                    ?.also { bmp -> appIconBitmapCache.put(pkg, bmp) }
-                                                    ?.asImageBitmap()
-                                            }
-                                }.getOrElse { t ->
-                                    // Fix P2: log icon load failures so they are diagnosable.
-                                    AppLogger.w("HistoryRow", "app icon load failed for item ${item.id} pkg=$pkg", t)
-                                    null
+                // gq48: body cell — 2-line Column: preview on line 1, meta caption on line 2.
+                // Mirrors web .hrow .body { .preview + .meta } structure (styleguide L252-255).
+                Column(modifier = Modifier.weight(1f)) {
+                    // ── Line 1: preview text ─────────────────────────────────────
+                    // audit #13: URL rows render bold host + dim path (web parity).
+                    if (urlParts != null && !detectedSensitive) {
+                        val (host, path) = urlParts
+                        val annotated = remember(host, path, c.text, c.dim) {
+                            buildAnnotatedString {
+                                withStyle(SpanStyle(color = c.text, fontWeight = FontWeight.SemiBold)) {
+                                    append(host)
+                                }
+                                if (path.isNotEmpty()) {
+                                    withStyle(SpanStyle(color = c.dim)) { append(path) }
                                 }
                             }
                         }
+                        Text(
+                            text = annotated,
+                            style = MaterialTheme.typography.bodyLarge,
+                            maxLines = previewLines,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else {
+                        // 0lis: CODE/COLOR/NUMBER/PATH/JSON → MonoFontFamily 12sp (parity .preview.mono)
+                        val isMonoKind = chipLabel in setOf("CODE", "COLOR", "NUMBER", "PATH", "JSON")
+                        Text(
+                            text = display,
+                            style = if (isMonoKind) {
+                                TextStyle(
+                                    fontFamily = MonoFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Normal,
+                                )
+                            } else {
+                                MaterialTheme.typography.bodyLarge
+                            },
+                            color = if (detectedSensitive) c.dim else c.text,
+                            maxLines = previewLines,
+                            overflow = TextOverflow.Ellipsis,
+                            // iuwb: blur radius 8dp→5dp (parity .masked = blur(5px))
+                            // §10/P1#10: blur the real text while masked (tap reveals). On
+                            // API < 31 `display` is the bullet mask instead (blur is a no-op
+                            // there and must not leak the text), so blur only when canBlur.
+                            modifier = if (masked && canBlur)
+                                Modifier.blur(5.dp, BlurredEdgeTreatment.Unbounded)
+                            else
+                                Modifier,
+                        )
                     }
+                    // ── Line 2: meta caption — chip + timestamp + sourceApp ──────
+                    // gq48: parity web .hrow .meta (11px faint, gap 7px, margin-top 2px).
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .background(
-                                color = c.elevated.copy(alpha = 0.5f),
-                                shape = RoundedCornerShape(4.dp),
-                            )
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(7.dp),
+                        modifier = Modifier.padding(top = 2.dp),
                     ) {
-                        iconBitmap?.let { iconBmp ->
-                            Image(
-                                bitmap = iconBmp,
-                                contentDescription = null,
-                                contentScale = ContentScale.Fit,
-                                modifier = Modifier
-                                    .size(14.dp)
-                                    .clip(RoundedCornerShape(3.dp)),
-                            )
-                            Spacer(Modifier.width(3.dp))
-                        }
+                        // Kind chip in meta row
+                        ContentTypeChip(label = chipLabel, color = chipColor)
+                        if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
+                        // Timestamp
                         Text(
-                            text = appLabel,
-                            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal),
+                            text = relativeTime(item.wallTimeMs),
+                            style = TextStyle(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Normal,
+                                fontFeatureSettings = "tnum",
+                            ),
                             color = c.faint,
                             maxLines = 1,
                         )
+                        // Source-app icon + label chip
+                        sourceAppLabel(item.sourceApp)?.let { appLabel ->
+                            val iconBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+                                initialValue = null,
+                                key1 = item.sourceApp,
+                            ) {
+                                value = item.sourceApp?.let { pkg ->
+                                    withContext(Dispatchers.Default) {
+                                        runCatching {
+                                            appIconBitmapCache.get(pkg)?.asImageBitmap()
+                                                ?: AppIconHelper.getAppIconBase64(ctx, pkg)
+                                                    ?.let { b64 ->
+                                                        val bytes = Base64.decode(b64, Base64.DEFAULT)
+                                                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                                            ?.also { bmp -> appIconBitmapCache.put(pkg, bmp) }
+                                                            ?.asImageBitmap()
+                                                    }
+                                        }.getOrElse { t ->
+                                            AppLogger.w("HistoryRow", "app icon load failed for item ${item.id} pkg=$pkg", t)
+                                            null
+                                        }
+                                    }
+                                }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .background(
+                                        color = c.elevated.copy(alpha = 0.5f),
+                                        shape = RoundedCornerShape(4.dp),
+                                    )
+                                    .padding(horizontal = 4.dp, vertical = 2.dp),
+                            ) {
+                                iconBitmap?.let { iconBmp ->
+                                    Image(
+                                        bitmap = iconBmp,
+                                        contentDescription = null,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .size(14.dp)
+                                            .clip(RoundedCornerShape(3.dp)),
+                                    )
+                                    Spacer(Modifier.width(3.dp))
+                                }
+                                Text(
+                                    text = appLabel,
+                                    style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal),
+                                    color = c.faint,
+                                    maxLines = 1,
+                                )
+                            }
+                        }
+                        // Origin-device badge
+                        val originId = item.originDeviceId
+                        if (!selectionMode && originId != null && ownDeviceId.isNotBlank()) {
+                            OriginDeviceBadge(
+                                deviceId = originId,
+                                ownDeviceId = ownDeviceId,
+                                peers = peers,
+                            )
+                        }
                     }
-                    Spacer(Modifier.width(4.dp))
                 }
-                // §5 timestamp — always visible, tabular-nums
-                Text(
-                    text = relativeTime(item.wallTimeMs),
-                    style = TextStyle(
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Normal,
-                        fontFeatureSettings = "tnum",
-                    ),
-                    color = c.faint,
-                    maxLines = 1,
-                )
-                // Origin-device badge — shown when originDeviceId is known
-                val originId = item.originDeviceId
-                if (!selectionMode && originId != null && ownDeviceId.isNotBlank()) {
-                    Spacer(Modifier.width(4.dp))
-                    OriginDeviceBadge(
-                        deviceId = originId,
-                        ownDeviceId = ownDeviceId,
-                        peers = peers,
-                    )
-                }
+                // Action buttons (right gutter) — hidden in selectionMode; height floor
+                // (qwyq) means the row stays same height regardless.
                 if (!selectionMode) {
                     Spacer(Modifier.width(2.dp))
                     if (reorderMode && item.pinned) {
