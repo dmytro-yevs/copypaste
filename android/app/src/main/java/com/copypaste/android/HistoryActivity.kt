@@ -1661,14 +1661,14 @@ private fun HistoryList(
     val maskSensitive = remember(settingsVersion) { settings.maskSensitiveContent }
     val imageMaxHeightDp = remember(settingsVersion) { settings.imageMaxHeight }
     val previewDelayMs = remember(settingsVersion) { settings.previewDelay }
-    // §2 density-aware row height: read "density" pref defensively — the Settings store
-    // (owned by a sibling agent) may not yet have this key.  Default to "comfortable" so
-    // existing installs never crash and display the larger 34dp minimum height.
-    // TODO(CopyPaste-hv5): migrate to Settings.density property once the sibling agent
-    //   adds the typed accessor; for now read the raw SharedPreferences key directly.
+    // §2 density-aware row height: read the same "density" key the Settings store
+    // (Settings.density) writes — it persists the Density enum *name* ("COMPACT"/
+    // "COMFORTABLE"), so compare case-insensitively. Default to comfortable (34dp)
+    // when the key is absent. Keyed on settingsVersion so a toggle re-renders rows.
     val isCompact = remember(settingsVersion) {
         ctx.getSharedPreferences("copypaste", android.content.Context.MODE_PRIVATE)
-            .getString("density", "comfortable") == "compact"
+            .getString("density", "comfortable")
+            ?.equals("compact", ignoreCase = true) ?: false
     }
 
     // D: hoist the per-item copy logic into a single stable lambda (copyItemById) that
