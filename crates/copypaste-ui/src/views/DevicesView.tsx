@@ -25,6 +25,11 @@ type QrState =
   | { status: "ready"; qr: PairingQr; generatedAt: number }
   | { status: "error"; message: string };
 
+// QR blur is tracked independently of QR generation so regenerating does not
+// accidentally clear the privacy blur (spec §10 / CopyPaste-v5a concern).
+// Default: blurred (privacy-first). Cleared only when the user explicitly reveals.
+type QrBlur = "blurred" | "revealed";
+
 // Devices load outcomes. `degraded` (daemon up, DB unavailable) and `error`
 // (some other failure) are split out from `offline` so a DB-degraded daemon is
 // no longer mislabeled "Daemon not running."
@@ -264,8 +269,7 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
   };
 
   return (
-    // 'group' enables hover-reveal on the Revoke button
-    <div className="group px-3 py-2.5 hover:bg-ide-hover">
+    <div className="px-3 py-2.5 hover:bg-ide-hover">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
           {/* Name + online dot + transport chip */}
@@ -313,7 +317,7 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
               onClick={handleCopyFp}
               title="Copy fingerprint"
               aria-label="Copy fingerprint"
-              className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 rounded p-0.5 text-ide-faint hover:text-ide-dim hover:bg-ide-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent"
+              className="shrink-0 rounded p-0.5 text-ide-faint hover:text-ide-dim hover:bg-ide-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent"
             >
               {fpCopied
                 ? <span className="text-[10px] text-ide-success">✓</span>
@@ -340,20 +344,20 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
           )}
         </div>
 
-        {/* Actions */}
+        {/* Actions — both destructive actions always visible with the same
+             danger-tint fill (spec §7 / CopyPaste-dpr consistency rule). */}
         <div className="flex shrink-0 items-center gap-1.5 pt-0.5">
           <button
             onClick={() => onUnpair(peer.fingerprint)}
             disabled={isPending}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-ide bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isPending ? "..." : "Unpair"}
           </button>
-          {/* Revoke is a dangerous action — hover-reveal so it's not accidentally clicked */}
           <button
             onClick={() => onRevoke(peer.fingerprint)}
             disabled={isPending}
-            className="opacity-0 group-hover:opacity-100 transition-opacity rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            className="rounded-ide bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {isPending ? "..." : "Revoke"}
           </button>
@@ -678,7 +682,7 @@ function SasPairingModal({
               <button
                 onClick={() => void handleConfirm(true)}
                 disabled={confirmPending}
-                className="rounded-ide border border-ide-accent/40 bg-ide-accent/15 px-3 py-1.5 text-[12px] font-medium text-ide-accent hover:bg-ide-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded-ide bg-ide-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {confirmPending ? "..." : "Match"}
               </button>
@@ -802,7 +806,7 @@ function DiscoveredRow({
           onClick={() => onPair(device)}
           disabled={!pairable || busy}
           title={pairable ? undefined : "This device does not support secure pairing"}
-          className="shrink-0 rounded-ide border border-ide-accent/40 bg-ide-accent/15 px-2.5 py-1 text-[12px] font-medium text-ide-accent hover:bg-ide-accent/25 disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 rounded-ide bg-ide-accent px-2.5 py-1 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
         >
           Pair
         </button>
@@ -919,6 +923,10 @@ export function DevicesView({
   const qrInflightRef = useRef(false);
   const qrCancelledRef = useRef(false);
 
+  // QR privacy blur — independent of QR generation so regenerating the QR code
+  // does not accidentally clear the blur (CopyPaste-v5a). Default: blurred.
+  const [qrBlur, setQrBlur] = useState<QrBlur>("blurred");
+
   const generateQr = useCallback(async () => {
     // Drop duplicate concurrent calls — only one generation runs at a time.
     if (qrInflightRef.current) return;
@@ -945,8 +953,14 @@ export function DevicesView({
     }
   }, []);
 
-  // Clicking the QR regenerates it.
-  const handleQrClick = useCallback(() => {
+  // Clicking the QR when blurred reveals it; when already revealed, regenerates.
+  // This keeps reveal and regeneration as two distinct affordances (spec §10).
+  const handleQrReveal = useCallback(() => {
+    setQrBlur("revealed");
+  }, []);
+
+  const handleQrRegenerate = useCallback(() => {
+    // Blur is kept as-is across regeneration — the user must reveal explicitly.
     void generateQr();
   }, [generateQr]);
 
@@ -1558,26 +1572,42 @@ export function DevicesView({
         {qrState.status === "ready" && (
           <div className="flex items-start gap-5">
             {/* QR code — SVG comes from our own Tauri backend and never
-                contains remote markup — dangerouslySetInnerHTML is safe here. */}
-            <button
-              type="button"
-              onClick={handleQrClick}
-              className="relative shrink-0 rounded-ide bg-white p-2 overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
+                contains remote markup — dangerouslySetInnerHTML is safe here.
+                Privacy-first: blurred by default, revealed on click (spec §10). */}
+            <div
+              className="relative shrink-0 rounded-ide bg-white p-2 overflow-hidden"
               style={{ width: 190, height: 190 }}
-              title="Click to regenerate"
-              aria-label="Regenerate pairing QR code"
             >
               <div
-                className="[&>svg]:block [&>svg]:h-full [&>svg]:w-full"
+                className={[
+                  "[&>svg]:block [&>svg]:h-full [&>svg]:w-full transition-[filter] duration-200",
+                  qrBlur === "blurred" ? "blur-md" : "",
+                ].join(" ")}
                 style={{ width: "100%", height: "100%" }}
                 // eslint-disable-next-line react/no-danger
                 dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
               />
-            </button>
+              {/* Blur overlay — click-to-reveal affordance */}
+              {qrBlur === "blurred" && (
+                <button
+                  type="button"
+                  onClick={handleQrReveal}
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent rounded-ide"
+                  aria-label="Click to reveal QR code"
+                >
+                  <span className="text-[11px] font-medium text-ide-dim select-none">
+                    Click to reveal
+                  </span>
+                </button>
+              )}
+            </div>
             <div className="min-w-0 flex-1 space-y-2">
-              <p className="select-all break-all font-mono text-[10px] text-ide-faint">
-                {qrState.qr.payload}
-              </p>
+              {/* Payload only visible when QR is revealed */}
+              {qrBlur === "revealed" && (
+                <p className="select-all break-all font-mono text-[10px] text-ide-faint">
+                  {qrState.qr.payload}
+                </p>
+              )}
               {qrSecsLeft !== null && qrSecsLeft > 0 && (
                 <>
                   {/* Determinate drain bar: width drains from 100% to 0 as time runs out */}
@@ -1604,13 +1634,23 @@ export function DevicesView({
                     <span className={qrSecsLeft <= 20 ? "text-ide-warning font-medium tabular-nums" : "tabular-nums"}>
                       {qrSecsLeft}s
                     </span>
-                    {" "}· click QR to regenerate
                   </p>
                 </>
               )}
               <p className="text-[11px] text-ide-faint">
                 Scan from CopyPaste on another device to pair automatically.
               </p>
+              {/* Explicit regenerate button — separate from reveal so blur state
+                  is not accidentally cleared by a refresh (spec §10). */}
+              <button
+                type="button"
+                onClick={handleQrRegenerate}
+                className="flex items-center gap-1 text-[11px] text-ide-accent hover:text-ide-accent-hover focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent rounded"
+                aria-label="Regenerate pairing QR code"
+              >
+                <RefreshCw size={10} strokeWidth={2} aria-hidden="true" />
+                Regenerate
+              </button>
             </div>
           </div>
         )}
