@@ -40,10 +40,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
 import com.copypaste.android.ui.theme.CopyPasteTheme
-import com.copypaste.android.ui.theme.IdeAccent
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdePanel
+import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.glassContainerColor
 import com.copypaste.android.ui.theme.rememberTranslucency
 import kotlinx.coroutines.Dispatchers
@@ -237,12 +234,13 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     // across the NavigationBar and all child screens. CopyPasteTopBar and
     // CopyPasteCard read it independently via rememberTranslucency() for
     // screens rendered without MainShell (standalone activities).
+    val c = LocalIdeColors.current
     val translucent = rememberTranslucency()
-    // Glass NavigationBar: IdePanel at 72% alpha when translucent, solid when off.
-    val navBarColor = glassContainerColor(IdePanel, translucent)
+    // Glass NavigationBar: panel at 72% alpha when translucent, solid when off.
+    val navBarColor = glassContainerColor(c.panel, translucent)
 
     Scaffold(
-        containerColor = IdeBg,
+        containerColor = c.bg,
         // The NavigationBar (bottomBar) consumes the navigation-bar inset itself.
         // We zero the Scaffold's *content* insets so the TOP (status-bar / cutout)
         // inset is NOT also added to innerPadding — each embedded screen's own
@@ -274,12 +272,13 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                         },
                         icon = { Icon(tab.icon, contentDescription = label) },
                         label = { Text(label) },
+                        // §9 spec: active = accent, inactive = uniform dim, indicator = accent/15.
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor       = IdeAccent,
-                            selectedTextColor       = IdeAccent,
-                            indicatorColor          = IdeAccent.copy(alpha = 0.15f),
-                            unselectedIconColor     = IdeDim,
-                            unselectedTextColor     = IdeDim,
+                            selectedIconColor       = c.accent,
+                            selectedTextColor       = c.accent,
+                            indicatorColor          = c.accent.copy(alpha = 0.15f),
+                            unselectedIconColor     = c.dim,
+                            unselectedTextColor     = c.dim,
                         ),
                     )
                 }
