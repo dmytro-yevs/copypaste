@@ -226,6 +226,56 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Step 5: Assert UNIFFI_ABI_VERSION (Rust) == APP_ABI_VERSION (Kotlin).
+#
+# Regenerating the bindings makes no sense if the two ABI constants disagree —
+# the resulting Kotlin will immediately fail checkNativeAbiCompatibility() at
+# runtime. Fail loudly here so developers fix the mismatch before committing.
+# ---------------------------------------------------------------------------
+log "Checking ABI version parity (Rust version.rs vs CopypasteBindings.kt)"
+
+VERSION_RS="${REPO_ROOT}/crates/copypaste-android/src/version.rs"
+BINDINGS_KT="${REPO_ROOT}/android/app/src/main/java/com/copypaste/android/CopypasteBindings.kt"
+
+if [[ ! -f "${VERSION_RS}" ]]; then
+  echo "error: cannot find ${VERSION_RS} — ABI parity check cannot run" >&2
+  exit 4
+fi
+if [[ ! -f "${BINDINGS_KT}" ]]; then
+  echo "error: cannot find ${BINDINGS_KT} — ABI parity check cannot run" >&2
+  exit 4
+fi
+
+# Extract the integer literal after `UNIFFI_ABI_VERSION: u32 = `.
+RUST_ABI="$(rg -o 'pub const UNIFFI_ABI_VERSION:\s*u32\s*=\s*(\d+)' -r '$1' "${VERSION_RS}" | head -n1)"
+# Extract the integer literal after `APP_ABI_VERSION: UInt = `.
+KOTLIN_ABI="$(rg -o 'const val APP_ABI_VERSION:\s*UInt\s*=\s*(\d+)u' -r '$1' "${BINDINGS_KT}" | head -n1)"
+
+if [[ -z "${RUST_ABI}" ]]; then
+  echo "error: could not extract UNIFFI_ABI_VERSION from ${VERSION_RS}" >&2
+  echo "       (has the constant name or type annotation changed?)" >&2
+  exit 4
+fi
+if [[ -z "${KOTLIN_ABI}" ]]; then
+  echo "error: could not extract APP_ABI_VERSION from ${BINDINGS_KT}" >&2
+  echo "       (has the constant name or type annotation changed?)" >&2
+  exit 4
+fi
+
+if [[ "${RUST_ABI}" != "${KOTLIN_ABI}" ]]; then
+  echo "" >&2
+  echo "error: ABI VERSION MISMATCH — the Rust core and the Kotlin wrapper are out of sync." >&2
+  echo "       Rust  UNIFFI_ABI_VERSION = ${RUST_ABI}  (in crates/copypaste-android/src/version.rs)" >&2
+  echo "       Kotlin APP_ABI_VERSION   = ${KOTLIN_ABI}  (in android/app/src/main/java/com/copypaste/android/CopypasteBindings.kt)" >&2
+  echo "" >&2
+  echo "  Fix: bump the lower of the two to match the higher one, then re-run this script." >&2
+  echo "  The mismatch means checkNativeAbiCompatibility() will log a mismatch at runtime." >&2
+  exit 4
+fi
+
+log "ABI version parity confirmed: rust_abi=${RUST_ABI} == kotlin_abi=${KOTLIN_ABI}"
+
+# ---------------------------------------------------------------------------
 # Done
 # ---------------------------------------------------------------------------
 log "Done. ${#KT_FILES[@]} Kotlin file(s) written to:"
