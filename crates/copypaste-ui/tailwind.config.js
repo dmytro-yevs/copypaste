@@ -60,9 +60,9 @@ export default {
         mono: ['"JetBrains Mono"', '"SF Mono"', "ui-monospace", "Menlo", "monospace"],
       },
       borderRadius: {
-        ide:      "6px",   // inputs, buttons
+        ide:      "8px",   // inputs, buttons, controls (audit P2: standardise 8px)
         "ide-sm": "4px",   // chips, keycaps, highlights
-        "ide-lg": "12px",  // cards (PARITY-SPEC §4 — matches Android 12dp)
+        "ide-lg": "12px",  // cards + modals (PARITY-SPEC §4 — matches Android 12dp)
         "ide-xl": "14px",  // popup
       },
       boxShadow: {

@@ -51,11 +51,14 @@ export interface UIPrefs {
    */
   translucency: boolean;
   /**
-   * UI color theme. "dark" (default) uses the Design System v2 dark palette;
-   * "light" uses the WCAG-AA light overrides defined in index.css.
-   * Applied via <html data-theme="…"> in App.tsx.
+   * UI color theme.
+   *   "light"  (default) — Apple Liquid-Glass light/greyish palette.
+   *   "dark"             — Design System v2 dark palette.
+   *   "system"           — follow the OS `prefers-color-scheme` live (App.tsx
+   *                        resolves it via matchMedia and re-resolves on change).
+   * Applied via <html data-theme="light|dark"> in App.tsx.
    */
-  theme: "dark" | "light";
+  theme: "dark" | "light" | "system";
   /**
    * Row density for the History view (Design System v2 §9 — Liquid Glass redesign).
    * "comfortable" (default) = standard row spacing; "compact" = reduced row height.

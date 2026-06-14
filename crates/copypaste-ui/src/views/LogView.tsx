@@ -3,12 +3,33 @@ import { readLogs, logDirPath } from "../lib/ipc";
 
 const MAX_LINES = 500;
 
+// audit P2: colorize each log line by level. Each token meets WCAG AA on the
+// log surface (bg-ide-raised): WARN→warning amber, ERROR→danger red, DEBUG/TRACE
+// dimmed (faint), INFO + everything else→neutral text. Detection is a simple
+// word-boundary scan for the level token tracing emits (case-insensitive).
+type LogLevel = "error" | "warn" | "info" | "debug";
+
+function levelOf(line: string): LogLevel {
+  // Match a standalone level word (avoids matching "information" etc.).
+  if (/\bERROR\b/i.test(line)) return "error";
+  if (/\bWARN(?:ING)?\b/i.test(line)) return "warn";
+  if (/\b(?:DEBUG|TRACE)\b/i.test(line)) return "debug";
+  return "info";
+}
+
+const LEVEL_CLASS: Record<LogLevel, string> = {
+  error: "text-ide-danger",
+  warn: "text-ide-warning",
+  info: "text-ide-text",
+  debug: "text-ide-faint",
+};
+
 export function LogView() {
   const [content, setContent] = useState<string>("");
   const [logPath, setLogPath] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
     try {
@@ -32,8 +53,8 @@ export function LogView() {
 
   // Auto-scroll to bottom when content loads
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.scrollTop = textareaRef.current.scrollHeight;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [content]);
 
@@ -91,12 +112,21 @@ export function LogView() {
             <p className="text-[13px] text-ide-danger">{error}</p>
           </div>
         ) : (
-          <textarea
-            ref={textareaRef}
-            readOnly
-            value={content}
-            className="h-full w-full resize-none rounded-ide border border-ide-border bg-ide-raised p-3 font-mono text-[11px] leading-relaxed text-ide-text focus:outline-none"
-          />
+          // audit P2: colorized, per-line log view (replaces the flat textarea).
+          // Selectable text is preserved (select-text) so users can still copy.
+          <div
+            ref={scrollRef}
+            className="h-full w-full overflow-auto rounded-ide border border-ide-border bg-ide-raised p-3 font-mono text-[11px] leading-relaxed select-text"
+          >
+            {content.split("\n").map((line, i) => (
+              <div
+                key={i}
+                className={`whitespace-pre-wrap break-words ${LEVEL_CLASS[levelOf(line)]}`}
+              >
+                {line || " "}
+              </div>
+            ))}
+          </div>
         )}
       </div>
 

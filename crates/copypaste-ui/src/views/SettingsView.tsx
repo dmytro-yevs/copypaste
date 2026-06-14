@@ -337,13 +337,15 @@ function InfoPopover({ text }: { text: string }) {
 
 type TabId = "general" | "display" | "sync" | "shortcuts" | "storage" | "advanced";
 
+// audit P2: the "Advanced" tab is a "coming soon" stub with no content — hide it
+// from the bar until it ships. The TabId/renderAdvanced plumbing stays so it can
+// be re-added by appending one entry here.
 const TABS: { id: TabId; label: string }[] = [
   { id: "general",   label: "General"   },
   { id: "display",   label: "Display"   },
   { id: "sync",      label: "Sync"      },
   { id: "shortcuts", label: "Shortcuts" },
   { id: "storage",   label: "Storage"   },
-  { id: "advanced",  label: "Advanced"  },
 ];
 
 function TabBar({
@@ -504,6 +506,41 @@ function eventToAccelerator(e: React.KeyboardEvent<HTMLInputElement>): string | 
   return parts.join("+");
 }
 
+/**
+ * Render a Tauri accelerator string ("CmdOrCtrl+Shift+V") as Mac keycap symbols
+ * ("⌘⇧V"). Modifiers collapse to their glyphs (no "+" separators) to match the
+ * native macOS shortcut display. (audit P2)
+ */
+function formatAccelerator(accel: string): string {
+  const SYMBOL: Record<string, string> = {
+    CmdOrCtrl: "⌘",
+    Cmd: "⌘",
+    Command: "⌘",
+    Meta: "⌘",
+    Super: "⌘",
+    Ctrl: "⌃",
+    Control: "⌃",
+    Alt: "⌥",
+    Option: "⌥",
+    Shift: "⇧",
+    Return: "↩",
+    Enter: "↩",
+    Backspace: "⌫",
+    Delete: "⌦",
+    Escape: "⎋",
+    Space: "␣",
+    Tab: "⇥",
+    Up: "↑",
+    Down: "↓",
+    Left: "←",
+    Right: "→",
+  };
+  return accel
+    .split("+")
+    .map((part) => SYMBOL[part] ?? part)
+    .join("");
+}
+
 function ShortcutCapture({
   value,
   onChange,
@@ -537,13 +574,16 @@ function ShortcutCapture({
     <input
       ref={inputRef}
       readOnly
-      value={capturing ? "Press a shortcut…" : value}
+      // audit P2: show Mac keycaps (⌘⇧V) instead of the raw "CmdOrCtrl+Shift+V"
+      // accelerator token. The bound value is still the accelerator string.
+      value={capturing ? "Press a shortcut…" : formatAccelerator(value)}
       onFocus={() => setCapturing(true)}
       onBlur={() => setCapturing(false)}
       onKeyDown={handleKeyDown}
       className={[
         "w-48 cursor-pointer rounded-ide border px-2.5 py-1.5 text-[13px] text-ide-text",
-        "outline-none select-none bg-ide-bg",
+        // audit P2: bg-ide-bg looked disabled; use the white/elevated control fill.
+        "outline-none select-none bg-ide-elevated",
         capturing
           ? "border-ide-accent ring-1 ring-ide-accent"
           : "border-ide-border hover:border-ide-accent",
@@ -853,17 +893,26 @@ export function SettingsView() {
     // M4: When the toggle originates from the tray menu, the backend re-emits
     // `private-mode-changed` so this window converges without waiting for a
     // focus/visibility re-fetch. Keep the local React state in sync.
-    const unlistenPromise = listen<boolean>("private-mode-changed", (event) => {
-      if (!cancelled && typeof event.payload === "boolean") {
-        setPrivateMode(event.payload);
-      }
-    });
+    //
+    // audit P1-7: outside the Tauri runtime (plain browser / ?mock=1) the event
+    // plugin is absent, so listen() rejected and logged a console error on every
+    // mount. Feature-detect the runtime (same gate HistoryView uses) and skip the
+    // subscription in the browser — there's no tray to emit the event anyway.
+    const hasTauri =
+      typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    const unlistenPromise = hasTauri
+      ? listen<boolean>("private-mode-changed", (event) => {
+          if (!cancelled && typeof event.payload === "boolean") {
+            setPrivateMode(event.payload);
+          }
+        })
+      : null;
 
     return () => {
       cancelled = true;
       window.removeEventListener("focus", resyncPrivateMode);
       document.removeEventListener("visibilitychange", onVisibility);
-      void unlistenPromise.then((unlisten) => unlisten());
+      void unlistenPromise?.then((unlisten) => unlisten());
     };
   }, []);
 
@@ -1379,7 +1428,9 @@ export function SettingsView() {
                     void addExcludedApp();
                   }
                 }}
-                className="flex-1 rounded-ide border border-ide-border bg-ide-bg px-2.5 py-1.5 text-[13px] text-ide-text outline-none focus:border-ide-accent focus:ring-1 focus:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
+                /* audit P2: was bg-ide-bg (grey canvas) → looked disabled. Match
+                   the Sync-tab text inputs: white/near-white elevated fill. */
+                className="flex-1 rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1.5 text-[13px] text-ide-text outline-none focus:border-ide-accent focus:ring-1 focus:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
               />
               <button
                 type="button"
@@ -1527,32 +1578,27 @@ export function SettingsView() {
         <Panel>
           <SettingsRow label="Color theme">
             <div className="flex items-center gap-2">
-              <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette." />
+              <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />
+              {/* web parity (CopyPaste-7qy §0): Light / Dark / System segmented control. */}
               <div className="flex items-center gap-1 rounded-ide border border-ide-border bg-ide-bg p-0.5">
-                <button
-                  type="button"
-                  onClick={() => setPrefs({ theme: "light" })}
-                  className={[
-                    "rounded px-2.5 py-1 text-[12px] transition-colors",
-                    (prefs.theme ?? "dark") === "light"
-                      ? "bg-ide-elevated text-ide-text shadow-ide-xs"
-                      : "text-ide-dim hover:text-ide-text",
-                  ].join(" ")}
-                >
-                  Light
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrefs({ theme: "dark" })}
-                  className={[
-                    "rounded px-2.5 py-1 text-[12px] transition-colors",
-                    (prefs.theme ?? "dark") === "dark"
-                      ? "bg-ide-elevated text-ide-text shadow-ide-xs"
-                      : "text-ide-dim hover:text-ide-text",
-                  ].join(" ")}
-                >
-                  Dark
-                </button>
+                {(["light", "dark", "system"] as const).map((opt) => {
+                  const selected = (prefs.theme ?? "light") === opt;
+                  return (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setPrefs({ theme: opt })}
+                      className={[
+                        "rounded px-2.5 py-1 text-[12px] capitalize transition-colors",
+                        selected
+                          ? "bg-ide-elevated text-ide-text shadow-ide-xs"
+                          : "text-ide-dim hover:text-ide-text",
+                      ].join(" ")}
+                    >
+                      {opt}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </SettingsRow>
@@ -2127,7 +2173,9 @@ export function SettingsView() {
       )}
 
       {loadState !== "loading" && (
-        <div className="mx-auto max-w-xl">
+        // audit P2: centered ~620px column so the panels aren't stranded against
+        // a huge empty right gutter on wide windows.
+        <div className="mx-auto w-full" style={{ maxWidth: "620px" }}>
           <TabBar active={activeTab} onChange={setActiveTab} />
           {activeTab === "general"   && renderGeneral()}
           {activeTab === "display"   && renderDisplay()}

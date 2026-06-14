@@ -239,9 +239,11 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
   // Defensive: no crash when address/local_ip are absent.
   const isP2p = !!(peer.local_ip || peer.address);
   const transportLabel = isP2p ? "P2P" : "Cloud";
+  // audit P2: the P2P chip had no fill (2.54:1). Match the "This Mac" pill —
+  // a 15% tinted fill so the chip reads as a solid pill, not bare text.
   const transportClass = isP2p
-    ? "text-ide-info bg-ide-info/12"
-    : "text-ide-accent bg-ide-accent/12";
+    ? "text-ide-info bg-ide-info/15"
+    : "text-ide-accent bg-ide-accent/15";
 
   // Truncated fingerprint: first 16 chars + ellipsis + last 8 chars.
   const fp = peer.fingerprint;
@@ -641,6 +643,24 @@ function SasPairingModal({
             <p className="text-[12px] text-ide-dim">Connecting...</p>
           </div>
         )}
+
+        {/* audit P2: pre-handshake placeholder. Before the daemon reports a
+            recognised state (idle/empty/unknown — e.g. the responder modal opened
+            from the incoming-pairing event before the SAS poll's first tick), the
+            body was a blank box. Show a waiting spinner so it's never empty. */}
+        {!ended &&
+          error === null &&
+          status.state !== "initiating" &&
+          status.state !== "awaiting_sas" &&
+          status.state !== "confirmed" &&
+          status.state !== "rejected" &&
+          status.state !== "aborted" &&
+          status.state !== "timed_out" && (
+            <div className="flex items-center gap-2 py-4">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
+              <p className="text-[12px] text-ide-dim">Waiting for the other device…</p>
+            </div>
+          )}
 
         {/* Awaiting SAS — show the code prominently */}
         {!ended && status.state === "awaiting_sas" && status.sas !== undefined && (

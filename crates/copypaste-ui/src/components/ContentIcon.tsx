@@ -157,26 +157,32 @@ function kindFallback(contentType: string): string {
 export function KindChip({ contentType, kind }: KindChipProps) {
   const label = kind ?? kindFallback(contentType);
 
+  // audit P1-3: colored text on a bare/8% tint read 2.2–2.5:1. Give every kind a
+  // stronger tinted fill (14% over the surface — matches the *Dim tint tokens)
+  // and keep the semantic text colour; the heavier fill + the AA-darkened
+  // danger/faint tokens lift the badge to AA. (The text colour itself is the
+  // "one step darker" semantic token, not a lighter decorative tint.)
   const colorClass =
     label === "URL"
-      ? "text-ide-info border-ide-info/40 bg-ide-info/8"
+      ? "text-ide-info border-ide-info/45 bg-ide-info/14"
       : label === "EMAIL" || label === "PHONE"
-      ? "text-ide-success border-ide-success/40 bg-ide-success/8"
+      ? "text-ide-success border-ide-success/45 bg-ide-success/14"
       : label === "COLOR" || label === "NUMBER" || label === "PATH"
-      ? "text-ide-warning border-ide-warning/40 bg-ide-warning/8"
+      ? "text-ide-warning border-ide-warning/45 bg-ide-warning/14"
       : label === "JSON" || label === "PRIVATE" || label === "SENSITIVE"
-      ? "text-ide-danger border-ide-danger/40 bg-ide-danger/8"
+      ? "text-ide-danger border-ide-danger/45 bg-ide-danger/14"
       : label === "CODE" || label === "IMAGE"
-      ? "text-ide-violet border-ide-violet/40 bg-ide-violet/8"
+      ? "text-ide-violet border-ide-violet/45 bg-ide-violet/14"
       : label === "FILE"
-      ? "text-ide-dim border-ide-dim/40 bg-ide-dim/8"
-      : /* TEXT / fallback */ "text-ide-accent border-ide-accent/40 bg-ide-accent/8";
+      ? "text-ide-dim border-ide-dim/45 bg-ide-dim/14"
+      : /* TEXT / fallback */ "text-ide-accent border-ide-accent/45 bg-ide-accent/14";
 
   return (
     <span
       className={[
         "flex shrink-0 items-center rounded border px-1 py-px",
-        "text-[9px] font-semibold leading-none tracking-wide uppercase",
+        // audit P1-3: bumped 9px → 10px for legibility.
+        "text-[10px] font-semibold leading-none tracking-wide uppercase",
         colorClass,
       ].join(" ")}
       aria-label={`Type: ${label}`}

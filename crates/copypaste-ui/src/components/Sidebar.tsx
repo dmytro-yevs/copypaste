@@ -59,8 +59,12 @@ export function Sidebar() {
               className={[
                 "flex items-center gap-2.5 rounded-ide px-2.5 py-[7px] text-left text-[13px]",
                 "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent",
+                // audit P0-1: the old translucent 0.14-alpha selection pill paired
+                // with white text read ~1.2:1. A SOLID accent fill + white label/icon
+                // is the macOS "selected sidebar row" look and is high-contrast
+                // (white on systemBlue ≈ 4.5:1+ in both themes).
                 active
-                  ? "bg-ide-selection text-white shadow-ide-xs"
+                  ? "bg-ide-accent text-white shadow-ide-xs"
                   : "text-ide-dim hover:bg-ide-hover hover:text-ide-text",
               ].join(" ")}
             >

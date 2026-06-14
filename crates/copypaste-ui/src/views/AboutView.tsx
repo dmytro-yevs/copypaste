@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { getVersion } from "@tauri-apps/api/app";
 import { ViewShell } from "../components/ViewShell";
-import { probeStatus, type StatusProbe } from "../lib/ipc";
+import { appVersion, probeStatus, type StatusProbe } from "../lib/ipc";
 
 const FEATURES = [
   "End-to-end encrypted local history",
@@ -43,13 +43,22 @@ export function AboutView() {
       else setDaemon({ kind: "offline" });
     });
 
+    // Prefer the Tauri bundle version; fall back to the daemon's app_version
+    // (mock-safe IPC) when running outside the bundle (browser / ?mock=1), so the
+    // line shows a real version instead of a bare "—". (audit P2)
     getVersion().then(
       (v) => {
         if (!cancelled) setVersion(v);
       },
       () => {
-        // Tauri command unavailable (e.g. running outside the bundle / in tests).
-        // Leave version null rather than show a stale hardcoded number.
+        void appVersion().then(
+          (v) => {
+            if (!cancelled && v) setVersion(v);
+          },
+          () => {
+            // Both unavailable — leave null; the line hides rather than show "—".
+          }
+        );
       }
     );
 
@@ -70,7 +79,11 @@ export function AboutView() {
           {/* Identity */}
           <div className="flex flex-col items-center gap-1 border-b border-ide-divider px-8 py-6 text-center">
             <h2 className="text-[18px] font-semibold text-ide-text">CopyPaste</h2>
-            <span className="text-[12px] text-ide-faint">{version ?? "—"}</span>
+            {/* audit P2: hide the line entirely when no version is known instead
+                of rendering a bare "—". */}
+            {version !== null && (
+              <span className="text-[12px] text-ide-faint">{version}</span>
+            )}
             <p className="mt-1.5 text-[13px] text-ide-dim">Encrypted clipboard manager for macOS</p>
           </div>
 

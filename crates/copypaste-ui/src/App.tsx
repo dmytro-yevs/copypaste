@@ -12,6 +12,14 @@ import { SettingsView } from "./views/SettingsView";
 import { AboutView } from "./views/AboutView";
 import { LogView } from "./views/LogView";
 
+// audit P1-7: the Tauri event plugin is only present inside the Tauri runtime.
+// In a plain browser / ?mock=1 harness, listen() rejects and logs a console
+// error on every mount. Feature-detect the runtime (same gate History/Settings
+// use) and skip the subscriptions in the browser — nothing emits those events
+// there anyway.
+const HAS_TAURI =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
 // Views that take no extra props — routed generically via ComponentType.
 // DevicesView is rendered separately below so it can receive `incomingPairing`.
 const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
@@ -32,6 +40,7 @@ export default function App() {
   // The popup window emits "open-settings" (after showing this main window) when
   // the user clicks its footer gear. Navigate to the Settings view in response.
   useEffect(() => {
+    if (!HAS_TAURI) return;
     let cancelled = false;
     let unlisten: (() => void) | null = null;
     void listen("open-settings", () => {
@@ -58,6 +67,7 @@ export default function App() {
   const [incomingPairing, setIncomingPairing] = useState<PairSasStatus | null>(null);
 
   useEffect(() => {
+    if (!HAS_TAURI) return;
     let cancelled = false;
     let unlisten: (() => void) | null = null;
     void listen<PairSasStatus>("incoming-pairing", (event) => {
@@ -108,8 +118,35 @@ export default function App() {
   // Apply the data-theme attribute whenever the pref changes.
   // CSS custom property overrides in :root[data-theme="light"] take effect
   // immediately; no JS class toggling needed beyond setting this one attribute.
+  //
+  // theme:"system" follows the OS `prefers-color-scheme` LIVE — we resolve it
+  // here via matchMedia and re-resolve when the OS preference flips (no manual
+  // refresh). "light"/"dark" are applied verbatim. Light-first default: an
+  // absent pref still resolves to "light". (web parity — CopyPaste-7qy §0)
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme ?? "light");
+    const resolve = (t: typeof theme): "light" | "dark" => {
+      if (t === "dark" || t === "light") return t;
+      // t === "system" (or undefined/legacy): follow the OS preference.
+      if (t === "system" && typeof window !== "undefined" && window.matchMedia) {
+        return window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+      }
+      return "light";
+    };
+
+    document.documentElement.setAttribute("data-theme", resolve(theme));
+
+    // Only the "system" theme needs to react to OS-preference changes.
+    if (theme !== "system" || typeof window === "undefined" || !window.matchMedia) {
+      return;
+    }
+    const mql = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      document.documentElement.setAttribute("data-theme", resolve("system"));
+    };
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
   }, [theme]);
 
   // ---------------------------------------------------------------------------
@@ -133,20 +170,23 @@ export default function App() {
 
     // Real-time: listen for the daemon-spawn-result Tauri event so we show
     // the banner immediately if the daemon fails while the UI is already open.
+    // Browser/mock has no Tauri event plugin — skip (audit P1-7).
     let unlisten: (() => void) | null = null;
-    void listen<{ ok: boolean; error?: string }>("daemon-spawn-result", (event) => {
-      if (cancelled) return;
-      if (!event.payload.ok && event.payload.error) {
-        setDaemonError(event.payload.error);
-      } else if (event.payload.ok) {
-        // Daemon started successfully — clear any stale error.
-        setDaemonError(null);
-      }
-    }).then((fn) => {
-      unlisten = fn;
-    }).catch(() => {
-      // Best-effort.
-    });
+    if (HAS_TAURI) {
+      void listen<{ ok: boolean; error?: string }>("daemon-spawn-result", (event) => {
+        if (cancelled) return;
+        if (!event.payload.ok && event.payload.error) {
+          setDaemonError(event.payload.error);
+        } else if (event.payload.ok) {
+          // Daemon started successfully — clear any stale error.
+          setDaemonError(null);
+        }
+      }).then((fn) => {
+        unlisten = fn;
+      }).catch(() => {
+        // Best-effort.
+      });
+    }
 
     return () => {
       cancelled = true;
