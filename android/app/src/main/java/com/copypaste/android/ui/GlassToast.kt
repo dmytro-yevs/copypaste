@@ -201,6 +201,15 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
         GlassToastKind.ACCENT -> c.accent
     }
 
+    // f6x0: DANGER toasts get a danger-tinted hairline border (alert tonization) so
+    // they read as distinctly critical vs. neutral toasts. Other kinds keep the
+    // standard glass-rim grey border.
+    val borderColor: Color = if (data.kind == GlassToastKind.DANGER) {
+        c.danger.copy(alpha = 0.55f)
+    } else {
+        c.border
+    }
+
     // §2/P0: the Material Surface stays TRANSPARENT and supplies only the §4
     // shadow + hairline border + shape clip; the real frosted blur + §2 tint
     // comes from LiquidGlassSurface (API-31 RenderEffect blur, flat tint < 31).
@@ -210,7 +219,8 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
         color = Color.Transparent,
         contentColor = c.text,
         // §4: single 1dp hairline border (subtle, like CopyPasteCard).
-        border = androidx.compose.foundation.BorderStroke(1.dp, c.border),
+        // f6x0: danger toasts use danger-tinted border for alert tonization.
+        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
         // §4 elevation: one subtle e2-equivalent shadow.
         shadowElevation = 6.dp,
         modifier = Modifier

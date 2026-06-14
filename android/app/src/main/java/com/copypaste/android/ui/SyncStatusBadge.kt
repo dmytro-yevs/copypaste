@@ -41,7 +41,6 @@ import com.copypaste.android.DevicesOnlineState
 import com.copypaste.android.R
 import com.copypaste.android.Settings
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.MonoFontFamily
 import kotlinx.coroutines.delay
 
 /**
@@ -130,27 +129,22 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
         label = "dot-pulse-scale",
     )
 
+    // jxut: styleguide .nav-foot = left-aligned, dot FIRST, then 'CopyPaste · N devices'
+    // at 10.5sp c.faint, gap 6px. Previously was right-aligned COPYPASTE + dot + count.
+    // CopyPaste-3nyq: the dot conveys online/offline/idle by COLOUR only — add a
+    // text equivalent so screen-reader users get the state (WCAG 1.4.1).
+    val statusCd = when {
+        isOffline -> stringResource(R.string.cd_status_offline)
+        connected -> stringResource(R.string.cd_status_connected)
+        else      -> stringResource(R.string.cd_status_idle)
+    }
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.End,
+        horizontalArrangement = Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = "COPYPASTE",
-            color = c.faint.copy(alpha = 0.6f),
-            fontSize = 9.sp,
-            letterSpacing = 1.5.sp,
-            modifier = Modifier.weight(1f),
-        )
-        // CopyPaste-3nyq: the dot conveys online/offline/idle by COLOUR only — add a
-        // text equivalent so screen-reader users get the state (WCAG 1.4.1).
-        val statusCd = when {
-            isOffline -> stringResource(R.string.cd_status_offline)
-            connected -> stringResource(R.string.cd_status_connected)
-            else      -> stringResource(R.string.cd_status_idle)
-        }
         Box(
             modifier = Modifier
                 .size(8.dp)
@@ -160,15 +154,13 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
                 .background(dotColor)
                 .semantics { contentDescription = statusCd },
         )
-        if (count > 0) {
-            Text(
-                text = count.toString(),
-                color = c.faint,
-                fontSize = 10.sp,
-                fontFamily = MonoFontFamily,
-                modifier = Modifier.padding(start = 6.dp),
-            )
-        }
+        val footerLabel = if (count > 0) "CopyPaste · $count devices" else "CopyPaste"
+        Text(
+            text = footerLabel,
+            color = c.faint,
+            fontSize = 10.5.sp,
+            modifier = Modifier.padding(start = 6.dp),
+        )
     }
 }
 

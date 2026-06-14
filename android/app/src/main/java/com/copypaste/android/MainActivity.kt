@@ -325,22 +325,24 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                                 selectedTab = index
                             }
                         },
-                        // §5/§9: 20dp Outlined nav glyph.
+                        // §5/§9: 18dp Outlined nav glyph (9730: styleguide sidebar glyph
+                        // .gi / icon-btn is 18px; was 20dp).
                         // CopyPaste-n7ff: contentDescription = null — the visible label
                         // below already names the tab; describing the icon too makes
                         // TalkBack announce the name twice.
-                        icon = { Icon(tab.icon, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        icon = { Icon(tab.icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
                         label = { Text(label) },
                         // pe0c: active item = solid accent pill (full opacity indicatorColor)
-                        // + white text+icon (accentOn). Inactive = dim. Styleguide .nav-item.active
-                        // is `background: rgb(var(--ide-accent))` + `color: #fff` — NOT the
-                        // old faint 15% tint with accent-colored label.
+                        // + white text+icon (accentOn). Inactive = faint (42i4: styleguide
+                        // .nav-item inactive = rgb(var(--ide-faint)), not --ide-dim). Styleguide
+                        // .nav-item.active is `background: rgb(var(--ide-accent))` + `color: #fff`
+                        // — NOT the old faint 15% tint with accent-colored label.
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor       = c.accentOn,
                             selectedTextColor       = c.accentOn,
                             indicatorColor          = c.accent,
-                            unselectedIconColor     = c.dim,
-                            unselectedTextColor     = c.dim,
+                            unselectedIconColor     = c.faint,
+                            unselectedTextColor     = c.faint,
                         ),
                     )
                 }
