@@ -40,12 +40,10 @@ import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -69,6 +67,7 @@ import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
+import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.LocalIdeColors
@@ -83,9 +82,6 @@ import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.IdeSwitch
 import com.copypaste.android.ui.theme.ideTextFieldColors
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.animation.core.animateDpAsState
@@ -93,7 +89,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TextButton
 import com.copypaste.android.ui.theme.EaseStandard
 
 /**
@@ -101,7 +100,8 @@ import com.copypaste.android.ui.theme.EaseStandard
  *   General / Display / Storage / Sync / Notifications
  *
  * AND3: Settings are split into tabs matching macOS panel tabs.
- * H5/U1: Auto-save on every change — no Save button, parity with macOS.
+ * Draft model: changes are staged in local Compose state and persisted only
+ * when the user taps the sticky Save button (CopyPaste-u30t).
  *
  * Styled per PARITY-SPEC §7 (segmented controls), §8 (grouped rows / cards),
  * §3 (grey section labels), §1 (LocalIdeColors theme-adaptive tokens).
@@ -112,7 +112,11 @@ class SettingsActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             CopyPasteTheme {
-                SettingsScreen(showBackButton = true, onBack = { finish() })
+                SettingsScreen(
+                    showBackButton = true,
+                    onBack = { finish() },
+                    onSaved = { finish() },
+                )
             }
         }
     }
@@ -146,25 +150,24 @@ fun SettingsScreen(
     showBackButton: Boolean = true,
     onBack: () -> Unit = {},
     /**
-     * H5/U1: No dirty state — always proceeds immediately.
-     * The guard is kept for API compatibility with MainShell's navbar.
+     * CopyPaste-u30t: guard registered with the navbar so tab switches while there
+     * are unsaved changes show the Discard/Keep-editing dialog.
      */
     onRegisterNavGuard: ((guard: (proceed: () -> Unit) -> Unit) -> Unit)? = null,
     /** §1: paint the aurora backdrop here (standalone) vs. via MainShell (embedded). */
     paintCanvasBackdrop: Boolean = true,
+    /** Called after the user confirms Save and all settings are persisted. */
+    onSaved: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
-    val scope = rememberCoroutineScope()
     val c = LocalIdeColors.current
 
-    // ── Debounce jobs for text fields (300 ms) ──
-    var supabaseUrlJob by remember { mutableStateOf<Job?>(null) }
-    var supabaseAnonKeyJob by remember { mutableStateOf<Job?>(null) }
-    var cloudPassphraseJob by remember { mutableStateOf<Job?>(null) }
-    var supabaseEmailJob by remember { mutableStateOf<Job?>(null) }
-    var supabasePasswordJob by remember { mutableStateOf<Job?>(null) }
-    var relayUrlJob by remember { mutableStateOf<Job?>(null) }
+    // ── Draft dirty flag — true once any setting is changed, reset to false after save ──
+    var dirty by remember { mutableStateOf(false) }
+    // ── Discard-confirmation dialog state ──
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    var pendingProceed by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     // ── General ──
     // Private mode (ON = this device stops recording new clips). Mirrors the
@@ -233,14 +236,25 @@ fun SettingsScreen(
     // LogcatCaptureService.status() is a cheap synchronous check (no I/O), so this is safe.
     val logcatStatus = LogcatCaptureService.status(ctx, settings)
 
-    // H5/U1: nav-guard always proceeds immediately — no dirty state.
+    // CopyPaste-u30t: register a dirty-aware nav guard.
+    // When dirty, intercept proceed and show the Discard/Keep-editing dialog.
+    // When clean, proceed immediately.
     LaunchedEffect(onRegisterNavGuard) {
-        onRegisterNavGuard?.invoke { proceed -> proceed() }
+        onRegisterNavGuard?.invoke { proceed ->
+            if (dirty) {
+                pendingProceed = proceed
+                showDiscardDialog = true
+            } else {
+                proceed()
+            }
+        }
     }
 
-    // ── Helper: persist all non-text scalar settings in one commit ──
-    // Called after every toggle/slider change.
+    // ── Helper: persist ALL settings in one commit (called only on explicit Save) ──
+    // Also writes the password/passphrase fields that previously had separate write paths.
     fun persistAll() {
+        settings.cloudSyncPassphrase = cloudPassphrase
+        settings.supabasePassword = supabasePassword
         settings.saveScreenSettings(
             captureEnabled = settings.captureEnabled,
             privateMode = privateMode,
@@ -279,37 +293,49 @@ fun SettingsScreen(
         LogcatCaptureService.syncState(ctx, settings)
     }
 
-    // ── Flush-on-dispose: cancel pending debounce jobs and synchronously persist ──
-    // When the user edits a text field and switches away via the nav bar within the
-    // 300 ms debounce window, rememberCoroutineScope is cancelled together with the
-    // Composable — the pending persistAll() would silently drop the edit.
-    // DisposableEffect runs onDispose on the main thread synchronously before the
-    // composition is destroyed, so the write always completes before teardown.
-    DisposableEffect(Unit) {
-        onDispose {
-            // Cancel all in-flight debounce jobs (prevents double-write; the
-            // synchronous persistAll() below is the authoritative final flush).
-            supabaseUrlJob?.cancel()
-            supabaseAnonKeyJob?.cancel()
-            cloudPassphraseJob?.cancel()
-            supabaseEmailJob?.cancel()
-            supabasePasswordJob?.cancel()
-            relayUrlJob?.cancel()
-            // Flush the two fields that have their own write paths separate from
-            // persistAll(): cloudPassphrase and supabasePassword.
-            settings.cloudSyncPassphrase = cloudPassphrase
-            settings.supabasePassword = supabasePassword
-            // Full persist for all remaining fields.
-            persistAll()
-        }
-    }
-
     // ── Tab selection — rememberSaveable so the selected tab survives rotation ──
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
     val tabs = listOf("General", "Display", "Storage", "Sync", "Notifications")
 
     // §1 aurora canvas backdrop — reacts live to the Display→Translucency toggle.
     val dark = isDarkTheme()
+
+    // ── Discard-changes confirmation dialog ──
+    if (showDiscardDialog) {
+        GlassAlertDialog(
+            onDismissRequest = {
+                showDiscardDialog = false
+                pendingProceed = null
+            },
+            title = { Text("Unsaved changes") },
+            text = { Text("You have unsaved changes. Discard them and leave?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardDialog = false
+                    val proceed = pendingProceed
+                    pendingProceed = null
+                    dirty = false
+                    proceed?.invoke()
+                }) { Text("Discard") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showDiscardDialog = false
+                    pendingProceed = null
+                }) { Text("Keep editing") }
+            },
+        )
+    }
+
+    // Guard back-press/back-arrow through the same discard dialog when dirty.
+    val guardedOnBack: () -> Unit = {
+        if (dirty) {
+            pendingProceed = onBack
+            showDiscardDialog = true
+        } else {
+            onBack()
+        }
+    }
 
     Scaffold(
         modifier = if (translucency && paintCanvasBackdrop) modifier.auroraCanvas(dark) else modifier,
@@ -318,9 +344,35 @@ fun SettingsScreen(
             CopyPasteTopBar(
                 title = stringResource(R.string.title_settings),
                 showBackButton = showBackButton,
-                onBack = onBack,
+                onBack = guardedOnBack,
                 backContentDescription = stringResource(R.string.cd_back),
             )
+        },
+        bottomBar = {
+            // CopyPaste-u30t: sticky Save button — enabled only when there are unsaved changes.
+            // Full-width, accent-coloured, glass-style. Calls persistAll() then onSaved().
+            Button(
+                onClick = {
+                    persistAll()
+                    dirty = false
+                    onSaved()
+                },
+                enabled = dirty,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = c.accent,
+                    contentColor = c.accentOn,
+                    disabledContainerColor = c.elevated,
+                    disabledContentColor = c.dim,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+            ) {
+                Text(
+                    text = "Save",
+                    style = MaterialTheme.typography.labelLarge,
+                )
+            }
         },
     ) { innerPadding ->
         Column(
@@ -381,110 +433,80 @@ fun SettingsScreen(
                 when (selectedTab) {
                     TAB_GENERAL -> GeneralTab(
                         privateMode = privateMode,
-                        onPrivateModeChange = { privateMode = it; persistAll() },
+                        onPrivateModeChange = { privateMode = it; dirty = true },
                         syncEnabled = syncEnabled,
-                        onSyncEnabledChange = { syncEnabled = it; persistAll() },
+                        onSyncEnabledChange = { syncEnabled = it; dirty = true },
                         collectPublicIp = collectPublicIp,
-                        onCollectPublicIpChange = { collectPublicIp = it; persistAll() },
+                        onCollectPublicIpChange = { collectPublicIp = it; dirty = true },
                         pasteAsPlainText = pasteAsPlainText,
-                        onPasteAsPlainTextChange = { pasteAsPlainText = it; persistAll() },
+                        onPasteAsPlainTextChange = { pasteAsPlainText = it; dirty = true },
                         logcatEnabled = logcatEnabled,
-                        onLogcatEnabledChange = { logcatEnabled = it; persistAll() },
+                        onLogcatEnabledChange = { logcatEnabled = it; dirty = true },
                         logcatStatus = logcatStatus,
                         ctx = ctx,
                     )
                     TAB_DISPLAY -> DisplayTab(
                         density = density,
-                        onDensityChange = { density = it; persistAll() },
+                        onDensityChange = { density = it; dirty = true },
                         showWarnings = showWarnings,
-                        onShowWarningsChange = { showWarnings = it; persistAll() },
+                        onShowWarningsChange = { showWarnings = it; dirty = true },
                         maskSensitive = maskSensitive,
-                        onMaskSensitiveChange = { maskSensitive = it; persistAll() },
+                        onMaskSensitiveChange = { maskSensitive = it; dirty = true },
                         translucency = translucency,
-                        onTranslucencyChange = { translucency = it; persistAll() },
+                        onTranslucencyChange = { translucency = it; dirty = true },
                         imageMaxHeight = imageMaxHeight,
-                        onImageMaxHeightChange = { imageMaxHeight = it; persistAll() },
+                        onImageMaxHeightChange = { imageMaxHeight = it; dirty = true },
                         previewDelay = previewDelay,
-                        onPreviewDelayChange = { previewDelay = it; persistAll() },
+                        onPreviewDelayChange = { previewDelay = it; dirty = true },
                         previewLines = previewLines,
-                        onPreviewLinesChange = { previewLines = it; persistAll() },
+                        onPreviewLinesChange = { previewLines = it; dirty = true },
                         imageQuality = imageQuality,
-                        onImageQualityChange = { imageQuality = it; persistAll() },
+                        onImageQualityChange = { imageQuality = it; dirty = true },
                         settings = settings,
                         ctx = ctx,
                     )
                     TAB_STORAGE -> StorageTab(
                         maxTextSizeBytes = maxTextSizeBytes,
-                        onMaxTextSizeBytesChange = { maxTextSizeBytes = it; persistAll() },
+                        onMaxTextSizeBytesChange = { maxTextSizeBytes = it; dirty = true },
                         maxImageSizeBytes = maxImageSizeBytes,
-                        onMaxImageSizeBytesChange = { maxImageSizeBytes = it; persistAll() },
+                        onMaxImageSizeBytesChange = { maxImageSizeBytes = it; dirty = true },
                         maxFileSizeBytes = maxFileSizeBytes,
-                        onMaxFileSizeBytesChange = { maxFileSizeBytes = it; persistAll() },
+                        onMaxFileSizeBytesChange = { maxFileSizeBytes = it; dirty = true },
                         storageQuotaBytes = storageQuotaBytes,
-                        onStorageQuotaBytesChange = { storageQuotaBytes = it; persistAll() },
+                        onStorageQuotaBytesChange = { storageQuotaBytes = it; dirty = true },
                         sensitiveTtlSecs = sensitiveTtlSecs,
-                        onSensitiveTtlSecsChange = { sensitiveTtlSecs = it; persistAll() },
+                        onSensitiveTtlSecsChange = { sensitiveTtlSecs = it; dirty = true },
                         maxItems = maxItems,
-                        onMaxItemsChange = { maxItems = it; persistAll() },
+                        onMaxItemsChange = { maxItems = it; dirty = true },
                         excludedApps = excludedApps,
-                        onExcludedAppsChange = { excludedApps = it; persistAll() },
+                        onExcludedAppsChange = { excludedApps = it; dirty = true },
                         ctx = ctx,
                     )
                     TAB_SYNC -> SyncTab(
                         syncBackend = syncBackend,
-                        onSyncBackendChange = { syncBackend = it; persistAll() },
+                        onSyncBackendChange = { syncBackend = it; dirty = true },
                         syncOnWifiOnly = syncOnWifiOnly,
-                        onSyncOnWifiOnlyChange = { syncOnWifiOnly = it; persistAll() },
+                        onSyncOnWifiOnlyChange = { syncOnWifiOnly = it; dirty = true },
                         p2pSyncEnabled = p2pSyncEnabled,
-                        onP2pSyncEnabledChange = { p2pSyncEnabled = it; persistAll() },
+                        onP2pSyncEnabledChange = { p2pSyncEnabled = it; dirty = true },
                         supabaseUrl = supabaseUrl,
-                        onSupabaseUrlChange = { v ->
-                            supabaseUrl = v
-                            supabaseUrlJob?.cancel()
-                            supabaseUrlJob = scope.launch { delay(300); persistAll() }
-                        },
+                        onSupabaseUrlChange = { v -> supabaseUrl = v; dirty = true },
                         supabaseAnonKey = supabaseAnonKey,
-                        onSupabaseAnonKeyChange = { v ->
-                            supabaseAnonKey = v
-                            supabaseAnonKeyJob?.cancel()
-                            supabaseAnonKeyJob = scope.launch { delay(300); persistAll() }
-                        },
+                        onSupabaseAnonKeyChange = { v -> supabaseAnonKey = v; dirty = true },
                         cloudPassphrase = cloudPassphrase,
-                        onCloudPassphraseChange = { v ->
-                            cloudPassphrase = v
-                            cloudPassphraseJob?.cancel()
-                            cloudPassphraseJob = scope.launch {
-                                delay(300)
-                                settings.cloudSyncPassphrase = v
-                            }
-                        },
+                        onCloudPassphraseChange = { v -> cloudPassphrase = v; dirty = true },
                         supabaseEmail = supabaseEmail,
-                        onSupabaseEmailChange = { v ->
-                            supabaseEmail = v
-                            supabaseEmailJob?.cancel()
-                            supabaseEmailJob = scope.launch { delay(300); persistAll() }
-                        },
+                        onSupabaseEmailChange = { v -> supabaseEmail = v; dirty = true },
                         supabasePassword = supabasePassword,
-                        onSupabasePasswordChange = { v ->
-                            supabasePassword = v
-                            supabasePasswordJob?.cancel()
-                            supabasePasswordJob = scope.launch {
-                                delay(300)
-                                settings.supabasePassword = v
-                            }
-                        },
+                        onSupabasePasswordChange = { v -> supabasePassword = v; dirty = true },
                         relayUrl = relayUrl,
-                        onRelayUrlChange = { v ->
-                            relayUrl = v
-                            relayUrlJob?.cancel()
-                            relayUrlJob = scope.launch { delay(300); persistAll() }
-                        },
+                        onRelayUrlChange = { v -> relayUrl = v; dirty = true },
                     )
                     TAB_NOTIFICATIONS -> NotificationsTab(
                         notifyOnCopy = notifyOnCopy,
-                        onNotifyOnCopyChange = { notifyOnCopy = it; persistAll() },
+                        onNotifyOnCopyChange = { notifyOnCopy = it; dirty = true },
                         soundOnCopy = soundOnCopy,
-                        onSoundOnCopyChange = { soundOnCopy = it; persistAll() },
+                        onSoundOnCopyChange = { soundOnCopy = it; dirty = true },
                     )
                 }
             }

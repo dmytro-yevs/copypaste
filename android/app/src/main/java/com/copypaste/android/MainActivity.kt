@@ -353,6 +353,8 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                         onBack = {},
                         onRegisterNavGuard = { guard -> settingsNavGuard = guard },
                         paintCanvasBackdrop = false,
+                        // CopyPaste-u30t: navigate to the History/home tab after saving.
+                        onSaved = { selectedTab = NavTab.CLIPS.ordinal },
                     )
                 }
             }
