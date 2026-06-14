@@ -1492,16 +1492,18 @@ export function SettingsView() {
             Mirrors the Color theme segmented control pattern used in the Window section. */}
         <SubsectionHeader label="Appearance" />
         <Panel>
+          {/* bpax: styleguide §form-controls segmented control — mute/.18 group bg,
+              selected = white/.90 + e1 shadow, 7px inner radius */}
           <SettingsRow label="Row density">
-            <div className="flex items-center gap-1 rounded-ide border border-ide-border bg-ide-bg p-0.5">
+            <div className="flex items-center gap-0.5 rounded-[10px] bg-ide-faint/18 p-0.5">
               <button
                 type="button"
                 aria-label="comfortable"
                 onClick={() => setPrefs({ density: "comfortable" })}
                 className={[
-                  "rounded px-2.5 py-1 text-[12px] transition-colors",
+                  "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
                   (prefs.density ?? "comfortable") === "comfortable"
-                    ? "bg-ide-elevated text-ide-text shadow-ide-xs"
+                    ? "bg-white/90 text-ide-text shadow-ide-e1"
                     : "text-ide-dim hover:text-ide-text",
                 ].join(" ")}
               >
@@ -1512,9 +1514,9 @@ export function SettingsView() {
                 aria-label="compact"
                 onClick={() => setPrefs({ density: "compact" })}
                 className={[
-                  "rounded px-2.5 py-1 text-[12px] transition-colors",
+                  "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
                   (prefs.density ?? "comfortable") === "compact"
-                    ? "bg-ide-elevated text-ide-text shadow-ide-xs"
+                    ? "bg-white/90 text-ide-text shadow-ide-e1"
                     : "text-ide-dim hover:text-ide-text",
                 ].join(" ")}
               >
@@ -1583,8 +1585,9 @@ export function SettingsView() {
           <SettingsRow label="Color theme">
             <div className="flex items-center gap-2">
               <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />
-              {/* web parity (CopyPaste-7qy §0): Light / Dark / System segmented control. */}
-              <div className="flex items-center gap-1 rounded-ide border border-ide-border bg-ide-bg p-0.5">
+              {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
+                  Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius */}
+              <div className="flex items-center gap-0.5 rounded-[10px] bg-ide-faint/18 p-0.5">
                 {(["light", "dark", "system"] as const).map((opt) => {
                   const selected = (prefs.theme ?? "light") === opt;
                   return (
@@ -1593,9 +1596,9 @@ export function SettingsView() {
                       type="button"
                       onClick={() => setPrefs({ theme: opt })}
                       className={[
-                        "rounded px-2.5 py-1 text-[12px] capitalize transition-colors",
+                        "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
                         selected
-                          ? "bg-ide-elevated text-ide-text shadow-ide-xs"
+                          ? "bg-white/90 text-ide-text shadow-ide-e1"
                           : "text-ide-dim hover:text-ide-text",
                       ].join(" ")}
                     >
@@ -2062,10 +2065,11 @@ export function SettingsView() {
               {deleteConfirm ? (
                 <span className="flex items-center gap-1.5 text-[13px]">
                   <span className="text-ide-dim">Delete all history?</span>
+                  {/* puf4: solid-danger for primary destructive confirm (Delete all history) */}
                   <button
                     type="button"
                     onClick={() => void handleDeleteAll()}
-                    className="rounded-ide border border-ide-danger/50 bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-danger hover:bg-ide-hover"
+                    className="rounded-ide bg-ide-danger px-2.5 py-1 text-[13px] font-medium text-white hover:bg-ide-danger/85"
                   >
                     Yes
                   </button>

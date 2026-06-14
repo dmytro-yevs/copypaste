@@ -80,7 +80,8 @@ export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
       return (
         <Link
           {...shared}
-          className="shrink-0 text-ide-info"
+          // 1hqt: URL/IMAGE use sky token (20 120 170 in light, teal in dark)
+          className="shrink-0 text-ide-sky"
         />
       );
     case "image":
@@ -162,9 +163,10 @@ export function KindChip({ contentType, kind }: KindChipProps) {
   // and keep the semantic text colour; the heavier fill + the AA-darkened
   // danger/faint tokens lift the badge to AA. (The text colour itself is the
   // "one step darker" semantic token, not a lighter decorative tint.)
+  // 1hqt: URL/IMAGE use sky token; lplk: violet is now 128 90 213 (AA-darkened via CSS var)
   const colorClass =
     label === "URL"
-      ? "text-ide-info border-ide-info/45 bg-ide-info/14"
+      ? "text-ide-sky border-ide-sky/45 bg-ide-sky/14"
       : label === "EMAIL" || label === "PHONE"
       ? "text-ide-success border-ide-success/45 bg-ide-success/14"
       : label === "COLOR" || label === "NUMBER" || label === "PATH"
@@ -180,7 +182,8 @@ export function KindChip({ contentType, kind }: KindChipProps) {
   return (
     <span
       className={[
-        "flex shrink-0 items-center rounded border px-1 py-px",
+        // ix8u: rounded-ide-sm = 7px chip radius (styleguide --radius-chip)
+        "flex shrink-0 items-center rounded-ide-sm border px-1 py-px",
         // audit P1-3: bumped 9px → 10px for legibility.
         "text-[10px] font-semibold leading-none tracking-wide uppercase",
         colorClass,

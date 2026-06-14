@@ -124,8 +124,12 @@
   /* ── §3 Semantic colours (base / container) ──────────────────────────── */
   --ide-danger-rgb:   224 92 92;   --ide-danger:  rgb(var(--ide-danger-rgb));   --ide-danger-dim:   rgba(224,92,92,0.10);
   --ide-success-rgb:  95 173 101;  --ide-success: rgb(var(--ide-success-rgb));  --ide-success-dim:  rgba(95,173,101,0.10);
+  /* Dark: warning = amber 217 163 67; badge-warning same (both amber in dark) */
   --ide-warning-rgb:  217 163 67;  --ide-warning: rgb(var(--ide-warning-rgb));  --ide-warning-dim:  rgba(217,163,67,0.10);
+  --ide-badge-warning-rgb: 217 163 67; --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-info-rgb:     86 182 194;  --ide-info:    rgb(var(--ide-info-rgb));     --ide-info-dim:     rgba(86,182,194,0.12);
+  /* 1hqt: sky = same as info in dark (teal readable); light theme overrides to 20 120 170 */
+  --ide-sky-rgb:      86 182 194;  --ide-sky:     rgb(var(--ide-sky-rgb));      --ide-sky-dim:      rgba(86,182,194,0.12);
   --ide-violet-rgb:   198 120 221; --ide-violet:  rgb(var(--ide-violet-rgb));   --ide-violet-dim:   rgba(198,120,221,0.12);
 
   /* ── §3 Elevation (E0-E3 exact shadows) ──────────────────────────────── */
@@ -202,10 +206,16 @@
      white (≈4.6:1) and on the danger-tint fill. The tint alpha is also bumped
      0.12→0.16 to strengthen the pill. (audit P1-5) */
   --ide-danger-rgb:   215 40 30;   --ide-danger-dim:   rgba(215,40,30,0.16);
-  --ide-success-rgb:  52 199 89;   --ide-success-dim:  rgba(52,199,89,0.14);
-  --ide-warning-rgb:  255 149 0;   --ide-warning-dim:  rgba(255,149,0,0.14);
-  --ide-info-rgb:     50 173 230;  --ide-info-dim:     rgba(50,173,230,0.14);
-  --ide-violet-rgb:   175 82 222;  --ide-violet-dim:   rgba(175,82,222,0.14);
+  /* uufv: AA-darkened from raw systemGreen 52 199 89 → 40 140 70 (4.6:1 on white) */
+  --ide-success-rgb:  40 140 70;   --ide-success-dim:  rgba(40,140,70,0.14);
+  /* 8qzb: warning → 176 110 20 (AA text on white); badge-warning = pinned #D9A343 amber */
+  --ide-warning-rgb:  176 110 20;  --ide-warning-dim:  rgba(176,110,20,0.14);
+  --ide-badge-warning-rgb: 217 163 67; --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  /* 1hqt: sky token for URL/IMAGE kinds — 20 120 170 (AA on white) */
+  --ide-sky-rgb:      20 120 170;  --ide-sky:          rgb(var(--ide-sky-rgb)); --ide-sky-dim: rgba(20,120,170,0.14);
+  --ide-info-rgb:     20 120 170;  --ide-info-dim:     rgba(20,120,170,0.14);
+  /* lplk: violet → 128 90 213 (AA-darkened from raw systemPurple 175 82 222) */
+  --ide-violet-rgb:   128 90 213;  --ide-violet-dim:   rgba(128,90,213,0.14);
 
   /* ── §3 Elevation (lighter shadows for light theme) ──────────────────── */
   --ide-e0: none;
@@ -404,7 +414,7 @@ textarea {
   background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
-  border-radius: 8px; /* audit P2: controls standardised to 8px */
+  border-radius: 9px; /* ix8u: styleguide --radius-ctl 9px */
   outline: none;
   font-family: inherit;
   font-size: 13px;
@@ -443,7 +453,7 @@ select {
   background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
-  border-radius: 8px; /* audit P2: controls standardised to 8px */
+  border-radius: 9px; /* ix8u: styleguide --radius-ctl 9px */
   padding: 4px 28px 4px 10px;
   font-family: inherit;
   font-size: 13px;
@@ -726,7 +736,7 @@ button,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
+  border-radius: 7px; /* ix8u: styleguide --radius-chip 7px */
   font-size: 10.5px;
   font-weight: 500;
   letter-spacing: 0.02em;

@@ -116,7 +116,8 @@ function PinIndicator() {
       height="12"
       fill="currentColor"
       aria-label="Pinned"
-      className="shrink-0 text-ide-warning"
+      // 8qzb: pinned glyph uses badge-warning (#D9A343) not warning text token
+      className="shrink-0 text-ide-badge-warning"
     >
       {/* Bookmark ribbon — M2: sleek bookmark instead of thumbtack */}
       <path d="M2 1.5A1.5 1.5 0 0 1 3.5 0h9A1.5 1.5 0 0 1 14 1.5v17.25l-6-3.75-6 3.75V1.5Z" />
@@ -128,7 +129,7 @@ function PinIndicator() {
 // "Won't sync — too large" indicator (warning triangle)
 // ---------------------------------------------------------------------------
 // Mirrors PinIndicator's markup: a tiny currentColor SVG tinted with the same
-// amber `text-ide-warning` token. Shown on rows the daemon flagged as exceeding
+// amber badge-warning token. Shown on rows the daemon flagged as exceeding
 // the configured sync size cap — kept locally but not synced to other devices.
 
 function SyncBlockedIndicator() {
@@ -139,7 +140,8 @@ function SyncBlockedIndicator() {
       height="11"
       fill="currentColor"
       aria-label="Too large to sync"
-      className="shrink-0 text-ide-warning"
+      // 8qzb: uses badge-warning (#D9A343) to match PinIndicator amber
+      className="shrink-0 text-ide-badge-warning"
     >
       {/* Warning triangle with an exclamation mark */}
       <path
@@ -469,15 +471,16 @@ const HistoryRow = React.memo(function HistoryRow({
         // v0.5.3: warningDim tint for pinned rows — border-l-2 gives a clear
         // amber left edge; bg-ide-warningDim (no opacity modifier) at its native
         // 0.10 alpha is visible without overwhelming. border-b remains divider.
+        // 8qzb: pinned rows use badge-warning (#D9A343) for left edge + tint
         entry.pinned
-          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-warning bg-ide-warningDim"
+          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10"
           : "border-b border-ide-divider/50",
         multiSelected
           ? "bg-ide-selection text-ide-text"
           : selected
           ? "bg-ide-selection text-ide-text"
           : entry.pinned
-          ? "text-ide-text hover:bg-ide-warning/15"
+          ? "text-ide-text hover:bg-ide-badge-warning/15"
           : "text-ide-text hover:bg-ide-hover",   // panel surface: hover is ide-hover (darker than panel)
         dragHandleProps?.dragging ? "opacity-50" : "",
       ].join(" ")}
@@ -544,12 +547,28 @@ const HistoryRow = React.memo(function HistoryRow({
       {/* Type chip / glyph: image + file use their ContentIcon (visually distinct);
           text items use a full-word KindChip powered by the daemon's classifier. */}
       {isImage || isFile ? (
-        <span className="flex w-4 shrink-0 items-center justify-center">
-          <ContentIcon contentType={isImage ? "image" : "file"} />
+        // i7x4: 26×26 content-icon tile — tinted rounded tile (mute/.16) with faint glyph
+        <span
+          className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] bg-ide-faint/16"
+          aria-hidden="true"
+        >
+          <ContentIcon contentType={isImage ? "image" : "file"} size={14} />
         </span>
       ) : (
-        <span className="flex shrink-0 items-center">
+        <span className="flex shrink-0 items-center gap-1">
           <KindChip kind={entry.kind} contentType={entry.content_type} />
+          {/* q8v1: COLOR-kind items get a live swatch of the actual color value */}
+          {entry.kind === "COLOR" && (() => {
+            // Extract a CSS color from the preview (e.g. "#D9A343", "rgb(255,0,0)")
+            const colorMatch = entry.preview.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)|hsl[a]?\([^)]+\)/);
+            return colorMatch ? (
+              <span
+                className="inline-block h-[14px] w-[14px] shrink-0 rounded-[4px] border border-black/10"
+                style={{ backgroundColor: colorMatch[0] }}
+                aria-hidden="true"
+              />
+            ) : null;
+          })()}
         </span>
       )}
 
@@ -2393,7 +2412,8 @@ export function HistoryView() {
                 <button
                   disabled={resetting}
                   onClick={() => void handleResetConfirmed()}
-                  className="rounded-ide border border-ide-danger/60 bg-ide-elevated px-3 py-1 text-[12px] text-ide-danger hover:bg-ide-hover disabled:opacity-50"
+                  // puf4: solid-danger for primary destructive confirm (reset database)
+                  className="rounded-ide bg-ide-danger px-3 py-1 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:opacity-50"
                 >
                   {resetting ? "Resetting…" : "Yes, erase"}
                 </button>

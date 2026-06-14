@@ -50,6 +50,11 @@ export default {
           infoDim:     "var(--ide-info-dim)",
           violet:      "rgb(var(--ide-violet-rgb) / <alpha-value>)",
           violetDim:   "var(--ide-violet-dim)",
+          // 1hqt: sky token for URL/IMAGE kinds (light: 20 120 170, dark: same as info)
+          sky:         "rgb(var(--ide-sky-rgb) / <alpha-value>)",
+          skyDim:      "var(--ide-sky-dim)",
+          // 8qzb: badge-warning (pinned amber #D9A343) — separate from warning text token
+          "badge-warning": "rgb(var(--ide-badge-warning-rgb) / <alpha-value>)",
         }
       },
       fontFamily: {
@@ -60,9 +65,9 @@ export default {
         mono: ['"JetBrains Mono"', '"SF Mono"', "ui-monospace", "Menlo", "monospace"],
       },
       borderRadius: {
-        ide:      "8px",   // inputs, buttons, controls (audit P2: standardise 8px)
-        "ide-sm": "4px",   // chips, keycaps, highlights
-        "ide-lg": "12px",  // cards + modals (PARITY-SPEC §4 — matches Android 12dp)
+        ide:      "9px",   // ix8u: inputs, buttons, controls — styleguide --radius-ctl 9px
+        "ide-sm": "7px",   // ix8u: chips, keycaps — styleguide --radius-chip 7px
+        "ide-lg": "14px",  // ix8u: cards + modals — styleguide --radius-card 14px
         "ide-xl": "14px",  // popup
       },
       boxShadow: {

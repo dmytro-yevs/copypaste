@@ -86,7 +86,8 @@ function StatusDot({
         className={[
           "relative inline-block shrink-0 rounded-full",
           "w-2 h-2",
-          online ? "bg-ide-success" : "bg-ide-faint/50",
+          // mztl: offline dot → danger red (matches SyncStatusChip and styleguide .dot-offline)
+          online ? "bg-ide-success" : "bg-ide-danger",
         ].join(" ")}
       />
     </span>
@@ -165,7 +166,8 @@ function ThisDeviceCard({
         <p className="truncate text-[13px] font-medium text-ide-text">
           {info.device_name ?? "This Device"}
         </p>
-        <span className="shrink-0 rounded px-1 py-0.5 text-[10px] font-medium bg-ide-accent/15 text-ide-accent">
+        {/* nmea: pill with hairline border matching accent tint */}
+        <span className="shrink-0 rounded-full border border-ide-accent/30 px-1.5 py-0.5 text-[10px] font-medium bg-ide-accent/14 text-ide-accent">
           This Mac
         </span>
       </div>
@@ -240,11 +242,11 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
   // Defensive: no crash when address/local_ip are absent.
   const isP2p = !!(peer.local_ip || peer.address);
   const transportLabel = isP2p ? "P2P" : "Cloud";
-  // audit P2: the P2P chip had no fill (2.54:1). Match the "This Mac" pill —
-  // a 15% tinted fill so the chip reads as a solid pill, not bare text.
+  // nmea: transport chips → rounded-full pills with hairline border
+  // 1hqt: P2P uses sky token (not info) to match URL/IMAGE kind
   const transportClass = isP2p
-    ? "text-ide-info bg-ide-info/15"
-    : "text-ide-accent bg-ide-accent/15";
+    ? "text-ide-sky bg-ide-sky/14 border border-ide-sky/30 rounded-full"
+    : "text-ide-accent bg-ide-accent/14 border border-ide-accent/30 rounded-full";
 
   // Truncated fingerprint: first 16 chars + ellipsis + last 8 chars.
   const fp = peer.fingerprint;
@@ -284,10 +286,10 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs, liveOnline
             <p className="truncate text-[13px] font-medium text-ide-text">
               {peer.name || `Device ${peer.fingerprint.slice(0, 8)}`}
             </p>
-            {/* Transport chip: 10px uppercase pill */}
+            {/* nmea: transport chip — full-radius pill with hairline border */}
             <span
               className={[
-                "shrink-0 rounded px-1 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                "shrink-0 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
                 transportClass,
               ].join(" ")}
             >
@@ -924,7 +926,8 @@ function RevokeConfirmDialog({
                 ? "Enter a new passphrase (min 8 chars) to rotate"
                 : undefined
             }
-            className="rounded-ide border border-ide-danger/40 bg-ide-danger/15 px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
+            // puf4: solid-danger variant for primary destructive action (Revoke & rotate)
+            className="rounded-ide bg-ide-danger px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:cursor-not-allowed disabled:opacity-40"
           >
             {revokeBusy ? "..." : "Revoke & rotate"}
           </button>
@@ -1480,9 +1483,10 @@ export function DevicesView({
       {revokeAllConfirm ? (
         <span className="flex items-center gap-1.5 text-[12px]">
           <span className="text-ide-dim">Revoke all?</span>
+          {/* puf4: solid-danger for primary destructive confirm (Revoke all) */}
           <button
             onClick={() => void handleRevokeAllConfirmed()}
-            className="rounded-ide border border-ide-danger/40 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs"
+            className="rounded-ide bg-ide-danger px-2.5 py-1 text-[12px] font-medium text-white hover:bg-ide-danger/85 shadow-ide-xs"
           >
             Yes
           </button>
