@@ -238,13 +238,10 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          # Install NDK via sdkmanager bundled with the ubuntu-latest runner
-          # AUDIT: the final `|| true` silently swallows complete sdkmanager failure
-          # (both the pinned NDK and the ndk-bundle fallback). If neither installs,
-          # the cargo-ndk build step will fail with an unhelpful error rather than
-          # a clear "NDK not found" message. Consider removing `|| true` and letting
-          # the step fail loudly, or adding an explicit NDK presence check after.
-          # Human decision required before changing (affects CI reliability).
+          # Install the pinned NDK version; fall back to ndk-bundle if sdkmanager fails.
+          # Both installs are allowed to fail individually (the fallback exists for runner
+          # images that ship ndk-bundle pre-installed). The explicit gate step below will
+          # catch the case where neither install succeeded.
           echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
             "ndk;27.2.12479018" 2>/dev/null \
             || echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
@@ -253,6 +250,19 @@ jobs:
           # Prefer the env var set by the runner; fall back to the installed bundle
           NDK_DIR="${ANDROID_NDK_HOME:-${ANDROID_HOME}/ndk-bundle}"
           echo "ANDROID_NDK_HOME=${NDK_DIR}" >> "$GITHUB_ENV"
+
+      - name: Verify Android NDK presence
+        run: |
+          # Explicit gate: fail immediately with a clear message if the NDK directory
+          # is absent. Without this check a missing NDK produces a cryptic cargo-ndk
+          # error ("toolchain not found") rather than a useful diagnosis.
+          [ -d "${ANDROID_NDK_HOME}" ] || {
+            echo "ERROR: NDK not found at ${ANDROID_NDK_HOME}"
+            echo "  ANDROID_HOME=${ANDROID_HOME}"
+            echo "  Both sdkmanager installs (ndk;27.2.12479018 and ndk-bundle) failed."
+            exit 1
+          }
+          echo "NDK verified at ${ANDROID_NDK_HOME}"
 
       - name: Resolve release version
         id: ver

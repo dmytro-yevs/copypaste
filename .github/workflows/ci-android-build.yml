@@ -90,6 +90,13 @@ jobs:
 
       - name: Gradle assembleDebug
         working-directory: android
+        # REGRESSION GUARD (buildCargoNdk + Gradle configuration cache):
+        # gradle.properties sets org.gradle.configuration-cache=true, so this
+        # assembleDebug invocation exercises the configuration cache on every run.
+        # This guards against a past regression where the :app:buildCargoNdk task
+        # was incompatible with the configuration cache (fixed in build.gradle.kts).
+        # Do NOT add --no-configuration-cache here; the whole point is to catch
+        # future incompatibilities before they reach release.
         run: |
           # .so already built above - skip the Gradle cargo-ndk task to avoid
           # re-running cargo inside CI where ANDROID_NDK_HOME is already set.
@@ -118,6 +125,11 @@ jobs:
     # Unit tests do not need the native .so; the Kotlin/Java sources compile
     # on the JVM and Robolectric stubs the Android runtime. Run this job in
     # parallel with build-android-ndk to keep CI fast.
+    #
+    # IMPORTANT — .so gate: because this job uses -x buildCargoNdk, a broken
+    # native library will NOT be caught here. The build-android-ndk job above
+    # is the definitive gate for native .so correctness and MUST NOT be removed
+    # or made optional. Both jobs are required to pass before merging.
     steps:
       - uses: actions/checkout@v4
 
