@@ -62,7 +62,7 @@ export default {
       borderRadius: {
         ide:      "6px",   // inputs, buttons
         "ide-sm": "4px",   // chips, keycaps, highlights
-        "ide-lg": "10px",  // cards
+        "ide-lg": "12px",  // cards (PARITY-SPEC §4 — matches Android 12dp)
         "ide-xl": "14px",  // popup
       },
       boxShadow: {
