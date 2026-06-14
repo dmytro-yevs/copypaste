@@ -1,6 +1,18 @@
 import type { ReactNode } from "react";
 
-/** Shared screen frame: a titled header bar + a scrollable content area. */
+/**
+ * Shared screen frame: a floating glass header bar + a floating glass content area.
+ *
+ * Both the header and the content panel are separate floating glass cards that sit
+ * over the aurora backdrop with a gap between them — the aurora shows through the
+ * gap, reinforcing the "panels hovering in space" Liquid Glass look.
+ *
+ * Layout contract (set by App.tsx <main>):
+ *   • <main> is `min-h-0 flex-1 overflow-hidden` — fills available height.
+ *   • ViewShell is `h-full flex flex-col gap-[10px]`.
+ *   • Header: fixed height, rounded glass card, pinned to top (no scroll).
+ *   • Content: flex-1, rounded glass card, scrollable inside.
+ */
 export function ViewShell({
   title,
   actions,
@@ -11,23 +23,30 @@ export function ViewShell({
   children: ReactNode;
 }) {
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col gap-[10px]">
       {/*
-        Header — §8: glass surface (surface-glass replaces solid bg-ide-panel),
-        hairline bottom border kept. data-tauri-drag-region makes the whole bar
-        draggable (macOS titleBarStyle "Overlay" + decorations:true custom titlebar).
-        The title <h1> also carries the attribute so dragging over the text works too.
-        The `actions` slot intentionally does NOT carry it: Tauri v2 stops
-        drag-initiation on elements that lack the attribute, so buttons/inputs inside
-        `actions` remain clickable.
+        Floating header — a detached rounded glass bar sitting over the aurora.
+        Inset from the top by the parent's 10px padding (already applied by
+        the gap in App.tsx's column). The header itself has NO top margin here
+        because the column gap provides the 10px spacing from the window top.
+
+        data-tauri-drag-region: the macOS custom titlebar drag MUST stay on
+        this element so the user can drag the window by grabbing the header bar.
+        The title <h1> also carries it for full-width draggability.
+        The `actions` slot intentionally does NOT carry it — Tauri v2 stops
+        drag-initiation on elements without the attribute, keeping buttons clickable.
+
+        Radius: rounded-ide-lg = 14px (styleguide --radius-card).
+        Shadow: shadow-ide-sm = float shadow (reads as hovering over aurora).
+        No bottom border: the card border from surface-glass provides the rim.
       */}
       <header
         data-tauri-drag-region
         className={[
+          "surface-glass",
           "flex h-11 shrink-0 items-center justify-between px-4",
-          // §8: glass header surface; hairline bottom border stays.
-          "border-b border-ide-border surface-glass",
-          "shadow-ide-xs",
+          "rounded-ide-lg",
+          "shadow-ide-sm",
         ].join(" ")}
       >
         <h1
@@ -40,12 +59,14 @@ export function ViewShell({
         <div className="flex items-center gap-2">{actions}</div>
       </header>
 
-      {/* Content — scrollable, bg matches root. surface-glass applies the
-          canonical translucency recipe (rgba(19,20,26,.72)+blur(30px)+saturate(180%))
-          per §3 — no inline glass recipe needed. */}
-      <div
-        className="surface-glass min-h-0 flex-1 overflow-auto p-4"
-      >
+      {/*
+        Floating content panel — a separate glass card below the header.
+        flex-1 + min-h-0 so it fills the remaining height.
+        overflow-auto: content scrolls INSIDE the floating card; the card
+        stays pinned (does not grow to push out of the window).
+        rounded-ide-lg: same 14px radius as the header.
+      */}
+      <div className="surface-glass min-h-0 flex-1 overflow-auto rounded-ide-lg p-4 shadow-ide-sm">
         {children}
       </div>
     </div>

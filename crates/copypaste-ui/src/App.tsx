@@ -275,24 +275,37 @@ export default function App() {
     // Outer boundary is the last line of defence: even if the chrome (Sidebar)
     // itself throws, the window shows a fallback instead of going blank.
     <ErrorBoundary>
-      <div className="flex h-screen w-screen overflow-hidden text-ide-text">
+      {/*
+        Floating shell layout — aurora is the fixed background (body gradient),
+        all panels are floating glass cards inset ~10px from window edges with
+        gaps between them so the aurora shows through. No edge-to-edge surfaces.
+        The outer div is transparent so the aurora bleeds through every gap.
+      */}
+      <div className="flex h-screen w-screen gap-[10px] overflow-hidden p-[10px] text-ide-text">
         <Sidebar />
-        {/* surface-glass = canonical §3 translucency recipe (rgba(19,20,26,.72)+blur(30px) saturate(180%)) */}
-        <div
-          className="surface-glass flex min-w-0 flex-1 flex-col"
-        >
-          <div data-tauri-drag-region className="h-9 shrink-0" />
+        {/* Main column: banners + view shell, all floating over the aurora */}
+        <div className="flex min-w-0 flex-1 flex-col gap-[10px]">
+          {/*
+            Thin transparent drag strip covering the 10px gap row at the very top
+            of the main column, between the window edge and the ViewShell header.
+            This ensures the user can still drag the window by clicking in the top
+            strip even when no banners are visible and the ViewShell header starts
+            below the 10px inset. h-0 collapses it — the ViewShell header's own
+            data-tauri-drag-region covers the draggable zone when rendered.
+            The sidebar top drag region also covers the full left stripe so the
+            main use case (drag the title bar area) still works.
+          */}
 
           {/* Daemon spawn error — non-dismissible, installation-incomplete */}
           {daemonError !== null && (
-            <div className="mx-3 mb-2 flex items-start gap-3 rounded-ide border border-red-500/40 bg-red-500/5 px-3 py-2 text-[13px] text-red-400">
+            <div className="surface-glass flex shrink-0 items-start gap-3 rounded-ide-lg border border-red-500/40 px-3 py-2 text-[13px] text-red-400">
               <span className="shrink-0 font-semibold">Background service error:</span>
               <span>{daemonError}</span>
             </div>
           )}
 
           {showStaleBanner && (
-            <div className="mx-3 mb-2 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+            <div className="surface-glass flex shrink-0 items-start justify-between gap-3 rounded-ide-lg border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning">
               <span>
                 CopyPaste was updated but an older background daemon is still
                 running
@@ -319,7 +332,7 @@ export default function App() {
 
           {/* Accessibility permission banner — macOS only, dismissed once granted */}
           {showAxBanner && (
-            <div className="mx-3 mb-2 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+            <div className="surface-glass flex shrink-0 items-start justify-between gap-3 rounded-ide-lg border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning">
               <span>
                 Accessibility permission is required for the global paste shortcut
                 and hotkey capture. Grant it in System Settings to enable these

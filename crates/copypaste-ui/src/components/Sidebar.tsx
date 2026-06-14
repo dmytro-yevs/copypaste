@@ -36,17 +36,20 @@ export function Sidebar() {
   return (
     <aside
       className={[
-        // surface-glass applies the canonical §3 translucency recipe:
-        // rgba(19,20,26,.72)+blur(30px)+saturate(180%). The sidebar's panel bg
-        // overlaid on the OS vibrancy layer gives the same visual depth without
-        // a bespoke rgba value.
+        // Floating glass panel — detached from all window edges.
+        // surface-glass provides the canonical §3 translucency recipe;
+        // rounded-ide-lg = 14px radius (styleguide --radius-card);
+        // shadow-ide-sm = float shadow so it reads as hovering over the aurora.
+        // No border-r: the sidebar is a floating card, not an edge-to-edge bar.
         "surface-glass",
         "flex w-[208px] shrink-0 flex-col",
-        "border-r border-ide-border",
+        "rounded-ide-lg",
         "shadow-ide-sm",
       ].join(" ")}
     >
-      {/* Drag region aligned with the macOS traffic lights (h-9 = 36px). */}
+      {/* Drag region aligned with the macOS traffic lights (h-9 = 36px).
+          The floating sidebar is itself draggable so the user can reposition
+          the window by grabbing its top area. */}
       <div data-tauri-drag-region className="h-9 shrink-0" />
 
       <nav className="flex flex-col gap-0.5 px-2 pb-2">
