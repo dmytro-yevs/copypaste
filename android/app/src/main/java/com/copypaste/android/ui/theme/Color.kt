@@ -40,6 +40,7 @@ val IdeMultiSel  = Color(0xFF3D8BFF).copy(alpha = 0.20f)  // multi-select fill (
 val IdeText      = Color(0xFFE8EAED)   // §0 canonical primary text
 val IdeDim       = Color(0xFF9DA0A8)   // secondary / subdued text
 val IdeFaint     = Color(0xFF82868F)   // PARITY-SPEC §1 tertiaryLabel — WCAG-AA fix (was #6B6F78, failed AA)
+val IdeMute      = Color(0xFF6B6F78)   // styleguide --ide-mute (dark): control-track / disabled grey (distinct from faint text)
 
 // ── Ghost text / decorative icon tokens (PARITY-SPEC §1) ───────────────────
 // Mirror web's --ide-ghost / --ide-ghost-deco. Ghost = secondary metadata text;
@@ -49,9 +50,10 @@ val IdeGhostDeco = Color.White.copy(alpha = 0.33f)  // dark: white@0.33 (decorat
 
 // ── Brand / accent ────────────────────────────────────────────────────────
 
-val IdeAccent    = Color(0xFF3D8BFF)   // §0 canonical accent blue
-val IdeAccentOn  = Color(0xFFFFFFFF)   // text on accent surfaces
-val IdeAccentDim = Color(0xFF3D8BFF).copy(alpha = 0.12f)  // accent container tint
+val IdeAccent     = Color(0xFF3D8BFF)   // §0 canonical accent blue
+val IdeAccentOn   = Color(0xFFFFFFFF)   // text on accent surfaces
+val IdeAccentDim  = Color(0xFF3D8BFF).copy(alpha = 0.12f)  // accent container tint
+val IdeAccentPress = Color(0xFF2F7AE8)  // primary-button press (dark): a touch deeper than accent
 
 // ── §3 Semantic colours ───────────────────────────────────────────────────
 
@@ -105,34 +107,39 @@ val LightDivider   = Color(0xFFE2E2E6)   // row separators
 // Text hierarchy (Apple label colors)
 val LightText      = Color(0xFF1D1D1F)   // labelColor
 val LightDim       = Color(0xFF5B5B60)   // secondaryLabel
-val LightFaint     = Color(0xFF8A8A8E)   // tertiaryLabel (§1 WCAG-AA value)
+val LightFaint     = Color(0xFF6C6C72)   // styleguide --ide-faint 108/108/114 — AA-safe 4.6:1 on white (was #8A8A8E ~2.9:1, failed AA)
+val LightMute      = Color(0xFF8E8E94)   // styleguide --ide-mute 142/142/148 — control-track / disabled grey (distinct from faint text)
 
 // Ghost text / decorative icons — light variant (PARITY-SPEC §1)
 val LightGhost     = Color(0xFF3C3C43).copy(alpha = 0.55f)  // rgba(60,60,67,0.55)
 val LightGhostDeco = Color(0xFF3C3C43).copy(alpha = 0.32f)  // rgba(60,60,67,0.32)
 
-// Brand — Apple systemBlue
+// Brand — styleguide accent (systemBlue family)
 val LightPrimary            = Color(0xFF007AFF)   // §1 accent (systemBlue)
 val LightOnPrimary          = Color(0xFFFFFFFF)
 val LightPrimaryContainer   = Color(0xFF007AFF).copy(alpha = 0.12f)
 val LightOnPrimaryContainer = Color(0xFF0063D1)   // accent-hover, on tint
+val LightAccentPress        = Color(0xFF0070EB)   // styleguide --ide-accent-press 0/112/235 — primary-button press
 
-// Semantic — Apple system colors (§1)
-val LightSecondary            = Color(0xFFFF9500)  // warning / systemOrange
+// Semantic — styleguide :root[data-theme=light] ramp (AA-darkened on white)
+val LightSecondary            = Color(0xFFFF9500)  // warning / systemOrange (Material secondary slot)
 val LightOnSecondary          = Color(0xFFFFFFFF)
 val LightSecondaryContainer   = Color(0xFFFF9500).copy(alpha = 0.12f)
 val LightOnSecondaryContainer = Color(0xFF3E2000)
 
-val LightDanger    = Color(0xFFFF3B30)   // systemRed
-val LightDangerDim = Color(0xFFFF3B30).copy(alpha = 0.10f)
+// Pinned-row / COLOR / NUMBER / PATH badge amber — styleguide --ide-badge-warning #D9A343.
+val LightWarning   = Color(0xFFD9A343)   // styleguide pinned/amber 217/163/67 (was systemOrange #FF9500)
 
-val LightSuccess   = Color(0xFF34C759)   // systemGreen
-val LightInfo      = Color(0xFF32ADE6)   // systemTeal/cyan
-val LightViolet    = Color(0xFFAF52DE)   // systemPurple
+val LightDanger    = Color(0xFFD7281E)   // styleguide --ide-danger 215/40/30 (AA-darkened, was #FF3B30)
+val LightDangerDim = Color(0xFFD7281E).copy(alpha = 0.10f)
+
+val LightSuccess   = Color(0xFF288C46)   // styleguide --ide-success 40/140/70 (AA-darkened, was #34C759)
+val LightInfo      = Color(0xFF1478AA)   // styleguide --ide-sky 20/120/170 (URL/IMAGE, was systemTeal #32ADE6)
+val LightViolet    = Color(0xFF805AD5)   // styleguide --ide-violet 128/90/213 (CODE, was systemPurple #AF52DE)
 
 // Error containers for light
-val LightErrorContainer    = Color(0xFFFF3B30).copy(alpha = 0.10f)
-val LightOnErrorContainer  = Color(0xFFFF3B30)
+val LightErrorContainer    = Color(0xFFD7281E).copy(alpha = 0.10f)
+val LightOnErrorContainer  = Color(0xFFD7281E)
 
 // ---------------------------------------------------------------------------
 // IdeColors — the full theme-adaptive token set (PARITY-SPEC §1), the Android
@@ -149,9 +156,9 @@ val LightOnErrorContainer  = Color(0xFFFF3B30)
 data class IdeColors(
     val bg: Color, val panel: Color, val elevated: Color, val raised: Color,
     val border: Color, val divider: Color,
-    val text: Color, val dim: Color, val faint: Color,
+    val text: Color, val dim: Color, val faint: Color, val mute: Color,
     val ghost: Color, val ghostDeco: Color,
-    val accent: Color, val accentOn: Color, val accentDim: Color,
+    val accent: Color, val accentOn: Color, val accentDim: Color, val accentPress: Color,
     val selection: Color, val hover: Color,
     val success: Color, val successDim: Color,
     val warning: Color, val warningDim: Color,
@@ -164,9 +171,9 @@ data class IdeColors(
 val DarkIdeColors = IdeColors(
     bg = IdeBg, panel = IdePanel, elevated = IdeElevated, raised = IdeRaised,
     border = IdeBorder, divider = IdeDivider,
-    text = IdeText, dim = IdeDim, faint = IdeFaint,
+    text = IdeText, dim = IdeDim, faint = IdeFaint, mute = IdeMute,
     ghost = IdeGhost, ghostDeco = IdeGhostDeco,
-    accent = IdeAccent, accentOn = IdeAccentOn, accentDim = IdeAccentDim,
+    accent = IdeAccent, accentOn = IdeAccentOn, accentDim = IdeAccentDim, accentPress = IdeAccentPress,
     selection = IdeSelection, hover = IdeHover,
     success = IdeSuccess, successDim = IdeSuccessDim,
     warning = IdeWarning, warningDim = IdeWarningDim,
@@ -179,14 +186,15 @@ val DarkIdeColors = IdeColors(
 val LightIdeColors = IdeColors(
     bg = LightBg, panel = LightPanel, elevated = LightElevated, raised = LightRaised,
     border = LightBorder, divider = LightDivider,
-    text = LightText, dim = LightDim, faint = LightFaint,
+    text = LightText, dim = LightDim, faint = LightFaint, mute = LightMute,
     ghost = LightGhost, ghostDeco = LightGhostDeco,
     accent = LightPrimary, accentOn = LightOnPrimary,
-    accentDim = LightPrimary.copy(alpha = 0.12f),
+    accentDim = LightPrimary.copy(alpha = 0.12f), accentPress = LightAccentPress,
     selection = LightPrimary.copy(alpha = 0.14f),
     hover = Color.Black.copy(alpha = 0.04f),
     success = LightSuccess, successDim = LightSuccess.copy(alpha = 0.14f),
-    warning = LightSecondary, warningDim = LightSecondary.copy(alpha = 0.14f),
+    // styleguide pins pinned-row/COLOR/NUMBER/PATH badge amber to #D9A343, not systemOrange.
+    warning = LightWarning, warningDim = LightWarning.copy(alpha = 0.14f),
     danger = LightDanger, dangerDim = LightDanger.copy(alpha = 0.12f),
     info = LightInfo, infoDim = LightInfo.copy(alpha = 0.14f),
     violet = LightViolet, violetDim = LightViolet.copy(alpha = 0.14f),

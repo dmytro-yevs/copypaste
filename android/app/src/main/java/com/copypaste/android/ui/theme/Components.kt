@@ -7,7 +7,11 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -59,9 +63,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asComposeRenderEffect
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -70,6 +77,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.widthIn
@@ -104,11 +112,61 @@ const val GLASS_ALPHA_DARK = 0.55f
  */
 const val GLASS_ALPHA = GLASS_ALPHA_DARK
 
-/** PARITY-SPEC §2 warm near-white LIGHT glass fill — rgba(250,250,252). */
-val GlassFillLight = Color(0xFFFAFAFC)
+/**
+ * Styleguide glass fill — pure white 255/255/255 (light). The styleguide
+ * `.surface-glass`/`.surface-card`/`.surface-strong` fills are
+ * `linear-gradient(rgba(255 255 255 /α-top), rgba(255 255 255 /α-bot))`, i.e.
+ * pure white at a per-tier alpha gradient (was a flat warm #FAFAFC@0.62).
+ */
+val GlassFillLight = Color(0xFFFFFFFF)
 
 /** PARITY-SPEC §2 DARK glass fill — rgba(30,32,42). */
 val GlassFillDark = Color(0xFF1E202A)
+
+// ---------------------------------------------------------------------------
+// Glass tiers (zd35/skzd/1k3i/vk12) — the styleguide's three frosted recipes.
+//
+//   GLASS  (.surface-glass)  — top bars / chrome: blur 28, light fill .64→.46
+//   CARD   (.surface-card)   — cards / panels:    blur 28, light fill .58→.40
+//   STRONG (.surface-strong) — modals / dialogs:  blur 40, light fill flat .92
+//
+// Each tier carries its own (a) blur radius, (b) top→bottom fill-alpha gradient,
+// and (c) float shadow. The light recipe is pure-white at the listed alphas; the
+// dark recipe reuses the deep [GlassFillDark] at the DARK alpha (0.55) — the dark
+// styleguide does not publish a per-tier gradient, so dark stays a flat tint.
+// ---------------------------------------------------------------------------
+
+enum class GlassTier(
+    val blur: Dp,
+    val lightAlphaTop: Float,
+    val lightAlphaBottom: Float,
+    // Dark recipe has no published per-tier gradient, so dark uses a single flat
+    // tint per tier (chrome/card stay at the §2 baseline 0.55; modals floor higher
+    // so the dialog stands out over the scrim).
+    val darkAlpha: Float,
+    val shadowYOffset: Dp,
+    val shadowBlur: Dp,
+) {
+    /** Top bars / chrome — styleguide .surface-glass. */
+    GLASS(blur = 28.dp, lightAlphaTop = 0.64f, lightAlphaBottom = 0.46f, darkAlpha = GLASS_ALPHA_DARK, shadowYOffset = 8.dp, shadowBlur = 24.dp),
+
+    /** Cards / panels — styleguide .surface-card. */
+    CARD(blur = 28.dp, lightAlphaTop = 0.58f, lightAlphaBottom = 0.40f, darkAlpha = GLASS_ALPHA_DARK, shadowYOffset = 4.dp, shadowBlur = 14.dp),
+
+    /** Modals / dialogs — styleguide .surface-strong (flat .92 light, floored dark). */
+    STRONG(blur = 40.dp, lightAlphaTop = 0.92f, lightAlphaBottom = 0.92f, darkAlpha = 0.86f, shadowYOffset = 20.dp, shadowBlur = 60.dp),
+}
+
+/**
+ * Styleguide glass hairline rim — `.5px solid rgba(255 255 255 / 0.65)` (light).
+ * A bright translucent-white edge that reads as the glass rim, NOT an opaque grey
+ * 1dp Material outline. On dark, a subtler white@0.12 keeps the rim from glowing.
+ */
+fun glassHairline(dark: Boolean): Color =
+    if (dark) Color.White.copy(alpha = 0.12f) else Color.White.copy(alpha = 0.65f)
+
+/** Styleguide glass float-shadow tint — `rgb(60 60 90 / 0.14)`. */
+val GlassShadowTint = Color(0xFF3C3C5A).copy(alpha = 0.14f)
 
 // ---------------------------------------------------------------------------
 // Real frosted blur (PARITY-SPEC §2, audit P0).
@@ -122,13 +180,71 @@ val GlassFillDark = Color(0xFF1E202A)
 // we fall back to the EXISTING flat `glassFillForTheme()` alpha-fill, which also
 // tints the blur on ≥31. The §2 tint + a top sheen highlight are layered on top.
 //
-// The blur radius mirrors web's blur(40px); 40dp is a touch heavy for the
-// gradient-only backdrop, so we use the §2-equivalent 32px (the canonical glass
-// blur radius documented in PARITY-SPEC §2: "blur(32px) saturate(180%)").
+// The blur radius is now PER-TIER (skzd): styleguide glass/card use blur(28px),
+// strong/modal uses blur(40px) — see [GlassTier]. The blur is also chained with a
+// saturate(180%) ColorMatrix RenderEffect (skzd) so the frosted aurora pops like
+// the web `backdrop-filter: blur(..) saturate(180%)`. [GLASS_BLUR_RADIUS] is kept
+// as the default (= GLASS tier 28dp) for any source-compatibility callers.
 // ---------------------------------------------------------------------------
 
-/** §2 canonical glass blur radius (mirrors web `backdrop-filter: blur(32px)`). */
-val GLASS_BLUR_RADIUS = 32.dp
+/** Default glass blur radius (= [GlassTier.GLASS]); styleguide `blur(28px)`. */
+val GLASS_BLUR_RADIUS = GlassTier.GLASS.blur
+
+/**
+ * Styleguide `saturate(180%)` as a 4×5 ColorMatrix (skzd). Boosts chroma so the
+ * frosted aurora pops; chained AFTER the blur via [android.graphics.RenderEffect.createChainEffect]
+ * on API 31+. The matrix is the standard saturation interpolation around the
+ * Rec.601 luma coefficients with s = 1.8.
+ */
+private fun saturationRenderEffect(): android.graphics.RenderEffect {
+    val s = 1.8f
+    val lumaR = 0.213f
+    val lumaG = 0.715f
+    val lumaB = 0.072f
+    val sr = (1f - s) * lumaR
+    val sg = (1f - s) * lumaG
+    val sb = (1f - s) * lumaB
+    val m = floatArrayOf(
+        sr + s, sg,     sb,     0f, 0f,
+        sr,     sg + s, sb,     0f, 0f,
+        sr,     sg,     sb + s, 0f, 0f,
+        0f,     0f,     0f,     1f, 0f,
+    )
+    return android.graphics.RenderEffect.createColorFilterEffect(
+        android.graphics.ColorMatrixColorFilter(android.graphics.ColorMatrix(m)),
+    )
+}
+
+/**
+ * Soft styleguide float shadow (vk12). Draws a tinted, large-offset drop shadow
+ * behind a glass surface — `0 <yOffset> <blur> rgb(60 60 90 / .14)` — instead of
+ * Material's flat tonal-elevation. The shadow is a blurred copy of the surface's
+ * rounded silhouette, offset down by [yOffset]; [blurRadius] mirrors the CSS blur.
+ *
+ * Implemented with a framework Paint + MaskFilter blur so it works on all API
+ * levels (no RenderEffect dependency). [shape] is honoured for the common
+ * RoundedCornerShape case; other shapes fall back to a rounded rect of [radius].
+ */
+fun Modifier.glassFloatShadow(
+    tier: GlassTier,
+    radius: Dp,
+    tint: Color = GlassShadowTint,
+): Modifier = this.drawBehind {
+    val yPx = tier.shadowYOffset.toPx()
+    val blurPx = tier.shadowBlur.toPx()
+    if (blurPx <= 0f) return@drawBehind
+    val rPx = radius.toPx()
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        color = tint.toArgb()
+        maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawRoundRect(
+            0f, yPx, size.width, size.height + yPx, rPx, rPx, paint,
+        )
+    }
+}
 
 /** True when the platform can render a real RenderEffect blur (API 31+). */
 val supportsGlassBlur: Boolean
@@ -218,17 +334,21 @@ fun Modifier.auroraCanvas(dark: Boolean): Modifier {
 }
 
 /**
- * Frosted-glass surface wrapper (PARITY-SPEC §2, audit P0). Stacks, bottom→top:
+ * Frosted-glass surface wrapper (styleguide 3-tier recipe). Stacks, bottom→top:
  *   1. a backdrop layer drawing [glassCanvasBrush] with an API-31 RenderEffect
- *      blur ([GLASS_BLUR_RADIUS]) — the real frost. Gated on [supportsGlassBlur];
- *      omitted below 31 (the flat tint then carries the whole look).
- *   2. the §2 [glassFillForTheme] tint (which also tints the blur on ≥31).
- *   3. a 1 dp top sheen highlight (web's top inset highlight).
+ *      blur ([GlassTier.blur]) chained with a `saturate(180%)` ColorMatrix (skzd)
+ *      — the real frost. Gated on [supportsGlassBlur]; omitted below 31 (the
+ *      gradient fill then carries the whole look).
+ *   2. the per-tier translucent fill — a top→bottom WHITE alpha gradient (zd35):
+ *      glass .64→.46, card .58→.40, strong flat .92 (light); flat deep tint (dark).
+ *   3. a 1 px inset top specular line + the glass sheen (1k3i).
  *   4. the caller's [content].
  *
- * When [translucent] is false the blur + sheen are skipped and the surface is
- * the opaque solid colour — the pre-glass look. [shape] clips all layers so the
- * frost respects the surface's corner radius.
+ * The bright `.5px white@.65` glass rim (1k3i) is drawn by the surface itself
+ * when [hairline] is true (default), so call sites no longer need an opaque grey
+ * Material border. When [translucent] is false the blur + sheen + gradient are
+ * skipped and the surface is the opaque solid colour — the pre-glass look.
+ * [shape] clips all layers so the frost respects the corner radius.
  *
  * This is the single mechanism behind CopyPasteCard, the History/standard top
  * bars, GlassToast and GlassAlertDialog so every glass surface frosts uniformly.
@@ -240,55 +360,92 @@ fun LiquidGlassSurface(
     dark: Boolean,
     solid: Color,
     modifier: Modifier = Modifier,
+    tier: GlassTier = GlassTier.CARD,
     contentColor: Color = LocalIdeColors.current.text,
+    hairline: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
-    val tint = glassFillForTheme(solid = solid, translucent = translucent, dark = dark)
-    // Top sheen: a near-white highlight fading out — web's `rgba(255,255,255,…)`
-    // top inset. Subtle on dark, brighter on light (Apple frosted near-white).
+    // Per-tier WHITE alpha gradient (light) / flat deep tint (dark) — zd35.
+    val fillColor = if (dark) GlassFillDark else GlassFillLight
+    val alphaTop = if (dark) tier.darkAlpha else tier.lightAlphaTop
+    val alphaBot = if (dark) tier.darkAlpha else tier.lightAlphaBottom
+    // Top sheen: a bright near-white inset highlight — styleguide top specular.
     val sheen = if (dark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.45f)
+    val specular = if (dark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.75f)
+    val rim = glassHairline(dark)
     val canvas = remember(dark) { glassCanvasBrush(dark) }
+    val blurRadius = tier.blur
 
     Box(
         modifier = modifier.clip(shape),
         propagateMinConstraints = true,
     ) {
         if (translucent && supportsGlassBlur) {
-            // Real frosted backdrop: the opaque canvas gradient, RenderEffect-blurred.
+            // Real frosted backdrop: opaque canvas gradient, blur ∘ saturate(180%).
             Box(
                 modifier = Modifier
                     .matchParentSize()
                     .graphicsLayer {
+                        val blur = android.graphics.RenderEffect.createBlurEffect(
+                            blurRadius.toPx(),
+                            blurRadius.toPx(),
+                            android.graphics.Shader.TileMode.CLAMP,
+                        )
+                        // skzd: chain saturate(180%) AFTER the blur so the frosted
+                        // aurora keeps its chroma (web `blur(..) saturate(180%)`).
                         renderEffect = android.graphics.RenderEffect
-                            .createBlurEffect(
-                                GLASS_BLUR_RADIUS.toPx(),
-                                GLASS_BLUR_RADIUS.toPx(),
-                                android.graphics.Shader.TileMode.CLAMP,
-                            )
+                            .createChainEffect(saturationRenderEffect(), blur)
                             .asComposeRenderEffect()
                     }
                     .drawBehind { drawRect(canvas) },
             )
         }
-        // §2 tint fill (also tints the blur on ≥31; the whole look below 31).
+        // Per-tier fill + sheen + inset specular line (zd35/1k3i).
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .drawBehind {
-                    drawRect(tint)
                     if (translucent) {
-                        // Top sheen highlight — a thin gradient fading down.
+                        // Top→bottom white alpha gradient (the 3-tier recipe).
+                        drawRect(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    fillColor.copy(alpha = alphaTop),
+                                    fillColor.copy(alpha = alphaBot),
+                                ),
+                            ),
+                        )
+                        // Sheen — a thin highlight fading down.
                         drawRect(
                             brush = Brush.verticalGradient(
                                 colors = listOf(sheen, Color.Transparent),
                                 endY = size.height * 0.5f,
                             ),
                         )
+                        // 1 px inset top-specular line (web's inset 0 1px 0 white@.75).
+                        drawRect(
+                            color = specular,
+                            topLeft = Offset(0f, 0f),
+                            size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx()),
+                        )
+                    } else {
+                        // Pre-glass solid look.
+                        drawRect(solid)
                     }
                 },
         )
         CompositionLocalProvider(LocalContentColor provides contentColor) {
             content()
+        }
+        // 1k3i: bright .5px white glass rim drawn ON the surface (not an opaque
+        // grey Material outline). Only on translucent surfaces; the solid look
+        // keeps its caller-supplied border.
+        if (translucent && hairline) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .border(0.5.dp, rim, shape),
+            )
         }
     }
 }
@@ -432,6 +589,10 @@ fun CopyPasteTopBar(
             dark = dark,
             solid = MaterialTheme.colorScheme.surface,
             modifier = Modifier.matchParentSize(),
+            // Top bars are the styleguide tier-1 .surface-glass recipe. No hairline
+            // rim (a rectangular full-bleed bar reads cleaner with just its blur).
+            tier = GlassTier.GLASS,
+            hairline = false,
             content = {},
         )
         TopAppBar(
@@ -483,7 +644,10 @@ fun CopyPasteTopBar(
  * white (light) / deep (dark) glass fill so the opaque canvas behind it bleeds
  * through. When false, the card is the fully opaque theme elevated surface.
  *
- * 12 dp radius (§4); single 1 dp hairline border.
+ * Styleguide tier-2 .surface-card: 14 dp radius, bright .5px white glass rim,
+ * soft tinted float shadow (0 4px 14px rgb(60 60 90 /.14)). [accent] still tints
+ * a SEMANTIC border (danger/success) when the caller overrides the default — that
+ * sits over the glass rim so per-screen status cards keep their colour cue.
  */
 @Composable
 fun CopyPasteCard(
@@ -494,30 +658,39 @@ fun CopyPasteCard(
     content: @Composable (androidx.compose.foundation.layout.ColumnScope.() -> Unit),
 ) {
     val dark = isDarkTheme()
-    val cardShape = RoundedCornerShape(12.dp)
+    // oha3/5686: styleguide card radius is 14 dp (--radius-card), not 12.
+    val cardShape = RadiusCard
+    // Only paint an explicit Material border when the caller overrides `accent`
+    // with a SEMANTIC tint; the default outline is superseded by the bright glass
+    // rim that LiquidGlassSurface draws (1k3i — no opaque grey 1dp ring).
+    val semanticBorder = accent != MaterialTheme.colorScheme.outline
 
-    // §2/P0: the Card supplies the §4 hairline border + one e2 shadow and stays
-    // TRANSPARENT; the real frosted blur + §2 tint comes from LiquidGlassSurface
-    // (API-31 RenderEffect blur, flat tint fallback < 31).
+    // vk12: drop Material tonal elevation entirely; the soft tinted float shadow
+    // is drawn behind the card via glassFloatShadow (CARD tier 0 4px 14px).
     Card(
-        modifier = modifier.fillMaxWidth(),
-        // §4 card radius 12 dp.
+        modifier = modifier
+            .fillMaxWidth()
+            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.CARD, 14.dp) else Modifier),
         shape = cardShape,
         colors = CardDefaults.cardColors(
             containerColor = Color.Transparent,
             contentColor   = MaterialTheme.colorScheme.onSurface,
         ),
-        // §4: single 1 dp hairline.
-        border = BorderStroke(1.dp, accent),
-        // §4 elevation: drop Material tonal-elevation drift (no pressed/hovered
-        // jumps) — a flat hairline + one subtle e2-equivalent shadow only.
+        // Semantic tint border only; glass rim otherwise (1k3i). Opaque solid look
+        // (translucency off) keeps a 1dp hairline so the card edge stays visible.
+        border = when {
+            semanticBorder -> BorderStroke(1.dp, accent)
+            !translucent   -> BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
+            else           -> null
+        },
+        // No Material tonal elevation (the float shadow replaces it).
         elevation = CardDefaults.cardElevation(
-            defaultElevation   = 2.dp,
-            pressedElevation   = 2.dp,
-            focusedElevation   = 2.dp,
-            hoveredElevation   = 2.dp,
-            draggedElevation   = 2.dp,
-            disabledElevation  = 2.dp,
+            defaultElevation   = 0.dp,
+            pressedElevation   = 0.dp,
+            focusedElevation   = 0.dp,
+            hoveredElevation   = 0.dp,
+            draggedElevation   = 0.dp,
+            disabledElevation  = 0.dp,
         ),
     ) {
         LiquidGlassSurface(
@@ -525,6 +698,7 @@ fun CopyPasteCard(
             translucent = translucent,
             dark = dark,
             solid = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tier = GlassTier.CARD,
             contentColor = MaterialTheme.colorScheme.onSurface,
         ) {
             Column(content = content)
@@ -545,10 +719,11 @@ fun glassDialogContainerColor(translucent: Boolean = rememberTranslucency()): Co
     val dark = isDarkTheme()
     val solid = MaterialTheme.colorScheme.surfaceContainerHigh
     if (!translucent) return solid
-    // §2 fill but at a higher floor (0.86) than cards so the modal stands out
-    // over the dim scrim and the dialog text never washes out.
+    // Styleguide .surface-strong: a flat 0.92 fill (zd35/mjwc — was 0.86) so the
+    // modal reads as a distinct, near-opaque layer over the dim scrim and the
+    // dialog text never washes out.
     val fill = if (dark) GlassFillDark else GlassFillLight
-    return fill.copy(alpha = 0.86f)
+    return fill.copy(alpha = GlassTier.STRONG.lightAlphaTop)
 }
 
 /**
@@ -582,22 +757,26 @@ fun GlassAlertDialog(
         onDismissRequest = onDismissRequest,
         properties = properties,
     ) {
-        // §4 hairline + e2 shadow on a transparent Surface; LiquidGlassSurface
-        // supplies the frosted blur + §8 tint.
+        // Transparent Surface; LiquidGlassSurface supplies the .surface-strong
+        // frosted blur, the .92 fill and the bright glass rim. vk12: the soft
+        // tinted modal float shadow (0 20px 60px) replaces Material elevation.
         Surface(
-            modifier = modifier.widthIn(min = 280.dp, max = 560.dp),
+            modifier = modifier
+                .widthIn(min = 280.dp, max = 560.dp)
+                .then(if (translucent) Modifier.glassFloatShadow(GlassTier.STRONG, 16.dp) else Modifier),
             shape = dialogShape,
             color = Color.Transparent,
-            border = BorderStroke(1.dp, c.border),
-            shadowElevation = 6.dp,
+            border = if (translucent) null else BorderStroke(1.dp, c.border),
+            shadowElevation = if (translucent) 0.dp else 6.dp,
         ) {
             LiquidGlassSurface(
                 shape = dialogShape,
                 translucent = translucent,
                 dark = dark,
-                // §8: dialogs use the higher-floor glass fill so text stays legible
-                // over the scrim. Passing the slightly-opaque fill as `solid` makes
-                // the no-blur (< 31 / translucency-off) path match §8 exactly.
+                tier = GlassTier.STRONG,
+                // Dialogs use the higher-floor (0.92) strong fill so text stays
+                // legible over the scrim. Passing it as `solid` makes the no-blur
+                // (< 31 / translucency-off) path match the styleguide exactly.
                 solid = glassDialogContainerColor(translucent),
                 contentColor = c.text,
             ) {
@@ -684,12 +863,12 @@ fun IdeSwitch(
         animationSpec = tween(120, easing = EaseStandard),
         label = "ideSwitchThumb",
     )
+    // 1vgu: styleguide closed track = rgb(--ide-mute / .5) grey (was c.elevated).
     val trackColor by animateColorAsState(
-        targetValue = if (checked) c.accent else c.elevated,
+        targetValue = if (checked) c.accent else c.mute.copy(alpha = 0.5f),
         animationSpec = tween(120, easing = EaseStandard),
         label = "ideSwitchTrack",
     )
-    val borderColor = if (checked) c.accent else c.border
 
     // toggleable with indication=null → click + Switch a11y role, NO ripple/glow.
     val clickMod = if (enabled && onCheckedChange != null) {
@@ -719,13 +898,14 @@ fun IdeSwitch(
             .size(width = trackW, height = trackH)
             .alpha(disabledAlpha)
             .clip(RoundedCornerShape(percent = 50))
+            // 1vgu: styleguide switch has NO border in either state — the mute@.5
+            // closed track and accent open track read on their own.
             .drawBehind {
                 drawRoundRect(
                     color = trackColor,
                     cornerRadius = CornerRadius(size.height / 2f),
                 )
-            }
-            .border(1.dp, borderColor, RoundedCornerShape(percent = 50)),
+            },
         contentAlignment = Alignment.CenterStart,
     ) {
         Box(
@@ -741,8 +921,8 @@ fun IdeSwitch(
 
 /**
  * Apple grouped section header (PARITY-SPEC §3): uppercase, 11 sp semibold,
- * GREY (`c.dim`) — NOT accent blue — with wide tracking. Apple section headers
- * are grey, not blue. 8 dp grid padding.
+ * tertiary GREY (`c.faint`) — NOT accent blue — with wide tracking. Apple
+ * section headers are grey, not blue. 8 dp grid padding.
  */
 @Composable
 fun SectionLabel(
@@ -758,7 +938,8 @@ fun SectionLabel(
             fontWeight    = FontWeight.SemiBold,
             letterSpacing = 0.6.sp,   // tracking-wide
         ),
-        color = c.dim,   // §3 grey, not accent
+        // 5jkb: styleguide section label uses the tertiary --ide-faint token (was dim).
+        color = c.faint,
         // CopyPaste-aod: mark as a heading so TalkBack users can jump between sections.
         modifier = modifier
             .semantics { heading() }
@@ -877,9 +1058,10 @@ fun SteppedSliderRow(
         val sliderColors = SliderDefaults.colors(
             thumbColor              = c.accent,
             activeTrackColor        = c.accent,
-            inactiveTrackColor      = c.border,
+            // vm7q: styleguide slider track = rgb(--ide-mute / .35) (was c.border).
+            inactiveTrackColor      = c.mute.copy(alpha = 0.35f),
             activeTickColor         = c.accent.copy(alpha = 0.7f),
-            inactiveTickColor       = c.border.copy(alpha = 0.5f),
+            inactiveTickColor       = c.mute.copy(alpha = 0.5f),
         )
         // CopyPaste-aod: the bare Slider announces only "Slider, N%"; include the
         // setting name + current step label so TalkBack reads e.g. "History limit, 50 MB".
@@ -971,7 +1153,8 @@ fun ContinuousSliderRow(
         val sliderColors = SliderDefaults.colors(
             thumbColor         = c.accent,
             activeTrackColor   = c.accent,
-            inactiveTrackColor = c.border,
+            // vm7q: styleguide slider track = rgb(--ide-mute / .35) (was c.border).
+            inactiveTrackColor = c.mute.copy(alpha = 0.35f),
         )
         // CopyPaste-aod: include setting name + formatted value for TalkBack.
         val valueLabel = formatValue(sliderPos.toInt().coerceIn(min, max))
@@ -1131,4 +1314,147 @@ fun ideTextFieldColors(): androidx.compose.material3.TextFieldColors {
         cursorColor      = c.accent,
         errorCursorColor = c.danger,
     )
+}
+
+// ---------------------------------------------------------------------------
+// CopyPasteButton — unified styleguide button (k9ht).
+//
+// One component for the styleguide's button variants, all coloured from
+// LocalIdeColors and using the --radius-ctl 9dp control radius:
+//
+//   PRIMARY      accent fill + white label; press → accentPress (#0070EB light).
+//   SECONDARY    glass: translucent white@.5 + .5px white hairline (tier-1 glass);
+//                text colour = theme text. Falls back to a flat tint < API 31.
+//   DANGER       danger@.15 tint fill + danger label (the soft destructive tier).
+//   DANGER_SOLID danger fill + white label (the loud destructive tier).
+//   GHOST        transparent + faint label (low-emphasis text action).
+//
+// Icon-only buttons use [CopyPasteIconButton] (28dp glyph inside a 44dp invisible
+// hit target). Per-screen agents adopt these at their call sites; this commit
+// only introduces the shared component (no global call-site rewrite).
+// ---------------------------------------------------------------------------
+
+enum class ButtonVariant { PRIMARY, SECONDARY, DANGER, DANGER_SOLID, GHOST }
+
+/**
+ * Shared styleguide button. [variant] selects the fill/label recipe; everything
+ * is coloured from [LocalIdeColors] so it themes light/dark in lockstep. Radius
+ * is the --radius-ctl 9dp control token. Press feedback is a colour shift (no
+ * Material state-layer halo). [enabled] dims to 0.40 and blocks taps.
+ */
+@Composable
+fun CopyPasteButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    variant: ButtonVariant = ButtonVariant.PRIMARY,
+    enabled: Boolean = true,
+    translucent: Boolean = rememberTranslucency(),
+    content: @Composable RowScope.() -> Unit,
+) {
+    val c = LocalIdeColors.current
+    val dark = isDarkTheme()
+    val shape = RadiusControl
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+
+    // Per-variant fill (background) + label colour. Secondary is glass, so its
+    // background is handled separately via LiquidGlassSurface below.
+    val labelColor = when (variant) {
+        ButtonVariant.PRIMARY      -> c.accentOn
+        ButtonVariant.SECONDARY    -> c.text
+        ButtonVariant.DANGER       -> c.danger
+        ButtonVariant.DANGER_SOLID -> Color.White
+        ButtonVariant.GHOST        -> c.faint
+    }
+    val fill = when (variant) {
+        // Primary press → styleguide --ide-accent-press; resting → accent.
+        ButtonVariant.PRIMARY      -> if (pressed) c.accentPress else c.accent
+        ButtonVariant.DANGER       -> c.danger.copy(alpha = if (pressed) 0.22f else 0.15f)
+        ButtonVariant.DANGER_SOLID -> if (pressed) c.danger.copy(alpha = 0.88f) else c.danger
+        ButtonVariant.GHOST        -> if (pressed) c.hover else Color.Transparent
+        ButtonVariant.SECONDARY    -> Color.Transparent // glass draws its own fill
+    }
+    val disabledAlpha = if (enabled) 1f else 0.40f
+
+    val core: @Composable () -> Unit = {
+        Row(
+            modifier = Modifier
+                .heightIn(min = 36.dp)
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            CompositionLocalProvider(LocalContentColor provides labelColor) {
+                ProvideTextStyle(
+                    MaterialTheme.typography.labelLarge.copy(
+                        color = labelColor,
+                        fontWeight = FontWeight.SemiBold,
+                    ),
+                ) { content() }
+            }
+        }
+    }
+
+    val clickMod = modifier
+        .clip(shape)
+        .alpha(disabledAlpha)
+        .clickable(
+            enabled = enabled,
+            role = Role.Button,
+            interactionSource = interaction,
+            indication = null,
+            onClick = onClick,
+        )
+
+    if (variant == ButtonVariant.SECONDARY) {
+        // Glass secondary — tier-1 .surface-glass recipe (translucent white@.5 +
+        // .5px white hairline + blur). Falls back to a flat tint < API 31.
+        Box(modifier = clickMod) {
+            LiquidGlassSurface(
+                shape = shape,
+                translucent = translucent,
+                dark = dark,
+                solid = c.elevated,
+                tier = GlassTier.GLASS,
+                contentColor = labelColor,
+            ) { core() }
+        }
+    } else {
+        Box(
+            modifier = clickMod.drawBehind { drawRect(fill) },
+            contentAlignment = Alignment.Center,
+        ) { core() }
+    }
+}
+
+/**
+ * Icon-only button (k9ht icon variant). A [glyphSize] icon centred inside a
+ * [hitTarget] invisible touch area (styleguide: 28px glyph, 44px hit target).
+ * Tint defaults to the theme dim; press has no halo (clickable indication=null).
+ */
+@Composable
+fun CopyPasteIconButton(
+    onClick: () -> Unit,
+    contentDescription: String?,
+    icon: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    hitTarget: Dp = 44.dp,
+) {
+    val interaction = remember { MutableInteractionSource() }
+    Box(
+        modifier = modifier
+            .size(hitTarget)
+            .clip(CircleShape)
+            .clickable(
+                enabled = enabled,
+                role = Role.Button,
+                interactionSource = interaction,
+                indication = null,
+                onClick = onClick,
+            )
+            .then(if (contentDescription != null) Modifier.semantics { this.contentDescription = contentDescription } else Modifier)
+            .alpha(if (enabled) 1f else 0.40f),
+        contentAlignment = Alignment.Center,
+    ) { icon() }
 }

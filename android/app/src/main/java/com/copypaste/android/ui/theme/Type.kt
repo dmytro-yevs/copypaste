@@ -45,22 +45,41 @@ val MonoFontFamily = FontFamily(
 )
 
 // ---------------------------------------------------------------------------
-// Typography — compact IDE-style scale matching the macOS desktop UI.
+// Typography — compact IDE-style scale matching the macOS desktop UI, extended
+// with the styleguide hero/heading tiers (34/700 + 18/600).
 //
 // The macOS reference uses 13 sp base text (Inter), with an 11 sp subdued
 // timestamp tier. Android sp already scales with density the same way em
 // does on the web, so the numbers transfer directly.
 //
 // Scale:
-//   titleLarge  — view headers (14 sp, Medium)
+//   displayLarge — hero title (34 sp, Bold) — styleguide Title/34/700
+//   headlineSmall— screen heading (18 sp, SemiBold) — styleguide Heading/18/600
+//   titleLarge  — compact view sub-headers (14 sp, Medium)
 //   titleMedium — section labels (13 sp, SemiBold)
 //   bodyLarge   — row preview text (13 sp, Normal)
 //   bodyMedium  — row metadata / timestamps (11 sp, Normal)
 //   labelLarge  — button labels (12 sp, Medium)
-//   labelSmall  — chip / badge labels (10 sp, Medium)
+//   labelSmall  — chip / badge labels (10 sp, SemiBold — styleguide badge 600)
 // ---------------------------------------------------------------------------
 
 val CopyPasteTypography = Typography(
+    // Styleguide hero title (Title/34/700) — e.g. About app name, onboarding hero.
+    displayLarge = TextStyle(
+        fontFamily    = InterFontFamily,
+        fontWeight    = FontWeight.Bold,
+        fontSize      = 34.sp,
+        lineHeight    = 40.sp,
+        letterSpacing = (-0.5).sp,
+    ),
+    // Styleguide screen heading (Heading/18/600) — the canonical screen-title tier.
+    headlineSmall = TextStyle(
+        fontFamily    = InterFontFamily,
+        fontWeight    = FontWeight.SemiBold,
+        fontSize      = 18.sp,
+        lineHeight    = 24.sp,
+        letterSpacing = 0.sp,
+    ),
     titleLarge = TextStyle(
         fontFamily    = InterFontFamily,
         fontWeight    = FontWeight.Medium,
@@ -94,7 +113,8 @@ val CopyPasteTypography = Typography(
     ),
     labelSmall = TextStyle(
         fontFamily = InterFontFamily,
-        fontWeight = FontWeight.Medium,
+        // Styleguide badge weight is 600 SemiBold (was Medium 500).
+        fontWeight = FontWeight.SemiBold,
         fontSize   = 10.sp,
         lineHeight = 14.sp,
     ),
