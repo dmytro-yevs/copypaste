@@ -188,6 +188,10 @@ function PeerRow({ peer, rowSt, onUnpair, onRevoke, liveLastSeenSecs }: PeerRowP
             <MetaRow label="Public IP" value={peer.public_ip} />
             <MetaRow label="Paired" value={pairedStr} />
             <MetaRow label="Last sync" value={lastSyncStr} />
+            <MetaRow
+              label="RTT"
+              value={peer.latency_ms !== undefined ? `${peer.latency_ms} ms` : null}
+            />
           </DeviceMetaGrid>
 
           {/* Revoked / error states — kept on their own line for visual weight */}

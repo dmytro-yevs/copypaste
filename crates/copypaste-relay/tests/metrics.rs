@@ -53,6 +53,9 @@ const DEVICE_B: &str = "22222222-2222-2222-2222-222222222222";
 fn pub_key(seed: u8) -> String {
     B64.encode([seed; 32])
 }
+fn valid_pop() -> String {
+    B64.encode([0xDE_u8; 32])
+}
 
 async fn fetch_metrics(router: &axum::Router) -> (StatusCode, String, String) {
     let req = Request::builder()
@@ -121,10 +124,10 @@ async fn counters_increment_on_insert_and_evict() {
     {
         let mut store = state.lock().unwrap();
         store
-            .register_device(DEVICE_A.into(), "A".into(), pub_key(1))
+            .register_device(DEVICE_A.into(), "A".into(), pub_key(1), valid_pop())
             .unwrap();
         store
-            .register_device(DEVICE_B.into(), "B".into(), pub_key(2))
+            .register_device(DEVICE_B.into(), "B".into(), pub_key(2), valid_pop())
             .unwrap();
 
         // Three pushes into A, two into B — items_total should be 5.

@@ -966,10 +966,10 @@ mod tests {
     #[test]
     #[serial]
     fn disabled_flag_truthy_values_disable_realtime() {
-        std::env::set_var("SUPABASE_URL", "https://test.supabase.co");
-        std::env::set_var("SUPABASE_ANON_KEY", "k");
+        unsafe { std::env::set_var("SUPABASE_URL", "https://test.supabase.co") };
+        unsafe { std::env::set_var("SUPABASE_ANON_KEY", "k") };
         for v in ["1", "true", "TRUE", "yes"] {
-            std::env::set_var("SUPABASE_REALTIME_DISABLED", v);
+            unsafe { std::env::set_var("SUPABASE_REALTIME_DISABLED", v) };
             let cfg = RealtimeConfig::from_env().expect("config builds");
             assert!(
                 !cfg.enabled,
@@ -977,19 +977,19 @@ mod tests {
             );
         }
         // Unset / falsey → enabled.
-        std::env::remove_var("SUPABASE_REALTIME_DISABLED");
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_DISABLED") };
         assert!(
             RealtimeConfig::from_env().expect("config builds").enabled,
             "unset disable flag should leave realtime enabled"
         );
-        std::env::set_var("SUPABASE_REALTIME_DISABLED", "false");
+        unsafe { std::env::set_var("SUPABASE_REALTIME_DISABLED", "false") };
         assert!(
             RealtimeConfig::from_env().expect("config builds").enabled,
             "SUPABASE_REALTIME_DISABLED=false should leave realtime enabled"
         );
-        std::env::remove_var("SUPABASE_REALTIME_DISABLED");
-        std::env::remove_var("SUPABASE_URL");
-        std::env::remove_var("SUPABASE_ANON_KEY");
+        unsafe { std::env::remove_var("SUPABASE_REALTIME_DISABLED") };
+        unsafe { std::env::remove_var("SUPABASE_URL") };
+        unsafe { std::env::remove_var("SUPABASE_ANON_KEY") };
     }
 
     // ── RealtimeConfig ────────────────────────────────────────────────────────
@@ -998,8 +998,8 @@ mod tests {
     #[serial]
     fn config_from_env_requires_supabase_url() {
         // Remove env vars to test missing SUPABASE_URL
-        std::env::remove_var("SUPABASE_URL");
-        std::env::remove_var("SUPABASE_ANON_KEY");
+        unsafe { std::env::remove_var("SUPABASE_URL") };
+        unsafe { std::env::remove_var("SUPABASE_ANON_KEY") };
         let result = RealtimeConfig::from_env();
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -1012,10 +1012,10 @@ mod tests {
     #[test]
     #[serial]
     fn config_from_env_requires_anon_key() {
-        std::env::set_var("SUPABASE_URL", "https://test.supabase.co");
-        std::env::remove_var("SUPABASE_ANON_KEY");
+        unsafe { std::env::set_var("SUPABASE_URL", "https://test.supabase.co") };
+        unsafe { std::env::remove_var("SUPABASE_ANON_KEY") };
         let result = RealtimeConfig::from_env();
-        std::env::remove_var("SUPABASE_URL");
+        unsafe { std::env::remove_var("SUPABASE_URL") };
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(

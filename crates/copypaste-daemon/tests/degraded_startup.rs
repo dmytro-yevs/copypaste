@@ -317,8 +317,10 @@ fn degraded_startup_does_not_modify_existing_db_file() {
         wait_for_socket(&daemon.socket_path, SOCKET_READY_TIMEOUT),
         "degraded daemon must bind its socket"
     );
-    // Give the daemon a moment to (not) touch the file.
-    std::thread::sleep(Duration::from_millis(300));
+    // No extra sleep needed — the DB open/fail decision is made during daemon
+    // startup, before the socket becomes available. `wait_for_socket` above
+    // already confirms the daemon has completed its initialisation sequence,
+    // so the DB file state is already final at this point.
 
     let after = std::fs::read(&daemon.db_path).expect("db file still present");
     assert_eq!(

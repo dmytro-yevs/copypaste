@@ -49,9 +49,14 @@ fn addr_hint_from_qr(qr: &str) -> String {
 }
 
 /// Poll `daemon`'s `peers.json` until it contains a record whose canonical
-/// fingerprint equals `want_fp_canonical`, returning that record. The responder
-/// side persists from a detached task after PAKE completes, so a short poll
-/// avoids a flaky race without an arbitrary fixed sleep.
+/// fingerprint equals `want_fp_canonical`, returning that record.
+///
+/// Plain existence check — no address requirement. The race-fix in ipc.rs
+/// (CopyPaste-7mf) ensures that `list_peers` on the responder side awaits the
+/// pending bootstrap JoinHandle before reading peers.json, so the record is
+/// present with all fields by the time `pair_accept_qr_network` returns on
+/// the initiator. A previous commit (f5f5c645) required a non-empty address
+/// here to paper over the race — that patch is now reverted.
 fn wait_for_persisted_peer(daemon: &Daemon, want_fp_canonical: &str) -> serde_json::Value {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
@@ -60,19 +65,14 @@ fn wait_for_persisted_peer(daemon: &Daemon, want_fp_canonical: &str) -> serde_js
             for p in arr {
                 if let Some(fp) = p.get("fingerprint").and_then(|v| v.as_str()) {
                     if canonical(fp) == want_fp_canonical {
-                        // Wait until address is also populated — it may be
-                        // written in a detached task slightly after the record.
-                        let addr = p.get("address").and_then(|v| v.as_str()).unwrap_or("");
-                        if !addr.is_empty() {
-                            return p.clone();
-                        }
+                        return p.clone();
                     }
                 }
             }
         }
         if Instant::now() >= deadline {
             panic!(
-                "timed out waiting for peers.json to contain peer {want_fp_canonical} with address; \
+                "timed out waiting for peers.json to contain peer {want_fp_canonical}; \
                  last seen: {peers}"
             );
         }

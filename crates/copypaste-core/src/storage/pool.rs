@@ -9,6 +9,17 @@
 //! Each connection drawn from the pool has the SQLCipher key applied and
 //! `journal_mode=WAL` enabled before it can be used, via r2d2_sqlite's
 //! `with_init` hook.
+//!
+//! # Read-pool concurrency (CopyPaste-j8p)
+//!
+//! SQLite WAL mode supports multiple simultaneous readers on the same database
+//! file, even while a writer holds the write lock. The `DbRead` trait and
+//! `ReadHandle` type expose this: read-only storage functions accept
+//! `&impl DbRead`, so callers can supply either the single `Database` writer
+//! (backward compatible) **or** a pooled `ReadHandle` that does not compete
+//! with writes. The daemon routes `list`/`count`/`search`/`history_page`/
+//! `stats` through a 4-connection `SqlitePool`, eliminating mutex contention
+//! for the hot read path.
 
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
@@ -19,6 +30,39 @@ use zeroize::Zeroizing;
 
 /// A pool of SQLCipher-encrypted SQLite connections.
 pub type SqlitePool = Pool<SqliteConnectionManager>;
+
+/// Shared interface for anything that can supply a `&rusqlite::Connection`.
+///
+/// Implemented by:
+/// * [`super::db::Database`] — the single write connection (backward compat).
+/// * [`ReadHandle`] — a connection drawn from an [`SqlitePool`].
+///
+/// Read-only storage functions accept `&impl DbRead` so they can serve
+/// requests from either path without code duplication.
+pub trait DbRead {
+    /// Return a shared reference to the underlying SQLite connection.
+    fn conn(&self) -> &rusqlite::Connection;
+}
+
+/// A pooled, read-only database connection.
+///
+/// Wraps an [`r2d2::PooledConnection`] obtained from [`SqlitePool::get()`].
+/// Implements [`DbRead`] so read-only storage functions accept it directly.
+/// The connection is returned to the pool when this value is dropped.
+///
+/// In WAL mode (which every connection in the pool enables via its `with_init`
+/// hook) multiple `ReadHandle`s can coexist simultaneously — they do not block
+/// each other or the single writer.
+pub struct ReadHandle(pub r2d2::PooledConnection<SqliteConnectionManager>);
+
+impl DbRead for ReadHandle {
+    fn conn(&self) -> &rusqlite::Connection {
+        // `r2d2::PooledConnection<SqliteConnectionManager>` implements
+        // `Deref<Target = rusqlite::Connection>`, so `&self.0` coerces
+        // directly to `&rusqlite::Connection`.
+        &self.0
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum PoolError {
@@ -257,5 +301,45 @@ mod tests {
             cipher_version.is_ok() && !cipher_version.unwrap().is_empty(),
             "cipher_version pragma should return non-empty on a SQLCipher build"
         );
+    }
+
+    /// CopyPaste-j8p: 8 threads each acquire a `ReadHandle` concurrently and
+    /// run a SELECT.  In WAL mode all reads should proceed in parallel without
+    /// deadlock.  Correctness: every thread must get a valid count (≥ 0).
+    ///
+    /// This test also exercises the `DbRead` trait path: `ReadHandle::conn()`
+    /// is called via the trait through `count_items`, which accepts `&impl DbRead`.
+    #[test]
+    fn read_handle_concurrent_reads_dont_deadlock() {
+        use crate::storage::items::count_items;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("concurrent_reads.db");
+        let key = [0x55u8; 32];
+        bootstrap_db(&path, &key);
+
+        // Open the pool with 8 slots so all 8 threads can hold a connection
+        // simultaneously.  `pool_supports_concurrent_connections` already
+        // tested the 4-thread case; here we verify the DbRead trait path.
+        let pool = Arc::new(open_pool(&path, &key, 8).unwrap());
+
+        let mut handles = Vec::new();
+        for i in 0..8 {
+            let pool = Arc::clone(&pool);
+            handles.push(thread::spawn(move || {
+                let conn = pool.get().expect("acquire pooled conn");
+                // Wrap in ReadHandle and go through the DbRead trait.
+                let handle = ReadHandle(conn);
+                // count_items accepts &impl DbRead — uses ReadHandle::conn()
+                let count = count_items(&handle).unwrap_or(-1);
+                assert!(
+                    count >= 0,
+                    "thread {i}: count_items through ReadHandle returned negative ({count})"
+                );
+            }));
+        }
+        for h in handles {
+            h.join().expect("concurrent read thread must not panic");
+        }
     }
 }

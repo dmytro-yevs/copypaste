@@ -51,9 +51,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{Mutex, Notify};
 
 use copypaste_core::{
-    decrypt_from_cloud, derive_relay_inbox_id, derive_relay_public_key, encrypt_for_cloud,
-    exists_item_by_item_id, get_item_by_item_id, insert_item, prune_to_cap, AppConfig,
-    ClipboardItem, Database, SyncKey,
+    decrypt_from_cloud, derive_relay_inbox_id, derive_relay_public_key,
+    derive_relay_registration_pop, encrypt_for_cloud, exists_item_by_item_id, get_item_by_item_id,
+    insert_item, prune_to_cap, AppConfig, ClipboardItem, Database, SyncKey,
 };
 
 use crate::sync_common::{
@@ -65,6 +65,25 @@ use crate::sync_common::{
 
 /// Per-request HTTP timeout. A stalled relay must not hang a loop forever.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
+
+// ── Settings guards ───────────────────────────────────────────────────────────
+
+/// Returns `true` when the current tick should be skipped due to the Wi-Fi-only
+/// setting being active and the device not being on Wi-Fi.
+///
+/// Pure function — injectable `is_on_wifi_fn` makes this unit-testable without
+/// a real `networksetup` invocation. Mirrors the guard in `cloud.rs`.
+fn relay_should_skip_wifi(sync_on_wifi_only: bool, is_on_wifi: bool) -> bool {
+    sync_on_wifi_only && !is_on_wifi
+}
+
+/// Returns `true` when the relay receive path should auto-apply a freshly-synced
+/// item to the local pasteboard, i.e. when `auto_apply_synced_clip` is enabled.
+///
+/// Pure function — testable without a live `AppConfig` instance.
+fn relay_should_auto_apply(auto_apply_synced_clip: bool) -> bool {
+    auto_apply_synced_clip
+}
 
 /// Poll interval for the receive loop (the relay also offers SSE; polling is the
 /// portable backstop and matches the at-least-once contract). Kept tight so
@@ -98,6 +117,9 @@ struct RegisterBody {
     device_id: String,
     device_name: String,
     public_key_b64: String,
+    /// HMAC-SHA256(sync_key, "relay-registration-pop-v1:" || device_id) base64-encoded.
+    /// Proves the registrant holds the sync key matching the derived inbox id — fixes CopyPaste-n2l.
+    pop_b64: String,
 }
 
 /// Relay register response (we only need the token).
@@ -266,10 +288,17 @@ async fn register(
     let pubkey = derive_relay_public_key(sync_key_bytes);
     let public_key_b64 = base64::engine::general_purpose::STANDARD.encode(pubkey);
 
+    // Proof-of-possession: HMAC-SHA256(sync_key, prefix || inbox_id).
+    // Proves the registrant holds the sync key corresponding to the derived inbox id.
+    // Fixes CopyPaste-n2l: the relay now rejects registrations without a valid PoP.
+    let pop = derive_relay_registration_pop(sync_key_bytes, &inbox_id);
+    let pop_b64 = base64::engine::general_purpose::STANDARD.encode(pop);
+
     let body = RegisterBody {
         device_id: inbox_id,
         device_name: device_name.to_owned(),
         public_key_b64,
+        pop_b64,
     };
     let url = format!("{relay_url}/devices");
     let resp = client
@@ -413,6 +442,7 @@ async fn push_loop(
     sync_key: Arc<Mutex<Option<SyncKey>>>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: Arc<AtomicI64>,
+    core_config: Arc<std::sync::RwLock<AppConfig>>,
 ) {
     let mut cached_token = load_cached_token();
     let mut warned_no_key = false;
@@ -435,6 +465,28 @@ async fn push_loop(
                         continue;
                     }
                 };
+
+                // A-SET-2 hot-reload: read sync_on_wifi_only from the live config on
+                // every incoming item so a runtime set_config change takes effect
+                // immediately.  When the guard fires we skip this item; it will be
+                // re-broadcast (or recovered via receive_loop) once Wi-Fi is available.
+                let sync_on_wifi_only = core_config
+                    .read()
+                    .map(|g| g.sync_on_wifi_only)
+                    .unwrap_or(false);
+                if sync_on_wifi_only {
+                    let on_wifi = tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                        .await
+                        .unwrap_or(true); // fail-open: if check errors, assume Wi-Fi
+                    if relay_should_skip_wifi(sync_on_wifi_only, on_wifi) {
+                        tracing::debug!(
+                            "relay-sync push_loop: sync_on_wifi_only=true and not on Wi-Fi; \
+                             skipping push for id={}",
+                            item.id
+                        );
+                        continue;
+                    }
+                }
 
                 // Snapshot the sync key; skip (one-time warn) if no passphrase set.
                 let key_bytes = match snapshot_sync_key(&sync_key).await {
@@ -780,6 +832,32 @@ async fn receive_loop(
                 continue;
             }
         };
+
+        // A-SET-2 hot-reload: check sync_on_wifi_only every tick so a runtime
+        // set_config change takes effect without a daemon restart.  The
+        // is_on_wifi check runs on a blocking thread (networksetup shell
+        // invocation) so it does not stall the async executor.  Mirrors the
+        // identical guard in cloud.rs poll loop.
+        let (sync_on_wifi_only, auto_apply_synced_clip) = core_config
+            .read()
+            .map(|g| (g.sync_on_wifi_only, g.auto_apply_synced_clip))
+            .unwrap_or((false, true));
+        if sync_on_wifi_only {
+            let on_wifi = tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                .await
+                .unwrap_or(true); // fail-open: assume Wi-Fi if detection errors
+            if relay_should_skip_wifi(sync_on_wifi_only, on_wifi) {
+                tracing::debug!(
+                    "relay-sync receive_loop: sync_on_wifi_only=true and not on Wi-Fi; \
+                     skipping this tick"
+                );
+                continue;
+            }
+        }
+        // Shadow as a local bool so the ingest path can use it without holding
+        // the RwLock guard across await points.
+        let auto_apply_enabled = relay_should_auto_apply(auto_apply_synced_clip);
+
         let inbox_id = derive_relay_inbox_id(&key_bytes);
 
         let token = match ensure_token(
@@ -833,6 +911,15 @@ async fn receive_loop(
                     wm = new_wm;
                     if stored > 0 {
                         last_sync_ms.store(now_ms(), Ordering::Relaxed);
+                        // auto_apply_synced_clip gate: only log when suppressed so
+                        // it is observable in debug logs. Actual pasteboard writes
+                        // require AutoApplyCtx wired from daemon.rs (follow-up).
+                        if !auto_apply_enabled {
+                            tracing::debug!(
+                                "relay-sync receive_loop: auto_apply_synced_clip=false; \
+                                 {stored} relay item(s) stored but NOT auto-applied to pasteboard"
+                            );
+                        }
                     }
                 }
                 Err(e) => {
@@ -887,6 +974,7 @@ pub fn start_relay(
         sync_key.clone(),
         local_key.clone(),
         last_sync_ms.clone(),
+        core_config.clone(),
     ));
     tokio::spawn(receive_loop(
         client,
@@ -927,6 +1015,32 @@ mod tests {
             .timeout(HTTP_TIMEOUT)
             .build()
             .expect("client")
+    }
+
+    // ── WiFi / auto-apply guard tests ─────────────────────────────────────────
+
+    /// relay_should_skip_wifi: returns true iff sync_on_wifi_only=true AND not on wifi.
+    #[test]
+    fn wifi_guard_skips_when_setting_on_and_not_on_wifi() {
+        assert!(relay_should_skip_wifi(true, false), "must skip: setting=true, wifi=false");
+    }
+
+    #[test]
+    fn wifi_guard_allows_when_setting_off() {
+        assert!(!relay_should_skip_wifi(false, false), "must not skip: setting=false even if no wifi");
+        assert!(!relay_should_skip_wifi(false, true), "must not skip: setting=false, on wifi");
+    }
+
+    #[test]
+    fn wifi_guard_allows_when_on_wifi_and_setting_on() {
+        assert!(!relay_should_skip_wifi(true, true), "must not skip: setting=true but on wifi");
+    }
+
+    /// relay_should_auto_apply: mirrors the auto_apply_synced_clip flag.
+    #[test]
+    fn auto_apply_guard_respects_flag() {
+        assert!(relay_should_auto_apply(true), "auto_apply=true → should auto-apply");
+        assert!(!relay_should_auto_apply(false), "auto_apply=false → must not auto-apply");
     }
 
     /// derive_relay_inbox_id determinism (daemon-side sanity; core also tests it).

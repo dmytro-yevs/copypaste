@@ -308,6 +308,20 @@ impl DiscoveryService {
         Ok(handle)
     }
 
+    /// Stop mDNS advertisement and browsing immediately, without dropping the
+    /// service.
+    ///
+    /// Aborts the background browse task and shuts down the mDNS daemon so the
+    /// device stops advertising on the LAN and releases the mDNS socket.
+    /// Idempotent — safe to call when nothing is running. The service can be
+    /// restarted later by calling [`start`](Self::start) again.
+    ///
+    /// Used by the hot-apply path in `set_config` when `lan_visibility` is
+    /// toggled off; [`Drop`] also calls this via [`shutdown_inner`].
+    pub fn stop(&self) {
+        self.shutdown_inner();
+    }
+
     /// Abort the retained browse task and shut down the retained mDNS daemon,
     /// if any. Idempotent: safe to call when nothing is running. Used both by
     /// [`start`] (restart-in-place) and [`Drop`].

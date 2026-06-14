@@ -50,6 +50,32 @@ use copypaste_core::{count_items, insert_item, ClipboardItem, Database};
 use copypaste_daemon::ipc::IpcServer;
 
 // ---------------------------------------------------------------------------
+// Socket-readiness helper (replaces bare sleep races)
+// ---------------------------------------------------------------------------
+
+/// Poll until a Unix socket at `path` accepts a connection or the deadline
+/// elapses. Returns `true` when the socket is ready, `false` on timeout.
+///
+/// This replaces the previous `tokio::time::sleep(50ms)` calls that were
+/// racy on slow CI machines: the sleep could expire before the listener
+/// task had bound the socket, causing spurious "connection refused" failures
+/// in the tests that follow.
+async fn wait_for_unix_socket(path: &std::path::Path, timeout_ms: u64) -> bool {
+    let deadline = tokio::time::Instant::now()
+        + Duration::from_millis(timeout_ms);
+    loop {
+        if UnixStream::connect(path).await.is_ok() {
+            return true;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        // Yield to the runtime briefly so the server task can make progress.
+        tokio::task::yield_now().await;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -76,8 +102,12 @@ async fn spawn_server(
             .serve(&path, tokio_util::sync::CancellationToken::new())
             .await;
     });
-    // Give the listener a moment to bind.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Wait deterministically for the listener to bind — replaces the previous
+    // bare 50 ms sleep which was racy on slow CI machines.
+    assert!(
+        wait_for_unix_socket(socket_path, 5_000).await,
+        "IpcServer did not bind socket within 5 s"
+    );
     (db, handle)
 }
 
@@ -131,8 +161,10 @@ async fn ipc_server_handles_client_disconnect_mid_request() {
         drop(bad);
     }
 
-    // Brief tick to let the spawned handler observe EOF and clean up.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Yield to let the spawned handler observe EOF and clean up.
+    // No fixed sleep — the `ipc_roundtrip` below has its own 5 s read timeout
+    // that catches any latency from handler cleanup without a busy sleep.
+    tokio::task::yield_now().await;
 
     // Client B: a normal request must succeed — proves the accept loop did
     // not get poisoned by client A's dirty disconnect.
@@ -226,7 +258,7 @@ async fn concurrent_clients_no_state_corruption() {
             ids.push(item.id.clone());
             insert_item(&g, &item).expect("seed insert");
         }
-        assert_eq!(count_items(&g).expect("seed count"), N as i64);
+        assert_eq!(count_items(&*g).expect("seed count"), N as i64);
     }
 
     // Fan out: N tokio tasks, each opens its own connection and deletes
@@ -271,7 +303,7 @@ async fn concurrent_clients_no_state_corruption() {
     // Cross-check via direct DB read — IPC view must match storage view.
     {
         let g = db.lock().await;
-        assert_eq!(count_items(&g).unwrap(), 0, "DB and IPC count disagree");
+        assert_eq!(count_items(&*g).unwrap(), 0, "DB and IPC count disagree");
     }
 
     handle.abort();
@@ -363,7 +395,7 @@ async fn shutdown_signal_drains_pending_requests() {
         let g = db1.lock().await;
         let item = ClipboardItem::new_text(vec![1, 2, 3], vec![0u8; 24], 1);
         insert_item(&g, &item).expect("seed insert");
-        assert_eq!(count_items(&g).unwrap(), 1);
+        assert_eq!(count_items(&*g).unwrap(), 1);
     }
     let pre = ipc_roundtrip(&sock, r#"{"id":"pre","method":"count"}"#).await;
     assert_eq!(pre["ok"], true, "pre-abort count must succeed: {pre}");
@@ -373,9 +405,10 @@ async fn shutdown_signal_drains_pending_requests() {
     // tasks (none here — request above completed before abort) are
     // dropped; the listener's bind on the socket path is released.
     handle1.abort();
-    // Wait for abort to take effect and the socket file to be free.
+    // `await` the aborted handle to ensure the task has fully stopped and
+    // the listener has released its hold on the socket file before we try
+    // to re-bind. JoinError::is_cancelled() is expected and not an error.
     let _ = handle1.await;
-    tokio::time::sleep(Duration::from_millis(100)).await;
 
     // The socket file may still exist (UnixListener doesn't unlink on
     // drop); the second `serve()` call removes it explicitly before

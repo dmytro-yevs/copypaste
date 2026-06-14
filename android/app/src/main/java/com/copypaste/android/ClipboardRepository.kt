@@ -18,9 +18,13 @@ import javax.crypto.spec.SecretKeySpec
  * survives process death without requiring Room or a .so binary.
  * An ordered index of ids is kept under "item_ids" (comma-separated).
  *
- * Encryption is attempted via UniFFI [encryptText]; on [UnsatisfiedLinkError]
- * (e.g. during unit tests or before .so is built) it falls back to
- * [localAesEncrypt] which uses AES-256-GCM via the Android KeyStore provider.
+ * Encryption is performed via UniFFI [encryptText] (XChaCha20-Poly1305, ADR-001).
+ * On [UnsatisfiedLinkError] or [IllegalStateException] (native library absent),
+ * the store operation FAILS rather than falling back to [localAesEncrypt]
+ * (AES-256-GCM): the fallback produced items that peers and the daemon could not
+ * decrypt, causing silent sync failures. A one-shot sentinel notification is posted
+ * instead so the user knows encryption is unavailable. [localAesDecrypt] is kept
+ * for reading any legacy AES-GCM items that were stored before this fix.
  *
  * ## Retention & quota enforcement
  *
@@ -87,6 +91,17 @@ class ClipboardRepository(context: Context) {
      * a lost update that would let a duplicate row through.
      */
     private val seenSourceIdsLock = Any()
+
+    /**
+     * Set to true the first time a native-library failure is posted as a
+     * user-visible notification so we don't flood the notification shade on
+     * every store call. Reset on app restart (in-memory only).
+     *
+     * SECURITY: the native-unavailable path must never silently downgrade to
+     * AES-GCM (which produces items peers cannot decrypt). Instead we throw so
+     * the item is not stored and post this sentinel notification once.
+     */
+    @Volatile private var nativeUnavailableNotified = false
 
     /**
      * Subscribe to changes in the backing item store. Any write from the
@@ -647,17 +662,36 @@ class ClipboardRepository(context: Context) {
         // fresh UUID only for a locally-captured clip. This is the value bound
         // into the AEAD AAD and reused on every later push/sync.
         val id = overrideId?.takeIf { it.isNotBlank() } ?: UUID.randomUUID().toString()
+        // key_version=2 matches the daemon's ITEM_KEY_VERSION_CURRENT (AAD "{id}|4|2").
+        // This makes Android-stored items decryptable on the daemon side and vice versa.
+        val keyVersion: UByte = 2u
+        // SECURITY: do NOT fall back to localAesEncrypt (AES-256-GCM) on FFI failure.
+        // AES-GCM items use a different key derivation/AAD format that peers (daemon,
+        // other Android devices) cannot decrypt — storing them produces items that silently
+        // fail sync with no user-visible error.  Instead, propagate the failure so the
+        // caller skips this store, and post a one-shot sentinel notification so the user
+        // knows something is wrong.
         val blob = try {
-            encryptText(id, textBytes, key)
+            encryptText(id, textBytes, key, keyVersion)
         } catch (e: IllegalStateException) {
-            Log.w(TAG, "UniFFI unavailable (${e.message}) — using local AES-GCM fallback (NOT sync-compatible)")
-            localAesEncrypt(textBytes, key)
-        } catch (_: UnsatisfiedLinkError) {
-            Log.w(TAG, "UniFFI unavailable (UnsatisfiedLinkError) — using local AES-GCM fallback (NOT sync-compatible)")
-            localAesEncrypt(textBytes, key)
+            Log.e(TAG, "storeItem: native encryption unavailable (${e.message}) — " +
+                "item NOT stored to avoid producing AES-GCM items that peers cannot decrypt")
+            if (!nativeUnavailableNotified) {
+                nativeUnavailableNotified = true
+                NotificationHelper.notifyNativeUnavailable(appContext)
+            }
+            throw e
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "storeItem: native encryption unavailable (UnsatisfiedLinkError) — " +
+                "item NOT stored to avoid producing AES-GCM items that peers cannot decrypt")
+            if (!nativeUnavailableNotified) {
+                nativeUnavailableNotified = true
+                NotificationHelper.notifyNativeUnavailable(appContext)
+            }
+            throw IllegalStateException("UnsatisfiedLinkError: ${e.message}", e)
         }
 
-        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId)
+        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId, keyVersion = keyVersion)
         synchronized(idsWriteLock) {
             // Append the id, removing any prior occurrence first so the index
             // stays canonical (no duplicate ids). A synced item re-stored under
@@ -744,16 +778,30 @@ class ClipboardRepository(context: Context) {
             }
 
             // Replace in-place: re-encrypt and overwrite the stored blob.
+            // key_version=2 matches the daemon's ITEM_KEY_VERSION_CURRENT.
+            val lwwKeyVersion: UByte = 2u
+            // SECURITY: same fail-closed rule as storeItem — do NOT fall back to
+            // AES-GCM on FFI failure. Propagate so the LWW replace is skipped.
             val blob = try {
-                encryptText(existingStorageId, plaintextBytes, key)
+                encryptText(existingStorageId, plaintextBytes, key, lwwKeyVersion)
             } catch (e: IllegalStateException) {
-                Log.w(TAG, "LWW replace: UniFFI unavailable — using local AES-GCM fallback (NOT sync-compatible)")
-                localAesEncrypt(plaintextBytes, key)
-            } catch (_: UnsatisfiedLinkError) {
-                Log.w(TAG, "LWW replace: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
-                localAesEncrypt(plaintextBytes, key)
+                Log.e(TAG, "LWW replace: native encryption unavailable (${e.message}) — " +
+                    "skipping replace to avoid producing AES-GCM items that peers cannot decrypt")
+                if (!nativeUnavailableNotified) {
+                    nativeUnavailableNotified = true
+                    NotificationHelper.notifyNativeUnavailable(appContext)
+                }
+                return@synchronized null  // null → skip, do not attempt new-item insert
+            } catch (e: UnsatisfiedLinkError) {
+                Log.e(TAG, "LWW replace: native encryption unavailable (UnsatisfiedLinkError) — " +
+                    "skipping replace to avoid producing AES-GCM items that peers cannot decrypt")
+                if (!nativeUnavailableNotified) {
+                    nativeUnavailableNotified = true
+                    NotificationHelper.notifyNativeUnavailable(appContext)
+                }
+                return@synchronized null  // null → skip, do not attempt new-item insert
             }
-            val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId)
+            val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId, keyVersion = lwwKeyVersion)
             prefs.edit().putString("item_$existingStorageId", encoded).apply()
             evictParseCache(existingStorageId) // A: blob changed — evict stale decrypt entry
             Log.d(TAG, "LWW replaced item_id=$itemId storageId=$existingStorageId (lamport $storedTs→$incomingLamportTs)")
@@ -775,17 +823,30 @@ class ClipboardRepository(context: Context) {
         }
 
         // New item: generate a fresh storage id and store normally.
+        // key_version=2 matches the daemon's ITEM_KEY_VERSION_CURRENT.
+        val newKeyVersion: UByte = 2u
         val storageId = itemId // Use the stable item_id as the storage key for easy lookup.
+        // SECURITY: same fail-closed rule — do NOT fall back to AES-GCM on FFI failure.
         val blob = try {
-            encryptText(storageId, plaintextBytes, key)
+            encryptText(storageId, plaintextBytes, key, newKeyVersion)
         } catch (e: IllegalStateException) {
-            Log.w(TAG, "storeItemWithLww: UniFFI unavailable — using local AES-GCM fallback (NOT sync-compatible)")
-            localAesEncrypt(plaintextBytes, key)
-        } catch (_: UnsatisfiedLinkError) {
-            Log.w(TAG, "storeItemWithLww: UnsatisfiedLinkError — using local AES-GCM fallback (NOT sync-compatible)")
-            localAesEncrypt(plaintextBytes, key)
+            Log.e(TAG, "storeItemWithLww: native encryption unavailable (${e.message}) — " +
+                "skipping new-item insert to avoid producing AES-GCM items that peers cannot decrypt")
+            if (!nativeUnavailableNotified) {
+                nativeUnavailableNotified = true
+                NotificationHelper.notifyNativeUnavailable(appContext)
+            }
+            return@withContext false
+        } catch (e: UnsatisfiedLinkError) {
+            Log.e(TAG, "storeItemWithLww: native encryption unavailable (UnsatisfiedLinkError) — " +
+                "skipping new-item insert to avoid producing AES-GCM items that peers cannot decrypt")
+            if (!nativeUnavailableNotified) {
+                nativeUnavailableNotified = true
+                NotificationHelper.notifyNativeUnavailable(appContext)
+            }
+            return@withContext false
         }
-        val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId)
+        val encoded = encodeItem(blob, plaintextBytes.size, lamportTs = incomingLamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId, keyVersion = newKeyVersion)
 
         synchronized(idsWriteLock) {
             // TOCTOU guard: re-check inside the lock. A concurrent caller (FgsSyncLoop
@@ -873,7 +934,7 @@ class ClipboardRepository(context: Context) {
         return try {
             val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
             val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
-            decryptForPreview(id, ciphertext, nonce, key)
+            decryptForPreview(id, ciphertext, nonce, key, keyVersionFromParts(parts))
         } catch (e: Exception) {
             Log.d(TAG, "loadFullPlaintextBlocking: decrypt failed for $id: ${e.message}")
             null
@@ -893,6 +954,9 @@ class ClipboardRepository(context: Context) {
      */
     private fun pruneToLimits() {
         val quotaBytes = settings.storageQuotaBytes.coerceAtLeast(0L)
+        // Settings.maxHistoryItems default 1000; coerceAtLeast(1) guards against
+        // a persisted 0 that would evict everything including pinned items.
+        val maxItems = settings.maxHistoryItems.coerceAtLeast(1)
         var evictedCount = 0
 
         synchronized(idsWriteLock) {
@@ -917,6 +981,7 @@ class ClipboardRepository(context: Context) {
             val editor = prefs.edit()
             var didEvict = false
 
+            // Pass 1: byte-quota eviction (oldest unpinned first, same as before).
             while (unpinned.isNotEmpty()) {
                 val quotaExceeded = quotaBytes > 0 && totalBytes > quotaBytes
                 if (!quotaExceeded) break
@@ -936,6 +1001,27 @@ class ClipboardRepository(context: Context) {
                 didEvict = true
                 evictedCount++
                 Log.d(TAG, "pruneToLimits: evicted $evictId (blob ${sz}B, totalNow=${totalBytes}B)")
+            }
+
+            // Pass 2: count-cap eviction.  Settings.maxHistoryItems (default 1000)
+            // was previously stored but never enforced — it only controlled the
+            // display cap in HistoryActivity/ClipboardViewModel via PAGE_SIZE.
+            // This pass evicts the OLDEST unpinned items until the total item
+            // count (pinned + unpinned) is <= maxItems.  Pinned items count toward
+            // the limit but are never evicted (same policy as the quota pass).
+            while (unpinned.isNotEmpty() && ids.size > maxItems) {
+                val evictId = unpinned.removeAt(0)
+                ids.remove(evictId)
+                editor.remove("item_$evictId")
+                editor.remove("item_img_$evictId")
+                editor.remove("item_thumb_$evictId")
+                editor.remove("item_file_$evictId")
+                editor.remove("item_filemeta_$evictId")
+                editor.remove("item_id_ref_$evictId")
+                evictParseCache(evictId)
+                didEvict = true
+                evictedCount++
+                Log.d(TAG, "pruneToLimits: count-evicted $evictId (total now ${ids.size}/${maxItems})")
             }
 
             if (didEvict) {
@@ -1048,7 +1134,7 @@ class ClipboardRepository(context: Context) {
         return try {
             val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
             val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
-            val plain = decryptForPreview(id, ciphertext, nonce, key)
+            val plain = decryptForPreview(id, ciphertext, nonce, key, keyVersionFromParts(parts))
             try {
                 isSensitive(plain)
             } catch (_: UnsatisfiedLinkError) {
@@ -1169,11 +1255,15 @@ class ClipboardRepository(context: Context) {
         wallTimeMs: Long = System.currentTimeMillis(),
         deleted: Boolean = false,
         originDeviceId: String = "",
+        // Field 8 (index 8): AEAD key_version. Must match the value passed to
+        // encryptText and must be threaded back into decryptText at read time.
+        // Default 2 = ITEM_KEY_VERSION_CURRENT (matches the daemon).
+        keyVersion: UByte = 2u,
     ): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
         val deletedFlag = if (deleted) 1 else 0
-        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs|$deletedFlag|$originDeviceId"
+        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs|$deletedFlag|$originDeviceId|$keyVersion"
     }
 
     /**
@@ -1227,7 +1317,7 @@ class ClipboardRepository(context: Context) {
             try {
                 val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
                 val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
-                decryptForPreview(id, ciphertext, nonce, key)
+                decryptForPreview(id, ciphertext, nonce, key, keyVersionFromParts(parts))
             } catch (e: Exception) {
                 Log.d(TAG, "Preview decrypt failed for $id: ${e.message}")
                 null
@@ -1270,14 +1360,23 @@ class ClipboardRepository(context: Context) {
         )
     }
 
+    /**
+     * Read the AEAD key_version stored in field 8 (index 8) of a pipe-delimited
+     * blob string. Returns 1 (legacy) when the field is absent or unparseable,
+     * so pre-4i2 items (written without the field) still decrypt correctly.
+     */
+    private fun keyVersionFromParts(parts: List<String>): UByte =
+        parts.getOrNull(8)?.toUByteOrNull() ?: 1u
+
     private fun decryptForPreview(
         id: String,
         ciphertext: ByteArray,
         nonce: ByteArray,
         key: ByteArray,
+        keyVersion: UByte,
     ): String {
         val bytes = try {
-            decryptText(id, ciphertext, nonce, key)
+            decryptText(id, ciphertext, nonce, key, keyVersion)
         } catch (_: Exception) {
             localAesDecrypt(ciphertext, nonce, key)
         }
@@ -1666,7 +1765,7 @@ class ClipboardRepository(context: Context) {
                 val contentType = normalizeContentTypeForSync(parts[1])
                 val nonce = Base64.decode(parts[3], Base64.NO_WRAP)
                 val ciphertext = Base64.decode(parts[4], Base64.NO_WRAP)
-                val plain = decryptText(id, ciphertext, nonce, key)
+                val plain = decryptText(id, ciphertext, nonce, key, keyVersionFromParts(parts))
 
                 val isImage = contentTypeIsImage(contentType)
                 if (contentTypeIsFile(contentType)) {
@@ -1732,7 +1831,11 @@ class ClipboardRepository(context: Context) {
                     )
                 }
             } catch (e: Exception) {
-                Log.d(TAG, "Skipping item $id for sync (decrypt/parse failed): ${e.message}")
+                // WARN (not DEBUG): a skipped item means a gap in the sync payload.
+                // Log at WARN with the item id so operators/devs can diagnose missing
+                // items in production without needing a debug build.
+                Log.w(TAG, "localItemsForSync: skipping item $id for sync " +
+                    "(decrypt/parse failed): ${e.message}")
                 null
             }
         }.reversed()

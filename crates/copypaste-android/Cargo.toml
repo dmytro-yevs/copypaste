@@ -83,3 +83,8 @@ tempfile = ">=3.0, <3.14"
 # Cross-language conformance fixture (tests/conformance_vectors.rs): emit golden
 # AEAD vectors as JSON for the Kotlin instrumented test to consume. (serde_json
 # is now also a normal dependency — used by `sync_with_peer`'s framed protocol.)
+# External KAT test (external_kat_xchacha20poly1305_cfrg_draft_vector): drive the
+# raw XChaCha20-Poly1305 AEAD directly with the CFRG fixed nonce so we can verify
+# the primitive independently of our encrypt_item_with_aad AAD-binding wrapper.
+# Matches the workspace version in the root Cargo.toml.
+chacha20poly1305 = { workspace = true }

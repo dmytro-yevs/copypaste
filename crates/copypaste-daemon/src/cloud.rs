@@ -1167,7 +1167,7 @@ async fn run_backlog_sweep(
             "SELECT id, item_id, content_type, content, content_nonce, \
              blob_ref, is_sensitive, is_synced, lamport_ts, wall_time, \
              expires_at, app_bundle_id, content_hash, origin_device_id, \
-             key_version, pinned \
+             key_version, pinned, pin_order \
              FROM clipboard_items \
              WHERE is_synced = 0 \
                AND content_type IN ('text', 'image', 'file') \
@@ -1198,8 +1198,9 @@ async fn run_backlog_sweep(
                 origin_device_id: row.get(13).unwrap_or_default(),
                 key_version: row.get::<_, i64>(14).unwrap_or(2) as u8,
                 pinned: row.get(15).unwrap_or(false),
-                // pin_order is a local-only ordering field, not synced.
-                pin_order: None,
+                // pin_order is synced alongside pinned so that the drag-to-reorder
+                // ordering chosen on the source device is preserved on every peer.
+                pin_order: row.get(16)?,
                 // backlog query selects no thumb column; thumbnails are a
                 // local-only field (schema v9) and never synced.
                 thumb: None,
@@ -4396,6 +4397,92 @@ mod tests {
         assert!(
             !signed_in.load(Ordering::Relaxed),
             "a failed refresh must clear cloud_signed_in"
+        );
+    }
+
+    /// Regression: the backlog SELECT must include `pin_order` and the row
+    /// mapper must propagate it into `ClipboardItem.pin_order` (not hardcode
+    /// `None`).  A pinned item with a non-null `pin_order` must round-trip the
+    /// value through the query so it is uploaded to the cloud with the correct
+    /// pin ordering rather than always as NULL.
+    #[test]
+    fn backlog_mapper_preserves_pin_order() {
+        use copypaste_core::{insert_item, pin_item, ClipboardItem};
+
+        let db = copypaste_core::Database::open_in_memory().expect("in-mem db");
+
+        // Insert a text item that is unsynced (is_synced = 0).
+        let mut item = test_item("backlog-pin-test");
+        item.content_type = "text".to_owned();
+        item.is_synced = false;
+        insert_item(&db, &item).expect("insert");
+
+        // Pin it — this assigns pin_order via the SQL subquery in pin_item.
+        pin_item(&db, &item.id).expect("pin");
+
+        // Run the same SELECT the backlog sweep uses.  pin_order is column 16
+        // (0-indexed) after: id(0) item_id(1) content_type(2) content(3)
+        // content_nonce(4) blob_ref(5) is_sensitive(6) is_synced(7)
+        // lamport_ts(8) wall_time(9) expires_at(10) app_bundle_id(11)
+        // content_hash(12) origin_device_id(13) key_version(14) pinned(15)
+        // pin_order(16).
+        let conn = db.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, item_id, content_type, content, content_nonce, \
+                 blob_ref, is_sensitive, is_synced, lamport_ts, wall_time, \
+                 expires_at, app_bundle_id, content_hash, origin_device_id, \
+                 key_version, pinned, pin_order \
+                 FROM clipboard_items \
+                 WHERE is_synced = 0 \
+                   AND content_type IN ('text', 'image', 'file') \
+                 ORDER BY wall_time ASC \
+                 LIMIT 100",
+            )
+            .expect("prepare backlog query");
+
+        let rows: Vec<ClipboardItem> = stmt
+            .query_map([], |row| {
+                Ok(ClipboardItem {
+                    id: row.get(0)?,
+                    item_id: row.get(1)?,
+                    content_type: row.get(2)?,
+                    content: row.get(3)?,
+                    content_nonce: row.get(4)?,
+                    blob_ref: row.get(5)?,
+                    is_sensitive: row.get(6)?,
+                    is_synced: row.get(7)?,
+                    lamport_ts: row.get(8)?,
+                    wall_time: row.get(9)?,
+                    expires_at: row.get(10)?,
+                    app_bundle_id: row.get(11)?,
+                    content_hash: row.get(12)?,
+                    origin_device_id: row.get(13).unwrap_or_default(),
+                    key_version: row.get::<_, i64>(14).unwrap_or(2) as u8,
+                    pinned: row.get(15).unwrap_or(false),
+                    pin_order: row.get(16)?,
+                    thumb: None,
+                    deleted: false,
+                })
+            })
+            .expect("query_map")
+            .filter_map(|r| r.ok())
+            .collect();
+
+        assert_eq!(rows.len(), 1, "expected exactly one backlog row");
+        let fetched = &rows[0];
+        assert!(fetched.pinned, "backlog row must be pinned");
+        assert!(
+            fetched.pin_order.is_some(),
+            "backlog mapper must not discard pin_order (was hardcoded None before fix); \
+             got pin_order = {:?}",
+            fetched.pin_order
+        );
+        // pin_item assigns MAX(pin_order)+1 = 1.0 for the first pinned item.
+        assert_eq!(
+            fetched.pin_order,
+            Some(1.0),
+            "first pinned item must get pin_order = 1.0"
         );
     }
 }

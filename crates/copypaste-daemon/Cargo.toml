@@ -91,6 +91,8 @@ security-framework-sys = "2"
 # wrapped in Zeroizing so the heap buffer holding the device secret is
 # scrubbed the moment it falls out of scope.
 zeroize = { version = "1.7", features = ["derive"] }
+# S3 (CopyPaste-4ca): constant-time PAKE confirmation-tag comparison.
+subtle = { workspace = true }
 # tray-icon + png moved to copypaste-ui::tray_host (the daemon process
 # is launched by launchd and cannot host an NSApplication main run loop on
 # macOS, which tray-icon / muda::Menu both require).
@@ -142,6 +144,11 @@ path = "tests/pairing_e2e.rs"
 [[test]]
 name = "import_handler"
 path = "tests/import_handler.rs"
+
+# Poison-row guard unit + integration tests (CopyPaste-jww / CopyPaste-5y4).
+[[test]]
+name = "poison_row_guard"
+path = "tests/poison_row_guard.rs"
 
 # E2E harness Step A: single-daemon spawn helper + readiness test.
 # The reusable helper lives in tests/support/mod.rs (included via `#[path]`).

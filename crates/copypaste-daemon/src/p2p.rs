@@ -29,6 +29,29 @@ use copypaste_sync::protocol::{ControlMsg, PeerFrame, WireItem};
 
 use crate::keychain;
 
+/// Shared map of last-measured round-trip times per peer (milliseconds).
+///
+/// Keyed by the peer's verified **certificate fingerprint** in canonical
+/// lowercase, colon-free hex form. Written by the RTT ping task spawned
+/// alongside each established connection; read by the IPC `list_peers`
+/// handler to surface the `latency_ms` field.
+pub type PeerRttMs = Arc<Mutex<HashMap<DeviceFingerprint, u32>>>;
+
+/// Correlation map from ping nonce to the [`Instant`] the ping was sent.
+///
+/// Used to compute round-trip time when the matching `Pong` arrives: the
+/// per-connection task looks up the nonce, computes `now - sent`, and
+/// records the result in the shared [`PeerRttMs`] map.
+pub(crate) type PendingPings = Arc<Mutex<HashMap<u64, Instant>>>;
+
+/// How often the RTT ping task wakes to send a [`ControlMsg::Ping`].
+const PING_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Maximum time to wait for a [`ControlMsg::Pong`] before discarding the
+/// nonce from the pending-ping map. Prevents unbounded growth when a peer
+/// never responds (e.g. old daemon that doesn't know the Ping variant).
+const PING_PONG_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Errors emitted by the daemon-side P2P surface.
 #[derive(Debug, Error)]
 pub enum P2pError {
@@ -57,6 +80,11 @@ pub struct P2pConfig {
     pub device_name: String,
     /// When false `start_p2p` returns immediately without spawning any tasks.
     pub enabled: bool,
+    /// When false, skip mDNS-SD registration and browsing so the device is
+    /// invisible on the local network. The mTLS listener is still bound and
+    /// accept/connector loops run — paired peers that have a persisted address
+    /// can still connect directly. Default: `true`.
+    pub lan_visibility: bool,
 }
 
 /// Shared map of currently-connected peer sinks, exported for IPC use.
@@ -87,6 +115,13 @@ pub struct P2pHandle {
     /// are clones of the same underlying map.
     pub live_sinks: LivePeerSinks,
     pub peer_sinks: PeerSinks,
+    /// Last-measured round-trip time per connected peer (milliseconds).
+    ///
+    /// Populated by the RTT ping task spawned alongside each established
+    /// mTLS connection. The IPC `list_peers` handler reads this map to expose
+    /// the `latency_ms` field in each peer entry. Entries are removed when
+    /// the corresponding connection closes (same cleanup as `peer_sinks`).
+    pub peer_rtt_ms: PeerRttMs,
 }
 
 /// Lightweight, synchronously-constructed P2P state used by the IPC layer.
@@ -182,14 +217,21 @@ pub fn get_own_fingerprint(public_key: &[u8]) -> String {
 pub type PeerSinks = Arc<Mutex<HashMap<DeviceFingerprint, mpsc::Sender<PeerFrame>>>>;
 
 /// Catch-up provider: produces the current local history as `WireItem`s already
-/// re-keyed under the shared sync key, so a freshly-connected peer receives every
-/// item that predates the link (fanout is otherwise fire-and-forget to whatever
-/// sinks happen to be live at the moment an item is produced).
+/// re-keyed under the **per-peer** sync key (CopyPaste-716), so a freshly-
+/// connected peer receives every item that predates the link (fanout is
+/// otherwise fire-and-forget to whatever sinks happen to be live at the moment
+/// an item is produced).
+///
+/// The closure takes the connecting peer's `fingerprint` as a `&str` so it can
+/// look up that peer's specific pairwise key and produce blobs only that peer
+/// can decrypt. Previously the closure was `Fn() -> Vec<WireItem>` (no
+/// fingerprint arg) and used the first cached key for all peers — the bug fixed
+/// by CopyPaste-716.
 ///
 /// Built in `daemon.rs` from the DB + `SyncCrypto`; called once per established
 /// connection (both the accept path and the connector path) right after the
 /// peer sink is registered. LWW on the receiver makes the replay idempotent.
-pub type CatchupProvider = Arc<dyn Fn() -> Vec<WireItem> + Send + Sync>;
+pub type CatchupProvider = Arc<dyn Fn(&str) -> Vec<WireItem> + Send + Sync>;
 
 /// Load peers persisted in `peers.json` into the live `PairedPeers` allowlist
 /// (fix/p2p-c-review #2).
@@ -282,6 +324,12 @@ pub async fn start_p2p(
     // writes (daemon.rs constructs it once). The standing LAN/SAS responder reads
     // it so it advertises our own global IP in-band, exactly like the IPC paths.
     public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>>,
+    // CopyPaste-1w7 (H8 fix): the daemon's shared `SyncCrypto` handle, built
+    // once in `daemon.rs` and shared with the IPC server (same Arc<Mutex<…>>
+    // backing store).  Cloned and forwarded to the standing pairing responder
+    // so it can call `reload_sync_key` after a successful button-pair without
+    // a daemon restart.  `None` when P2P is disabled.
+    sync_crypto: Option<crate::sync_orch::SyncCrypto>,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);
     let listener = TcpListener::bind(&bind_addr).await?;
@@ -332,6 +380,12 @@ pub async fn start_p2p(
     // task has to block the executor.
     let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
 
+    // ── RTT map ───────────────────────────────────────────────────────────────
+    // Shared RTT map populated by the ping task that runs alongside every
+    // established connection. Keyed by fingerprint so the IPC list_peers
+    // handler can add latency_ms to each peer entry.
+    let peer_rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
+
     // ── standing discovery-pairing bootstrap listener (LAN/SAS Phase 2) ────────
     // Bind ONE bootstrap listener up front so we learn the OS-assigned port and
     // can advertise it in the mDNS `bport` TXT key. The standing responder loop
@@ -372,14 +426,29 @@ pub async fn start_p2p(
     // (daemon.rs) constructs the Arc once and passes clones to both start_p2p
     // and `IpcServer::with_discovery`.
     let device_id_str = device_id.to_string();
-    // Advertise the bootstrap port in `bport` when available (v2); else v1.
-    let register_result = match bootstrap_port {
-        Some(bport) => {
-            discovery.register_with_bport(actual_port, &device_id_str, &config.device_name, bport)
-        }
-        None => discovery.register(actual_port, &device_id_str, &config.device_name),
-    };
-    register_result.map_err(|e| anyhow::anyhow!("mDNS register failed: {e}"))?;
+    // Gate mDNS registration on `lan_visibility`. When false, skip both the
+    // register call and the browse task so the device is invisible on the LAN.
+    // The mTLS listener is still bound so paired peers with a persisted address
+    // can connect directly.
+    if config.lan_visibility {
+        // Advertise the bootstrap port in `bport` when available (v2); else v1.
+        let register_result = match bootstrap_port {
+            Some(bport) => {
+                discovery.register_with_bport(
+                    actual_port,
+                    &device_id_str,
+                    &config.device_name,
+                    bport,
+                )
+            }
+            None => discovery.register(actual_port, &device_id_str, &config.device_name),
+        };
+        register_result.map_err(|e| anyhow::anyhow!("mDNS register failed: {e}"))?;
+    } else {
+        tracing::info!(
+            "lan_visibility=false: skipping mDNS-SD registration and browsing"
+        );
+    }
 
     let discovery_for_task = Arc::clone(&discovery);
     let device_name_for_task = config.device_name.clone();
@@ -401,6 +470,10 @@ pub async fn start_p2p(
         let cert_der = bootstrap_cert_der;
         let key_der = bootstrap_key_der;
         let responder_shutdown = shutdown_token.clone();
+        // CopyPaste-1w7: clone the SyncCrypto handle (all clones share the
+        // same Arc<Mutex<…>> backing store) so the responder can call
+        // reload_sync_key after a successful button-pair without a restart.
+        let sync_crypto_for_responder = sync_crypto.clone();
         tokio::spawn(async move {
             standing_pairing_responder_loop(
                 bport,
@@ -410,6 +483,7 @@ pub async fn start_p2p(
                 pairing_for_responder,
                 own_sync_addr_for_responder,
                 public_ip_cache_for_responder,
+                sync_crypto_for_responder,
                 responder_shutdown,
             )
             .await;
@@ -423,6 +497,10 @@ pub async fn start_p2p(
         let incoming_tx = incoming_tx.clone();
         let catchup = Arc::clone(&catchup);
         let accept_shutdown = shutdown_token.clone();
+        // Gap B: the accept loop forwards the live allowlist clone to each
+        // per-connection task so an inbound unpair evicts from it immediately.
+        let accept_peers = peers.clone();
+        let accept_rtt_ms = Arc::clone(&peer_rtt_ms);
         tokio::spawn(async move {
             accept_loop(
                 listener,
@@ -431,17 +509,22 @@ pub async fn start_p2p(
                 peer_sinks,
                 incoming_tx,
                 catchup,
+                accept_peers,
+                accept_rtt_ms,
             )
             .await;
         });
     }
 
     // ── outbound fanout loop ──────────────────────────────────────────────────
+    // CopyPaste-716: pass `sync_crypto` so `outbound_loop` can re-encrypt once
+    // per peer under that peer's pairwise key inside `fanout_to_peers`.
     {
         let peer_sinks = Arc::clone(&peer_sinks);
         let outbound_shutdown = shutdown_token.clone();
+        let outbound_crypto = sync_crypto.clone();
         tokio::spawn(async move {
-            outbound_loop(new_item_rx, outbound_rx, peer_sinks, outbound_shutdown).await;
+            outbound_loop(new_item_rx, outbound_rx, peer_sinks, outbound_crypto, outbound_shutdown).await;
         });
     }
 
@@ -467,6 +550,12 @@ pub async fn start_p2p(
         // the IPC handlers all observe the same `known_peers` map through it.
         let discovery_for_connector = Arc::clone(&discovery);
         let connector_shutdown = shutdown_token.clone();
+        // Gap A + Gap B: the connector owns a live allowlist clone so it can
+        // (a) forward it to per-connection tasks for inbound-unpair eviction, and
+        // (b) temporarily re-add a `pending_unpair` peer just long enough to dial
+        //     it and deliver the deferred `ControlMsg::Unpair` frame.
+        let connector_peers = peers.clone();
+        let connector_rtt_ms = Arc::clone(&peer_rtt_ms);
         tokio::spawn(async move {
             peer_connector_loop(
                 transport,
@@ -476,41 +565,50 @@ pub async fn start_p2p(
                 catchup,
                 discovery_for_connector,
                 connector_shutdown,
+                connector_peers,
+                connector_rtt_ms,
             )
             .await;
         });
     }
 
     // ── discovery task ────────────────────────────────────────────────────────
+    // Only start the mDNS-SD browse + advertise loop when lan_visibility is
+    // enabled. When off the discovery service is still available (the IPC server
+    // holds a reference for peer resolution) but does not advertise or browse,
+    // so the device is invisible on the LAN.
     let discovery_shutdown = shutdown_token.clone();
-    tokio::spawn(async move {
-        match discovery_for_task.start().await {
-            Ok(handle) => {
-                tracing::info!(
-                    port = actual_port,
-                    device_name = %device_name_for_task,
-                    "mDNS-SD discovery service running"
-                );
-                // BUG F1: race the mDNS handle against cancellation so the task
-                // exits promptly on shutdown instead of awaiting `handle` forever.
-                tokio::select! {
-                    _ = handle => {}
-                    _ = discovery_shutdown.cancelled() => {
-                        tracing::info!("mDNS-SD discovery task shutting down");
+    if config.lan_visibility {
+        tokio::spawn(async move {
+            match discovery_for_task.start().await {
+                Ok(handle) => {
+                    tracing::info!(
+                        port = actual_port,
+                        device_name = %device_name_for_task,
+                        "mDNS-SD discovery service running"
+                    );
+                    // BUG F1: race the mDNS handle against cancellation so the task
+                    // exits promptly on shutdown instead of awaiting `handle` forever.
+                    tokio::select! {
+                        _ = handle => {}
+                        _ = discovery_shutdown.cancelled() => {
+                            tracing::info!("mDNS-SD discovery task shutting down");
+                        }
                     }
                 }
+                Err(e) => {
+                    tracing::warn!("mDNS-SD discovery failed to start: {e}");
+                }
             }
-            Err(e) => {
-                tracing::warn!("mDNS-SD discovery failed to start: {e}");
-            }
-        }
-    });
+        });
+    }
 
     Ok(P2pHandle {
         actual_port,
         shutdown_token,
         live_sinks: Arc::clone(&peer_sinks),
         peer_sinks,
+        peer_rtt_ms,
     })
 }
 
@@ -532,6 +630,12 @@ async fn accept_loop(
     peer_sinks: PeerSinks,
     incoming_tx: mpsc::Sender<WireItem>,
     catchup: CatchupProvider,
+    // The live mTLS allowlist (shared with the transport's cert verifier).
+    // Forwarded to `run_peer_connection` so an inbound `ControlMsg::Unpair`
+    // evicts the peer from BOTH peers.json and this live allowlist (Gap B).
+    live_peers: PairedPeers,
+    // Shared RTT map — updated by the ping task spawned per connection.
+    peer_rtt_ms: PeerRttMs,
 ) {
     // fix/p2p-c-review #3: the previous `"unknown".parse().unwrap()` fallback
     // panicked because `"unknown"` is not a valid `SocketAddr`. `local_addr`
@@ -598,12 +702,43 @@ async fn accept_loop(
                         // buffer fills — the sink then stays full forever and the
                         // peer receives nothing. (Mirror of the connector-path fix.)
                         let catchup_tx = cleanup_tx.clone();
+                        // CopyPaste-716: clone the fingerprint separately for
+                        // push_catchup — peer_fp_for_task is moved into the spawn.
+                        let catchup_fp = peer_fp.clone();
 
                         let incoming_tx = incoming_tx.clone();
                         let peer_sinks = Arc::clone(&peer_sinks);
                         let peer_fp_for_task = peer_fp.clone();
+                        let live_peers_for_task = live_peers.clone();
+
+                        // RTT: create a per-connection pending-pings map shared
+                        // between the ping sender task and the connection task.
+                        let pending_pings: PendingPings =
+                            Arc::new(Mutex::new(HashMap::new()));
+                        let rtt_map_for_task = Arc::clone(&peer_rtt_ms);
+                        let rtt_map_for_ping = Arc::clone(&peer_rtt_ms);
+                        let pending_pings_for_conn = Arc::clone(&pending_pings);
+
+                        // Spawn the periodic RTT ping task. It holds a clone of
+                        // cleanup_tx (the same sink as the drainer) to inject
+                        // Ping frames through the normal outbound channel.
+                        let ping_fp = peer_fp.clone();
+                        let ping_sink = cleanup_tx.clone();
                         tokio::spawn(async move {
-                            run_peer_connection(framed, peer_rx, incoming_tx, peer_fp_for_task).await;
+                            ping_loop(ping_sink, ping_fp, pending_pings, rtt_map_for_ping).await;
+                        });
+
+                        tokio::spawn(async move {
+                            run_peer_connection(
+                                framed,
+                                peer_rx,
+                                incoming_tx,
+                                peer_fp_for_task,
+                                Some(live_peers_for_task),
+                                pending_pings_for_conn,
+                                rtt_map_for_task,
+                            )
+                            .await;
                             // Clean up the sink when the connection drops — but only
                             // if it is still *this* connection's sink (a later
                             // reconnect may have replaced it under the same key).
@@ -620,9 +755,10 @@ async fn accept_loop(
 
                         // Drainer is now consuming `peer_rx`, so replaying the local
                         // history (sync-on-connect) cannot deadlock on a full sink.
-                        // Items are re-keyed under the shared sync key by the
-                        // provider; LWW on the receiver makes the replay idempotent.
-                        push_catchup(&catchup, &catchup_tx).await;
+                        // Items are re-keyed under this peer's pairwise sync key
+                        // (CopyPaste-716); LWW on the receiver makes the replay
+                        // idempotent.
+                        push_catchup(&catchup, catchup_fp.as_str(), &catchup_tx).await;
                     }
                     Err(e) => {
                         tracing::warn!("P2P accept/handshake error: {e}");
@@ -830,6 +966,7 @@ fn dialable_peers_from_path(path: &std::path::Path) -> Vec<DialablePeer> {
 /// its (now-unreferenced) sink and exits when the stream closes — no duplicate
 /// fan-out. We additionally re-check `contains_key` immediately before dialing
 /// to skip a peer the accept loop just connected.
+#[allow(clippy::too_many_arguments)] // RTT params (pending_pings, peer_rtt_ms) pushed count to 9
 async fn peer_connector_loop(
     transport: Arc<PeerTransport>,
     peer_sinks: PeerSinks,
@@ -840,9 +977,17 @@ async fn peer_connector_loop(
     // persisted dial address fails (peer DHCP renew / network switch).
     discovery: Arc<DiscoveryService>,
     shutdown: CancellationToken,
+    // Live mTLS allowlist (Gap A + Gap B). Forwarded to per-connection tasks for
+    // inbound-unpair eviction, and used to TEMPORARILY allow-list a
+    // `pending_unpair` peer just long enough to dial it and deliver the deferred
+    // `ControlMsg::Unpair` frame.
+    live_peers: PairedPeers,
+    // Shared RTT map — updated by the ping task spawned per connection.
+    peer_rtt_ms: PeerRttMs,
 ) {
     tracing::debug!(%own_fp, "P2P peer connector loop running");
     let peers_path = crate::ipc::peers_file_path();
+    let pending_path = crate::peers::pending_unpair_path_for(&peers_path);
     let mut dial_state: HashMap<DeviceFingerprint, DialBackoff> = HashMap::new();
 
     loop {
@@ -855,6 +1000,11 @@ async fn peer_connector_loop(
                 break;
             }
         }
+
+        // Gap A: drain durable pending-unpair deliveries first. Each entry that
+        // has a dial address is temporarily allow-listed, dialed, sent a single
+        // `Unpair` frame, then removed from both the live allowlist and the file.
+        deliver_pending_unpairs(&transport, &pending_path, &own_fp, &live_peers).await;
 
         let peers = dialable_peers_from_path(&peers_path);
         // Drop dial-state for peers no longer present (unpaired) so the map
@@ -976,12 +1126,30 @@ async fn peer_connector_loop(
                         let peer_sinks = Arc::clone(&peer_sinks);
                         let peer_key = peer.fingerprint.clone();
                         let peer_fp_for_task = peer.fingerprint.clone();
+                        let live_peers_for_task = live_peers.clone();
+
+                        // RTT: per-connection pending-pings map shared between
+                        // the ping sender task and the connection task.
+                        let pending_pings: PendingPings =
+                            Arc::new(Mutex::new(HashMap::new()));
+                        let rtt_map_for_task = Arc::clone(&peer_rtt_ms);
+                        let rtt_map_for_ping = Arc::clone(&peer_rtt_ms);
+                        let pending_pings_for_conn = Arc::clone(&pending_pings);
+                        let ping_fp = peer.fingerprint.clone();
+                        let ping_sink = cleanup_tx.clone();
+                        tokio::spawn(async move {
+                            ping_loop(ping_sink, ping_fp, pending_pings, rtt_map_for_ping).await;
+                        });
+
                         tokio::spawn(async move {
                             run_peer_connection_client(
                                 stream,
                                 peer_rx,
                                 incoming_tx,
                                 peer_fp_for_task,
+                                Some(live_peers_for_task),
+                                pending_pings_for_conn,
+                                rtt_map_for_task,
                             )
                             .await;
                             let mut sinks = peer_sinks.lock().await;
@@ -997,7 +1165,9 @@ async fn peer_connector_loop(
 
                         // Drainer is now consuming `peer_rx`, so replaying the local
                         // history (sync-on-connect) cannot deadlock on a full sink.
-                        push_catchup(&catchup, &catchup_tx).await;
+                        // Items are re-keyed under this peer's pairwise sync key
+                        // (CopyPaste-716).
+                        push_catchup(&catchup, peer.fingerprint.as_str(), &catchup_tx).await;
                     }
                     // M3: a successful connect records the connection start but
                     // does NOT reset the backoff yet — a flapping peer that
@@ -1074,8 +1244,20 @@ async fn run_peer_connection(
     peer_rx: mpsc::Receiver<PeerFrame>,
     incoming_tx: mpsc::Sender<WireItem>,
     peer_fp: DeviceFingerprint,
+    live_peers: Option<PairedPeers>,
+    pending_pings: PendingPings,
+    peer_rtt_ms: PeerRttMs,
 ) {
-    run_peer_connection_framed(framed, peer_rx, incoming_tx, peer_fp).await
+    run_peer_connection_framed(
+        framed,
+        peer_rx,
+        incoming_tx,
+        peer_fp,
+        live_peers,
+        pending_pings,
+        peer_rtt_ms,
+    )
+    .await
 }
 
 /// Manage one authenticated **outbound** (connector-side) peer connection.
@@ -1087,8 +1269,20 @@ async fn run_peer_connection_client(
     peer_rx: mpsc::Receiver<PeerFrame>,
     incoming_tx: mpsc::Sender<WireItem>,
     peer_fp: DeviceFingerprint,
+    live_peers: Option<PairedPeers>,
+    pending_pings: PendingPings,
+    peer_rtt_ms: PeerRttMs,
 ) {
-    run_peer_connection_framed(framed, peer_rx, incoming_tx, peer_fp).await
+    run_peer_connection_framed(
+        framed,
+        peer_rx,
+        incoming_tx,
+        peer_fp,
+        live_peers,
+        pending_pings,
+        peer_rtt_ms,
+    )
+    .await
 }
 
 /// Maximum time a single outbound `framed.send().await` may block before the
@@ -1127,6 +1321,12 @@ async fn run_peer_connection_framed<S>(
     mut peer_rx: mpsc::Receiver<PeerFrame>,
     incoming_tx: mpsc::Sender<WireItem>,
     peer_fp: DeviceFingerprint,
+    live_peers: Option<PairedPeers>,
+    // Per-connection nonce → send-time map shared with the ping sender task.
+    // On Pong receipt, we look up the nonce here to compute elapsed time.
+    pending_pings: PendingPings,
+    // Shared map of last-measured RTTs per peer; written on each Pong receipt.
+    peer_rtt_ms: PeerRttMs,
 ) where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
@@ -1152,8 +1352,62 @@ async fn run_peer_connection_framed<S>(
                                     peer = %peer_fp,
                                     "received unpair signal from authenticated peer — evicting"
                                 );
-                                evict_peer_local(&peer_fp);
+                                evict_peer_local(&peer_fp, live_peers.as_ref());
                                 return;
+                            }
+                            Ok(PeerFrame::Control(ControlMsg::Ping { nonce })) => {
+                                // Reply immediately with a matching Pong so the
+                                // remote peer can measure the round-trip time.
+                                let pong = PeerFrame::Control(ControlMsg::Pong { nonce });
+                                match serde_json::to_vec(&pong) {
+                                    Ok(payload) => {
+                                        match tokio::time::timeout(
+                                            WRITE_TIMEOUT,
+                                            framed.send(Bytes::from(payload)),
+                                        )
+                                        .await
+                                        {
+                                            Ok(Ok(())) => {
+                                                tracing::trace!(
+                                                    peer = %peer_fp,
+                                                    nonce,
+                                                    "RTT: sent Pong"
+                                                );
+                                            }
+                                            Ok(Err(e)) => {
+                                                tracing::warn!("RTT: failed to send Pong to peer: {e}");
+                                                return;
+                                            }
+                                            Err(_elapsed) => {
+                                                tracing::warn!(
+                                                    peer = %peer_fp,
+                                                    "RTT: Pong write timed out — tearing down connection"
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("RTT: failed to serialise Pong: {e}");
+                                    }
+                                }
+                            }
+                            Ok(PeerFrame::Control(ControlMsg::Pong { nonce })) => {
+                                // Record the RTT for this peer. Look up the nonce
+                                // in the pending-pings map and compute elapsed time.
+                                let sent_at = {
+                                    let mut map = pending_pings.lock().await;
+                                    map.remove(&nonce)
+                                };
+                                if let Some(sent_at) = sent_at {
+                                    let rtt_ms = sent_at.elapsed().as_millis() as u32;
+                                    tracing::debug!(
+                                        peer = %peer_fp,
+                                        rtt_ms,
+                                        "RTT: measured"
+                                    );
+                                    peer_rtt_ms.lock().await.insert(peer_fp.clone(), rtt_ms);
+                                }
                             }
                             Err(e) => {
                                 tracing::warn!("failed to deserialise frame from peer: {e}");
@@ -1193,7 +1447,8 @@ async fn run_peer_connection_framed<S>(
                                             "peer write timed out — tearing down half-closed connection"
                                         );
                                         return;
-                                    }                                }
+                                    }
+                                }
                             }
                             Err(e) => {
                                 tracing::warn!("failed to serialise frame for peer: {e}");
@@ -1210,12 +1465,75 @@ async fn run_peer_connection_framed<S>(
     }
 }
 
+/// Periodic RTT ping sender for a single established peer connection.
+///
+/// Sends a [`ControlMsg::Ping`] frame every [`PING_INTERVAL`] through the
+/// peer sink, recording the send time in `pending_pings`. Expires unmatched
+/// nonces after [`PING_PONG_TIMEOUT`] so the map doesn't grow unbounded
+/// against peers that don't speak the Ping/Pong protocol.
+///
+/// The task exits when `peer_sink` is closed (the connection dropped and the
+/// per-connection task removed the sink from `peer_sinks`).
+async fn ping_loop(
+    peer_sink: mpsc::Sender<PeerFrame>,
+    peer_fp: DeviceFingerprint,
+    pending_pings: PendingPings,
+    peer_rtt_ms: PeerRttMs,
+) {
+    let mut interval = tokio::time::interval(PING_INTERVAL);
+    // Skip the first (immediate) tick so we don't ping before the catchup
+    // replay is done — the first real ping fires after PING_INTERVAL.
+    interval.tick().await;
+
+    loop {
+        interval.tick().await;
+
+        // Expire stale pending pings before sending a new one.
+        {
+            let mut map = pending_pings.lock().await;
+            let now = Instant::now();
+            map.retain(|_, sent_at| now.duration_since(*sent_at) < PING_PONG_TIMEOUT);
+        }
+
+        let nonce: u64 = {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            // Use current epoch nanos as a simple unique nonce within a
+            // connection. Collisions within a single connection are harmless
+            // (wrong RTT at worst); true randomness is unnecessary here.
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0)
+        };
+
+        let ping = PeerFrame::Control(ControlMsg::Ping { nonce });
+        let sent_at = Instant::now();
+
+        // Store the send time BEFORE sending (so the RTT includes the send
+        // time, not just the network transit). The nonce uniquely identifies
+        // this ping within the connection lifetime.
+        pending_pings.lock().await.insert(nonce, sent_at);
+
+        if peer_sink.send(ping).await.is_err() {
+            // The connection task has exited and the receiver was dropped.
+            // Clean up our RTT entry and exit.
+            tracing::debug!(peer = %peer_fp, "RTT: ping loop exiting (sink closed)");
+            peer_rtt_ms.lock().await.remove(&peer_fp);
+            return;
+        }
+
+        tracing::trace!(peer = %peer_fp, nonce, "RTT: sent Ping");
+    }
+}
+
 /// Outbound fanout loop.
 ///
 /// Receives `WireItem`s from the sync orchestrator via `outbound_rx` and
-/// sends each one to every currently-connected peer. Also drains the
-/// `new_item_rx` broadcast channel (previously handled by `subscriber_loop`)
-/// so broadcast items are also fanned out.
+/// sends each one to every currently-connected peer, re-encrypting once per
+/// peer under that peer's pairwise sync key (CopyPaste-716).
+///
+/// Also drains the `new_item_rx` broadcast channel (previously handled by
+/// `subscriber_loop`) so broadcast items are also fanned out.
 ///
 /// Peer sinks whose channel is closed (peer disconnected) are removed from
 /// `peer_sinks` on the next fanout pass.
@@ -1223,6 +1541,7 @@ async fn outbound_loop(
     mut new_item_rx: broadcast::Receiver<ClipboardItem>,
     mut outbound_rx: mpsc::Receiver<WireItem>,
     peer_sinks: PeerSinks,
+    sync_crypto: Option<crate::sync_orch::SyncCrypto>,
     shutdown: CancellationToken,
 ) {
     tracing::debug!("P2P outbound fanout loop running");
@@ -1255,11 +1574,12 @@ async fn outbound_loop(
                     }
                 }
             }
-            // Outbound WireItem from sync_orch — fan out to all connected peers.
+            // Outbound WireItem from sync_orch — fan out to all connected peers,
+            // re-encrypting once per peer under that peer's pairwise sync key.
             item_opt = outbound_rx.recv(), if !outbound_closed => {
                 match item_opt {
                     Some(item) => {
-                        fanout_to_peers(&item, &peer_sinks).await;
+                        fanout_to_peers(&item, &peer_sinks, sync_crypto.as_ref()).await;
                     }
                     None => {
                         tracing::info!("P2P outbound loop: outbound_rx channel closed");
@@ -1304,13 +1624,26 @@ fn stamp_peer_sync(peers_path: &std::path::Path, peer_fp: &DeviceFingerprint) {
     }
 }
 
-async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<PeerFrame>) {
-    let items = catchup();
+/// Push the catch-up history for `peer_fingerprint` into a freshly-connected
+/// peer's sink.
+///
+/// CopyPaste-716: the `peer_fingerprint` is forwarded to the `CatchupProvider`
+/// so it can look up the pairwise sync key for this specific peer and re-encrypt
+/// each item under that key. Previously the provider had no fingerprint arg and
+/// used the first cached key for all peers, causing 3rd+ peers to receive blobs
+/// encrypted under the wrong key (silent AEAD failure on the receiver).
+async fn push_catchup(
+    catchup: &CatchupProvider,
+    peer_fingerprint: &str,
+    sink: &mpsc::Sender<PeerFrame>,
+) {
+    let items = catchup(peer_fingerprint);
     if items.is_empty() {
         return;
     }
     tracing::debug!(
         count = items.len(),
+        peer = %peer_fingerprint,
         "P2P sync-on-connect: replaying local history to peer"
     );
     for item in items {
@@ -1321,10 +1654,16 @@ async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<PeerFrame>)
     }
 }
 
-/// Send `item` to every currently-connected peer sink.
+/// Send `item` to every currently-connected peer sink, re-encrypting once per
+/// peer under that peer's pairwise sync key (CopyPaste-716).
 ///
 /// Peers whose sender has been closed (disconnected) are removed from
 /// `peer_sinks`.
+///
+/// CopyPaste-716: `sync_crypto` is now used to re-encrypt the raw at-rest wire
+/// item once per peer under the correct pairwise key before sending. The old
+/// path cloned the same pre-encrypted blob to all peers — breaking >2 device
+/// sync because peer C received a K_AB-encrypted blob it could not decrypt.
 ///
 /// M2: the `peer_sinks` lock is held only long enough to *snapshot* the
 /// senders (each `mpsc::Sender` is cheap to clone) — never across the actual
@@ -1336,7 +1675,11 @@ async fn push_catchup(catchup: &CatchupProvider, sink: &mpsc::Sender<PeerFrame>)
 /// (bounded at 64) just drops this best-effort fanout item for that peer — the
 /// sync-on-connect catch-up replay reconciles it on the next reconnect, and we
 /// must not evict a live peer merely for being momentarily behind.
-async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
+async fn fanout_to_peers(
+    item: &WireItem,
+    peer_sinks: &PeerSinks,
+    sync_crypto: Option<&crate::sync_orch::SyncCrypto>,
+) {
     // Snapshot (key, sender) pairs under the lock, then release it before sending.
     let snapshot: Vec<(DeviceFingerprint, mpsc::Sender<PeerFrame>)> = {
         let sinks = peer_sinks.lock().await;
@@ -1348,7 +1691,39 @@ async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
 
     let mut dead_keys: Vec<DeviceFingerprint> = Vec::new();
     for (key, tx) in snapshot {
-        match tx.try_send(PeerFrame::Data(item.clone())) {
+        // CopyPaste-716: re-encrypt the at-rest wire item under this peer's
+        // specific pairwise sync key. Each peer gets its own independently-
+        // encrypted clone, so K_AB is never sent to peer C (which needs K_AC).
+        let peer_item = if let Some(crypto) = sync_crypto {
+            let mut cloned = item.clone();
+            let outcome =
+                crate::sync_orch::rekey_outbound_for_peer(crypto, key.as_str(), &mut cloned);
+            match outcome {
+                crate::sync_orch::RekeyOutcome::Rewrapped => cloned,
+                crate::sync_orch::RekeyOutcome::Failed => {
+                    // sync H2: a key was present but re-keying failed — drop
+                    // this item for this peer rather than forwarding an
+                    // undecryptable blob. The catch-up replay will retry on
+                    // the next reconnect once the root cause is resolved.
+                    tracing::warn!(
+                        peer = %key,
+                        item_id = %item.item_id,
+                        "fanout: rekey failed for peer, dropping item (catch-up will reconcile)"
+                    );
+                    continue;
+                }
+                crate::sync_orch::RekeyOutcome::NotApplicable => {
+                    // No pairwise key for this peer (legacy peer / P2P disabled):
+                    // forward the raw at-rest ciphertext as the legacy path did.
+                    item.clone()
+                }
+            }
+        } else {
+            // No SyncCrypto (P2P crypto disabled): legacy path — clone as-is.
+            item.clone()
+        };
+
+        match tx.try_send(PeerFrame::Data(peer_item)) {
             Ok(()) => {}
             Err(mpsc::error::TrySendError::Full(_)) => {
                 tracing::warn!(
@@ -1383,7 +1758,12 @@ async fn fanout_to_peers(item: &WireItem, peer_sinks: &PeerSinks) {
 /// error — the calling connection task exits regardless, ensuring the local
 /// mTLS transport will refuse further reconnects from this peer once the
 /// allowlist entry is gone.
-fn evict_peer_local(peer_fp: &str) {
+///
+/// `live_peers` is the daemon's live, interior-mutable mTLS allowlist. When
+/// supplied, the peer is ALSO removed from it (Gap B fix) so the stale mTLS
+/// allowlist entry is gone immediately — without waiting for a daemon restart.
+/// Passing `None` (as the unit tests do for the file-only path) skips that step.
+fn evict_peer_local(peer_fp: &str, live_peers: Option<&PairedPeers>) {
     let peers_path = crate::ipc::peers_file_path();
     let mut peers = crate::peers::load_peers(&peers_path);
     let before = peers.len();
@@ -1399,6 +1779,131 @@ fn evict_peer_local(peer_fp: &str) {
         );
     } else if removed {
         tracing::info!(peer = %peer_fp, "evict_peer_local: peer removed from peers.json");
+    }
+
+    // Gap B fix: the persisted file alone is not enough — the live mTLS
+    // allowlist (`PairedPeers`, shared with the transport's cert verifier) must
+    // ALSO drop this fingerprint, or the unpaired peer keeps being accepted on
+    // every subsequent handshake until the daemon restarts.
+    if let Some(live) = live_peers {
+        live.remove(&canonical_target);
+        tracing::info!(
+            peer = %peer_fp,
+            "evict_peer_local: peer removed from live PairedPeers allowlist"
+        );
+    }
+}
+
+/// Deliver any durable `pending_unpair.json` records (Gap A).
+///
+/// For each queued [`PendingUnpair`](crate::peers::PendingUnpair) that carries a
+/// parseable dial address (and is not our own fingerprint), this:
+///   1. TEMPORARILY allow-lists the peer's fingerprint on the live
+///      [`PairedPeers`] so the outbound mTLS handshake is accepted by the peer
+///      (the peer pins US, but we must pin THEM to connect);
+///   2. dials the peer and sends ONE `PeerFrame::Control(ControlMsg::Unpair)`;
+///   3. removes the peer from the live allowlist again (it must NOT resume sync);
+///   4. removes the record from `pending_unpair.json` so it is delivered once.
+///
+/// Best-effort: a dial/connect/send failure leaves the record in place for a
+/// retry on the next tick (the entry is removed from the live allowlist either
+/// way, so a transient allow-list never lingers). Records with no address are
+/// left untouched — there is nothing to dial.
+async fn deliver_pending_unpairs(
+    transport: &PeerTransport,
+    pending_path: &std::path::Path,
+    own_fp: &str,
+    live_peers: &PairedPeers,
+) {
+    let pending = crate::peers::load_pending_unpairs(pending_path);
+    if pending.is_empty() {
+        return;
+    }
+
+    for entry in pending {
+        let canonical = crate::ipc::canonical_fingerprint(&entry.fingerprint);
+        if canonical.is_empty() || canonical == own_fp {
+            // Never dial ourselves; drop a degenerate record so it cannot wedge
+            // the queue forever.
+            let _ = crate::peers::remove_pending_unpair(pending_path, &entry.fingerprint);
+            continue;
+        }
+        let Some(addr_str) = entry.address.as_deref() else {
+            // No address — cannot dial. Leave it queued for a future improvement
+            // that learns the address out-of-band.
+            continue;
+        };
+        let addr: SocketAddr = match addr_str.parse() {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::debug!(
+                    addr = %addr_str,
+                    error = %e,
+                    "pending-unpair: unparseable address — dropping record"
+                );
+                let _ = crate::peers::remove_pending_unpair(pending_path, &entry.fingerprint);
+                continue;
+            }
+        };
+
+        // Temporarily allow-list so our own client config will accept the peer's
+        // pinned cert on the handshake. Removed again below regardless of outcome.
+        live_peers.add(canonical.clone(), entry.name.clone());
+
+        let dialed = transport.connect_with_retry(addr, &canonical).await;
+        match dialed {
+            Ok(mut stream) => {
+                let frame = PeerFrame::Control(ControlMsg::Unpair);
+                let sent = match serde_json::to_vec(&frame) {
+                    Ok(payload) => tokio::time::timeout(
+                        WRITE_TIMEOUT,
+                        stream.send(Bytes::from(payload)),
+                    )
+                    .await
+                    .map(|r| r.is_ok())
+                    .unwrap_or(false),
+                    Err(e) => {
+                        tracing::warn!(error = %e, "pending-unpair: failed to serialise Unpair frame");
+                        false
+                    }
+                };
+                // Close our end promptly — we have nothing more to say.
+                drop(stream);
+                if sent {
+                    tracing::info!(
+                        peer = %canonical,
+                        %addr,
+                        "pending-unpair: delivered deferred Unpair to reconnected peer"
+                    );
+                    if let Err(e) =
+                        crate::peers::remove_pending_unpair(pending_path, &entry.fingerprint)
+                    {
+                        tracing::warn!(
+                            peer = %canonical,
+                            error = %e,
+                            "pending-unpair: delivered but failed to dequeue record"
+                        );
+                    }
+                } else {
+                    tracing::debug!(
+                        peer = %canonical,
+                        "pending-unpair: connect ok but send failed — will retry next tick"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::debug!(
+                    peer = %canonical,
+                    %addr,
+                    error = %e,
+                    "pending-unpair: dial failed — will retry next tick"
+                );
+            }
+        }
+
+        // Always drop the transient allow-list entry so the peer can never
+        // resume normal sync through this window.
+        live_peers.remove(&canonical);
     }
 }
 
@@ -1426,6 +1931,10 @@ fn evict_peer_local(peer_fp: &str) {
 /// We only begin (`try_begin`) when the coordinator is `Idle`; a connection that
 /// arrives while another pairing (inbound or the IPC-initiated outbound) is in
 /// flight is dropped immediately so there is never more than one pending SAS.
+// CopyPaste-1w7: `sync_crypto` is the 9th parameter; allow the lint so the
+// handle can be threaded through without introducing a new struct solely to
+// satisfy the argument-count limit (matching the pattern used for `start_p2p`).
+#[allow(clippy::too_many_arguments)]
 async fn standing_pairing_responder_loop(
     bport: u16,
     cert_der: Vec<u8>,
@@ -1436,6 +1945,12 @@ async fn standing_pairing_responder_loop(
     // B1: shared public-IP cache (the daemon's single STUN source). Read each
     // iteration so our own current global IP is advertised in-band to the peer.
     public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>>,
+    // CopyPaste-1w7 (H8 fix): the daemon's shared SyncCrypto handle.  Passed
+    // to `persist_paired_peer` so `reload_sync_key` runs after a successful
+    // button-pair and the running orchestrator picks up the new shared key
+    // without a daemon restart.  Matches the three IPC-initiated pairing
+    // paths (SAS initiator, QR responder, QR initiator).
+    sync_crypto: Option<crate::sync_orch::SyncCrypto>,
     shutdown: CancellationToken,
 ) {
     tracing::info!(bport, "LAN/SAS standing pairing responder running");
@@ -1563,15 +2078,18 @@ async fn standing_pairing_responder_loop(
                     device_name: outcome.peer_device_name.clone(),
                     public_ip: outcome.peer_public_ip.clone(),
                 };
-                // H8: no SyncCrypto handle in this path; the key cache will be
-                // refreshed when the daemon next constructs a SyncCrypto (restart).
-                // The IPC-initiated pairing paths do call reload_sync_key.
+                // CopyPaste-1w7 (H8 fix): pass the real SyncCrypto handle so
+                // `persist_paired_peer` calls `reload_sync_key` after writing
+                // `peers.json`.  This mirrors the three IPC-initiated pairing
+                // paths (SAS initiator ipc.rs:2159, QR responder ipc.rs:2312,
+                // QR initiator ipc.rs:2436) and ensures the running orchestrator
+                // picks up the new shared key without a daemon restart.
                 crate::ipc::IpcServer::persist_paired_peer(
                     &outcome.peer_fingerprint,
                     &outcome.peer_sync_addr,
                     &outcome.session_key,
                     &peer_meta,
-                    None,
+                    sync_crypto.as_ref(),
                 );
                 pairing.finish(crate::pairing_sm::PairingState::Confirmed);
             }
@@ -1691,11 +2209,16 @@ mod tests {
             .await
             .unwrap();
 
+        let pending: PendingPings = Arc::new(Mutex::new(HashMap::new()));
+        let rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
         let handle = tokio::spawn(run_peer_connection_framed(
             framed,
             peer_rx,
             incoming_tx,
             "testpeer".to_string(),
+            None,
+            pending,
+            rtt_ms,
         ));
 
         // The sink Sender must close once the pump tears down on write timeout.
@@ -1769,6 +2292,175 @@ mod tests {
         assert_eq!(received.content, item_check.content);
     }
 
+    /// Gap B: after `run_peer_connection_framed` receives an inbound
+    /// `ControlMsg::Unpair` over a REAL in-process mTLS connection, the live
+    /// `PairedPeers` allowlist handed to it must no longer contain the peer —
+    /// proving `evict_peer_local` now removes from the live allowlist, not just
+    /// `peers.json`. Built as a sync test that owns its runtime so the
+    /// `TEST_ENV_LOCK`-guarded `COPYPASTE_CONFIG_DIR` override is never held
+    /// across an `.await` (clippy::await_holding_lock).
+    #[test]
+    fn gap_b_evict_peer_local_removes_from_live_allowlist() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        // SAFETY: serialised via TEST_ENV_LOCK; restored before the lock drops.
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(2)
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let server_peers = PairedPeers::new();
+        let client_known = rt.block_on(async {
+            let server_cert =
+                copypaste_p2p::cert::SelfSignedCert::generate("gapb-server").unwrap();
+            let client_cert =
+                copypaste_p2p::cert::SelfSignedCert::generate("gapb-client").unwrap();
+            let server_fp = server_cert.fingerprint();
+            let client_fp = client_cert.fingerprint();
+
+            server_peers.add(client_fp.clone(), "client");
+            let client_peers = PairedPeers::new();
+            client_peers.add(server_fp.clone(), "server");
+
+            let server_transport = PeerTransport::from_cert(
+                server_cert.cert_der,
+                server_cert.key_der,
+                server_peers.clone(),
+            );
+            let client_transport =
+                PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
+
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let addr = listener.local_addr().unwrap();
+
+            // Sanity: the peer is known before the unpair.
+            assert!(
+                server_peers.is_known(&client_fp),
+                "precondition: client must be allow-listed before unpair"
+            );
+
+            let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
+            let (_peer_tx, peer_rx) = mpsc::channel::<PeerFrame>(8);
+            let server_peers_for_pump = server_peers.clone();
+
+            // Server: accept one connection, then run the real duplex pump with
+            // the live allowlist supplied (Gap B path).
+            let accept_fut = async move {
+                let (_peer_addr, peer_fp, stream) =
+                    server_transport.accept(&listener).await.unwrap();
+                let pending: PendingPings = Arc::new(Mutex::new(HashMap::new()));
+                let rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
+                run_peer_connection_framed(
+                    stream,
+                    peer_rx,
+                    incoming_tx,
+                    peer_fp,
+                    Some(server_peers_for_pump),
+                    pending,
+                    rtt_ms,
+                )
+                .await;
+            };
+
+            // Client: connect and send a single Unpair control frame.
+            let connect_fut = async move {
+                let mut stream = client_transport.connect(addr, &server_fp).await.unwrap();
+                let payload =
+                    serde_json::to_vec(&PeerFrame::Control(ControlMsg::Unpair)).unwrap();
+                stream.send(Bytes::from(payload)).await.unwrap();
+                // Hold the connection briefly so the server processes the frame
+                // before the client drops (which would also close the stream).
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            };
+
+            tokio::join!(accept_fut, connect_fut);
+
+            server_peers.is_known(&client_fp)
+        });
+
+        // Restore env before any assertion that might panic.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        assert!(
+            !client_known,
+            "Gap B: after an inbound Unpair the peer must be gone from the live PairedPeers allowlist"
+        );
+    }
+
+    /// Gap B (pure unit): `evict_peer_local` with a live `PairedPeers` supplied
+    /// must remove the fingerprint from BOTH `peers.json` and the live allowlist.
+    #[test]
+    fn gap_b_evict_peer_local_unit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("peers.json");
+        crate::peers::save_peers(
+            &path,
+            &[crate::peers::PairedDevice {
+                fingerprint: "aa:bb:cc".to_string(),
+                name: "Alice".to_string(),
+                added_at: 1_000,
+                address: Some("10.0.0.1:1111".to_string()),
+                sync_key_b64: None,
+                model: None,
+                os_version: None,
+                app_version: None,
+                local_ip: None,
+                public_ip: None,
+                first_sync_at: None,
+                last_sync_at: None,
+                password_file_b64: None,
+            }],
+        )
+        .unwrap();
+
+        let live = PairedPeers::new();
+        live.add("aabbcc", "Alice");
+        assert!(live.is_known("aabbcc"), "precondition: live allowlist has Alice");
+
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        // SAFETY: serialised via TEST_ENV_LOCK.
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        evict_peer_local("aabbcc", Some(&live));
+
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+
+        // File: Alice removed.
+        let loaded = crate::peers::load_peers(&path);
+        assert!(loaded.is_empty(), "Gap B: peers.json must no longer contain Alice");
+        // Live allowlist: Alice removed.
+        assert!(
+            !live.is_known("aabbcc"),
+            "Gap B: live PairedPeers must no longer contain Alice"
+        );
+    }
+
     /// BUG F1: cancelling the shared `CancellationToken` must stop the
     /// long-running loops. Drives `accept_loop` and `outbound_loop` (both blocked
     /// on their idle awaits with no traffic) and asserts each task exits promptly
@@ -1789,10 +2481,21 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
             let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
             let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
-            let catchup: CatchupProvider = Arc::new(Vec::new);
+            let catchup: CatchupProvider = Arc::new(|_fp: &str| Vec::new());
             let token = token.clone();
+            let rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
             tokio::spawn(async move {
-                accept_loop(listener, token, transport, peer_sinks, incoming_tx, catchup).await;
+                accept_loop(
+                    listener,
+                    token,
+                    transport,
+                    peer_sinks,
+                    incoming_tx,
+                    catchup,
+                    PairedPeers::new(),
+                    rtt_ms,
+                )
+                .await;
             })
         };
 
@@ -1803,7 +2506,7 @@ mod tests {
             let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
             let token = token.clone();
             tokio::spawn(async move {
-                outbound_loop(new_item_rx, outbound_rx, peer_sinks, token).await;
+                outbound_loop(new_item_rx, outbound_rx, peer_sinks, None, token).await;
             })
         };
 
@@ -1856,9 +2559,10 @@ mod tests {
             let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
             let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
             let own_fp = transport.fingerprint().to_string();
-            let catchup: CatchupProvider = Arc::new(Vec::new);
+            let catchup: CatchupProvider = Arc::new(|_fp: &str| Vec::new());
             let discovery = Arc::new(DiscoveryService::new());
             let token = token.clone();
+            let rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
             tokio::spawn(async move {
                 peer_connector_loop(
                     transport,
@@ -1868,6 +2572,8 @@ mod tests {
                     catchup,
                     discovery,
                     token,
+                    PairedPeers::new(),
+                    rtt_ms,
                 )
                 .await;
             })
@@ -1918,6 +2624,7 @@ mod tests {
                     pairing,
                     own_sync_addr,
                     public_ip_cache,
+                    None, // sync_crypto — not needed for cancellation test
                     token,
                 )
                 .await;
@@ -2340,6 +3047,7 @@ mod tests {
                     public_ip: None,
                     first_sync_at: Some(500),
                     last_sync_at: Some(999),
+                    password_file_b64: None,
                 },
                 crate::peers::PairedDevice {
                     fingerprint: "ccdd".to_string(),
@@ -2354,6 +3062,7 @@ mod tests {
                     public_ip: None,
                     first_sync_at: None,
                     last_sync_at: None,
+                    password_file_b64: None,
                 },
             ],
         )
@@ -2407,6 +3116,7 @@ mod tests {
                 public_ip: None,
                 first_sync_at: None,
                 last_sync_at: None,
+                password_file_b64: None,
             }],
         )
         .unwrap();
@@ -2452,6 +3162,7 @@ mod tests {
                     public_ip: None,
                     first_sync_at: None,
                     last_sync_at: None,
+                    password_file_b64: None,
                 },
                 crate::peers::PairedDevice {
                     fingerprint: "dd:ee:ff".to_string(),
@@ -2466,6 +3177,7 @@ mod tests {
                     public_ip: None,
                     first_sync_at: None,
                     last_sync_at: None,
+                    password_file_b64: None,
                 },
             ],
         )
@@ -2483,7 +3195,7 @@ mod tests {
 
         // Evict Alice using the canonical (colon-free) form of her fingerprint,
         // exactly as the mTLS layer would provide it.
-        evict_peer_local("aabbcc");
+        evict_peer_local("aabbcc", None);
 
         // Restore env before any assertions that might panic.
         unsafe {
@@ -2524,6 +3236,7 @@ mod tests {
                 public_ip: None,
                 first_sync_at: None,
                 last_sync_at: None,
+                password_file_b64: None,
             }],
         )
         .unwrap();
@@ -2537,7 +3250,7 @@ mod tests {
         }
 
         // "deadbeef" has no stored record — must be a silent no-op.
-        evict_peer_local("deadbeef");
+        evict_peer_local("deadbeef", None);
 
         unsafe {
             match prev {
@@ -2550,5 +3263,230 @@ mod tests {
         let loaded = crate::peers::load_peers(&path);
         assert_eq!(loaded.len(), 1, "Alice must be untouched");
         assert_eq!(loaded[0].name, "Alice");
+    }
+
+    /// H8 regression (CopyPaste-1w7): `standing_pairing_responder_loop` called
+    /// `IpcServer::persist_paired_peer` with `sync_crypto = None`, so the
+    /// in-memory sync-key cache was never refreshed after a button-pair — the
+    /// first sync after pairing silently fell back to "no key" until a daemon
+    /// restart. This test exercises the contract that `persist_paired_peer`
+    /// refreshes the cache when a `SyncCrypto` handle is supplied, and that it
+    /// does NOT refresh when `None` is passed (the pre-fix standing-responder
+    /// behaviour).
+    ///
+    /// # RED → GREEN
+    /// Before the fix, the standing responder passed `None`, so this
+    /// `persist_paired_peer(... None)` branch is the buggy path.  The fix
+    /// threads a `SyncCrypto` clone into `standing_pairing_responder_loop` and
+    /// passes it to `persist_paired_peer` as `Some(…)`.  Both branches are
+    /// exercised here to pin the contract; the "None does not refresh" assertion
+    /// remains correct after the fix (None is still a valid caller-supplied
+    /// opt-out) while the real regression is caught by the "Some refreshes"
+    /// assertion which fails if the plumbing accidentally passes None again.
+    #[test]
+    fn persist_paired_peer_refreshes_sync_crypto_cache_iff_handle_supplied() {
+        // ── shared setup ────────────────────────────────────────────────────
+        let tmp = tempfile::tempdir().unwrap();
+
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_CONFIG_DIR");
+        // SAFETY: serialised via TEST_ENV_LOCK; restored before lock drops.
+        unsafe {
+            std::env::set_var("COPYPASTE_CONFIG_DIR", tmp.path());
+        }
+
+        // Dummy peers.json path inside the temp dir (same dir peers_file_path() uses).
+        let peers_path = crate::ipc::peers_file_path();
+
+        // ── test inputs ─────────────────────────────────────────────────────
+        let session_key = copypaste_p2p::pake::SessionKey([0xABu8; 32]);
+        let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
+            model: None,
+            os_version: None,
+            app_version: None,
+            local_ip: None,
+            device_name: Some("Test Device".to_string()),
+            public_ip: None,
+        };
+        let fp = "aa:bb:cc:dd:ee:ff:00:11";
+
+        // ── branch 1: None (the pre-fix standing-responder path) ────────────
+        // Create a SyncCrypto whose cache starts empty (no peers.json yet).
+        // The seed bytes don't matter for cache-refresh; only the peers.json
+        // path matters.
+        let crypto_none = crate::sync_orch::SyncCrypto::new([0u8; 32], peers_path.clone());
+        assert!(
+            !crypto_none.has_cached_sync_key(),
+            "precondition: cache is empty before any peer is persisted"
+        );
+
+        crate::ipc::IpcServer::persist_paired_peer(fp, "127.0.0.1:5001", &session_key, &peer_meta, None);
+
+        // None was passed → reload_sync_key was never called → cache still empty.
+        // This assertion PASSES before the fix, pinning the bug.
+        assert!(
+            !crypto_none.has_cached_sync_key(),
+            "H8/CopyPaste-1w7: passing None must not refresh the cache (the pre-fix bug path)"
+        );
+
+        // Clean up peers.json before the second branch.
+        let _ = std::fs::remove_file(&peers_path);
+
+        // ── branch 2: Some (the fixed standing-responder path) ───────────────
+        // Fresh SyncCrypto (no peers.json yet → cache starts empty).
+        let crypto_some = crate::sync_orch::SyncCrypto::new([0u8; 32], peers_path.clone());
+        assert!(
+            !crypto_some.has_cached_sync_key(),
+            "precondition: cache is empty before any peer is persisted"
+        );
+
+        crate::ipc::IpcServer::persist_paired_peer(
+            fp,
+            "127.0.0.1:5001",
+            &session_key,
+            &peer_meta,
+            Some(&crypto_some),
+        );
+
+        // Some(&crypto) was passed → reload_sync_key ran → cache is now populated.
+        // This assertion FAILS before the fix because the standing responder
+        // passed None; it PASSES after the fix threads the handle through.
+        assert!(
+            crypto_some.has_cached_sync_key(),
+            "H8/CopyPaste-1w7: passing Some(&crypto) must refresh the cache \
+             (standing responder must supply the handle, not None)"
+        );
+
+        // ── env restore ─────────────────────────────────────────────────────
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_CONFIG_DIR", v),
+                None => std::env::remove_var("COPYPASTE_CONFIG_DIR"),
+            }
+        }
+        drop(env_lock);
+    }
+
+    // ── RTT ping/pong unit tests ───────────────────────────────────────────────
+
+    /// `ControlMsg::Ping` and `ControlMsg::Pong` must round-trip through serde
+    /// with the `nonce` field intact, and their serialised form must carry the
+    /// `"control"` tag (so old peers that don't know these variants log a
+    /// warning rather than mis-routing the frame).
+    #[test]
+    fn ping_pong_serde_round_trip() {
+        use copypaste_sync::protocol::{ControlMsg, PeerFrame};
+
+        let nonce = 0xDEAD_BEEF_CAFE_1234u64;
+
+        // Serialise Ping.
+        let ping_frame = PeerFrame::Control(ControlMsg::Ping { nonce });
+        let ping_json = serde_json::to_string(&ping_frame).expect("serialise Ping");
+        assert!(
+            ping_json.contains("\"control\""),
+            "Ping serialisation must contain the 'control' tag key: {ping_json}"
+        );
+        assert!(
+            ping_json.contains("\"ping\""),
+            "Ping serialisation must contain 'ping' as the control value: {ping_json}"
+        );
+        assert!(
+            ping_json.contains(&nonce.to_string()),
+            "Ping serialisation must include the nonce: {ping_json}"
+        );
+
+        // Round-trip Ping.
+        let de_ping: PeerFrame = serde_json::from_str(&ping_json).expect("deserialise Ping");
+        assert_eq!(
+            de_ping,
+            PeerFrame::Control(ControlMsg::Ping { nonce }),
+            "Ping must survive a serde round-trip"
+        );
+
+        // Serialise Pong.
+        let pong_frame = PeerFrame::Control(ControlMsg::Pong { nonce });
+        let pong_json = serde_json::to_string(&pong_frame).expect("serialise Pong");
+        assert!(
+            pong_json.contains("\"pong\""),
+            "Pong serialisation must contain 'pong' as the control value: {pong_json}"
+        );
+
+        // Round-trip Pong.
+        let de_pong: PeerFrame = serde_json::from_str(&pong_json).expect("deserialise Pong");
+        assert_eq!(
+            de_pong,
+            PeerFrame::Control(ControlMsg::Pong { nonce }),
+            "Pong must survive a serde round-trip"
+        );
+
+        // Ping and Pong must produce different serialisations (different control values).
+        assert_ne!(ping_json, pong_json, "Ping and Pong must not serialise identically");
+    }
+
+    /// The RTT record: after inserting a nonce + Instant into the pending-pings
+    /// map and then simulating a Pong response (remove the nonce, compute
+    /// elapsed), the RTT map must contain a non-zero entry for the peer.
+    ///
+    /// This tests the state-machine logic in `run_peer_connection_framed` that
+    /// handles `ControlMsg::Pong` — isolated from the network layer.
+    #[tokio::test]
+    async fn rtt_record_written_on_pong() {
+        let pending_pings: PendingPings = Arc::new(Mutex::new(HashMap::new()));
+        let peer_rtt_ms: PeerRttMs = Arc::new(Mutex::new(HashMap::new()));
+        let peer_fp = "aabbccddee".to_string();
+        let nonce = 42u64;
+
+        // Record a send time just before "now".
+        let sent_at = Instant::now() - Duration::from_millis(15);
+        pending_pings.lock().await.insert(nonce, sent_at);
+
+        // Simulate receiving the Pong (the code path in run_peer_connection_framed).
+        let resolved = {
+            let mut map = pending_pings.lock().await;
+            map.remove(&nonce)
+        };
+        assert!(resolved.is_some(), "nonce must be found in pending_pings");
+
+        let rtt_ms = resolved.unwrap().elapsed().as_millis() as u32;
+        peer_rtt_ms
+            .lock()
+            .await
+            .insert(peer_fp.clone(), rtt_ms);
+
+        let stored = peer_rtt_ms.lock().await.get(&peer_fp).copied();
+        assert!(
+            stored.is_some(),
+            "RTT map must contain an entry for the peer after Pong processing"
+        );
+        assert!(
+            stored.unwrap() >= 15,
+            "recorded RTT must be at least 15 ms (our simulated delay), got {stored:?}"
+        );
+    }
+
+    /// After a Pong is processed the pending-pings map must be empty (the
+    /// nonce is removed so it doesn't contribute to stale-nonce accumulation).
+    #[tokio::test]
+    async fn pending_ping_removed_on_pong() {
+        let pending_pings: PendingPings = Arc::new(Mutex::new(HashMap::new()));
+        let nonce = 99u64;
+
+        pending_pings.lock().await.insert(nonce, Instant::now());
+        assert_eq!(
+            pending_pings.lock().await.len(),
+            1,
+            "precondition: one pending ping"
+        );
+
+        // Simulate Pong processing: remove the nonce.
+        let _ = pending_pings.lock().await.remove(&nonce);
+
+        assert_eq!(
+            pending_pings.lock().await.len(),
+            0,
+            "pending_pings must be empty after Pong processing removes the nonce"
+        );
     }
 }

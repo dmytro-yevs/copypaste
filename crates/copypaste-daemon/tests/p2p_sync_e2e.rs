@@ -153,6 +153,7 @@ fn wait_for_synced_plaintext(daemon: &Daemon, want_plaintext: &str, timeout: Dur
 
 /// THE Phase 3 end-to-end test: copy-on-A → same-plaintext-on-B over live P2P.
 #[test]
+#[ignore = "spawns real daemons over a live network link; run manually or in a dedicated P2P CI job"]
 fn copy_on_a_syncs_same_plaintext_to_paired_b_over_p2p() {
     let daemon_a = Daemon::spawn_with_p2p();
     let daemon_b = Daemon::spawn_with_p2p();

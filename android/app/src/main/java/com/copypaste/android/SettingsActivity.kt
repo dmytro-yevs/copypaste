@@ -36,6 +36,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -241,6 +242,31 @@ fun SettingsScreen(
         settings.excludedAppBundleIds = excludedApps
         SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
         LogcatCaptureService.syncState(ctx, settings)
+    }
+
+    // ── Flush-on-dispose: cancel pending debounce jobs and synchronously persist ──
+    // When the user edits a text field and switches away via the nav bar within the
+    // 300 ms debounce window, rememberCoroutineScope is cancelled together with the
+    // Composable — the pending persistAll() would silently drop the edit.
+    // DisposableEffect runs onDispose on the main thread synchronously before the
+    // composition is destroyed, so the write always completes before teardown.
+    DisposableEffect(Unit) {
+        onDispose {
+            // Cancel all in-flight debounce jobs (prevents double-write; the
+            // synchronous persistAll() below is the authoritative final flush).
+            supabaseUrlJob?.cancel()
+            supabaseAnonKeyJob?.cancel()
+            cloudPassphraseJob?.cancel()
+            supabaseEmailJob?.cancel()
+            supabasePasswordJob?.cancel()
+            relayUrlJob?.cancel()
+            // Flush the two fields that have their own write paths separate from
+            // persistAll(): cloudPassphrase and supabasePassword.
+            settings.cloudSyncPassphrase = cloudPassphrase
+            settings.supabasePassword = supabasePassword
+            // Full persist for all remaining fields.
+            persistAll()
+        }
     }
 
     // ── Tab selection — rememberSaveable so the selected tab survives rotation ──

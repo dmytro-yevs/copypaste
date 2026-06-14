@@ -1,6 +1,9 @@
 package com.copypaste.android.ui.theme
 
 import android.app.Activity
+import android.content.Context
+import android.provider.Settings as AndroidSettings
+import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -8,8 +11,10 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
@@ -48,6 +53,54 @@ val EaseStandard = CubicBezierEasing(0.20f, 0.0f, 0.0f, 1.0f)
 
 /** §8 ease-in — matches CSS cubic-bezier(.4,0,1,1). */
 val EaseIn = CubicBezierEasing(0.40f, 0.0f, 1.0f, 1.0f)
+
+// ---------------------------------------------------------------------------
+// §8 Reduced-motion gate — mirrors the web prefers-reduced-motion media query.
+//
+// Two signals are checked, either of which independently disables animations:
+//   1. AccessibilityManager.isAnimationEnabled() == false
+//      (covers "Remove animations" / "Disable animations" in Accessibility settings)
+//   2. Settings.Global.ANIMATOR_DURATION_SCALE == 0f
+//      (covers Developer Options → "Animator duration scale = off")
+//
+// Both APIs are available on API 26+ (our minSdk). The result is remembered
+// across recompositions but is read fresh on each composition entry because the
+// user may toggle these settings while the app is in the foreground.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns `true` when the user has requested reduced motion via any of the
+ * platform's animation-disable mechanisms.  When `true`, callers MUST skip or
+ * shorten their animated transitions.
+ */
+@Composable
+fun rememberReducedMotion(): Boolean {
+    val context = LocalContext.current
+    return remember(context) { isReducedMotion(context) }
+}
+
+/**
+ * Non-composable helper — safe to call from helpers that already have a [Context].
+ * Checks both the accessibility and developer-options animation scales.
+ */
+fun isReducedMotion(context: Context): Boolean {
+    // Signal 1: Accessibility → "Remove animations" (isAnimationEnabled = false).
+    // isAnimationEnabled was added in API 26; always available on our minSdk.
+    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+    val animEnabled = am?.isAnimationEnabled ?: true   // true = animations on
+    if (!animEnabled) return true
+
+    // Signal 2: Developer Options → "Animator duration scale = 0"
+    val scale = try {
+        AndroidSettings.Global.getFloat(
+            context.contentResolver,
+            AndroidSettings.Global.ANIMATOR_DURATION_SCALE,
+        )
+    } catch (_: AndroidSettings.SettingNotFoundException) {
+        1f  // setting absent → animations on
+    }
+    return scale == 0f
+}
 
 // ---------------------------------------------------------------------------
 

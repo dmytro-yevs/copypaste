@@ -99,9 +99,7 @@ fn sigkill_recovers_lamport() {
 
     std::thread::sleep(Duration::from_millis(500));
 
-    // TODO(wave3.2-followup): query daemon's IPC socket for current Lamport
-    // and assert it loaded the persisted value. For now, simply assert the
-    // state directory survived the crash and contains a DB file.
+    // Assert the DB file survived the SIGKILL — necessary but not sufficient.
     let db_present = std::fs::read_dir(&state)
         .map(|rd| {
             rd.flatten()
@@ -118,6 +116,15 @@ fn sigkill_recovers_lamport() {
         "expected DB file to survive SIGKILL in {:?}",
         state
     );
+
+    // TODO(wave3.2-followup): query daemon's IPC socket for the persisted Lamport
+    // value and assert it is >= N+1 (where N is the value before SIGKILL). This
+    // requires the IPC socket to expose a `get_lamport` method or a diagnostic
+    // endpoint.
+    todo!(
+        "assert persisted Lamport >= N+1 after restart \
+         (wave3.2-followup: wire up IPC get_lamport endpoint)"
+    );
 }
 
 /// System sleep → wake → WS reconnects.
@@ -130,8 +137,12 @@ fn sigkill_recovers_lamport() {
 #[test]
 #[ignore = "requires pmset sleep injection or NSWorkspace mock"]
 fn wake_from_sleep_reconnects() {
-    // TODO(wave3.2-followup): implement once sleep/wake hook surface is exposed
-    // for testing. For now this exists as documentation of intent.
+    // Not yet implemented — the sleep/wake hook surface needed to inject
+    // a synthetic NSWorkspaceWillSleepNotification is not yet exposed for tests.
+    todo!(
+        "wire up sleep/wake hook surface then assert WS reconnects within N seconds \
+         (wave3.2-followup)"
+    );
 }
 
 /// Smoke test that always runs: the helper paths used by the ignored tests

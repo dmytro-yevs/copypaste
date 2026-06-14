@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applySpanMasking } from "./masking";
+import { applySpanMasking, shouldMask } from "./masking";
 import { buildOffsets, computeVisibleWindow } from "../views/HistoryView";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +34,30 @@ describe("applySpanMasking", () => {
   it("does not reveal secret material when overlapping spans are given", () => {
     // overlapping [0,4] and [2,6] over "password" → first 6 chars masked
     expect(applySpanMasking("password", [[0, 4], [2, 6]])).toBe("••••••rd");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// shouldMask — blur/redaction gate
+// ---------------------------------------------------------------------------
+
+describe("shouldMask", () => {
+  it("returns true when maskSensitive is on and entry is sensitive", () => {
+    expect(shouldMask({ is_sensitive: true }, true)).toBe(true);
+  });
+
+  it("returns false when maskSensitive is off, even if entry is sensitive", () => {
+    // User disabled masking → show content unblurred.
+    expect(shouldMask({ is_sensitive: true }, false)).toBe(false);
+  });
+
+  it("returns false when entry is not sensitive, even if maskSensitive is on", () => {
+    // Non-sensitive entries are never blurred.
+    expect(shouldMask({ is_sensitive: false }, true)).toBe(false);
+  });
+
+  it("returns false when both maskSensitive is off and entry is not sensitive", () => {
+    expect(shouldMask({ is_sensitive: false }, false)).toBe(false);
   });
 });
 

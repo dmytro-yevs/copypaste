@@ -35,6 +35,9 @@ const DEVICE_A: &str = "11111111-1111-1111-1111-111111111111";
 fn valid_key() -> String {
     B64.encode([0u8; 32])
 }
+fn valid_pop() -> String {
+    B64.encode([0xDE_u8; 32])
+}
 
 fn push_text(store: &mut RelayStore, device_id: &str, wall_time: u64) -> i64 {
     store
@@ -62,11 +65,11 @@ fn devices_tokens_and_items_survive_reopen() {
     let (token1, token2, ids) = {
         let mut store = RelayStore::new_persistent(TTL, MAX_ITEMS, &db_path).unwrap();
         let (token1, _) = store
-            .register_device(DEVICE_A.into(), "Device A".into(), valid_key())
+            .register_device(DEVICE_A.into(), "Device A".into(), valid_key(), valid_pop())
             .unwrap();
         // Co-registration (R1a): a second independent token on the SAME id.
         let (token2, _) = store
-            .register_device(DEVICE_A.into(), "Device A".into(), valid_key())
+            .register_device(DEVICE_A.into(), "Device A".into(), valid_key(), valid_pop())
             .unwrap();
         let id1 = push_text(&mut store, DEVICE_A, 1000);
         let id2 = push_text(&mut store, DEVICE_A, 2000);
@@ -128,7 +131,7 @@ fn ttl_eviction_persists_across_reopen() {
     {
         let mut store = RelayStore::new_persistent(TTL, MAX_ITEMS, &db_path).unwrap();
         store
-            .register_device(DEVICE_A.into(), "Device A".into(), valid_key())
+            .register_device(DEVICE_A.into(), "Device A".into(), valid_key(), valid_pop())
             .unwrap();
         push_text(&mut store, DEVICE_A, 1000);
         push_text(&mut store, DEVICE_A, 2000);
@@ -171,7 +174,7 @@ fn cursor_ordering_correct_after_reopen() {
     let (id_a, id_b, id_c) = {
         let mut store = RelayStore::new_persistent(TTL, MAX_ITEMS, &db_path).unwrap();
         store
-            .register_device(DEVICE_A.into(), "Device A".into(), valid_key())
+            .register_device(DEVICE_A.into(), "Device A".into(), valid_key(), valid_pop())
             .unwrap();
         // Three items, two sharing wall_time == 10, distinct ascending ids.
         let id_a = push_text(&mut store, DEVICE_A, 10);
@@ -218,7 +221,7 @@ fn in_memory_default_does_not_persist() {
     {
         let mut store = RelayStore::new_persistent(TTL, MAX_ITEMS, db::IN_MEMORY_PATH).unwrap();
         store
-            .register_device(DEVICE_A.into(), "Device A".into(), valid_key())
+            .register_device(DEVICE_A.into(), "Device A".into(), valid_key(), valid_pop())
             .unwrap();
         push_text(&mut store, DEVICE_A, 1000);
         assert!(store.get_device(DEVICE_A).is_ok());

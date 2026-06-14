@@ -317,20 +317,64 @@ class Settings(context: Context) {
      * cloud.rs `build_poll_url`. PostgREST keyset filter:
      *   or=(wall_time.gt.W,and(wall_time.eq.W,id.gt.ID))
      * with order=wall_time.asc,id.asc.
+     *
+     * CONCURRENCY: the setter is private. All callers MUST use [advanceSupabaseCursor]
+     * to serialise concurrent advances from FgsSyncLoop, SupabasePollWorker, and
+     * SupabaseRealtimeClient under [supabaseCursorLock].
      */
     var lastSupabasePollWallTime: Long
         get() = prefs.getLong("supabase_last_poll_wall_time", 0L)
-        set(v) = prefs.edit().putLong("supabase_last_poll_wall_time", v).apply()
+        private set(v) = prefs.edit().putLong("supabase_last_poll_wall_time", v).apply()
 
     /**
      * Row `id` (UUID string) of the last processed Supabase poll row.
      * Combined with [lastSupabasePollWallTime] to form the compound keyset
      * cursor — prevents burst-loss when >20 rows share the same wall_time.
      * Empty string means "no rows seen yet" (initial state).
+     *
+     * Use [advanceSupabaseCursor] to write — direct setter is private.
      */
     var lastSupabasePollId: String
         get() = prefs.getString("supabase_last_poll_id", "") ?: ""
-        set(v) = prefs.edit().putString("supabase_last_poll_id", v).apply()
+        private set(v) = prefs.edit().putString("supabase_last_poll_id", v).apply()
+
+    /**
+     * Atomically advance the Supabase compound keyset cursor `(wallTime, id)`
+     * if the new values are strictly greater than what is currently stored.
+     *
+     * "Strictly greater" follows the same keyset ordering used by the PostgREST
+     * query: a row is newer when its `wall_time` is higher, OR its `wall_time`
+     * is equal AND its `id` is lexicographically greater.
+     *
+     * CONCURRENCY: the compare-and-write is performed under [supabaseCursorLock]
+     * (a companion-object process-wide monitor) so concurrent callers —
+     * FgsSyncLoop on the IO coroutine AND SupabasePollWorker on a WorkManager
+     * thread — serialise here and neither can observe a stale cursor value
+     * mid-advance.  SharedPreferences `.apply()` is async (off-thread write) but
+     * the in-memory prefs map is updated synchronously before `apply()` returns,
+     * so subsequent `get()` calls from any thread see the new value immediately.
+     *
+     * Mirrors [advanceP2pOutboundHighWater] / [advanceP2pInboundHighWater].
+     *
+     * @param wallTime  The candidate new wall-clock value (Unix epoch ms).
+     * @param id        The candidate new row UUID string.
+     */
+    fun advanceSupabaseCursor(wallTime: Long, id: String) {
+        synchronized(supabaseCursorLock) {
+            val curWall = lastSupabasePollWallTime
+            val curId   = lastSupabasePollId
+            val isNewer = wallTime > curWall ||
+                (wallTime == curWall && id > curId)
+            if (isNewer) {
+                // Write both atomically: single edit batch so readers never
+                // see one field updated and the other not.
+                prefs.edit()
+                    .putLong("supabase_last_poll_wall_time", wallTime)
+                    .putString("supabase_last_poll_id", id)
+                    .apply()
+            }
+        }
+    }
 
     val deviceId: String
         get() {
@@ -637,6 +681,68 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean(KEY_P2P_SYNC_ENABLED, v).apply()
 
     /**
+     * Return the P2P outbound high-water cursor for [fingerprint]:
+     * the highest [LocalItem.wallTimeMs] successfully sent to that peer.
+     *
+     * A value of 0L means no items have been sent yet (send everything on
+     * the first dial). The cursor advances only on a fully successful
+     * [syncWithPeer] call — a partial/failed dial leaves it unchanged so the
+     * next dial retransmits the same window.
+     *
+     * Key pattern: `"p2p_outbound_hw_<fingerprint>"`.  Using the fingerprint
+     * as a suffix mirrors the [KEY_PAIRED_PEERS_JSON] roster key so cursor and
+     * roster share the same natural scope / lifecycle.
+     */
+    fun p2pOutboundHighWater(fingerprint: String): Long =
+        prefs.getLong(KEY_P2P_OUTBOUND_HW_PREFIX + fingerprint, 0L)
+
+    /**
+     * Advance the P2P outbound high-water cursor for [fingerprint] to [wallTimeMs],
+     * but only when [wallTimeMs] is strictly greater than the stored value.
+     * Monotonically-increasing guard prevents a clock skew or retry from
+     * rolling the cursor backward.
+     */
+    fun advanceP2pOutboundHighWater(fingerprint: String, wallTimeMs: Long) {
+        val key = KEY_P2P_OUTBOUND_HW_PREFIX + fingerprint
+        val current = prefs.getLong(key, 0L)
+        if (wallTimeMs > current) {
+            prefs.edit().putLong(key, wallTimeMs).apply()
+        }
+    }
+
+    /**
+     * Return the P2P inbound high-water cursor for [fingerprint]:
+     * the highest [SyncedItem.wallTimeMs] received and stored from that peer.
+     * 0L = nothing received yet.
+     */
+    fun p2pInboundHighWater(fingerprint: String): Long =
+        prefs.getLong(KEY_P2P_INBOUND_HW_PREFIX + fingerprint, 0L)
+
+    /**
+     * Advance the P2P inbound high-water cursor for [fingerprint] to [wallTimeMs].
+     * Monotonically-increasing — never rolls backward.
+     */
+    fun advanceP2pInboundHighWater(fingerprint: String, wallTimeMs: Long) {
+        val key = KEY_P2P_INBOUND_HW_PREFIX + fingerprint
+        val current = prefs.getLong(key, 0L)
+        if (wallTimeMs > current) {
+            prefs.edit().putLong(key, wallTimeMs).apply()
+        }
+    }
+
+    /**
+     * Remove the P2P outbound and inbound high-water cursors for [fingerprint].
+     * Called when the peer is removed from the roster so the next pairing starts
+     * from a clean slate. No-op when the cursor was never set.
+     */
+    fun clearP2pHighWater(fingerprint: String) {
+        prefs.edit()
+            .remove(KEY_P2P_OUTBOUND_HW_PREFIX + fingerprint)
+            .remove(KEY_P2P_INBOUND_HW_PREFIX + fingerprint)
+            .apply()
+    }
+
+    /**
      * 256-bit AES key used for local clipboard encryption.
      *
      * Storage: the raw 32 random bytes are wrapped with an AndroidKeyStore-
@@ -770,7 +876,11 @@ class Settings(context: Context) {
     fun removePeer(fingerprint: String) {
         val current = pairedPeers
         val next = current.filterNot { it.fingerprint == fingerprint }
-        if (next.size != current.size) pairedPeers = next
+        if (next.size != current.size) {
+            pairedPeers = next
+            // Clear associated P2P high-water cursors so a re-pairing starts fresh.
+            clearP2pHighWater(fingerprint)
+        }
     }
 
     /**
@@ -1344,6 +1454,17 @@ class Settings(context: Context) {
         private val deviceIdLock = Any()
 
         /**
+         * Process-wide monitor for [advanceSupabaseCursor].
+         *
+         * A single companion-object lock (rather than an instance field) means
+         * ALL [Settings] instances — whether constructed by FgsSyncLoop or by the
+         * WorkManager [SupabasePollWorker] in the same process — share the same
+         * mutex.  This is safe because [Settings] already shares the same
+         * `SharedPreferences` instance via `context.getSharedPreferences`.
+         */
+        private val supabaseCursorLock = Any()
+
+        /**
          * Process-wide [LamportClock] singleton. Constructed once (double-checked
          * locking on [lamportClockLock]) and reused by all [Settings] instances.
          * Using a shared instance ensures all code paths (FGS loop, WorkManager
@@ -1394,6 +1515,28 @@ class Settings(context: Context) {
 
         // ── P2P sync ──────────────────────────────────────────────────────────
         const val KEY_P2P_SYNC_ENABLED = "p2p_sync_enabled"
+
+        /**
+         * SharedPreferences key prefix for the per-peer P2P outbound high-water
+         * cursor. The full key is "$KEY_P2P_OUTBOUND_HW_PREFIX<fingerprint>".
+         * Value is a Long (Unix epoch ms) — the highest [LocalItem.wallTimeMs]
+         * successfully sent to that peer on the last dial. Items with wallTimeMs
+         * <= this value are skipped on subsequent dials (already synced).
+         * Default 0L = never synced (send everything on first dial).
+         */
+        private const val KEY_P2P_OUTBOUND_HW_PREFIX = "p2p_outbound_hw_"
+
+        /**
+         * SharedPreferences key prefix for the per-peer P2P inbound high-water
+         * cursor. The full key is "$KEY_P2P_INBOUND_HW_PREFIX<fingerprint>".
+         * Value is a Long (Unix epoch ms) — the highest [SyncedItem.wallTimeMs]
+         * received from that peer and successfully stored on the last dial.
+         * Items from the peer with wallTimeMs <= this value are skipped by LWW
+         * in [ClipboardRepository.storeItemWithLww], so this cursor is advisory
+         * (avoids unnecessary FFI work) rather than the primary dedup gate.
+         * Default 0L = never received from this peer.
+         */
+        private const val KEY_P2P_INBOUND_HW_PREFIX = "p2p_inbound_hw_"
 
         // ── Excluded apps (privacy) ─────────────────────────────────────────────
         private const val KEY_EXCLUDED_APP_BUNDLE_IDS = "excluded_app_bundle_ids"
@@ -1462,6 +1605,11 @@ data class PairedPeer(
     val peerAppVersion: String? = null,
     val peerLocalIp: String? = null,
     val peerPublicIp: String? = null,
+    // Runtime-only: round-trip time in ms measured by FgsSyncLoop over the mTLS P2P
+    // connection. Not persisted to the roster JSON — populated in-memory during an
+    // active sync session. Wired to the UI via DevicesViewModel; actual FgsSyncLoop
+    // instrumentation deferred to CopyPaste-8dd (Gradle build cycle).
+    val latencyMs: Int? = null,
 ) {
     /** Convenience overload for callers that have no wrapped key yet (e.g. the
      *  legacy-fingerprint shim). Defaults the wrapped fields to empty. */

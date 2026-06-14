@@ -97,6 +97,18 @@ pub struct AppConfig {
     /// Default: `true`.
     #[serde(default = "default_true")]
     pub auto_apply_synced_clip: bool,
+
+    /// Whether this device advertises itself via mDNS-SD on the local network
+    /// and browses for peers.
+    ///
+    /// When `false`, the daemon does NOT register a `_copypaste._tcp.local.`
+    /// service and does NOT browse for peers, so the device is invisible on
+    /// the LAN.  Existing paired peers remain persisted and can still be
+    /// connected via direct (non-discovery) dialling if their address is known.
+    ///
+    /// Default: `true` (LAN advertisement enabled).
+    #[serde(default = "default_true")]
+    pub lan_visibility: bool,
 }
 
 impl Default for AppConfig {
@@ -126,6 +138,7 @@ impl Default for AppConfig {
             collect_public_ip: true,
             relay_url: None,
             auto_apply_synced_clip: true,
+            lan_visibility: true,
         }
     }
 }
@@ -406,5 +419,58 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "config_version = 1\nunknown_future_key = true\n").unwrap();
         AppConfig::load(&path).unwrap();
+    }
+
+    // ── lan_visibility tests ──────────────────────────────────────────────────
+
+    #[test]
+    fn lan_visibility_defaults_to_true() {
+        let cfg = AppConfig::default();
+        assert!(cfg.lan_visibility, "lan_visibility must default to true");
+    }
+
+    #[test]
+    fn lan_visibility_roundtrips_through_save_and_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        // Explicitly disabled.
+        let cfg = AppConfig {
+            lan_visibility: false,
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = AppConfig::load(&path).unwrap();
+        assert!(
+            !loaded.lan_visibility,
+            "lan_visibility=false must survive save/load"
+        );
+
+        // Re-enable and verify.
+        let cfg2 = AppConfig {
+            lan_visibility: true,
+            ..Default::default()
+        };
+        cfg2.save(&path).unwrap();
+        let loaded2 = AppConfig::load(&path).unwrap();
+        assert!(
+            loaded2.lan_visibility,
+            "lan_visibility=true must survive save/load"
+        );
+    }
+
+    #[test]
+    fn lan_visibility_absent_in_toml_defaults_to_true() {
+        // A config file written before lan_visibility was introduced must still
+        // load cleanly, with lan_visibility defaulting to true via
+        // #[serde(default = "default_true")].
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "config_version = 1\n").unwrap();
+        let cfg = AppConfig::load(&path).unwrap();
+        assert!(
+            cfg.lan_visibility,
+            "lan_visibility must default to true when absent from TOML"
+        );
     }
 }

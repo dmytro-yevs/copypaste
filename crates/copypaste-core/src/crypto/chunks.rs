@@ -146,9 +146,10 @@ pub fn decrypt_chunks(
     // Fix [MED]: use try_from to avoid silent truncation on pathological inputs.
     let total = u32::try_from(chunks.len()).map_err(|_| ChunkError::TooManyChunks)?;
 
-    // SAFETY: guarded by the `chunks.is_empty()` early-return above; `last()`
-    // cannot return `None` when `chunks` is non-empty.
-    let last = chunks.last().expect("non-empty by is_empty guard above");
+    // Guarded by the `chunks.is_empty()` early-return above; `ok_or` here
+    // makes the empty-chunk case an explicit Err instead of an infallible
+    // expect, which removes a panic site from the AEAD path (audit LOW).
+    let last = chunks.last().ok_or(ChunkError::Empty)?;
     if !last.is_final {
         return Err(ChunkError::TruncatedStream {
             expected: total + 1,
@@ -363,5 +364,22 @@ mod tests {
             ChunkError::TooManyChunks.to_string(),
             "too many chunks: stream length exceeds u32::MAX"
         );
+    }
+
+    /// Audit LOW: `decrypt_chunks` with an empty slice must return
+    /// `Err(ChunkError::Empty)` — never panic. Covers both the early-return
+    /// guard and the `ok_or(ChunkError::Empty)?` fallback that replaced the
+    /// `.expect()` in the AEAD path.
+    #[test]
+    fn empty_chunks_returns_err_not_panic() {
+        let key = test_key();
+        let file_id = test_file_id();
+        let result = decrypt_chunks(&[], &key, &file_id);
+        assert!(
+            matches!(result, Err(ChunkError::Empty)),
+            "empty chunk slice must produce ChunkError::Empty, got {:?}",
+            result
+        );
+        assert_eq!(ChunkError::Empty.to_string(), "Empty chunk stream");
     }
 }

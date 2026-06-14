@@ -1,4 +1,5 @@
 use super::db::{Database, DbError, MigrationState};
+use super::pool::DbRead;
 use rusqlite::{params, OptionalExtension};
 use thiserror::Error;
 use uuid::Uuid;
@@ -490,8 +491,8 @@ pub fn find_recent_by_hash(
     }
 }
 
-pub fn get_page(
-    db: &Database,
+pub fn get_page<D: DbRead + ?Sized>(
+    db: &D,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
@@ -521,8 +522,8 @@ pub fn get_page(
 ///
 /// This is the function used by the `history_page` IPC verb. [`get_page`]
 /// is kept for callers that need a pure-recency order (e.g. tests, sync).
-pub fn get_page_pinned_first(
-    db: &Database,
+pub fn get_page_pinned_first<D: DbRead + ?Sized>(
+    db: &D,
     limit: usize,
     offset: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
@@ -611,7 +612,7 @@ pub fn get_page_meta(
 /// `copy_item` that resolve an item directly by id — this avoids the
 /// data-loss footgun of paging (`get_page`) and linear-scanning, which
 /// silently misses any item beyond the fetched page window.
-pub fn get_item_by_id(db: &Database, id: &str) -> Result<Option<ClipboardItem>, ItemsError> {
+pub fn get_item_by_id<D: DbRead + ?Sized>(db: &D, id: &str) -> Result<Option<ClipboardItem>, ItemsError> {
     let result = db.conn().query_row(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
@@ -804,6 +805,10 @@ pub fn soft_delete_item(
 /// lands at the **end** of the pinned section. This is done atomically in a
 /// single UPDATE + subquery — no separate SELECT is needed.
 pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
+    // Bump lamport_ts so the pin change wins LWW merge on every peer that
+    // already holds this item (same pattern as soft_delete_item).
+    // wall_time is refreshed to now (ms since UNIX epoch) so peers can also
+    // converge on wall-clock order when lamport clocks are tied.
     db.conn().execute(
         "UPDATE clipboard_items
          SET pinned = 1,
@@ -812,7 +817,13 @@ pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
                  SELECT COALESCE(MAX(pin_order), 0) + 1
                  FROM clipboard_items
                  WHERE pinned = 1
-             )
+             ),
+             lamport_ts = (
+                 SELECT lamport_ts + 1
+                 FROM clipboard_items
+                 WHERE id = ?1
+             ),
+             wall_time = (CAST(strftime('%s', 'now') AS INTEGER) * 1000)
          WHERE id = ?1",
         rusqlite::params![id],
     )?;
@@ -823,8 +834,19 @@ pub fn pin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
 /// behaviour. Sets `pinned = 0` and clears `pin_order` back to NULL;
 /// `expires_at` remains `NULL` unless the caller explicitly sets a new expiry.
 pub fn unpin_item(db: &Database, id: &str) -> Result<(), ItemsError> {
+    // Bump lamport_ts so the unpin change wins LWW merge on every peer that
+    // already holds this item (same pattern as soft_delete_item / pin_item).
     db.conn().execute(
-        "UPDATE clipboard_items SET pinned = 0, pin_order = NULL WHERE id = ?1",
+        "UPDATE clipboard_items
+         SET pinned = 0,
+             pin_order = NULL,
+             lamport_ts = (
+                 SELECT lamport_ts + 1
+                 FROM clipboard_items
+                 WHERE id = ?1
+             ),
+             wall_time = (CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+         WHERE id = ?1",
         rusqlite::params![id],
     )?;
     Ok(())
@@ -848,8 +870,18 @@ pub fn reorder_pinned(db: &Database, ids: &[&str]) -> Result<usize, ItemsError> 
     let mut changed = 0usize;
     for (i, id) in ids.iter().enumerate() {
         let order = (i + 1) as f64;
+        // Bump lamport_ts so the reorder wins LWW merge on every peer —
+        // same pattern as pin_item / unpin_item / soft_delete_item.
         let rows = tx.execute(
-            "UPDATE clipboard_items SET pin_order = ?1 WHERE id = ?2 AND pinned = 1",
+            "UPDATE clipboard_items
+             SET pin_order = ?1,
+                 lamport_ts = (
+                     SELECT lamport_ts + 1
+                     FROM clipboard_items
+                     WHERE id = ?2
+                 ),
+                 wall_time = (CAST(strftime('%s', 'now') AS INTEGER) * 1000)
+             WHERE id = ?2 AND pinned = 1",
             rusqlite::params![order, id],
         )?;
         changed += rows;
@@ -1009,7 +1041,7 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     Ok(deleted)
 }
 
-pub fn count_items(db: &Database) -> Result<i64, ItemsError> {
+pub fn count_items<D: DbRead + ?Sized>(db: &D) -> Result<i64, ItemsError> {
     Ok(db.conn().query_row(
         "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 0",
         [],
@@ -1034,7 +1066,7 @@ pub const MAX_PREVIEW_BYTES: usize = 1_024;
 /// Returns `None` when no FTS entry exists for the given id (image items or
 /// pre-FTS rows). Callers should render an appropriate placeholder in that
 /// case (e.g. `"[image — id:XXXXXXXX]"`).
-pub fn fetch_text_preview(db: &Database, id: &str) -> Result<Option<String>, ItemsError> {
+pub fn fetch_text_preview<D: DbRead + ?Sized>(db: &D, id: &str) -> Result<Option<String>, ItemsError> {
     let result: Option<String> = db
         .conn()
         .query_row(
@@ -1074,6 +1106,32 @@ pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsE
         params![id, plaintext],
     )?;
     Ok(())
+}
+
+/// Fetch a map of device UUID → device name from the `devices` table.
+///
+/// Used by `history_page` to resolve `origin_device_id` to a human-readable
+/// name without requiring a per-item JOIN on every history query.  The map
+/// is built once per page request; unknown device UUIDs (items captured
+/// before the peer was paired, or orphaned rows) map to `None` at the call
+/// site rather than appearing here.
+///
+/// Returns an empty map when the `devices` table is empty or when no paired
+/// devices exist yet.
+pub fn get_device_names<D: DbRead + ?Sized>(
+    db: &D,
+) -> Result<std::collections::HashMap<String, String>, ItemsError> {
+    let mut stmt = db
+        .conn()
+        .prepare("SELECT id, name FROM devices")?;
+    let pairs = stmt
+        .query_map([], |row| {
+            let id: String = row.get(0)?;
+            let name: String = row.get(1)?;
+            Ok((id, name))
+        })?
+        .collect::<Result<std::collections::HashMap<_, _>, _>>()?;
+    Ok(pairs)
 }
 
 /// Remove an item's entry from the FTS5 index.
@@ -1200,8 +1258,8 @@ fn sanitize_fts5_query(raw: &str) -> Option<String> {
 ///
 /// The query is sanitized via `sanitize_fts5_query` (S8 whitelist tokenizer) before being
 /// passed to the FTS5 MATCH operator to prevent operator injection.
-pub fn search_items(
-    db: &Database,
+pub fn search_items<D: DbRead + ?Sized>(
+    db: &D,
     query: &str,
     limit: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
@@ -1743,6 +1801,95 @@ mod tests {
         // Verify expired returns 0 (pinned item not deleted)
         let removed = delete_expired(&db, 99999).unwrap();
         assert_eq!(removed, 0);
+    }
+
+    /// Regression: `pin_item` and `unpin_item` must bump `lamport_ts` so the
+    /// pin-state change wins LWW merge on peers that already have the item.
+    /// Without this bump a peer receiving the item via cloud backlog or P2P
+    /// would silently discard the pin update because the timestamp tie-breaks
+    /// in favour of the (unchanged) local copy.
+    #[test]
+    fn pin_unpin_bumps_lamport_ts() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(10);
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        // pin_item must advance lamport_ts beyond the inserted value (10).
+        pin_item(&db, &id).unwrap();
+        let after_pin = get_item_by_id(&db, &id).unwrap().expect("row must exist");
+        assert_eq!(
+            after_pin.lamport_ts,
+            11,
+            "pin_item must bump lamport_ts by 1 so the pin wins LWW merge (was 10)"
+        );
+        assert!(after_pin.pinned, "item must be pinned after pin_item");
+        assert!(
+            after_pin.pin_order.is_some(),
+            "pin_item must assign a non-null pin_order"
+        );
+
+        // unpin_item must advance lamport_ts beyond the post-pin value (11).
+        unpin_item(&db, &id).unwrap();
+        let after_unpin = get_item_by_id(&db, &id).unwrap().expect("row must exist");
+        assert_eq!(
+            after_unpin.lamport_ts,
+            12,
+            "unpin_item must bump lamport_ts by 1 so the unpin wins LWW merge (was 11)"
+        );
+        assert!(!after_unpin.pinned, "item must be unpinned after unpin_item");
+        assert!(
+            after_unpin.pin_order.is_none(),
+            "unpin_item must clear pin_order back to NULL"
+        );
+    }
+
+    /// Regression: `reorder_pinned` must bump `lamport_ts` on each row so the
+    /// new drag-to-reorder ordering wins LWW merge on peers.
+    #[test]
+    fn reorder_pinned_bumps_lamport_ts() {
+        let db = Database::open_in_memory().unwrap();
+
+        let item_a = make_item(5);
+        let id_a = item_a.id.clone();
+        insert_item(&db, &item_a).unwrap();
+        pin_item(&db, &id_a).unwrap();
+
+        let item_b = make_item(6);
+        let id_b = item_b.id.clone();
+        insert_item(&db, &item_b).unwrap();
+        pin_item(&db, &id_b).unwrap();
+
+        // Record lamport_ts values after pinning.
+        let a_before = get_item_by_id(&db, &id_a)
+            .unwrap()
+            .expect("row must exist")
+            .lamport_ts;
+        let b_before = get_item_by_id(&db, &id_b)
+            .unwrap()
+            .expect("row must exist")
+            .lamport_ts;
+
+        // Reorder: put b first, a second.
+        reorder_pinned(&db, &[&id_b, &id_a]).unwrap();
+
+        let a_after = get_item_by_id(&db, &id_a)
+            .unwrap()
+            .expect("row must exist")
+            .lamport_ts;
+        let b_after = get_item_by_id(&db, &id_b)
+            .unwrap()
+            .expect("row must exist")
+            .lamport_ts;
+
+        assert!(
+            a_after > a_before,
+            "reorder_pinned must bump lamport_ts on item_a: before={a_before}, after={a_after}"
+        );
+        assert!(
+            b_after > b_before,
+            "reorder_pinned must bump lamport_ts on item_b: before={b_before}, after={b_after}"
+        );
     }
 
     #[test]

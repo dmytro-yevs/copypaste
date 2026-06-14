@@ -15,7 +15,58 @@
 //! Call it via `tokio::task::spawn_blocking` in async contexts.
 
 use std::net::IpAddr;
+use std::sync::OnceLock;
 use tracing::debug;
+
+// ---------------------------------------------------------------------------
+// Startup cache
+// ---------------------------------------------------------------------------
+
+/// Process-wide cache for the static parts of this device's metadata.
+///
+/// `DeviceMeta::collect` spawns several child processes (`scutil`, `sysctl`,
+/// `sw_vers`) that together take up to ~6 s on cold macOS systems.  Because
+/// `device_name`, `device_model`, and `os_version` never change while the
+/// daemon is running, it is safe — and much cheaper — to collect them ONCE at
+/// daemon startup and reuse the result for every subsequent call.
+///
+/// `local_ip` is also captured here.  It can change when the user moves
+/// between networks, but the existing code already only collects it once per
+/// pairing/QR action, so caching it here is no regression — the same trade-off
+/// that the mDNS advertisement already makes (it re-registers on interface
+/// change events separately).
+///
+/// # How to populate
+/// Call [`warm_cache`] once from a `tokio::task::spawn_blocking` context
+/// (or from a plain blocking thread) before any other code path reaches
+/// [`get_cached`].  Subsequent calls to [`warm_cache`] are no-ops.
+///
+/// # Thread-safety
+/// `OnceLock` guarantees that exactly one thread runs `DeviceMeta::collect`
+/// even when two threads race on the first call.  All readers after the first
+/// write are wait-free.
+static CACHED_META: OnceLock<DeviceMeta> = OnceLock::new();
+
+/// Populate the process-wide metadata cache.
+///
+/// This is a **blocking** function (it may call `scutil`, `sysctl`, etc.).
+/// Call it from `tokio::task::spawn_blocking` in async contexts.
+///
+/// Idempotent: if the cache is already populated, this is a no-op (the
+/// already-stored value is never replaced).
+pub(crate) fn warm_cache(app_version: &str) {
+    CACHED_META.get_or_init(|| DeviceMeta::collect(app_version));
+}
+
+/// Return the cached metadata, collecting it now (blocking) if the cache has
+/// not been warmed yet.
+///
+/// Prefer calling [`warm_cache`] explicitly at startup so the latency is paid
+/// once at a predictable time rather than on the first pairing/QR request.
+/// This fallback guarantees correctness even if `warm_cache` was never called.
+pub(crate) fn get_cached(app_version: &str) -> &'static DeviceMeta {
+    CACHED_META.get_or_init(|| DeviceMeta::collect(app_version))
+}
 
 /// Rich identity metadata for this device.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -379,5 +430,37 @@ mod tests {
             json.contains("\"public_ip\":\"203.0.113.42\""),
             "public_ip must appear in JSON when Some: {json}"
         );
+    }
+
+    /// `get_cached` must always return a non-panicking result, and repeated
+    /// calls must return the same `app_version` (cache hit, not a re-collect).
+    #[test]
+    fn get_cached_is_idempotent() {
+        let first = get_cached("0.6.0");
+        let second = get_cached("0.6.0");
+        // Both calls must return the same static reference (pointer equality).
+        assert!(
+            std::ptr::eq(first, second),
+            "get_cached must return the same cached reference on repeated calls"
+        );
+        assert_eq!(first.app_version, "0.6.0");
+        assert!(
+            first.public_ip.is_none(),
+            "cached meta must not populate public_ip"
+        );
+    }
+
+    /// `warm_cache` followed by `get_cached` must return the pre-warmed value.
+    ///
+    /// Note: because `CACHED_META` is a process-wide `OnceLock`, other tests in
+    /// this module may have already warmed it with a different `app_version`.
+    /// This test only checks that the cache is populated (non-panic) and that
+    /// `get_cached` returns without blocking.
+    #[test]
+    fn warm_cache_and_get_cached_do_not_panic() {
+        warm_cache("0.6.0");
+        let meta = get_cached("0.6.0");
+        // The cache must have been populated.
+        assert!(!meta.app_version.is_empty());
     }
 }

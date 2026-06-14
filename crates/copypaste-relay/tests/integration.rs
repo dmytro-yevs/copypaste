@@ -90,6 +90,12 @@ fn make_app_with_item_bytes(max_item_bytes: usize) -> (axum::Router, AppState) {
 fn valid_pub_key() -> String {
     B64.encode([0u8; 32])
 }
+/// Dummy 32-byte proof-of-possession for integration tests. Tests that do not
+/// exercise PoP semantics use this sentinel (any 32-byte value is accepted on
+/// first registration; co-registration with the same value succeeds).
+fn valid_pop() -> String {
+    B64.encode([0xDE_u8; 32])
+}
 
 const DEVICE_A: &str = "11111111-1111-1111-1111-111111111111";
 #[allow(dead_code)]
@@ -155,6 +161,7 @@ async fn register_device(
         "device_id": device_id,
         "device_name": "Test Device",
         "public_key_b64": public_key,
+        "pop_b64": valid_pop(),
     });
     let req = Request::builder()
         .method(Method::POST)
@@ -304,7 +311,7 @@ async fn test_push_and_pull_roundtrip() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -360,7 +367,7 @@ async fn test_pull_since_wall_time() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -394,7 +401,7 @@ async fn test_push_invalid_content_type_is_400() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -413,7 +420,7 @@ async fn test_delete_nonexistent_item_is_404() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -434,7 +441,7 @@ async fn test_push_oversized_text_item_is_413_item_size_exceeded() {
     let (app, state) = make_app_with_item_bytes(20 * 1024 * 1024);
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -460,7 +467,7 @@ async fn test_push_text_item_at_limit_is_accepted() {
     let (app, state) = make_app_with_item_bytes(20 * 1024 * 1024);
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -504,7 +511,7 @@ async fn test_push_route_advances_last_seen() {
     // Register a device directly in the store (no HTTP round-trip needed for setup).
     let token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -575,7 +582,7 @@ async fn test_pull_route_advances_last_seen() {
 
     let token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -627,7 +634,7 @@ async fn test_push_large_image_under_image_limit_is_accepted() {
     let (app, state) = make_app();
     let a_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key())
+        s.register_device(DEVICE_A.to_string(), "Device A".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };

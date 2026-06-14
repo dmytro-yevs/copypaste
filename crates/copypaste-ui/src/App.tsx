@@ -216,7 +216,10 @@ export default function App() {
     <ErrorBoundary>
       <div className="flex h-screen w-screen overflow-hidden text-ide-text">
         <Sidebar />
-        <div className="flex min-w-0 flex-1 flex-col bg-ide-bg/35">
+        {/* surface-glass = canonical §3 translucency recipe (rgba(19,20,26,.72)+blur(30px) saturate(180%)) */}
+        <div
+          className="surface-glass flex min-w-0 flex-1 flex-col"
+        >
           <div data-tauri-drag-region className="h-9 shrink-0" />
 
           {/* Daemon spawn error — non-dismissible, installation-incomplete */}

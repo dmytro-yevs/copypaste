@@ -29,9 +29,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
@@ -42,6 +44,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +52,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -70,6 +77,8 @@ import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
+import com.copypaste.android.ui.theme.IdeElevated
+import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
@@ -372,6 +381,9 @@ fun PairScreen(
     var scannedPeer by remember { mutableStateOf<ScannedPairing?>(null) }
     var syncing by remember { mutableStateOf(false) }
     var syncResult by remember { mutableStateOf<String?>(null) }
+    // Holds the just-paired peer to display in the compact success popup.
+    // Set at the end of runPairAndSync; cleared when the popup is dismissed.
+    var pairedPeerForPopup by remember { mutableStateOf<PairedPeer?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -728,6 +740,11 @@ fun PairScreen(
                         "blob ${result.itemsSkippedMissingBlob}"
                     "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored ($skipped), sent ${result.itemsSent}. ($peerCount paired device(s))"
                 }
+                // Surface the just-persisted peer for the compact success popup.
+                // Look it up from the roster by fingerprint so all ABI-14 fields
+                // (model/OS/version/IPs) are present for the card.
+                pairedPeerForPopup = settings.pairedPeers
+                    .firstOrNull { it.fingerprint == bootstrap.peerFingerprint }
                 syncResult = message
                 scannedPeer = null
             } catch (e: Exception) {
@@ -740,6 +757,9 @@ fun PairScreen(
 
     // Countdown ticker — restarts whenever a fresh QR is issued.
     // When the countdown reaches 0, auto-regenerate the QR.
+    // Gated: if the success popup is showing, skip the auto-regenerate so the
+    // QR doesn't refresh underneath the dialog and the pairedPeerForPopup state
+    // stays stable while the user reads the card.
     LaunchedEffect(qr) {
         if (qr == null) return@LaunchedEffect
         remainingSeconds = PAIR_TOKEN_TTL_SECONDS
@@ -747,8 +767,8 @@ fun PairScreen(
             delay(1000)
             remainingSeconds -= 1
         }
-        // QR expired — auto-regenerate.
-        generateQr()
+        // QR expired — auto-regenerate only when the success popup is not up.
+        if (pairedPeerForPopup == null) generateQr()
     }
 
     // AND2: Auto-start pairing when the screen opens so the QR appears
@@ -1064,12 +1084,17 @@ fun PairScreen(
                 )
             }
 
-            // ── Post-pair success message ──────────────────────────────────────
-            syncResult?.let { msg ->
-                Text(
-                    text = msg,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = IdeAccent
+            // ── Post-pair success popup ────────────────────────────────────────
+            // Shown as a compact AlertDialog overlay once pairing completes.
+            // The full syncResult string is still set (for logging / snackbar
+            // fallback) but no longer displayed inline — the popup card takes over.
+            pairedPeerForPopup?.let { justPaired ->
+                PairedSuccessPopup(
+                    peer = justPaired,
+                    onDismiss = {
+                        pairedPeerForPopup = null
+                        onBack()
+                    },
                 )
             }
 
@@ -1117,6 +1142,111 @@ fun PairScreen(
                 }
             }
         }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Post-pairing success popup
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Compact AlertDialog shown immediately after QR pairing succeeds.
+ *
+ * Renders the just-paired device as a tidy card — name + status dot (always
+ * "Paired ✓" since we just finished), model/OS if the peer sent them over the
+ * authenticated tunnel (ABI 14 peerModel/peerOs), and a short fingerprint.
+ * The full verbose sync summary is intentionally omitted here (it remains in
+ * [syncResult] for debug logging); this card surfaces only what the user cares
+ * about: "which device did I just pair with?"
+ *
+ * Dismisses via "Done" → [onDismiss], which clears [pairedPeerForPopup] and
+ * calls [onBack] to return to the Devices list.
+ */
+@Composable
+private fun PairedSuccessPopup(
+    peer: PairedPeer,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = IdeElevated,
+        title = {
+            Text(
+                text = "Paired successfully",
+                style = MaterialTheme.typography.titleMedium,
+                color = IdeSuccess,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // ── Status header row: dot + name + "Paired ✓" ──────────────
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(IdeSuccess),
+                    )
+                    Text(
+                        text = peer.name.ifBlank { "Paired device" },
+                        style = MaterialTheme.typography.titleSmall,
+                        color = IdeText,
+                    )
+                    Text(
+                        text = "Paired ✓",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = IdeSuccess,
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+
+                // ── Device metadata rows (only non-blank fields) ─────────────
+                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    peer.peerModel?.takeIf { it.isNotBlank() }?.let {
+                        PopupMetaRow(label = "Model", value = it)
+                    }
+                    peer.peerOs?.takeIf { it.isNotBlank() }?.let {
+                        PopupMetaRow(label = "OS", value = it)
+                    }
+                    peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
+                        PopupMetaRow(label = "Version", value = it)
+                    }
+                    // Short fingerprint (first 16 + last 8 chars) — readable
+                    // without overwhelming the compact popup layout.
+                    val shortFp = if (peer.fingerprint.length > 24)
+                        "${peer.fingerprint.take(16)}…${peer.fingerprint.takeLast(8)}"
+                    else peer.fingerprint
+                    PopupMetaRow(label = "Fingerprint", value = shortFp)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done", color = IdeAccent)
+            }
+        },
+    )
+}
+
+/** Single label+value row for [PairedSuccessPopup]. */
+@Composable
+private fun PopupMetaRow(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = IdeDim,
+            modifier = Modifier.width(72.dp),
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = IdeText,
+        )
     }
 }
 

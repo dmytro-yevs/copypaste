@@ -32,6 +32,9 @@ x25519-dalek = { version = "2.0", features = ["static_secrets"] }
 chacha20poly1305 = "0.10"
 hkdf = "0.12"
 sha2 = "0.10"
+# HMAC-SHA256 for relay proof-of-possession (PoP). Same version family as hkdf;
+# hmac v0.12.1 is already in Cargo.lock transitively via hkdf — no new lock entry.
+hmac = "0.12"
 zeroize = { version = "1.7", features = ["derive"] }
 rand = "0.8"
 hex = "0.4"

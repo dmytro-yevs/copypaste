@@ -84,6 +84,9 @@ fn make_app() -> (axum::Router, AppState) {
 fn pub_key(seed: u8) -> String {
     B64.encode([seed; 32])
 }
+fn valid_pop() -> String {
+    B64.encode([0xDE_u8; 32])
+}
 
 fn device_uuid(n: u8) -> String {
     format!(
@@ -96,6 +99,7 @@ async fn register(app: axum::Router, device_id: &str, key: &str) -> (StatusCode,
         "device_id": device_id,
         "device_name": "Test Device",
         "public_key_b64": key,
+        "pop_b64": valid_pop(),
     });
     let req = Request::builder()
         .method(Method::POST)

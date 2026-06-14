@@ -18,10 +18,17 @@ home.workspace = true
 copypaste-ipc = { path = "../copypaste-ipc" }
 # QR rendering for `copypaste pair-qr` (terminal block art).
 qrcode.workspace = true
-# beta-bonus (vacuum): direct encrypted-DB access for `copypaste vacuum`.
-# We open the SQLCipher file ourselves (daemon must be stopped first), so we
-# need rusqlite and the core Database wrapper. Adds ~1MB to binary but lets
-# us avoid an "IPC vacuum" method that would lock the daemon for seconds.
+# ARCH-RESIDUAL: copypaste-core is linked ONLY by `commands/vacuum.rs`.
+# `commands/pair_qr.rs` already routes through IPC (`pair_generate_qr`) —
+# it never uses core in code (the module-doc mention is a cross-ref comment).
+#
+# vacuum opens the SQLCipher file directly (daemon must be stopped first) and
+# derives the local-enc key via HKDF-SHA256 on the keychain secret — both
+# operations require copypaste_core::Database and copypaste_core::DeviceKeypair.
+# Adding a `vacuum` IPC method would put a long-blocking exclusive-lock on the
+# daemon's request loop. Until the daemon exposes a "vacuum" IPC verb (tracked
+# in CopyPaste-FOLLOW_VACUUM, follow-up bd issue), this dep stays.
+# See crates/copypaste-cli/src/commands/vacuum.rs for the full rationale.
 copypaste-core = { path = "../copypaste-core" }
 rusqlite.workspace = true
 zeroize = { workspace = true }

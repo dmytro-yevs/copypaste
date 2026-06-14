@@ -31,6 +31,18 @@ pub enum ClipboardContent {
         filename: String,
         mime: String,
     },
+    /// Internal: a file-URL was detected on the clipboard but the bytes have
+    /// NOT been read yet. `poll()` returns this variant instead of `File` so
+    /// that the actual `std::fs::read` can be deferred to the async
+    /// `handle_tick` caller, which wraps it in `tokio::task::spawn_blocking`.
+    /// Callers outside `handle_tick` should never observe this variant in
+    /// normal operation; it is resolved to `File` (or silently dropped on
+    /// read error) before surfacing to higher layers.
+    FileRef {
+        path: std::path::PathBuf,
+        filename: String,
+        mime: String,
+    },
     /// Emitted alongside the latest captured content when the pasteboard
     /// changeCount advanced by more than [`SKIPPED_BATCH_THRESHOLD`] since
     /// the previous poll. The inner value is the number of intermediate
@@ -40,12 +52,14 @@ pub enum ClipboardContent {
 
 impl ClipboardContent {
     /// Returns the raw bytes for this content variant.
-    /// `SkippedBatch` has no payload — returns an empty slice.
+    /// `SkippedBatch` and `FileRef` have no in-memory payload — returns an
+    /// empty slice. `FileRef` bytes are loaded lazily in `handle_tick`.
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             ClipboardContent::Text(s) => s.as_bytes(),
             ClipboardContent::Image(b) => b.as_slice(),
             ClipboardContent::File { bytes, .. } => bytes.as_slice(),
+            ClipboardContent::FileRef { .. } => &[],
             ClipboardContent::SkippedBatch(_) => &[],
         }
     }
@@ -56,6 +70,7 @@ impl ClipboardContent {
             ClipboardContent::Text(_) => "text",
             ClipboardContent::Image(_) => "image",
             ClipboardContent::File { .. } => "file",
+            ClipboardContent::FileRef { .. } => "file",
             ClipboardContent::SkippedBatch(_) => "skipped_batch",
         }
     }
@@ -409,7 +424,7 @@ impl ClipboardMonitor {
                 // the bytes, and derive the filename + MIME from the path.
                 // `NSFilenamesPboardType` is the legacy (pre-UTI) name for the
                 // same data; we probe it as a fallback.
-                let file_content: Option<(Vec<u8>, String, String)> = if text.is_none()
+                let file_content: Option<(std::path::PathBuf, String, String)> = if text.is_none()
                     && image_bytes.is_none()
                 {
                     let file_url_type = NSString::from_str("public.file-url");
@@ -434,16 +449,11 @@ impl ClipboardMonitor {
                             // Best-effort MIME from file extension; fall back to
                             // application/octet-stream for unknown extensions.
                             let mime = mime_from_path(path);
-                            match std::fs::read(path) {
-                                Ok(bytes) => Some((bytes, filename, mime)),
-                                Err(e) => {
-                                    tracing::warn!(
-                                        path = %path.display(),
-                                        "clipboard: file-url read failed: {e}"
-                                    );
-                                    None
-                                }
-                            }
+                            // Return a FileRef instead of reading the bytes here.
+                            // The actual std::fs::read runs in handle_tick via
+                            // tokio::task::spawn_blocking so this tokio worker
+                            // thread is not blocked on potentially large I/O.
+                            Some((path.to_path_buf(), filename, mime))
                         } else {
                             tracing::debug!(
                                 url = %url_str,
@@ -588,21 +598,15 @@ impl ClipboardMonitor {
                 return Ok(Some(ClipboardContent::Image(bytes)));
             }
 
-            if let Some((bytes, filename, mime)) = file_content {
-                if bytes.len() > self.max_file_bytes {
-                    tracing::warn!(
-                        bytes = bytes.len(),
-                        max = self.max_file_bytes,
-                        filename = %filename,
-                        "clipboard: file too large — skipping"
-                    );
-                } else {
-                    return Ok(Some(ClipboardContent::File {
-                        bytes,
-                        filename,
-                        mime,
-                    }));
-                }
+            if let Some((path, filename, mime)) = file_content {
+                // The size gate will be applied after spawn_blocking reads
+                // the bytes in handle_tick. Return FileRef here so the
+                // tokio worker is not blocked on potentially large I/O.
+                return Ok(Some(ClipboardContent::FileRef {
+                    path,
+                    filename,
+                    mime,
+                }));
             }
 
             // No supported content — log any unknown kinds once each.
@@ -765,5 +769,18 @@ mod tests {
         let expected = Sha256::digest(a);
         assert_eq!(&ha[..], &expected[..16]);
         assert_eq!(ha.len(), 16);
+    }
+
+    /// FileRef variant: as_bytes returns empty, content_type returns "file".
+    /// The actual bytes are loaded lazily via spawn_blocking in handle_tick.
+    #[test]
+    fn file_ref_content_type_and_bytes() {
+        let c = ClipboardContent::FileRef {
+            path: std::path::PathBuf::from("/tmp/report.pdf"),
+            filename: "report.pdf".to_string(),
+            mime: "application/pdf".to_string(),
+        };
+        assert_eq!(c.content_type(), "file");
+        assert_eq!(c.as_bytes(), &[] as &[u8]);
     }
 }

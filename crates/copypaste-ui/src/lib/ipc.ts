@@ -1,11 +1,36 @@
 import { invoke } from "@tauri-apps/api/core";
 
+/**
+ * IPC wire protocol version this UI build was compiled against (ADR-007).
+ * Bump this when a breaking wire change is shipped alongside a UI update.
+ * The daemon emits `protocol_version` on every response; when the daemon's
+ * version exceeds this value the client should surface an upgrade prompt.
+ */
+export const CURRENT_PROTOCOL_VERSION = 1;
+
+/**
+ * Optional callback invoked when a daemon response carries a `protocol_version`
+ * that differs from {@link CURRENT_PROTOCOL_VERSION}. The default handler
+ * emits a `console.warn`. Replace this at startup (e.g. in App.tsx) to surface
+ * a richer banner instead.
+ *
+ * Signature: `(daemonVersion: number) => void`
+ */
+export let protocolMismatchHandler: ((daemonVersion: number) => void) | null = null;
+
 /** Raw daemon reply, mirrored from the Rust `ipc_call` bridge. */
 export interface IpcReply {
   ok: boolean;
   data: unknown | null;
   error: string | null;
   error_code: string | null;
+  /**
+   * Wire protocol version the daemon speaks (ADR-007). Optional for back-compat
+   * with daemon builds predating the field and with the current Tauri bridge
+   * (`src-tauri/src/ipc.rs`) which does not yet forward this field — until that
+   * bridge is updated the field arrives as `undefined`.
+   */
+  protocol_version?: number;
 }
 
 /** Error carrying the daemon's stable machine code (e.g. "daemon_offline"). */
@@ -22,6 +47,11 @@ export class IpcError extends Error {
  * Call a daemon method over the Unix-socket bridge. Resolves to the daemon's
  * `data` payload on success; throws `IpcError` on a daemon error and on a
  * transport failure (e.g. the daemon being offline -> code "daemon_offline").
+ *
+ * Per ADR-007, checks the daemon's `protocol_version` on every reply. When the
+ * daemon speaks a version higher than {@link CURRENT_PROTOCOL_VERSION} the
+ * client may be unable to handle future field changes — a warning is surfaced
+ * via {@link protocolMismatchHandler} (defaults to `console.warn`).
  */
 export async function ipcCall<T = unknown>(
   method: string,
@@ -36,6 +66,25 @@ export async function ipcCall<T = unknown>(
     const code = raw.split(":", 1)[0] || null;
     throw new IpcError(raw, code);
   }
+
+  // ADR-007: check protocol version on every reply. The field is optional
+  // because (a) the Tauri bridge does not yet forward it and (b) old daemon
+  // builds predate the field — both cases arrive as `undefined`, which we
+  // treat as "no mismatch detected" rather than a false alarm.
+  const daemonVersion = reply.protocol_version;
+  if (daemonVersion !== undefined && daemonVersion !== CURRENT_PROTOCOL_VERSION) {
+    const handler = protocolMismatchHandler;
+    if (handler !== null) {
+      handler(daemonVersion);
+    } else {
+      console.warn(
+        `[copypaste] IPC protocol version mismatch: daemon speaks v${daemonVersion}, ` +
+        `client expects v${CURRENT_PROTOCOL_VERSION}. ` +
+        "Please upgrade the CopyPaste app or restart the daemon."
+      );
+    }
+  }
+
   if (!reply.ok) {
     throw new IpcError(reply.error ?? "unknown daemon error", reply.error_code);
   }
@@ -81,6 +130,15 @@ export interface HistoryEntry {
    * Optional for back-compat with daemon builds predating this field.
    */
   origin_device_id?: string;
+  /**
+   * Human-readable name of the device that originally captured this item,
+   * as stored in the local `devices` table.  `null` when the device was
+   * never paired on this machine (e.g. an item received from a third device
+   * that was not directly paired here) or for pre-v3 rows with an empty
+   * `origin_device_id`.  Optional for back-compat with older daemon builds
+   * that do not emit this field.
+   */
+  origin_device_name?: string | null;
   /**
    * Refined content-kind label computed by the daemon's core text-kind
    * classifier. Values for text items: "TEXT" | "URL" | "EMAIL" | "PHONE" |
@@ -137,6 +195,45 @@ export interface AppSettings {
   // Sound / notification on copy — wired to daemon config.toml.
   sound_on_copy?: boolean | null;
   notify_on_copy?: boolean | null;
+  /**
+   * Whether the daemon may make a one-off STUN request to discover the device's
+   * public IP. `null` / absent = preserve stored value. Maps to
+   * `AppConfig::collect_public_ip` in the daemon.
+   */
+  collect_public_ip?: boolean | null;
+  /**
+   * When true, paste-back strips all rich clipboard types and writes plain
+   * text only. `null` / absent = preserve stored value. Maps to
+   * `AppConfig::paste_as_plain_text`.
+   */
+  paste_as_plain_text?: boolean | null;
+  /**
+   * Bundle IDs of apps whose clipboard copies are silently skipped (macOS).
+   * `null` / absent = preserve stored value; an explicit `[]` clears the list.
+   * Maps to `AppConfig::excluded_app_bundle_ids`.
+   */
+  excluded_app_bundle_ids?: string[] | null;
+  /**
+   * Whether this device advertises itself via mDNS-SD and browses for peers on
+   * the local network. `false` = LAN-invisible (stealth mode). `null` / absent
+   * = preserve stored value. Default: `true`. Maps to
+   * `AppConfig::lan_visibility` in core config.toml.
+   */
+  lan_visibility?: boolean | null;
+  /**
+   * True when a Supabase GoTrue email is stored in the daemon's config.
+   * The daemon never returns the email itself — only this presence flag.
+   * Read-only; ignored by `set_config`. Maps to `AppConfig::supabase_email`
+   * after redaction in `redact_config_secrets`.
+   */
+  supabase_email_set?: boolean;
+  /**
+   * True when a Supabase GoTrue password is stored in the daemon's config.
+   * The daemon never returns the password itself — only this presence flag.
+   * Read-only; ignored by `set_config`. Maps to `AppConfig::supabase_password`
+   * after redaction in `redact_config_secrets`.
+   */
+  supabase_password_set?: boolean;
 }
 
 /**
@@ -331,6 +428,11 @@ export interface PairedDevice {
    * Optional for back-compat with older daemons that don't emit this field.
    */
   last_seen_secs?: number;
+  /**
+   * Round-trip time in milliseconds to this peer over the mTLS P2P connection.
+   * Absent when no live P2P connection exists or the daemon has not yet measured it.
+   */
+  latency_ms?: number;
 }
 
 /**

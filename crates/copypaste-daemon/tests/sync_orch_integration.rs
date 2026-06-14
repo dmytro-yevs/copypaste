@@ -103,7 +103,7 @@ async fn run_orch_stand_in(
                         // Mirror `sync_orch::merge_incoming` LWW path.
                         let g = db.lock().await;
                         let local: Vec<ClipboardItem> =
-                            copypaste_core::get_page(&g, 10_000, 0).unwrap_or_default();
+                            copypaste_core::get_page(&*g, 10_000, 0).unwrap_or_default();
                         let take = match local.iter().find(|i| i.id == wire.id) {
                             Some(existing) => matches!(resolve(existing, &wire), MergeOutcome::TakeRemote),
                             None => true,
@@ -182,7 +182,7 @@ async fn dummy_incoming_wire_item_invokes_merge_handler() {
     // Verify handler invoked: row exists in DB.
     {
         let g = db.lock().await;
-        let rows = copypaste_core::get_page(&g, 10, 0).expect("get_page");
+        let rows = copypaste_core::get_page(&*g, 10, 0).expect("get_page");
         assert_eq!(rows.len(), 1, "merge handler must have inserted the item");
         assert_eq!(rows[0].id, "dummy-1");
         assert_eq!(rows[0].lamport_ts, 7);

@@ -37,3 +37,5 @@ sentry = { version = "0.35", default-features = false, features = ["reqwest", "r
 # `test` feature enables `sentry::test::with_captured_events` — required for
 # the in-memory transport used by `tests/sentry_backend.rs`.
 sentry = { version = "0.35", default-features = false, features = ["test"] }
+# Required for serde round-trip tests in `tests/serde_contract.rs`.
+serde_json = { workspace = true }

@@ -182,6 +182,24 @@ pub enum ControlMsg {
     /// message.  This prevents a compromised or misbehaving peer from causing
     /// arbitrary evictions.
     Unpair,
+    /// RTT probe sent by one peer; the receiver must reply with a matching
+    /// [`ControlMsg::Pong`] carrying the same `nonce`. The sender records
+    /// the elapsed time between send and pong receipt as the round-trip time
+    /// for that peer connection.
+    ///
+    /// The nonce is a randomly-generated `u64` that correlates each pong with
+    /// its ping. Old peers that don't know this variant will log a deserialise
+    /// warning (harmless — no eviction, no state change).
+    Ping {
+        /// Randomly-generated correlation token.
+        nonce: u64,
+    },
+    /// RTT probe reply. The receiver of a [`ControlMsg::Ping`] sends this back
+    /// with the same `nonce` so the original sender can compute the RTT.
+    Pong {
+        /// Echo of the nonce from the corresponding [`ControlMsg::Ping`].
+        nonce: u64,
+    },
 }
 
 /// A frame that may carry either a clipboard-item payload or a control signal.

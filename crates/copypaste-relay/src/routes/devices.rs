@@ -73,12 +73,12 @@ pub async fn register(
 
     // Per-(ip, device) rate limit (HIGH #5 / MEDIUM #13).
     //
-    // Runs *after* full payload validation so the limiter map never grows
-    // from probes that the handler would reject anyway — and is keyed by
-    // `(client_ip, device_id)` so a `device_id`-only enumeration probe
-    // from an attacker IP cannot collide with the bucket the legitimate
-    // owner builds up from a different IP. When `ConnectInfo` is absent
-    // (tests using `tower::ServiceExt::oneshot`) the IP becomes `None`,
+    // Runs *after* structural payload validation (UUID, name, key) but
+    // *before* PoP extraction, so the 429 fires even when pop_b64 is absent.
+    // The limiter is keyed by `(client_ip, device_id)` so a `device_id`-only
+    // enumeration probe from an attacker IP cannot collide with the bucket the
+    // legitimate owner builds up from a different IP. When `ConnectInfo` is
+    // absent (tests using `tower::ServiceExt::oneshot`) the IP becomes `None`,
     // preserving the previous per-device-only fallback for that path.
     let client_ip = connect_info.map(|Extension(ConnectInfo(addr))| addr.ip());
 
@@ -106,6 +106,21 @@ pub async fn register(
         return Err(resp);
     }
 
+    // Validate pop_b64 is present (required — fixes CopyPaste-n2l).
+    // Extracted *after* the rate-limit check so that 429 fires even when the
+    // field is absent (e.g. rate-limit probes without a valid pop_b64).
+    // The state layer performs the deeper PoP verification (constant-time
+    // compare on co-registration); here we just surface a clear error when the
+    // field is entirely absent so callers get a descriptive 400.
+    let pop_b64 = body.pop_b64.ok_or_else(|| {
+        RelayError::BadRequest(
+            "pop_b64 is required: provide HMAC-SHA256(sync_key, \
+             \"relay-registration-pop-v1:\" || device_id) base64-encoded"
+                .to_string(),
+        )
+        .into_response()
+    })?;
+
     // Scope the per-account device quota (H1) to the registering client IP so
     // it is a per-source cap, not a global ceiling that would reject the 6th
     // device across all users. `client_ip` is reused from the rate-limit check.
@@ -115,6 +130,7 @@ pub async fn register(
             body.device_id.clone(),
             device_name,
             body.public_key_b64,
+            pop_b64,
         )
         .map_err(|e| e.into_response())?;
 

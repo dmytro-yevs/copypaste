@@ -678,7 +678,19 @@ impl Database {
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
+}
 
+/// `Database` implements [`crate::storage::pool::DbRead`] so that the same
+/// read-only storage functions (e.g. `get_page`, `search_items`) can accept
+/// either the single writer handle or a pooled [`crate::storage::pool::ReadHandle`]
+/// without code duplication.
+impl crate::storage::pool::DbRead for Database {
+    fn conn(&self) -> &Connection {
+        &self.conn
+    }
+}
+
+impl Database {
     /// Read the current state of the v4 key-version sweep from `migration_state`.
     ///
     /// Returns `MigrationState::NotStarted` if the table row is absent (fresh
@@ -975,6 +987,24 @@ impl Database {
             );
         }
         Ok(deleted)
+    }
+
+    /// One-time startup repair: find image/file rows that were encrypted with
+    /// the v1 key but mistakenly stamped `key_version = 2` by the pre-fix
+    /// writer in `daemon::handle_image` and `handle_file`.
+    ///
+    /// For each candidate row the function probes v1-decrypt: success means
+    /// the row is mislabeled and is re-encrypted in-place with the v2 key;
+    /// failure means the row is correctly v2-encrypted and is left alone.
+    ///
+    /// Returns the count of rows actually repaired (re-encrypted). Idempotent.
+    pub fn repair_mislabeled_kv2_blob_rows(
+        &self,
+        v1_key: &[u8; 32],
+        v2_key: &[u8; 32],
+    ) -> Result<usize, DbError> {
+        super::migration_v4::repair_mislabeled_kv2_blob_rows(self, v1_key, v2_key)
+            .map_err(|e| DbError::Migration(e.to_string()))
     }
 }
 

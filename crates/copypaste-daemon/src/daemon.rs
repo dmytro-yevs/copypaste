@@ -255,6 +255,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             let rotated = guard.migration_v4_sweep_resumable(&v1_key, &v2_key)?;
             guard.force_complete_if_no_v1_rows()?;
+            // One-time repair: image/file rows that were encrypted with the v1
+            // key but mistakenly stamped key_version=2 by the pre-fix writer.
+            // Idempotent: repaired rows fail the v1-decrypt probe on subsequent
+            // runs and are silently skipped.
+            let repaired = guard.repair_mislabeled_kv2_blob_rows(&v1_key, &v2_key)?;
             // After the sweep, surface any rows that stayed at key_version=1 —
             // these are permanently undecryptable legacy ciphertexts (auth-tag
             // mismatch) and are dead weight. Purge only if explicitly opted in.
@@ -264,12 +269,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             } else {
                 0
             };
-            Ok::<(usize, usize, usize), copypaste_core::DbError>((rotated, dead, purged))
+            Ok::<(usize, usize, usize, usize), copypaste_core::DbError>((rotated, repaired, dead, purged))
         })
         .await
         {
-            Ok(Ok((rotated, dead, purged))) => {
+            Ok(Ok((rotated, repaired, dead, purged))) => {
                 tracing::info!(rotated, "v4 key-version migration sweep complete");
+                if repaired > 0 {
+                    tracing::info!(
+                        repaired,
+                        "v4 migration: repaired {repaired} mislabeled kv2 blob row(s) \
+                         (were encrypted with v1 key but stamped key_version=2)"
+                    );
+                }
                 if purged > 0 {
                     tracing::warn!(
                         purged,
@@ -294,6 +306,41 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             Err(join_err) => {
                 tracing::warn!(error = %join_err, "v4 migration sweep task panicked");
+            }
+        }
+    }
+
+    // One-time startup sweep: delete poison rows created before the
+    // inbound-merge guard was added (CopyPaste-jww / CopyPaste-5y4).
+    // A poison row is a text item where content IS NOT NULL AND
+    // content_nonce IS NULL, or a file/image item where content IS NOT
+    // NULL AND content_nonce IS NULL AND blob_ref IS NULL. The peer
+    // re-sends these items on the next catch-up cycle. Idempotent.
+    {
+        let sweep_db = db.clone();
+        match tokio::task::spawn_blocking(move || {
+            let guard = sweep_db.blocking_lock();
+            crate::sync_orch::sweep_poison_rows(&guard)
+        })
+        .await
+        {
+            Ok(Ok(swept)) => {
+                if swept > 0 {
+                    tracing::warn!(
+                        swept,
+                        "startup: swept {swept} poison row(s) created before \
+                         the inbound-merge guard (CopyPaste-jww/5y4) — \
+                         peers will re-send them on next connect"
+                    );
+                } else {
+                    tracing::debug!("startup: no poison rows found (clean)");
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "startup: poison row sweep failed (non-fatal)");
+            }
+            Err(join_err) => {
+                tracing::warn!(error = %join_err, "startup: poison row sweep task panicked");
             }
         }
     }
@@ -358,6 +405,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         // Item 6: single source of truth — delegate to the public accessor so
         // daemon.rs and any future caller always agree on the read path.
         _ => crate::ipc::p2p_enabled_from_config(),
+    };
+    // lan_visibility is persisted in config.toml (overlaid by update_core_config
+    // on set_config). Read it here so start_p2p can gate mDNS at startup.
+    let lan_visibility_at_start = {
+        let core = copypaste_core::AppConfig::load(&crate::paths::config_path())
+            .unwrap_or_default();
+        core.lan_visibility
     };
     let p2p_peers: Option<copypaste_p2p::transport::PairedPeers> = if p2p_enabled {
         Some(copypaste_p2p::transport::PairedPeers::new())
@@ -482,6 +536,26 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let cloud_signed_in: std::sync::Arc<std::sync::atomic::AtomicBool> =
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
+    // CopyPaste-bps: warm the DeviceMeta cache ONCE at startup, before the IPC
+    // server is constructed.  `DeviceMeta::collect` spawns child processes
+    // (`scutil`, `sysctl`, `sw_vers`) that together can take up to ~6 s on a
+    // cold macOS system.  By running them here on a blocking thread we pay the
+    // cost exactly once; all subsequent calls to `collect_own_peer_meta` and
+    // `get_own_device_info` are instant cache reads (OnceLock — wait-free after
+    // the first write).
+    match tokio::task::spawn_blocking(|| {
+        crate::device_meta::warm_cache(env!("CARGO_PKG_VERSION"))
+    })
+    .await
+    {
+        Ok(()) => tracing::debug!("device_meta: startup cache warmed"),
+        Err(e) => tracing::warn!(
+            error = %e,
+            "device_meta: startup cache warm task panicked — \
+             per-request collection will be used as fallback"
+        ),
+    }
+
     // D2 (IPC): pass a token clone so the accept loop exits on shutdown.
     // DUP-ON-COPY fix: build IpcServer before spawning so we can extract
     // `self_write_change_count` and wire it into ClipboardMonitor below.
@@ -513,11 +587,39 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         None
     };
 
+    // CopyPaste-j8p: open a read-only connection pool on the same database file.
+    // SQLite WAL mode allows multiple readers to proceed in parallel without
+    // blocking the single writer (the Arc<Mutex<Database>> above).  Pool size 4
+    // covers the typical 2-3 concurrent UI/CLI read requests with headroom.
+    // Schema migrations have already run above; the pool connections open the
+    // post-migration file and require no DDL themselves.
+    //
+    // `None` on failure (e.g. wrong key, file locked) — the IPC server falls
+    // back to the write mutex transparently so the daemon remains functional.
+    #[cfg(unix)]
+    let ipc_read_pool: Option<Arc<copypaste_core::SqlitePool>> = {
+        let key: [u8; 32] = **local_key_arc;
+        match copypaste_core::open_pool(&db_path, &key, 4) {
+            Ok(pool) => {
+                tracing::info!("read pool opened (4 connections) for concurrent IPC reads");
+                Some(Arc::new(pool))
+            }
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "read pool open failed — IPC reads will use write mutex (degraded perf)"
+                );
+                None
+            }
+        }
+    };
+
     #[cfg(unix)]
     let (
         self_write_change_count_arc,
         p2p_sync_addr_slot,
         live_sinks_slot,
+        live_rtt_ms_slot,
         pairing_coordinator,
         _ipc_handle,
         // B1: surfaced out of this block so the P2P subsystem (below) can share
@@ -572,6 +674,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         let public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>> =
             Arc::new(tokio::sync::RwLock::new(None));
         server = server.with_public_ip_cache(public_ip_cache.clone());
+        // CopyPaste-j8p: wire the read pool so list/count/search/history_page/stats
+        // bypass the write mutex for concurrent reads.
+        if let Some(pool) = ipc_read_pool {
+            server = server.with_read_pool(pool);
+        }
         // Spawn the STUN refresh loop if the user has not opted out.
         // The loop resolves once immediately, then re-resolves every 15 minutes.
         // All failures are best-effort: logged at debug and silently skipped.
@@ -608,6 +715,8 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         let sync_addr_slot = server.p2p_sync_addr_slot();
         // Online-status + mutual-unpair control slot (both consumers share the same Arc).
         let live_sinks_slot = server.live_peer_sinks_slot();
+        // RTT slot — populated after start_p2p returns, read by list_peers.
+        let live_rtt_ms_slot = server.live_peer_rtt_ms_slot();
         // LAN/SAS Phase 2: grab a clone of the shared discovery-pairing
         // coordinator so the standing responder in `start_p2p` routes its SAS
         // through the SAME state machine the IPC handlers observe.
@@ -640,6 +749,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             swcc,
             sync_addr_slot,
             live_sinks_slot,
+            live_rtt_ms_slot,
             pairing_coordinator,
             handle,
             public_ip_cache,
@@ -678,6 +788,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 listen_port: 0,
                 device_name,
                 enabled: true,
+                lan_visibility: lan_visibility_at_start,
             };
 
             // P2P Phase 3 (sync-on-connect catch-up): build a provider that
@@ -687,19 +798,23 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             // before the link came up is never delivered (fanout is
             // fire-and-forget to currently-connected sinks). Uses the same
             // `SyncCrypto` construction as the orchestrator below.
+            // CopyPaste-716: the closure now takes the connecting peer's
+            // fingerprint so `catchup_items` uses that peer's specific pairwise
+            // sync key rather than the first cached key for all peers.
             let catchup: p2p::CatchupProvider = {
                 let catchup_db = db.clone();
                 let catchup_device_id = local_device_id.clone();
                 let catchup_seed: [u8; 32] = **local_key_arc;
-                Arc::new(move || {
+                Arc::new(move |peer_fingerprint: &str| {
                     let crypto =
                         sync_orch::SyncCrypto::new(catchup_seed, crate::ipc::peers_file_path());
                     // The closure is `Fn` (sync) but the DB sits behind a tokio
                     // Mutex; `block_in_place` + `blocking_lock` safely acquires
                     // it on the multi-thread runtime without blocking the worker.
+                    let fp = peer_fingerprint.to_owned();
                     tokio::task::block_in_place(|| {
                         let db = catchup_db.blocking_lock();
-                        sync_orch::catchup_items(&db, &catchup_device_id, &crypto)
+                        sync_orch::catchup_items(&db, &catchup_device_id, &crypto, &fp)
                     })
                 })
             };
@@ -732,6 +847,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 // refresh task writes, so the standing LAN/SAS responder advertises
                 // our own global IP in-band exactly like the IPC pairing paths.
                 std::sync::Arc::clone(&public_ip_cache),
+                // CopyPaste-1w7 (H8 fix): share a SyncCrypto clone with the
+                // standing responder so it can call reload_sync_key after a
+                // successful button-pair.  All clones share the same
+                // Arc<Mutex<…>> backing store built above.
+                sync_crypto.clone(),
             )
             .await
             {
@@ -773,6 +893,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                             .lock()
                             .unwrap_or_else(|poisoned| poisoned.into_inner());
                         *slot = Some(std::sync::Arc::clone(&handle.live_sinks));
+                    }
+                    {
+                        // Populate the RTT slot so list_peers can include latency_ms.
+                        let mut slot = live_rtt_ms_slot
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        *slot = Some(std::sync::Arc::clone(&handle.peer_rtt_ms));
                     }
                     Some(handle)
                 }
@@ -1456,6 +1583,68 @@ async fn handle_tick(
                 let _ = new_item_tx.send(item);
             }
         }
+        Ok(Some(ClipboardContent::FileRef {
+            path,
+            filename,
+            mime,
+        })) => {
+            // Offload the blocking filesystem read to a dedicated thread so
+            // this tokio worker is not stalled on potentially large I/O
+            // (e.g. a 100 MiB file). spawn_blocking runs the closure on a
+            // blocking-IO thread from the tokio blocking pool.
+            let max_file_bytes =
+                usize::try_from(config.max_file_size_bytes).unwrap_or(usize::MAX);
+            let path_clone = path.clone();
+            let read_result = tokio::task::spawn_blocking(move || std::fs::read(&path_clone))
+                .await;
+            match read_result {
+                Ok(Ok(bytes)) => {
+                    if bytes.len() > max_file_bytes {
+                        tracing::warn!(
+                            bytes = bytes.len(),
+                            max = max_file_bytes,
+                            filename = %filename,
+                            "clipboard: file too large — skipping"
+                        );
+                    } else {
+                        tracing::info!(
+                            bytes = bytes.len(),
+                            filename = %filename,
+                            mime = %mime,
+                            "clipboard captured: file ({} bytes, {})",
+                            bytes.len(),
+                            filename
+                        );
+                        if let Some(item) = handle_file(
+                            bytes,
+                            filename,
+                            mime,
+                            db,
+                            local_key,
+                            config,
+                            local_device_id,
+                        )
+                        .await
+                        {
+                            let _ = new_item_tx.send(item);
+                        }
+                    }
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        "clipboard: file-url read failed: {e}"
+                    );
+                }
+                Err(e) => {
+                    // spawn_blocking task panicked — log and continue.
+                    tracing::warn!(
+                        path = %path.display(),
+                        "clipboard: file-url spawn_blocking panicked: {e}"
+                    );
+                }
+            }
+        }
         Ok(Some(ClipboardContent::SkippedBatch(missed))) => {
             // Rapid clipboard burst — the monitor already logged the gap;
             // we just bump telemetry here and let the next poll capture
@@ -1594,7 +1783,7 @@ async fn handle_text(
                 }
                 // Return the bumped item so broadcast subscribers (P2P, sync) see
                 // the recency update. Fetch the full row for up-to-date fields.
-                return match get_item_by_id(&db_guard, &existing_id) {
+                return match get_item_by_id(&*db_guard, &existing_id) {
                     Ok(Some(bumped)) => Some(bumped),
                     Ok(None) => None,
                     Err(e) => {
@@ -1657,7 +1846,7 @@ async fn handle_text(
                         "text item deduped against existing row (UNIQUE index race) — broadcasting stored row"
                     );
                     prune_history(&db_guard, &config);
-                    match get_item_by_id(&db_guard, &stored_id) {
+                    match get_item_by_id(&*db_guard, &stored_id) {
                         Ok(Some(stored_item)) => Some(stored_item),
                         Ok(None) => {
                             tracing::debug!(
@@ -1739,9 +1928,10 @@ async fn handle_image(
         // baked into the `encode_image` wrapper. encode_image_full decodes ONCE
         // and reuses the bitmap for both the full PNG and the downscaled
         // thumbnail (Variant-B: avoid a second decode of the clipboard bytes).
+        let v2_key = copypaste_core::derive_v2(&local_key);
         match encode_image_full(
             &raw_bytes,
-            &local_key,
+            &v2_key,
             &file_id,
             &thumb_file_id,
             max_image_bytes,
@@ -1869,11 +2059,12 @@ async fn handle_file(
 
         let max_file_bytes = usize::try_from(config.max_file_size_bytes).unwrap_or(usize::MAX);
 
+        let v2_key = copypaste_core::derive_v2(&local_key);
         match copypaste_core::encode_file(
             &raw_bytes,
             &filename,
             &mime,
-            &local_key,
+            &v2_key,
             &file_id,
             max_file_bytes,
         ) {
@@ -2793,8 +2984,11 @@ mod tests {
         let file_id =
             crate::ipc::parse_image_file_id(&meta_json).expect("file_id parses from blob_ref");
         let chunks = copypaste_core::chunks_from_blob(&blob).expect("chunks deserialize");
+        // handle_image encrypts with derive_v2(&local_key) (key_version = 2),
+        // so the read path must also decrypt with the v2-derived key.
+        let v2_key = copypaste_core::derive_v2(&local_key);
         let recovered_png =
-            copypaste_core::decode_image(&chunks, &local_key, &file_id).expect("decode_image");
+            copypaste_core::decode_image(&chunks, &*v2_key, &file_id).expect("decode_image");
 
         // `handle_image` re-encodes the raw clipboard bytes to PNG before
         // chunking, so the recovered bytes are the canonical PNG of the
@@ -2841,17 +3035,20 @@ mod tests {
         let rotated_key = [0x99u8; 32];
         assert_ne!(old_key, rotated_key, "precondition: key actually changed");
 
-        // Decoding the pre-rotation row under the rotated key must FAIL
-        // explicitly — never silently return corrupted/garbage bytes.
-        let result = copypaste_core::decode_image(&chunks, &rotated_key, &file_id);
+        // handle_image encrypts with derive_v2(key) (key_version = 2). A
+        // rotated key's v2 derivation ≠ the original key's v2 derivation, so
+        // decoding must fail explicitly — never silently return wrong bytes.
+        let rotated_v2_key = copypaste_core::derive_v2(&rotated_key);
+        let result = copypaste_core::decode_image(&chunks, &*rotated_v2_key, &file_id);
         assert!(
             result.is_err(),
             "a pre-rotation image row must NOT silently decode under a rotated key"
         );
 
-        // And the original key must still decode it (rotation does not destroy
-        // the existing row's recoverability under its own key).
-        let recovered = copypaste_core::decode_image(&chunks, &old_key, &file_id)
+        // And the original key's v2 derivation must still decode it (rotation
+        // does not destroy the existing row's recoverability under its own key).
+        let old_v2_key = copypaste_core::derive_v2(&old_key);
+        let recovered = copypaste_core::decode_image(&chunks, &*old_v2_key, &file_id)
             .expect("the pre-rotation row must still decode under its original key");
         let reference_png = copypaste_core::encode_as_png(
             &copypaste_core::decode_clipboard_image(&png).expect("decode raw"),
@@ -2860,6 +3057,174 @@ mod tests {
         assert_eq!(
             recovered, reference_png,
             "under its original key the row decodes to the stored PNG"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Regression guard: real-write → real-read key_version round-trip
+    // (v0.3.4 lesson: writer/reader key_version desync causes AuthFailed).
+    // -----------------------------------------------------------------------
+
+    /// Drive the REAL production write paths (`handle_image`, `handle_file`) into
+    /// the REAL production IPC read handlers (`get_item_image`, `get_item_file`,
+    /// `get_item_thumbnail`) and assert the bytes round-trip cleanly.
+    ///
+    /// This test catches any future desync between the writer key (always
+    /// `derive_v2(local_key)` for `key_version = 2` rows) and the reader key
+    /// (dispatched on `item.key_version`). If a writer and reader ever disagree
+    /// on which key to use, this test will fail with `auth_failed` or
+    /// `decode_failed` long before the regression reaches production.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn real_write_to_real_read_roundtrip_image_and_file() {
+        use base64::Engine as _;
+        use image::{DynamicImage, RgbaImage};
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+
+        let local_key = [0xAAu8; 32];
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
+        let config = AppConfig::default();
+
+        // ── Write: use REAL handle_image and handle_file ────────────────────
+
+        // Build a 64×64 image (small for test speed, but real PNG).
+        let mut buf = RgbaImage::new(64, 64);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgba([(x % 256) as u8, (y % 256) as u8, 128, 255]);
+        }
+        let raw_png = copypaste_core::encode_as_png(&DynamicImage::ImageRgba8(buf))
+            .expect("encode test PNG");
+
+        let img_item = handle_image(raw_png.clone(), &db, &local_key, &config, "reg-device")
+            .await
+            .expect("handle_image must store the image");
+        assert_eq!(
+            img_item.key_version, 2,
+            "handle_image must stamp key_version = 2"
+        );
+        let img_id = img_item.id.clone();
+
+        let raw_file = b"regression test file bytes";
+        let file_item = handle_file(
+            raw_file.to_vec(),
+            "reg.txt".to_string(),
+            "text/plain".to_string(),
+            &db,
+            &local_key,
+            &config,
+            "reg-device",
+        )
+        .await
+        .expect("handle_file must store the file");
+        assert_eq!(
+            file_item.key_version, 2,
+            "handle_file must stamp key_version = 2"
+        );
+        let file_id = file_item.id.clone();
+
+        // ── Read: serve via the REAL IpcServer and dispatch on the socket ───
+        let dir = tempfile::tempdir().expect("tempdir");
+        let socket_path = dir.path().join("reg_rt.sock");
+
+        let ipc_key = Arc::new(zeroize::Zeroizing::new(local_key));
+        let ipc_pub = Arc::new([0u8; 32]);
+        let server = crate::ipc::IpcServer::new(
+            db.clone(),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            ipc_key,
+            ipc_pub,
+        );
+        let sock_clone = socket_path.clone();
+        tokio::spawn(async move {
+            let _ = server
+                .serve(&sock_clone, tokio_util::sync::CancellationToken::new())
+                .await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // Helper: send one JSON-RPC request over the socket, return parsed response.
+        let send_req = |method: String, params: String| {
+            let path = socket_path.clone();
+            async move {
+                let mut stream = UnixStream::connect(&path).await.unwrap();
+                let req = format!("{{\"id\":\"r1\",\"method\":\"{method}\",\"params\":{params}}}\n");
+                stream.write_all(req.as_bytes()).await.unwrap();
+                let mut reader = BufReader::new(stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).await.unwrap();
+                serde_json::from_str::<serde_json::Value>(line.trim()).expect("valid JSON")
+            }
+        };
+
+        // get_item_image round-trip.
+        let img_resp = send_req(
+            "get_item_image".to_string(),
+            format!("{{\"id\":\"{img_id}\"}}"),
+        )
+        .await;
+        assert_eq!(
+            img_resp["ok"], true,
+            "get_item_image must succeed: {img_resp}"
+        );
+        let data_uri = img_resp["data"]["data_uri"]
+            .as_str()
+            .expect("data_uri must be a string");
+        assert!(
+            data_uri.starts_with("data:image/png;base64,"),
+            "data_uri must be a PNG data-URI"
+        );
+        // Decode the returned PNG and compare to what handle_image would have stored.
+        let b64 = data_uri.strip_prefix("data:image/png;base64,").unwrap();
+        let returned_png = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .expect("base64 decode must succeed");
+        let reference_png = copypaste_core::encode_as_png(
+            &copypaste_core::decode_clipboard_image(&raw_png).expect("decode raw"),
+        )
+        .expect("encode reference png");
+        assert_eq!(
+            returned_png, reference_png,
+            "get_item_image must return the canonical PNG stored by handle_image"
+        );
+
+        // get_item_thumbnail round-trip (may backfill or serve stored thumb).
+        let thumb_resp = send_req(
+            "get_item_thumbnail".to_string(),
+            format!("{{\"id\":\"{img_id}\"}}"),
+        )
+        .await;
+        assert_eq!(
+            thumb_resp["ok"], true,
+            "get_item_thumbnail must succeed: {thumb_resp}"
+        );
+        assert!(
+            !thumb_resp["data"]["thumbnail"].is_null(),
+            "get_item_thumbnail must return a non-null thumbnail: {thumb_resp}"
+        );
+
+        // get_item_file round-trip.
+        let file_resp = send_req(
+            "get_item_file".to_string(),
+            format!("{{\"id\":\"{file_id}\"}}"),
+        )
+        .await;
+        assert_eq!(
+            file_resp["ok"], true,
+            "get_item_file must succeed: {file_resp}"
+        );
+        assert_eq!(file_resp["data"]["filename"], "reg.txt");
+        assert_eq!(file_resp["data"]["mime"], "text/plain");
+        let data_b64 = file_resp["data"]["data_b64"]
+            .as_str()
+            .expect("data_b64 must be a string");
+        let returned_bytes = base64::engine::general_purpose::STANDARD
+            .decode(data_b64)
+            .expect("base64 decode must succeed");
+        assert_eq!(
+            returned_bytes,
+            raw_file.to_vec(),
+            "get_item_file must return the original file bytes"
         );
     }
 
@@ -2884,7 +3249,7 @@ mod tests {
         // Verify content_hash is set after first insert.
         {
             let guard = db.lock().await;
-            let row = copypaste_core::get_item_by_id(&guard, &item1.id)
+            let row = copypaste_core::get_item_by_id(&*guard, &item1.id)
                 .unwrap()
                 .expect("first row must exist");
             assert!(
@@ -2898,7 +3263,7 @@ mod tests {
 
         // Must still be exactly one row.
         let guard = db.lock().await;
-        let total = copypaste_core::count_items(&guard).expect("count_items");
+        let total = copypaste_core::count_items(&*guard).expect("count_items");
         assert_eq!(
             total, 1,
             "identical text must not insert a duplicate row; expected 1 row, got {total}"
@@ -2927,7 +3292,7 @@ mod tests {
         handle_text(text.clone(), &db, &local_key, &config, "test-device").await;
 
         let guard = db.lock().await;
-        let row = copypaste_core::get_item_by_id(&guard, &item1.id)
+        let row = copypaste_core::get_item_by_id(&*guard, &item1.id)
             .unwrap()
             .expect("original row must still exist after bump");
 
@@ -2964,7 +3329,7 @@ mod tests {
         .await;
 
         let guard = db.lock().await;
-        let total = copypaste_core::count_items(&guard).expect("count_items");
+        let total = copypaste_core::count_items(&*guard).expect("count_items");
         assert_eq!(
             total, 2,
             "two distinct texts must produce two rows, got {total}"

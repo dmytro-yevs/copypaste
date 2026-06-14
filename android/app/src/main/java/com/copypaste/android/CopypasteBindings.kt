@@ -108,15 +108,25 @@ val isNativeLibraryLoaded: Boolean = run {
 // ---------------------------------------------------------------------------
 
 /**
- * Encrypts [bytes] with [key] (32 bytes, XChaCha20-Poly1305, AAD = itemId|5).
- * [itemId] is bound into the AEAD AAD and MUST be persisted alongside the
- * ciphertext — pass the same value back to [decryptText] verbatim.
+ * Encrypts [bytes] with [key] (32 bytes, XChaCha20-Poly1305), binding [itemId]
+ * and [keyVersion] into the AEAD AAD.
+ *
+ * | [keyVersion] | AAD format             |
+ * |--------------|------------------------|
+ * | 1            | "{itemId}|3"           |
+ * | 2            | "{itemId}|4|2"         |
+ *
+ * [itemId] and [keyVersion] MUST be persisted alongside the ciphertext and
+ * passed back to [decryptText] verbatim — a mismatch will fail decryption.
+ *
+ * New items MUST use [keyVersion] = 2 (matches the daemon's ITEM_KEY_VERSION_CURRENT).
+ * Legacy stored items encrypted with keyVersion=1 continue to use 1.
  *
  * Throws [CopypasteException.EncryptionFailed] on error.
  * Throws [IllegalStateException] when the native library is unavailable.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
-fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob {
+fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray, keyVersion: UByte): EncryptedBlob {
     if (!isNativeLibraryLoaded) {
         Log.w(TAG, "encryptText: native library not loaded — refusing to return plaintext")
         throw IllegalStateException("copypaste_android native library not loaded; encryptText is unavailable")
@@ -126,6 +136,7 @@ fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob
             itemId = itemId,
             bytes = bytes.toUByteList(),
             key = key.toUByteList(),
+            keyVersion = keyVersion,
         )
         EncryptedBlob(
             nonce = result.nonce.toByteArray(),
@@ -141,14 +152,21 @@ fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray): EncryptedBlob
 }
 
 /**
- * Decrypts [ciphertext] using [nonce] and [key]. [itemId] MUST match the value
- * passed to [encryptText] when the ciphertext was produced.
+ * Decrypts [ciphertext] using [nonce] and [key], dispatching on [keyVersion]
+ * to select the correct AEAD AAD format.
+ *
+ * | [keyVersion] | AAD format             |
+ * |--------------|------------------------|
+ * | 1            | "{itemId}|3"           |
+ * | 2            | "{itemId}|4|2"         |
+ *
+ * [itemId] and [keyVersion] MUST match the values used during [encryptText].
  *
  * Throws [CopypasteException.DecryptionFailed] on error.
  * Throws [IllegalStateException] when the native library is unavailable.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
-fun decryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray {
+fun decryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: ByteArray, keyVersion: UByte): ByteArray {
     if (!isNativeLibraryLoaded) {
         Log.w(TAG, "decryptText: native library not loaded — refusing to fabricate plaintext")
         throw IllegalStateException("copypaste_android native library not loaded; decryptText is unavailable")
@@ -159,6 +177,7 @@ fun decryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: By
             ciphertext = ciphertext.toUByteList(),
             nonce = nonce.toUByteList(),
             key = key.toUByteList(),
+            keyVersion = keyVersion,
         ).toByteArray()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         Log.w(TAG, "decryptText: native call failed: ${e.message}", e)
@@ -502,14 +521,24 @@ data class PairingQrResult(val qr: String, val pakePassword: String)
  * Begin device pairing (display side). Delegates to the generated
  * `uniffi.copypaste_android.buildPairingQr`.
  *
- * If the native .so is unavailable, returns a deterministic stub payload so
- * [PairActivity] UI can still be exercised on devices without the Rust core.
+ * Throws [IllegalStateException] when the native library is unavailable, or
+ * [CopypasteException] on an FFI error. The caller (PairActivity.generateQr)
+ * already wraps this in try/catch and surfaces the message via [errorMessage]
+ * state — the QR widget stays hidden when [qr] is null so a non-functional
+ * stub QR is never displayed.
+ *
+ * SECURITY: returning a stub QR on failure is FORBIDDEN. A stub QR encodes a
+ * random token that has no matching PAKE session on this device, so the other
+ * side completes a QR scan and then hits a mysterious PAKE failure. Propagating
+ * the error and hiding the QR slot is the correct fail-closed behaviour.
  */
+@Throws(CopypasteException::class, IllegalStateException::class)
 fun startPairing(deviceId: String, deviceName: String): PairingQrResult {
     if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "startPairing: stub — native library not loaded")
-        val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
-        return PairingQrResult(qr = "copypaste-pair://stub/$hex", pakePassword = hex)
+        Log.e(TAG, "startPairing: native library not loaded — refusing to emit stub QR")
+        throw IllegalStateException(
+            "copypaste_android native library not loaded; cannot generate a valid pairing QR"
+        )
     }
     return try {
         val payload = uniffi.copypaste_android.buildPairingQr(
@@ -522,10 +551,12 @@ fun startPairing(deviceId: String, deviceName: String): PairingQrResult {
         // scanners (Google Lens) offer "open in app". parsePairing strips the
         // wrapper on the receiving side.
         PairingQrResult(qr = wrapPairingDeepLink(payload.qr), pakePassword = payload.pakePassword)
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        Log.e(TAG, "startPairing: native call failed — refusing to emit stub QR: ${e.message}", e)
+        throw CopypasteException.EncryptionFailed(e.message ?: "buildPairingQr failed")
     } catch (e: Exception) {
-        Log.w(TAG, "startPairing: native call threw — falling back to stub: ${e.message}")
-        val hex = java.util.UUID.randomUUID().toString().replace("-", "").take(16)
-        PairingQrResult(qr = "copypaste-pair://stub/$hex", pakePassword = hex)
+        Log.e(TAG, "startPairing: native call threw — refusing to emit stub QR: ${e.message}", e)
+        throw IllegalStateException("startPairing failed: ${e.message}", e)
     }
 }
 

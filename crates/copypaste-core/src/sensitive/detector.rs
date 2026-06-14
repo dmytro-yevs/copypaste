@@ -190,13 +190,6 @@ impl SensitiveDetector {
     /// High-confidence examples that DO trigger (>= 0.70):
     ///   AWS keys (0.99), JWTs (0.95), OpenAI/Anthropic keys, SSH private keys,
     ///   Stripe/GitHub/npm tokens, Vault tokens (0.95), credit cards (Luhn).
-    ///
-    /// # FIXWAVE
-    /// daemon should call `SensitiveDetector::new().is_sensitive_for_autowipe(&text)`
-    /// (or the free function `is_sensitive_for_autowipe(&text)`) **instead of**
-    /// `detect(&text).is_some()` for the `is_sensitive` / `expires_at` gate in
-    /// `daemon.rs` (around line 1177). The existing `detect()` call for
-    /// per-pattern annotations and redaction remains unchanged.
     pub fn is_sensitive_for_autowipe(&self, text: &str) -> bool {
         /// Minimum confidence for a match to trigger automatic expiry/wipe.
         const AUTOWIPE_CONFIDENCE_FLOOR: f32 = 0.70;
@@ -364,9 +357,6 @@ impl SensitiveKind {
 /// should trigger automatic expiry/wipe. Low-confidence heuristics (phone,
 /// passport, email) are excluded so routine clipboard content is never silently
 /// deleted.
-///
-/// # FIXWAVE: daemon should call this instead of `detect(&text).is_some()`
-/// for the `is_sensitive` / `expires_at` gate (daemon.rs ~line 1177).
 pub fn is_sensitive_for_autowipe(text: &str) -> bool {
     SensitiveDetector::new().is_sensitive_for_autowipe(text)
 }

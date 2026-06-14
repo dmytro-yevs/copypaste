@@ -86,6 +86,24 @@ A client receiving `error_code = "invalid_argument"` with a message
 beginning `unsupported protocol version` MUST NOT retry — this is a hard
 mismatch that requires a daemon or client upgrade.
 
+## TypeScript client implementation
+
+`crates/copypaste-ui/src/lib/ipc.ts` implements the client-side guidance:
+
+- `IpcReply` includes `protocol_version?: number` (optional for back-compat
+  with daemon builds predating the field).
+- `CURRENT_PROTOCOL_VERSION = 1` is the version this UI build expects.
+- `ipcCall` checks the reply's `protocol_version` against
+  `CURRENT_PROTOCOL_VERSION`. When they differ (daemon is newer than the
+  client, i.e. `reply.protocol_version > CURRENT_PROTOCOL_VERSION`),
+  it emits a `console.warn` so the discrepancy is visible in DevTools without
+  blocking the response. Callers that need a richer surface (e.g. a banner)
+  can gate on the exported `protocolMismatchHandler` callback.
+- The Tauri Rust bridge (`src-tauri/src/ipc.rs`, `IpcReply`) does not yet
+  forward `protocol_version` to the TS layer; the field arrives as
+  `undefined` until the bridge is updated. The TS code handles this gracefully
+  (optional field, `undefined` is treated as "no mismatch detected").
+
 ## Consequences
 
 **Positive:**

@@ -109,12 +109,9 @@ class SupabasePollWorker(
                 }
 
                 // Persist the advanced cursor after processing the full batch.
-                if (cursorWallTime > settings.lastSupabasePollWallTime ||
-                    (cursorWallTime == settings.lastSupabasePollWallTime &&
-                            cursorId > settings.lastSupabasePollId)) {
-                    settings.lastSupabasePollWallTime = cursorWallTime
-                    settings.lastSupabasePollId = cursorId
-                }
+                // advanceSupabaseCursor holds supabaseCursorLock so concurrent
+                // FgsSyncLoop calls cannot interleave and lose an advance.
+                settings.advanceSupabaseCursor(cursorWallTime, cursorId)
 
                 totalFetched += batch.rows.size
                 totalNewCount += newCount
@@ -248,8 +245,13 @@ internal suspend fun storeDecryptedItem(
     repository: ClipboardRepository,
     settings: Settings,
 ): Boolean {
-    val isImage = item.contentType == "image" || item.contentType.startsWith("image/")
-    val isFile = item.contentType == "file" || item.contentType.startsWith("application/")
+    // Use canonical predicates from ContentType.kt so FgsSyncLoop and
+    // SupabasePollWorker route content types identically.  The old
+    // startsWith("application/") branch incorrectly classified PDFs and other
+    // application/* MIME types as files — contentTypeIsFile() only matches the
+    // canonical "file" label used by the encryption/decryption layer.
+    val isImage = contentTypeIsImage(item.contentType)
+    val isFile = contentTypeIsFile(item.contentType)
 
     return when {
         isImage -> {

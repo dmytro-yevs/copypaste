@@ -25,7 +25,13 @@ export default {
           // Text hierarchy
           text:  "#E8EAED",       // §0 canonical text
           dim:   "#9da0a8",       // secondary
-          faint: "#6b6f78",       // timestamps, placeholders
+          // Raised from #6b6f78 (3.37:1) to meet WCAG AA 4.5:1 on panel (#1B1C22).
+          faint: "#82868f",       // timestamps, placeholders
+          // Ghost token: rgba(255,255,255,0.46) = 4.56:1 on panel. Replaces inline
+          // rgba magic in Popup/EmptyState. Use for secondary metadata text.
+          ghost: "rgba(255,255,255,0.46)",
+          // Decorative-icon: 3.01:1 on panel — WCAG AA large/decorative (≥3:1).
+          "ghost-deco": "rgba(255,255,255,0.33)",
 
           // Brand
           accent:      "#3D8BFF", // §0 canonical accent

@@ -37,8 +37,12 @@ export function ViewShell({
         <div className="flex items-center gap-2">{actions}</div>
       </header>
 
-      {/* Content — scrollable, bg matches root */}
-      <div className="min-h-0 flex-1 overflow-auto bg-ide-bg p-4">
+      {/* Content — scrollable, bg matches root. surface-glass applies the
+          canonical translucency recipe (rgba(19,20,26,.72)+blur(30px)+saturate(180%))
+          per §3 — no inline glass recipe needed. */}
+      <div
+        className="surface-glass min-h-0 flex-1 overflow-auto p-4"
+      >
         {children}
       </div>
     </div>

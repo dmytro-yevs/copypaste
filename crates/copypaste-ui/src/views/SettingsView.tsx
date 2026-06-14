@@ -278,7 +278,7 @@ function InfoPopover({ text }: { text: string }) {
         aria-label="More info"
         aria-expanded={open}
         onClick={handleToggle}
-        className="flex h-4 w-4 items-center justify-center rounded-full text-ide-faint hover:text-ide-dim transition-colors"
+        className="flex h-6 w-6 items-center justify-center rounded-full text-ide-faint hover:text-ide-dim transition-colors"
       >
         <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
           <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.9.9 0 1 1 0 1.8A.9.9 0 0 1 8 4Zm-.75 2.75h1.5v4.5h-1.5v-4.5Z" />
@@ -551,6 +551,9 @@ export function SettingsView() {
   // Sync parity — p2p toggle + wifi-only
   const [syncOnWifiOnly, setSyncOnWifiOnly] = useState(false);
 
+  // LAN visibility — mDNS-SD advertisement toggle (config.toml, hot-applied).
+  const [lanVisibility, setLanVisibility] = useState(true);
+
   // Privacy & capture — daemon AppConfig fields (config.toml).
   const [collectPublicIp, setCollectPublicIp] = useState(true);
   const [pasteAsPlainText, setPasteAsPlainText] = useState(false);
@@ -704,10 +707,13 @@ export function SettingsView() {
           collect_public_ip?: boolean | null;
           paste_as_plain_text?: boolean | null;
           excluded_app_bundle_ids?: string[] | null;
+          lan_visibility?: boolean | null;
         };
         setCollectPublicIp(privacyCfg.collect_public_ip ?? true);
         setPasteAsPlainText(privacyCfg.paste_as_plain_text ?? false);
         setExcludedApps(privacyCfg.excluded_app_bundle_ids ?? []);
+        // lan_visibility defaults to true (LAN-visible) on first install.
+        setLanVisibility(privacyCfg.lan_visibility ?? true);
 
         // Guard again — a second reloadKey bump that fired while we were
         // awaiting could have set cancelled=true between the check above and
@@ -809,6 +815,7 @@ export function SettingsView() {
     collect_public_ip?: boolean | null;
     paste_as_plain_text?: boolean | null;
     excluded_app_bundle_ids?: string[] | null;
+    lan_visibility?: boolean | null;
   };
 
   // Build the full AppSettings patch for set_config, merging current config
@@ -831,6 +838,7 @@ export function SettingsView() {
       collect_public_ip: collectPublicIp,
       paste_as_plain_text: pasteAsPlainText,
       excluded_app_bundle_ids: excludedApps,
+      lan_visibility: lanVisibility,
       ...overrides,
     };
   }
@@ -883,7 +891,6 @@ export function SettingsView() {
   ) {
     try {
       await api.setConfig(buildConfigPatch(patch) as unknown as Parameters<typeof api.setConfig>[0]);
-      showLimitsMsg(field, "Saved", 2000);
     } catch (err) {
       const msg = ipcErrorMessage(err, "Save failed");
       showLimitsMsg(field, msg, 4000);
@@ -1042,6 +1049,17 @@ export function SettingsView() {
       "sync_on_wifi_only",
       { sync_on_wifi_only: val },
       () => setSyncOnWifiOnly(prev),
+    );
+  };
+
+  // NOT memoized — same reasoning as handleWifiOnlyToggle above.
+  const handleLanVisibilityToggle = async (val: boolean) => {
+    const prev = lanVisibility;
+    setLanVisibility(val);
+    await saveLimitsField(
+      "lan_visibility",
+      { lan_visibility: val },
+      () => setLanVisibility(prev),
     );
   };
 
@@ -1306,7 +1324,7 @@ export function SettingsView() {
                       aria-label={`Remove ${bundleId}`}
                       disabled={offline}
                       onClick={() => void removeExcludedApp(bundleId)}
-                      className="text-ide-faint hover:text-ide-danger disabled:cursor-not-allowed disabled:opacity-40"
+                      className="flex h-6 w-6 items-center justify-center text-ide-faint hover:text-ide-danger disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       ×
                     </button>
@@ -1454,6 +1472,18 @@ export function SettingsView() {
                 checked={syncOnWifiOnly}
                 onChange={(v) => void handleWifiOnlyToggle(v)}
                 disabled={offline}
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Visible on local network">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="When off, this device stops advertising via mDNS-SD and will not appear in the device list on other Macs on the same network. Paired peers with a known address can still connect directly." />
+              <LimitsMsg field="lan_visibility" />
+              <Toggle
+                checked={lanVisibility}
+                onChange={(v) => void handleLanVisibilityToggle(v)}
+                disabled={offline}
+                aria-label="LAN visibility"
               />
             </div>
           </SettingsRow>

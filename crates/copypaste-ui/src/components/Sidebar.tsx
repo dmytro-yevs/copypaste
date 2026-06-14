@@ -146,8 +146,13 @@ export function Sidebar() {
   return (
     <aside
       className={[
+        // surface-glass applies the canonical §3 translucency recipe:
+        // rgba(19,20,26,.72)+blur(30px)+saturate(180%). The sidebar's panel bg
+        // overlaid on the OS vibrancy layer gives the same visual depth without
+        // a bespoke rgba value.
+        "surface-glass",
         "flex w-[188px] shrink-0 flex-col",
-        "border-r border-ide-border bg-ide-panel",
+        "border-r border-ide-border",
         "shadow-ide-sm",
       ].join(" ")}
     >
@@ -179,7 +184,8 @@ export function Sidebar() {
       </nav>
       {/* Footer: app name + sync status chip */}
       <div className="mt-auto flex items-center justify-between px-3 py-2.5">
-        <span className="text-[10px] font-medium uppercase tracking-widest text-ide-faint/60">CopyPaste</span>
+        {/* ide-faint is WCAG AA 4.5:1 on panel; drop the /60 opacity that was bringing it to ~1.8:1 */}
+        <span className="text-[10px] font-medium uppercase tracking-widest text-ide-faint">CopyPaste</span>
         <SyncStatusChip />
       </div>
     </aside>

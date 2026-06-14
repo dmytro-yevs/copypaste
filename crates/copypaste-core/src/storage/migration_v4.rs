@@ -519,6 +519,181 @@ fn rotate_one_image(
     Ok(())
 }
 
+// ── Mislabeled kv=2 blob repair (closes writer bug) ───────────────────────
+//
+// Before the writer fix, `daemon::handle_image` and `handle_file` encrypted
+// chunks with the RAW v1 seed key but stamped `key_version = 2` on the row
+// (the `ClipboardItem::new_image` / `new_file` constructors always stamp
+// `ITEM_KEY_VERSION_CURRENT = 2`). The `WHERE key_version = 1` predicate in
+// `migrate_v1_image_chunks_to_v2` never saw these rows, so they stayed
+// "mislabeled": encrypted-with-v1 but marked kv=2.
+//
+// After the writer fix every new image/file row is genuinely v2-encrypted.
+// But existing mislabeled rows need a one-time repair: try v1-decrypt; on
+// success the row is mislabeled — re-encrypt with v2 and bump `content` (the
+// `key_version` stays 2, matching the stamp). On v1-decrypt failure the row
+// is correctly v2-encrypted — skip it.
+//
+// The function is idempotent: after repair the row is truly v2-encrypted, so
+// the v1-decrypt probe fails on the next run and the row is skipped.
+
+/// Minimal projection of a candidate mislabeled kv=2 blob row.
+struct Kv2BlobRow {
+    id: String,
+    // item_id is read from the DB for structural consistency with V1ImageRow
+    // but not used in the repair logic (file_id comes from blob_ref JSON).
+    #[allow(dead_code)]
+    item_id: String,
+    content: Vec<u8>,
+    blob_ref: Option<String>,
+}
+
+fn fetch_kv2_blob_batch(db: &Database, limit: usize) -> Result<Vec<Kv2BlobRow>, MigrationV4Error> {
+    // Clamp to i64::MAX to avoid overflow when the caller passes usize::MAX
+    // or i64::MAX as usize.
+    let sql_limit = i64::try_from(limit).unwrap_or(i64::MAX);
+    let mut stmt = db.conn().prepare(
+        "SELECT id, item_id, content, blob_ref \
+         FROM clipboard_items \
+         WHERE key_version = 2 \
+           AND content IS NOT NULL \
+           AND content_type IN ('image', 'file') \
+         ORDER BY wall_time ASC \
+         LIMIT ?1",
+    )?;
+    let rows = stmt
+        .query_map(params![sql_limit], |r| {
+            Ok(Kv2BlobRow {
+                id: r.get(0)?,
+                item_id: r.get(1)?,
+                content: r.get(2)?,
+                blob_ref: r.get(3)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(rows)
+}
+
+/// Try to repair a single mislabeled kv=2 blob row.
+///
+/// Attempts v1-decrypt of the chunk blob. If it succeeds the row was
+/// encrypted with the v1 key but stamped kv=2 (the pre-fix writer bug) —
+/// re-encrypt with the v2 key and update `content` in place (`key_version`
+/// stays 2). If v1-decrypt fails the row is correctly v2-encrypted — skip.
+///
+/// Returns `Ok(true)` if the row was repaired, `Ok(false)` if it was
+/// already correct (v1-decrypt failed), or `Err` for structural failures
+/// (blob parse, metadata missing, re-encrypt failure).
+fn maybe_repair_one_kv2_blob(
+    db: &Database,
+    row: &Kv2BlobRow,
+    v1_key: &[u8; 32],
+    v2_key: &[u8; 32],
+) -> Result<bool, MigrationV4Error> {
+    let file_id = parse_file_id(&row.id, row.blob_ref.as_deref())?;
+
+    let chunks = chunks_from_blob(&row.content).map_err(|e| MigrationV4Error::ImageBlob {
+        id: row.id.clone(),
+        source: e,
+    })?;
+
+    // Probe: try v1-decrypt. Failure → row is correctly v2 → skip.
+    let plaintext = match decrypt_chunks(&chunks, v1_key, &file_id) {
+        Ok(pt) => pt,
+        Err(_) => return Ok(false), // correctly v2-encrypted, nothing to do
+    };
+
+    // v1-decrypt succeeded → row is mislabeled. Re-encrypt with v2 key.
+    let v2_chunks =
+        encrypt_chunks(&plaintext, v2_key, &file_id, IMAGE_CHUNK_SIZE).map_err(|e| {
+            MigrationV4Error::ImageChunkEncrypt {
+                id: row.id.clone(),
+                source: e,
+            }
+        })?;
+    let v2_blob = chunks_to_blob(&v2_chunks).map_err(|e| {
+        let source = match e {
+            crate::image::ImageError::Chunk(ce) => ce,
+            _ => crate::crypto::chunks::ChunkError::TooManyChunks,
+        };
+        MigrationV4Error::ImageChunkEncrypt {
+            id: row.id.clone(),
+            source,
+        }
+    })?;
+
+    // Update content only — key_version stays 2 (now accurate).
+    // The WHERE re-asserts key_version=2 so a concurrent bump cannot be
+    // silently overwritten.
+    db.conn().execute(
+        "UPDATE clipboard_items \
+         SET content = ?1 \
+         WHERE id = ?2 AND key_version = 2",
+        params![v2_blob, row.id],
+    )?;
+
+    Ok(true)
+}
+
+/// Repair image/file rows that were mislabeled: encrypted with the v1 key
+/// but stamped `key_version = 2` by the pre-fix writer.
+///
+/// For each candidate row (`content_type IN ('image','file') AND key_version = 2`):
+/// * Try v1-decrypt (chunk decrypt with the v1 key).
+/// * If it **succeeds**: the row is mislabeled — re-encrypt with the v2 key
+///   and update `content` in place. `key_version` stays 2 (now accurate).
+/// * If it **fails**: the row is correctly v2-encrypted — leave it alone.
+///
+/// Returns the number of rows that were actually repaired (re-encrypted).
+/// The function is idempotent: repaired rows fail the v1-decrypt probe on
+/// subsequent runs and are silently skipped.
+///
+/// The repair fetches all kv=2 blob rows in one pass. The expected set is
+/// small (only rows captured before the writer fix was deployed), so a
+/// single unbounded fetch is acceptable. Rows that fail the v1-decrypt probe
+/// are skipped in-place; rows that fail re-encryption are logged and left
+/// unchanged (they remain readable with the v2 key if they were truly v2).
+pub fn repair_mislabeled_kv2_blob_rows(
+    db: &Database,
+    v1_key: &[u8; 32],
+    v2_key: &[u8; 32],
+) -> Result<usize, MigrationV4Error> {
+    // Fetch all candidates in one shot — the set is expected to be tiny.
+    // i64::MAX safely caps the SQL LIMIT to "all rows".
+    let candidates = fetch_kv2_blob_batch(db, i64::MAX as usize)?;
+    let mut total_repaired = 0usize;
+
+    for row in &candidates {
+        match maybe_repair_one_kv2_blob(db, row, v1_key, v2_key) {
+            Ok(true) => {
+                total_repaired += 1;
+                tracing::debug!(
+                    row_id = %row.id,
+                    "repair_mislabeled_kv2: repaired mislabeled kv2 blob row"
+                );
+            }
+            Ok(false) => {
+                // Correctly v2-encrypted; skip.
+            }
+            Err(e) => {
+                tracing::warn!(
+                    row_id = %row.id,
+                    error = %e,
+                    "repair_mislabeled_kv2: could not repair row (left unchanged)"
+                );
+            }
+        }
+    }
+
+    if total_repaired > 0 {
+        tracing::info!(
+            repaired = total_repaired,
+            "repair_mislabeled_kv2: repaired {total_repaired} mislabeled kv2 blob row(s)"
+        );
+    }
+    Ok(total_repaired)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1077,5 +1252,154 @@ mod tests {
                 .unwrap();
             assert_eq!(kv, 2);
         }
+    }
+
+    // ── Mislabeled kv=2 blob repair ──────────────────────────────────────
+    //
+    // Before the writer fix, handle_image/handle_file encrypted chunks with
+    // the v1 key but stamped key_version=2 on the row. The repair function
+    // must detect these "mislabeled" rows (v1-decrypt succeeds) and
+    // re-encrypt them with the v2 key. Correctly v2-encrypted rows (v1-
+    // decrypt fails) must be left unchanged.
+
+    /// Seed a mislabeled kv=2 row: content_type='image', key_version=2,
+    /// BUT the chunk blob was encrypted with the v1 key (the old writer bug).
+    /// Returns `(row_id, file_id, plaintext)`.
+    fn seed_mislabeled_kv2_image_row(
+        db: &Database,
+        v1_key: &[u8; 32],
+        plaintext: &[u8],
+    ) -> (String, [u8; 16], Vec<u8>) {
+        let row_id = Uuid::new_v4().to_string();
+        let item_id = Uuid::new_v4().to_string();
+        let file_id: [u8; 16] = *Uuid::new_v4().as_bytes();
+
+        // Encrypt with v1 key (the bug) but stamp key_version=2 (the lie).
+        let chunks = encrypt_chunks(plaintext, v1_key, &file_id, IMAGE_CHUNK_SIZE).unwrap();
+        let blob = chunks_to_blob(&chunks).unwrap();
+
+        let meta_json = format!(
+            r#"{{"width":4,"height":4,"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
+            plaintext.len(),
+            chunks.len(),
+            file_id
+        );
+
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_items \
+                 (id, item_id, content_type, content, content_nonce, blob_ref, \
+                  is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                 VALUES (?1,?2,'image',?3,NULL,?4,0,0,?5,?5,2)",
+                params![row_id, item_id, blob, meta_json, 1i64],
+            )
+            .unwrap();
+
+        (row_id, file_id, plaintext.to_vec())
+    }
+
+    /// A mislabeled kv=2 image row (encrypted with v1, stamped kv=2) must be
+    /// re-encrypted with the v2 key by `repair_mislabeled_kv2_blob_rows`.
+    /// After repair: repaired_count=1, row is genuinely v2-decryptable, and
+    /// v1-decrypt fails.
+    #[test]
+    fn kv2_mislabeled_image_row_repairs_via_migration() {
+        let db = Database::open_in_memory().unwrap();
+        let v1_key = [0xA1u8; 32];
+        let v2_key = [0xA2u8; 32];
+
+        let plaintext = b"mislabeled image bytes for repair test";
+        let (row_id, file_id, expected_pt) =
+            seed_mislabeled_kv2_image_row(&db, &v1_key, plaintext);
+
+        let repaired = repair_mislabeled_kv2_blob_rows(&db, &v1_key, &v2_key).unwrap();
+        assert_eq!(repaired, 1, "exactly one mislabeled row must be repaired");
+
+        // Retrieve the updated blob.
+        let blob: Vec<u8> = db
+            .conn()
+            .query_row(
+                "SELECT content FROM clipboard_items WHERE id = ?1",
+                params![row_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let chunks = chunks_from_blob(&blob).unwrap();
+
+        // Must now decrypt with v2 key.
+        let recovered = decrypt_chunks(&chunks, &v2_key, &file_id)
+            .expect("repaired row must decrypt with v2 key");
+        assert_eq!(recovered, expected_pt, "v2 plaintext must match original");
+
+        // Must NOT decrypt with v1 key anymore.
+        assert!(
+            decrypt_chunks(&chunks, &v1_key, &file_id).is_err(),
+            "repaired row must NOT decrypt with v1 key"
+        );
+
+        // key_version must still be 2 (stamp unchanged).
+        let kv: i64 = db
+            .conn()
+            .query_row(
+                "SELECT key_version FROM clipboard_items WHERE id = ?1",
+                params![row_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kv, 2, "key_version stamp must remain 2 after repair");
+    }
+
+    /// A correctly v2-encrypted kv=2 row (v1-decrypt fails) must be left
+    /// completely unchanged by `repair_mislabeled_kv2_blob_rows`.
+    /// repaired_count must be 0.
+    #[test]
+    fn kv2_correctly_encrypted_row_not_touched_by_repair_migration() {
+        let db = Database::open_in_memory().unwrap();
+        let v1_key = [0xB1u8; 32];
+        let v2_key = [0xB2u8; 32];
+
+        let plaintext = b"genuinely v2-encrypted image bytes";
+        let file_id: [u8; 16] = *Uuid::new_v4().as_bytes();
+        let row_id = Uuid::new_v4().to_string();
+        let item_id = Uuid::new_v4().to_string();
+
+        // Encrypt with v2 key (correct).
+        let chunks = encrypt_chunks(plaintext, &v2_key, &file_id, IMAGE_CHUNK_SIZE).unwrap();
+        let blob = chunks_to_blob(&chunks).unwrap();
+        let original_blob = blob.clone();
+
+        let meta_json = format!(
+            r#"{{"width":2,"height":2,"original_size":{},"chunk_count":{},"file_id":{:?}}}"#,
+            plaintext.len(),
+            chunks.len(),
+            file_id
+        );
+
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_items \
+                 (id, item_id, content_type, content, content_nonce, blob_ref, \
+                  is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                 VALUES (?1,?2,'image',?3,NULL,?4,0,0,?5,?5,2)",
+                params![row_id, item_id, blob, meta_json, 1i64],
+            )
+            .unwrap();
+
+        let repaired = repair_mislabeled_kv2_blob_rows(&db, &v1_key, &v2_key).unwrap();
+        assert_eq!(repaired, 0, "correctly v2-encrypted row must NOT be repaired");
+
+        // Content blob must be byte-for-byte identical (untouched).
+        let stored_blob: Vec<u8> = db
+            .conn()
+            .query_row(
+                "SELECT content FROM clipboard_items WHERE id = ?1",
+                params![row_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            stored_blob, original_blob,
+            "content must be unchanged for a correctly v2-encrypted row"
+        );
     }
 }

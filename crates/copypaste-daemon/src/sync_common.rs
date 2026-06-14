@@ -515,7 +515,11 @@ pub(crate) fn replace_cloud_item_by_item_id(
             item.app_bundle_id,
             item.content_hash,
             item.origin_device_id,
-            ITEM_KEY_VERSION_CURRENT,
+            // Use the item's own key_version rather than the current constant
+            // so cloud-synced items retain the key generation they were
+            // encrypted with. ITEM_KEY_VERSION_CURRENT would silently stamp
+            // v2 on v1-keyed chunks, poisoning future migration dispatches.
+            item.key_version as i64,
             item.pinned as i64,
             item.pin_order,
         ],
@@ -580,5 +584,74 @@ mod tests {
         // bare base64 form (relay envelope ct_b64)
         let b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
         assert_eq!(decode_payload_ct(&b64).unwrap(), blob);
+    }
+
+    /// LWW fix: replace_cloud_item_by_item_id must store the item's own
+    /// key_version, not the hardcoded ITEM_KEY_VERSION_CURRENT constant.
+    /// A v1-keyed chunk item replaced via cloud LWW must survive as v1 so
+    /// future migration dispatch can identify and re-encrypt it correctly.
+    #[test]
+    fn replace_cloud_item_preserves_key_version() {
+        use copypaste_core::{get_item_by_item_id, insert_item, Database};
+
+        let db = Database::open_in_memory().expect("in-memory DB");
+
+        // Seed a v2 item that the remote will overwrite via LWW.
+        let seed = ClipboardItem {
+            id: "local-row-id".to_string(),
+            item_id: "shared-item-id".to_string(),
+            content_type: "text".to_string(),
+            content: Some(b"old ciphertext".to_vec()),
+            content_nonce: Some(vec![0u8; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            is_synced: true,
+            lamport_ts: 1,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+            origin_device_id: "local-device".to_string(),
+            key_version: 2,
+            pinned: false,
+            pin_order: None,
+            thumb: None,
+            deleted: false,
+        };
+        insert_item(&db, &seed).expect("insert seed");
+
+        // Build a replacement that is v1-keyed (chunk from an older peer).
+        let replacement = ClipboardItem {
+            id: "local-row-id".to_string(),
+            item_id: "shared-item-id".to_string(),
+            content_type: "file".to_string(),
+            content: None,
+            content_nonce: None,
+            blob_ref: Some("blob-abc".to_string()),
+            is_sensitive: false,
+            is_synced: true,
+            lamport_ts: 2,
+            wall_time: 1_700_000_001_000,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+            origin_device_id: "remote-device".to_string(),
+            key_version: 1, // <-- must survive the LWW replace
+            pinned: false,
+            pin_order: None,
+            thumb: None,
+            deleted: false,
+        };
+
+        replace_cloud_item_by_item_id(&db, &replacement).expect("replace");
+
+        let stored = get_item_by_item_id(&db, "shared-item-id")
+            .expect("query ok")
+            .expect("row exists");
+
+        assert_eq!(
+            stored.key_version, 1,
+            "replace_cloud_item_by_item_id must persist item.key_version, not ITEM_KEY_VERSION_CURRENT"
+        );
     }
 }

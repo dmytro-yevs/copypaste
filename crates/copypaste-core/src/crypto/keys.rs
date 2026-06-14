@@ -166,30 +166,6 @@ impl DeviceKeypair {
         *self.public.as_bytes()
     }
 
-    /// Returns the raw 32-byte X25519 secret as a plain `[u8; 32]`.
-    ///
-    /// **Security note (audit MED #3):** the return value is `Copy` and is
-    /// NOT zeroized — callers leak key material on the stack and on heap
-    /// reallocation. Prefer [`Self::secret_key_bytes_zeroizing`] for new
-    /// call sites; this signature is retained so existing call sites in
-    /// crates outside this worker's allow-list (e.g.
-    /// `copypaste-daemon::platform::macos`) keep compiling unchanged. A
-    /// follow-up patch should migrate every caller and either delete this
-    /// method or formally `#[deprecated]` it.
-    #[deprecated(
-        note = "use secret_key_bytes_zeroizing — plain [u8;32] leaks key material on stack/heap reallocation (audit MED #3)"
-    )]
-    pub fn secret_key_bytes(&self) -> [u8; 32] {
-        // Use a `Zeroizing` buffer for the intermediate copy so the
-        // x25519_dalek-allocated bytes are scrubbed when this function
-        // returns. The final `[u8; 32]` returned to the caller is still a
-        // fresh copy (compiler may keep it in a register), so this only
-        // narrows the leak window — it does not eliminate it. Callers
-        // that need a tighter window must use the `_zeroizing` variant.
-        let buf: zeroize::Zeroizing<[u8; 32]> = zeroize::Zeroizing::new(self.secret.to_bytes());
-        *buf
-    }
-
     /// Returns the raw 32-byte X25519 secret wrapped in [`zeroize::Zeroizing`] so
     /// the bytes are scrubbed when the returned value is dropped.
     ///
@@ -310,24 +286,21 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn keypair_roundtrips_through_bytes() {
         let kp = DeviceKeypair::generate();
-        let secret_bytes = kp.secret_key_bytes();
+        let secret_bytes = kp.secret_key_bytes_zeroizing();
         let restored = DeviceKeypair::from_secret_bytes(&secret_bytes).unwrap();
         assert_eq!(kp.public_key_bytes(), restored.public_key_bytes());
     }
 
-    /// Audit MED #3: the zeroizing accessor must return the same bytes as
-    /// the plain accessor — it's a wrap-not-replace operation. Callers
-    /// who switch should not observe a behavioural change.
+    /// Audit MED #3: the zeroizing accessor must be deterministic — calling
+    /// it twice on the same keypair yields the same bytes.
     #[test]
-    #[allow(deprecated)]
-    fn secret_key_bytes_zeroizing_matches_plain_accessor() {
+    fn secret_key_bytes_zeroizing_is_deterministic() {
         let kp = DeviceKeypair::generate();
-        let plain = kp.secret_key_bytes();
-        let zr = kp.secret_key_bytes_zeroizing();
-        assert_eq!(plain, *zr);
+        let zr1 = kp.secret_key_bytes_zeroizing();
+        let zr2 = kp.secret_key_bytes_zeroizing();
+        assert_eq!(*zr1, *zr2);
     }
 
     #[test]
@@ -340,10 +313,9 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
     fn local_enc_key_is_deterministic_across_keypair_instances() {
         let kp = DeviceKeypair::generate();
-        let secret = kp.secret_key_bytes();
+        let secret = kp.secret_key_bytes_zeroizing();
         let kp_restored = DeviceKeypair::from_secret_bytes(&secret).unwrap();
         assert_eq!(kp.local_enc_key(), kp_restored.local_enc_key());
     }
@@ -539,10 +511,9 @@ mod tests {
     /// the free function exists only as a re-export for the migration sweep
     /// and must NOT subtly diverge from the legacy path.
     #[test]
-    #[allow(deprecated)]
     fn derive_storage_key_v1_matches_local_enc_key() {
         let kp = DeviceKeypair::generate();
-        let secret = kp.secret_key_bytes();
+        let secret = kp.secret_key_bytes_zeroizing();
         let instance_key = kp.local_enc_key();
         let free_fn_key = derive_storage_key_v1(&secret);
         assert_eq!(*instance_key, free_fn_key);

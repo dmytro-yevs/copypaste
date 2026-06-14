@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { api, HistoryEntry, ipcErrorMessage, IpcError, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
-import { applySpanMasking } from "../lib/masking";
+import { applySpanMasking, shouldMask } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { formatRelativeTime } from "../lib/time";
 import { useUI } from "../store";
@@ -43,23 +43,25 @@ function popupRowHeight(isImage: boolean, textH: number, imageMaxH: number): num
 // Shared inline SVG glyphs with tinted chip background.
 
 function ContentChip({ type }: { type: string }) {
+  // All colors reference CSS custom properties from :root (index.css §0/§3).
+  // --ide-accent-dim / --ide-info-dim / --ide-violet-dim are the container tints.
   if (type === "text" || type === "text/plain") {
     return (
-      <span className="chip" style={{ background: "rgba(61,139,255,0.14)", color: "#3D8BFF" }}>
+      <span className="chip" style={{ background: "var(--ide-accent-dim)", color: "var(--ide-accent)" }}>
         T
       </span>
     );
   }
   if (type === "url") {
     return (
-      <span className="chip" style={{ background: "rgba(86,182,194,0.14)", color: "#56B6C2" }}>
+      <span className="chip" style={{ background: "var(--ide-info-dim)", color: "var(--ide-info)" }}>
         ↗
       </span>
     );
   }
   if (isImageType(type)) {
     return (
-      <span className="chip" style={{ background: "rgba(198,120,221,0.14)", color: "#C678DD" }}>
+      <span className="chip" style={{ background: "var(--ide-violet-dim)", color: "var(--ide-violet)" }}>
         {/* mini image frame */}
         <svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
           <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
@@ -71,14 +73,14 @@ function ContentChip({ type }: { type: string }) {
   }
   if (type === "code" || type.startsWith("text/x-") || type.startsWith("application/")) {
     return (
-      <span className="chip" style={{ background: "rgba(198,120,221,0.14)", color: "#C678DD" }}>
+      <span className="chip" style={{ background: "var(--ide-violet-dim)", color: "var(--ide-violet)" }}>
         {"</>"}
       </span>
     );
   }
   // Fallback: faint dot
   return (
-    <span className="chip" style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)" }}>
+    <span className="chip" style={{ background: "rgba(255,255,255,0.06)", color: "var(--ide-faint)" }}>
       •
     </span>
   );
@@ -102,8 +104,8 @@ function HighlightedText({ text, positions }: { text: string; positions: number[
         <span
           key={i}
           style={{
-            color: "#3D8BFF",
-            background: "rgba(61,139,255,0.16)",
+            color: "var(--ide-accent)",
+            background: "var(--ide-selection)",  /* rgba(61,139,255,0.16) — §3 selected fill */
             borderRadius: 2,
             // Deliberately NO fontWeight change — prevents width-shift on highlight
           }}
@@ -474,11 +476,13 @@ export function Popup() {
       className="popup-enter flex flex-col h-screen overflow-hidden"
       style={{
         borderRadius: 14,
+        // Popup glass: same recipe as .surface-glass (§3) but alpha=0.82 for
+        // extra depth on the floating popup vs. panel surfaces (0.72).
         background: "rgba(19, 20, 26, 0.82)",
         backdropFilter: "blur(30px) saturate(180%)",
         WebkitBackdropFilter: "blur(30px) saturate(180%)",
         border: "1px solid rgba(255,255,255,0.08)",
-        boxShadow: "0 12px 40px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.40), inset 0 1px 0 rgba(255,255,255,0.06)",
+        boxShadow: "var(--ide-e3)",
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -499,7 +503,7 @@ export function Popup() {
           width="16" height="16" viewBox="0 0 24 24"
           fill="none" stroke="currentColor" strokeWidth="1.75"
           strokeLinecap="round" strokeLinejoin="round"
-          style={{ color: "rgba(255,255,255,0.28)", flexShrink: 0 }}
+          style={{ color: "var(--ide-ghost)", flexShrink: 0 }}
         >
           <circle cx="11" cy="11" r="7" />
           <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -519,7 +523,7 @@ export function Popup() {
             boxShadow: "none",
             borderRadius: 0,
             color: "rgba(255,255,255,0.90)",
-            fontSize: "15px",
+            fontSize: "13px",
             outline: "none",
             flex: 1,
             padding: 0,
@@ -531,13 +535,13 @@ export function Popup() {
         {!loading && filtered.length > 0 && (
           <span
             className="shrink-0 text-[11px]"
-            style={{ color: "rgba(255,255,255,0.30)", fontVariantNumeric: "tabular-nums" }}
+            style={{ color: "var(--ide-ghost)", fontVariantNumeric: "tabular-nums" }}
           >
             {showQuery ? `${Math.min(selectedIdx + 1, filtered.length)} of ${filtered.length}` : `${filtered.length}`}
           </span>
         )}
         {loading && (
-          <span className="text-[11px] shrink-0" style={{ color: "rgba(255,255,255,0.25)" }}>
+          <span className="text-[11px] shrink-0" style={{ color: "var(--ide-ghost)" }}>
             …
           </span>
         )}
@@ -627,7 +631,7 @@ export function Popup() {
         className="flex items-center justify-between px-3 py-1.5 shrink-0"
         style={{
           borderTop: "1px solid rgba(255,255,255,0.07)",
-          color: "rgba(255,255,255,0.22)",
+          color: "var(--ide-ghost)",
         }}
       >
         <span className="text-[10.5px]">↑↓ navigate</span>
@@ -640,8 +644,8 @@ export function Popup() {
             aria-label="Open settings"
             title="Open settings"
             onClick={() => void openSettings()}
-            className="flex items-center justify-center rounded p-0.5 hover:bg-white/10 transition-colors"
-            style={{ border: "none", background: "none", cursor: "pointer", color: "rgba(255,255,255,0.35)" }}
+            className="flex min-h-[24px] min-w-[24px] items-center justify-center rounded hover:bg-white/10 transition-colors"
+            style={{ border: "none", background: "none", cursor: "pointer", color: "var(--ide-ghost)" }}
           >
             <svg
               width="13" height="13" viewBox="0 0 24 24"
@@ -694,6 +698,10 @@ function PopupRow({
   const isImage = isImageType(item.content_type);
   const isSensitive = item.is_sensitive;
 
+  // Per-row reveal: user clicks the blurred text to temporarily see it.
+  const [revealed, setRevealed] = useState(false);
+  const blurred = shouldMask(item, maskSensitive) && !revealed;
+
   const rowH = popupRowHeight(isImage, textRowHeight, imageMaxHeight);
 
   let label: string;
@@ -701,7 +709,8 @@ function PopupRow({
   if (isImage) {
     label = "[Image]";
   } else if (isSensitive) {
-    label = "••••••••";
+    // Use actual preview text so the blur reveals real content on click.
+    label = item.preview.replace(/\s+/g, " ").trim() || "••••••••";
   } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
     label =
       applySpanMasking(item.preview, item.sensitive_spans)
@@ -744,7 +753,7 @@ function PopupRow({
         <span
           className="flex-1 min-w-0 text-[13px]"
           style={{
-            color: isSensitive ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.88)",
+            color: blurred ? "rgba(255,255,255,0.40)" : "rgba(255,255,255,0.88)",
             // M4: multi-line clamp when previewLines > 1, single-line ellipsis otherwise
             ...(previewLines > 1
               ? {
@@ -760,7 +769,26 @@ function PopupRow({
                 }),
           }}
         >
-          {canHighlight && matchPositions.length > 0 ? (
+          {blurred ? (
+            // Blur reveal: click temporarily shows this row's text.
+            // stopPropagation prevents triggering the row's copy-on-click.
+            <span
+              title="Click to reveal sensitive content"
+              onClick={(e) => {
+                e.stopPropagation();
+                setRevealed(true);
+              }}
+              style={{
+                filter: "blur(5px)",
+                userSelect: "none",
+                cursor: "pointer",
+                display: "inline-block",
+                maxWidth: "100%",
+              }}
+            >
+              {label}
+            </span>
+          ) : canHighlight && matchPositions.length > 0 ? (
             <HighlightedText text={label} positions={matchPositions} />
           ) : (
             label
@@ -775,7 +803,7 @@ function PopupRow({
           <span
             className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5 rounded"
             style={{
-              color: "rgba(255,255,255,0.28)",
+              color: "var(--ide-ghost)",
               background: "rgba(255,255,255,0.06)",
               border: "1px solid rgba(255,255,255,0.08)",
             }}
@@ -795,7 +823,7 @@ function PopupRow({
         {/* Relative time (tabular-nums, 11px) */}
         <span
           className="text-[11px]"
-          style={{ color: "rgba(255,255,255,0.30)", fontVariantNumeric: "tabular-nums" }}
+          style={{ color: "var(--ide-ghost)", fontVariantNumeric: "tabular-nums" }}
         >
           {relTime}
         </span>

@@ -78,9 +78,12 @@ describe("HistoryView — header total count (deliverable 2)", () => {
 
     render(<HistoryView />);
 
-    // The header badge must show "500", not "200".
+    // The header badge must reflect the daemon total (500), not the loaded slice (200).
+    // The badge renders as "{total} item(s)", so we look up by testid and check content.
     await waitFor(() => {
-      expect(screen.getByText("500")).toBeInTheDocument();
+      const badge = screen.getByTestId("history-total-badge");
+      expect(badge).toBeInTheDocument();
+      expect(badge.textContent).toMatch(/^500\b/);
     });
   });
 
@@ -101,9 +104,10 @@ describe("HistoryView — header total count (deliverable 2)", () => {
 
     // Badge must show 0 (or be absent — the view may hide a 0 badge; either is acceptable).
     // What must NOT happen: badge showing undefined or NaN.
+    // The component renders "{total} item(s)" so "0 items" is the expected text.
     const badgeEl = screen.queryByTestId("history-total-badge");
     if (badgeEl !== null) {
-      expect(badgeEl.textContent).toBe("0");
+      expect(badgeEl.textContent).toMatch(/^0\b/);
     }
   });
 });

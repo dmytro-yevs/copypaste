@@ -14,7 +14,7 @@ import {
   type HistoryEntry,
   type HistoryPage,
 } from "../lib/ipc";
-import { applySpanMasking } from "../lib/masking";
+import { applySpanMasking, shouldMask } from "../lib/masking";
 import { formatRelativeTime } from "../lib/time";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
@@ -39,10 +39,13 @@ function Toast({ message, kind }: { message: string; kind: ToastKind }) {
         transform: "translateX(-50%)",
         borderRadius: 10,
         border: "1px solid rgba(255,255,255,0.10)",
+        // Toast glass: elevated surface at 92% opacity with subtle blur (§8 toast).
+        // Using ide-elevated base (#23252D) for the toast panel—slightly more opaque
+        // than surface-glass so it reads as a distinct notification layer.
         background: "rgba(35,37,45,0.92)",
         backdropFilter: "blur(20px) saturate(160%)",
         WebkitBackdropFilter: "blur(20px) saturate(160%)",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.35)",
+        boxShadow: "var(--ide-e2)",
         padding: "6px 14px 6px 10px",
         display: "flex",
         alignItems: "center",
@@ -133,7 +136,7 @@ function ContentIcon({ type }: { type: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
-        className="shrink-0 text-[#56b6c2]"
+        className="shrink-0 text-ide-info"
       >
         <path d="M7 3H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V9" />
         <path d="M10 2h4v4" />
@@ -155,7 +158,7 @@ function ContentIcon({ type }: { type: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
-        className="shrink-0 text-[#e5c07b]"
+        className="shrink-0 text-ide-warning"
       >
         <path d="M9.5 1.5H3.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V5.5L9.5 1.5Z" />
         <path d="M9.5 1.5v4h4" />
@@ -178,7 +181,7 @@ function ContentIcon({ type }: { type: string }) {
         strokeLinecap="round"
         strokeLinejoin="round"
         aria-hidden="true"
-        className="shrink-0 text-[#c678dd]"
+        className="shrink-0 text-ide-violet"
       >
         <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
         <circle cx="5.5" cy="6" r="1.25" />
@@ -230,15 +233,18 @@ function KindChip({ kind, contentType }: { kind: string | undefined; contentType
   const label = kind ?? kindFallback(contentType);
   // Color the chip based on the kind — each maps to an existing IDE token or
   // a fixed hex that matches the ContentIcon palette for visual consistency.
+  // Map each kind to a semantic design-system token (§3 — no hardcoded hex).
+  // EMAIL/PHONE → success (green); COLOR/PATH/NUMBER → warning (amber);
+  // JSON → danger (red); CODE/IMAGE → violet; URL → info (teal); TEXT → accent.
   const colorClass =
-    label === "URL"     ? "text-[#56b6c2] border-[#56b6c2]/40 bg-[#56b6c2]/8"
-    : label === "EMAIL"   ? "text-[#98c379] border-[#98c379]/40 bg-[#98c379]/8"
-    : label === "PHONE"   ? "text-[#98c379] border-[#98c379]/40 bg-[#98c379]/8"
-    : label === "COLOR"   ? "text-[#e5c07b] border-[#e5c07b]/40 bg-[#e5c07b]/8"
-    : label === "JSON"    ? "text-[#e06c75] border-[#e06c75]/40 bg-[#e06c75]/8"
-    : label === "CODE"    ? "text-[#c678dd] border-[#c678dd]/40 bg-[#c678dd]/8"
-    : label === "NUMBER"  ? "text-[#d19a66] border-[#d19a66]/40 bg-[#d19a66]/8"
-    : label === "PATH"    ? "text-[#e5c07b] border-[#e5c07b]/40 bg-[#e5c07b]/8"
+    label === "URL"     ? "text-ide-info border-ide-info/40 bg-ide-info/8"
+    : label === "EMAIL"   ? "text-ide-success border-ide-success/40 bg-ide-success/8"
+    : label === "PHONE"   ? "text-ide-success border-ide-success/40 bg-ide-success/8"
+    : label === "COLOR"   ? "text-ide-warning border-ide-warning/40 bg-ide-warning/8"
+    : label === "JSON"    ? "text-ide-danger border-ide-danger/40 bg-ide-danger/8"
+    : label === "CODE"    ? "text-ide-violet border-ide-violet/40 bg-ide-violet/8"
+    : label === "NUMBER"  ? "text-ide-warning border-ide-warning/40 bg-ide-warning/8"
+    : label === "PATH"    ? "text-ide-warning border-ide-warning/40 bg-ide-warning/8"
     : /* TEXT / fallback */ "text-ide-accent border-ide-accent/40 bg-ide-accent/8";
   return (
     <span
@@ -306,27 +312,36 @@ function SyncBlockedIndicator() {
 // ---------------------------------------------------------------------------
 
 /**
- * Return a compact label for an origin device ID.
+ * Return a compact label for an origin device.
  * - Empty / unknown → null (badge not shown)
  * - Matches own device → "This device"
- * - Otherwise → first 8 chars of UUID (enough to distinguish devices)
+ * - Known device name → that name (e.g. "MacBook Pro")
+ * - Otherwise → first 8 chars of UUID as a fallback
  */
-function deviceLabel(originId: string | undefined, ownId: string): string | null {
+function deviceLabel(
+  originId: string | undefined,
+  ownId: string,
+  originName?: string | null
+): string | null {
   if (!originId) return null;
-  if (ownId && originId === ownId) return "This device";
   if (originId === "") return null;
-  // Compact: first 8 chars of UUID is visually enough for disambiguation
+  if (ownId && originId === ownId) return "This device";
+  // Prefer the human-readable name from the daemon's devices table.
+  if (originName) return originName;
+  // Fallback: compact UUID prefix (first 8 chars is enough to distinguish devices).
   return originId.slice(0, 8);
 }
 
 function DeviceBadge({
   originId,
   ownId,
+  originName,
 }: {
   originId: string | undefined;
   ownId: string;
+  originName?: string | null;
 }) {
-  const label = deviceLabel(originId, ownId);
+  const label = deviceLabel(originId, ownId, originName);
   if (!label) return null;
   const isOwn = label === "This device";
   return (
@@ -487,9 +502,17 @@ function HistoryRow({
   const isImage = isImageType(entry.content_type);
   const isFile = entry.content_type === "file";
 
+  // Per-row reveal toggle: user clicks the blurred text to temporarily show it.
+  const [revealed, setRevealed] = useState(false);
+
+  // Whether this row should be visually blurred right now.
+  const blurred = shouldMask(entry, maskSensitive) && !revealed;
+
   let preview: string;
   if (entry.is_sensitive) {
-    preview = "•••••• (sensitive)";
+    // Keep the actual text for blur-reveal; text-substitution is the fallback
+    // when the CSS blur path isn't active (e.g. screen readers / selection).
+    preview = entry.preview || "•••••• (sensitive)";
   } else if (maskSensitive && entry.sensitive_spans && entry.sensitive_spans.length > 0) {
     // Redact only sensitive spans, show the rest.
     preview = applySpanMasking(entry.preview, entry.sensitive_spans);
@@ -514,7 +537,12 @@ function HistoryRow({
 
   // Build a concise screen-reader label: type + first 80 chars of preview.
   const kindLabel = isImage ? "image" : isFile ? "file" : entry.content_type;
-  const ariaRowLabel = `${kindLabel}: ${preview.slice(0, 80)}`;
+  // Do not leak sensitive text into the accessibility tree while blurred — the
+  // aria-label is plaintext-readable by AT and DOM inspectors. Mirror the visual
+  // blur: placeholder until the user explicitly reveals the row.
+  const ariaRowLabel = blurred
+    ? `${kindLabel}: (sensitive content hidden)`
+    : `${kindLabel}: ${preview.slice(0, 80)}`;
 
   return (
     <div
@@ -653,7 +681,29 @@ function HistoryRow({
               : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
           }
         >
-          {preview}
+          {blurred ? (
+            // Blur overlay: visually hides the text; click reveals for this row only.
+            // title gives a screen-reader / tooltip hint. user-select:none prevents
+            // accidental selection revealing the text via copy.
+            <span
+              title="Click to reveal sensitive content"
+              onClick={(e) => {
+                e.stopPropagation(); // don't also trigger row copy
+                setRevealed(true);
+              }}
+              style={{
+                filter: "blur(6px)",
+                userSelect: "none",
+                cursor: "pointer",
+                display: "inline-block",
+                maxWidth: "100%",
+              }}
+            >
+              {preview}
+            </span>
+          ) : (
+            preview
+          )}
         </span>
       )}
 
@@ -665,8 +715,8 @@ function HistoryRow({
         style={{ minWidth: "4.5rem" }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Origin-device badge: "This device" or compact UUID prefix */}
-        <DeviceBadge originId={entry.origin_device_id} ownId={ownDeviceId} />
+        {/* Origin-device badge: "This device", device name, or compact UUID prefix */}
+        <DeviceBadge originId={entry.origin_device_id} ownId={ownDeviceId} originName={entry.origin_device_name} />
 
         {/* Source-app icon + label chip; only rendered when present */}
         {entry.app_bundle_id && (() => {
@@ -909,13 +959,19 @@ function FullResImage({ id, maxHeight }: { id: string; maxHeight: number }) {
 
 function DetailsModal({
   entry,
+  maskSensitive,
   onClose,
 }: {
   entry: HistoryEntry;
+  maskSensitive: boolean;
   onClose: () => void;
 }) {
   const isImage = isImageType(entry.content_type);
   const isFile = entry.content_type === "file";
+
+  // Per-modal reveal: user must click "Reveal" to see sensitive plaintext.
+  const [revealed, setRevealed] = useState(false);
+  const blurred = shouldMask(entry, maskSensitive) && !revealed;
 
   // Close on Escape
   useEffect(() => {
@@ -935,6 +991,8 @@ function DetailsModal({
       aria-label="Clip details"
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      // Modal scrim: intentionally dark + light blur (not surface-glass) — this is
+      // a modal overlay (dims everything behind), not a translucent panel surface.
       style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
     >
       <div
@@ -996,12 +1054,33 @@ function DetailsModal({
               </table>
             </div>
           ) : (
-            <pre
-              className="whitespace-pre-wrap break-words text-[13px] text-ide-text font-mono leading-relaxed select-text"
-              style={{ userSelect: "text" }}
-            >
-              {entry.preview}
-            </pre>
+            <div className="relative">
+              <pre
+                className="whitespace-pre-wrap break-words text-[13px] text-ide-text font-mono leading-relaxed select-text"
+                style={{
+                  userSelect: blurred ? "none" : "text",
+                  filter: blurred ? "blur(6px)" : "none",
+                  // Prevent layout reflow when blur is toggled.
+                  transition: "filter 0.15s ease",
+                }}
+              >
+                {entry.preview}
+              </pre>
+              {blurred && (
+                // Reveal overlay — sits on top of the blurred pre so the user
+                // can click without accidentally selecting text through the blur.
+                <div
+                  className="absolute inset-0 flex items-center justify-center"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setRevealed(true)}
+                  title="Click to reveal sensitive content"
+                >
+                  <span className="rounded-md border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim shadow">
+                    Sensitive — click to reveal
+                  </span>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -2437,10 +2516,11 @@ export function HistoryView() {
             transform: "translateX(-50%)",
             borderRadius: 10,
             border: "1px solid rgba(255,255,255,0.10)",
+            // Same toast glass recipe as Toast component (§8 toast, elevated panel).
             background: "rgba(35,37,45,0.92)",
             backdropFilter: "blur(20px) saturate(160%)",
             WebkitBackdropFilter: "blur(20px) saturate(160%)",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.45), 0 1px 2px rgba(0,0,0,0.35)",
+            boxShadow: "var(--ide-e2)",
             padding: "6px 14px 6px 10px",
             display: "flex",
             alignItems: "center",
@@ -2482,7 +2562,7 @@ export function HistoryView() {
       )}
       {/* M10: Details modal */}
       {previewEntry !== null && (
-        <DetailsModal entry={previewEntry} onClose={() => setPreviewEntry(null)} />
+        <DetailsModal entry={previewEntry} maskSensitive={maskSensitive} onClose={() => setPreviewEntry(null)} />
       )}
     </ViewShell>
   );

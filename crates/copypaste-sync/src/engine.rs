@@ -938,4 +938,108 @@ mod tests {
         assert_eq!(upsert_b.len(), 1, "B must receive X1");
         assert_eq!(upsert_b[0].item_id, "X1");
     }
+
+    /// CopyPaste-5on regression: HAVE/WANT exchange MUST be keyed on the stable
+    /// `item_id`, never on the per-row `id`.  Each device mints its own
+    /// `Uuid::new_v4()` row id at capture time, so two devices that hold the same
+    /// logical item will have different row ids.  If the engine keyed HAVE/WANT on
+    /// `id` instead of `item_id` it would treat each copy as a distinct item and
+    /// accumulate duplicates on every sync.  This test verifies convergence by
+    /// using deliberately mismatched row ids and asserting that exactly ONE item
+    /// survives on each side after the session.
+    #[tokio::test]
+    async fn crdt_have_want_keyed_on_item_id_not_row_id() {
+        // Device A captured item_id "shared-clip" and assigned row id "row-AAA".
+        let mut item_a = make_item("row-AAA", 10);
+        item_a.item_id = "shared-clip".to_string();
+        item_a.content = Some(b"hello from A".to_vec());
+
+        // Device B captured the SAME logical item (same item_id) but assigned a
+        // completely different row id "row-BBB" and has a higher lamport clock.
+        let mut item_b = make_item("row-BBB", 15);
+        item_b.item_id = "shared-clip".to_string();
+        item_b.content = Some(b"hello from B (newer)".to_vec());
+
+        let mut engine_a = SyncEngine::new("device-A");
+        let mut engine_b = SyncEngine::new("device-B");
+        let (mut sa, mut sb) = make_duplex();
+        let items_a = [item_a];
+        let items_b = [item_b];
+        let (res_a, res_b) = tokio::join!(
+            engine_a.run_session(&mut sa, &items_a),
+            engine_b.run_session(&mut sb, &items_b),
+        );
+        let (result_a, upsert_a) = res_a.expect("engine A ok");
+        let (result_b, upsert_b) = res_b.expect("engine B ok");
+
+        // A must receive B's newer version (lamport 15 > 10) — one upsert.
+        assert_eq!(
+            upsert_a.len(),
+            1,
+            "A must converge: exactly 1 upsert for shared-clip"
+        );
+        assert_eq!(upsert_a[0].item_id, "shared-clip");
+        assert_eq!(
+            upsert_a[0].lamport_ts, 15,
+            "higher-lamport (B) wins LWW"
+        );
+        assert_eq!(
+            upsert_a[0].content,
+            Some(b"hello from B (newer)".to_vec()),
+            "B's content wins"
+        );
+        assert_eq!(result_a.items_received, 1);
+
+        // B already holds the winning version — it must not ingest A's older copy
+        // as a new row (which is what happens when HAVE/WANT keys on row `id`).
+        assert!(
+            upsert_b.is_empty(),
+            "B must NOT treat A's row-AAA as a brand-new item (HAVE/WANT must key on item_id)"
+        );
+        assert_eq!(
+            result_b.items_received, 0,
+            "B receives nothing — it already has the winner"
+        );
+    }
+
+    /// CopyPaste-5on regression: logical-clock unification.
+    ///
+    /// When a remote item arrives with a large `lamport_ts` (e.g. an Android
+    /// device that historically stored wall-clock millis ≈ 1.7 × 10^12 in that
+    /// field), `observe()` must advance the LOCAL clock to `max(local, remote) + 1`
+    /// — the standard Lamport rule — so subsequent local events are causally
+    /// later than anything received.  The clock must NOT stay below the received
+    /// value (which would make future local writes appear "older").
+    ///
+    /// The engine's upper-bound clamp (MAX_LAMPORT_SKEW) is intentionally set high
+    /// enough (10^12) that a legitimate wall-clock-millis value just above 1.7 × 10^12
+    /// is clamped before it jams the clock forever, while a value within the window
+    /// advances the local clock correctly.
+    #[tokio::test]
+    async fn logical_clock_observe_advances_to_max_plus_one() {
+        // Simulate a peer whose lamport_ts reflects a small logical counter (42).
+        // Our local clock starts at 0.  After the session our clock must be > 42.
+        let mut peer_item = make_item("peer-row", 42);
+        peer_item.item_id = "peer-item".to_string();
+
+        let mut engine_local = SyncEngine::new("device-local");
+        let mut engine_peer = SyncEngine::new("device-peer");
+        assert_eq!(engine_local.clock.get(), 0, "local clock starts at 0");
+
+        let (mut sl, mut sp) = make_duplex();
+        let local_items: [ClipboardItem; 0] = [];
+        let peer_items = [peer_item];
+        let _ = tokio::join!(
+            engine_local.run_session(&mut sl, &local_items),
+            engine_peer.run_session(&mut sp, &peer_items),
+        );
+
+        // After observing peer's lamport=42, local clock must be >= 43
+        // (Lamport rule: max(0, 42) + 1 = 43).
+        assert!(
+            engine_local.clock.get() >= 43,
+            "local clock must advance to at least max(local, peer)+1 = 43, got {}",
+            engine_local.clock.get()
+        );
+    }
 }

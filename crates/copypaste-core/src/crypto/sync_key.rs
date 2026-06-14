@@ -157,6 +157,23 @@ impl SyncKey {
         SyncKey(bytes)
     }
 
+    /// Generate a fresh 32-byte key from the OS CSPRNG.
+    ///
+    /// Unlike `derive_sync_key`, this key is NOT reproducible from a
+    /// passphrase — callers must distribute the raw bytes to remaining paired
+    /// devices via the existing pairing re-provision flow (QR re-scan or
+    /// explicit key-share). This is the preferred path for automatic revocation
+    /// (`revoke_peer` with an active cloud/relay backend) because it requires
+    /// NO passphrase entry from the user.
+    ///
+    /// The key is filled by `OsRng` (which maps to `getrandom` / the OS
+    /// entropy pool) so it is cryptographically unpredictable and unique.
+    pub fn random() -> Self {
+        let mut bytes = [0u8; 32];
+        OsRng.fill_bytes(&mut bytes);
+        SyncKey(bytes)
+    }
+
     /// Constant-time comparison of this key's bytes against a candidate
     /// 32-byte key.
     ///

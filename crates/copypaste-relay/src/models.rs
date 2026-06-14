@@ -13,6 +13,14 @@ pub struct RegisterRequest {
     /// Accepted as both `public_key_b64` (preferred) and `public_key` (legacy alias).
     #[serde(alias = "public_key")]
     pub public_key_b64: String,
+    /// Proof-of-possession (PoP): HMAC-SHA256(key=sync_key, msg="relay-registration-pop-v1:" ||
+    /// device_id) base64-standard-encoded to exactly 32 raw bytes.
+    ///
+    /// Security: the relay verifies this field to ensure the registrant holds the sync key
+    /// that the `device_id` was derived from. Registration is rejected when this field is
+    /// absent, malformed, or (on co-registration) does not match the stored PoP.
+    /// See CopyPaste-n2l and `copypaste_core::derive_relay_registration_pop`.
+    pub pop_b64: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

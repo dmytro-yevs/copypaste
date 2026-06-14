@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 
 // Mock the IPC layer so own-device info resolves "ready" with a fingerprint
-// (the only state in which the copy-fingerprint button is rendered), while
+// (the only state in which the "This Mac" card renders), while
 // every other call resolves to a benign empty value.
 const getOwnDeviceInfo = vi.fn();
 const listPeers = vi.fn();
@@ -20,6 +20,7 @@ vi.mock("../lib/ipc", async (importOriginal) => {
       revokeAllPeers: vi.fn().mockResolvedValue({ revoked: 0 }),
       revokePeer: vi.fn().mockResolvedValue(undefined),
       unpairPeer: vi.fn().mockResolvedValue(undefined),
+      listDiscovered: vi.fn().mockResolvedValue({ devices: [] }),
     },
     probeStatus: (...a: unknown[]) => probeStatus(...a),
     pairingQrSvg: (...a: unknown[]) => pairingQrSvg(...a),
@@ -41,12 +42,6 @@ beforeEach(() => {
   probeStatus.mockReset().mockResolvedValue({ kind: "offline" });
   // QR generation is irrelevant to this test — keep it pending forever.
   pairingQrSvg.mockReset().mockReturnValue(new Promise(() => {}));
-
-  // navigator.clipboard.writeText drives the copy handler's success branch,
-  // which schedules the setTimeout(() => setCopied(false), 1500) under test.
-  Object.assign(navigator, {
-    clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
-  });
 });
 
 afterEach(() => {
@@ -54,37 +49,43 @@ afterEach(() => {
 });
 
 describe("DevicesView timer cleanup", () => {
-  it("clears the copy-fingerprint reset timer when unmounted before it fires", async () => {
-    const clearSpy = vi.spyOn(globalThis, "clearTimeout");
+  it("calls clearInterval at least once when unmounted (intervals are cleaned up)", async () => {
+    // Use fake timers so no real intervals fire during the test.
+    vi.useFakeTimers();
+
+    const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
 
     const { unmount } = render(<DevicesView />);
 
-    // Wait for own-device info to resolve so the fingerprint button renders.
-    const copyBtn = await screen.findByTitle(/click to copy fingerprint/i);
-
-    // Click to copy: success branch sets copied=true and schedules a 1500ms
-    // timer to reset it. Let the writeText promise resolve.
-    fireEvent.click(copyBtn);
+    // Let async effects settle (getOwnDeviceInfo, listPeers, etc.).
+    // Advancing by 0 ms drains the microtask queue (resolves mocked Promises)
+    // without firing any recurring setInterval callbacks.
     await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
     });
 
-    // The reset timer is now pending. Record how many clearTimeout calls have
-    // happened so far, then unmount BEFORE the 1500ms elapses.
-    const clearsBeforeUnmount = clearSpy.mock.calls.length;
+    // The DevicesView starts at least three setIntervals:
+    //   - 1 s clock tick (nowSecs)
+    //   - 10 s loadPeers poll
+    //   - 3 s loadDiscovered poll
+    // After unmount every cleanup function must call clearInterval.
+    const clearsBeforeUnmount = clearIntervalSpy.mock.calls.length;
     unmount();
 
-    // Unmount must have cleared the still-pending reset timer; otherwise it
-    // fires later and calls setCopied on an unmounted component (a leak).
-    expect(clearSpy.mock.calls.length).toBeGreaterThan(clearsBeforeUnmount);
+    // At least the three intervals above must be cleared.
+    expect(clearIntervalSpy.mock.calls.length).toBeGreaterThan(clearsBeforeUnmount);
 
-    clearSpy.mockRestore();
+    clearIntervalSpy.mockRestore();
   });
 
-  it("unmounts cleanly with no copy interaction", async () => {
+  it("unmounts cleanly with no interaction — the This Mac card is visible before unmount", async () => {
     const { unmount } = render(<DevicesView />);
-    await screen.findByTitle(/click to copy fingerprint/i);
+
+    // After own-device info resolves, the "This Mac" badge renders.
+    await waitFor(() => {
+      expect(screen.getByText("This Mac")).toBeInTheDocument();
+    });
+
     expect(() => unmount()).not.toThrow();
     await waitFor(() => undefined);
   });

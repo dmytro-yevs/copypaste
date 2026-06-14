@@ -48,3 +48,8 @@ hyper = { version = "1", features = ["full"] }
 # when the test ends. Pinned `>=3.0, <3.14` to match every other crate's
 # tempfile dev-dep so the workspace Cargo.lock stays unified on one version.
 tempfile = ">=3.0, <3.14"
+# PoP test helper: compute_pop in pop_verification.rs uses HMAC-SHA256 to derive
+# the expected proof and compare it against the relay's stored value. Both crates
+# are already in Cargo.lock (transitively via hkdf) — no new lock entries.
+hmac.workspace = true
+sha2.workspace = true

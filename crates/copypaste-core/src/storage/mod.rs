@@ -15,5 +15,8 @@ pub use items::{
     insert_item_with_fts, pin_item, prune_to_cap, reorder_pinned, search_items, upsert_fts,
     ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT,
 };
-pub use migration_v4::{migrate_v1_image_chunks_to_v2, migrate_v1_to_v2_keys, MigrationV4Error};
-pub use pool::{open_pool, open_pool_with_cache_mb, PoolError, SqlitePool};
+pub use migration_v4::{
+    migrate_v1_image_chunks_to_v2, migrate_v1_to_v2_keys, repair_mislabeled_kv2_blob_rows,
+    MigrationV4Error,
+};
+pub use pool::{open_pool, open_pool_with_cache_mb, DbRead, PoolError, ReadHandle, SqlitePool};

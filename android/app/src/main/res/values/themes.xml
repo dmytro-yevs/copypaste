@@ -12,7 +12,7 @@
         — keep this purely color + accent so it merges cleanly. Hook left below.
     -->
     <style name="Theme.CopyPaste" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-        <!-- Accent — Darcula action blue #3574F0 (matches macOS + Compose theme) -->
+        <!-- Accent — Design System v2 §0 action blue #3D8BFF (matches Compose theme) -->
         <item name="colorPrimary">@color/ide_accent</item>
         <item name="colorPrimaryDark">@color/ide_accent_dark</item>
         <item name="colorAccent">@color/ide_accent</item>

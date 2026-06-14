@@ -58,6 +58,9 @@ use crate::state::RelayStore;
 fn valid_key_b64() -> String {
     B64.encode([0u8; 32])
 }
+fn valid_pop() -> String {
+    B64.encode([0xDE_u8; 32])
+}
 
 fn device_id() -> String {
     "11111111-1111-1111-1111-111111111111".to_string()
@@ -66,7 +69,7 @@ fn device_id() -> String {
 #[test]
 fn prune_expired_removes_items_past_ttl() {
     let mut s = RelayStore::new(60);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
 
     // Push three items at the current wall clock.
@@ -91,7 +94,7 @@ fn prune_expired_removes_items_past_ttl() {
 #[test]
 fn prune_expired_keeps_fresh_items() {
     let mut s = RelayStore::new(3600);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
     s.push_item(
         &device_id(),
@@ -115,7 +118,7 @@ fn prune_expired_keeps_fresh_items() {
 #[test]
 fn prune_expired_with_zero_ttl_is_noop() {
     let mut s = RelayStore::new(0);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
     s.push_item(
         &device_id(),
@@ -134,7 +137,7 @@ fn prune_expired_with_zero_ttl_is_noop() {
 #[test]
 fn prune_expired_preserves_empty_inboxes() {
     let mut s = RelayStore::new(60);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
     // No items pushed — inbox is empty but registered.
     let evicted = s.prune_expired(u64::MAX, 1);
@@ -146,7 +149,7 @@ fn prune_expired_preserves_empty_inboxes() {
 #[test]
 fn prune_expired_partial_eviction() {
     let mut s = RelayStore::new(60);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
 
     // Insert one "old" item, sleep briefly, then one "fresh" item.
@@ -184,7 +187,7 @@ fn prune_expired_partial_eviction() {
 async fn ttl_evictor_task_fires_on_tick() {
     // Build a store with one item that is already older than the TTL.
     let mut s = RelayStore::new(1);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
     s.push_item(
         &device_id(),
@@ -238,7 +241,7 @@ async fn ttl_evictor_task_fires_on_tick() {
 #[test]
 fn file_payload_over_1mib_is_accepted() {
     let mut s = RelayStore::new(3600);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
 
     // 2 MiB of decoded ciphertext.
@@ -273,7 +276,7 @@ fn file_payload_over_1mib_is_accepted() {
 #[test]
 fn push_item_decoded_matches_push_item() {
     let mut s = RelayStore::new(3600);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
 
     let raw = vec![0x42u8; 4096];
@@ -300,7 +303,7 @@ fn push_item_decoded_enforces_body_cap() {
     use crate::error::RelayError;
 
     let mut s = RelayStore::new(3600);
-    s.register_device(device_id(), "A".into(), valid_key_b64())
+    s.register_device(device_id(), "A".into(), valid_key_b64(), valid_pop())
         .unwrap();
 
     let raw = vec![0u8; 11];

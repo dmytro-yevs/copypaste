@@ -2,6 +2,9 @@
 /target/
 /dist/
 
+# Playwright/Chrome-devtools MCP runtime artifacts (regenerated each session)
+.playwright-mcp/
+
 # Multi-platform build outputs (per-platform binaries).
 # Ignore everything under builds/ EXCEPT .gitkeep so the directory is tracked.
 builds/*
@@ -26,6 +29,13 @@ ruflo-setup-log.md
 .claude/
 .claude/worktrees/
 CLAUDE.md
+GEMINI.md
+AGENTS.md
+.agents/
+.codex/
+.mcp.json
+.beads/
+docs/superpowers/
 
 # OS
 .DS_Store

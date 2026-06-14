@@ -130,14 +130,17 @@ class FgsSyncLoop(
         /**
          * Cadence for the background LAN P2P dial, DECOUPLED from the Supabase
          * poll delay. The poll delay can grow to [IDLE_POLL_INTERVAL_MS] after an
-         * empty streak, but the P2P link is the priority transport — we want it
-         * dialed and established quickly so it can then deliver instantly over the
-         * persistent mTLS link. So the dial fires on this fixed short cadence
-         * regardless of how long the next poll is deferred.
+         * empty streak; the P2P dial fires on this fixed cadence regardless.
+         *
+         * 30 s is short enough to deliver new clips promptly while avoiding the
+         * "re-transmit entire history every 3 s" behaviour that the old 3 s value
+         * produced.  The outbound high-water cursor (see [Settings.p2pOutboundHighWater])
+         * further caps what is sent on each tick, so even at 30 s only NEW items
+         * travel over the wire after the first dial.
          *
          * Also drives the inbound listener drain cadence in [ClipboardService].
          */
-        const val P2P_DIAL_INTERVAL_MS = 3_000L
+        const val P2P_DIAL_INTERVAL_MS = 30_000L
 
         /**
          * WS-aware steady-state catch-up poll interval.
@@ -180,6 +183,33 @@ class FgsSyncLoop(
          */
         fun intervalForEmptyStreak(consecutiveEmpty: Int): Long =
             pollIntervalMs(wsConnected = false, consecutiveEmpty = consecutiveEmpty)
+
+        /**
+         * Filter [allLocalItems] to only those items whose [wallTimeMs] is
+         * STRICTLY GREATER than [outboundHighWater].
+         *
+         * When [outboundHighWater] is 0 (never synced), returns all items
+         * unchanged — the first dial always sends the full history.
+         *
+         * Pure function — no Android runtime, no coroutines — intentionally kept
+         * in the companion object so it can be unit-tested on the plain JVM.
+         */
+        fun filterByOutboundHighWater(
+            allLocalItems: List<Pair<String, Long>>,
+            outboundHighWater: Long,
+        ): List<Pair<String, Long>> {
+            if (outboundHighWater == 0L) return allLocalItems
+            return allLocalItems.filter { (_, wallTimeMs) -> wallTimeMs > outboundHighWater }
+        }
+
+        /**
+         * Compute the max wallTimeMs from a list of (id, wallTimeMs) pairs.
+         * Returns 0L for an empty list (cursor stays unchanged — no items sent).
+         *
+         * Pure function for JVM-testability.
+         */
+        fun maxWallTime(items: List<Pair<String, Long>>): Long =
+            if (items.isEmpty()) 0L else items.maxOf { it.second }
 
         /**
          * Select the newest text clip from a list of (text, wallTime) pairs
@@ -440,12 +470,9 @@ class FgsSyncLoop(
             }
 
             // Persist the advanced cursor after processing the full batch.
-            if (cursorWallTime > settings.lastSupabasePollWallTime ||
-                (cursorWallTime == settings.lastSupabasePollWallTime &&
-                        cursorId > settings.lastSupabasePollId)) {
-                settings.lastSupabasePollWallTime = cursorWallTime
-                settings.lastSupabasePollId = cursorId
-            }
+            // advanceSupabaseCursor is monotonic and holds supabaseCursorLock so
+            // a concurrent SupabasePollWorker run cannot interleave and lose an advance.
+            settings.advanceSupabaseCursor(cursorWallTime, cursorId)
 
             totalNewCount += newCount
 
@@ -504,13 +531,26 @@ class FgsSyncLoop(
         //   (a) to skip dialing any peer we have locally revoked, and
         //   (b) passed into syncWithPeer so the native side refuses to ingest
         //       items from any revoked fingerprint (server-side enforcement).
-        val revoked = runCatching { listRevokedFingerprints(settings.dbPath, key) }
-            .getOrElse { e ->
-                Log.w(TAG, "listRevokedFingerprints failed; proceeding with empty denylist: ${e.message}")
-                emptyList()
-            }
+        //
+        // SECURITY (fail-closed): if we cannot load the revoked-fingerprint list
+        // we MUST NOT proceed with an empty denylist — doing so would allow a sync
+        // to a previously-revoked peer.  Log at ERROR and abort the entire dial
+        // pass; the next tick will retry.
+        val revoked = try {
+            listRevokedFingerprints(settings.dbPath, key)
+        } catch (e: Exception) {
+            Log.e(
+                TAG,
+                "dialPairedPeer: ABORTING dial pass — listRevokedFingerprints failed " +
+                    "and proceeding with an empty denylist would allow sync to revoked peers: ${e.message}",
+                e,
+            )
+            return@withContext
+        }
 
-        val localItems = repository.localItemsForSync(key)
+        // Load ALL local items once; each peer's outbound high-water cursor
+        // is applied per-peer below to avoid re-loading for every peer.
+        val allLocalItems = repository.localItemsForSync(key)
 
         // Snapshot the LAN discovery table ONCE per pass. Used by the per-peer
         // mDNS IP-correlation fallback below. listDiscovered can throw if the
@@ -561,6 +601,18 @@ class FgsSyncLoop(
 
             if (!P2pDialerGate.shouldDial(peerAddr, peerFingerprint, sessionKey)) continue
 
+            // P2P outbound high-water cursor: only send items NEWER than the
+            // last successfully-synced wall_time for this peer.  On the first
+            // dial (cursor == 0) all local items are included.  A partial/failed
+            // dial leaves the cursor unchanged so the next dial retransmits the
+            // same window — no data is lost.
+            val outboundHw = settings.p2pOutboundHighWater(peerFingerprint)
+            val localItems = if (outboundHw == 0L) {
+                allLocalItems
+            } else {
+                allLocalItems.filter { it.wallTimeMs > outboundHw }
+            }
+
             try {
             val result = syncWithPeer(
                 peerAddr = peerAddr,
@@ -576,6 +628,9 @@ class FgsSyncLoop(
             // Accumulate text clips from this P2P batch; apply only the newest
             // after the full set is stored — mirrors the Supabase drain logic.
             val p2pTextClips = mutableListOf<Pair<String, Long>>()
+            // Track the highest wallTimeMs received from the peer so we can
+            // advance the inbound high-water cursor after a successful sync.
+            var maxInboundWallTime = settings.p2pInboundHighWater(peerFingerprint)
             for (item in result.items) {
                 // Store-mapping shared with the inbound listener poll (Android-as-
                 // responder). LWW dedup on item_id makes a re-dial / re-receipt a
@@ -594,6 +649,11 @@ class FgsSyncLoop(
                         if (text.isNotBlank()) p2pTextClips.add(text to item.wallTimeMs)
                     }
                 }
+                // Advance inbound high-water regardless of whether the item was
+                // stored: a deduped item still proves we've seen this wall_time.
+                if (item.wallTimeMs > maxInboundWallTime) {
+                    maxInboundWallTime = item.wallTimeMs
+                }
             }
             if (result.itemsReceived > 0uL || result.itemsSent > 0uL) {
                 Log.i(
@@ -606,6 +666,23 @@ class FgsSyncLoop(
             newestTextClip(p2pTextClips)?.let { text ->
                 onSyncedTextClip?.invoke(text)
             }
+
+            // Advance the outbound high-water cursor to the max wallTimeMs among
+            // items we just sent.  Only advance when we actually sent something —
+            // an empty localItems list means the cursor is already correct.
+            if (localItems.isNotEmpty()) {
+                val maxSentWallTime = localItems.maxOf { it.wallTimeMs }
+                settings.advanceP2pOutboundHighWater(peerFingerprint, maxSentWallTime)
+                Log.d(
+                    TAG,
+                    "P2P dial ${peerFingerprint.take(8)}: advanced outbound HW → $maxSentWallTime " +
+                        "(sent ${localItems.size} items)",
+                )
+            }
+
+            // Advance the inbound high-water cursor to the max wallTimeMs received.
+            settings.advanceP2pInboundHighWater(peerFingerprint, maxInboundWallTime)
+
             // E1: stamp a real-presence contact time on the roster entry so the
             // Devices screen "online" dot reflects an ACTUAL successful P2P sync
             // (not a Supabase poll-cursor proxy). Replace-in-place via the

@@ -25,8 +25,15 @@
 //!   public-key and from every other key-derivation use of the sync key, so one
 //!   value can never be substituted for another.
 
+use hmac::{Hmac, Mac};
 use hkdf::Hkdf;
 use sha2::Sha256;
+
+/// HMAC-SHA256 context prefix for the relay proof-of-possession (PoP).
+/// The full HMAC input is `RELAY_POP_PREFIX + device_id.as_bytes()`.
+/// Changing this string invalidates all existing PoP values (a migration),
+/// so it is frozen. The "v1" suffix allows future versioned rotation.
+const RELAY_POP_PREFIX: &[u8] = b"relay-registration-pop-v1:";
 
 /// HKDF `info` for the relay inbox id. Changing this string re-points every
 /// account at a different inbox (a hard migration), so it is frozen.
@@ -79,6 +86,42 @@ pub fn derive_relay_public_key(sync_key: &[u8; 32]) -> [u8; 32] {
     let mut out = [0u8; 32];
     hk.expand(RELAY_PUBKEY_INFO, &mut out)
         .expect("HKDF-SHA256 expand of 32 bytes is always valid");
+    out
+}
+
+/// Compute the relay registration **proof-of-possession** (PoP) for a device.
+///
+/// Returns `HMAC-SHA256(key=sync_key, msg=RELAY_POP_PREFIX || device_id)` as
+/// 32 raw bytes. The caller base64-encodes them for the wire (`pop_b64`).
+///
+/// # Security model
+///
+/// The relay verifies that a registration request carries a valid PoP to prevent
+/// an attacker who has learned a victim's `device_id` (the SECRET-derived inbox
+/// id) from co-registering and receiving that inbox's ciphertext. Because the PoP
+/// is keyed with the shared sync key — which the relay never receives — only a
+/// legitimate device that holds the sync key can produce a valid PoP for a given
+/// `device_id`.
+///
+/// On first registration the relay stores the PoP. On co-registration it uses a
+/// constant-time comparison to verify the new request's PoP matches the stored
+/// one — ensuring all co-registrants hold the same sync key (i.e. belong to the
+/// same account).
+///
+/// The PoP is derived from the same sync key used for inbox/pubkey derivation,
+/// but with a distinct prefix so domain separation holds.
+///
+/// # Security
+/// Derived from secret key material; do not log.
+pub fn derive_relay_registration_pop(sync_key: &[u8; 32], device_id: &str) -> [u8; 32] {
+    // HMAC-SHA256(key=sync_key, msg="relay-registration-pop-v1:" + device_id)
+    let mut mac = <Hmac<Sha256> as Mac>::new_from_slice(sync_key)
+        .expect("HMAC accepts any key length");
+    mac.update(RELAY_POP_PREFIX);
+    mac.update(device_id.as_bytes());
+    let result = mac.finalize().into_bytes();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&result);
     out
 }
 

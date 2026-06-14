@@ -76,6 +76,9 @@ fn unique_device_id(n: u8) -> String {
 fn unique_key(seed: u8) -> String {
     B64.encode([seed; 32])
 }
+fn valid_pop() -> String {
+    B64.encode([0xDE_u8; 32])
+}
 
 fn device_a() -> String {
     "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa".to_string()
@@ -261,7 +264,7 @@ fn quota_500_items_per_device_evicts_oldest() {
     let mut store = make_store();
     let id = device_a();
     store
-        .register_device(id.clone(), "Device A".into(), unique_key(0))
+        .register_device(id.clone(), "Device A".into(), unique_key(0), valid_pop())
         .unwrap();
 
     // Push 501 items with monotonically increasing wall_time so the oldest
@@ -311,6 +314,7 @@ fn quota_5_devices_per_account_rejects_6th() {
                 unique_device_id(i),
                 format!("Dev {i}"),
                 unique_key(i),
+                valid_pop(),
                 Tier::Free,
             )
             .unwrap_or_else(|err| panic!("device #{i} must register: {err:?}"));
@@ -322,6 +326,7 @@ fn quota_5_devices_per_account_rejects_6th() {
             unique_device_id(5),
             "Dev 5".into(),
             unique_key(5),
+            valid_pop(),
             Tier::Free,
         )
         .expect_err("6th Free-tier device must be rejected");

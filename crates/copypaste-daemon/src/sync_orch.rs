@@ -34,8 +34,9 @@ use tracing::{debug, info, warn};
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
-    encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, prune_to_cap, ClipboardItem,
-    Database, MigrationState, SyncKey, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+    encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, is_sensitive_for_autowipe,
+    prune_to_cap, ClipboardItem, Database, MigrationState, SyncKey, AAD_SCHEMA_VERSION_V4,
+    NONCE_SIZE,
 };
 use copypaste_sync::{
     merge::{local_to_wire, resolve, wire_to_local, MergeOutcome},
@@ -74,10 +75,10 @@ pub struct AutoApplyCtx {
 /// from the PAKE session key — both peers hold the identical key):
 ///
 /// * **outbound** — decrypt the row's ciphertext with the local key, then
-///   re-encrypt the plaintext under the shared sync key
-///   (`encrypt_for_cloud`, XChaCha20-Poly1305 + per-item-id AAD). The wire
-///   item carries that blob with `content_nonce = None` (the cloud blob is
-///   self-framed: it prefixes its own 24-byte nonce).
+///   re-encrypt the plaintext under the **per-peer** sync key (K_AB for peer B,
+///   K_AC for peer C, etc. — [`encrypt_for_cloud`], XChaCha20-Poly1305 + per-item-id
+///   AAD). The wire item carries that blob with `content_nonce = None` (the cloud
+///   blob is self-framed: it prefixes its own 24-byte nonce).
 /// * **inbound** — decrypt the wire blob with the shared sync key, then
 ///   re-encrypt the plaintext under THIS device's local v2 key before storing,
 ///   and index the plaintext into FTS so search + previews work for synced rows.
@@ -87,14 +88,24 @@ pub struct AutoApplyCtx {
 /// outgoing items ship their raw at-rest ciphertext (undecryptable on the peer,
 /// exactly as before Phase 3) and incoming items are stored verbatim.
 ///
-/// ## Caching (H8 perf fix)
+/// ## Key model (CopyPaste-716 fix)
 ///
-/// The shared sync key is cached in-memory as an `Arc<std::sync::Mutex<Option<[u8;
-/// 32]>>>`. All clones (e.g. the `spawn_blocking` copy inside
-/// `merge_incoming_with_crypto`) share the same backing `Arc`, so a single
-/// `reload_sync_key` call — made after any pairing write — updates every live
-/// copy simultaneously. The key bytes are stored as a plain array rather than
-/// `SyncKey` because `SyncKey` intentionally does not implement `Clone`.
+/// Keys are **per-peer pairwise**: K_AB (shared between A and B) differs from
+/// K_AC (shared between A and C). The previous implementation cached only the
+/// FIRST peer's key and used it for all fanout targets, so peer C received a
+/// blob encrypted under K_AB — which it could not decrypt (silent sync failure).
+///
+/// The fix: `cached_peer_keys` is a `HashMap<fingerprint, [u8; 32]>` populated
+/// from **all** paired peers in `peers.json`. `sync_key_for_peer(fp)` does a
+/// O(1) map lookup; the outbound fanout path calls it once per peer and
+/// re-encrypts independently.
+///
+/// ## Caching (H8 perf fix, preserved)
+///
+/// The key map is wrapped in `Arc<Mutex<…>>` so all `SyncCrypto` clones
+/// (including the temporary copy inside `merge_incoming_with_crypto::spawn_blocking`)
+/// share the same backing store. `reload_sync_key` refreshes the entire map
+/// atomically — visible to every live clone immediately.
 #[derive(Clone)]
 pub struct SyncCrypto {
     /// This device's v1 local-storage key (the raw seed from `load_local_key`).
@@ -105,67 +116,143 @@ pub struct SyncCrypto {
     /// Path to `peers.json`. Only read during construction and `reload_sync_key`
     /// — NOT on every crypto operation (H8 fix).
     peers_path: PathBuf,
-    /// Cached shared content sync key bytes (H8: eliminates per-item disk I/O).
+    /// Per-peer sync key cache (CopyPaste-716 fix).
     ///
-    /// Shared via `Arc` so every `SyncCrypto` clone (including the temporary
-    /// copy inside `merge_incoming_with_crypto::spawn_blocking`) observes the
-    /// same value. Updated atomically by `reload_sync_key` after pairing.
-    cached_sync_key_bytes: std::sync::Arc<std::sync::Mutex<Option<[u8; 32]>>>,
+    /// Maps canonical peer fingerprint → 32-byte pairwise sync key bytes.
+    /// Populated from ALL paired peers in `peers.json` (not just the first).
+    /// Shared via `Arc` so every `SyncCrypto` clone observes the same map.
+    /// Updated atomically by `reload_sync_key` after any pairing write.
+    cached_peer_keys: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, [u8; 32]>>>,
 }
 
 impl SyncCrypto {
     /// Build a crypto context from the device's local-storage seed and the
     /// `peers.json` path. Eagerly loads the shared sync key from `peers.json`
-    /// so the hot-path `shared_sync_key()` never touches the filesystem.
+    /// so the hot-path `sync_key_for_peer()` never touches the filesystem.
     pub fn new(local_seed: [u8; 32], peers_path: PathBuf) -> Self {
-        let cached = Self::load_key_from_peers(&peers_path);
+        let cached = Self::load_keys_from_peers(&peers_path);
         Self {
             v1_key: local_seed,
             v2_key: derive_v2(&local_seed),
-            cached_sync_key_bytes: std::sync::Arc::new(std::sync::Mutex::new(cached)),
+            cached_peer_keys: std::sync::Arc::new(std::sync::Mutex::new(cached)),
             peers_path,
         }
     }
 
-    /// Read `peers.json` once and return the first valid 32-byte sync key, or
-    /// `None` when no paired peer with a key is present.
-    fn load_key_from_peers(peers_path: &std::path::Path) -> Option<[u8; 32]> {
+    /// Read `peers.json` once and return a map of canonical fingerprint →
+    /// 32-byte sync key for every paired peer that has a valid `sync_key_b64`.
+    ///
+    /// CopyPaste-716: previously this returned only the FIRST peer's key via
+    /// `find_map`, causing all fanout targets beyond the first peer to receive
+    /// a blob encrypted under the wrong key. Now returns ALL peers' keys.
+    ///
+    /// The map key is the **canonical** (colon-free lowercase hex) fingerprint —
+    /// the same form used by the mTLS transport as `DeviceFingerprint` in
+    /// `peer_sinks`. `peers.json` stores colon-hex (e.g. `"aa:bb:cc"`); we
+    /// normalise via `canonical_fingerprint` so lookups by `DeviceFingerprint`
+    /// always hit (CopyPaste-716 secondary fix).
+    fn load_keys_from_peers(peers_path: &std::path::Path) -> std::collections::HashMap<String, [u8; 32]> {
         use base64::Engine as _;
         crate::peers::load_peers(peers_path)
             .into_iter()
-            .find_map(|dev| {
+            .filter_map(|dev| {
                 let b64 = dev.sync_key_b64.as_deref()?;
                 let bytes = base64::engine::general_purpose::STANDARD.decode(b64).ok()?;
-                <[u8; 32]>::try_from(bytes.as_slice()).ok()
+                let key = <[u8; 32]>::try_from(bytes.as_slice()).ok()?;
+                // Normalise to canonical (colon-free lowercase) so lookups by
+                // DeviceFingerprint (the mTLS transport's canonical form) hit.
+                let canonical = crate::ipc::canonical_fingerprint(&dev.fingerprint);
+                Some((canonical, key))
             })
+            .collect()
     }
 
-    /// Return the cached shared content sync key (if any).
+    /// Return the sync key for a specific peer fingerprint.
     ///
-    /// This is now an O(1) memory read — no file I/O (H8 fix). Call
-    /// `reload_sync_key` after pairing to refresh the cache.
-    fn shared_sync_key(&self) -> Option<SyncKey> {
+    /// This is an O(1) map read (no file I/O — H8 preserved). Call
+    /// `reload_sync_key` after any pairing write to refresh all peers' keys.
+    ///
+    /// The `fingerprint` parameter may be in either colon-hex (`aa:bb:cc`) or
+    /// canonical colon-free lowercase form — this function normalises before
+    /// lookup so both call sites (tests with colon-hex, production fanout with
+    /// canonical DeviceFingerprint) work correctly.
+    ///
+    /// Returns `None` when the peer has no sync key (legacy peer record or
+    /// no pairing yet).
+    pub fn sync_key_for_peer(&self, fingerprint: &str) -> Option<SyncKey> {
+        let canonical = crate::ipc::canonical_fingerprint(fingerprint);
         let guard = self
-            .cached_sync_key_bytes
+            .cached_peer_keys
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        (*guard).map(SyncKey::from_bytes)
+        guard.get(canonical.as_str()).copied().map(SyncKey::from_bytes)
     }
 
-    /// Re-read `peers.json` and update the in-memory cache. Call this once
-    /// after any write to `peers.json` (pairing completion, revoke) so the
-    /// orchestrator picks up the new key without a daemon restart.
+    /// Return ANY available shared content sync key (if any peer has one).
     ///
-    /// Because `cached_sync_key_bytes` is an `Arc`, this update is visible to
+    /// **Outbound use only** — used by `rekey_outbound` / `rekey_blob_outbound`
+    /// for the legacy single-peer fallback path.  For the inbound path use
+    /// [`all_sync_keys`] (CopyPaste-kw2) to avoid the arbitrary-first-entry
+    /// bias that breaks 3+ device topologies.
+    ///
+    /// This is an O(1) memory read — no file I/O (H8 fix).
+    fn shared_sync_key(&self) -> Option<SyncKey> {
+        let guard = self
+            .cached_peer_keys
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        guard.values().next().copied().map(SyncKey::from_bytes)
+    }
+
+    /// Return ALL cached pairwise sync keys as a `Vec<SyncKey>`.
+    ///
+    /// Used on the **inbound** path (CopyPaste-kw2 fix): because the mTLS
+    /// authenticated sender fingerprint is dropped before items reach the
+    /// merge path, we cannot look up the exact pairwise key by fingerprint.
+    /// Instead we try every registered peer key until AEAD decryption
+    /// succeeds — the authentication tag guarantees only the correct key
+    /// accepts the ciphertext, so this is both correct and safe.
+    ///
+    /// In the common 2-device case there is exactly one key and the cost is
+    /// identical to the previous `values().next()` path. In a 3+-device
+    /// topology each sender encrypts under the pairwise key shared with
+    /// THIS device, so at most one entry in the vec will ever succeed.
+    fn all_sync_keys(&self) -> Vec<SyncKey> {
+        let guard = self
+            .cached_peer_keys
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        guard.values().copied().map(SyncKey::from_bytes).collect()
+    }
+
+    /// Re-read `peers.json` and update the in-memory per-peer key map. Call
+    /// this once after any write to `peers.json` (pairing completion, revoke)
+    /// so the orchestrator picks up new/changed keys without a daemon restart.
+    ///
+    /// Because `cached_peer_keys` is an `Arc`, this update is visible to
     /// every `SyncCrypto` clone (including ones moved into `spawn_blocking`
     /// closures) immediately.
     pub fn reload_sync_key(&self) {
-        let new_key = Self::load_key_from_peers(&self.peers_path);
+        let new_keys = Self::load_keys_from_peers(&self.peers_path);
         let mut guard = self
-            .cached_sync_key_bytes
+            .cached_peer_keys
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        *guard = new_key;
+        *guard = new_keys;
+    }
+
+    /// Returns `true` if the in-memory per-peer key map contains at least one
+    /// entry.
+    ///
+    /// Only available in test builds so production code cannot accidentally
+    /// depend on the cache state as a signal (reload_sync_key is the contract).
+    #[cfg(test)]
+    pub fn has_cached_sync_key(&self) -> bool {
+        !self
+            .cached_peer_keys
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_empty()
     }
 }
 
@@ -219,23 +306,14 @@ pub async fn run(
             local = new_item_rx.recv(), if !local_closed => {
                 match local {
                     Ok(item) => {
-                        let mut wire = local_to_wire(&item, &device_id);
-                        // P2P Phase 3: re-key the payload under the shared sync
-                        // key so a paired peer can decrypt it. Falls back to the
-                        // raw at-rest ciphertext when no shared key is available.
-                        if let Some(ref crypto) = crypto {
-                            // sync H2: if a shared key is present but re-keying
-                            // fails, DROP the item — forwarding raw at-rest
-                            // ciphertext would land a permanently-undecryptable
-                            // row on the peer that it counts as synced.
-                            if rekey_outbound(crypto, &mut wire) == RekeyOutcome::Failed {
-                                warn!(
-                                    item_id = %wire.id,
-                                    "sync_orch: dropping local item — re-key failed (would be undecryptable on peer)"
-                                );
-                                continue;
-                            }
-                        }
+                        let wire = local_to_wire(&item, &device_id);
+                        // CopyPaste-716: per-peer re-keying now happens in the
+                        // transport's fanout_to_peers (p2p.rs) so each peer
+                        // receives a blob encrypted under its own pairwise sync
+                        // key. Sending the raw at-rest wire here is safe because
+                        // the outbound_loop holds a SyncCrypto and re-encrypts
+                        // once per peer at send time. When crypto is None (P2P
+                        // disabled) the raw ciphertext is forwarded as before.
                         debug!(item_id = %wire.id, "sync_orch: forwarding local item to transport");
                         if let Err(e) = outbound_tx.send(wire).await {
                             // No transport listening — normal when P2P/cloud disabled.
@@ -451,6 +529,25 @@ pub async fn merge_incoming_with_crypto(
                 Some(c) => match rekey_inbound(c, wire) {
                     Ok(pair) => pair,
                     Err(w) => {
+                        // Guard: if the item looks sync-key-wrapped but we
+                        // couldn't decrypt it (shared key missing or wrong),
+                        // the wire item has no content_nonce (and for
+                        // file/image also no blob_ref).  Storing it verbatim
+                        // creates a "poison row" that consumers reject with
+                        // "missing content_nonce" / "missing blob_ref metadata".
+                        // Skip it — the peer will re-send on the next catch-up
+                        // cycle once the key is available.
+                        // (CopyPaste-jww / CopyPaste-5y4)
+                        if is_poison_wire(&w) {
+                            warn!(
+                                item_id = %w.item_id,
+                                content_type = %w.content_type,
+                                "sync_orch: inbound item has no content_nonce/blob_ref \
+                                 (sync-key-wrapped but undecryptable) — skipping to avoid \
+                                 poison row (CopyPaste-jww/5y4)"
+                            );
+                            continue;
+                        }
                         // Not sync-key-wrapped (or undecryptable): store verbatim.
                         (wire_to_local(*w), None)
                     }
@@ -472,6 +569,21 @@ pub async fn merge_incoming_with_crypto(
             // instead of OR-merging with the local state: the IPC handlers bump
             // lamport_ts before broadcasting, so the wire wins LWW only when it is
             // causally later — which is exactly when its pin state should take effect.
+
+            // CopyPaste-kcf fix: run SensitiveDetector on the decrypted plaintext
+            // so inbound items get the same auto-wipe TTL as locally-captured ones.
+            // Previously `wire_to_local` always set `is_sensitive = false`, meaning
+            // a password or API key synced from another device bypassed TTL cleanup.
+            // We reuse the same `is_sensitive_for_autowipe` the local capture path
+            // uses (daemon.rs line ~1587) — no new heuristics.
+            // Only runs when `fts_plaintext` is Some (i.e. rekey_inbound succeeded
+            // and decrypted a text item); verbatim/image/file rows are left as-is
+            // because we have no plaintext to inspect.
+            if let Some(ref pt) = fts_plaintext {
+                if let Ok(text) = std::str::from_utf8(pt) {
+                    to_insert.is_sensitive = is_sensitive_for_autowipe(text);
+                }
+            }
 
             // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
             // ran `delete_item` then a separate `insert_item`; if the insert failed
@@ -692,31 +804,36 @@ fn replace_item_atomic(
     Ok(())
 }
 
-/// Build the set of local items to push to a peer that has just connected
-/// (P2P Phase 3 "sync on connect" / catch-up).
+/// Build the set of local items to push to a specific peer that has just
+/// connected (P2P Phase 3 "sync on connect" / catch-up).
 ///
 /// Fanout is fire-and-forget to *currently* connected sinks, so an item
 /// captured/imported before the mTLS link came up would otherwise never reach
 /// the peer (and the both-sides-dial race makes the exact connect instant
 /// non-deterministic). When a connection is established we therefore replay the
 /// full local history to it once: each row is converted to a wire item and
-/// re-keyed under the shared sync key so the peer can decrypt it. LWW on the
-/// receiver makes the replay idempotent (already-present items lose or no-op).
+/// re-keyed under the **per-peer** sync key for `peer_fingerprint` so only
+/// the target peer can decrypt it. LWW on the receiver makes the replay
+/// idempotent (already-present items lose or no-op).
 ///
-/// Returns an empty vec when there is no shared sync key (nothing decryptable to
+/// CopyPaste-716: the previous signature had no `peer_fingerprint` parameter
+/// and used `shared_sync_key()` (the first peer's key), so on 3+ device
+/// topologies peers B and C both received catch-up blobs encrypted under K_AB.
+/// Peer C (holding K_AC) could never decrypt them — silent sync failure.
+/// Now each catch-up call passes the connecting peer's fingerprint and uses
+/// that peer's specific pairwise key.
+///
+/// Returns an empty vec when the peer has no sync key (nothing decryptable to
 /// send) or the DB read fails — catch-up is best-effort.
-pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec<WireItem> {
-    // P2 fix: check the shared sync key ONCE here (now an in-memory cache read
-    // after the H8 fix) rather than re-reading peers.json per item. If no shared
-    // key is available there is nothing to forward — bail early.
-    //
-    // P1 fix: paginate through the local store in CATCHUP_PAGE_SIZE-row batches
-    // instead of materialising up to 10 000 structs in one shot. Each page is
-    // processed immediately and dropped, keeping peak heap usage bounded.
-
-    // Pre-flight: only bother paginating if a shared key actually exists.
-    // H8 fix: use the cached key via shared_sync_key() — no peers.json disk read.
-    if crypto.shared_sync_key().is_none() {
+pub fn catchup_items(
+    db: &Database,
+    device_id: &str,
+    crypto: &SyncCrypto,
+    peer_fingerprint: &str,
+) -> Vec<WireItem> {
+    // Pre-flight: only bother paginating if the connecting peer has a sync key.
+    // H8 fix preserved: uses the in-memory cache — no peers.json disk read.
+    if crypto.sync_key_for_peer(peer_fingerprint).is_none() {
         return Vec::new();
     }
 
@@ -734,10 +851,13 @@ pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec
         let page_len = page.len();
         for item in &page {
             let mut wire = local_to_wire(item, device_id);
-            // Only forward items we could actually re-key under the shared key; a
+            // Re-key under this peer's pairwise key (CopyPaste-716).
+            // Only forward items we could actually re-key — a
             // still-locally-encrypted (NotApplicable) or failed payload is useless
             // — or worse, undecryptable — to the peer (sync H2).
-            if rekey_outbound(crypto, &mut wire) == RekeyOutcome::Rewrapped {
+            if rekey_outbound_for_peer(crypto, peer_fingerprint, &mut wire)
+                == RekeyOutcome::Rewrapped
+            {
                 out.push(wire);
             }
         }
@@ -751,7 +871,7 @@ pub fn catchup_items(db: &Database, device_id: &str, crypto: &SyncCrypto) -> Vec
 
 /// Outcome of an attempt to re-key an outgoing item under the shared sync key.
 #[derive(Debug, PartialEq, Eq)]
-enum RekeyOutcome {
+pub(crate) enum RekeyOutcome {
     /// The payload was successfully re-wrapped under the shared sync key — the
     /// wire item is decryptable by the paired peer and safe to forward.
     Rewrapped,
@@ -818,13 +938,21 @@ fn recover_blob_plaintext(crypto: &SyncCrypto, wire: &WireItem) -> Option<Vec<u8
             return None;
         }
     };
-    // Decode under the LOCAL v1 seed — handle_image passes the raw local_key
-    // (NOT derive_v2) as the chunk-encryption key, so the v1 seed is correct
-    // here. Wrong key would surface as a silent AuthFailed.
-    let decoded = if wire.content_type == "image" {
-        copypaste_core::decode_image(&chunks, &crypto.v1_key, &file_id).map_err(|e| e.to_string())
+    // Dispatch on the wire item's key_version: v1 rows use the raw local
+    // key (v1 seed); v2 rows use derive_v2(seed). After the writer fix
+    // (handle_image / handle_file now use derive_v2), all freshly-captured
+    // rows are kv=2. Legacy rows stamped kv=2 but encrypted with v1 (the
+    // mislabeled rows) are repaired by repair_mislabeled_kv2_blob_rows at
+    // startup, so by the time sync runs all kv=2 rows are truly v2.
+    let blob_key: &[u8; 32] = if wire.key_version == 1 {
+        &crypto.v1_key
     } else {
-        copypaste_core::decode_file(&chunks, &crypto.v1_key, &file_id).map_err(|e| e.to_string())
+        &crypto.v2_key
+    };
+    let decoded = if wire.content_type == "image" {
+        copypaste_core::decode_image(&chunks, blob_key, &file_id).map_err(|e| e.to_string())
+    } else {
+        copypaste_core::decode_file(&chunks, blob_key, &file_id).map_err(|e| e.to_string())
     };
     match decoded {
         Ok(pt) => Some(pt),
@@ -843,10 +971,14 @@ fn recover_blob_plaintext(crypto: &SyncCrypto, wire: &WireItem) -> Option<Vec<u8
 /// clears `content_nonce` (the unwrap marker) and `blob_ref`, and keeps
 /// `content_type`. Mirrors the text arm's `Failed`/`NotApplicable` contract.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn rekey_blob_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome {
-    let Some(shared) = crypto.shared_sync_key() else {
-        return RekeyOutcome::NotApplicable;
-    };
+/// Inner implementation for blob (image/file) outbound re-keying under an
+/// explicit `SyncKey` (CopyPaste-716: key now passed in by caller rather than
+/// fetched from the first-peer-only cache).
+fn rekey_blob_outbound_with_key(
+    crypto: &SyncCrypto,
+    shared: &SyncKey,
+    wire: &mut WireItem,
+) -> RekeyOutcome {
     // A shared key IS present: from here any failure is `Failed` (drop), never
     // a silent forward of an undecryptable at-rest blob (sync H2).
     let Some(plaintext) = recover_blob_plaintext(crypto, wire) else {
@@ -861,7 +993,7 @@ fn rekey_blob_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome
         );
         return RekeyOutcome::Failed;
     }
-    match encrypt_for_cloud(&shared, &wire.item_id, &plaintext) {
+    match encrypt_for_cloud(shared, &wire.item_id, &plaintext) {
         Ok(blob) => {
             wire.content = Some(blob);
             // Self-framed blob → no item-level nonce; `None` is the receiver's
@@ -888,6 +1020,13 @@ fn rekey_blob_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome
             RekeyOutcome::Failed
         }
     }
+}
+
+fn rekey_blob_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome {
+    let Some(shared) = crypto.shared_sync_key() else {
+        return RekeyOutcome::NotApplicable;
+    };
+    rekey_blob_outbound_with_key(crypto, &shared, wire)
 }
 
 /// Re-encrypt an outgoing item's payload under the shared content sync key so a
@@ -923,6 +1062,19 @@ fn rekey_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome {
     let Some(shared) = crypto.shared_sync_key() else {
         return RekeyOutcome::NotApplicable;
     };
+    rekey_outbound_text_with_key(crypto, &shared, wire)
+}
+
+/// Inner text re-key under an explicit `SyncKey` (CopyPaste-716: per-peer key).
+///
+/// Decrypts the at-rest ciphertext under `crypto`'s local key, then
+/// re-encrypts under `peer_key`. Caller is responsible for passing the correct
+/// per-peer key (via [`SyncCrypto::sync_key_for_peer`]).
+fn rekey_outbound_text_with_key(
+    crypto: &SyncCrypto,
+    peer_key: &SyncKey,
+    wire: &mut WireItem,
+) -> RekeyOutcome {
     let (Some(ciphertext), Some(nonce_vec)) = (wire.content.as_ref(), wire.content_nonce.as_ref())
     else {
         return RekeyOutcome::NotApplicable;
@@ -951,7 +1103,7 @@ fn rekey_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome {
         }
     };
 
-    match encrypt_for_cloud(&shared, &wire.item_id, &plaintext) {
+    match encrypt_for_cloud(peer_key, &wire.item_id, &plaintext) {
         Ok(blob) => {
             wire.content = Some(blob);
             // The cloud blob is self-framed (nonce prefix), so there is no
@@ -964,6 +1116,37 @@ fn rekey_outbound(crypto: &SyncCrypto, wire: &mut WireItem) -> RekeyOutcome {
             RekeyOutcome::Failed
         }
     }
+}
+
+/// Re-encrypt an outgoing item under the pairwise sync key for `peer_fingerprint`.
+///
+/// CopyPaste-716: this is the correct per-peer fanout call. Unlike
+/// [`rekey_outbound`] (which uses the first cached key for legacy/catchup
+/// compatibility), this function looks up the sync key specific to
+/// `peer_fingerprint` from the per-peer cache. The caller (fanout + catchup
+/// paths) must clone the `WireItem` before calling so each peer gets its own
+/// independently-encrypted copy.
+///
+/// Returns [`RekeyOutcome`]:
+/// * [`RekeyOutcome::Rewrapped`] — payload re-wrapped under the peer's key.
+/// * [`RekeyOutcome::NotApplicable`] — peer has no sync key, or item type is
+///   not re-keyable (non-text/image/file). Wire item is left unchanged.
+/// * [`RekeyOutcome::Failed`] — key present but crypto failed; caller must drop.
+pub(crate) fn rekey_outbound_for_peer(
+    crypto: &SyncCrypto,
+    peer_fingerprint: &str,
+    wire: &mut WireItem,
+) -> RekeyOutcome {
+    let Some(peer_key) = crypto.sync_key_for_peer(peer_fingerprint) else {
+        return RekeyOutcome::NotApplicable;
+    };
+    if wire.content_type == "image" || wire.content_type == "file" {
+        return rekey_blob_outbound_with_key(crypto, &peer_key, wire);
+    }
+    if wire.content_type != "text" {
+        return RekeyOutcome::NotApplicable;
+    }
+    rekey_outbound_text_with_key(crypto, &peer_key, wire)
 }
 
 /// Inverse of [`rekey_outbound`]: turn a sync-key-wrapped incoming wire item
@@ -989,21 +1172,57 @@ fn rekey_inbound(
     {
         return Err(Box::new(wire));
     }
-    let Some(shared) = crypto.shared_sync_key() else {
+
+    // CopyPaste-kw2 fix: try ALL registered peer keys instead of the arbitrary
+    // first entry in the HashMap.  In a 3+-device topology the authenticated
+    // mTLS sender fingerprint is dropped before items reach the merge path, so
+    // we cannot look up the pairwise key by fingerprint here.  AEAD guarantees
+    // that only the correct key (K_sender_this_device) produces a valid tag —
+    // trying every key until one succeeds is correct, safe, and O(n) in the
+    // number of paired peers (typically 1-3).
+    let peer_keys = crypto.all_sync_keys();
+    if peer_keys.is_empty() {
         return Err(Box::new(wire));
-    };
-    if is_blob {
-        return rewrap_inbound_blob(crypto, wire, &shared);
     }
+
+    if is_blob {
+        // For blobs try each key; pass ownership of wire only to the first
+        // attempt, hand it back on failure, and on the final failure return.
+        let mut wire_box = Box::new(wire);
+        for key in &peer_keys {
+            match rewrap_inbound_blob(crypto, *wire_box, key) {
+                Ok(pair) => return Ok(pair),
+                Err(w) => {
+                    wire_box = w;
+                }
+            }
+        }
+        return Err(wire_box);
+    }
+
     let blob = match wire.content.as_ref() {
         Some(b) => b.clone(),
         None => return Err(Box::new(wire)),
     };
-    let plaintext = match decrypt_from_cloud(&shared, &wire.item_id, &blob) {
-        Ok(pt) => pt,
-        Err(e) => {
-            warn!(item_id = %wire.item_id, "sync_orch: rekey_inbound shared-decrypt failed: {e}");
-            return Err(Box::new(wire));
+
+    // Try each pairwise key until AEAD decryption succeeds (CopyPaste-kw2).
+    let plaintext = {
+        let mut found: Option<Vec<u8>> = None;
+        for key in &peer_keys {
+            match decrypt_from_cloud(key, &wire.item_id, &blob) {
+                Ok(pt) => {
+                    found = Some(pt);
+                    break;
+                }
+                Err(_) => continue,
+            }
+        }
+        match found {
+            Some(pt) => pt,
+            None => {
+                warn!(item_id = %wire.item_id, "sync_orch: rekey_inbound: all peer keys failed to decrypt (tried {})", peer_keys.len());
+                return Err(Box::new(wire));
+            }
         }
     };
 
@@ -1353,6 +1572,74 @@ fn recover_latest_image_png(
             debug!("sync_orch: auto-apply image: decode_image failed: {e}");
         })
         .ok()
+}
+
+// ── Poison-row guard (CopyPaste-jww / CopyPaste-5y4) ─────────────────────────
+
+/// Returns `true` when a [`WireItem`] would become a poison row if stored
+/// verbatim — i.e. when `rekey_inbound` failed because the shared sync key is
+/// missing or wrong and the item was sync-key-wrapped.
+///
+/// A sync-key-wrapped item has `content` (the wrapped blob) but the sender
+/// strips `content_nonce` (which is the "no local-nonce" sentinel on the wire)
+/// and for file/image items also strips `blob_ref`. Storing such an item means
+/// consumers will see a row with ciphertext they cannot decrypt AND no nonce /
+/// no blob reference — causing "missing content_nonce" or "missing blob_ref
+/// metadata" errors on every read.
+///
+/// The check is intentionally conservative:
+/// * `text` is poison when `content` is present and `content_nonce` is absent.
+/// * `file` / `image` are poison when `content` is present, `content_nonce` is
+///   absent, AND `blob_ref` is also absent.  A file item that arrived via the
+///   large-blob path carries `blob_ref` even without a nonce — that is a
+///   legitimate row and must not be discarded.
+pub fn is_poison_wire(w: &WireItem) -> bool {
+    if w.content.is_none() {
+        // No ciphertext at all (tombstone or empty) — not a poison row.
+        return false;
+    }
+    match w.content_type.as_str() {
+        "text" => w.content_nonce.is_none(),
+        "file" | "image" => w.content_nonce.is_none() && w.blob_ref.is_none(),
+        // Unknown content types: be conservative, do not treat as poison.
+        _ => false,
+    }
+}
+
+/// Delete all poison rows from `clipboard_items` and return the count removed.
+///
+/// A poison row is any row that was stored verbatim from a sync-key-wrapped
+/// wire item (i.e. `rekey_inbound` failed) and therefore lacks the fields
+/// consumers need to decrypt it:
+/// * `content_type = 'text'` with `content IS NOT NULL` and `content_nonce IS NULL`
+/// * `content_type IN ('file', 'image')` with `content IS NOT NULL`,
+///   `content_nonce IS NULL`, and `blob_ref IS NULL`
+///
+/// Safe to call at startup on every restart — idempotent.  The affected peers
+/// will re-send the items on their next catch-up cycle (sync is idempotent).
+///
+/// Returns `Err` only on SQLite failures; a zero-row result is `Ok(0)`.
+pub fn sweep_poison_rows(db: &Database) -> Result<usize, anyhow::Error> {
+    let n = db.conn().execute(
+        "DELETE FROM clipboard_items \
+         WHERE (content_type = 'text' \
+                AND content IS NOT NULL \
+                AND content_nonce IS NULL) \
+            OR (content_type IN ('file', 'image') \
+                AND content IS NOT NULL \
+                AND content_nonce IS NULL \
+                AND blob_ref IS NULL)",
+        [],
+    )?;
+    if n > 0 {
+        warn!(
+            swept = n,
+            "sync_orch: swept {n} poison row(s) \
+             (sync-key-wrapped items stored without content_nonce/blob_ref \
+             — peers will re-send on next connect) (CopyPaste-jww/5y4)"
+        );
+    }
+    Ok(n)
 }
 
 #[cfg(test)]
@@ -1738,6 +2025,243 @@ mod tests {
         assert_eq!(recovered, raw, "B recovers A's exact file bytes");
     }
 
+    /// CopyPaste-716: 3-device topology (A paired with B and C under DIFFERENT
+    /// pairwise keys) must produce per-peer ciphertext blobs.
+    ///
+    /// Before the fix: `rekey_outbound` used `shared_sync_key()` (first peer
+    /// only) so fanout to C produced a K_AB-encrypted blob that C could never
+    /// decrypt. After the fix: `rekey_outbound_for_peer` uses the per-peer key
+    /// from the HashMap cache, so each peer gets a blob it can actually decrypt.
+    ///
+    /// This test simulates device A sending to peers B and C:
+    /// - K_AB = [0x33; 32], K_AC = [0x44; 32] (distinct pairwise keys)
+    /// - Fanout to B must produce a blob decryptable under K_AB (not K_AC)
+    /// - Fanout to C must produce a blob decryptable under K_AC (not K_AB)
+    #[test]
+    fn three_device_fanout_uses_per_peer_key_not_first_peer_key() {
+        use base64::Engine as _;
+        use copypaste_core::{
+            build_item_aad_v2, derive_v2, decrypt_from_cloud, encrypt_item_with_aad,
+            AAD_SCHEMA_VERSION_V4,
+        };
+        use tempfile::tempdir;
+
+        // Device A's local seed.
+        let seed_a = [0x11u8; 32];
+
+        // Two distinct pairwise keys: K_AB (A↔B) and K_AC (A↔C).
+        let k_ab: [u8; 32] = [0x33u8; 32];
+        let k_ac: [u8; 32] = [0x44u8; 32];
+        assert_ne!(k_ab, k_ac, "test requires distinct per-peer keys");
+
+        let k_ab_b64 = base64::engine::general_purpose::STANDARD.encode(k_ab);
+        let k_ac_b64 = base64::engine::general_purpose::STANDARD.encode(k_ac);
+
+        // Peer fingerprints (as stored in peers.json / used as DeviceFingerprint).
+        let fp_b = "bb:bb";
+        let fp_c = "cc:cc";
+
+        // A's peers.json: both B and C, each with their own pairwise key.
+        let dir_a = tempdir().unwrap();
+        let peers_a = dir_a.path().join("peers.json");
+        std::fs::write(
+            &peers_a,
+            format!(
+                r#"[
+                    {{"fingerprint":"{fp_b}","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{k_ab_b64}"}},
+                    {{"fingerprint":"{fp_c}","added_at":1,"address":"127.0.0.1:8","sync_key_b64":"{k_ac_b64}"}}
+                ]"#
+            ),
+        )
+        .unwrap();
+        let crypto_a = SyncCrypto::new(seed_a, peers_a);
+
+        // Confirm both keys loaded.
+        assert!(
+            crypto_a.sync_key_for_peer(fp_b).is_some(),
+            "A must have K_AB for peer B"
+        );
+        assert!(
+            crypto_a.sync_key_for_peer(fp_c).is_some(),
+            "A must have K_AC for peer C"
+        );
+
+        // Prepare a plaintext item and encrypt it under A's local v2 key
+        // (exactly as the daemon stores a captured clipboard item).
+        let item_id = "iid-716-three-device".to_string();
+        let plaintext = b"three-device sync test payload";
+        let a_v2 = derive_v2(&seed_a);
+        let aad_a = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let (nonce_a, ct_a) =
+            encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
+
+        // Build the wire item (at-rest ciphertext from A's local storage).
+        let wire_template = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
+            id: "row-716".to_string(),
+            item_id: item_id.clone(),
+            content_type: "text".to_string(),
+            content: Some(ct_a),
+            content_nonce: Some(nonce_a.to_vec()),
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 1,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "device-A".to_string(),
+            key_version: 2,
+            file_name: None,
+            mime: None,
+        };
+
+        // ── Fanout to peer B (should use K_AB) ───────────────────────────────
+        let mut wire_for_b = wire_template.clone();
+        let outcome_b = rekey_outbound_for_peer(&crypto_a, fp_b, &mut wire_for_b);
+        assert_eq!(
+            outcome_b,
+            RekeyOutcome::Rewrapped,
+            "fanout to B must succeed (K_AB present)"
+        );
+        assert!(
+            wire_for_b.content_nonce.is_none(),
+            "sync-key-wrapped payload clears item nonce"
+        );
+        let blob_b = wire_for_b.content.as_ref().unwrap().clone();
+
+        // ── Fanout to peer C (should use K_AC) ───────────────────────────────
+        let mut wire_for_c = wire_template.clone();
+        let outcome_c = rekey_outbound_for_peer(&crypto_a, fp_c, &mut wire_for_c);
+        assert_eq!(
+            outcome_c,
+            RekeyOutcome::Rewrapped,
+            "fanout to C must succeed (K_AC present)"
+        );
+        let blob_c = wire_for_c.content.as_ref().unwrap().clone();
+
+        // ── Verify: B's blob decrypts under K_AB ─────────────────────────────
+        let key_b = copypaste_core::SyncKey::from_bytes(k_ab);
+        let decrypted_b = decrypt_from_cloud(&key_b, &item_id, &blob_b)
+            .expect("blob_b must decrypt under K_AB");
+        assert_eq!(
+            decrypted_b, plaintext,
+            "B recovers A's original plaintext from its blob"
+        );
+
+        // ── Verify: C's blob decrypts under K_AC ─────────────────────────────
+        let key_c = copypaste_core::SyncKey::from_bytes(k_ac);
+        let decrypted_c = decrypt_from_cloud(&key_c, &item_id, &blob_c)
+            .expect("blob_c must decrypt under K_AC");
+        assert_eq!(
+            decrypted_c, plaintext,
+            "C recovers A's original plaintext from its blob"
+        );
+
+        // ── Key isolation: B's blob must NOT decrypt under K_AC ──────────────
+        // (This is what was silently broken before the fix: fanout used K_AB for
+        // all peers, so C received blob_b which it cannot decrypt.)
+        let result_wrong = decrypt_from_cloud(&key_c, &item_id, &blob_b);
+        assert!(
+            result_wrong.is_err(),
+            "blob_b (encrypted under K_AB) must NOT decrypt under K_AC — \
+             this would be the CopyPaste-716 bug if it succeeded"
+        );
+
+        // ── Key isolation: C's blob must NOT decrypt under K_AB ──────────────
+        let result_wrong2 = decrypt_from_cloud(&key_b, &item_id, &blob_c);
+        assert!(
+            result_wrong2.is_err(),
+            "blob_c (encrypted under K_AC) must NOT decrypt under K_AB"
+        );
+
+        // ── Blobs differ (per-peer encryption with fresh nonces) ─────────────
+        assert_ne!(
+            blob_b, blob_c,
+            "each peer must receive a distinct (independently encrypted) blob"
+        );
+    }
+
+    /// CopyPaste-716: catchup_items must use the connecting peer's pairwise
+    /// key, not the first peer's key. With 2+ peers, the catch-up set for peer
+    /// C must decrypt under K_AC only, not K_AB.
+    ///
+    /// This is the equivalent catch-up path test for the fanout fix above.
+    #[tokio::test]
+    async fn catchup_items_uses_per_peer_key_not_first_peer_key() {
+        use base64::Engine as _;
+        use copypaste_core::{
+            build_item_aad_v2, derive_v2, decrypt_from_cloud, encrypt_item_with_aad,
+            insert_item, AAD_SCHEMA_VERSION_V4,
+        };
+        use tempfile::tempdir;
+
+        let seed_a = [0x11u8; 32];
+        let k_ab: [u8; 32] = [0x33u8; 32];
+        let k_ac: [u8; 32] = [0x44u8; 32];
+        let k_ab_b64 = base64::engine::general_purpose::STANDARD.encode(k_ab);
+        let k_ac_b64 = base64::engine::general_purpose::STANDARD.encode(k_ac);
+        let fp_b = "bb:bb";
+        let fp_c = "cc:cc";
+
+        let dir_a = tempdir().unwrap();
+        let peers_a = dir_a.path().join("peers.json");
+        std::fs::write(
+            &peers_a,
+            format!(
+                r#"[
+                    {{"fingerprint":"{fp_b}","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{k_ab_b64}"}},
+                    {{"fingerprint":"{fp_c}","added_at":1,"address":"127.0.0.1:8","sync_key_b64":"{k_ac_b64}"}}
+                ]"#
+            ),
+        )
+        .unwrap();
+        let crypto_a = SyncCrypto::new(seed_a, peers_a);
+
+        // Insert one text item into the DB encrypted under A's v2 key.
+        let db = make_db();
+        let item_id = "catchup-716-item".to_string();
+        let plaintext = b"catchup per-peer key test";
+        let a_v2 = derive_v2(&seed_a);
+        let aad_a = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let (nonce_a, ct_a) =
+            encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
+
+        let mut local = copypaste_core::ClipboardItem::new_text(ct_a, nonce_a.to_vec(), 1);
+        local.item_id = item_id.clone();
+        {
+            let g = db.lock().await;
+            insert_item(&g, &local).unwrap();
+        }
+
+        let db_guard = db.lock().await;
+        // Catch-up for peer B: items must be encrypted under K_AB.
+        let items_for_b = catchup_items(&db_guard, "device-A", &crypto_a, fp_b);
+        assert_eq!(items_for_b.len(), 1, "catch-up for B must contain our item");
+        let blob_b = items_for_b[0].content.as_ref().unwrap().clone();
+        let key_b = copypaste_core::SyncKey::from_bytes(k_ab);
+        let dec_b = decrypt_from_cloud(&key_b, &item_id, &blob_b)
+            .expect("B's catch-up blob must decrypt under K_AB");
+        assert_eq!(dec_b, plaintext, "B recovers original plaintext from catch-up");
+
+        // Catch-up for peer C: items must be encrypted under K_AC.
+        let items_for_c = catchup_items(&db_guard, "device-A", &crypto_a, fp_c);
+        assert_eq!(items_for_c.len(), 1, "catch-up for C must contain our item");
+        let blob_c = items_for_c[0].content.as_ref().unwrap().clone();
+        let key_c = copypaste_core::SyncKey::from_bytes(k_ac);
+        let dec_c = decrypt_from_cloud(&key_c, &item_id, &blob_c)
+            .expect("C's catch-up blob must decrypt under K_AC");
+        assert_eq!(dec_c, plaintext, "C recovers original plaintext from catch-up");
+
+        // Key isolation: C's catch-up blob must NOT decrypt under K_AB.
+        assert!(
+            decrypt_from_cloud(&key_b, &item_id, &blob_c).is_err(),
+            "C's catch-up blob (K_AC) must not decrypt under K_AB — \
+             this would be the CopyPaste-716 bug if it succeeded"
+        );
+    }
+
     /// W2.2: an incoming WireItem from the transport must be persisted to the
     /// local DB via the LWW merge path.
     #[tokio::test]
@@ -1779,7 +2303,7 @@ mod tests {
         handle.await.expect("task join");
 
         let db_guard = db.lock().await;
-        let rows = copypaste_core::get_page(&db_guard, 10, 0).expect("get_page");
+        let rows = copypaste_core::get_page(&*db_guard, 10, 0).expect("get_page");
         assert_eq!(rows.len(), 1, "incoming item must be persisted");
         assert_eq!(rows[0].id, "new-item");
         assert!(rows[0].is_synced, "item from peer must be marked synced");
@@ -1861,7 +2385,7 @@ mod tests {
         {
             let g = db.lock().await;
             insert_item(&g, &local).unwrap();
-            let stored = copypaste_core::get_item_by_id(&g, "shared-id")
+            let stored = copypaste_core::get_item_by_id(&*g, "shared-id")
                 .unwrap()
                 .unwrap();
             assert!(stored.pinned, "setup: local row must be pinned");
@@ -1876,7 +2400,7 @@ mod tests {
         assert_eq!(upserted, 1, "newer remote must win LWW");
 
         let g = db.lock().await;
-        let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
+        let rows = copypaste_core::get_page(&*g, 10, 0).unwrap();
         assert_eq!(rows.len(), 1, "must remain ONE row");
         assert!(
             !rows[0].pinned,
@@ -1907,7 +2431,7 @@ mod tests {
         assert_eq!(upserted, 0, "older remote must lose LWW");
 
         let g = db.lock().await;
-        let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
+        let rows = copypaste_core::get_page(&*g, 10, 0).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].content, Some(vec![0x11]), "local payload preserved");
     }
@@ -1937,7 +2461,7 @@ mod tests {
         assert_eq!(upserted, 1, "newer remote must win LWW");
 
         let g = db.lock().await;
-        let rows = copypaste_core::get_page(&g, 10, 0).unwrap();
+        let rows = copypaste_core::get_page(&*g, 10, 0).unwrap();
         assert_eq!(
             rows.len(),
             1,
@@ -1952,10 +2476,247 @@ mod tests {
         assert_eq!(rows[0].content, Some(vec![0xFF]), "remote content stored");
         // The peer's row id must NOT have been adopted.
         assert!(
-            copypaste_core::get_item_by_id(&g, "peer-pk")
+            copypaste_core::get_item_by_id(&*g, "peer-pk")
                 .unwrap()
                 .is_none(),
             "peer's row id must not leak into local storage"
         );
+    }
+
+    /// CopyPaste-kw2: 3-device topology — inbound item from peer C (encrypted
+    /// under K_AC) must be decrypted correctly even when K_AB is the first
+    /// entry in the peer key map.
+    ///
+    /// Before the fix: `rekey_inbound` called `shared_sync_key()` which returned
+    /// `values().next()` — an arbitrary HashMap entry.  If K_AB was first, the
+    /// item from C (encrypted under K_AC) failed to decrypt and was silently
+    /// dropped.
+    ///
+    /// After the fix: `all_sync_keys()` returns all keys; `rekey_inbound` tries
+    /// each until AEAD succeeds, so K_AC is always found regardless of iteration
+    /// order.
+    #[test]
+    fn rekey_inbound_3_device_tries_all_keys() {
+        use base64::Engine as _;
+        use copypaste_core::{decrypt_from_cloud, encrypt_for_cloud};
+        use tempfile::tempdir;
+
+        // Distinct pairwise keys: K_AB and K_AC.
+        let k_ab: [u8; 32] = [0x33u8; 32];
+        let k_ac: [u8; 32] = [0x44u8; 32];
+        assert_ne!(k_ab, k_ac);
+        let k_ab_b64 = base64::engine::general_purpose::STANDARD.encode(k_ab);
+        let k_ac_b64 = base64::engine::general_purpose::STANDARD.encode(k_ac);
+
+        let fp_b = "bb:bb";
+        let fp_c = "cc:cc";
+        let seed_b_recv = [0x22u8; 32]; // Device B's local seed (the receiver in this test)
+
+        // Device B's peers.json: both A and C, each with their own pairwise key.
+        // B shares K_AB with A and K_BC with C — but for this test B receives
+        // a blob from C encrypted under K_AC (the key A and C share).
+        // We simulate a direct A→B case: B holds K_AB (to reach A) and K_AC (wrong).
+        // The payload we produce is encrypted under K_AC and B should find it by
+        // trying all keys.
+        //
+        // To make the scenario concrete: pretend this device IS A and receives a
+        // blob from C (encrypted under K_AC).  A's peer map has K_AB (for B) first
+        // and K_AC (for C) second.  The fix ensures K_AC is tried.
+        let dir = tempdir().unwrap();
+        let peers_path = dir.path().join("peers.json");
+        std::fs::write(
+            &peers_path,
+            format!(
+                r#"[
+                    {{"fingerprint":"{fp_b}","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{k_ab_b64}"}},
+                    {{"fingerprint":"{fp_c}","added_at":1,"address":"127.0.0.1:8","sync_key_b64":"{k_ac_b64}"}}
+                ]"#
+            ),
+        )
+        .unwrap();
+        let crypto = SyncCrypto::new(seed_b_recv, peers_path);
+
+        // Build a wire item encrypted under K_AC (as if sent by peer C).
+        let item_id = "kw2-test-item".to_string();
+        let plaintext = b"secret payload from peer C";
+        let key_ac = copypaste_core::SyncKey::from_bytes(k_ac);
+        let blob_ac = encrypt_for_cloud(&key_ac, &item_id, plaintext).expect("encrypt under K_AC");
+
+        let wire = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
+            id: "kw2-row".to_string(),
+            item_id: item_id.clone(),
+            content_type: "text".to_string(),
+            content: Some(blob_ac),
+            content_nonce: None, // sync-key-wrapped (no local nonce)
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 1,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "device-C".to_string(),
+            key_version: 2,
+            file_name: None,
+            mime: None,
+        };
+
+        // rekey_inbound must succeed even if K_AB is iterated before K_AC.
+        let (stored, fts_plaintext) =
+            rekey_inbound(&crypto, wire).expect("must decrypt under K_AC (CopyPaste-kw2 fix)");
+
+        assert_eq!(
+            fts_plaintext.as_deref(),
+            Some(plaintext.as_slice()),
+            "recovered plaintext must match original"
+        );
+        // The stored row must be re-encrypted under this device's v2 key.
+        assert!(
+            stored.content_nonce.is_some(),
+            "stored row must have a local nonce after rekey"
+        );
+        assert_eq!(stored.key_version, 2, "stored row must be keyed at v2");
+
+        // Sanity: the wrong key (K_AB) alone would have failed.
+        let key_ab = copypaste_core::SyncKey::from_bytes(k_ab);
+        let blob_from_stored = stored.content.as_ref().unwrap();
+        // The stored ciphertext is under the device's v2 key, not K_AB — just
+        // confirm K_AB cannot decrypt the original blob (key isolation).
+        // We reconstruct the original blob to check isolation.
+        let original_blob = encrypt_for_cloud(&key_ac, &item_id, plaintext).unwrap();
+        assert!(
+            decrypt_from_cloud(&key_ab, &item_id, &original_blob).is_err(),
+            "K_AB must not decrypt a blob encrypted under K_AC — key isolation"
+        );
+        let _ = blob_from_stored; // silence unused warning
+    }
+
+    /// CopyPaste-kcf: inbound items must have `is_sensitive` set from the
+    /// decrypted plaintext, so cross-device sensitive items get the auto-wipe TTL.
+    ///
+    /// Before the fix: `wire_to_local` always set `is_sensitive = false`, so a
+    /// password or API key copied on device A and synced to B was stored with
+    /// `is_sensitive = false` on B — bypassing the auto-wipe TTL entirely.
+    ///
+    /// After the fix: `merge_incoming_with_crypto` runs `is_sensitive_for_autowipe`
+    /// on the recovered plaintext and stores the correct value.
+    #[tokio::test]
+    async fn rekey_inbound_sets_is_sensitive_from_plaintext() {
+        use base64::Engine as _;
+        use copypaste_core::encrypt_for_cloud;
+        use tempfile::tempdir;
+
+        // A single pairwise key between two devices.
+        let k_shared: [u8; 32] = [0x55u8; 32];
+        let k_shared_b64 = base64::engine::general_purpose::STANDARD.encode(k_shared);
+        let fp_a = "aa:aa";
+        let seed_b = [0x22u8; 32];
+
+        let dir = tempdir().unwrap();
+        let peers_path = dir.path().join("peers.json");
+        std::fs::write(
+            &peers_path,
+            format!(
+                r#"[{{"fingerprint":"{fp_a}","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{k_shared_b64}"}}]"#
+            ),
+        )
+        .unwrap();
+        let crypto = SyncCrypto::new(seed_b, peers_path);
+
+        let db = make_db();
+        let key_sync = copypaste_core::SyncKey::from_bytes(k_shared);
+
+        // ── Test 1: sensitive plaintext (AWS key) → is_sensitive = true ──────
+        let item_id_sensitive = "kcf-sensitive".to_string();
+        // A real AWS access key triggers the detector at confidence 0.99.
+        let sensitive_plaintext = "AKIAIOSFODNN7EXAMPLE";
+        let blob_sensitive =
+            encrypt_for_cloud(&key_sync, &item_id_sensitive, sensitive_plaintext.as_bytes())
+                .expect("encrypt sensitive");
+
+        let wire_sensitive = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
+            id: "kcf-row-sens".to_string(),
+            item_id: item_id_sensitive.clone(),
+            content_type: "text".to_string(),
+            content: Some(blob_sensitive),
+            content_nonce: None, // sync-key-wrapped
+            blob_ref: None,
+            is_sensitive: false, // sender's flag — must be overridden by receiver
+            lamport_ts: 1,
+            wall_time: 1_700_000_000_001,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "device-A".to_string(),
+            key_version: 2,
+            file_name: None,
+            mime: None,
+        };
+
+        let quota = copypaste_core::AppConfig::default().storage_quota_bytes as i64;
+        merge_incoming_with_crypto(&db, vec![wire_sensitive], Some(&crypto), quota, None)
+            .await
+            .expect("merge sensitive item");
+
+        {
+            let g = db.lock().await;
+            let rows = copypaste_core::get_page(&*g, 10, 0).expect("get_page");
+            assert_eq!(rows.len(), 1, "sensitive item must be stored");
+            assert!(
+                rows[0].is_sensitive,
+                "inbound sensitive item must have is_sensitive=true (CopyPaste-kcf fix); got false"
+            );
+        }
+
+        // ── Test 2: non-sensitive plaintext → is_sensitive = false ───────────
+        let item_id_plain = "kcf-plain".to_string();
+        let plain_text = "hello world, nothing secret here";
+        let blob_plain =
+            encrypt_for_cloud(&key_sync, &item_id_plain, plain_text.as_bytes())
+                .expect("encrypt plain");
+
+        let wire_plain = WireItem {
+            deleted: false,
+            pinned: false,
+            pin_order: None,
+            id: "kcf-row-plain".to_string(),
+            item_id: item_id_plain.clone(),
+            content_type: "text".to_string(),
+            content: Some(blob_plain),
+            content_nonce: None,
+            blob_ref: None,
+            is_sensitive: false,
+            lamport_ts: 2,
+            wall_time: 1_700_000_000_002,
+            expires_at: None,
+            app_bundle_id: None,
+            origin_device_id: "device-A".to_string(),
+            key_version: 2,
+            file_name: None,
+            mime: None,
+        };
+
+        merge_incoming_with_crypto(&db, vec![wire_plain], Some(&crypto), quota, None)
+            .await
+            .expect("merge plain item");
+
+        {
+            let g = db.lock().await;
+            let rows = copypaste_core::get_page(&*g, 10, 0).expect("get_page");
+            assert_eq!(rows.len(), 2, "both items must be stored");
+            // The plain item should have is_sensitive=false.
+            let plain_row = rows
+                .iter()
+                .find(|r| r.item_id == item_id_plain)
+                .expect("plain item must be in DB");
+            assert!(
+                !plain_row.is_sensitive,
+                "non-sensitive inbound item must have is_sensitive=false"
+            );
+        }
     }
 }

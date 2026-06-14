@@ -60,7 +60,7 @@ async fn concurrent_writers_no_lost_updates() {
     // --- Assertion 1: no lost updates ---
     let total = {
         let guard = shared.lock().await;
-        count_items(&guard).expect("count")
+        count_items(&*guard).expect("count")
     };
     assert_eq!(
         total,

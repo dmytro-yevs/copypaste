@@ -127,10 +127,20 @@ async fn reconnect_after_disconnect_fires_at_least_twice() {
     let (client, _rx) = RealtimeClient::new(config);
     let handle = client.connect().await.expect("connect must return handle");
 
-    // Give the reconnect loop a few cycles to fire.
-    tokio::time::sleep(Duration::from_secs(2)).await;
-
-    let observed = connection_count.load(Ordering::SeqCst);
+    // Poll until the reconnect loop has fired at least twice, or time out.
+    // This replaces a bare 2 s sleep: we can return as soon as the condition
+    // is met (typically within a few hundred ms with 50 ms initial backoff),
+    // and the 5 s deadline catches genuine failures without an arbitrary wait.
+    let observed = {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let n = connection_count.load(Ordering::SeqCst);
+            if n >= 2 || tokio::time::Instant::now() >= deadline {
+                break n;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    };
     handle.shutdown().await;
 
     assert!(

@@ -236,6 +236,7 @@
     <string name="action_move_up">Move up</string>
     <string name="action_move_down">Move down</string>
     <string name="cd_reorder_handle">Reorder pinned item</string>
+    <string name="cd_more_options">More options</string>
     <string name="action_clear_all">Clear All</string>
     <string name="action_clear_unpinned">Clear Unpinned</string>
     <string name="action_delete_selected">Delete selected</string>
@@ -303,6 +304,10 @@
     <string name="snackbar_dismiss">Dismiss</string>
     <string name="settings_saved">Settings saved</string>
     <string name="action_save">Save</string>
+
+    <!-- Native library unavailable — sync disabled sentinel notification -->
+    <string name="notif_native_unavailable_title">CopyPaste: sync disabled</string>
+    <string name="notif_native_unavailable_content">The encryption library failed to load. Items will NOT be saved until the app is restarted.</string>
 
     <!-- File item UI -->
     <string name="cd_file_item">Synced file</string>

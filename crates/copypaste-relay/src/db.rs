@@ -77,7 +77,8 @@ const SCHEMA: &str = "
         registered_from_ip TEXT,
         registered_at_unix INTEGER NOT NULL,
         last_seen_unix     INTEGER NOT NULL,
-        next_sync_id       INTEGER NOT NULL DEFAULT 1
+        next_sync_id       INTEGER NOT NULL DEFAULT 1,
+        registered_pop     TEXT
     );
 
     CREATE TABLE IF NOT EXISTS device_tokens (
@@ -118,6 +119,10 @@ pub struct LoadedDevice {
     pub registered_at_unix: i64,
     pub last_seen_unix: i64,
     pub next_sync_id: i64,
+    /// The proof-of-possession stored at first registration: base64-encoded
+    /// HMAC-SHA256 output. `None` for devices registered before the PoP fix
+    /// (CopyPaste-n2l); the store maps that to `[0u8; 32]` sentinel.
+    pub registered_pop: Option<String>,
     /// Token set in issuance order (oldest first), matching `issue_seq`.
     pub tokens: Vec<(String, i64)>,
     /// Inbox items, ascending by `(wall_time, item_id)`.
@@ -163,6 +168,23 @@ impl Db {
              PRAGMA foreign_keys=ON;",
         )?;
         conn.execute_batch(SCHEMA)?;
+        // Schema migration: add `registered_pop` to pre-existing databases that
+        // were created before CopyPaste-n2l was fixed. We check
+        // `pragma_table_info` first (instead of `IF NOT EXISTS`) because bundled
+        // SQLite in rusqlite 0.32 may predate 3.37.0 where that extension was
+        // added. Devices loaded from old rows have `registered_pop = NULL`, which
+        // the store maps to the `[0u8; 32]` sentinel.
+        let needs_pop_col: bool = conn
+            .query_row(
+                "SELECT COUNT(*) = 0 FROM pragma_table_info('devices') \
+                 WHERE name = 'registered_pop'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(false);
+        if needs_pop_col {
+            conn.execute_batch("ALTER TABLE devices ADD COLUMN registered_pop TEXT;")?;
+        }
         Ok(Self { conn, persistent })
     }
 
@@ -177,7 +199,7 @@ impl Db {
         {
             let mut stmt = self.conn.prepare(
                 "SELECT device_id, device_name, public_key_b64, tier, registered_from_ip,
-                        registered_at_unix, last_seen_unix, next_sync_id
+                        registered_at_unix, last_seen_unix, next_sync_id, registered_pop
                  FROM devices",
             )?;
             let rows = stmt.query_map([], |r| {
@@ -190,6 +212,7 @@ impl Db {
                     registered_at_unix: r.get(5)?,
                     last_seen_unix: r.get(6)?,
                     next_sync_id: r.get(7)?,
+                    registered_pop: r.get(8)?,
                     tokens: Vec::new(),
                     items: Vec::new(),
                 })
@@ -248,12 +271,13 @@ impl Db {
         registered_from_ip: Option<&str>,
         registered_at_unix: i64,
         last_seen_unix: i64,
+        registered_pop_b64: &str,
     ) -> Result<(), rusqlite::Error> {
         self.conn.execute(
             "INSERT INTO devices
                (device_id, device_name, public_key_b64, tier, registered_from_ip,
-                registered_at_unix, last_seen_unix, next_sync_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
+                registered_at_unix, last_seen_unix, next_sync_id, registered_pop)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1, ?8)",
             params![
                 device_id,
                 device_name,
@@ -262,6 +286,7 @@ impl Db {
                 registered_from_ip,
                 registered_at_unix,
                 last_seen_unix,
+                registered_pop_b64,
             ],
         )?;
         Ok(())
@@ -429,7 +454,7 @@ mod tests {
     #[test]
     fn insert_load_roundtrip() {
         let db = Db::open(IN_MEMORY_PATH).unwrap();
-        db.insert_device("d1", "Dev", "pk", "free", Some("10.0.0.1"), 100, 200)
+        db.insert_device("d1", "Dev", "pk", "free", Some("10.0.0.1"), 100, 200, "AAAA")
             .unwrap();
         db.replace_tokens("d1", &[("tok-a".into(), 999), ("tok-b".into(), 1000)])
             .unwrap();
@@ -453,7 +478,7 @@ mod tests {
     #[test]
     fn cascade_delete_removes_tokens_and_items() {
         let db = Db::open(IN_MEMORY_PATH).unwrap();
-        db.insert_device("d1", "Dev", "pk", "free", None, 1, 1)
+        db.insert_device("d1", "Dev", "pk", "free", None, 1, 1, "AAAA")
             .unwrap();
         db.replace_tokens("d1", &[("t".into(), 1)]).unwrap();
         db.insert_item("d1", 1, "text", "Yg==", 1, 1).unwrap();
@@ -465,7 +490,7 @@ mod tests {
     #[test]
     fn prune_expired_removes_old_items_in_sql() {
         let db = Db::open(IN_MEMORY_PATH).unwrap();
-        db.insert_device("d1", "Dev", "pk", "free", None, 1, 1)
+        db.insert_device("d1", "Dev", "pk", "free", None, 1, 1, "AAAA")
             .unwrap();
         db.insert_item("d1", 1, "text", "Yg==", 1000, 10).unwrap();
         db.insert_item("d1", 2, "text", "Yw==", 2000, 100).unwrap();

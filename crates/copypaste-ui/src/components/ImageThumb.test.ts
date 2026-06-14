@@ -26,8 +26,10 @@ beforeEach(() => {
 });
 
 describe("byte-budget LRU cache", () => {
-  it("budget constant is 24 MiB (25165824 bytes)", () => {
-    expect(__testOnly_cacheBudgetBytes()).toBe(25_165_824);
+  it("budget constant is 16 MiB (16777216 bytes)", () => {
+    // The budget was intentionally trimmed from 24 → 16 MiB in ImageThumb.tsx
+    // to reduce total RSS (decoded bitmaps are now the dominant memory cost).
+    expect(__testOnly_cacheBudgetBytes()).toBe(16_777_216);
   });
 
   it("empty after clearImageCache()", () => {
@@ -47,11 +49,11 @@ describe("byte-budget LRU cache", () => {
   });
 
   it("evicts the LRU entry when budget is exceeded", () => {
-    // Build two large URIs whose combined byte size exceeds the 24 MiB budget.
+    // Build two large URIs whose combined byte size exceeds the 16 MiB budget.
     // Each URI string of N chars costs N bytes (JS string .length).
-    // Budget = 25_165_824 bytes (~24 MiB).
-    // We build two entries of 13 MiB each (13 * 1024 * 1024 = 13_631_488).
-    const HALF = Math.ceil(25_165_824 / 2) + 1; // slightly > half budget
+    // Budget = 16_777_216 bytes (16 MiB).
+    // We build two entries of 8 MiB + 1 byte each — slightly > half budget.
+    const HALF = Math.ceil(16_777_216 / 2) + 1; // slightly > half budget
     const bigA = "A".repeat(HALF);
     const bigB = "B".repeat(HALF);
 
@@ -70,7 +72,7 @@ describe("byte-budget LRU cache", () => {
   });
 
   it("touch moves an entry from LRU to MRU position", () => {
-    const HALF = Math.ceil(25_165_824 / 2) + 1;
+    const HALF = Math.ceil(16_777_216 / 2) + 1;
     const bigA = "A".repeat(HALF);
     const bigB = "B".repeat(HALF);
 

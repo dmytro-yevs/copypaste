@@ -113,15 +113,59 @@ XChaCha20-Poly1305 key (per ADR-001).
 
 ## Storage
 
-- **Server side** (`PasswordFile`): persisted in **SQLCipher** (ADR-003) in
-  the `paired_peers` table, column `pake_password_file BLOB`. Per-peer row;
-  rotated whenever the user re-pairs.
+> **⚠ Implementation delta — read before relying on this section.**
+> The storage model below reflects the original design intent. The *actual*
+> current implementation differs in one respect; see
+> [Security delta vs original design](#security-delta-vs-original-design).
+
+- **Server side** (`PasswordFile`): **DESIGN INTENT** — persist in **SQLCipher**
+  (ADR-003) in the `paired_peers` table, column `pake_password_file BLOB`.
+  Per-peer row; rotated whenever the user re-pairs.
+  **CURRENT REALITY** — serialised as `password_file_b64` (standard base64,
+  **plaintext at rest**) inside `peers.json`, written near
+  `crates/copypaste-daemon/src/ipc.rs`. The `paired_peers` table and
+  `pake_password_file` column do not exist; the `PairedDevice` Rust struct has
+  no such field (extra JSON is silently dropped on deserialisation). Follow-up
+  tracked in **CopyPaste-5lm**.
 - **Pairing code** (the short password): **never** written to disk on either
   side. Held in `zeroize::Zeroizing<String>` for the duration of the
   handshake, then dropped.
 - **Long-term identity key** (recovered from the envelope in step 3): stored
   in the macOS **Keychain** under `service = com.copypaste.pake`, never in
   the SQLCipher DB. Android equivalent uses the Android Keystore.
+
+## Security delta vs original design
+
+The original design placed the OPAQUE `PasswordFile` inside the SQLCipher
+database (encrypted at rest via the database key). The current implementation
+stores it as `password_file_b64` — a standard base64 string — inside
+`peers.json`, a plain JSON file that is protected only by filesystem
+permissions (`0600`, owned by the daemon's effective user).
+
+**What this means in practice:**
+
+| Threat | Original design (SQLCipher BLOB) | Current reality (base64, peers.json 0600) |
+|--------|----------------------------------|-------------------------------------------|
+| Remote attacker over the network | No exposure — not transmitted | No exposure — not transmitted |
+| Local attacker with user-level read access | Protected — requires the SQLCipher key | **Exposed** — `peers.json` is readable by any process running as the same user |
+| Physical access / disk image | Protected — requires the SQLCipher key | **Exposed** — file is plaintext on the disk image |
+| OS-level exfiltration of the user's home directory | Protected | **Exposed** |
+
+The `PasswordFile` is not a password itself — it is OPAQUE server-side material
+that an attacker must possess along with a separately-acquired pairing code in
+order to compute a session key. However, storing it in plaintext weakens the
+aPAKE's "server DB exfiltration does not reveal the pairing code" guarantee that
+motivated choosing an augmented PAKE over a symmetric PAKE.
+
+**Severity:** Medium. Exploiting the gap requires: (1) local read access
+(same-user process or physical disk), (2) knowledge of the pairing code (never
+stored), and (3) active network capability to intercept a re-pairing handshake.
+The pairing code is short-lived (used once, then discarded) which limits the
+attack window.
+
+**Remediation tracked in CopyPaste-5lm:** move `PasswordFile` persistence to
+the `paired_peers` table in the SQLCipher DB, remove `password_file_b64` from
+`peers.json`, and add a one-time migration for existing deployments.
 
 ## Consequences
 

@@ -73,6 +73,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.IdeAccent
+import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.IdeAccentDim
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.IdeDanger
@@ -218,14 +219,17 @@ fun PreviewOverlay(
     if (phase == PreviewPhase.Idle || item == null) return
 
     val pinned = phase == PreviewPhase.Pinned
+    // §8 a11y: suppress card scale-in when the user has requested reduced motion.
+    val reducedMotion = rememberReducedMotion()
 
     // Dismiss pinned via system back
     BackHandler(enabled = pinned) { onDismiss() }
 
-    // Scale-in animation for the card
+    // Scale-in animation for the card.  When reduced-motion is active the card
+    // appears at full scale instantly instead of growing in from 0.85×.
     val cardScale by animateFloatAsState(
-        targetValue = if (phase == PreviewPhase.Idle) 0.85f else 1f,
-        animationSpec = tween(durationMillis = Motion.Base, easing = EaseOutExpo),
+        targetValue = if (reducedMotion) 1f else if (phase == PreviewPhase.Idle) 0.85f else 1f,
+        animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Base, easing = EaseOutExpo),
         label = "previewCardScale",
     )
 

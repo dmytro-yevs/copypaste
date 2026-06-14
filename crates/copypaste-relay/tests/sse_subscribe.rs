@@ -45,6 +45,9 @@ const DEVICE_B: &str = "22222222-2222-2222-2222-222222222222";
 fn valid_pub_key() -> String {
     B64.encode([0u8; 32])
 }
+fn valid_pop() -> String {
+    B64.encode([0xDE_u8; 32])
+}
 
 fn sample_content_b64(payload: &[u8]) -> String {
     B64.encode(payload)
@@ -138,7 +141,7 @@ async fn sse_delivers_item_pushed_after_subscribe() {
 
     let b_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key())
+        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -191,7 +194,7 @@ async fn sse_backfills_preexisting_item_on_connect() {
 
     let b_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key())
+        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -248,7 +251,7 @@ async fn sse_producer_tears_down_on_client_disconnect_idle_inbox() {
 
     let b_token = {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key())
+        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key(), valid_pop())
             .unwrap()
             .0
     };
@@ -328,7 +331,7 @@ async fn sse_rejects_missing_auth() {
     let (addr, state) = spawn_relay().await;
     {
         let mut s = state.lock().unwrap();
-        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key())
+        s.register_device(DEVICE_B.to_string(), "Device B".into(), valid_pub_key(), valid_pop())
             .unwrap();
     }
 

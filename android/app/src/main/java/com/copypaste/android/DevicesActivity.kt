@@ -1008,6 +1008,11 @@ private fun PeerCard(
                 lastSyncText?.let {
                     MetaRow(label = "Last sync", value = it)
                 }
+                // RTT: shown when FgsSyncLoop has measured a live round-trip time.
+                // FgsSyncLoop instrumentation (Ping/Pong over mTLS) deferred to CopyPaste-8dd.
+                peer.latencyMs?.let {
+                    MetaRow(label = "RTT", value = "$it ms")
+                }
             }
 
             HorizontalDivider(

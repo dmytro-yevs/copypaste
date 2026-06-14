@@ -601,23 +601,24 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     #[ignore = "requires interactive Keychain access; run manually with `cargo test -- --ignored`"]
-    #[allow(deprecated)]
     fn load_or_create_returns_keypair() {
         let _ = delete_stored();
         let kp = load_or_create().expect("should create keypair");
-        assert_eq!(kp.secret_key_bytes().len(), 32);
+        assert_eq!(kp.secret_key_bytes_zeroizing().len(), 32);
         delete_stored().unwrap();
     }
 
     #[cfg(target_os = "macos")]
     #[test]
     #[ignore = "requires interactive Keychain access; run manually with `cargo test -- --ignored`"]
-    #[allow(deprecated)]
     fn load_or_create_is_idempotent() {
         let _ = delete_stored();
         let kp1 = load_or_create().unwrap();
         let kp2 = load_or_create().unwrap();
-        assert_eq!(kp1.secret_key_bytes(), kp2.secret_key_bytes());
+        assert_eq!(
+            kp1.secret_key_bytes_zeroizing(),
+            kp2.secret_key_bytes_zeroizing()
+        );
         delete_stored().unwrap();
     }
 

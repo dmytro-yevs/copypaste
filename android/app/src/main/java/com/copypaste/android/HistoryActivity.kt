@@ -138,6 +138,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import com.copypaste.android.ui.theme.EaseOutExpo
+import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeAccentDim
 import com.copypaste.android.ui.theme.IdeBg
@@ -384,6 +385,9 @@ fun HistoryScreen(
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
+    // §8 a11y: skip animated transitions when the user has requested reduced motion
+    // (Accessibility → Remove animations, or Developer Options → Animator duration scale = 0).
+    val reducedMotion = rememberReducedMotion()
     val loadErrorTemplate = stringResource(R.string.error_load_history)
     val dismissLabel = stringResource(R.string.snackbar_dismiss)
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
@@ -814,7 +818,7 @@ fun HistoryScreen(
                                     IconButton(onClick = { overflowExpanded = true }) {
                                         Icon(
                                             Icons.Filled.MoreVert,
-                                            contentDescription = null,
+                                            contentDescription = stringResource(R.string.cd_more_options),
                                             tint = IdeDim,
                                             modifier = Modifier.size(18.dp),
                                         )
@@ -856,10 +860,13 @@ fun HistoryScreen(
 
                     // Full-width inline search field + suggestions, in normal layout
                     // flow (NOT a Popup) so they push the list down via innerPadding.
+                    // §8 a11y: suppress enter/exit animation when reduced-motion is active.
                     AnimatedVisibility(
                         visible = searchExpanded,
-                        enter = expandVertically() + fadeIn(),
-                        exit = shrinkVertically() + fadeOut(),
+                        enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None
+                                else expandVertically() + fadeIn(),
+                        exit  = if (reducedMotion) androidx.compose.animation.ExitTransition.None
+                                else shrinkVertically() + fadeOut(),
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             TextField(
@@ -1537,6 +1544,8 @@ private fun HistoryList(
     val settings = remember { Settings(ctx) }
     val repository = remember { ClipboardRepository(ctx) }
     val scope = rememberCoroutineScope()
+    // §8 a11y: skip animated transitions when the user has requested reduced motion.
+    val reducedMotion = rememberReducedMotion()
     // E: hoist settings reads via a version token so they're re-read once per
     // settings-change event rather than on every recomposition frame.
     // A DisposableEffect observes the settings SharedPreferences and increments
@@ -1704,22 +1713,24 @@ private fun HistoryList(
             val isNewMount = !mountedIds.contains(item.id)
             if (isNewMount) mountedIds.add(item.id)
             val mountDelay = if (isNewMount) (index * Motion.Fast).coerceAtMost(10 * Motion.Fast) else 0
+            // §8 a11y: suppress entrance animation entirely when reduced-motion is active.
             AnimatedVisibility(
                 visible = true,
-                enter = if (isNewMount) fadeIn(
-                    animationSpec = tween(
-                        durationMillis = Motion.Base,
-                        delayMillis = mountDelay,
-                        easing = EaseOutExpo,
-                    )
-                ) + slideInVertically(
-                    animationSpec = tween(
-                        durationMillis = Motion.Base,
-                        delayMillis = mountDelay,
-                        easing = EaseOutExpo,
-                    ),
-                    initialOffsetY = { it / 8 },
-                ) else androidx.compose.animation.EnterTransition.None,
+                enter = if (reducedMotion || !isNewMount) androidx.compose.animation.EnterTransition.None
+                        else fadeIn(
+                            animationSpec = tween(
+                                durationMillis = Motion.Base,
+                                delayMillis = mountDelay,
+                                easing = EaseOutExpo,
+                            )
+                        ) + slideInVertically(
+                            animationSpec = tween(
+                                durationMillis = Motion.Base,
+                                delayMillis = mountDelay,
+                                easing = EaseOutExpo,
+                            ),
+                            initialOffsetY = { it / 8 },
+                        ),
             ) {
                 Column(
                     modifier = Modifier.previewPeekGesture(
@@ -1826,6 +1837,8 @@ private fun HistoryRow(
     onPreviewDismiss: () -> Unit = {},
 ) {
     val detectedSensitive = item.isSensitive
+    // §8 a11y: skip animated transitions when the user has requested reduced motion.
+    val reducedMotion = rememberReducedMotion()
 
     var expanded by remember(item.id) { mutableStateOf(false) }
     // Key on (item.id, expanded) so the coroutine is cancelled and restarted whenever
@@ -1841,12 +1854,13 @@ private fun HistoryRow(
         if (selectionMode) expanded = false
     }
 
-    // §8 press-scale: 0.98 on press, instant out-expo spring back
+    // §8 press-scale: 0.98 on press, instant out-expo spring back.
+    // When reduced-motion is active we hold the scale at 1f (no animation).
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val rowScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.98f else 1.0f,
-        animationSpec = tween(durationMillis = Motion.Instant, easing = EaseOutExpo),
+        targetValue = if (reducedMotion) 1.0f else if (isPressed) 0.98f else 1.0f,
+        animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant, easing = EaseOutExpo),
         label = "rowPressScale",
     )
 
@@ -1997,7 +2011,7 @@ private fun HistoryRow(
                 if (!selectionMode) {
                     Spacer(Modifier.width(4.dp))
                     if (reorderMode && item.pinned) {
-                        ScaleIconButton(onClick = onMoveUp, modifier = Modifier.size(28.dp)) {
+                        ScaleIconButton(onClick = onMoveUp) {
                             Icon(
                                 imageVector = Icons.Filled.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
@@ -2005,7 +2019,7 @@ private fun HistoryRow(
                                 modifier = Modifier.size(18.dp),
                             )
                         }
-                        ScaleIconButton(onClick = onMoveDown, modifier = Modifier.size(28.dp)) {
+                        ScaleIconButton(onClick = onMoveDown) {
                             Icon(
                                 imageVector = Icons.Filled.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
@@ -2259,10 +2273,7 @@ private fun HistoryRow(
                     Spacer(Modifier.width(2.dp))
                     if (reorderMode && item.pinned) {
                         // Reorder mode: show up/down arrows instead of pin/delete
-                        ScaleIconButton(
-                            onClick = onMoveUp,
-                            modifier = Modifier.size(28.dp),
-                        ) {
+                        ScaleIconButton(onClick = onMoveUp) {
                             Icon(
                                 imageVector = Icons.Filled.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
@@ -2270,10 +2281,7 @@ private fun HistoryRow(
                                 modifier = Modifier.size(18.dp),
                             )
                         }
-                        ScaleIconButton(
-                            onClick = onMoveDown,
-                            modifier = Modifier.size(28.dp),
-                        ) {
+                        ScaleIconButton(onClick = onMoveDown) {
                             Icon(
                                 imageVector = Icons.Filled.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
@@ -2419,7 +2427,10 @@ private fun OriginDeviceBadge(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §8 ScaleIconButton — 28dp touch-target icon button with press-scale 0.98
+// §8 ScaleIconButton — icon button with press-scale 0.98.
+// Touch target is ≥48dp (M3 IconButton default) to meet Android a11y minimum.
+// Callers must NOT pass Modifier.size(<48.dp) — use the modifier slot only
+// for positioning (padding, weight, etc.).
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -2428,19 +2439,21 @@ private fun ScaleIconButton(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    // §8 a11y: suppress press-scale when reduced-motion is active.
+    val reducedMotion = rememberReducedMotion()
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (isPressed) 0.98f else 1.0f,
-        animationSpec = tween(durationMillis = Motion.Instant, easing = EaseOutExpo),
+        targetValue = if (reducedMotion) 1.0f else if (isPressed) 0.98f else 1.0f,
+        animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant, easing = EaseOutExpo),
         label = "btnScale",
     )
     IconButton(
         onClick = onClick,
         interactionSource = interactionSource,
-        modifier = modifier
-            .size(28.dp)
-            .scale(scale),
+        // No forced .size() here — M3 IconButton defaults to 48×48dp touch target,
+        // satisfying the Android a11y minimum (WCAG 2.5.5 / Material 3 spec).
+        modifier = modifier.scale(scale),
     ) {
         content()
     }

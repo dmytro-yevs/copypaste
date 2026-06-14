@@ -85,8 +85,10 @@ class CryptoConformanceTest {
             val nonce = hexToBytes(v.getString("nonce_hex")).toUByteList()
             val ciphertext = hexToBytes(v.getString("ciphertext_hex")).toUByteList()
             val expected = v.getString("plaintext_utf8").toByteArray(Charsets.UTF_8)
+            // Default to key_version=1 for pre-4i2 fixture vectors (no field).
+            val keyVersion: UByte = (if (v.has("key_version_u8")) v.getInt("key_version_u8") else 1).toUByte()
 
-            val recovered = decryptText(itemId, ciphertext, nonce, key).toByteArray()
+            val recovered = decryptText(itemId, ciphertext, nonce, key, keyVersion).toByteArray()
             assertArrayEquals(
                 "Kotlin failed to decrypt Rust item vector '${v.getString("label")}'",
                 expected,
@@ -104,9 +106,11 @@ class CryptoConformanceTest {
             val itemId = "kotlin-roundtrip-${v.getString("label")}"
             val key = hexToBytes(v.getString("key_hex")).toUByteList()
             val plaintext = v.getString("plaintext_utf8").toByteArray(Charsets.UTF_8)
+            // Use key_version=2 for new items (ITEM_KEY_VERSION_CURRENT=2).
+            val keyVersion: UByte = 2u
 
-            val blob: EncryptedBlob = encryptText(itemId, plaintext.toUByteList(), key)
-            val recovered = decryptText(itemId, blob.ciphertext, blob.nonce, key).toByteArray()
+            val blob: EncryptedBlob = encryptText(itemId, plaintext.toUByteList(), key, keyVersion)
+            val recovered = decryptText(itemId, blob.ciphertext, blob.nonce, key, keyVersion).toByteArray()
             assertArrayEquals(
                 "Kotlin encrypt→decrypt round-trip failed for '${v.getString("label")}'",
                 plaintext,

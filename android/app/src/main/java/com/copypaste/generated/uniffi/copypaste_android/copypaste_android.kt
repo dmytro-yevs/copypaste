@@ -799,13 +799,13 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_core_version(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_decrypt_text(`itemId`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_decrypt_text(`itemId`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`keyVersion`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_default_config(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_derive_cloud_sync_key(`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_encrypt_text(`itemId`: RustBuffer.ByValue,`bytes`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_encrypt_text(`itemId`: RustBuffer.ByValue,`bytes`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`keyVersion`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_generate_device_cert(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1089,7 +1089,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_core_version() != 36895.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_decrypt_text() != 62492.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_decrypt_text() != 25650.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_default_config() != 9299.toShort()) {
@@ -1098,7 +1098,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_derive_cloud_sync_key() != 34994.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_encrypt_text() != 17889.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_encrypt_text() != 19835.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_generate_device_cert() != 61778.toShort()) {
@@ -1762,7 +1762,8 @@ data class P2pSyncResult (
     var `itemsSkippedLegacy`: kotlin.UInt, 
     var `itemsSkippedDecryptFail`: kotlin.UInt, 
     var `itemsSkippedUnknownType`: kotlin.UInt, 
-    var `itemsSkippedMissingBlob`: kotlin.UInt
+    var `itemsSkippedMissingBlob`: kotlin.UInt, 
+    var `peerUnpaired`: kotlin.Boolean
 ) {
     
     companion object
@@ -1778,6 +1779,7 @@ public object FfiConverterTypeP2pSyncResult: FfiConverterRustBuffer<P2pSyncResul
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
             FfiConverterUInt.read(buf),
+            FfiConverterBoolean.read(buf),
         )
     }
 
@@ -1788,7 +1790,8 @@ public object FfiConverterTypeP2pSyncResult: FfiConverterRustBuffer<P2pSyncResul
             FfiConverterUInt.allocationSize(value.`itemsSkippedLegacy`) +
             FfiConverterUInt.allocationSize(value.`itemsSkippedDecryptFail`) +
             FfiConverterUInt.allocationSize(value.`itemsSkippedUnknownType`) +
-            FfiConverterUInt.allocationSize(value.`itemsSkippedMissingBlob`)
+            FfiConverterUInt.allocationSize(value.`itemsSkippedMissingBlob`) +
+            FfiConverterBoolean.allocationSize(value.`peerUnpaired`)
     )
 
     override fun write(value: P2pSyncResult, buf: ByteBuffer) {
@@ -1799,6 +1802,7 @@ public object FfiConverterTypeP2pSyncResult: FfiConverterRustBuffer<P2pSyncResul
             FfiConverterUInt.write(value.`itemsSkippedDecryptFail`, buf)
             FfiConverterUInt.write(value.`itemsSkippedUnknownType`, buf)
             FfiConverterUInt.write(value.`itemsSkippedMissingBlob`, buf)
+            FfiConverterBoolean.write(value.`peerUnpaired`, buf)
     }
 }
 
@@ -2754,11 +2758,11 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     }
     
 
-    @Throws(CopypasteException::class) fun `decryptText`(`itemId`: kotlin.String, `ciphertext`: List<kotlin.UByte>, `nonce`: List<kotlin.UByte>, `key`: List<kotlin.UByte>): List<kotlin.UByte> {
+    @Throws(CopypasteException::class) fun `decryptText`(`itemId`: kotlin.String, `ciphertext`: List<kotlin.UByte>, `nonce`: List<kotlin.UByte>, `key`: List<kotlin.UByte>, `keyVersion`: kotlin.UByte): List<kotlin.UByte> {
             return FfiConverterSequenceUByte.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_decrypt_text(
-        FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`ciphertext`),FfiConverterSequenceUByte.lower(`nonce`),FfiConverterSequenceUByte.lower(`key`),_status)
+        FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`ciphertext`),FfiConverterSequenceUByte.lower(`nonce`),FfiConverterSequenceUByte.lower(`key`),FfiConverterUByte.lower(`keyVersion`),_status)
 }
     )
     }
@@ -2793,11 +2797,11 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     }
     
 
-    @Throws(CopypasteException::class) fun `encryptText`(`itemId`: kotlin.String, `bytes`: List<kotlin.UByte>, `key`: List<kotlin.UByte>): EncryptedBlob {
+    @Throws(CopypasteException::class) fun `encryptText`(`itemId`: kotlin.String, `bytes`: List<kotlin.UByte>, `key`: List<kotlin.UByte>, `keyVersion`: kotlin.UByte): EncryptedBlob {
             return FfiConverterTypeEncryptedBlob.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_encrypt_text(
-        FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`bytes`),FfiConverterSequenceUByte.lower(`key`),_status)
+        FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`bytes`),FfiConverterSequenceUByte.lower(`key`),FfiConverterUByte.lower(`keyVersion`),_status)
 }
     )
     }

@@ -61,29 +61,126 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Debounce job for the store-change listener. Rapid bursts of prefs writes
-     * (e.g. a sync catch-up) are collapsed into a single [loadItems] call.
+     * (e.g. a sync catch-up) are collapsed into a single reload call.
      */
     private var storeDebounceJob: Job? = null
+
+    /**
+     * Track which item IDs are currently visible in the list. Used by the
+     * store-change listener to distinguish additive updates (new items arrived
+     * while the user is scrolled down) from structural changes (deletes, pin
+     * toggles, reorders) that require a full reset.
+     */
+    private var knownItemIds: Set<String> = emptySet()
 
     /**
      * Auto-refresh whenever the backing store changes.
      * Watches [ClipboardRepository.KEY_ITEM_IDS] / [KEY_PINNED_IDS].
      * Retained as a field — SharedPreferences holds a weak reference.
+     *
+     * Incremental strategy:
+     * - KEY_ITEM_IDS changed → check whether items were only ADDED (sync
+     *   catch-up) or also removed/reordered.  Additive changes are merged at
+     *   the top of the existing list without resetting [unpinnedOffset] so the
+     *   user's scroll position is preserved.  Any removal or structural change
+     *   falls back to a full [loadItems] reset.
+     * - KEY_PINNED_IDS changed → always full reload (pin order is structural).
      */
     private val storeListener =
         SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-            if (key == ClipboardRepository.KEY_ITEM_IDS ||
-                key == ClipboardRepository.KEY_PINNED_IDS) {
-                storeDebounceJob?.cancel()
-                storeDebounceJob = viewModelScope.launch {
-                    delay(STORE_DEBOUNCE_MS)
-                    loadItems()
+            when (key) {
+                ClipboardRepository.KEY_ITEM_IDS -> {
+                    storeDebounceJob?.cancel()
+                    storeDebounceJob = viewModelScope.launch {
+                        delay(STORE_DEBOUNCE_MS)
+                        refreshItems()
+                    }
+                }
+                ClipboardRepository.KEY_PINNED_IDS -> {
+                    storeDebounceJob?.cancel()
+                    storeDebounceJob = viewModelScope.launch {
+                        delay(STORE_DEBOUNCE_MS)
+                        loadItems()
+                    }
                 }
             }
         }
 
     init {
         repository.observe(storeListener)
+    }
+
+    /**
+     * Incremental refresh: fetch the first page and merge any NEW items at the
+     * top of the existing list without resetting [unpinnedOffset].
+     *
+     * Called when KEY_ITEM_IDS fires (item added or removed).  If the refresh
+     * detects that existing IDs have been removed or pin state has changed
+     * structurally, it falls through to a full [loadItems] reset so the list
+     * stays consistent.
+     *
+     * Preserves the user's scroll position when the only change was new items
+     * arriving at the top (the common sync/capture case).
+     */
+    private fun refreshItems() {
+        viewModelScope.launch {
+            try {
+                // Fetch the first page — this always contains pinned items plus
+                // the newest unpinned items (offset 0).
+                val freshPage = repository.getItems(
+                    key    = settings.encryptionKey,
+                    limit  = ClipboardRepository.PAGE_SIZE,
+                    offset = 0,
+                )
+                val freshIds = freshPage.mapTo(HashSet()) { it.id }
+                val existing = _items.value ?: emptyList()
+                val existingIds = existing.mapTo(HashSet()) { it.id }
+
+                // Determine whether this is purely additive (new items at top)
+                // or structural (items removed / reordered).
+                val anyRemoved = existingIds.any { it !in freshIds } &&
+                    existing.any { !it.pinned && it.id !in freshIds }
+
+                if (anyRemoved || existing.isEmpty()) {
+                    // Structural change — full reset is required for correctness.
+                    loadItems()
+                    return@launch
+                }
+
+                // Additive: some IDs in freshPage are not yet in existing.
+                // Prepend them to the current list without touching unpinnedOffset
+                // (the offset still correctly addresses the same "next page" the
+                // user would load by scrolling — existing loaded rows are intact).
+                val newItems = freshPage.filter { it.id !in existingIds }
+                if (newItems.isEmpty()) {
+                    // No visible change (e.g. a tombstone write or metadata update).
+                    // Refresh counts but keep the list intact.
+                    _totalCount.value = repository.totalItemCount()
+                    _hasMore.value = repository.unpinnedItemCount() > unpinnedOffset
+                    return@launch
+                }
+
+                // Merge: new unpinned items go to the top of the unpinned section;
+                // fresh pinned items replace stale pinned entries (pin state may have
+                // changed for an already-loaded item).
+                val freshPinned = freshPage.filter { it.pinned }
+                val existingUnpinned = existing.filter { !it.pinned }
+                val newUnpinned = newItems.filter { !it.pinned }
+                val merged = (freshPinned + newUnpinned + existingUnpinned).distinctBy { it.id }
+
+                if (merged != existing) {
+                    _items.value = merged
+                }
+                // Offset grows by the number of new unpinned items prepended.
+                unpinnedOffset += newUnpinned.size
+                knownItemIds = merged.mapTo(HashSet()) { it.id }
+                _totalCount.value = repository.totalItemCount()
+                _hasMore.value = repository.unpinnedItemCount() > unpinnedOffset
+            } catch (e: Exception) {
+                Log.w(TAG, "refreshItems failed — falling back to full reload", e)
+                loadItems()
+            }
+        }
     }
 
     /**
@@ -105,6 +202,7 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
                     _items.value = next
                 }
                 unpinnedOffset = next.count { !it.pinned }
+                knownItemIds = next.mapTo(HashSet()) { it.id }
                 _totalCount.value = repository.totalItemCount()
                 // Check whether there are more unpinned rows beyond this page.
                 _hasMore.value = repository.unpinnedItemCount() > unpinnedOffset

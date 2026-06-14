@@ -515,12 +515,10 @@ class SupabaseRealtimeClient(
         }
 
         // Advance the cursor if this row is strictly newer than the watermark.
-        if (wallTime > settings.lastSupabasePollWallTime ||
-            (wallTime == settings.lastSupabasePollWallTime && id > settings.lastSupabasePollId)
-        ) {
-            settings.lastSupabasePollWallTime = wallTime
-            settings.lastSupabasePollId = id
-        }
+        // advanceSupabaseCursor holds supabaseCursorLock so this WS push path
+        // and the concurrent poll paths (FgsSyncLoop, SupabasePollWorker) all
+        // serialise on the same monitor — no advance is lost.
+        settings.advanceSupabaseCursor(wallTime, id)
 
         val isImage = item.contentType == "image" || item.contentType.startsWith("image/")
         val isFile = item.contentType == "file"
@@ -699,13 +697,8 @@ class SupabaseRealtimeClient(
             }
 
             // Persist the advanced cursor after processing the batch.
-            if (cursorWallTime > settings.lastSupabasePollWallTime ||
-                (cursorWallTime == settings.lastSupabasePollWallTime &&
-                        cursorId > settings.lastSupabasePollId)
-            ) {
-                settings.lastSupabasePollWallTime = cursorWallTime
-                settings.lastSupabasePollId = cursorId
-            }
+            // Serialises with FgsSyncLoop and SupabasePollWorker via supabaseCursorLock.
+            settings.advanceSupabaseCursor(cursorWallTime, cursorId)
 
             if (newCount > 0) {
                 Log.i(TAG, "WS catch-up: stored $newCount of ${batch.rows.size} row(s)")

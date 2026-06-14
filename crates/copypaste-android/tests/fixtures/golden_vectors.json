@@ -5,19 +5,19 @@
     "sync_key_hex": "3335b72a2bcc4adaf3e1ed2d8e1e64a82eb08a05472d5b665be1ddeb640aff5b",
     "vectors": [
       {
-        "blob_hex": "f797354bc33acc8e06d32adbfd11f9e91d1b528717fac2b3a15abecccff42af4542e94f111a75272dc9b3b939a3158a9cb6de6bd752a022f9c4041954e7093e4dfbe69360ccf1924",
+        "blob_hex": "31b9fcea5c6c2ebcf69a9a47fc35024c7055e05992667d9cd659640c3f8cb4c5e138c2be0025c7ab6516ac8d3404214aee6f129b734f0c9a9b9e6aa49f5de7a61d218d7a991e0d72",
         "item_id": "conformance-cloud-ascii",
         "label": "ascii",
         "plaintext_utf8": "hello cross-language conformance"
       },
       {
-        "blob_hex": "c716fbf30b86e60df207d433188d99464e750c805ee14929d59460113d709aa41260aa80ad8d837dffb37918366ad265ff42811320ce14157320c770bf70f85f3020e219ed1b59df0604fd0ab93058ca4ad3d1e06e1112",
+        "blob_hex": "1919c14241952fd267ba1d0ab5cd4ec4128661d3c1a2375c2d26cd1ade0ec4ab46b0e4dd30975c51035648916de175eb37d0850f436743c73ddb35e0f007afaf031365b215d8fa2d356812a8875e5db2cca5fa0e1a31fa",
         "item_id": "conformance-cloud-unicode",
         "label": "unicode",
         "plaintext_utf8": "café ☕ 日本語 🦀 — mixed BMP + astral"
       },
       {
-        "blob_hex": "67c84352f5b970031c3e1d76ec418a5cf09000ff88ccf501a0944d31e6d1d3cbf4ec88c65e4de5e4",
+        "blob_hex": "edd3f52333fd853456006c0db20cdad22513e9de209e44af044323c48959b0a9ea2f12d92cce8c13",
         "item_id": "conformance-cloud-empty",
         "label": "empty",
         "plaintext_utf8": ""
@@ -30,28 +30,45 @@
     "note": "encrypt_text/decrypt_text path. key_hex is the raw 32-byte device key.",
     "vectors": [
       {
-        "ciphertext_hex": "acf866b536c3f48c53f89db9923dabc34876220ecaff569a83f3ef6d76453ced6428b892d3c6cbc59cc5c6fc471e458c",
+        "ciphertext_hex": "3912c05668a2bb74e29eb2cf36d51b06d87f32bec416e6a8914ab5000de6029fba0e21996d30da0f58e96805da5da87b",
         "item_id": "conformance-item-ascii",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+        "key_version_u8": 2,
         "label": "ascii",
-        "nonce_hex": "369860da311097bcca28e186cb4be86367304d39ba83e6af",
+        "nonce_hex": "94df04d1bab528a97f8499f91f0fb1171c5cce3a831c77c7",
         "plaintext_utf8": "hello cross-language conformance"
       },
       {
-        "ciphertext_hex": "30cd62040636767480b1cc16f3445b4ff12b1a945a179c0fdbcab5833cabcaaf813fba5c9761e8d84639029c17e2e91d71abd5e03cee2302e5acc38ff9f5f4",
+        "ciphertext_hex": "399278a07c1afc69fe49689519085196082c115f60b026ef00d39a7ce76e61f17e97d38fe13018282f734d7223ed5f5d2f98baec05c8b582d055361c8831e2",
         "item_id": "conformance-item-unicode",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+        "key_version_u8": 2,
         "label": "unicode",
-        "nonce_hex": "cd52fc06c913d435342261058478fa5e150b2761ee6cca9f",
+        "nonce_hex": "51e1d96997ebd29511f22de4ed954adecf249a8f2d12f32c",
         "plaintext_utf8": "café ☕ 日本語 🦀 — mixed BMP + astral"
       },
       {
-        "ciphertext_hex": "b404468a7fd53f466701ff42783f4641",
+        "ciphertext_hex": "8617ca51216b9fc033d9875a1a4beb56",
         "item_id": "conformance-item-empty",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+        "key_version_u8": 2,
         "label": "empty",
-        "nonce_hex": "69a3acb9aacdc86693a2b1a0ecc7babcb3925b5764f6aa8b",
+        "nonce_hex": "1ad6f2d9a22397ce5e587a7dd9f622c24c347c752dc5fc73",
         "plaintext_utf8": ""
+      }
+    ]
+  },
+  "item_aead_v1_anchor": {
+    "note": "Static kv=1 anchor vectors — never regenerated. AAD format: '{item_id}|3' (build_item_aad, schema_version=3). Anchors the legacy v1 decrypt path so AAD drift or key-version dispatch bugs are caught.",
+    "vectors": [
+      {
+        "ciphertext_hex": "aae0c801fd744b0f75632a1ac155d9cd3124bab68dda35a6dad326fd8a8dccb3",
+        "item_id": "kv1-anchor-ascii",
+        "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
+        "key_version_u8": 1,
+        "label": "kv1-ascii",
+        "nonce_hex": "a1a2a8f30e510820d2e35af0dae2a8b89628e9b9d7463573",
+        "plaintext_utf8": "hello kv1 anchor"
       }
     ]
   }

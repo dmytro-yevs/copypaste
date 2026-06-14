@@ -3,6 +3,23 @@
 // ---------------------------------------------------------------------------
 
 /**
+ * Returns true when a clipboard entry should be visually blurred/redacted.
+ *
+ * An entry is masked when:
+ * - `maskSensitive` preference is enabled (user hasn't turned off masking), AND
+ * - the entry is classified as fully sensitive (`is_sensitive === true`).
+ *
+ * Partial span masking (sensitive_spans only) does NOT trigger blur — those
+ * spans are redacted via applySpanMasking in-place, which is already visible.
+ */
+export function shouldMask(
+  entry: { is_sensitive: boolean },
+  maskSensitive: boolean,
+): boolean {
+  return maskSensitive && entry.is_sensitive;
+}
+
+/**
  * Redact the sensitive ranges in `spans` from `text`, replacing each range with
  * bullet characters.
  *

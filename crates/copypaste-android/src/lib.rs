@@ -14,13 +14,10 @@ pub use version::{
 };
 
 use copypaste_core::{
-    build_item_aad, decrypt_from_cloud, decrypt_item_with_aad, derive_sync_key, detect,
-    encrypt_for_cloud, encrypt_item_with_aad, is_sensitive_for_autowipe, SyncKeyError,
-    AAD_SCHEMA_VERSION, ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
+    build_item_aad, build_item_aad_v2, decrypt_from_cloud, decrypt_item_with_aad, derive_sync_key,
+    detect, encrypt_for_cloud, encrypt_item_with_aad, is_sensitive_for_autowipe, SyncKeyError,
+    AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
 };
-// Only used by the feature-gated `add_clipboard_item` live binding below.
-#[cfg(feature = "android-uniffi-live")]
-use copypaste_core::{build_item_aad_v2, AAD_SCHEMA_VERSION_V4};
 // Brings `Engine::encode` into scope for `relay_public_key_b64` (STANDARD base64).
 use base64::Engine as _;
 use std::collections::HashMap;
@@ -72,21 +69,37 @@ pub struct EncryptedBlob {
     pub ciphertext: Vec<u8>,
 }
 
-/// v0.3: `item_id` is bound into the AEAD AAD alongside `AAD_SCHEMA_VERSION`.
-/// Kotlin callers MUST persist the same item_id alongside the ciphertext and
-/// pass it back to `decrypt_text` verbatim — a mismatch will fail decryption
-/// with `EncryptionFailed`. (Legacy empty-AAD fallback was removed in 1c55e57.)
+/// Encrypt `bytes` with `key` (XChaCha20-Poly1305), binding `item_id` and
+/// `key_version` into the AEAD AAD.
+///
+/// | `key_version` | AAD format                           |
+/// |---------------|--------------------------------------|
+/// | 1             | `build_item_aad(item_id, 3)`         |
+/// | 2             | `build_item_aad_v2(item_id, 4, 2)`   |
+/// | other         | `Err(EncryptionFailed)`              |
+///
+/// Kotlin callers MUST persist `key_version` alongside the ciphertext and pass
+/// it back to `decrypt_text` verbatim — a mismatch will fail decryption.
+/// New items should always use `key_version = 2` (matches the daemon's
+/// `ITEM_KEY_VERSION_CURRENT`). Legacy stored items encrypted with v1 must
+/// continue to round-trip with `key_version = 1`.
 pub fn encrypt_text(
     item_id: String,
     bytes: &[u8],
     key: &[u8],
+    key_version: u8,
 ) -> Result<EncryptedBlob, CopypasteError> {
     panic_boundary::catch_result(|| {
         let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
             key.try_into()
                 .map_err(|_| CopypasteError::InvalidKeyLength)?,
         );
-        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+        // Mirror the dispatch table in decrypt_item_by_version (copypaste-core).
+        let aad = match key_version {
+            1 => build_item_aad(&item_id, AAD_SCHEMA_VERSION),
+            2 => build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, u32::from(key_version)),
+            _ => return Err(CopypasteError::EncryptionFailed),
+        };
         let (nonce, ciphertext) = encrypt_item_with_aad(bytes, &key_arr, &aad)
             .map_err(|_| CopypasteError::EncryptionFailed)?;
         Ok(EncryptedBlob {
@@ -96,13 +109,23 @@ pub fn encrypt_text(
     })
 }
 
-/// v0.3: `item_id` MUST match the value used during `encrypt_text` — see the
-/// docstring on `encrypt_text` for the AAD binding rationale.
+/// Decrypt `ciphertext` encrypted by `encrypt_text`, dispatching on
+/// `key_version` to select the correct AAD format.
+///
+/// | `key_version` | AAD format                           |
+/// |---------------|--------------------------------------|
+/// | 1             | `build_item_aad(item_id, 3)`         |
+/// | 2             | `build_item_aad_v2(item_id, 4, 2)`   |
+/// | other         | `Err(DecryptionFailed)`              |
+///
+/// `item_id` and `key_version` MUST match the values used during
+/// `encrypt_text` — a mismatch will cause an AEAD auth-tag failure.
 pub fn decrypt_text(
     item_id: String,
     ciphertext: &[u8],
     nonce: &[u8],
     key: &[u8],
+    key_version: u8,
 ) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
         let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
@@ -115,7 +138,16 @@ pub fn decrypt_text(
                 .map_err(|_| CopypasteError::DecryptionFailed {
                     reason: "wrong nonce length".into(),
                 })?;
-        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
+        // Mirror the dispatch table in decrypt_item_by_version (copypaste-core).
+        let aad = match key_version {
+            1 => build_item_aad(&item_id, AAD_SCHEMA_VERSION),
+            2 => build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, u32::from(key_version)),
+            v => {
+                return Err(CopypasteError::DecryptionFailed {
+                    reason: format!("unknown key_version: {v}"),
+                })
+            }
+        };
         decrypt_item_with_aad(ciphertext, &nonce_arr, &key_arr, &aad).map_err(|e| {
             CopypasteError::DecryptionFailed {
                 reason: e.to_string(),
@@ -869,6 +901,13 @@ pub struct P2pSyncResult {
     /// HB-7a (ABI 14): inbound frames of a known type that carried NO `content`
     /// blob to decrypt. Previously a silent `continue`.
     pub items_skipped_missing_blob: u32,
+    /// Gap C (mutual unpair): `true` when the peer sent a
+    /// `ControlMsg::Unpair` frame on this connection — i.e. the peer has
+    /// removed this device from its pairing list. The fingerprint is the
+    /// mTLS-authenticated peer, so this can only ever signal an unpair of THIS
+    /// peer. Kotlin MUST delete the local pairing record for `peer_fingerprint`
+    /// (and stop syncing with it) when this is set. Defaults to `false`.
+    pub peer_unpaired: bool,
 }
 
 /// Derive the shared content [`SyncKey`](copypaste_core::SyncKey) from a 32-byte
@@ -1240,7 +1279,7 @@ pub fn sync_with_peer(
     panic_boundary::catch_result(|| {
         use bytes::Bytes;
         use copypaste_p2p::transport::{PairedPeers, PeerTransport};
-        use copypaste_sync::protocol::WireItem;
+        use copypaste_sync::protocol::{ControlMsg, PeerFrame, WireItem};
         use futures_util::{SinkExt, StreamExt};
 
         // SECURITY (load-bearing): refuse to dial a revoked peer at the TRUST
@@ -1393,6 +1432,11 @@ pub fn sync_with_peer(
         // `WireItem` frames over exactly this framing (NOT `run_session`).
         let peers = PairedPeers::new();
         peers.add(peer_fingerprint.clone(), "android-peer");
+        // Gap C: keep a clone of the live allowlist BEFORE it moves into the
+        // transport. `PairedPeers` is interior-mutable (shared `Arc<RwLock<…>>`),
+        // so removing the peer from this clone on an inbound `ControlMsg::Unpair`
+        // also drops it from the transport's verifier for the rest of this call.
+        let peers_handle = peers.clone();
         let transport = PeerTransport::from_cert(cert_der, key_der, peers);
 
         // Bounded receive window: the daemon pushes its catch-up history right
@@ -1404,9 +1448,14 @@ pub fn sync_with_peer(
         const DEADLINE: std::time::Duration = std::time::Duration::from_secs(20);
         const MAX_ITEMS: usize = 10_000;
 
-        let received: Vec<WireItem> = runtime()?
+        let (received, peer_unpaired): (Vec<WireItem>, bool) = runtime()?
             .block_on(async {
                 let mut framed = transport.connect(addr, &peer_fingerprint).await?;
+                // Gap C: set when the peer sends a `ControlMsg::Unpair` frame on
+                // this connection. The peer is the mTLS-authenticated party (its
+                // cert fingerprint was verified by `transport.connect`), so the
+                // signal can only unpair THIS peer — never another device.
+                let mut unpaired = false;
 
                 // Send this device's items first, mirroring the daemon's
                 // outbound write half (`serde_json::to_vec(&WireItem)` → frame).
@@ -1434,10 +1483,29 @@ pub fn sync_with_peer(
                     }
                     let idle = IDLE.min(remaining);
                     match tokio::time::timeout(idle, framed.next()).await {
-                        // A frame arrived: deserialise it as a `WireItem` exactly
-                        // as the daemon's read half does.
-                        Ok(Some(Ok(frame))) => match serde_json::from_slice::<WireItem>(&frame) {
-                            Ok(wire) => got.push(wire),
+                        // A frame arrived: deserialise it as a `PeerFrame` exactly
+                        // as the daemon's read half does. `PeerFrame` is
+                        // `#[serde(untagged)]` with `Data(WireItem)` first, so a
+                        // normal item still parses as `Data`; a control frame
+                        // (`{"control":"unpair"}`) parses as `Control`.
+                        Ok(Some(Ok(frame))) => match serde_json::from_slice::<PeerFrame>(&frame) {
+                            Ok(PeerFrame::Data(wire)) => got.push(wire),
+                            Ok(PeerFrame::Control(ControlMsg::Unpair)) => {
+                                // Gap C: the peer unpaired us. Drop it from the
+                                // live allowlist (defence-in-depth for the rest of
+                                // this session) and stop reading — the connection
+                                // is done. Surface the flag so Kotlin can delete
+                                // the local pairing record.
+                                peers_handle.remove(&peer_fingerprint);
+                                unpaired = true;
+                                break;
+                            }
+                            Ok(PeerFrame::Control(_)) => {
+                                // Other control frames (e.g. the Ping/Pong RTT
+                                // probes added in CopyPaste-ql7) are not handled on
+                                // this Android catch-up read path — ignore and keep
+                                // reading. An Android RTT reply is deferred (8dd).
+                            }
                             Err(_e) => {
                                 // A frame we cannot parse is not fatal — skip it
                                 // and keep reading (matches the daemon, which
@@ -1457,7 +1525,7 @@ pub fn sync_with_peer(
                         Err(_elapsed) => break,
                     }
                 }
-                Ok(got)
+                Ok::<(Vec<WireItem>, bool), copypaste_p2p::transport::TransportError>((got, unpaired))
             })
             .map_err(
                 |e: copypaste_p2p::transport::TransportError| CopypasteError::P2pError {
@@ -1573,6 +1641,7 @@ pub fn sync_with_peer(
             items_skipped_decrypt_fail,
             items_skipped_unknown_type,
             items_skipped_missing_blob,
+            peer_unpaired,
         })
     })
 }
@@ -2212,10 +2281,23 @@ pub fn add_clipboard_item(
         let (nonce, ciphertext) = encrypt_item_with_aad(text.as_bytes(), &key_arr, &aad)
             .map_err(|_| CopypasteError::EncryptionFailed)?;
 
-        let lamport_ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as i64)
-            .unwrap_or(0);
+        // Use a process-scoped monotonic counter as the Lamport timestamp, NOT
+        // wall-clock millis.  Using SystemTime::now() here produced timestamps
+        // ≈1.7×10^12 that the macOS daemon's MAX_LAMPORT_SKEW clamp would
+        // eventually reject, and — more critically — mixing wall-clock numbers
+        // with the daemon's small logical counter (starting at 1 and ticking
+        // once per write) broke LWW ordering: Android items appeared causally
+        // far ahead of every Mac item, so Mac writes could never win conflicts.
+        //
+        // This function is the legacy UniFFI capture path (the primary Kotlin
+        // path goes through ClipboardRepository.storeItem which manages the
+        // persistent LamportClock in SharedPreferences).  A per-process atomic
+        // gives correct logical ordering within this process; cross-session
+        // ordering is maintained by the daemon's observe() on ingest.
+        static LAMPORT_COUNTER: std::sync::atomic::AtomicI64 =
+            std::sync::atomic::AtomicI64::new(1);
+        let lamport_ts = LAMPORT_COUNTER
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let mut item =
             copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
@@ -2295,9 +2377,10 @@ mod tests {
     fn encrypt_then_decrypt_roundtrips() {
         let key = test_key();
         let item_id = "test-android-item".to_string();
-        let blob = encrypt_text(item_id.clone(), b"hello android", &key).expect("encrypt");
+        // Use key_version=2 (current daemon default, ITEM_KEY_VERSION_CURRENT=2).
+        let blob = encrypt_text(item_id.clone(), b"hello android", &key, 2).expect("encrypt");
         let plaintext =
-            decrypt_text(item_id, &blob.ciphertext, &blob.nonce, &key).expect("decrypt");
+            decrypt_text(item_id, &blob.ciphertext, &blob.nonce, &key, 2).expect("decrypt");
         assert_eq!(plaintext, b"hello android");
     }
 
@@ -2308,8 +2391,8 @@ mod tests {
     #[test]
     fn decrypt_rejects_mismatched_item_id() {
         let key = test_key();
-        let blob = encrypt_text("item-A".into(), b"secret", &key).expect("encrypt");
-        let err = decrypt_text("item-B".into(), &blob.ciphertext, &blob.nonce, &key)
+        let blob = encrypt_text("item-A".into(), b"secret", &key, 2).expect("encrypt");
+        let err = decrypt_text("item-B".into(), &blob.ciphertext, &blob.nonce, &key, 2)
             .expect_err("mismatched item_id must reject");
         assert!(
             matches!(err, CopypasteError::DecryptionFailed { .. }),
@@ -3684,8 +3767,10 @@ mod tests {
     fn zeroizing_key_does_not_break_encrypt_decrypt() {
         let key = test_key();
         let item_id = "zeroize-test".to_string();
-        let blob = encrypt_text(item_id.clone(), b"zeroize path check", &key).expect("encrypt");
-        let pt = decrypt_text(item_id, &blob.ciphertext, &blob.nonce, &key).expect("decrypt");
+        // Use key_version=2 (current daemon default).
+        let blob =
+            encrypt_text(item_id.clone(), b"zeroize path check", &key, 2).expect("encrypt");
+        let pt = decrypt_text(item_id, &blob.ciphertext, &blob.nonce, &key, 2).expect("decrypt");
         assert_eq!(pt, b"zeroize path check");
     }
 
