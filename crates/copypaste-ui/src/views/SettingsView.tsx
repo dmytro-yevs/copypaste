@@ -1510,7 +1510,7 @@ export function SettingsView() {
                 className={[
                   "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
                   (prefs.density ?? "comfortable") === "comfortable"
-                    ? "bg-white/90 text-ide-text shadow-ide-e1"
+                    ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
                     : "text-ide-dim hover:text-ide-text",
                 ].join(" ")}
               >
@@ -1523,7 +1523,7 @@ export function SettingsView() {
                 className={[
                   "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
                   (prefs.density ?? "comfortable") === "compact"
-                    ? "bg-white/90 text-ide-text shadow-ide-e1"
+                    ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
                     : "text-ide-dim hover:text-ide-text",
                 ].join(" ")}
               >
@@ -1605,7 +1605,7 @@ export function SettingsView() {
                       className={[
                         "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
                         selected
-                          ? "bg-white/90 text-ide-text shadow-ide-e1"
+                          ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
                           : "text-ide-dim hover:text-ide-text",
                       ].join(" ")}
                     >
