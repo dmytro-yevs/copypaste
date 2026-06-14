@@ -54,6 +54,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
@@ -149,6 +150,72 @@ fun glassCanvasBrush(dark: Boolean): Brush =
             colors = listOf(Color(0xFFECECF1), Color(0xFFE3E3E9), Color(0xFFDADAE1)),
         )
     }
+
+/**
+ * One radial aurora blob (PARITY-SPEC §1, mirrors index.css `body` background).
+ * [fx]/[fy] are fractional centre coords (0..1, may overshoot to push the blob
+ * off-canvas like the web `at 6% -18%`); [radiusFrac] is the blob radius as a
+ * fraction of the canvas diagonal; [stopFrac] is the transparent fade stop.
+ */
+private data class AuroraBlob(
+    val color: Color,
+    val fx: Float,
+    val fy: Float,
+    val radiusFrac: Float,
+    val stopFrac: Float,
+)
+
+// Dark-mode aurora — deep, saturated blue/violet/teal/green over the §1 base.
+// Mirrors index.css `body { background: radial-gradient(... 0.42/0.38/0.28/0.18) }`.
+private val AURORA_DARK = listOf(
+    AuroraBlob(Color(0xFF3D8BFF).copy(alpha = 0.42f), 0.06f, -0.18f, 1.05f, 0.50f),
+    AuroraBlob(Color(0xFFC678DD).copy(alpha = 0.38f), 1.08f, 1.18f, 1.00f, 0.50f),
+    AuroraBlob(Color(0xFF56B6C2).copy(alpha = 0.28f), 0.95f, -0.12f, 0.82f, 0.46f),
+    AuroraBlob(Color(0xFF5FAD65).copy(alpha = 0.18f), -0.10f, 1.05f, 0.88f, 0.48f),
+)
+
+// Light-mode aurora — softer cool blobs so frosted near-white panels still read
+// as glass. Mirrors `:root[data-theme="light"] body` (0.22/0.20/0.16/0.12).
+private val AURORA_LIGHT = listOf(
+    AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.22f), 0.08f, -0.14f, 1.05f, 0.52f),
+    AuroraBlob(Color(0xFFAF52DE).copy(alpha = 0.20f), 1.06f, 1.14f, 1.00f, 0.50f),
+    AuroraBlob(Color(0xFF32ADE6).copy(alpha = 0.16f), 0.98f, -0.08f, 0.82f, 0.46f),
+    AuroraBlob(Color(0xFF34C759).copy(alpha = 0.12f), -0.08f, 1.08f, 0.86f, 0.48f),
+)
+
+/**
+ * Screen-level aurora canvas backdrop (PARITY-SPEC §1). Paints the opaque base
+ * gradient ([glassCanvasBrush]) then layers four soft colour radials matching the
+ * web `body` aurora, so [LiquidGlassSurface] has a genuinely COLOURED canvas to
+ * frost — closing the biggest visual gap (screens were a flat `c.bg`).
+ *
+ * Apply to a `Modifier.fillMaxSize()` Box that sits BEHIND the glass surfaces; the
+ * hosting Scaffold/container must be `Color.Transparent` so this shows through.
+ * Theme-aware via [dark].
+ */
+fun Modifier.auroraCanvas(dark: Boolean): Modifier {
+    val base = glassCanvasBrush(dark)
+    val blobs = if (dark) AURORA_DARK else AURORA_LIGHT
+    return this.drawBehind {
+        // Base linear gradient (opaque — gives the canvas real colour, §1).
+        drawRect(base)
+        // Diagonal of the canvas — blob radii scale to it so the aurora keeps its
+        // proportions on any aspect ratio.
+        val diag = kotlin.math.hypot(size.width, size.height)
+        for (b in blobs) {
+            drawRect(
+                brush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to b.color,
+                        b.stopFrac to Color.Transparent,
+                    ),
+                    center = Offset(size.width * b.fx, size.height * b.fy),
+                    radius = diag * b.radiusFrac,
+                ),
+            )
+        }
+    }
+}
 
 /**
  * Frosted-glass surface wrapper (PARITY-SPEC §2, audit P0). Stacks, bottom→top:

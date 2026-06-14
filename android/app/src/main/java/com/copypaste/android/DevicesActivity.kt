@@ -83,6 +83,9 @@ import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.SectionLabel
+import com.copypaste.android.ui.theme.auroraCanvas
+import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.rememberTranslucency
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.journeyapps.barcodescanner.ScanContract
@@ -270,12 +273,17 @@ fun DevicesScreen(
      * modal if the state is `awaiting_sas`. Consumed after the first check.
      */
     autoOpenSasOnEntry: Boolean = false,
+    /** §1: paint the aurora backdrop here (standalone) vs. via MainShell (embedded). */
+    paintCanvasBackdrop: Boolean = true,
 ) {
     val ctx = LocalContext.current
     val c = LocalIdeColors.current
     val settings = remember { Settings(ctx) }
     val deviceKeyStore = remember { DeviceKeyStore(ctx) }
     val scope = rememberCoroutineScope()
+    // §1 aurora canvas backdrop (glass surfaces frost over real colour).
+    val translucent = rememberTranslucency()
+    val dark = isDarkTheme()
 
     // ── Direct camera scan launcher (Deliverable 2) ───────────────────────────
     // The scan button on this screen launches the ZXing scanner directly —
@@ -640,8 +648,8 @@ fun DevicesScreen(
     }
 
     Scaffold(
-        modifier = modifier,
-        containerColor = c.bg,
+        modifier = if (translucent && paintCanvasBackdrop) modifier.auroraCanvas(dark) else modifier,
+        containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_devices),

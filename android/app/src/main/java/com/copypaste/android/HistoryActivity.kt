@@ -155,6 +155,7 @@ import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LiquidGlassSurface
+import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.ideTextFieldColors
@@ -418,6 +419,13 @@ fun HistoryScreen(
     modifier: Modifier = Modifier,
     showBackButton: Boolean = true,
     onBack: () -> Unit = {},
+    /**
+     * §1: paint the aurora canvas backdrop on this screen's own Scaffold. True when
+     * the screen is the window root (standalone activity); false when embedded in
+     * MainShell, which already paints a single full-window aurora behind everything
+     * (avoids a per-screen vs shell-sized double-paint seam at the nav-bar edge).
+     */
+    paintCanvasBackdrop: Boolean = true,
 ) {
     val items by viewModel.items.observeAsState(emptyList())
     val loading by viewModel.loading.observeAsState(false)
@@ -715,8 +723,11 @@ fun HistoryScreen(
     }
 
     Scaffold(
-        modifier = modifier,
-        containerColor = c.bg,
+        // §1 aurora canvas: when translucent, the coloured radial backdrop is painted
+        // either here (standalone) or by the MainShell (embedded). Either way the
+        // container goes transparent so the aurora shows through the glass surfaces.
+        modifier = if (translucent && paintCanvasBackdrop) modifier.auroraCanvas(dark) else modifier,
+        containerColor = if (translucent) Color.Transparent else c.bg,
         topBar = {
             if (selectionMode) {
                 SelectionTopBar(

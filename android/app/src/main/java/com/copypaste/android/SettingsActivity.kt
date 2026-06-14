@@ -65,6 +65,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.auroraCanvas
+import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_LABELS
@@ -148,6 +150,8 @@ fun SettingsScreen(
      * The guard is kept for API compatibility with MainShell's navbar.
      */
     onRegisterNavGuard: ((guard: (proceed: () -> Unit) -> Unit) -> Unit)? = null,
+    /** §1: paint the aurora backdrop here (standalone) vs. via MainShell (embedded). */
+    paintCanvasBackdrop: Boolean = true,
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -304,9 +308,12 @@ fun SettingsScreen(
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
     val tabs = listOf("General", "Display", "Storage", "Sync", "Notifications")
 
+    // §1 aurora canvas backdrop — reacts live to the Display→Translucency toggle.
+    val dark = isDarkTheme()
+
     Scaffold(
-        modifier = modifier,
-        containerColor = c.bg,
+        modifier = if (translucency && paintCanvasBackdrop) modifier.auroraCanvas(dark) else modifier,
+        containerColor = if (translucency) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_settings),
@@ -325,7 +332,8 @@ fun SettingsScreen(
             // AND3: Tab row with §8 animated underline (180ms EaseStandard).
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
-                containerColor = c.bg,
+                // Transparent over the aurora canvas; opaque c.bg when translucency off.
+                containerColor = if (translucency) androidx.compose.ui.graphics.Color.Transparent else c.bg,
                 edgePadding = 0.dp,
                 indicator = { tabPositions ->
                     // Animate tab indicator position/width with tween(180, EaseStandard)

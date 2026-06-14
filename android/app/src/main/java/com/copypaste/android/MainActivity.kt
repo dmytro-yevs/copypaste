@@ -34,7 +34,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
@@ -43,7 +45,9 @@ import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.glassContainerColor
+import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberTranslucency
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -263,11 +267,19 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     // screens rendered without MainShell (standalone activities).
     val c = LocalIdeColors.current
     val translucent = rememberTranslucency()
+    val dark = isDarkTheme()
     // Glass NavigationBar: panel at 72% alpha when translucent, solid when off.
     val navBarColor = glassContainerColor(c.panel, translucent)
 
+    // §1 aurora canvas backdrop: a COLOURED radial-glow gradient behind the whole
+    // shell so the glass surfaces (nav bar, cards) frost over real colour instead
+    // of a flat fill. Only when translucent — otherwise keep the opaque c.bg so the
+    // solid look is unchanged. The Scaffold container goes transparent so this shows.
+    Box(modifier = Modifier.fillMaxSize().then(
+        if (translucent) Modifier.auroraCanvas(dark) else Modifier
+    )) {
     Scaffold(
-        containerColor = c.bg,
+        containerColor = if (translucent) Color.Transparent else c.bg,
         // The NavigationBar (bottomBar) consumes the navigation-bar inset itself.
         // We zero the Scaffold's *content* insets so the TOP (status-bar / cutout)
         // inset is NOT also added to innerPadding — each embedded screen's own
@@ -327,20 +339,25 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                     NavTab.CLIPS -> HistoryScreen(
                         viewModel = viewModel,
                         showBackButton = false,
-                        onBack = {}
+                        onBack = {},
+                        // Shell already paints the full-window aurora behind everything.
+                        paintCanvasBackdrop = false,
                     )
                     NavTab.DEVICES -> DevicesScreen(
                         showBackButton = false,
-                        onBack = {}
+                        onBack = {},
+                        paintCanvasBackdrop = false,
                     )
                     NavTab.SETTINGS -> SettingsScreen(
                         showBackButton = false,
                         onBack = {},
                         onRegisterNavGuard = { guard -> settingsNavGuard = guard },
+                        paintCanvasBackdrop = false,
                     )
                 }
             }
             SyncStatusBadge()
         }
+    }
     }
 }
