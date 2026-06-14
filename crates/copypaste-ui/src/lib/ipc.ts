@@ -1,4 +1,37 @@
-import { invoke } from "@tauri-apps/api/core";
+// ---------------------------------------------------------------------------
+// Mock-IPC gate — activated by VITE_MOCK=1 (env) or ?mock=1 (URL query param).
+// When active, all invoke() calls are handled by the in-process mockInvoke()
+// fixture so the full UI renders in a plain browser with no Tauri runtime.
+// The real (non-mock) path is COMPLETELY unchanged — this is a dead-code branch
+// in production builds where VITE_MOCK is not "1".
+// ---------------------------------------------------------------------------
+
+// Tree-shakeable: tauriInvoke is never imported when MOCK===true at build time
+// (Vite replaces import.meta.env.VITE_MOCK with the literal string "1" or "").
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
+import { mockInvoke } from "./mockIpc";
+
+/**
+ * True when the browser mock-IPC harness is active.
+ * Activated by VITE_MOCK=1 at build/dev time OR ?mock=1 in the URL at runtime.
+ * The URL-based escape hatch works even in a production build served by a
+ * plain HTTP server (no Tauri), making ad-hoc visual testing easy.
+ */
+const MOCK =
+  (import.meta.env?.VITE_MOCK === "1") ||
+  (typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).has("mock"));
+
+/**
+ * Single invoke() used throughout this module. In mock mode it is the
+ * in-process fixture; in real mode it is the Tauri bridge. The signature
+ * matches @tauri-apps/api/core's `invoke<T>` exactly so call sites are
+ * unchanged.
+ */
+const invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> =
+  MOCK
+    ? (cmd, args) => mockInvoke(cmd, args) as Promise<never>
+    : tauriInvoke;
 
 /**
  * IPC wire protocol version this UI build was compiled against (ADR-007).
