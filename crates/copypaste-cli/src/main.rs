@@ -146,9 +146,9 @@ enum Commands {
     },
     /// Reclaim free pages (VACUUM) and rebuild indexes (REINDEX) in the local DB
     ///
-    /// Daemon MUST be stopped first — VACUUM takes an exclusive lock.
-    /// Use `copypaste daemon stop` before running this, then `daemon start`
-    /// after. Typical reclaim: 10-40% after heavy churn.
+    /// Daemon MUST be running — the operation runs inside the daemon over IPC.
+    /// Use `copypaste daemon start` before running this if needed.
+    /// Typical reclaim: 10-40% after heavy churn.
     Vacuum {
         /// Print what would happen without modifying the database
         #[arg(long)]
@@ -280,7 +280,6 @@ fn main() {
             reindex_only,
         } => commands::vacuum::run(
             &socket,
-            paths::db_path(),
             commands::vacuum::Plan {
                 dry_run,
                 reindex_only,

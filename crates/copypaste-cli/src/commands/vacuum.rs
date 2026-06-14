@@ -1,38 +1,40 @@
 //! `copypaste vacuum` — reclaim free pages and rebuild indexes in the
-//! encrypted clipboard database.
+//! encrypted clipboard database via the running daemon.
 //!
-//! Why a CLI command? Over a long-running daemon, SQLite accumulates free
-//! pages from DELETE/UPDATE traffic. `VACUUM` rewrites the file without those
-//! pages, shrinking it on disk and defragmenting B-trees. `REINDEX` rebuilds
-//! the FTS5 / B-tree indexes (useful after schema migrations or upgrades).
+//! ## Architecture change (CopyPaste-wmv / CopyPaste-29x)
 //!
-//! ## Why we refuse to run while the daemon is up
-//! `VACUUM` takes an exclusive lock on the database and rewrites every page.
-//! Running it concurrently with the daemon's writers would either fail with
-//! `SQLITE_BUSY` or starve the daemon. We chose to *fail fast* with a clear
-//! message telling the user to stop the daemon first, rather than silently
-//! racing or auto-stopping (auto-stopping is a footgun if the user has
-//! pending sync work).
+//! The original implementation opened the SQLCipher file *directly* from the
+//! CLI process, which required copypaste-core (Database), the macOS Keychain
+//! (DeviceKeypair), rusqlite, and zeroize — violating the architectural rule
+//! that `copypaste-cli` must speak IPC only and never link `copypaste-core`.
 //!
-//! ## Why we open the DB directly (instead of asking the daemon over IPC)
-//! Adding a `vacuum` IPC method would put a long-blocking, exclusive-lock
-//! operation on the daemon's request loop — at best it blocks every other
-//! request for ~seconds, at worst it deadlocks against an active writer.
-//! Directly opening the file (after confirming the daemon is stopped) keeps
-//! the CLI's failure mode isolated to the CLI process.
+//! The daemon now exposes a `vacuum` IPC verb (METHOD_VACUUM) that:
+//!   * Holds the write-lock for the duration of the operation (exclusive
+//!     access is already serialised through the daemon's Mutex<Database>).
+//!   * Runs `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM` + `REINDEX` on a
+//!     blocking thread so the async executor is not starved.
+//!   * Returns `{ ok, size_before, size_after, reclaimed }` which the CLI
+//!     prints for the user.
+//!
+//! ## Required daemon state
+//!
+//! The daemon MUST be running. Unlike the old CLI path (which required the
+//! daemon to be *stopped* so the CLI could grab the exclusive lock), the IPC
+//! path acquires the lock inside the daemon, which is always safe because the
+//! daemon serialises all DB access through its own Mutex.
 //!
 //! ## Exit codes
 //! - 0 — operation succeeded (or `--dry-run` finished printing)
-//! - 1 — daemon still running, keychain unavailable, or SQLite error
+//! - 1 — daemon not running, IPC call failed, or daemon returned an error
 
 use anyhow::{anyhow, Context, Result};
-use std::path::{Path, PathBuf};
+use copypaste_ipc::METHOD_VACUUM;
+use std::path::Path;
 
+use crate::commands::common::exit_on_err;
 use crate::ipc::IpcClient;
 
-/// Options assembled from clap and passed to [`run`]. Kept as a plain struct
-/// so the inner [`vacuum_with_key`] helper can be tested without a real
-/// keychain (tests construct a `Plan` + key by hand).
+/// Options assembled from clap and passed to [`run`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Plan {
     /// When true, report what would happen but do NOT mutate the database.
@@ -44,60 +46,52 @@ pub struct Plan {
 
 /// Public entry point invoked from `main.rs`.
 ///
-/// Refuses to run while the daemon is alive (see module docs for the
-/// rationale). On macOS, fetches the local-storage key from the Keychain.
-/// On any other platform, returns an error explaining that vacuum currently
-/// requires the macOS keychain — this matches today's daemon, which is the
-/// only producer of the keychain entry.
-pub fn run(socket_path: &Path, db_path: PathBuf, plan: Plan) -> Result<()> {
-    // ── Step 1: refuse if daemon is up ────────────────────────────────────
-    if daemon_is_running(socket_path) {
-        return Err(anyhow!(
-            "daemon is running — VACUUM/REINDEX require exclusive DB access.\n\
-             Stop the daemon first:  copypaste daemon stop\n\
-             Then retry:             copypaste vacuum"
-        ));
-    }
+/// Sends a `vacuum` IPC request to the running daemon and prints the result.
+/// The daemon must be running — unlike the old direct-DB path, this approach
+/// does not require the daemon to be stopped first.
+pub fn run(socket_path: &Path, plan: Plan) -> Result<()> {
+    let mut client = IpcClient::connect(socket_path).with_context(|| {
+        format!(
+            "daemon is not running (could not connect to socket: {})\n\
+             Start the daemon first:  copypaste daemon start\n\
+             Then retry:             copypaste vacuum",
+            socket_path.display()
+        )
+    })?;
 
-    // ── Step 2: confirm DB exists ────────────────────────────────────────
-    if !db_path.exists() {
-        return Err(anyhow!(
-            "database file not found at: {}\n\
-             (set COPYPASTE_DB to override the default path)",
-            db_path.display()
-        ));
-    }
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_VACUUM,
+        serde_json::json!({
+            "reindex_only": plan.reindex_only,
+            "dry_run": plan.dry_run,
+        }),
+    );
 
-    // ── Step 3: fetch SQLCipher key from Keychain ────────────────────────
-    // We resolve the key here (not inside vacuum_with_key) so unit tests
-    // can bypass the keychain by calling vacuum_with_key directly with a
-    // known test key. The keychain call is a side effect that does not
-    // belong in pure logic.
-    let key = load_db_key().context("failed to load database key from keychain")?;
+    let resp = client.call(&req)?;
+    exit_on_err(&resp);
 
-    vacuum_with_key(&db_path, &key, plan)
-}
+    let data = resp
+        .data
+        .as_ref()
+        .ok_or_else(|| anyhow!("daemon returned no data for vacuum"))?;
 
-/// Inner worker — no I/O outside the database file and stdout.
-///
-/// Split from [`run`] so unit tests can drive it with a temp DB and a
-/// synthetic key, without touching the real keychain or the user's home
-/// directory.
-pub fn vacuum_with_key(db_path: &Path, key: &[u8; 32], plan: Plan) -> Result<()> {
-    let size_before = file_size(db_path)?;
+    // Parse the structured response fields.
+    let size_before = data["size_before"]
+        .as_u64()
+        .ok_or_else(|| anyhow!("daemon response missing 'size_before' field"))?;
+    let size_after = data["size_after"]
+        .as_u64()
+        .ok_or_else(|| anyhow!("daemon response missing 'size_after' field"))?;
+    let reclaimed = data["reclaimed"]
+        .as_i64()
+        .ok_or_else(|| anyhow!("daemon response missing 'reclaimed' field"))?;
 
-    println!("Database: {}", db_path.display());
+    // Print results in the same style as the old direct path so shell scripts
+    // that parse this output continue to work unchanged.
     println!("Before:   {}", format_size(size_before));
 
     if plan.dry_run {
-        // For dry-run we still want to *open* the DB to confirm the key
-        // works (catches "you stopped the daemon but the keychain entry
-        // is gone" before the user wastes time on `daemon stop` again).
-        // We open in a separate scope so the connection is dropped before
-        // we report — no chance of accidental mutation.
-        verify_key_opens_db(db_path, key)
-            .context("dry-run: failed to open database with stored key")?;
-
         if plan.reindex_only {
             println!("Plan:     REINDEX (skipped — dry-run)");
         } else {
@@ -110,47 +104,18 @@ pub fn vacuum_with_key(db_path: &Path, key: &[u8; 32], plan: Plan) -> Result<()>
         return Ok(());
     }
 
-    // ── Real run ─────────────────────────────────────────────────────────
-    let db = copypaste_core::Database::open(db_path, key)
-        .context("failed to open encrypted database (wrong key? corrupted file?)")?;
-
-    if !plan.reindex_only {
-        // Checkpoint WAL into the main file first. Otherwise VACUUM only
-        // shrinks the main file while -wal/-shm still hold recent pages,
-        // and the reported "after" size is misleading.
-        // The checkpoint can fail when another reader still holds a read
-        // lock (e.g. a stale -wal not yet cleaned up). We log the error
-        // instead of swallowing it so the user knows the WAL was not fully
-        // flushed and the "after" size may be slightly inflated.
-        if let Err(e) = db.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE)") {
-            eprintln!("warning: wal_checkpoint(TRUNCATE) failed (continuing with VACUUM): {e}");
-        }
-        db.conn()
-            .execute_batch("VACUUM")
-            .context("VACUUM failed (out of disk space? db locked?)")?;
-        println!("Plan:     VACUUM + REINDEX");
-    } else {
+    if plan.reindex_only {
         println!("Plan:     REINDEX only");
+    } else {
+        println!("Plan:     VACUUM + REINDEX");
     }
-
-    db.conn()
-        .execute_batch("REINDEX")
-        .context("REINDEX failed")?;
-
-    // Drop the connection so OS file metadata is up-to-date before we stat.
-    drop(db);
-
-    let size_after = file_size(db_path)?;
     println!("After:    {}", format_size(size_after));
 
-    // Reclaimed bytes. Use signed math so growth (rare — REINDEX can grow
-    // slightly) doesn't underflow.
-    let delta = size_before as i64 - size_after as i64;
-    if delta > 0 {
-        let pct = (delta as f64 / size_before.max(1) as f64) * 100.0;
-        println!("Reclaimed: {} ({:.1}%)", format_size(delta as u64), pct);
-    } else if delta < 0 {
-        println!("Grew by:  {}", format_size((-delta) as u64));
+    if reclaimed > 0 {
+        let pct = (reclaimed as f64 / size_before.max(1) as f64) * 100.0;
+        println!("Reclaimed: {} ({:.1}%)", format_size(reclaimed as u64), pct);
+    } else if reclaimed < 0 {
+        println!("Grew by:  {}", format_size((-reclaimed) as u64));
     } else {
         println!("Reclaimed: 0 bytes (already compact)");
     }
@@ -158,32 +123,7 @@ pub fn vacuum_with_key(db_path: &Path, key: &[u8; 32], plan: Plan) -> Result<()>
     Ok(())
 }
 
-/// Probe the daemon socket. Returns true if we could establish a connection
-/// — that's enough proof the daemon is alive. We deliberately do NOT try a
-/// `status` round-trip because connect-only is faster and the only thing we
-/// need to know is "will this process race us for the DB lock?".
-fn daemon_is_running(socket_path: &Path) -> bool {
-    IpcClient::connect(socket_path).is_ok()
-}
-
-/// Open the DB just long enough to confirm the key decrypts it. The
-/// connection is dropped on return — no statements are executed.
-fn verify_key_opens_db(db_path: &Path, key: &[u8; 32]) -> Result<()> {
-    let _db = copypaste_core::Database::open(db_path, key)?;
-    Ok(())
-}
-
-/// File size in bytes. Returns an error if the file is missing — we already
-/// checked existence in `run`, but `vacuum_with_key` is also called directly
-/// in tests so this guard belongs here too.
-fn file_size(p: &Path) -> Result<u64> {
-    Ok(std::fs::metadata(p)
-        .with_context(|| format!("stat {}", p.display()))?
-        .len())
-}
-
 /// Pretty-print bytes with one decimal place at the largest fitting unit.
-/// Keeps output stable for shell scripts (no surprise unit jumps mid-line).
 fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
@@ -199,219 +139,16 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-// ── Keychain access ──────────────────────────────────────────────────────
-//
-// Mirrors `copypaste-daemon/src/keychain.rs` (same SERVICE/ACCOUNT). We
-// duplicate the *fetch* (not the full keypair-management module) because:
-//   1. `copypaste-daemon` is a binary crate, not a library — its
-//      `keychain` module isn't importable from the CLI.
-//   2. We only need the raw 32-byte secret to derive the local enc key, not
-//      the full DeviceKeypair API surface.
-// If a third caller appears we'll promote this into a shared crate.
-
-#[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "com.copypaste.daemon";
-#[cfg(target_os = "macos")]
-const KEYCHAIN_ACCOUNT: &str = "device-secret-key";
-
-#[cfg(target_os = "macos")]
-fn load_db_key() -> Result<zeroize::Zeroizing<[u8; 32]>> {
-    use copypaste_core::DeviceKeypair;
-    use security_framework::passwords::get_generic_password;
-
-    let bytes = get_generic_password(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-        .map_err(|e| anyhow!("keychain lookup failed: {e} (was the daemon ever started?)"))?;
-    if bytes.len() != 32 {
-        return Err(anyhow!(
-            "keychain entry has wrong length: expected 32 bytes, got {}",
-            bytes.len()
-        ));
-    }
-    let mut arr = [0u8; 32];
-    arr.copy_from_slice(&bytes);
-    let kp = DeviceKeypair::from_secret_bytes(&arr)
-        .map_err(|e| anyhow!("invalid keypair bytes in keychain: {e}"))?;
-    Ok(kp.local_enc_key())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn load_db_key() -> Result<zeroize::Zeroizing<[u8; 32]>> {
-    Err(anyhow!(
-        "vacuum currently requires macOS keychain access; \
-         this platform is not yet supported"
-    ))
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use copypaste_core::Database;
-    use tempfile::tempdir;
 
-    /// Helper: create an encrypted DB with `n` rows so VACUUM has something
-    /// meaningful to reclaim after we delete them. Returns the file path so
-    /// the test can stat it before/after.
-    fn make_db_with_rows(dir: &Path, n: usize, key: &[u8; 32]) -> PathBuf {
-        let path = dir.join("vac.db");
-        let db = Database::open(&path, key).expect("open");
-        for i in 0..n {
-            db.conn()
-                .execute(
-                    "INSERT INTO clipboard_items \
-                     (id, item_id, content_type, content, content_nonce, \
-                      is_sensitive, is_synced, lamport_ts, wall_time) \
-                     VALUES (?1,?2,?3,?4,?5,0,0,?6,?6)",
-                    rusqlite::params![
-                        format!("id-{i}"),
-                        format!("item-{i}"),
-                        "text/plain",
-                        // 4 KiB payload per row — enough that deletes free
-                        // pages VACUUM can visibly reclaim.
-                        vec![b'x'; 4096] as Vec<u8>,
-                        vec![0u8; 24] as Vec<u8>,
-                        i as i64,
-                    ],
-                )
-                .expect("insert");
-        }
-        drop(db);
-        path
-    }
-
-    /// VACUUM must invoke the SQLCipher-aware code path. We assert this
-    /// indirectly: after VACUUM the file is still openable with the SAME
-    /// key (proving SQLCipher pragma was applied — a plaintext VACUUM
-    /// would have nuked encryption) and rejected with a WRONG key.
-    /// This is the strongest behavioural check available without
-    /// pattern-matching SQLite internals.
     #[test]
-    fn vacuum_invokes_correct_sqlcipher_pragma() {
-        let dir = tempdir().unwrap();
-        let key = [0x42u8; 32];
-        let db_path = make_db_with_rows(dir.path(), 10, &key);
-
-        vacuum_with_key(
-            &db_path,
-            &key,
-            Plan {
-                dry_run: false,
-                reindex_only: false,
-            },
-        )
-        .expect("vacuum should succeed");
-
-        // Still encrypted with the original key.
-        Database::open(&db_path, &key).expect("must open with original key after VACUUM");
-
-        // Wrong key still rejected — proves SQLCipher header survived.
-        let wrong = [0x99u8; 32];
-        assert!(
-            Database::open(&db_path, &wrong).is_err(),
-            "VACUUM must NOT decrypt the database"
-        );
+    fn run_signature_compiles() {
+        let _: fn(&Path, Plan) -> Result<()> = run;
     }
 
-    /// `--dry-run` must NOT mutate the file. We check file size before
-    /// and after (mtime would also work but is more brittle on some FS).
-    #[test]
-    fn dry_run_does_not_modify_db() {
-        let dir = tempdir().unwrap();
-        let key = [0x10u8; 32];
-        let db_path = make_db_with_rows(dir.path(), 5, &key);
-
-        // Capture size + content hash before.
-        let before_size = std::fs::metadata(&db_path).unwrap().len();
-        let before_bytes = std::fs::read(&db_path).unwrap();
-
-        vacuum_with_key(
-            &db_path,
-            &key,
-            Plan {
-                dry_run: true,
-                reindex_only: false,
-            },
-        )
-        .expect("dry-run should succeed");
-
-        // File size must be identical.
-        let after_size = std::fs::metadata(&db_path).unwrap().len();
-        assert_eq!(before_size, after_size, "dry-run must not change file size");
-
-        // Byte-for-byte identical — even a no-op open in WAL mode could
-        // touch -wal/-shm, but the main file must be untouched in dry-run.
-        let after_bytes = std::fs::read(&db_path).unwrap();
-        assert_eq!(
-            before_bytes, after_bytes,
-            "dry-run must not modify main DB file bytes"
-        );
-    }
-
-    /// When a daemon is reachable on the socket, `run` must refuse and
-    /// the error message must mention `daemon stop` so the user knows
-    /// the fix. We simulate a running daemon by binding a UnixListener
-    /// (any process accepting on the socket counts).
-    #[test]
-    fn vacuum_with_daemon_running_returns_clear_error() {
-        use std::os::unix::net::UnixListener;
-
-        let dir = tempdir().unwrap();
-        let sock = dir.path().join("daemon.sock");
-        let _listener = UnixListener::bind(&sock).expect("bind mock daemon socket");
-
-        // DB path doesn't need to exist — we expect to fail at the
-        // daemon-detect step, before any file I/O.
-        let fake_db = dir.path().join("nonexistent.db");
-
-        let err = run(
-            &sock,
-            fake_db,
-            Plan {
-                dry_run: false,
-                reindex_only: false,
-            },
-        )
-        .expect_err("must refuse to run while daemon is alive");
-
-        let msg = format!("{err:#}");
-        assert!(
-            msg.contains("daemon is running"),
-            "error must explain why: {msg}"
-        );
-        assert!(
-            msg.contains("daemon stop"),
-            "error must recommend the fix: {msg}"
-        );
-    }
-
-    /// `--reindex-only` must skip VACUUM. We can't directly observe
-    /// "VACUUM was skipped", but we can verify the operation succeeds on
-    /// a DB and leaves it readable with the same key.
-    #[test]
-    fn reindex_only_succeeds_and_preserves_data() {
-        let dir = tempdir().unwrap();
-        let key = [0x33u8; 32];
-        let db_path = make_db_with_rows(dir.path(), 3, &key);
-
-        vacuum_with_key(
-            &db_path,
-            &key,
-            Plan {
-                dry_run: false,
-                reindex_only: true,
-            },
-        )
-        .expect("reindex-only should succeed");
-
-        let db = Database::open(&db_path, &key).expect("open after reindex");
-        let n: i64 = db
-            .conn()
-            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(n, 3, "REINDEX must preserve all rows");
-    }
-
-    /// Bytes-to-string formatter sanity check — locks the user-visible
-    /// output format so shell scripts that parse `Reclaimed:` stay stable.
     #[test]
     fn format_size_units() {
         assert_eq!(format_size(0), "0 B");
@@ -421,22 +158,15 @@ mod tests {
         assert_eq!(format_size(3u64 * 1024 * 1024 * 1024), "3.0 GiB");
     }
 
-    /// Missing DB file path must produce a clear error (not a panic) when
-    /// reached from `vacuum_with_key`. The `run` path catches this earlier,
-    /// but the helper is also reachable from tests / future callers.
+    /// The Plan struct must be constructible from code outside this module
+    /// (main.rs builds it from clap output).
     #[test]
-    fn missing_db_path_errors_cleanly() {
-        let dir = tempdir().unwrap();
-        let missing = dir.path().join("does-not-exist.db");
-        let err = vacuum_with_key(
-            &missing,
-            &[0u8; 32],
-            Plan {
-                dry_run: true,
-                reindex_only: false,
-            },
-        )
-        .expect_err("missing db must error");
-        assert!(format!("{err:#}").contains("does-not-exist.db"));
+    fn plan_is_constructible() {
+        let p = Plan {
+            dry_run: true,
+            reindex_only: false,
+        };
+        assert!(p.dry_run);
+        assert!(!p.reindex_only);
     }
 }

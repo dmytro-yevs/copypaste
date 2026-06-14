@@ -4946,6 +4946,114 @@ impl IpcServer {
             }
 
             // ------------------------------------------------------------------
+            // Database maintenance
+            // ------------------------------------------------------------------
+            "vacuum" => {
+                // Parse optional flags; both default to false so a bare `{}`
+                // params object runs the full VACUUM + REINDEX path.
+                let reindex_only = req
+                    .params
+                    .get("reindex_only")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let dry_run = req
+                    .params
+                    .get("dry_run")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+
+                let db_arc = self.db.clone();
+                let db_path = crate::paths::db_path();
+                let join = tokio::task::spawn_blocking(move || {
+                    let guard = db_arc.blocking_lock();
+
+                    // Stat the file before any writes so we can report
+                    // reclaimed bytes.  The stat uses the filesystem path, not
+                    // in-memory pages, so it accurately reflects WAL state.
+                    let size_before = std::fs::metadata(&db_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+
+                    if dry_run {
+                        // Verify the connection is healthy by running a cheap
+                        // read-only statement; does NOT mutate anything.
+                        guard
+                            .conn()
+                            .execute_batch("SELECT COUNT(*) FROM clipboard_items")
+                            .map_err(|e| format!("dry-run DB probe failed: {e}"))?;
+                        return Ok((size_before, size_before));
+                    }
+
+                    if !reindex_only {
+                        // Flush WAL pages into the main file before VACUUM so
+                        // the "after" size reflects the fully compacted state.
+                        // A failed checkpoint is non-fatal — log and continue.
+                        if let Err(e) =
+                            guard.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
+                        {
+                            tracing::warn!(
+                                error = %e,
+                                "vacuum: wal_checkpoint(TRUNCATE) failed; \
+                                 continuing with VACUUM (after-size may be inflated)"
+                            );
+                        }
+                        guard
+                            .conn()
+                            .execute_batch("VACUUM")
+                            .map_err(|e| format!("VACUUM failed: {e}"))?;
+                    }
+
+                    guard
+                        .conn()
+                        .execute_batch("REINDEX")
+                        .map_err(|e| format!("REINDEX failed: {e}"))?;
+
+                    // Drop the guard so the OS flushes pending writes before
+                    // we stat the file for the "after" size.
+                    drop(guard);
+
+                    let size_after = std::fs::metadata(&db_path)
+                        .map(|m| m.len())
+                        .unwrap_or(size_before);
+
+                    Ok::<(u64, u64), String>((size_before, size_after))
+                })
+                .await;
+
+                match join {
+                    Ok(Ok((size_before, size_after))) => {
+                        let reclaimed = size_before as i64 - size_after as i64;
+                        tracing::info!(
+                            size_before,
+                            size_after,
+                            reclaimed,
+                            reindex_only,
+                            dry_run,
+                            "vacuum: completed"
+                        );
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "ok": true,
+                                "size_before": size_before,
+                                "size_after": size_after,
+                                "reclaimed": reclaimed,
+                            }),
+                        )
+                    }
+                    Ok(Err(msg)) => {
+                        tracing::error!(error = %msg, "vacuum: operation failed");
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg)
+                    }
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("vacuum blocking task failed: {e}"),
+                    ),
+                }
+            }
+
+            // ------------------------------------------------------------------
             // P2P IPC methods
             // ------------------------------------------------------------------
             "get_own_fingerprint" => {

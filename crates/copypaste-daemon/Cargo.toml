@@ -101,6 +101,12 @@ subtle = { workspace = true }
 name = "integration_ipc"
 path = "tests/integration_ipc.rs"
 
+# Vacuum IPC verb tests — spawn daemon + exercise the `vacuum` method over
+# the Unix socket. All tests are #[ignore] (require pre-built daemon binary).
+[[test]]
+name = "vacuum_ipc"
+path = "tests/vacuum_ipc.rs"
+
 [[test]]
 name = "lifecycle"
 path = "tests/lifecycle.rs"

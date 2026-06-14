@@ -850,12 +850,10 @@ version = "0.6.1"
 dependencies = [
  "anyhow",
  "clap",
- "copypaste-core",
  "copypaste-ipc",
  "home",
  "qrcode",
  "rpassword",
- "rusqlite",
  "security-framework",
  "serde",
  "serde_json",

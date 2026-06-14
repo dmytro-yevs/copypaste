@@ -71,7 +71,7 @@ pub fn socket_path() -> PathBuf {
     }
 }
 
-#[allow(dead_code)] // used by the `vacuum` command; may be unused on some cfgs.
+#[allow(dead_code)] // tests call this; production code routes vacuum through IPC now.
 pub fn db_path() -> PathBuf {
     if let Ok(p) = std::env::var("COPYPASTE_DB") {
         return PathBuf::from(p);

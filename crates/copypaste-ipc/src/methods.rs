@@ -132,6 +132,53 @@ pub const METHOD_ADD_FILE_ITEM: &str = "add_file_item";
 
 // ── Database maintenance ────────────────────────────────────────────────────
 
+/// Run `VACUUM` (and optionally `REINDEX`) on the encrypted clipboard database.
+///
+/// The daemon holds the write-lock for the duration and runs the operation on a
+/// blocking thread so the async executor is not starved. The daemon MUST be
+/// running for this method to be callable — the client no longer needs to stop
+/// the daemon, open the DB directly, or touch the macOS Keychain.
+///
+/// ## Parameters ([`VacuumRequest`])
+/// - `reindex_only` (`bool`, default `false`): skip `VACUUM`, run only `REINDEX`.
+/// - `dry_run` (`bool`, default `false`): open the DB to verify the key, report
+///   current size, but do NOT mutate any data.
+///
+/// ## Response ([`VacuumResponse`])
+/// - `ok` (`bool`): always `true` on the happy path.
+/// - `size_before` (`u64`): file size in bytes before the operation.
+/// - `size_after` (`u64`): file size in bytes after (same as `size_before` on
+///   `dry_run`).
+/// - `reclaimed` (`i64`): `size_before - size_after` (negative = file grew,
+///   e.g. after `REINDEX` on a fragmented DB).
+pub const METHOD_VACUUM: &str = "vacuum";
+
+/// Parameters for the [`METHOD_VACUUM`] method.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct VacuumRequest {
+    /// When `true`, skip `VACUUM` and run only `REINDEX`. Faster; does not
+    /// require free space equal to the current DB size.
+    #[serde(default)]
+    pub reindex_only: bool,
+    /// When `true`, report what would happen without mutating the database.
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+/// Success payload for the [`METHOD_VACUUM`] method.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct VacuumResponse {
+    /// Always `true` when the daemon returns `ok` for this method.
+    pub ok: bool,
+    /// DB file size in bytes *before* the operation.
+    pub size_before: u64,
+    /// DB file size in bytes *after* the operation (equals `size_before` on
+    /// `dry_run`).
+    pub size_after: u64,
+    /// `size_before - size_after`; negative when the file grew.
+    pub reclaimed: i64,
+}
+
 /// Method name for the destructive "reset database" recovery operation.
 ///
 /// This wipes `clipboard.db` (and its `-wal` / `-shm` siblings) and recreates a
@@ -218,6 +265,44 @@ mod tests {
         };
         let s = serde_json::to_string(&resp).unwrap();
         let back: ResetDatabaseResponse = serde_json::from_str(&s).unwrap();
+        assert_eq!(resp, back);
+    }
+
+    #[test]
+    fn vacuum_method_has_correct_wire_name() {
+        assert_eq!(METHOD_VACUUM, "vacuum");
+    }
+
+    #[test]
+    fn vacuum_request_defaults_all_false() {
+        // An empty params object must parse with all flags false so a bare
+        // `{"method":"vacuum","params":{}}` call runs the full VACUUM + REINDEX.
+        let req: VacuumRequest = serde_json::from_str("{}").unwrap();
+        assert!(!req.reindex_only);
+        assert!(!req.dry_run);
+    }
+
+    #[test]
+    fn vacuum_request_roundtrip() {
+        let req = VacuumRequest {
+            reindex_only: true,
+            dry_run: false,
+        };
+        let s = serde_json::to_string(&req).unwrap();
+        let back: VacuumRequest = serde_json::from_str(&s).unwrap();
+        assert_eq!(req, back);
+    }
+
+    #[test]
+    fn vacuum_response_roundtrip() {
+        let resp = VacuumResponse {
+            ok: true,
+            size_before: 2048,
+            size_after: 1024,
+            reclaimed: 1024,
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        let back: VacuumResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);
     }
 }
