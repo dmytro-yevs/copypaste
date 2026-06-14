@@ -33,8 +33,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.QrCode
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -64,25 +62,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.border
 import androidx.compose.ui.unit.dp
-import androidx.compose.foundation.BorderStroke
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
+import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.IdeBorder
+import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.MonoFontFamily
+import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeAccent
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeDanger
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeSuccess
-import com.copypaste.android.ui.theme.IdeText
-import com.copypaste.android.ui.theme.IdeWarning
+import com.copypaste.android.ui.theme.auroraCanvas
+import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.rememberTranslucency
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import com.journeyapps.barcodescanner.ScanContract
@@ -104,22 +101,23 @@ private const val PAIR_TOKEN_TTL_SECONDS = 120
 private const val PAIR_TOKEN_URGENT_THRESHOLD_SECONDS = 20
 
 /**
- * Side of the rendered QR image, in dp. The QR, the placeholder icon, and the
- * loading spinner all sit inside a reserved box of this size (plus
- * [QR_PLATE_PADDING_DP] of white backing) so the layout never reflows when the
- * content swaps between loading / present / placeholder. This is the single
- * source of truth for the QR's on-screen size, keeping the image and its
- * reserved container in lock-step (BUG 2).
+ * Side of the rendered QR image, in dp.
+ * bro9: reduced from 240dp to 160dp — closer to styleguide's ~132px calm scale
+ * while still scannable on a phone.
  */
-private const val QR_IMAGE_SIZE_DP = 240
-
-/** White backing-plate padding around the QR, in dp (each side). */
-private const val QR_PLATE_PADDING_DP = 12
+private const val QR_IMAGE_SIZE_DP = 160
 
 /**
- * Fixed side of the reserved QR slot, in dp: the QR image plus its white plate
- * padding on both sides. Every QR-area state renders into a box of exactly this
- * size so the screen stays visually stable (no jitter — BUG 1).
+ * Padding of the inset white QR plate, in dp (each side).
+ * ioco: the plate is sized only to the QR itself (not the full slot) and rounded
+ * with RadiusCard (12dp) so it sits cleanly on the glass surface.
+ */
+private const val QR_PLATE_PADDING_DP = 10
+
+/**
+ * Fixed side of the reserved QR slot, in dp: QR image + plate padding both sides.
+ * Every QR-area state renders into a box of exactly this size so the layout stays
+ * visually stable (no jitter).
  */
 private const val QR_SLOT_SIZE_DP = QR_IMAGE_SIZE_DP + QR_PLATE_PADDING_DP * 2
 
@@ -895,10 +893,15 @@ fun PairScreen(
         onAutoScanConsumed()
     }
 
+    val c = LocalIdeColors.current
+    val translucent = rememberTranslucency()
+    val dark = isDarkTheme()
+
     Box(Modifier.fillMaxSize()) {
+    // 9g57: aurora canvas backdrop — mirrors DevicesScreen pattern.
     Scaffold(
-        modifier = modifier,
-        containerColor = IdeBg,
+        modifier = if (translucent) modifier.auroraCanvas(dark) else modifier,
+        containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_pair),
@@ -931,7 +934,8 @@ fun PairScreen(
                 Text(
                     text = stringResource(R.string.pair_instructions),
                     style = MaterialTheme.typography.bodyLarge,
-                    color = IdeText
+                    // voyf: use theme-adaptive token instead of hardcoded dark IdeText.
+                    color = c.text,
                 )
             }
 
@@ -959,20 +963,16 @@ fun PairScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
-                                    CircularProgressIndicator(
-                                        color = IdeAccent
-                                    )
+                                    // voyf: use theme-adaptive tokens.
+                                    CircularProgressIndicator(color = c.accent)
                                     Text(
                                         text = stringResource(R.string.status_pairing),
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = IdeDim
+                                        color = c.dim,
                                     )
                                 }
                             }
                             bmp != null && !expired -> {
-                                // QR needs a light, high-contrast backing to scan
-                                // reliably — sit the code on a white rounded plate
-                                // that fills the reserved slot exactly.
                                 // First tap reveals (if blurred); tap while revealed regenerates.
                                 Box(
                                     modifier = Modifier
@@ -987,12 +987,15 @@ fun PairScreen(
                                         },
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    // White plate with QR image.
+                                    // ioco: small inset white plate sized exactly to the QR
+                                    // with RadiusCard corners — NOT a full-bleed white box.
+                                    // The glass surface behind it shows through the slot margins.
                                     Box(
                                         modifier = Modifier
                                             .size(QR_SLOT_SIZE_DP.dp)
-                                            .background(androidx.compose.ui.graphics.Color.White)
-                                            .padding(QR_PLATE_PADDING_DP.dp),
+                                            .padding(QR_PLATE_PADDING_DP.dp)
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(androidx.compose.ui.graphics.Color.White),
                                         contentAlignment = Alignment.Center,
                                     ) {
                                         Image(
@@ -1008,13 +1011,15 @@ fun PairScreen(
                                                 )
                                         )
                                     }
-                                    // Tap-to-reveal overlay shown while the QR is blurred.
+                                    // 9luz: tap-to-reveal — glass-tinted overlay instead of
+                                    // dark 35% scrim. Accent-tinted translucent pill label
+                                    // matches the calm glass aesthetic.
                                     if (!qrRevealed) {
                                         Box(
                                             modifier = Modifier
                                                 .size(QR_SLOT_SIZE_DP.dp)
                                                 .background(
-                                                    androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.35f),
+                                                    c.accentDim,
                                                     RoundedCornerShape(12.dp),
                                                 ),
                                             contentAlignment = Alignment.Center,
@@ -1022,8 +1027,11 @@ fun PairScreen(
                                             Text(
                                                 text = "Tap to reveal",
                                                 style = MaterialTheme.typography.labelMedium,
-                                                color = androidx.compose.ui.graphics.Color.White,
+                                                color = c.accent,
                                                 textAlign = TextAlign.Center,
+                                                modifier = Modifier
+                                                    .background(c.accentDim, RadiusChip)
+                                                    .padding(horizontal = 12.dp, vertical = 5.dp),
                                             )
                                         }
                                     }
@@ -1035,8 +1043,9 @@ fun PairScreen(
                                     // CopyPaste-3nyq: announce the QR-loading state so AT
                                     // is not silent while the code is being generated.
                                     contentDescription = stringResource(R.string.cd_pairing_qr_loading),
-                                    tint = IdeDim,
-                                    modifier = Modifier.size(96.dp)
+                                    // voyf: theme-adaptive dim token.
+                                    tint = c.dim,
+                                    modifier = Modifier.size(96.dp),
                                 )
                             }
                         }
@@ -1050,7 +1059,8 @@ fun PairScreen(
                                 Text(
                                     text = stringResource(R.string.pair_token_expired),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = IdeDanger
+                                    // voyf: theme-adaptive danger token.
+                                    color = c.danger,
                                 )
                             }
                             else -> {
@@ -1062,7 +1072,8 @@ fun PairScreen(
                                         remainingSeconds
                                     ),
                                     style = MaterialTheme.typography.bodyMedium,
-                                    color = if (urgent) IdeWarning else IdeAccent
+                                    // voyf: theme-adaptive warning/accent tokens.
+                                    color = if (urgent) c.warning else c.accent,
                                 )
                             }
                         }
@@ -1074,9 +1085,11 @@ fun PairScreen(
             // Hidden when a peer has already been scanned (scannedPeer != null);
             // in that state the screen shows only the peer confirmation UI below.
             if (scannedPeer == null) {
-                OutlinedButton(
+                // Adopt CopyPasteButton secondary (glass) per action-button spec.
+                CopyPasteButton(
                     onClick = { startScanFlow() },
-                    modifier = Modifier.fillMaxWidth()
+                    variant = ButtonVariant.SECONDARY,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(text = stringResource(R.string.btn_scan_qr))
                 }
@@ -1096,41 +1109,85 @@ fun PairScreen(
             //   BootstrapResult.peerModel/peerOs/peerAppVersion (ABI 14) but
             //   runPairAndSync currently only persists them to Settings.pairedPeers.
             scannedPeer?.let { peer ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
-                    border = BorderStroke(1.dp, IdeBorder),
-                ) {
+                // 6i0w: replace raw Material Card with CopyPasteCard (glass surface).
+                CopyPasteCard {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        Text(
-                            text = "Device to pair with",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.primary,
-                        )
-                        // Device name (from QR payload field 5)
-                        val displayName = peer.deviceName.ifBlank { "Unknown device" }
-                        Text(
-                            text = displayName,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = IdeText,
-                        )
+                        // lclr: avatar tile — 38dp accent-tint rounded tile with device initial.
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        ) {
+                            val displayName = peer.deviceName.ifBlank { "Unknown device" }
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(c.accentDim),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    text = displayName.take(1).uppercase(),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = c.accent,
+                                )
+                            }
+                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                Text(
+                                    text = "Device to pair with",
+                                    style = MaterialTheme.typography.labelLarge,
+                                    // voyf: theme-adaptive accent token.
+                                    color = c.accent,
+                                )
+                                // Device name (from QR payload field 5)
+                                Text(
+                                    text = displayName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    // voyf: theme-adaptive text token.
+                                    color = c.text,
+                                )
+                            }
+                        }
+
+                        // 483o: transport chip pill — RadiusChip (7dp) pill + hairline border + glyph.
+                        Row(
+                            modifier = Modifier
+                                .background(c.infoDim, RadiusChip)
+                                .border(0.5.dp, c.info.copy(alpha = 0.5f), RadiusChip)
+                                .padding(horizontal = 9.dp, vertical = 3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(text = "⟲", color = c.info, fontSize = 11.sp)
+                            Text(
+                                text = "P2P",
+                                color = c.info,
+                                fontSize = 11.sp,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+
                         // Address (host:port from QR payload field 6, if present)
                         if (peer.addrHint.isNotBlank()) {
                             Text(
                                 text = "Address: ${peer.addrHint}",
                                 style = MaterialTheme.typography.bodySmall,
-                                color = IdeDim,
+                                // voyf: theme-adaptive dim token.
+                                color = c.dim,
                             )
                         }
-                        // Fingerprint (from QR payload field 2) — tappable to copy
+                        // 10hh: fingerprint mono + 16…8 truncation (matches DevicesActivity).
+                        val truncatedFp = formatPeerFingerprint(peer.fingerprint)
                         Text(
-                            text = "Fingerprint: ${peer.fingerprint}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
+                            text = "Fingerprint: $truncatedFp",
+                            style = MaterialTheme.typography.bodySmall.copy(
+                                fontFamily = MonoFontFamily,
+                                fontSize = 11.sp,
+                            ),
+                            // voyf: theme-adaptive faint token (c.faint ≈ styleguide mute).
+                            color = c.faint,
                             modifier = Modifier.clickable {
                                 clipboardManager.setText(AnnotatedString(peer.fingerprint))
                                 scope.launch {
@@ -1143,19 +1200,20 @@ fun PairScreen(
                     }
                 }
 
-                Button(
+                // Adopt CopyPasteButton primary for the pairing action.
+                CopyPasteButton(
                     enabled = !syncing,
                     onClick = { runPairAndSync(peer) },
-                    modifier = Modifier.fillMaxWidth()
+                    variant = ButtonVariant.PRIMARY,
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     Text(text = if (syncing) "Pairing…" else "Pair & sync")
                 }
             }
 
             if (syncing) {
-                CircularProgressIndicator(
-                    color = IdeAccent
-                )
+                // voyf: theme-adaptive accent token.
+                CircularProgressIndicator(color = c.accent)
             }
 
             // ── Post-pair success popup ────────────────────────────────────────
@@ -1179,24 +1237,69 @@ fun PairScreen(
                 val pairedFingerprint = settings.pairedPeerFingerprint
                 val pairedAddr = settings.pairedPeerSyncAddr
                 if (pairedFingerprint.isNotBlank()) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        ),
-                        border = BorderStroke(1.dp, IdeBorder),
-                    ) {
-                        Column(modifier = Modifier.padding(16.dp)) {
+                    // 6i0w: replace raw Material Card with CopyPasteCard.
+                    CopyPasteCard {
+                        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // lclr: avatar tile — 38dp accent-tint rounded tile.
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(c.accentDim),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    // Device glyph placeholder — phone icon initial.
+                                    Text(
+                                        text = "📱",
+                                        fontSize = 18.sp,
+                                    )
+                                }
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    Text(
+                                        text = "Paired device",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        // voyf: theme-adaptive accent token.
+                                        color = c.accent,
+                                    )
+                                    // prld: status dot — danger for offline (unknown reachability here),
+                                    // no redundant "Online/Offline" text label per styleguide.
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                // prld: offline = danger (not faint grey).
+                                                .background(c.danger),
+                                        )
+                                        if (pairedAddr.isNotBlank()) {
+                                            Text(
+                                                text = pairedAddr,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                // voyf: theme-adaptive dim token.
+                                                color = c.dim,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 10hh: fingerprint mono + 16…8 truncation.
+                            val truncatedFp = formatPeerFingerprint(pairedFingerprint)
                             Text(
-                                text = "Paired device",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
-                            Text(
-                                text = pairedFingerprint,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface,
+                                text = truncatedFp,
+                                style = MaterialTheme.typography.bodySmall.copy(
+                                    fontFamily = MonoFontFamily,
+                                    fontSize = 11.sp,
+                                ),
+                                // voyf: theme-adaptive faint token.
+                                color = c.faint,
                                 modifier = Modifier.clickable {
                                     clipboardManager.setText(AnnotatedString(pairedFingerprint))
                                     scope.launch {
@@ -1204,13 +1307,6 @@ fun PairScreen(
                                     }
                                 },
                             )
-                            if (pairedAddr.isNotBlank()) {
-                                Text(
-                                    text = pairedAddr,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = IdeDim,
-                                )
-                            }
                         }
                     }
                 }
@@ -1243,38 +1339,65 @@ private fun PairedSuccessPopup(
     peer: PairedPeer,
     onDismiss: () -> Unit,
 ) {
+    // voyf: read theme-adaptive ramp — no hardcoded Ide* constants.
+    val c = LocalIdeColors.current
     GlassAlertDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
                 text = "Paired successfully",
                 style = MaterialTheme.typography.titleMedium,
-                color = IdeSuccess,
+                // voyf: theme-adaptive success token.
+                color = c.success,
             )
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // ── Status header row: dot + name + "Paired ✓" ──────────────
+                // ── Avatar + name + status row ────────────────────────────────
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    // lclr: 38dp avatar tile in success-tint (peer is now online/paired).
+                    val displayName = peer.name.ifBlank { "Paired device" }
                     Box(
                         modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(IdeSuccess),
-                    )
-                    Text(
-                        text = peer.name.ifBlank { "Paired device" },
-                        style = MaterialTheme.typography.titleSmall,
-                        color = IdeText,
-                    )
-                    Text(
-                        text = "Paired ✓",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = IdeSuccess,
-                    )
+                            .size(38.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(c.successDim),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            text = displayName.take(1).uppercase(),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = c.success,
+                        )
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            // prld: status dot 8dp (not 10dp), success color for paired state.
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(c.success),
+                            )
+                            Text(
+                                text = displayName,
+                                style = MaterialTheme.typography.titleSmall,
+                                // voyf: theme-adaptive text token.
+                                color = c.text,
+                            )
+                        }
+                        Text(
+                            text = "Paired ✓",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = c.success,
+                        )
+                    }
                 }
 
                 Spacer(Modifier.height(4.dp))
@@ -1290,18 +1413,16 @@ private fun PairedSuccessPopup(
                     peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
                         PopupMetaRow(label = "Version", value = it)
                     }
-                    // Short fingerprint (first 16 + last 8 chars) — readable
-                    // without overwhelming the compact popup layout.
-                    val shortFp = if (peer.fingerprint.length > 24)
-                        "${peer.fingerprint.take(16)}…${peer.fingerprint.takeLast(8)}"
-                    else peer.fingerprint
+                    // 10hh: mono truncated fingerprint — 16…8 (via formatPeerFingerprint).
+                    val shortFp = formatPeerFingerprint(peer.fingerprint)
                     PopupMetaRow(label = "Fingerprint", value = shortFp)
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) {
-                Text("Done", color = IdeAccent)
+                // voyf: theme-adaptive accent token.
+                Text("Done", color = c.accent)
             }
         },
     )
@@ -1310,17 +1431,21 @@ private fun PairedSuccessPopup(
 /** Single label+value row for [PairedSuccessPopup]. */
 @Composable
 private fun PopupMetaRow(label: String, value: String) {
+    // voyf: read theme-adaptive ramp — no hardcoded Ide* constants.
+    val c = LocalIdeColors.current
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = label,
             style = MaterialTheme.typography.bodySmall,
-            color = IdeDim,
+            // voyf: theme-adaptive dim token.
+            color = c.dim,
             modifier = Modifier.width(72.dp),
         )
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall,
-            color = IdeText,
+            // voyf: theme-adaptive text token.
+            color = c.text,
         )
     }
 }
