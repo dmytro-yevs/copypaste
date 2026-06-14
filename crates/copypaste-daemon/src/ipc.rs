@@ -4487,16 +4487,78 @@ impl IpcServer {
                     ),
                 }
             }
-            // Cloud auth — stubs until Supabase integration lands.
-            // Route through `Response::not_implemented` so clients see a
-            // machine-readable `error_code: "not_implemented"` instead of an
-            // ambiguous `ok: true` carrying a "not yet implemented" note.
+            // ── Cloud auth ─────────────────────────────────────────────────
+            //
+            // `cloud_sign_in`: resolve GoTrue credentials via the same path
+            // `start_cloud` uses at daemon startup, then flip `cloud_signed_in`
+            // to reflect the real auth state. This fixes CopyPaste-i5b where
+            // the flag was never set from the IPC (UI-driven) sign-in path —
+            // only the env-var startup path set it.
+            //
+            // `cloud_sign_out`: unconditionally clear `cloud_signed_in` so
+            // `get_sync_status` immediately reflects the signed-out state.
+            #[cfg(feature = "cloud-sync")]
             "cloud_sign_in" => {
-                tracing::info!("cloud_sign_in stub called");
-                Response::not_implemented(req.id, "cloud-sync")
+                use crate::cloud::CloudConfig;
+                let cfg = match CloudConfig::from_env() {
+                    Some(c) => c,
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "cloud-sync not configured: set supabase_url and supabase_anon_key \
+                             (via set_config or SUPABASE_URL / SUPABASE_ANON_KEY env vars)",
+                        );
+                    }
+                };
+                // Attempt GoTrue sign-in (or fall through to anon key when no
+                // email/password is configured — mirrors resolve_bearer_with_client).
+                let auth =
+                    copypaste_supabase::auth::AuthClient::new(&cfg.supabase_url, &cfg.anon_key);
+                let sign_in_result = match (cfg.email.as_deref(), cfg.password.as_deref()) {
+                    (Some(email), Some(password))
+                        if !email.is_empty() && !password.is_empty() =>
+                    {
+                        auth.sign_in(email, password).await.map(|_| ())
+                    }
+                    // No email/password → anon key is the bearer; sign-in
+                    // succeeds trivially (the key itself is the credential).
+                    _ => Ok(()),
+                };
+                match sign_in_result {
+                    Ok(()) => {
+                        // CopyPaste-i5b fix: set the shared flag so
+                        // get_sync_status reports the real authenticated state.
+                        self.cloud_signed_in.store(true, Ordering::SeqCst);
+                        tracing::info!("cloud_sign_in: signed in; cloud_signed_in = true");
+                        Response::ok(req.id, serde_json::json!({"signed_in": true}))
+                    }
+                    Err(e) => {
+                        self.cloud_signed_in.store(false, Ordering::SeqCst);
+                        tracing::warn!(
+                            "cloud_sign_in: sign-in failed ({e}); cloud_signed_in = false"
+                        );
+                        Response::err_with_code(
+                            req.id,
+                            ERR_CODE_AUTH_FAILED,
+                            format!("sign-in failed: {e}"),
+                        )
+                    }
+                }
             }
+            #[cfg(feature = "cloud-sync")]
             "cloud_sign_out" => {
-                tracing::info!("cloud_sign_out stub called");
+                // CopyPaste-i5b fix: clear the flag on explicit sign-out so
+                // get_sync_status stops reporting signed_in = true after logout.
+                self.cloud_signed_in.store(false, Ordering::SeqCst);
+                tracing::info!("cloud_sign_out: cloud_signed_in = false");
+                Response::ok(req.id, serde_json::json!({"signed_in": false}))
+            }
+            // When cloud-sync is not compiled in, cloud_sign_in / cloud_sign_out
+            // are not available. Return not_implemented so clients see a
+            // machine-readable error_code rather than "method not found".
+            #[cfg(not(feature = "cloud-sync"))]
+            "cloud_sign_in" | "cloud_sign_out" => {
                 Response::not_implemented(req.id, "cloud-sync")
             }
 
@@ -12242,6 +12304,89 @@ mod tests {
         assert_eq!(
             data2["signed_in"], true,
             "signed_in must track the real auth flag once set true: {data2}"
+        );
+    }
+
+    // ── CopyPaste-i5b: cloud_sign_in/out set cloud_signed_in ─────────────────
+
+    /// `cloud_sign_out` must clear `cloud_signed_in` to false so
+    /// `get_sync_status` stops reporting signed_in = true after logout.
+    /// Proves the flag is set by the IPC sign-out path (not only by the
+    /// startup `start_cloud` path that was the only setter before this fix).
+    #[cfg(feature = "cloud-sync")]
+    #[tokio::test]
+    async fn cloud_sign_out_clears_signed_in_flag() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let private_mode = Arc::new(AtomicBool::new(false));
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+        let device_pub = Arc::new([0u8; 32]);
+
+        let sync_key = Arc::new(Mutex::new(None));
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        // Start the flag at true — simulating a previously signed-in session.
+        let signed_in = Arc::new(AtomicBool::new(true));
+
+        let server = IpcServer::new(db, private_mode, local_key, device_pub).with_cloud_sync_state(
+            sync_key,
+            last_sync_ms,
+            signed_in.clone(),
+        );
+
+        let resp = server
+            .dispatch(r#"{"id":"1","method":"cloud_sign_out"}"#)
+            .await;
+        assert!(resp.ok, "cloud_sign_out must return ok: true; got {resp:?}");
+        // CopyPaste-i5b: the shared flag must now be false.
+        assert!(
+            !signed_in.load(Ordering::SeqCst),
+            "cloud_signed_in must be false after cloud_sign_out"
+        );
+    }
+
+    /// `cloud_sign_in` with no SUPABASE_URL configured must return
+    /// `invalid_argument` without touching `cloud_signed_in` (it stays false).
+    #[cfg(feature = "cloud-sync")]
+    #[tokio::test]
+    async fn cloud_sign_in_returns_invalid_argument_when_not_configured() {
+        // Ensure no env override leaks from a parent shell.
+        std::env::remove_var("SUPABASE_URL");
+        std::env::remove_var("SUPABASE_ANON_KEY");
+
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let private_mode = Arc::new(AtomicBool::new(false));
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+        let device_pub = Arc::new([0u8; 32]);
+
+        let sync_key = Arc::new(Mutex::new(None));
+        let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+        let signed_in = Arc::new(AtomicBool::new(false));
+
+        // Use a temp config dir so read_config() finds no persisted credentials.
+        let dir = tempfile::tempdir().unwrap();
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            dir.path(),
+        );
+
+        let server = IpcServer::new(db, private_mode, local_key, device_pub).with_cloud_sync_state(
+            sync_key,
+            last_sync_ms,
+            signed_in.clone(),
+        );
+
+        let resp = server
+            .dispatch(r#"{"id":"1","method":"cloud_sign_in"}"#)
+            .await;
+        assert!(!resp.ok, "cloud_sign_in with no config must fail; got {resp:?}");
+        assert_eq!(
+            resp.error_code.as_deref(),
+            Some(ERR_CODE_INVALID_ARGUMENT),
+            "must return invalid_argument when Supabase is not configured"
+        );
+        // Flag must remain false — the unconfigured path must not set it.
+        assert!(
+            !signed_in.load(Ordering::SeqCst),
+            "cloud_signed_in must stay false when sign-in is rejected for missing config"
         );
     }
 
