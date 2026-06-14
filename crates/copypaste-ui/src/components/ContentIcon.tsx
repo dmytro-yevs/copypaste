@@ -144,13 +144,15 @@ function kindFallback(contentType: string): string {
 /**
  * Full-word type chip with semantic IDE token colors.
  *
- * Color mapping (matches HistoryView.tsx KindChip exactly):
- *   URL            → text-ide-info
- *   EMAIL / PHONE  → text-ide-success
- *   COLOR / NUMBER / PATH → text-ide-warning
- *   JSON           → text-ide-danger
- *   CODE / IMAGE   → text-ide-violet
- *   TEXT / unknown → text-ide-accent
+ * Canonical kind→color table (spec §6):
+ *   TEXT                        → accent (blue)
+ *   URL                         → info (teal)
+ *   EMAIL / PHONE               → success (green)
+ *   COLOR / NUMBER / PATH       → warning (amber)
+ *   JSON                        → danger (red)
+ *   CODE / IMAGE                → violet
+ *   FILE                        → dim (grey)
+ *   PRIVATE / SENSITIVE         → danger (red)
  */
 export function KindChip({ contentType, kind }: KindChipProps) {
   const label = kind ?? kindFallback(contentType);
@@ -162,10 +164,12 @@ export function KindChip({ contentType, kind }: KindChipProps) {
       ? "text-ide-success border-ide-success/40 bg-ide-success/8"
       : label === "COLOR" || label === "NUMBER" || label === "PATH"
       ? "text-ide-warning border-ide-warning/40 bg-ide-warning/8"
-      : label === "JSON"
+      : label === "JSON" || label === "PRIVATE" || label === "SENSITIVE"
       ? "text-ide-danger border-ide-danger/40 bg-ide-danger/8"
       : label === "CODE" || label === "IMAGE"
       ? "text-ide-violet border-ide-violet/40 bg-ide-violet/8"
+      : label === "FILE"
+      ? "text-ide-dim border-ide-dim/40 bg-ide-dim/8"
       : /* TEXT / fallback */ "text-ide-accent border-ide-accent/40 bg-ide-accent/8";
 
   return (

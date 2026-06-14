@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
+// getCurrentWebview is only available inside the Tauri runtime. Import it
+// lazily so the module can load in a plain browser without crashing at
+// import time (the symbol would be undefined / the package would throw).
+// We feature-detect at call-site via `window.__TAURI_INTERNALS__`.
+let _getCurrentWebview: typeof import("@tauri-apps/api/webview").getCurrentWebview | null = null;
+if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+  void import("@tauri-apps/api/webview").then((m) => {
+    _getCurrentWebview = m.getCurrentWebview;
+  });
+}
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -2106,10 +2115,16 @@ export function HistoryView() {
   // -------------------------------------------------------------------------
 
   useEffect(() => {
+    // Tauri-only: OS file drag-drop via the webview's onDragDropEvent API.
+    // In a plain browser `_getCurrentWebview` is null (set only when
+    // window.__TAURI_INTERNALS__ exists), so we skip the subscription entirely.
+    // The browser <input type="file"> path (D2) still works without Tauri.
+    if (_getCurrentWebview === null) return;
+
     let unlisten: (() => void) | null = null;
     let cancelled = false;
 
-    void getCurrentWebview()
+    void _getCurrentWebview()
       .onDragDropEvent((event) => {
         if (cancelled) return;
         const { type } = event.payload;
