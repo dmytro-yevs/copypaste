@@ -208,8 +208,10 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
           title="Open with default app"
           disabled={opening}
           onClick={() => void handleOpen()}
-          className="flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+          className="relative flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
         >
+          {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
+          <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />
           {opening ? "Opening…" : "Open"}
         </button>
         <button
@@ -218,8 +220,10 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
           title="Save As…"
           disabled={saving}
           onClick={() => void handleSaveAs()}
-          className="flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+          className="relative flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
         >
+          {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
+          <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />
           {saving ? "Saving…" : "Save As…"}
         </button>
         <button
@@ -228,8 +232,10 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
           title="Copy to clipboard"
           disabled={copying}
           onClick={() => void handleCopy()}
-          className="flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+          className="relative flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
         >
+          {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
+          <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />
           {copying ? "…" : "Copy"}
         </button>
       </span>

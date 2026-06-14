@@ -15,6 +15,7 @@ import {
   type PairSasStatus,
 } from "../lib/ipc";
 import { usePeerPresence } from "../lib/peerPresence";
+import { useFocusTrap } from "../lib/useFocusTrap";
 import { ViewShell } from "../components/ViewShell";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
@@ -446,6 +447,9 @@ function SasPairingModal({
     unmountedRef.current = false;
     return () => { unmountedRef.current = true; };
   }, []);
+  // Focus trap — traps Tab/Shift+Tab inside the dialog panel and restores focus on close.
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef);
   const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const terminal =
@@ -618,11 +622,11 @@ function SasPairingModal({
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
       role="dialog"
       aria-modal="true"
-      aria-label="Pair device"
+      aria-labelledby="sas-modal-title"
     >
       {/* surface-glass-strong = floating frosted-glass pairing dialog. */}
-      <div className="surface-glass-strong w-full max-w-sm rounded-ide-lg p-5 shadow-ide-lg">
-        <p className="mb-1 text-[13px] font-medium text-ide-text">
+      <div ref={modalRef} className="surface-glass-strong w-full max-w-sm rounded-ide-lg p-5 shadow-ide-lg">
+        <p id="sas-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
           {isResponder ? `"${peerName}" wants to pair` : `Pair "${peerName}"`}
         </p>
 
@@ -831,6 +835,100 @@ function DiscoveredRow({
         >
           Pair
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RevokeConfirmDialog — a small wrapper that applies a focus-trap to the
+// revoke-device confirmation dialog. Extracted from DevicesView's inline JSX
+// so the useFocusTrap hook can run unconditionally (hooks must not be called
+// conditionally; the dialog is conditionally *rendered* by DevicesView).
+// ---------------------------------------------------------------------------
+
+function RevokeConfirmDialog({
+  name,
+  fingerprint,
+  rotatePassphrase,
+  revokeBusy,
+  onPassphraseChange,
+  onCancel,
+  onRevoke,
+  onRevokeAndRotate,
+}: {
+  name: string;
+  fingerprint: string;
+  rotatePassphrase: string;
+  revokeBusy: boolean;
+  onPassphraseChange: (v: string) => void;
+  onCancel: () => void;
+  onRevoke: (fp: string) => void;
+  onRevokeAndRotate: (fp: string) => void;
+}) {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="revoke-modal-title"
+    >
+      {/* surface-glass-strong = floating frosted-glass revoke dialog. */}
+      <div ref={dialogRef} className="surface-glass-strong w-full max-w-sm rounded-ide-lg p-5 shadow-ide-lg">
+        <p id="revoke-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
+          Revoke &ldquo;{name}&rdquo;
+        </p>
+        <p className="mb-3 text-[12px] leading-relaxed text-ide-dim">
+          Revoking removes this device from P2P. To also cut off cloud/relay
+          sync, rotate the sync key — remaining devices must re-scan the
+          pairing QR (or re-enter the new passphrase) to keep syncing. Rotate
+          now?
+        </p>
+
+        <label className="mb-1 block text-[11px] font-medium text-ide-faint">
+          New sync passphrase (for rotation)
+        </label>
+        <input
+          type="password"
+          value={rotatePassphrase}
+          onChange={(e) => onPassphraseChange(e.target.value)}
+          placeholder="At least 8 characters"
+          autoComplete="new-password"
+          disabled={revokeBusy}
+          className="mb-3 w-full rounded-ide border border-ide-border bg-ide-panel/60 px-2.5 py-1.5 text-[12px] text-ide-text placeholder:text-ide-faint focus:border-ide-accent/60 focus:outline-none disabled:opacity-40"
+        />
+
+        <div className="flex items-center justify-end gap-2">
+          <button
+            onClick={onCancel}
+            disabled={revokeBusy}
+            className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => onRevoke(fingerprint)}
+            disabled={revokeBusy}
+            className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Revoke only
+          </button>
+          <button
+            onClick={() => onRevokeAndRotate(fingerprint)}
+            disabled={revokeBusy || rotatePassphrase.length < 8}
+            title={
+              rotatePassphrase.length < 8
+                ? "Enter a new passphrase (min 8 chars) to rotate"
+                : undefined
+            }
+            className="rounded-ide border border-ide-danger/40 bg-ide-danger/15 px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {revokeBusy ? "..." : "Revoke & rotate"}
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1724,70 +1822,19 @@ export function DevicesView({
 
       {/* ── C-P0-4: Revoke confirm — offer P2P-only vs cloud/relay rotation ── */}
       {revokePrompt !== null && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Revoke device"
-        >
-          {/* surface-glass-strong = floating frosted-glass revoke dialog. */}
-          <div className="surface-glass-strong w-full max-w-sm rounded-ide-lg p-5 shadow-ide-lg">
-            <p className="mb-1 text-[13px] font-medium text-ide-text">
-              Revoke "{revokePrompt.name}"
-            </p>
-            <p className="mb-3 text-[12px] leading-relaxed text-ide-dim">
-              Revoking removes this device from P2P. To also cut off cloud/relay
-              sync, rotate the sync key — remaining devices must re-scan the
-              pairing QR (or re-enter the new passphrase) to keep syncing. Rotate
-              now?
-            </p>
-
-            <label className="mb-1 block text-[11px] font-medium text-ide-faint">
-              New sync passphrase (for rotation)
-            </label>
-            <input
-              type="password"
-              value={rotatePassphrase}
-              onChange={(e) => setRotatePassphrase(e.target.value)}
-              placeholder="At least 8 characters"
-              autoComplete="new-password"
-              disabled={revokeBusy}
-              className="mb-3 w-full rounded-ide border border-ide-border bg-ide-panel/60 px-2.5 py-1.5 text-[12px] text-ide-text placeholder:text-ide-faint focus:border-ide-accent/60 focus:outline-none disabled:opacity-40"
-            />
-
-            <div className="flex items-center justify-end gap-2">
-              <button
-                onClick={() => {
-                  setRevokePrompt(null);
-                  setRotatePassphrase("");
-                }}
-                disabled={revokeBusy}
-                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={() => void handleRevoke(revokePrompt.fingerprint)}
-                disabled={revokeBusy}
-                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Revoke only
-              </button>
-              <button
-                onClick={() => void handleRevokeAndRotate(revokePrompt.fingerprint)}
-                disabled={revokeBusy || rotatePassphrase.length < 8}
-                title={
-                  rotatePassphrase.length < 8
-                    ? "Enter a new passphrase (min 8 chars) to rotate"
-                    : undefined
-                }
-                className="rounded-ide border border-ide-danger/40 bg-ide-danger/15 px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {revokeBusy ? "..." : "Revoke & rotate"}
-              </button>
-            </div>
-          </div>
-        </div>
+        <RevokeConfirmDialog
+          name={revokePrompt.name}
+          fingerprint={revokePrompt.fingerprint}
+          rotatePassphrase={rotatePassphrase}
+          revokeBusy={revokeBusy}
+          onPassphraseChange={setRotatePassphrase}
+          onCancel={() => {
+            setRevokePrompt(null);
+            setRotatePassphrase("");
+          }}
+          onRevoke={(fp) => void handleRevoke(fp)}
+          onRevokeAndRotate={(fp) => void handleRevokeAndRotate(fp)}
+        />
       )}
     </ViewShell>
   );

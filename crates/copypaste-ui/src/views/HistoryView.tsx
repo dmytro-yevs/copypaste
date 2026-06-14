@@ -32,6 +32,7 @@ import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 import { FileChip } from "../components/FileChip";
 import { ContentIcon, KindChip } from "../components/ContentIcon";
+import { useFocusTrap } from "../lib/useFocusTrap";
 
 // ---------------------------------------------------------------------------
 // Toast — §8 slide-up, neutral panel + 6px semantic dot, one at a time
@@ -46,6 +47,8 @@ function Toast({ message, kind }: { message: string; kind: ToastKind }) {
       // translucent fill + backdrop-blur + specular highlight + float shadow,
       // themed for light/dark. Replaces the hardcoded dark-only rgba(35,37,45,0.92).
       className="surface-glass-strong toast-in fixed bottom-3 left-1/2 z-50 pointer-events-none"
+      role={kind === "error" ? "alert" : "status"}
+      aria-live={kind === "error" ? "assertive" : "polite"}
       style={{
         // translate is baked into the toast-in animation start; keep it in
         // final state so the element stays centred after the animation settles.
@@ -514,9 +517,9 @@ function HistoryRow({
           onChange={() => {/* controlled via onClick above */}}
           className={[
             "h-4 w-4 rounded accent-ide-accent cursor-pointer",
-            selectionMode ? "opacity-80" : "opacity-0 group-hover:opacity-60",
+            selectionMode ? "opacity-80" : "opacity-0 group-hover:opacity-60 focus:opacity-80",
           ].join(" ")}
-          tabIndex={-1}
+          tabIndex={0}
           aria-label={`Select ${entry.preview.slice(0, 30)}`}
         />
       </span>
@@ -707,12 +710,15 @@ function IconActionBtn({
       aria-label={ariaLabel}
       title={title}
       className={[
-        "flex h-5 w-5 items-center justify-center rounded",
+        "relative flex h-5 w-5 items-center justify-center rounded",
         "border border-transparent hover:border-ide-border hover:bg-ide-elevated",
         danger ? "text-ide-danger" : "text-ide-dim hover:text-ide-text",
       ].join(" ")}
       onClick={(e) => { e.stopPropagation(); onClick(); }}
     >
+      {/* Transparent hit-target overlay expanding clickable area to ≥44×44px
+          without affecting the 20px visual button size or row layout. */}
+      <span aria-hidden="true" style={{ position: "absolute", inset: "-12px" }} />
       {children}
     </button>
   );
@@ -892,6 +898,10 @@ function DetailsModal({
   const [revealed, setRevealed] = useState(false);
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
 
+  // Focus trap — traps Tab/Shift+Tab inside the dialog panel and restores focus on close.
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef);
+
   // Close on Escape
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -907,7 +917,7 @@ function DetailsModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Clip details"
+      aria-labelledby="details-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       // Modal scrim: intentionally dark + light blur (not surface-glass) — this is
@@ -915,6 +925,7 @@ function DetailsModal({
       style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
     >
       <div
+        ref={modalRef}
         // surface-glass-strong = floating frosted-glass dialog: the dimmed,
         // blurred content behind the scrim shows through the translucent panel.
         className="surface-glass-strong relative flex max-h-[80vh] w-[480px] max-w-[90vw] flex-col overflow-hidden rounded-xl shadow-xl"
@@ -922,7 +933,7 @@ function DetailsModal({
       >
         {/* Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-ide-border px-4 py-2.5">
-          <span className="text-[13px] font-medium text-ide-text">
+          <span id="details-modal-title" className="text-[13px] font-medium text-ide-text">
             {modalTitle}
           </span>
           <button
@@ -2308,7 +2319,11 @@ export function HistoryView() {
     );
   } else if (loadState === "error") {
     body = (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+      <div
+        className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
+        role="alert"
+        aria-live="assertive"
+      >
         <div className="text-[13px] font-medium text-ide-danger">
           {degraded ? "Clipboard database can't be opened" : "Failed to load history."}
         </div>
@@ -2533,6 +2548,8 @@ export function HistoryView() {
           // surface-glass-strong = same floating frosted-glass material as Toast,
           // theme-aware (replaces the hardcoded dark-only rgba fill + blur).
           className="surface-glass-strong toast-in fixed bottom-3 left-1/2 z-[9999] pointer-events-auto"
+          role="status"
+          aria-live="polite"
           style={{
             transform: "translateX(-50%)",
             borderRadius: 10,

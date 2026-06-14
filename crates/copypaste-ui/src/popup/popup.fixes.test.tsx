@@ -213,8 +213,8 @@ describe("Fix #3: SettingsView P2P toggle sends full config payload", () => {
       expect(screen.queryByText(/^Loading…$/i)).not.toBeInTheDocument();
     });
 
-    // Select the "Sync" tab
-    const syncTab = screen.getByRole("button", { name: /Sync/i });
+    // Select the "Sync" tab (role="tab" after a11y fix CopyPaste-9c8)
+    const syncTab = screen.getByRole("tab", { name: /Sync/i });
     fireEvent.click(syncTab);
 
     // Find the P2P toggle switch and click it.

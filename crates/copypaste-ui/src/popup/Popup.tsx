@@ -573,6 +573,11 @@ export function Popup() {
           />
           <ul
             ref={listRef}
+            role="listbox"
+            aria-label="Clipboard history"
+            aria-activedescendant={
+              filtered[selectedIdx] ? `popup-item-${filtered[selectedIdx].item.id}` : undefined
+            }
             className="relative flex-1 overflow-y-auto py-1 h-full"
             style={{ minHeight: 0 }}
           >
@@ -628,7 +633,7 @@ export function Popup() {
             aria-label="Open settings"
             title="Open settings"
             onClick={() => void openSettings()}
-            className="flex min-h-[24px] min-w-[24px] items-center justify-center rounded hover:bg-ide-hover transition-colors"
+            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded hover:bg-ide-hover transition-colors"
             style={{ border: "none", background: "none", cursor: "pointer", color: "var(--ide-ghost)" }}
           >
             <svg
@@ -790,6 +795,9 @@ function PopupRow({
 
   return (
     <li
+      id={`popup-item-${item.id}`}
+      role="option"
+      aria-selected={selected}
       className={[
         isImage ? "popup-row-image" : "popup-row",
         "flex items-center gap-2 px-3 cursor-pointer select-none relative group",

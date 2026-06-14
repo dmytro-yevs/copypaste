@@ -376,12 +376,16 @@ function TabBar({
 
   return (
     // relative so the absolute indicator is contained within the tab bar.
-    <div className="relative mb-4 flex gap-0.5 border-b border-ide-border pb-0">
+    <div role="tablist" className="relative mb-4 flex gap-0.5 border-b border-ide-border pb-0">
       {TABS.map((t, idx) => (
         <button
           key={t.id}
           ref={(el) => { tabRefs.current[idx] = el; }}
           type="button"
+          role="tab"
+          aria-selected={active === t.id}
+          id={`tab-${t.id}`}
+          aria-controls={`tabpanel-${t.id}`}
           onClick={() => onChange(t.id)}
           className={[
             "px-3 py-2 text-[13px] transition-colors -mb-px",
@@ -2177,12 +2181,13 @@ export function SettingsView() {
         // a huge empty right gutter on wide windows.
         <div className="mx-auto w-full" style={{ maxWidth: "620px" }}>
           <TabBar active={activeTab} onChange={setActiveTab} />
-          {activeTab === "general"   && renderGeneral()}
-          {activeTab === "display"   && renderDisplay()}
-          {activeTab === "sync"      && renderSync()}
-          {activeTab === "shortcuts" && renderShortcuts()}
-          {activeTab === "storage"   && renderStorage()}
-          {activeTab === "advanced"  && renderAdvanced()}
+          {/* Each active tab's content is wrapped in a tabpanel for a11y. */}
+          {activeTab === "general"   && <div role="tabpanel" id="tabpanel-general"   aria-labelledby="tab-general">{renderGeneral()}</div>}
+          {activeTab === "display"   && <div role="tabpanel" id="tabpanel-display"   aria-labelledby="tab-display">{renderDisplay()}</div>}
+          {activeTab === "sync"      && <div role="tabpanel" id="tabpanel-sync"      aria-labelledby="tab-sync">{renderSync()}</div>}
+          {activeTab === "shortcuts" && <div role="tabpanel" id="tabpanel-shortcuts" aria-labelledby="tab-shortcuts">{renderShortcuts()}</div>}
+          {activeTab === "storage"   && <div role="tabpanel" id="tabpanel-storage"   aria-labelledby="tab-storage">{renderStorage()}</div>}
+          {activeTab === "advanced"  && <div role="tabpanel" id="tabpanel-advanced"  aria-labelledby="tab-advanced">{renderAdvanced()}</div>}
         </div>
       )}
     </ViewShell>
