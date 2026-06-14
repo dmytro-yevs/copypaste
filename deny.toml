@@ -25,6 +25,24 @@ ignore = [
     "RUSTSEC-2024-0418",
     "RUSTSEC-2024-0419",
     "RUSTSEC-2024-0420",
+    # More gtk-rs GTK3 X11/Wayland backend bindings unmaintained (same tray-icon ->
+    # libappindicator -> gtk chain; Linux UI only, not built on macOS/Android).
+    "RUSTSEC-2024-0411", # gdkwayland-sys
+    "RUSTSEC-2024-0414", # gdkx11-sys
+    "RUSTSEC-2024-0417", # gdkx11
+    # glib 0.18 `VariantStrIter` unsound (RUSTSEC-2024-0429). Transitive via
+    # webkit2gtk -> tauri on LINUX ONLY; macOS/Android (primary targets) use
+    # WKWebView/Android WebView and never link glib. No safe upgrade until the
+    # gtk3 stack is replaced upstream. Linux-scoped, not on the crypto/IPC path.
+    "RUSTSEC-2024-0429",
+    # unic-* unmaintained (char-range/common/char-property/ucd-version/ucd-ident).
+    # Transitive via urlpattern -> tauri-utils -> copypaste-ui (UI build only).
+    # No safe upgrade upstream; not on the core crypto/IPC path.
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
     # paste 1.0.x unmaintained. No safe upgrade upstream.
     "RUSTSEC-2024-0436",
     # bincode 1.3.3 unmaintained (team disbanded after harassment incident).
