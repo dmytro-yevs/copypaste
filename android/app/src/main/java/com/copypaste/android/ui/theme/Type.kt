@@ -105,6 +105,12 @@ val CopyPasteTypography = Typography(
         fontSize   = 11.sp,
         lineHeight = 16.sp,
     ),
+    bodySmall = TextStyle(
+        fontFamily = InterFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize   = 11.sp,
+        lineHeight = 15.sp,
+    ),
     labelLarge = TextStyle(
         fontFamily = InterFontFamily,
         fontWeight = FontWeight.Medium,

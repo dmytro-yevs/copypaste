@@ -1099,7 +1099,7 @@ private fun SettingsSectionLabel(text: String) {
             style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
-                letterSpacing = 0.8.sp,
+                letterSpacing = 0.6.sp,
             ),
             color = c.dim,
             modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp),
@@ -1250,13 +1250,15 @@ private fun SettingsNavRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
+    // CopyPaste-hffp: density-aware vertical padding
+    density: String = "comfortable",
 ) {
     val c = LocalIdeColors.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = if (density == "compact") 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1319,7 +1321,9 @@ private fun SettingsRow(
     title: String,
     subtitle: String,
     checked: Boolean,
-    onCheckedChange: (Boolean) -> Unit
+    onCheckedChange: (Boolean) -> Unit,
+    // CopyPaste-hffp: density-aware vertical padding — compact=8dp, comfortable=12dp
+    density: String = "comfortable",
 ) {
     val c = LocalIdeColors.current
     Row(
@@ -1329,7 +1333,7 @@ private fun SettingsRow(
         modifier = Modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {}
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = if (density == "compact") 8.dp else 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1387,7 +1391,7 @@ private fun AdbCaptureStatusLine(
                     stringResource(R.string.bg_adb_status_read_logs_ok)
                 else
                     stringResource(R.string.bg_adb_status_read_logs_no),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = if (readLogsGranted) c.success else c.danger,
             )
             Text(
@@ -1395,13 +1399,13 @@ private fun AdbCaptureStatusLine(
                     stringResource(R.string.bg_adb_status_overlay_ok)
                 else
                     stringResource(R.string.bg_adb_status_overlay_no),
-                style = MaterialTheme.typography.labelSmall,
+                style = MaterialTheme.typography.bodySmall,
                 color = if (overlayGranted) c.success else c.dim,
             )
         }
         Text(
             text = captureText,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
             color = captureColor,
             modifier = Modifier.padding(top = 2.dp),
         )
