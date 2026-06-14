@@ -265,13 +265,15 @@ fn legacy_config_path() -> Option<std::path::PathBuf> {
 /// cannot import `AppConfig` directly) can honour the persisted flag without
 /// re-reading the full config.
 ///
-/// # FIXWAVE: daemon.rs must call `ipc::read_config().p2p_enabled` (or this
-/// accessor) when deciding whether to start the P2P subsystem. Currently
-/// `daemon.rs` reads the env-var `COPYPASTE_P2P` only and never consults the
-/// persisted `AppConfig::p2p_enabled` value written by `set_config`, so toggling
-/// P2P from the settings UI has no effect until the env-var is set. Wiring
-/// requires editing `daemon.rs` (out of scope for this agent) — the call site
-/// is the block immediately before `start_p2p` in `daemon::run`.
+/// **Precedence (A-SET-4):** `COPYPASTE_P2P=1` (env override) beats the
+/// persisted config; `COPYPASTE_P2P=0` hard-disables P2P regardless. When the
+/// env var is absent (the normal user install path), `daemon::run` delegates
+/// here. A `set_config` that writes `p2p_enabled=false` persists to
+/// `config.json`; the change is picked up on the **next daemon restart** because
+/// starting/stopping the P2P transport stack at runtime requires a full
+/// `start_p2p` re-run and is deferred to a future hot-restart feature
+/// (CopyPaste-bjh). The `set_config` handler logs a `tracing::info!` notice
+/// when this flag changes so operators can see the restart requirement in logs.
 pub fn p2p_enabled_from_config() -> bool {
     // S2: default ON. A fresh install with no config.json must start P2P so the
     // user can pair devices without having to toggle it on first. `Some(false)`
@@ -4343,6 +4345,13 @@ impl IpcServer {
                 // the running DiscoveryService after the persist succeeds.
                 let requested_lan_visibility = incoming.lan_visibility;
                 let discovery_for_lan = self.discovery.clone();
+                // Capture p2p_enabled so we can log a restart-required notice
+                // after the persist succeeds. Runtime start/stop of the full P2P
+                // transport stack (start_p2p) is not feasible without a large
+                // refactor (CopyPaste-bjh); the persisted value is honoured on
+                // the NEXT daemon restart. `None` means the caller did not send
+                // the field — no change, no notice needed.
+                let requested_p2p_enabled = incoming.p2p_enabled;
                 // MERGE, don't overwrite. `get_config` redacts the secret
                 // fields (`supabase_password`, `supabase_email`) to `*_set`
                 // booleans and drops the real values, so a UI/CLI
@@ -4456,6 +4465,17 @@ impl IpcServer {
                                     disc.stop();
                                 }
                             }
+                        }
+                        // CopyPaste-bjh: p2p_enabled is persisted to config.json
+                        // here and honoured at the NEXT daemon startup (A-SET-4).
+                        // Hot-apply (runtime start/stop of start_p2p) is not
+                        // implemented; inform operators so they know a restart is
+                        // needed for the toggle to take effect.
+                        if let Some(enabled) = requested_p2p_enabled {
+                            tracing::info!(
+                                p2p_enabled = enabled,
+                                "p2p_enabled persisted — change takes effect on next daemon restart"
+                            );
                         }
                         Response::ok(req.id, serde_json::json!({"saved": true}))
                     }
@@ -13931,5 +13951,69 @@ mod tests {
         // Restore env.
         unsafe { std::env::remove_var("COPYPASTE_CONFIG_DIR") };
         drop(env_lock);
+    }
+
+    // ── CopyPaste-bjh: startup must honour persisted p2p_enabled ────────────
+
+    /// `p2p_enabled_from_config` must default to `true` when no config.json
+    /// exists (fresh install — P2P is ON by default so users can pair without
+    /// an explicit toggle). Regression guard: daemon startup used to check
+    /// `COPYPASTE_P2P` env-var only; now it falls back to this accessor.
+    #[test]
+    fn p2p_enabled_from_config_defaults_to_true_when_no_config() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::set_all(
+            &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
+            dir.path(),
+        );
+        // No config.json written — accessor must return true (default ON).
+        assert!(
+            p2p_enabled_from_config(),
+            "p2p_enabled_from_config must default to true when config.json is absent"
+        );
+    }
+
+    /// When `p2p_enabled: false` is persisted (user toggled P2P off in Settings),
+    /// `p2p_enabled_from_config` must return `false`. This is the value daemon
+    /// startup reads (after the A-SET-4 fix) so the daemon skips `start_p2p`
+    /// when the env-var override (`COPYPASTE_P2P`) is absent.
+    #[test]
+    fn p2p_enabled_from_config_returns_false_when_persisted_false() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::set_all(
+            &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
+            dir.path(),
+        );
+        write_config(&AppConfig {
+            p2p_enabled: Some(false),
+            ..Default::default()
+        })
+        .expect("write_config must succeed");
+
+        assert!(
+            !p2p_enabled_from_config(),
+            "p2p_enabled_from_config must return false when config.json stores p2p_enabled=false"
+        );
+    }
+
+    /// When `p2p_enabled: true` is persisted, `p2p_enabled_from_config` must
+    /// return `true`. Symmetric with the false case above.
+    #[test]
+    fn p2p_enabled_from_config_returns_true_when_persisted_true() {
+        let dir = tempdir().unwrap();
+        let _env = EnvGuard::set_all(
+            &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
+            dir.path(),
+        );
+        write_config(&AppConfig {
+            p2p_enabled: Some(true),
+            ..Default::default()
+        })
+        .expect("write_config must succeed");
+
+        assert!(
+            p2p_enabled_from_config(),
+            "p2p_enabled_from_config must return true when config.json stores p2p_enabled=true"
+        );
     }
 }

@@ -774,7 +774,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let (sync_outbound_tx, sync_outbound_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
     let (sync_incoming_tx, sync_incoming_rx) = mpsc::channel::<copypaste_sync::WireItem>(64);
 
-    // Start the P2P subsystem when COPYPASTE_P2P=1 is set in the environment.
+    // Start the P2P subsystem when p2p_enabled is true (resolved above via
+    // A-SET-4: COPYPASTE_P2P env override, falling back to persisted config via
+    // `ipc::p2p_enabled_from_config()`).
     // The live allowlist, cert, and shared DiscoveryService must all be present:
     // the cert is the identity the transport presents and that pairing advertises,
     // and the DiscoveryService must be the SAME Arc handed to the IPC server so
@@ -963,7 +965,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 }
             }
         } else {
-            tracing::debug!("P2P disabled (set COPYPASTE_P2P=1 to enable)");
+            tracing::debug!(
+                "P2P disabled (via COPYPASTE_P2P=0 or persisted p2p_enabled=false in config.json; \
+                 set COPYPASTE_P2P=1 or toggle in Settings to enable)"
+            );
             // Drop sync_outbound_rx — no consumer. sync_orch will log debug
             // on each outbound send (harmless: closed receiver just means no
             // peers are connected).
