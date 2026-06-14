@@ -75,6 +75,10 @@ export function clearImageCache(): void {
 // ---------------------------------------------------------------------------
 // Test-only exports — exposed solely for unit tests; not part of the public
 // component API. The `__testOnly_` prefix signals this clearly.
+//
+// These are never imported by production code, so Rollup/Vite tree-shakes them
+// out of the production bundle automatically (dead export elimination).
+// Vitest imports them directly and runs in DEV mode where they are available.
 // ---------------------------------------------------------------------------
 
 /** Returns the current number of entries in the cache. */

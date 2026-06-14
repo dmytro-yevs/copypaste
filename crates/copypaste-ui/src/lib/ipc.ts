@@ -6,32 +6,52 @@
 // in production builds where VITE_MOCK is not "1".
 // ---------------------------------------------------------------------------
 
-// Tree-shakeable: tauriInvoke is never imported when MOCK===true at build time
-// (Vite replaces import.meta.env.VITE_MOCK with the literal string "1" or "").
+// ---------------------------------------------------------------------------
+// Mock-IPC gate (DEV-only): the ?mock=1 escape hatch is only honoured in
+// development / test builds. In production (import.meta.env.DEV === false)
+// the entire branch is dead code — Rollup/Vite tree-shakes mockIpc.ts out of
+// the bundle entirely, so fixture data (developer email, fixture secrets) never
+// ships to end-users. The runtime ?mock=1 URL gate is also only active in DEV,
+// preventing production webview users from swapping in the fixture harness.
+// ---------------------------------------------------------------------------
+
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { mockInvoke } from "./mockIpc";
 
-/**
- * True when the browser mock-IPC harness is active.
- * Activated by VITE_MOCK=1 at build/dev time OR ?mock=1 in the URL at runtime.
- * The URL-based escape hatch works even in a production build served by a
- * plain HTTP server (no Tauri), making ad-hoc visual testing easy.
- */
-const MOCK =
-  (import.meta.env?.VITE_MOCK === "1") ||
-  (typeof window !== "undefined" &&
-    new URLSearchParams(window.location.search).has("mock"));
+type InvokeFn = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 
-/**
- * Single invoke() used throughout this module. In mock mode it is the
- * in-process fixture; in real mode it is the Tauri bridge. The signature
- * matches @tauri-apps/api/core's `invoke<T>` exactly so call sites are
- * unchanged.
- */
-const invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T> =
-  MOCK
-    ? (cmd, args) => mockInvoke(cmd, args) as Promise<never>
-    : tauriInvoke;
+// `invoke` and `MOCK` are resolved below via a DEV-gated block. Both branches
+// always assign them, so TypeScript can prove they are initialised before use.
+let invoke: InvokeFn;
+let MOCK: boolean;
+
+if (import.meta.env.DEV) {
+  // DEV / test: honour VITE_MOCK=1 (build-time) or ?mock=1 (runtime URL).
+  const mockRequested =
+    (import.meta.env?.VITE_MOCK === "1") ||
+    (typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).has("mock"));
+
+  if (mockRequested) {
+    // Dynamic import keeps mockIpc.ts out of the production module graph.
+    // Top-level await is valid here: "module": "ESNext" + "moduleResolution":
+    // "bundler" enable top-level await in TypeScript ESM modules.
+    // Vite statically replaces import.meta.env.DEV with `false` in prod, so
+    // this entire `if` block — including the dynamic import string — is dead
+    // code that Rollup eliminates before bundling.
+    const { mockInvoke } = await import("./mockIpc");
+    MOCK = true;
+    invoke = (cmd, args) => mockInvoke(cmd, args) as Promise<never>;
+  } else {
+    MOCK = false;
+    invoke = tauriInvoke;
+  }
+} else {
+  // Production: always the real Tauri bridge. mockIpc.ts is never referenced.
+  MOCK = false;
+  invoke = tauriInvoke;
+}
+
+export { MOCK };
 
 /**
  * IPC wire protocol version this UI build was compiled against (ADR-007).

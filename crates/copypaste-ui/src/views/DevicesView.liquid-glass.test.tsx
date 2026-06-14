@@ -11,7 +11,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, waitFor } from "@testing-library/react";
 
 const getOwnDeviceInfo = vi.fn();
 const listPeers = vi.fn();
@@ -260,8 +260,14 @@ describe("§7.5 QR countdown drain bar", () => {
 
     const { container } = render(<DevicesView />);
 
-    // Wait for QR to render (the payload text should appear)
-    await screen.findByText("copypaste://pair?token=abc");
+    // Wait for QR to render — the drain bar appears as soon as the QR is ready
+    // and qrSecsLeft > 0, regardless of whether the QR is blurred or revealed.
+    // (The payload text is behind the privacy blur by default, so we target the
+    // drain bar directly instead of waiting for the payload text.)
+    await waitFor(() => {
+      const bar = container.querySelector("[data-testid='qr-drain-bar']");
+      expect(bar).not.toBeNull();
+    });
 
     // The drain bar: a div with transition-[width] and bg-ide-accent or bg-ide-warning
     const bars = container.querySelectorAll("[data-testid='qr-drain-bar']");
@@ -276,7 +282,12 @@ describe("§7.5 QR countdown drain bar", () => {
     });
 
     const { container } = render(<DevicesView />);
-    await screen.findByText("copypaste://pair?token=abc");
+
+    // Wait for drain bar — payload is blurred by default (privacy-first §10).
+    await waitFor(() => {
+      const bar = container.querySelector("[data-testid='qr-drain-bar']");
+      expect(bar).not.toBeNull();
+    });
 
     const bar = container.querySelector("[data-testid='qr-drain-bar']");
     expect(bar).not.toBeNull();
@@ -285,34 +296,44 @@ describe("§7.5 QR countdown drain bar", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §7.6 PeerRow Revoke button hover-reveal
+// §7.6 PeerRow destructive actions — always-visible (Liquid Glass redesign)
 // ---------------------------------------------------------------------------
-describe("§7.6 PeerRow Revoke hover-reveal", () => {
-  it("Revoke button has opacity-0 by default with group-hover:opacity-100", async () => {
+// The pre-glass spec used hover-reveal (opacity-0 / group-hover:opacity-100).
+// The Liquid Glass redesign (CopyPaste-9ug) makes Revoke and Unpair always
+// visible with a danger-tint fill (bg-ide-danger/15) — no hover required.
+describe("§7.6 PeerRow destructive actions always visible", () => {
+  it("Revoke button is always present and does NOT require hover (no opacity-0)", async () => {
     listPeers.mockResolvedValue({ peers: [BASE_PEER] });
 
-    const { container } = render(<DevicesView />);
+    render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
-    // Find the Revoke button — exactly "Revoke" text (not "Revoke only" etc.)
+    // The Revoke button must exist in the DOM at all times.
     const revokeBtns = screen.getAllByRole("button").filter(
       (btn) => btn.textContent?.trim() === "Revoke"
     );
     expect(revokeBtns.length).toBeGreaterThanOrEqual(1);
     const revokeBtn = revokeBtns[0];
-    expect(revokeBtn.className).toMatch(/opacity-0/);
-    expect(revokeBtn.className).toMatch(/group-hover:opacity-100/);
+    // Glass spec: always-visible danger tint — NOT the old hover-reveal pattern.
+    expect(revokeBtn.className).not.toMatch(/opacity-0/);
+    expect(revokeBtn.className).not.toMatch(/group-hover:opacity-100/);
+    expect(revokeBtn.className).toMatch(/bg-ide-danger/);
   });
 
-  it("PeerRow outer div has 'group' class to enable hover-reveal", async () => {
+  it("Unpair button is always present and does NOT require hover", async () => {
     listPeers.mockResolvedValue({ peers: [BASE_PEER] });
 
-    const { container } = render(<DevicesView />);
+    render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
-    // The peer row must have 'group' somewhere in its ancestor chain
-    const groupEls = container.querySelectorAll(".group");
-    expect(groupEls.length).toBeGreaterThanOrEqual(1);
+    // The Unpair button must also be always visible (same danger-tint fill).
+    const unpairBtns = screen.getAllByRole("button").filter(
+      (btn) => btn.textContent?.trim() === "Unpair"
+    );
+    expect(unpairBtns.length).toBeGreaterThanOrEqual(1);
+    const unpairBtn = unpairBtns[0];
+    expect(unpairBtn.className).not.toMatch(/opacity-0/);
+    expect(unpairBtn.className).toMatch(/bg-ide-danger/);
   });
 });
 
