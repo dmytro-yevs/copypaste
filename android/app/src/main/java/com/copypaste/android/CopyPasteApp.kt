@@ -33,6 +33,8 @@ class CopyPasteApp : Application() {
         // syncState auto-enables when READ_LOGS is granted and the user has not
         // explicitly disabled the toggle (survives app updates; reset on factory reset/data clear).
         val settings = Settings(this)
+        // One-time: reset a stale pre-Liquid-Glass theme_mode so light-first applies.
+        settings.migrateThemeForLiquidGlass()
         LogcatCaptureService.syncState(this, settings)
     }
 }

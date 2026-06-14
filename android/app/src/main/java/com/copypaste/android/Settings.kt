@@ -509,6 +509,18 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putString("theme_mode", v.name).apply()
 
     /**
+     * One-time upgrade migration to the Apple "Liquid Glass" light-first release.
+     * Pre-Liquid-Glass builds persisted `theme_mode` (often SYSTEM, which follows
+     * OS night mode → dark). Clear it ONCE so the new LIGHT default applies, then
+     * latch a flag so the user's later choices persist. Mirrors the desktop
+     * store.ts v1→v2 migration that drops the stale persisted theme.
+     */
+    fun migrateThemeForLiquidGlass() {
+        if (prefs.getBoolean("theme_migrated_lg", false)) return
+        prefs.edit().remove("theme_mode").putBoolean("theme_migrated_lg", true).apply()
+    }
+
+    /**
      * Maximum height (in dp) for image thumbnails in the history list.
      *
      * Matches Maccy's `imageMaxHeight` preference. The thumbnail is scaled into
