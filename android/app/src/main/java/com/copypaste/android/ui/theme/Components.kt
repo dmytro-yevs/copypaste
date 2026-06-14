@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -41,45 +42,101 @@ import androidx.compose.foundation.layout.widthIn
 import com.copypaste.android.Settings
 
 // ---------------------------------------------------------------------------
-// §3 Translucency / glass-surface helpers  (CopyPaste-fkj)
+// Glass material — Apple macOS Tahoe "Liquid Glass" (PARITY-SPEC §2)
 //
-// Design System v2 §3 token:
-//   ON  → container = rgba(panel-rgb, 0.72)  — frosted/glass feel
-//   OFF → container = panel (fully opaque)   — solid dark theme
+// Frosted translucent surface. The glass FILL and alpha differ per theme:
+//   LIGHT → warm near-white rgba(250,250,252, 0.62)
+//   DARK  → deep rgba(30,32,42, 0.55)
+// (Was a flat 0.72 with no warm-near-white tint.)
 //
-// GLASS_ALPHA and glassAlphaFor() are pure functions so they can be unit-tested
-// on the host JVM without the Android SDK.  Call glassContainerColor() from
-// @Composable sites; call rememberTranslucency() to read the pref from context.
+// When the translucency pref is OFF, surfaces are fully opaque (alpha 1.0) using
+// the theme's own elevated/panel color — the pre-glass solid look.
+//
+// GLASS_ALPHA_LIGHT/DARK and glassAlphaFor() are pure values/functions so they
+// can be unit-tested on the host JVM without the Android SDK. Call
+// glassContainerColor() from @Composable sites; call rememberTranslucency() to
+// read the pref from context. CopyPasteCard is the canonical glass surface.
 // ---------------------------------------------------------------------------
 
+/** PARITY-SPEC §2 LIGHT glass alpha (warm near-white fill). */
+const val GLASS_ALPHA_LIGHT = 0.62f
+
+/** PARITY-SPEC §2 DARK glass alpha. */
+const val GLASS_ALPHA_DARK = 0.55f
+
 /**
- * §3 canonical glass-surface alpha (rgba container with 0.72 opacity).
- * Pure constant — usable in JVM unit tests.
+ * Default glass alpha. Kept for source compatibility; equals the DARK value
+ * since dark was the historical baseline. Prefer [glassAlphaForTheme].
  */
-const val GLASS_ALPHA = 0.72f
+const val GLASS_ALPHA = GLASS_ALPHA_DARK
+
+/** PARITY-SPEC §2 warm near-white LIGHT glass fill — rgba(250,250,252). */
+val GlassFillLight = Color(0xFFFAFAFC)
+
+/** PARITY-SPEC §2 DARK glass fill — rgba(30,32,42). */
+val GlassFillDark = Color(0xFF1E202A)
 
 /**
  * Returns the container-surface alpha for the given [translucent] flag.
  *
- *   translucent = true  → GLASS_ALPHA (0.72f) — frosted/glass appearance
- *   translucent = false → 1.0f             — fully opaque solid surface
+ *   translucent = true  → [GLASS_ALPHA] — frosted/glass appearance
+ *   translucent = false → 1.0f          — fully opaque solid surface
  *
- * Pure function — usable in JVM unit tests.
+ * Pure function — usable in JVM unit tests. For theme-correct alpha use
+ * [glassAlphaForTheme].
  */
 fun glassAlphaFor(translucent: Boolean): Float = if (translucent) GLASS_ALPHA else 1.0f
 
 /**
- * Returns [base] with its alpha adjusted for the glass effect.
+ * Theme-aware glass alpha (PARITY-SPEC §2).
+ *
+ *   translucent = false             → 1.0f (solid)
+ *   translucent = true,  dark=true  → [GLASS_ALPHA_DARK]  (0.55)
+ *   translucent = true,  dark=false → [GLASS_ALPHA_LIGHT] (0.62)
+ *
+ * Pure function — usable in JVM unit tests.
+ */
+fun glassAlphaForTheme(translucent: Boolean, dark: Boolean): Float =
+    if (!translucent) 1.0f else if (dark) GLASS_ALPHA_DARK else GLASS_ALPHA_LIGHT
+
+/**
+ * Theme-correct glass fill color for the canonical glass surface (PARITY-SPEC §2).
+ *
+ * When [translucent], returns the warm-near-white (light) / deep (dark) glass
+ * fill at the §2 alpha so the opaque canvas behind it bleeds through for a
+ * frosted look. When not translucent, returns the supplied opaque [solid]
+ * surface unchanged. Pure — call from @Composable sites or helpers with colors.
+ */
+fun glassFillForTheme(solid: Color, translucent: Boolean, dark: Boolean): Color =
+    if (!translucent) {
+        solid
+    } else {
+        val fill = if (dark) GlassFillDark else GlassFillLight
+        fill.copy(alpha = glassAlphaForTheme(translucent = true, dark = dark))
+    }
+
+/**
+ * Returns [base] with its alpha adjusted for the glass effect (legacy shim).
  *
  *   translucent = true  → base.copy(alpha = GLASS_ALPHA)
  *   translucent = false → base (unchanged, fully opaque)
  *
- * Compose-only (uses Color.copy); call from @Composable sites or helpers
- * that already have Color values. When [translucent] is false, the original
- * [base] is returned without allocation.
+ * Retained for source compatibility; new code should prefer [glassFillForTheme]
+ * (theme-correct warm-near-white light fill). Compose-only (uses Color.copy).
  */
 fun glassContainerColor(base: Color, translucent: Boolean): Color =
     if (translucent) base.copy(alpha = GLASS_ALPHA) else base
+
+/**
+ * True when the active Material color scheme is the dark "Liquid Glass" scheme.
+ *
+ * Detected from the resolved surface luminance rather than a separate flag, so
+ * it tracks whichever scheme [CopyPasteTheme] installed (Light / Dark / System).
+ * The light surface (#F2F2F5) is bright; the dark surface (#1B1C22) is not, so a
+ * 0.5 luminance threshold separates them unambiguously.
+ */
+@Composable
+fun isDarkTheme(): Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
 /**
  * Reads the `translucency` SharedPreferences boolean (key "translucency",
@@ -143,8 +200,13 @@ fun CopyPasteTopBar(
     // §3 translucency: reads the pref by default; callers may override.
     translucent: Boolean = rememberTranslucency(),
 ) {
-    // Glass container: IdePanel at 72% alpha when translucent, fully opaque when off.
-    val containerColor = glassContainerColor(IdePanel, translucent)
+    // §2 glass header: warm-near-white (light) / deep (dark) fill at the §2
+    // alpha when translucent, else the opaque theme panel surface.
+    val containerColor = glassFillForTheme(
+        solid = MaterialTheme.colorScheme.surface,
+        translucent = translucent,
+        dark = isDarkTheme(),
+    )
 
     TopAppBar(
         title = {
@@ -188,30 +250,37 @@ fun CopyPasteTopBar(
  * success for a granted one) without flooding the whole card with color — this
  * is closer to the restrained macOS look than Material's filled containers.
  *
- * When [translucent] is true (default: reads from SharedPreferences), the card
- * container is IdeElevated.copy(alpha = GLASS_ALPHA) so the underlying surface
- * bleeds through — the §3 "glass" token. When false, the card is fully opaque.
+ * This is the CANONICAL glass surface (PARITY-SPEC §2): when [translucent]
+ * (default: reads from SharedPreferences), the container is the §2 warm-near-
+ * white (light) / deep (dark) glass fill so the opaque canvas behind it bleeds
+ * through. When false, the card is the fully opaque theme elevated surface.
  *
- * v0.5.3: uses IdeElevated (#23252D) container, 12 dp radius.
+ * 12 dp radius (§4); single 1 dp hairline border.
  */
 @Composable
 fun CopyPasteCard(
     modifier: Modifier = Modifier,
-    accent: Color = IdeBorder,
+    accent: Color = MaterialTheme.colorScheme.outline,
     // §3 translucency: reads the pref by default; callers may override.
     translucent: Boolean = rememberTranslucency(),
     content: @Composable (androidx.compose.foundation.layout.ColumnScope.() -> Unit),
 ) {
-    // Glass container: IdeElevated at 72% alpha when translucent, fully opaque when off.
-    val containerColor = glassContainerColor(IdeElevated, translucent)
+    // §2 canonical glass: warm-near-white (light) / deep (dark) fill at the §2
+    // alpha when translucent, else the opaque theme elevated surface.
+    val containerColor = glassFillForTheme(
+        solid = MaterialTheme.colorScheme.surfaceContainerHigh,
+        translucent = translucent,
+        dark = isDarkTheme(),
+    )
 
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = containerColor, // glass when translucent, solid #23252D when off
-            contentColor   = IdeText,
+            containerColor = containerColor,
+            contentColor   = MaterialTheme.colorScheme.onSurface,
         ),
+        // §4: single 1 dp hairline.
         border = androidx.compose.foundation.BorderStroke(1.dp, accent),
         elevation = CardDefaults.cardElevation(
             defaultElevation   = 2.dp,

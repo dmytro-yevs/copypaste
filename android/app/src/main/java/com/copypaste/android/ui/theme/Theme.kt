@@ -18,14 +18,20 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
+import com.copypaste.android.Settings
+import com.copypaste.android.ThemeMode
 
 // ---------------------------------------------------------------------------
-// CopyPaste theme — dark by default, matching the Design System v2 "Quiet
-// Precision" canonical palette defined in DESIGN-SYSTEM-v2.md §0/§3 and
-// mirrored in crates/copypaste-ui/tailwind.config.js.
+// CopyPaste theme — **light-first** (PARITY-SPEC §0), matching the Apple macOS
+// Tahoe "Liquid Glass" palette in docs/PARITY-SPEC.md §1, mirrored in
+// crates/copypaste-ui/src/index.css.
 //
-// A light colour scheme (LightColorScheme) is also provided; pass
-// darkTheme=false to CopyPasteTheme() to use it.
+// The default theme is LIGHT (NOT follow-OS). A Settings control drives a
+// [ThemeMode] (System / Light / Dark); CopyPasteTheme reads it from the
+// persisted pref via [rememberThemeMode] so every screen follows the user's
+// choice. Only ThemeMode.SYSTEM follows the OS dark/light setting.
+//
+// A dark colour scheme (DarculaColorScheme) is retained for Dark / System-dark.
 //
 // Dynamic color (Material You) is intentionally disabled: it would override
 // the precise canonical palette we need to match the desktop app.
@@ -175,24 +181,24 @@ private val LightColorScheme = lightColorScheme(
     secondaryContainer   = LightSecondaryContainer,
     onSecondaryContainer = LightOnSecondaryContainer,
 
-    // ── Backgrounds / surfaces ────────────────────────────────────────────
-    background           = LightBg,        // #ECEEF2 — lightest layer
-    onBackground         = LightText,      // #1A1C20 — 13.8:1 on bg
-    surface              = LightPanel,     // #F5F6F8 — primary surface
+    // ── Backgrounds / surfaces — Apple greys (PARITY-SPEC §1) ─────────────
+    background           = LightBg,        // #E3E3E8 — window canvas (systemGray5)
+    onBackground         = LightText,      // #1D1D1F — labelColor
+    surface              = LightPanel,     // #F2F2F5 — sidebar / list
     onSurface            = LightText,
-    surfaceVariant       = LightElevated,  // #EEF0F4 — elevated
-    onSurfaceVariant     = LightDim,       // #4B505A — 6.2:1 on panel
+    surfaceVariant       = LightElevated,  // #FFFFFF — cards, inputs
+    onSurfaceVariant     = LightDim,       // #5B5B60 — secondaryLabel
 
-    // Tonal surface containers — keep every tier inside the canonical light ramp.
-    surfaceContainerLowest  = LightBg,       // #ECEEF2
-    surfaceContainerLow     = LightPanel,    // #F5F6F8
-    surfaceContainer        = LightPanel,    // #F5F6F8 — bottom nav / app bar
-    surfaceContainerHigh    = LightElevated, // #EEF0F4 — cards
-    surfaceContainerHighest = LightRaised,   // #E4E6EB — pressed / raised
+    // Tonal surface containers — keep every tier inside the Apple light ramp.
+    surfaceContainerLowest  = LightBg,       // #E3E3E8
+    surfaceContainerLow     = LightPanel,    // #F2F2F5
+    surfaceContainer        = LightPanel,    // #F2F2F5 — bottom nav / app bar
+    surfaceContainerHigh    = LightElevated, // #FFFFFF — cards
+    surfaceContainerHighest = LightRaised,   // #ECECF0 — pressed / raised
 
     // ── Outline / dividers ────────────────────────────────────────────────
-    outline              = LightBorder,    // #C8CAD0
-    outlineVariant       = LightDivider,   // #D8DAE0
+    outline              = LightBorder,    // #D3D3D8
+    outlineVariant       = LightDivider,   // #E2E2E6
 
     // ── Error / destructive ───────────────────────────────────────────────
     error                = LightDanger,
@@ -208,18 +214,43 @@ private val LightColorScheme = lightColorScheme(
 )
 
 /**
+ * Reads the persisted [ThemeMode] from SharedPreferences (key "theme_mode",
+ * default [ThemeMode.LIGHT] — light-first per PARITY-SPEC §0).
+ *
+ * Defensive: returns LIGHT when the key is absent (first launch) so new installs
+ * see the Apple light theme immediately. `remember(ctx)` so the read is stable
+ * across recompositions for the activity lifetime; a Settings change recreates
+ * the activity (standard Android theme-switch flow), which re-reads it.
+ */
+@Composable
+fun rememberThemeMode(): ThemeMode {
+    val ctx = LocalContext.current
+    return remember(ctx) { Settings(ctx).themeMode }
+}
+
+/**
  * Root theme for CopyPaste on Android.
  *
- * Renders in dark mode by default (matching the Design System v2 palette) but
- * honors the [darkTheme] parameter: pass `false` to use the WCAG-AA light
- * colour scheme. Dynamic color (Material You) is disabled to preserve the
- * exact canonical palette.
+ * **Light-first** (PARITY-SPEC §0): the default is the Apple "Liquid Glass"
+ * light scheme. The active scheme is resolved from [themeMode]:
+ *   - [ThemeMode.LIGHT]  → light (default)
+ *   - [ThemeMode.DARK]   → dark
+ *   - [ThemeMode.SYSTEM] → follow OS ([isSystemInDarkTheme])
+ *
+ * [themeMode] defaults to the persisted pref via [rememberThemeMode], so every
+ * call site picks up the user's choice without per-site wiring. Dynamic color
+ * (Material You) is disabled to preserve the exact canonical palette.
  */
 @Composable
 fun CopyPasteTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    themeMode: ThemeMode = rememberThemeMode(),
     content: @Composable () -> Unit,
 ) {
+    val darkTheme = when (themeMode) {
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+    }
     val colorScheme = if (darkTheme) DarculaColorScheme else LightColorScheme
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -264,8 +295,9 @@ fun ideSwitchColors() = SwitchDefaults.colors(
     uncheckedThumbColor      = IdeDim,
     uncheckedTrackColor      = IdeElevated,
     uncheckedBorderColor     = IdeBorder,
-    disabledCheckedThumbColor    = Color.White.copy(alpha = 0.38f),
-    disabledCheckedTrackColor    = IdeAccent.copy(alpha = 0.38f),
-    disabledUncheckedThumbColor  = IdeDim.copy(alpha = 0.38f),
-    disabledUncheckedTrackColor  = IdeElevated.copy(alpha = 0.38f),
+    // PARITY-SPEC §4: disabled opacity 0.40 (was Material's 0.38).
+    disabledCheckedThumbColor    = Color.White.copy(alpha = 0.40f),
+    disabledCheckedTrackColor    = IdeAccent.copy(alpha = 0.40f),
+    disabledUncheckedThumbColor  = IdeDim.copy(alpha = 0.40f),
+    disabledUncheckedTrackColor  = IdeElevated.copy(alpha = 0.40f),
 )

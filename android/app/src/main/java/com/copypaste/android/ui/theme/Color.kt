@@ -38,7 +38,13 @@ val IdeMultiSel  = Color(0xFF3D8BFF).copy(alpha = 0.20f)  // multi-select fill (
 
 val IdeText      = Color(0xFFE8EAED)   // §0 canonical primary text
 val IdeDim       = Color(0xFF9DA0A8)   // secondary / subdued text
-val IdeFaint     = Color(0xFF6B6F78)   // placeholder / timestamp / hero-icon
+val IdeFaint     = Color(0xFF82868F)   // PARITY-SPEC §1 tertiaryLabel — WCAG-AA fix (was #6B6F78, failed AA)
+
+// ── Ghost text / decorative icon tokens (PARITY-SPEC §1) ───────────────────
+// Mirror web's --ide-ghost / --ide-ghost-deco. Ghost = secondary metadata text;
+// ghost-deco = 24px+ decorative icons (lower contrast, purely ornamental).
+val IdeGhost     = Color.White.copy(alpha = 0.46f)  // dark: white@0.46
+val IdeGhostDeco = Color.White.copy(alpha = 0.33f)  // dark: white@0.33 (decorative)
 
 // ── Brand / accent ────────────────────────────────────────────────────────
 
@@ -80,40 +86,49 @@ val DarkOnSecondary          = Color(0xFF1A1200)
 val DarkSecondaryContainer   = IdeWarningDim
 val DarkOnSecondaryContainer = Color(0xFFFFD98B)
 
-// ── Light scheme colours ──────────────────────────────────────────────────
-// Mirrors :root[data-theme="light"] in crates/copypaste-ui/src/index.css.
-// All WCAG AA contrast ratios verified against their backgrounds.
+// ── Light scheme colours — Apple macOS Tahoe "Liquid Glass" (PARITY-SPEC §1) ──
+// LIGHT is the default theme. Values come verbatim from the canonical Apple
+// system palette in docs/PARITY-SPEC.md §1 and mirror
+// crates/copypaste-ui/src/index.css :root[data-theme="light"].
 
-// Surface hierarchy — light ramp
-val LightBg        = Color(0xFFECEEF2)   // root / lightest layer
-val LightPanel     = Color(0xFFF5F6F8)   // primary surface
-val LightElevated  = Color(0xFFEEF0F4)   // cards, inputs
-val LightRaised    = Color(0xFFE4E6EB)   // hover / pressed
+// Surface hierarchy — Apple greys
+val LightBg        = Color(0xFFE3E3E8)   // window canvas — greyish (systemGray5)
+val LightPanel     = Color(0xFFF2F2F5)   // sidebar / list — frosted near-white
+val LightElevated  = Color(0xFFFFFFFF)   // cards, inputs
+val LightRaised    = Color(0xFFECECF0)   // hover / pressed on elevated
 
 // Borders & dividers
-val LightBorder    = Color(0xFFC8CAD0)
-val LightDivider   = Color(0xFFD8DAE0)
+val LightBorder    = Color(0xFFD3D3D8)   // hairline separators
+val LightDivider   = Color(0xFFE2E2E6)   // row separators
 
-// Text hierarchy — all WCAG AA on LightPanel (#F5F6F8)
-val LightText      = Color(0xFF1A1C20)   // 13.8:1 — AAA
-val LightDim       = Color(0xFF4B505A)   //  6.2:1 — AA
-val LightFaint     = Color(0xFF6B7280)   //  4.6:1 — AA
+// Text hierarchy (Apple label colors)
+val LightText      = Color(0xFF1D1D1F)   // labelColor
+val LightDim       = Color(0xFF5B5B60)   // secondaryLabel
+val LightFaint     = Color(0xFF8A8A8E)   // tertiaryLabel (§1 WCAG-AA value)
 
-// Brand — darkened for light surfaces; 5.2:1 on LightElevated
-val LightPrimary            = Color(0xFF1A5FCC)
+// Ghost text / decorative icons — light variant (PARITY-SPEC §1)
+val LightGhost     = Color(0xFF3C3C43).copy(alpha = 0.55f)  // rgba(60,60,67,0.55)
+val LightGhostDeco = Color(0xFF3C3C43).copy(alpha = 0.32f)  // rgba(60,60,67,0.32)
+
+// Brand — Apple systemBlue
+val LightPrimary            = Color(0xFF007AFF)   // §1 accent (systemBlue)
 val LightOnPrimary          = Color(0xFFFFFFFF)
-val LightPrimaryContainer   = Color(0xFFD6E4FF)   // light blue tint container
-val LightOnPrimaryContainer = Color(0xFF002060)   // dark navy on container
+val LightPrimaryContainer   = Color(0xFF007AFF).copy(alpha = 0.12f)
+val LightOnPrimaryContainer = Color(0xFF0063D1)   // accent-hover, on tint
 
-// Semantic
-val LightSecondary            = Color(0xFFA0610A)  // warning amber — AA on light
+// Semantic — Apple system colors (§1)
+val LightSecondary            = Color(0xFFFF9500)  // warning / systemOrange
 val LightOnSecondary          = Color(0xFFFFFFFF)
-val LightSecondaryContainer   = Color(0xFFFFE0B2)
+val LightSecondaryContainer   = Color(0xFFFF9500).copy(alpha = 0.12f)
 val LightOnSecondaryContainer = Color(0xFF3E2000)
 
-val LightDanger    = Color(0xFFC0392B)   // destructive / error
-val LightDangerDim = Color(0xFFC0392B).copy(alpha = 0.09f)
+val LightDanger    = Color(0xFFFF3B30)   // systemRed
+val LightDangerDim = Color(0xFFFF3B30).copy(alpha = 0.10f)
+
+val LightSuccess   = Color(0xFF34C759)   // systemGreen
+val LightInfo      = Color(0xFF32ADE6)   // systemTeal/cyan
+val LightViolet    = Color(0xFFAF52DE)   // systemPurple
 
 // Error containers for light
-val LightErrorContainer    = Color(0xFFFFDAD6)
-val LightOnErrorContainer  = Color(0xFF8B1A1A)
+val LightErrorContainer    = Color(0xFFFF3B30).copy(alpha = 0.10f)
+val LightOnErrorContainer  = Color(0xFFFF3B30)

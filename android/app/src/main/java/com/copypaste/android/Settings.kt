@@ -32,6 +32,22 @@ enum class Density {
     }
 }
 
+/**
+ * App theme mode — mirrors the web's System/Light/Dark theme control
+ * (PARITY-SPEC §0). The app is **light-first**: [DEFAULT] is [LIGHT], NOT
+ * follow-OS. The user may pick [SYSTEM] to follow the OS dark/light setting.
+ */
+enum class ThemeMode {
+    SYSTEM, // follow OS (isSystemInDarkTheme)
+    LIGHT,  // force light (default)
+    DARK;   // force dark
+
+    companion object {
+        /** PARITY-SPEC §0: default is LIGHT (light-first), not OS-follow. */
+        val DEFAULT = LIGHT
+    }
+}
+
 class Settings(context: Context) {
     private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
@@ -470,6 +486,27 @@ class Settings(context: Context) {
             else -> Density.COMFORTABLE
         }
         set(v) = prefs.edit().putString("density", v.name).apply()
+
+    /**
+     * App theme mode — System / Light / Dark (PARITY-SPEC §0).
+     *
+     * The app is **light-first**: the default is [ThemeMode.LIGHT], NOT
+     * follow-OS. A Settings control (added by a later screen agent) drives this;
+     * [com.copypaste.android.ui.theme.CopyPasteTheme] reads it via
+     * [com.copypaste.android.ui.theme.rememberThemeMode] so every screen picks
+     * up the choice without per-call-site wiring.
+     *
+     * Persisted as the enum name string so new variants can be added without a
+     * migration. Falls back to [ThemeMode.DEFAULT] (LIGHT) on an unrecognised or
+     * absent value.
+     */
+    var themeMode: ThemeMode
+        get() = when (prefs.getString("theme_mode", ThemeMode.DEFAULT.name)) {
+            ThemeMode.SYSTEM.name -> ThemeMode.SYSTEM
+            ThemeMode.DARK.name -> ThemeMode.DARK
+            else -> ThemeMode.LIGHT
+        }
+        set(v) = prefs.edit().putString("theme_mode", v.name).apply()
 
     /**
      * Maximum height (in dp) for image thumbnails in the history list.
