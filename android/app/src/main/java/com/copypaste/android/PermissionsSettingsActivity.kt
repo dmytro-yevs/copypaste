@@ -168,7 +168,15 @@ class PermissionsSettingsActivity : ComponentActivity() {
             Log.d(TAG, "Ignoring tap: a permission/settings request is already in flight")
             return
         }
+        // CopyPaste-l080: permanent-denial fallback — route to system notification
+        // settings instead of firing a dialog the OS will no longer show.
+        if (NotificationPermissionHelper.isPermanentlyDenied(this)) {
+            Log.i(TAG, "POST_NOTIFICATIONS permanently denied — opening app notification settings")
+            launchGated(NotificationPermissionHelper.appNotificationSettingsIntents(this))
+            return
+        }
         requestInFlight = true
+        NotificationPermissionHelper.markRequested(this)
         notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 

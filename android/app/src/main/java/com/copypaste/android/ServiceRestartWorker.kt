@@ -1,11 +1,16 @@
 package com.copypaste.android
 
+import android.app.Notification
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingWorkPolicy
+import androidx.work.ForegroundInfo
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
@@ -46,9 +51,52 @@ class ServiceRestartWorker(
         }
     }
 
+    /**
+     * CopyPaste-50mb: required for expedited execution on API < 31.
+     *
+     * On API 26-30 (minSdk=26) WorkManager runs an expedited request as a
+     * foreground-service-backed job and calls [getForegroundInfo] to obtain the
+     * notification it must show. Without this override expedited execution throws
+     * IllegalStateException at runtime, breaking the restart-after-swipe-away path
+     * on every pre-Android-12 device. On API 31+ the request is quota-job-backed
+     * and tolerates the absence, but providing it is harmless there.
+     *
+     * The notification is intentionally minimal and reuses [ClipboardService]'s
+     * existing IMPORTANCE_LOW (silent, no heads-up) channel so it is unobtrusive;
+     * the job lives for only a few hundred ms before the real FGS notification
+     * replaces it.
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        ClipboardService.ensureChannel(applicationContext)
+        val notification: Notification =
+            NotificationCompat.Builder(applicationContext, ClipboardService.CHANNEL_ID)
+                .setContentTitle(applicationContext.getString(R.string.notif_title_active))
+                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOngoing(true)
+                .build()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // FOREGROUND_SERVICE_TYPE_SPECIAL_USE matches ClipboardService's declared
+            // type so the transient restart notification is consistent with the FGS
+            // it is about to start.
+            ForegroundInfo(
+                RESTART_NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE,
+            )
+        } else {
+            ForegroundInfo(RESTART_NOTIFICATION_ID, notification)
+        }
+    }
+
     companion object {
         private const val TAG = "ServiceRestartWorker"
         private const val WORK_NAME = "copypaste_service_restart"
+
+        // Distinct from ClipboardService.NOTIFICATION_ID (1001) so the transient
+        // expedited-job notification does not collide with the real FGS one.
+        private const val RESTART_NOTIFICATION_ID = 1010
 
         /**
          * Enqueue a one-time expedited restart job.

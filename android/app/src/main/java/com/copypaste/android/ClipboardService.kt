@@ -709,6 +709,42 @@ class ClipboardService : Service() {
         private const val KEY_TODAY_COUNT = "today_count"
 
         /**
+         * CopyPaste-lk5m: hard cap on bytes read for a FILE capture, in bytes.
+         * Mirrors copypaste-core's file ceiling (defaults.rs: 64 MiB). This is the
+         * backstop that protects against a content provider that under-reports its
+         * OpenableColumns.SIZE (the ShareReceiverActivity pre-check is advisory).
+         */
+        private const val MAX_FILE_CAPTURE_BYTES = 64L * 1024 * 1024
+
+        /**
+         * CopyPaste-lk5m: hard cap on decoded-image pixel budget (in pixels), used to
+         * reject decompression bombs before allocating the full Bitmap. 100 MiB image
+         * ceiling / 4 bytes-per-ARGB-pixel ≈ 26.2M px; we use a generous 32M-pixel
+         * budget (≈128 MB at ARGB_8888) and reject anything above it.
+         */
+        private const val MAX_IMAGE_PIXELS = 32L * 1024 * 1024
+
+        /**
+         * Read up to [limit] bytes from [input], returning null when the stream
+         * exceeds the limit (so the caller can reject it instead of OOMing).
+         * Reads incrementally so an over-limit stream is aborted early rather than
+         * fully buffered. Returns the read bytes when within the limit.
+         */
+        private fun readBytesCapped(input: java.io.InputStream, limit: Long): ByteArray? {
+            val buffer = ByteArrayOutputStream()
+            val chunk = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                val n = input.read(chunk)
+                if (n < 0) break
+                total += n
+                if (total > limit) return null
+                buffer.write(chunk, 0, n)
+            }
+            return buffer.toByteArray()
+        }
+
+        /**
          * BUG 1 fix: shared MIME-dispatch helper.
          *
          * Both [ClipboardService.clipListener] and [ClipboardAccessibilityService]
@@ -922,6 +958,29 @@ class ClipboardService : Service() {
                 return
             }
 
+            // CopyPaste-lk5m: bounds-only pre-decode to reject decompression bombs
+            // BEFORE allocating the full Bitmap. inJustDecodeBounds reads only the
+            // image header, so a 100 000×100 000 PNG reports its dimensions without
+            // OOMing. If width*height exceeds MAX_IMAGE_PIXELS, abort.
+            try {
+                val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream, null, boundsOpts)
+                }
+                val pixels = boundsOpts.outWidth.toLong() * boundsOpts.outHeight.toLong()
+                if (boundsOpts.outWidth > 0 && boundsOpts.outHeight > 0 && pixels > MAX_IMAGE_PIXELS) {
+                    Log.w(
+                        TAG,
+                        "captureImageClip: image ${boundsOpts.outWidth}x${boundsOpts.outHeight} " +
+                            "($pixels px) exceeds $MAX_IMAGE_PIXELS px cap for $uri — rejecting",
+                    )
+                    return
+                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "captureImageClip: bounds pre-decode failed for $uri: ${t.message}")
+                return
+            }
+
             // Decode at full resolution (inSampleSize=1 = no sub-sampling).
             val decodeOpts = BitmapFactory.Options().apply {
                 inSampleSize = 1
@@ -1076,13 +1135,23 @@ class ClipboardService : Service() {
                 return
             }
 
-            // Read raw bytes from the content provider.
+            // Read raw bytes from the content provider, capped at MAX_FILE_CAPTURE_BYTES.
+            // CopyPaste-lk5m: readBytesCapped aborts early once the cap is exceeded so a
+            // hostile/huge content:// URI cannot OOM the process (the previous
+            // it.readBytes() buffered the entire stream unconditionally).
             val fileBytes: ByteArray = try {
-                context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: run {
-                        Log.w(TAG, "captureFileClip: openInputStream returned null for $uri")
+                context.contentResolver.openInputStream(uri)?.use { input ->
+                    readBytesCapped(input, MAX_FILE_CAPTURE_BYTES) ?: run {
+                        Log.w(
+                            TAG,
+                            "captureFileClip: stream exceeds ${MAX_FILE_CAPTURE_BYTES} byte cap for $uri — rejecting",
+                        )
                         return
                     }
+                } ?: run {
+                    Log.w(TAG, "captureFileClip: openInputStream returned null for $uri")
+                    return
+                }
             } catch (t: Throwable) {
                 Log.w(TAG, "captureFileClip: failed to read bytes from $uri: ${t.message}")
                 return
@@ -1127,10 +1196,13 @@ class ClipboardService : Service() {
 
             repository.storeFileBytes(storedId, fileBytes)
             repository.storeFileMeta(storedId, fileName, mimeType)
+            // CopyPaste-als8: do NOT log the filename — AppLogger writes to
+            // ADB-pullable external storage and the filename is user content (PII).
+            // Log only a length marker + the (non-sensitive) mime type.
             Log.d(
                 TAG,
                 "captureFileClip: stored $storedId (${fileBytes.size} bytes, " +
-                    "name=$fileName, mime=$mimeType)",
+                    "nameLen=${fileName?.length ?: 0}, mime=$mimeType)",
             )
 
             bumpTodayCounter(context)

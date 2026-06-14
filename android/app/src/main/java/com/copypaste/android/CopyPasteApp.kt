@@ -36,5 +36,27 @@ class CopyPasteApp : Application() {
         // One-time: reset a stale pre-Liquid-Glass theme_mode so light-first applies.
         settings.migrateThemeForLiquidGlass()
         LogcatCaptureService.syncState(this, settings)
+
+        // CopyPaste-jhz2: re-establish the foreground ClipboardService after a
+        // process-death restart. onCreate already restores the poll worker and
+        // logcat capture above, but historically NOT ClipboardService — the owner
+        // of the P2P listener, Supabase WS, relay SSE, and FGS sync loop. Recovery
+        // used to rely entirely on START_STICKY, which the OS does not honour after
+        // many force-stop / OEM-kill / low-memory scenarios, leaving capture + all
+        // three receive transports dead until the user reopened MainActivity.
+        //
+        // We use ServiceRestartWorker.scheduleOnce (the background-start-exempt
+        // expedited-job path) rather than a direct startForegroundService here:
+        // Application.onCreate can run in a background context (boot, WorkManager,
+        // sync push) where a direct FGS start throws on API 31+. The worker now
+        // provides getForegroundInfo() (CopyPaste-50mb) so expedited execution is
+        // also legal on API 26-30. Guarded by the user's capture toggle so a paused
+        // user is not forced back into monitoring.
+        if (settings.captureEnabled) {
+            runCatching { ServiceRestartWorker.scheduleOnce(this) }
+                .onFailure {
+                    android.util.Log.w("CopyPasteApp", "ClipboardService restore failed: ${it.message}")
+                }
+        }
     }
 }

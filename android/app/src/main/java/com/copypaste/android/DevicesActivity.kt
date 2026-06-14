@@ -11,6 +11,7 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.WindowManager
 import java.text.DateFormat
 import java.util.Date
 import androidx.activity.ComponentActivity
@@ -68,6 +69,8 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -230,6 +233,14 @@ class DevicesActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // CopyPaste-92qs: FLAG_SECURE. This window shows the own-device pairing QR
+        // (PAKE secret material — blurred at rest but tap-to-reveal makes it fully
+        // screenshot-capturable) and the full own fingerprint. Block screenshots and
+        // keep contents out of the recents thumbnail. Set before setContent.
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
         enableEdgeToEdge()
         val autoOpenSas = intent?.getBooleanExtra(EXTRA_AUTO_OPEN_SAS, false) ?: false
         setContent {
@@ -656,10 +667,10 @@ fun DevicesScreen(
             // the PAKE password + sync provisioning material. Reuses the same
             // blur/reveal pattern as PairActivity (Modifier.blur(16.dp) + overlay
             // label, first-tap reveals, second-tap regenerates and stays visible).
-            // The QR is generated lazily in OwnQrSection; the Scaffold FLAG_SECURE
-            // from PairActivity is NOT needed here because the QR is blurred at
-            // rest and FLAG_SECURE on PairActivity still protects the reveal flow
-            // when the user taps through to that screen.
+            // The QR is generated lazily in OwnQrSection. DevicesActivity now sets
+            // FLAG_SECURE in onCreate (CopyPaste-92qs), so the reveal flow here is
+            // screenshot-protected just like PairActivity's; the blur-at-rest is a
+            // second layer of defence.
             OwnQrSection(settings = settings)
 
             // ── Single grouped inset device list (PARITY-SPEC §8) ─────────────
@@ -815,11 +826,9 @@ private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap {
  * as PairActivity). Failures show a muted error label so the rest of the
  * Devices screen still renders.
  *
- * FLAG_SECURE: this composable lives in DevicesScreen, which does NOT set
- * FLAG_SECURE. The QR is blurred at rest, so the secret material is not
- * readable from a screenshot in the default state. Users who tap to reveal
- * accept the exposure; a future hardening pass could set FLAG_SECURE on
- * DevicesActivity too, but that blocks the rest of the screen uselessly.
+ * FLAG_SECURE: DevicesActivity sets FLAG_SECURE in onCreate (CopyPaste-92qs), so
+ * the revealed QR (and the full fingerprint) cannot be captured to a screenshot or
+ * the recents thumbnail. The blur-at-rest remains as defence-in-depth.
  */
 @Composable
 private fun OwnQrSection(settings: Settings) {
@@ -1873,11 +1882,24 @@ private fun MetaRow(label: String, value: String) {
 @Composable
 private fun MonoMetaRow(label: String, value: String, onTap: (() -> Unit)? = null) {
     val c = LocalIdeColors.current
+    // CopyPaste-3nyq: when the row is tappable (fingerprint copy), give TalkBack an
+    // explicit "Copy" action label AND merge label+value into one node with a
+    // contentDescription so the mono fingerprint reads as "<label>, <value>" and the
+    // user knows it can be double-tapped to copy.
+    val copyLabel = stringResource(R.string.cd_copy_fingerprint)
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .then(if (onTap != null) Modifier.clickable(onClick = onTap) else Modifier),
+            .then(
+                if (onTap != null) {
+                    Modifier
+                        .semantics(mergeDescendants = true) { contentDescription = "$label, $value" }
+                        .clickable(onClickLabel = copyLabel, onClick = onTap)
+                } else {
+                    Modifier
+                }
+            ),
     ) {
         Text(
             text = label,

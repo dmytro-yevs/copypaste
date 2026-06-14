@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import android.util.LruCache
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -136,6 +137,9 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -189,6 +193,15 @@ class HistoryActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // CopyPaste-92qs: FLAG_SECURE. This window renders the full clipboard history
+        // list AND the long-press full-screen PreviewOverlay (clip plaintext + images).
+        // HistoryActivity is a live, manifest-declared back-stack/deep-link target;
+        // MainActivity's flag does NOT cover it. Block screenshots and keep contents
+        // out of the recents thumbnail. Set before setContent so it covers the lifetime.
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
         enableEdgeToEdge()
         setContent {
             CopyPasteTheme {
@@ -2188,6 +2201,17 @@ private fun HistoryRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            // CopyPaste-e3n: delete was previously reachable only via a long-press
+            // (or the View-based ClipboardHistoryAdapter, now deleted as dead code).
+            // Expose Delete + Copy as accessibility custom actions so switch-access,
+            // keyboard, and TalkBack users can invoke them without a gesture. WCAG
+            // 2.1.1 (Keyboard), 2.5.3.
+            .semantics {
+                customActions = listOf(
+                    CustomAccessibilityAction("Copy") { onCopy(); true },
+                    CustomAccessibilityAction("Delete") { onDelete(item.id); true },
+                )
+            }
             .scale(rowScale)
             .background(rowBg)
             // §5/§8 Copy-success flash overlay: animates from c.successDim → transparent

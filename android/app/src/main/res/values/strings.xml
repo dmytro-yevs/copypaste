@@ -238,6 +238,16 @@
     <string name="cd_select_all">Select all</string>
     <string name="cd_close_selection">Close selection mode</string>
 
+    <!-- CopyPaste-3nyq: content descriptions for images / QR / fingerprint / status -->
+    <string name="cd_preview_image">Clipboard image preview</string>
+    <string name="cd_pairing_qr">Pairing QR code</string>
+    <string name="cd_pairing_qr_loading">Pairing QR code is loading</string>
+    <string name="cd_own_fingerprint">This device fingerprint</string>
+    <string name="cd_copy_fingerprint">Copy fingerprint</string>
+    <string name="cd_status_connected">Connected</string>
+    <string name="cd_status_offline">Offline</string>
+    <string name="cd_status_idle">Idle</string>
+
     <!-- History — file item actions -->
     <string name="action_open_file">Open file</string>
     <string name="cd_open_file">Open with default app</string>

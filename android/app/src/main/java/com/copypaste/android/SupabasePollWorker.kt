@@ -134,19 +134,29 @@ class SupabasePollWorker(
             Result.success()
         } catch (e: Exception) {
             Log.w(TAG, "Poll failed: ${e.message}")
-            // RETRY on network failures; SUCCESS on logic errors to avoid
-            // exponential-backoff storms from misconfigured credentials.
-            if (e is java.net.UnknownHostException || e is java.net.SocketTimeoutException) {
-                Result.retry()
-            } else {
-                Result.success()
-            }
+            if (shouldRetry(e)) Result.retry() else Result.success()
         }
     }
 
     companion object {
         private const val TAG = "SupabasePollWorker"
         private const val WORK_NAME = "supabase_poll"
+
+        /**
+         * CopyPaste-z934: retry-classification for a failed poll.
+         *
+         * RETRY on any transient network failure so WorkManager's exponential backoff
+         * re-runs the poll well before the 15-min periodic cadence. SUCCESS only on
+         * logic/config/auth errors so a misconfigured-credentials case does not cause
+         * backoff storms.
+         *
+         * IOException is the supertype of both originally-handled cases
+         * (UnknownHostException, SocketTimeoutException) plus SSL handshake failures,
+         * connection resets, premature EOF, and HTTP transport errors — previously all
+         * of those were swallowed as success and only recovered on the periodic tick.
+         * This is a strict widening of the original retry set.
+         */
+        fun shouldRetry(e: Throwable): Boolean = e is java.io.IOException
 
         /** Minimum WorkManager periodic interval. Increase if battery matters more than latency. */
         private const val POLL_INTERVAL_MINUTES = 15L

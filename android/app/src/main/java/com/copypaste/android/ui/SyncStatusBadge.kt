@@ -32,9 +32,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.DevicesOnlineState
+import com.copypaste.android.R
 import com.copypaste.android.Settings
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
@@ -140,13 +144,21 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
             letterSpacing = 1.5.sp,
             modifier = Modifier.weight(1f),
         )
+        // CopyPaste-3nyq: the dot conveys online/offline/idle by COLOUR only — add a
+        // text equivalent so screen-reader users get the state (WCAG 1.4.1).
+        val statusCd = when {
+            isOffline -> stringResource(R.string.cd_status_offline)
+            connected -> stringResource(R.string.cd_status_connected)
+            else      -> stringResource(R.string.cd_status_idle)
+        }
         Box(
             modifier = Modifier
                 .size(8.dp)
                 // Pulse scale applied only when connected; static otherwise.
                 .scale(if (connected) pulseScale else 1f)
                 .clip(CircleShape)
-                .background(dotColor),
+                .background(dotColor)
+                .semantics { contentDescription = statusCd },
         )
         if (count > 0) {
             Text(

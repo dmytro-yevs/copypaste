@@ -63,6 +63,10 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -592,6 +596,10 @@ fun IdeSwitch(
     onCheckedChange: ((Boolean) -> Unit)?,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    // CopyPaste-aod: accessibility label so TalkBack announces "<name>, on/off"
+    // instead of a bare "Switch, on". Optional so existing call sites that merge the
+    // switch into a labelled parent row (mergeDescendants) can leave it null.
+    name: String? = null,
 ) {
     val c = LocalIdeColors.current
 
@@ -630,9 +638,17 @@ fun IdeSwitch(
         Modifier
     }
 
+    // CopyPaste-aod: announce a human on/off state, and a name when supplied, so the
+    // switch is never read as a bare "Switch, on/off" with no context.
+    val a11yMod = Modifier.semantics {
+        stateDescription = if (checked) "On" else "Off"
+        if (name != null) contentDescription = name
+    }
+
     Box(
         modifier = modifier
             .then(clickMod)
+            .then(a11yMod)
             .size(width = trackW, height = trackH)
             .alpha(disabledAlpha)
             .clip(RoundedCornerShape(percent = 50))
@@ -676,7 +692,10 @@ fun SectionLabel(
             letterSpacing = 0.6.sp,   // tracking-wide
         ),
         color = c.dim,   // §3 grey, not accent
-        modifier = modifier.padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
+        // CopyPaste-aod: mark as a heading so TalkBack users can jump between sections.
+        modifier = modifier
+            .semantics { heading() }
+            .padding(start = 16.dp, top = 16.dp, bottom = 4.dp),
     )
 }
 
@@ -795,6 +814,9 @@ fun SteppedSliderRow(
             activeTickColor         = c.accent.copy(alpha = 0.7f),
             inactiveTickColor       = c.border.copy(alpha = 0.5f),
         )
+        // CopyPaste-aod: the bare Slider announces only "Slider, N%"; include the
+        // setting name + current step label so TalkBack reads e.g. "History limit, 50 MB".
+        val stepLabel = stepLabels[sliderPosition.toInt().coerceIn(0, stepValues.size - 1)]
         Slider(
             value = sliderPosition,
             onValueChange = { sliderPosition = it },
@@ -813,7 +835,9 @@ fun SteppedSliderRow(
                     colors = sliderColors,
                 )
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "$label, $stepLabel" },
         )
     }
 }
@@ -882,6 +906,8 @@ fun ContinuousSliderRow(
             activeTrackColor   = c.accent,
             inactiveTrackColor = c.border,
         )
+        // CopyPaste-aod: include setting name + formatted value for TalkBack.
+        val valueLabel = formatValue(sliderPos.toInt().coerceIn(min, max))
         Slider(
             value = sliderPos,
             onValueChange = { sliderPos = it },
@@ -898,7 +924,9 @@ fun ContinuousSliderRow(
                     colors = sliderColors,
                 )
             },
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics { contentDescription = "$label, $valueLabel" },
         )
     }
 }

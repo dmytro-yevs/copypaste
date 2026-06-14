@@ -448,7 +448,10 @@ private fun PreviewHeader(
                 color = IdeFaint,
             )
             if (pinned && onDismiss != null) {
-                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                // CopyPaste-5jcj: 48dp touch target (WCAG 2.5.5 / Android min) while
+                // keeping the visible glyph at 16dp. IconButton centres its content,
+                // so the icon does not grow.
+                IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
                     Icon(
                         imageVector = Icons.Filled.Close,
                         contentDescription = stringResource(R.string.cd_close_selection),
@@ -564,7 +567,8 @@ private fun PreviewImageContent(
         if (bitmap != null) {
             Image(
                 bitmap = bitmap,
-                contentDescription = null,
+                // CopyPaste-3nyq: describe the copied image so AT announces it.
+                contentDescription = stringResource(R.string.cd_preview_image),
                 contentScale = ContentScale.Fit,
                 modifier = Modifier
                     .fillMaxSize()
@@ -627,12 +631,15 @@ private fun PreviewActionRow(
     /** Open with default app. Non-null only for file items. */
     onOpenFile: (() -> Unit)? = null,
 ) {
+    // CopyPaste-5jcj: every action IconButton is 48dp (WCAG 2.5.5 minimum touch
+    // target) while the inner Icon glyph stays 18dp — IconButton centres its content
+    // so the visible icon is unchanged, only the tappable area grows.
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        IconButton(onClick = onCopy, modifier = Modifier.size(36.dp)) {
+        IconButton(onClick = onCopy, modifier = Modifier.size(48.dp)) {
             Icon(
                 imageVector = Icons.Filled.ContentCopy,
                 contentDescription = stringResource(R.string.cd_copy),
@@ -641,7 +648,7 @@ private fun PreviewActionRow(
             )
         }
         Spacer(Modifier.width(4.dp))
-        IconButton(onClick = { onSetPinned(!item.pinned) }, modifier = Modifier.size(36.dp)) {
+        IconButton(onClick = { onSetPinned(!item.pinned) }, modifier = Modifier.size(48.dp)) {
             Icon(
                 imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
                               else Icons.Filled.BookmarkBorder,
@@ -655,7 +662,7 @@ private fun PreviewActionRow(
         // Open with default app — shown only for file items
         if (onOpenFile != null) {
             Spacer(Modifier.width(4.dp))
-            IconButton(onClick = onOpenFile, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = onOpenFile, modifier = Modifier.size(48.dp)) {
                 Icon(
                     imageVector = Icons.Filled.OpenInNew,
                     contentDescription = stringResource(R.string.cd_open_file),
@@ -666,7 +673,7 @@ private fun PreviewActionRow(
         }
         if (onSaveFile != null) {
             Spacer(Modifier.width(4.dp))
-            IconButton(onClick = onSaveFile, modifier = Modifier.size(36.dp)) {
+            IconButton(onClick = onSaveFile, modifier = Modifier.size(48.dp)) {
                 Icon(
                     imageVector = Icons.Filled.SaveAlt,
                     contentDescription = stringResource(R.string.action_save_file),
@@ -676,7 +683,7 @@ private fun PreviewActionRow(
             }
         }
         Spacer(Modifier.width(4.dp))
-        IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+        IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
             Icon(
                 imageVector = Icons.Filled.Delete,
                 contentDescription = stringResource(R.string.cd_delete),

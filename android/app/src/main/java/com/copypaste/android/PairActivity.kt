@@ -382,6 +382,12 @@ fun PairScreen(
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var scannedInfo by remember { mutableStateOf<String?>(null) }
     var scannedPeer by remember { mutableStateOf<ScannedPairing?>(null) }
+    // CopyPaste-tqt0: the raw scanned/deep-linked QR payload, retained so its 6th-field
+    // relay/Supabase provisioning can be applied AFTER the user confirms pairing (inside
+    // runPairAndSync, only once the PAKE bootstrap succeeds) — NOT at scan/parse time. A
+    // hostile cppair:// could otherwise silently seed attacker-controlled URLs on a fresh
+    // install before any consent.
+    var pendingProvisioningRaw by remember { mutableStateOf<String?>(null) }
     var syncing by remember { mutableStateOf(false) }
     var syncResult by remember { mutableStateOf<String?>(null) }
     // Holds the just-paired peer to display in the compact success popup.
@@ -430,21 +436,12 @@ fun PairScreen(
             scannedPeer = info
             syncResult = null
             scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
-            // H4: apply any relay/Supabase provisioning embedded in the 6th QR
-            // field immediately at scan time — before the P2P bootstrap handshake
-            // completes, covering the off-LAN case. Runs on IO (SharedPreferences).
-            scope.launch {
-                withContext(Dispatchers.IO) {
-                    val prov = extractQrProvisioning(contents) ?: return@withContext
-                    val applied = applyQrProvisioning(prov, settings)
-                    if (applied.isNotEmpty()) {
-                        android.util.Log.i(
-                            "PairActivity",
-                            "QR provisioning (6th field) applied at scan: ${applied.joinToString(", ")}",
-                        )
-                    }
-                }
-            }
+            // CopyPaste-tqt0: retain the raw QR payload but DO NOT apply its 6th-field
+            // relay/Supabase provisioning yet. Applying at scan time let a hostile QR
+            // seed attacker-controlled URLs into Settings on a fresh install before the
+            // user consented. Provisioning is now applied inside runPairAndSync, only
+            // after the PAKE bootstrap (SAS confirmation) succeeds.
+            pendingProvisioningRaw = contents
         } catch (e: Exception) {
             errorMessage = e.message ?: "Invalid pairing code"
         }
@@ -483,8 +480,20 @@ fun PairScreen(
         if (granted) {
             launchScanner()
         } else {
-            errorMessage = "Camera permission is required to scan a pairing QR code. " +
-                "Grant it in Settings, or use the QR display flow on this device instead."
+            // CopyPaste-l080: distinguish a recoverable denial from a permanent one.
+            // After a permanent denial (the OS will no longer show the dialog) point
+            // the user at app-details Settings so re-tapping Scan is not a dead end.
+            val activity = context as? android.app.Activity
+            if (activity != null && NotificationPermissionHelper.isCameraPermanentlyDenied(activity)) {
+                NotificationPermissionHelper.launchFirstResolvable(
+                    context, NotificationPermissionHelper.appDetailsSettingsIntents(context),
+                )
+                errorMessage = "Camera permission is permanently denied. Enable it in " +
+                    "Settings (just opened), or use the QR display flow on this device instead."
+            } else {
+                errorMessage = "Camera permission is required to scan a pairing QR code. " +
+                    "Grant it in Settings, or use the QR display flow on this device instead."
+            }
         }
     }
 
@@ -494,9 +503,21 @@ fun PairScreen(
         ) == PackageManager.PERMISSION_GRANTED
         if (hasCamera) {
             launchScanner()
-        } else {
-            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+            return
         }
+        // CopyPaste-l080: if CAMERA is already permanently denied, requesting again is
+        // a silent no-op — go straight to app-details Settings instead.
+        val activity = context as? android.app.Activity
+        if (activity != null && NotificationPermissionHelper.isCameraPermanentlyDenied(activity)) {
+            NotificationPermissionHelper.launchFirstResolvable(
+                context, NotificationPermissionHelper.appDetailsSettingsIntents(context),
+            )
+            errorMessage = "Camera permission is permanently denied. Enable it in " +
+                "Settings (just opened) to scan a pairing QR."
+            return
+        }
+        NotificationPermissionHelper.markCameraRequested(context)
+        cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
     }
 
     // Drive bootstrap PAKE pairing + a single P2P sync against the scanned peer
@@ -527,6 +548,9 @@ fun PairScreen(
     // reuse it. Requires an on-device verification (phone + Mac on same Wi-Fi).
     fun runPairAndSync(peer: ScannedPairing) {
         if (syncing) return
+        // CopyPaste-tqt0: snapshot the retained QR payload now; its 6th-field
+        // provisioning is applied below ONLY after the PAKE bootstrap succeeds.
+        val provisioningRaw = pendingProvisioningRaw
         scope.launch {
             syncing = true
             syncResult = null
@@ -625,6 +649,22 @@ fun PairScreen(
                             android.util.Log.i(
                                 "PairActivity",
                                 "QR provisioning carried by peer but all fields already configured locally — nothing applied",
+                            )
+                        }
+                    }
+                    // CopyPaste-tqt0: NOW (post-bootstrap = the user confirmed pairing and
+                    // PAKE/SAS succeeded) apply the QR's 6th-field relay/Supabase provisioning.
+                    // Fill-missing only (applyQrProvisioning never overwrites a configured
+                    // field). This is the off-LAN / relay-only path; the PAKE-response
+                    // provisioning above covers the on-LAN bootstrap case. Deferring to here
+                    // ensures a hostile cppair:// cannot seed Settings without consent.
+                    provisioningRaw?.let { raw ->
+                        val prov = extractQrProvisioning(raw)
+                        val applied = prov?.let { applyQrProvisioning(it, settings) } ?: emptyList()
+                        if (applied.isNotEmpty()) {
+                            android.util.Log.i(
+                                "PairActivity",
+                                "QR provisioning (6th field) applied after pair confirmation: ${applied.joinToString(", ")}",
                             )
                         }
                     }
@@ -756,6 +796,9 @@ fun PairScreen(
                     .firstOrNull { it.fingerprint == pairedFingerprint }
                 syncResult = message
                 scannedPeer = null
+                // CopyPaste-tqt0: provisioning has been applied (post-confirmation);
+                // drop the retained raw payload so it cannot leak into a later pairing.
+                pendingProvisioningRaw = null
             } catch (e: Exception) {
                 errorMessage = e.message ?: e.javaClass.simpleName
             } finally {
@@ -811,23 +854,16 @@ fun PairScreen(
         val payload = incomingDeepLinkPayload ?: return@LaunchedEffect
         try {
             val info = withContext(Dispatchers.IO) {
-                val scanned = parsePairing(payload)
-                // H4: extract and apply provisioning from the QR's 6th field at
-                // deep-link time — before the P2P bootstrap handshake, covering
-                // the off-LAN / relay-only case.
-                val qrProv = extractQrProvisioning(payload)
-                val applied = qrProv?.let { applyQrProvisioning(it, settings) } ?: emptyList()
-                if (applied.isNotEmpty()) {
-                    android.util.Log.i(
-                        "PairActivity",
-                        "QR provisioning (6th field) applied via deep-link: ${applied.joinToString(", ")}",
-                    )
-                }
-                scanned
+                parsePairing(payload)
             }
             scannedPeer = info
             syncResult = null
             scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
+            // CopyPaste-tqt0: retain the raw deep-link payload but DO NOT apply its
+            // 6th-field provisioning here. A crafted cppair:// link must not be able to
+            // write relay/Supabase URLs into Settings before the user confirms pairing.
+            // Applied inside runPairAndSync once the PAKE bootstrap succeeds.
+            pendingProvisioningRaw = payload
         } catch (e: Exception) {
             errorMessage = e.message ?: "Invalid pairing code"
         } finally {
@@ -961,7 +997,7 @@ fun PairScreen(
                                     ) {
                                         Image(
                                             bitmap = bmp.asImageBitmap(),
-                                            contentDescription = "Pairing QR code",
+                                            contentDescription = stringResource(R.string.cd_pairing_qr),
                                             modifier = Modifier
                                                 .size(QR_IMAGE_SIZE_DP.dp)
                                                 .then(
@@ -996,7 +1032,9 @@ fun PairScreen(
                             else -> {
                                 Icon(
                                     imageVector = Icons.Filled.QrCode,
-                                    contentDescription = null,
+                                    // CopyPaste-3nyq: announce the QR-loading state so AT
+                                    // is not silent while the code is being generated.
+                                    contentDescription = stringResource(R.string.cd_pairing_qr_loading),
                                     tint = IdeDim,
                                     modifier = Modifier.size(96.dp)
                                 )

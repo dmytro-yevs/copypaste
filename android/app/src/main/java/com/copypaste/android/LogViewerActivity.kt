@@ -1,6 +1,7 @@
 package com.copypaste.android
 
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -80,6 +81,12 @@ import java.io.File
 class LogViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // CopyPaste-92qs (MEDIUM): FLAG_SECURE. Logs can contain device IDs,
+        // fingerprints, and relay URLs. Block screenshots / recents capture.
+        window.setFlags(
+            WindowManager.LayoutParams.FLAG_SECURE,
+            WindowManager.LayoutParams.FLAG_SECURE,
+        )
         enableEdgeToEdge()
         setContent {
             CopyPasteTheme {

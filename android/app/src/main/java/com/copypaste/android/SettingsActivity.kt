@@ -53,6 +53,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -1270,8 +1273,12 @@ private fun SettingsRow(
 ) {
     val c = LocalIdeColors.current
     Row(
+        // CopyPaste-aod: merge the title + subtitle + switch into ONE TalkBack node
+        // labelled with the title so it reads "<title>, <subtitle>, On/Off" instead
+        // of the title/subtitle and a context-free "Switch, on" as separate stops.
         modifier = Modifier
             .fillMaxWidth()
+            .semantics(mergeDescendants = true) {}
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
@@ -1293,6 +1300,7 @@ private fun SettingsRow(
         IdeSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
+            name = title,
         )
     }
 }
@@ -1387,7 +1395,9 @@ private fun AdbCmdRow(
         color = c.accent,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable {
+            // CopyPaste-n7ff: announce as a Button with a "Copy command" action.
+            .semantics { role = Role.Button }
+            .clickable(onClickLabel = "Copy command") {
                 val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as ClipboardManager
                 cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", cmd))

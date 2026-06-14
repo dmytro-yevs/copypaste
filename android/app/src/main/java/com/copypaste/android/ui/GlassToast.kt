@@ -32,6 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -212,7 +215,10 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
         shadowElevation = 6.dp,
         modifier = Modifier
             .padding(horizontal = 16.dp)
-            .clip(toastShape),
+            .clip(toastShape)
+            // CopyPaste-n7ff: announce the toast via a polite live region so the
+            // message is read even when focus is elsewhere.
+            .semantics { liveRegion = LiveRegionMode.Polite },
     ) {
         LiquidGlassSurface(
             shape = toastShape,

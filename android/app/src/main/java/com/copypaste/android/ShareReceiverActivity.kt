@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -155,14 +156,36 @@ class ShareReceiverActivity : Activity() {
     ) {
         try {
             val mime = contentResolver.getType(uri) ?: "application/octet-stream"
-            if (mime.startsWith("image/") && syncManager != null) {
+
+            // CopyPaste-lk5m: ShareReceiverActivity is exported (ACTION_SEND /
+            // SEND_MULTIPLE, mimeType */*). The capture paths read the whole stream
+            // into memory (captureFileClip: readBytes(); captureImageClip:
+            // decodeStream). A hostile or accidental huge content:// URI would OOM
+            // the process. Reject oversized streams up front using the provider-
+            // declared size. This is advisory (a malicious provider can under-report),
+            // so ClipboardService also enforces a hard byte cap during the actual
+            // read as defence-in-depth.
+            // Local non-null capture so the image branch keeps the smart-cast that
+            // captureImageClip (non-null SyncManager) requires.
+            val sm = syncManager
+            val isImage = mime.startsWith("image/") && sm != null
+            val declaredSize = queryStreamSize(uri)
+            if (!isStreamSizeAcceptable(declaredSize, isImage)) {
+                Log.w(
+                    TAG,
+                    "share: rejecting oversized stream (declaredSize=$declaredSize, isImage=$isImage) — exceeds cap",
+                )
+                return
+            }
+
+            if (isImage && sm != null) {
                 ClipboardService.captureImageClip(
                     context = applicationContext,
                     uri = uri,
                     mimeType = mime,
                     settings = settings,
                     repository = repository,
-                    syncManager = syncManager,
+                    syncManager = sm,
                 )
             } else {
                 // Files (non-image), or images when SyncManager could not init:
@@ -179,6 +202,26 @@ class ShareReceiverActivity : Activity() {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "share: failed to capture $uri: ${t.message}")
+        }
+    }
+
+    /**
+     * Query the provider-declared size of [uri] via [OpenableColumns.SIZE].
+     * Returns the size in bytes, or -1 when the provider does not report a size
+     * (treated as "unknown" by [isStreamSizeAcceptable], which allows it through to
+     * the hard cap enforced during the actual read in [ClipboardService]).
+     */
+    private fun queryStreamSize(uri: Uri): Long {
+        return try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val idx = c.getColumnIndex(OpenableColumns.SIZE)
+                    if (idx >= 0 && !c.isNull(idx)) c.getLong(idx) else -1L
+                } else -1L
+            } ?: -1L
+        } catch (e: Exception) {
+            Log.w(TAG, "share: SIZE query failed for $uri: ${e.message}")
+            -1L
         }
     }
 
@@ -218,5 +261,35 @@ class ShareReceiverActivity : Activity() {
 
     companion object {
         private const val TAG = "ShareReceiver"
+
+        /**
+         * Maximum accepted size for a shared FILE stream, in bytes.
+         * Mirrors copypaste-core's file ceiling (defaults.rs: 64 MiB) so a file that
+         * passes the Android share-cap will also pass the daemon's local-store cap.
+         */
+        const val MAX_FILE_BYTES: Long = 64L * 1024 * 1024
+
+        /**
+         * Maximum accepted size for a shared IMAGE stream, in bytes.
+         * Mirrors copypaste-core's image ceiling (defaults.rs: 100 MiB). Images are
+         * additionally decoded, so [ClipboardService.captureImageClip] enforces a
+         * pixel-dimension guard as well to defend against decompression bombs.
+         */
+        const val MAX_IMAGE_BYTES: Long = 100L * 1024 * 1024
+
+        /**
+         * Pure size-cap predicate (no Android deps — unit-testable).
+         *
+         * @param declaredSize provider-declared size in bytes, or a negative value
+         *        when unknown. Unknown sizes are allowed through here; the hard cap
+         *        enforced during the actual read in [ClipboardService] is the real
+         *        backstop against a provider that under-reports or refuses to report.
+         * @param isImage true when routing to the image path (higher ceiling).
+         */
+        fun isStreamSizeAcceptable(declaredSize: Long, isImage: Boolean): Boolean {
+            if (declaredSize < 0) return true // unknown — defer to the hard read cap
+            val cap = if (isImage) MAX_IMAGE_BYTES else MAX_FILE_BYTES
+            return declaredSize <= cap
+        }
     }
 }

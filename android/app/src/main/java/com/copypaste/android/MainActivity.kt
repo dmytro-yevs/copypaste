@@ -107,6 +107,17 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch(Dispatchers.IO) { handleClipboardChange(text) }
     }
 
+    // CopyPaste-l080: request POST_NOTIFICATIONS BEFORE starting the FGS on
+    // Android 13+ first launch. Whatever the result, start the service afterwards
+    // so capture still works — but if granted, the FGS status notification (Pause/
+    // Resume) is now actually visible instead of being silently dropped.
+    private val notifLauncher = registerForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        Log.d(TAG, "MainActivity POST_NOTIFICATIONS granted=$granted")
+        startClipboardServiceIfPossible()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // AB-7: FLAG_SECURE. This window hosts the clipboard history (Clips tab),
@@ -149,7 +160,21 @@ class MainActivity : ComponentActivity() {
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager.addPrimaryClipChangedListener(clipListener)
 
-        startClipboardServiceIfPossible()
+        // CopyPaste-l080: on Android 13+ first launch, request POST_NOTIFICATIONS
+        // BEFORE starting the foreground service so its status notification is
+        // visible (previously the FGS started first and the notification was
+        // silently dropped — no Pause/Resume — until the next launch after grant).
+        // The launcher callback starts the service whatever the user chooses; if
+        // already granted (or pre-Tiramisu) we start it directly.
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            !NotificationPermissionHelper.isGranted(this) &&
+            !NotificationPermissionHelper.isPermanentlyDenied(this)
+        ) {
+            NotificationPermissionHelper.markRequested(this)
+            notifLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            startClipboardServiceIfPossible()
+        }
 
         setContent {
             CopyPasteTheme {
@@ -273,7 +298,10 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                             }
                         },
                         // §5/§9: 20dp Outlined nav glyph.
-                        icon = { Icon(tab.icon, contentDescription = label, modifier = Modifier.size(20.dp)) },
+                        // CopyPaste-n7ff: contentDescription = null — the visible label
+                        // below already names the tab; describing the icon too makes
+                        // TalkBack announce the name twice.
+                        icon = { Icon(tab.icon, contentDescription = null, modifier = Modifier.size(20.dp)) },
                         label = { Text(label) },
                         // §9 spec: active = accent, inactive = uniform dim, indicator = accent/15.
                         colors = NavigationBarItemDefaults.colors(

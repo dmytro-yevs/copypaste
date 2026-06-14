@@ -48,6 +48,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.CopyPasteCard
@@ -194,7 +197,17 @@ class OnboardingActivity : ComponentActivity() {
             Log.d(TAG, "Ignoring tap: a permission/settings request is already in flight")
             return
         }
+        // CopyPaste-l080: once POST_NOTIFICATIONS is permanently denied (Android 13+
+        // caps the dialog after 2 denials) a launch() is a silent no-op. Route the
+        // user to the app-notification-settings screen instead so the Grant button
+        // is never dead.
+        if (NotificationPermissionHelper.isPermanentlyDenied(this)) {
+            Log.i(TAG, "POST_NOTIFICATIONS permanently denied — opening app notification settings")
+            launchGated(NotificationPermissionHelper.appNotificationSettingsIntents(this))
+            return
+        }
         requestInFlight = true
+        NotificationPermissionHelper.markRequested(this)
         notifLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 
@@ -652,7 +665,10 @@ private fun AdbCommandRow(
             color = IdeText,
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable {
+                // CopyPaste-n7ff: announce as a Button with a "Copy command" action
+                // so TalkBack reports the row as interactive (it was a bare clickable).
+                .semantics { role = Role.Button }
+                .clickable(onClickLabel = "Copy command") {
                     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                         as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", command))

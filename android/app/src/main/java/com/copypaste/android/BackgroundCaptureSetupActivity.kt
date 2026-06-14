@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
@@ -456,6 +457,10 @@ private fun BgCaptureCard(
             // Live status badge — only when state is deterministic.
             if (granted != null) {
                 Row(
+                    // CopyPaste-aod: merge the status icon + text into ONE node so
+                    // TalkBack reads "Granted" / "Not granted" as a single element
+                    // rather than announcing the icon and text separately.
+                    modifier = Modifier.semantics(mergeDescendants = true) {},
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {

@@ -354,9 +354,25 @@ class LogcatCaptureService : Service() {
             val shouldRun = hasReadLogsPermission(context) && settings.logcatCaptureEnabled
             val intent = Intent(context, LogcatCaptureService::class.java)
             if (shouldRun) {
-                context.startService(intent)
+                // CopyPaste-ki0n: this is a plain background service (not an FGS).
+                // syncState is called from CopyPasteApp.onCreate, which on a
+                // process restart triggered by a background event (boot, WorkManager,
+                // sync push) has no visible Activity. startService() from a
+                // non-foreground context throws IllegalStateException on API 26+.
+                // We cannot promote to startForegroundService (this service never
+                // calls startForeground), so swallow the background-start exception:
+                // capture self-recovers on the next foreground launch, and crashing
+                // app init here would be far worse.
+                try {
+                    context.startService(intent)
+                } catch (e: IllegalStateException) {
+                    AppLogger.w(
+                        TAG,
+                        "startService blocked (background context) — will retry on foreground: ${e.message}"
+                    )
+                }
             } else {
-                context.stopService(intent)
+                runCatching { context.stopService(intent) }
             }
         }
 
