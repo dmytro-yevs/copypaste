@@ -95,8 +95,9 @@ function Toggle({
         "relative inline-flex h-[18px] w-[34px] shrink-0 cursor-pointer items-center rounded-full",
         "border focus:outline-none focus:ring-2 focus:ring-ide-accent/50 focus:ring-offset-1 focus:ring-offset-ide-bg",
         "disabled:cursor-not-allowed disabled:opacity-40",
+        // §7: checked = accent fill only, no glow shadow.
         checked
-          ? "border-ide-accent bg-ide-accent shadow-[0_0_6px_rgba(53,146,255,0.30)]"
+          ? "border-ide-accent bg-ide-accent"
           : "border-ide-border bg-ide-elevated",
       ].join(" ")}
     >
@@ -118,7 +119,8 @@ function Toggle({
 function SubsectionHeader({ label, hint }: { label: string; hint?: string }) {
   return (
     <div className="mb-1.5 mt-7 first:mt-0">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ide-accent/80">{label}</div>
+      {/* §3: section labels = grey (text-ide-dim), NOT accent blue; 11px semibold uppercase. */}
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-ide-dim">{label}</div>
       {hint && <div className="mt-0.5 text-[11px] text-ide-faint">{hint}</div>}
     </div>
   );

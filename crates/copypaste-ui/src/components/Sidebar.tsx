@@ -14,12 +14,14 @@ type NavItem = {
   inactiveClass: string;
 };
 
+// §9: ALL inactive nav icons use a single muted text-ide-dim (no rainbow tints).
+// Active item keeps the accent pill + white icon+text via activeClass.
 const NAV: NavItem[] = [
-  { id: "history",  label: "History",  Icon: History,           activeClass: "text-white",      inactiveClass: "text-ide-accent" },
-  { id: "devices",  label: "Devices",  Icon: MonitorSmartphone, activeClass: "text-white",      inactiveClass: "text-[#56b6c2]" },
-  { id: "settings", label: "Settings", Icon: Settings,          activeClass: "text-white",      inactiveClass: "text-ide-warning" },
-  { id: "about",    label: "About",    Icon: Info,              activeClass: "text-white",      inactiveClass: "text-ide-dim" },
-  { id: "logs",     label: "Logs",     Icon: ScrollText,        activeClass: "text-white",      inactiveClass: "text-ide-dim" },
+  { id: "history",  label: "History",  Icon: History,           activeClass: "text-white", inactiveClass: "text-ide-dim" },
+  { id: "devices",  label: "Devices",  Icon: MonitorSmartphone, activeClass: "text-white", inactiveClass: "text-ide-dim" },
+  { id: "settings", label: "Settings", Icon: Settings,          activeClass: "text-white", inactiveClass: "text-ide-dim" },
+  { id: "about",    label: "About",    Icon: Info,              activeClass: "text-white", inactiveClass: "text-ide-dim" },
+  { id: "logs",     label: "Logs",     Icon: ScrollText,        activeClass: "text-white", inactiveClass: "text-ide-dim" },
 ];
 
 // ---------------------------------------------------------------------------
