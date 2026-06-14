@@ -62,8 +62,12 @@ import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeWarning
+import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
+import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
+import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_LABELS
+import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_LABELS
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
 import com.copypaste.android.ui.theme.SectionLabel
@@ -78,6 +82,14 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import android.content.ClipData
 import android.content.ClipboardManager
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
+import androidx.compose.material3.TabRowDefaults
+import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
+import com.copypaste.android.ui.theme.EaseStandard
 
 /**
  * Settings screen — grouped into tabs mirroring the macOS settings layout:
@@ -152,6 +164,7 @@ fun SettingsScreen(
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
 
     // ── Display ──
+    var density by remember { mutableStateOf(settings.density) }
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
     var translucency by remember { mutableStateOf(settings.translucency) }
@@ -174,6 +187,10 @@ fun SettingsScreen(
     }
     var sensitiveTtlSecs by remember {
         mutableStateOf(snapToNearestLong(SENSITIVE_TTL_STEP_VALUES, settings.sensitiveTtlSecs))
+    }
+    // Max history items — pref-only (no daemon IPC knob yet; see TODO(daemon) in Components.kt).
+    var maxItems by remember {
+        mutableStateOf(snapToNearestLong(MAX_ITEMS_STEP_VALUES, settings.maxHistoryItems.toLong()))
     }
 
     // ── Privacy (config via FFI — macOS parity) ──
@@ -237,6 +254,9 @@ fun SettingsScreen(
         )
         settings.maxFileSizeBytes = maxFileSizeBytes
         settings.sensitiveTtlSecs = sensitiveTtlSecs
+        settings.density = density
+        // maxItems: pref-only sentinel (100_000 = Unlimited). No daemon IPC yet.
+        settings.maxHistoryItems = maxItems.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         settings.collectPublicIp = collectPublicIp
         settings.pasteAsPlainText = pasteAsPlainText
         settings.excludedAppBundleIds = excludedApps
@@ -291,11 +311,38 @@ fun SettingsScreen(
                 .padding(innerPadding),
             verticalArrangement = Arrangement.Top,
         ) {
-            // AND3: Tab row
+            // AND3: Tab row with §8 animated underline (180ms EaseStandard).
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = IdeBg,
                 edgePadding = 0.dp,
+                indicator = { tabPositions ->
+                    // Animate tab indicator position/width with tween(180, EaseStandard)
+                    // matching the §8 base-duration "standard transitions" token.
+                    val currentTabPosition = tabPositions[selectedTab]
+                    val indicatorOffset by animateDpAsState(
+                        targetValue = currentTabPosition.left,
+                        animationSpec = tween(
+                            durationMillis = 180,
+                            easing = EaseStandard,
+                        ),
+                        label = "tab_underline_offset",
+                    )
+                    val indicatorWidth by animateDpAsState(
+                        targetValue = currentTabPosition.width,
+                        animationSpec = tween(
+                            durationMillis = 180,
+                            easing = EaseStandard,
+                        ),
+                        label = "tab_underline_width",
+                    )
+                    TabRowDefaults.SecondaryIndicator(
+                        modifier = Modifier
+                            .wrapContentSize(Alignment.BottomStart)
+                            .offset(x = indicatorOffset)
+                            .width(indicatorWidth),
+                    )
+                },
             ) {
                 tabs.forEachIndexed { index, title ->
                     Tab(
@@ -328,6 +375,8 @@ fun SettingsScreen(
                         ctx = ctx,
                     )
                     TAB_DISPLAY -> DisplayTab(
+                        density = density,
+                        onDensityChange = { density = it; persistAll() },
                         showWarnings = showWarnings,
                         onShowWarningsChange = { showWarnings = it; persistAll() },
                         maskSensitive = maskSensitive,
@@ -352,6 +401,8 @@ fun SettingsScreen(
                         onStorageQuotaBytesChange = { storageQuotaBytes = it; persistAll() },
                         sensitiveTtlSecs = sensitiveTtlSecs,
                         onSensitiveTtlSecsChange = { sensitiveTtlSecs = it; persistAll() },
+                        maxItems = maxItems,
+                        onMaxItemsChange = { maxItems = it; persistAll() },
                         excludedApps = excludedApps,
                         onExcludedAppsChange = { excludedApps = it; persistAll() },
                         ctx = ctx,
@@ -544,6 +595,8 @@ private fun GeneralTab(
 
 @Composable
 private fun DisplayTab(
+    density: Density,
+    onDensityChange: (Density) -> Unit,
     showWarnings: Boolean,
     onShowWarningsChange: (Boolean) -> Unit,
     maskSensitive: Boolean,
@@ -559,6 +612,13 @@ private fun DisplayTab(
 ) {
     Column {
         SectionLabel(stringResource(R.string.section_display))
+        // §6/§10 density toggle — first row of Display tab (comfortable|compact).
+        // "Comfortable" = 34dp rows (default); "Compact" = 28dp rows (§2 spec).
+        DensityToggleRow(
+            density = density,
+            onDensityChange = onDensityChange,
+        )
+        HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
         SettingsRow(
             title = stringResource(R.string.setting_sensitive_warnings_title),
             subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
@@ -628,6 +688,8 @@ private fun StorageTab(
     onStorageQuotaBytesChange: (Long) -> Unit,
     sensitiveTtlSecs: Long,
     onSensitiveTtlSecsChange: (Long) -> Unit,
+    maxItems: Long,
+    onMaxItemsChange: (Long) -> Unit,
     excludedApps: List<String>,
     onExcludedAppsChange: (List<String>) -> Unit,
     ctx: android.content.Context,
@@ -670,6 +732,15 @@ private fun StorageTab(
             stepLabels = SENSITIVE_TTL_STEP_LABELS,
             currentValue = sensitiveTtlSecs,
             onRelease = onSensitiveTtlSecsChange,
+        )
+        // §6/§10 max-items slider — pref-only; Unlimited sentinel = 100_000.
+        // TODO(daemon): wire to daemon max_history_items config field when IPC lands.
+        SteppedSliderRow(
+            label = stringResource(R.string.setting_max_items_label),
+            stepValues = MAX_ITEMS_STEP_VALUES,
+            stepLabels = MAX_ITEMS_STEP_LABELS,
+            currentValue = maxItems,
+            onRelease = onMaxItemsChange,
         )
         HorizontalDivider(color = IdeBorder.copy(alpha = 0.5f), thickness = 0.5.dp)
 
@@ -849,6 +920,31 @@ private fun NotificationsTab(
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared composables
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Density toggle row — comfortable / compact toggle, first row of the Display tab.
+ *
+ * Mirrors the macOS/web `prefs.density` toggle (§2/§6 of DESIGN-SYSTEM-v2.md).
+ * Uses the existing SettingsRow Switch pattern for visual consistency.
+ * Comfortable (default) = 34dp rows; Compact = 28dp rows.
+ */
+@Composable
+private fun DensityToggleRow(
+    density: Density,
+    onDensityChange: (Density) -> Unit,
+) {
+    SettingsRow(
+        title = stringResource(R.string.setting_density_title),
+        subtitle = if (density == Density.COMPACT)
+            stringResource(R.string.setting_density_subtitle_compact)
+        else
+            stringResource(R.string.setting_density_subtitle_comfortable),
+        checked = density == Density.COMPACT,
+        onCheckedChange = { compact ->
+            onDensityChange(if (compact) Density.COMPACT else Density.COMFORTABLE)
+        },
+    )
+}
 
 @Composable
 private fun SettingsTextField(
@@ -1105,18 +1201,6 @@ private fun snapToNearestLong(steps: LongArray, raw: Long): Long {
 // (crates/copypaste-core/src/config/defaults.rs) and the macOS SettingsView, and
 // to fix the decimal-vs-binary drift for these new size fields.
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** Max clip file size steps: 8, 16, 25, 50, 100 MiB. Cap 100 MiB = MAX_FILE_SIZE_BYTES. */
-private val FILE_SIZE_STEP_VALUES: LongArray = longArrayOf(
-    8L * 1024 * 1024,
-    16L * 1024 * 1024,
-    25L * 1024 * 1024,
-    50L * 1024 * 1024,
-    100L * 1024 * 1024,
-)
-private val FILE_SIZE_STEP_LABELS: Array<String> = arrayOf(
-    "8 MiB", "16 MiB", "25 MiB", "50 MiB", "100 MiB (max)",
-)
 
 /**
  * Sensitive auto-clear TTL steps (seconds). `0` is the "disabled" sentinel

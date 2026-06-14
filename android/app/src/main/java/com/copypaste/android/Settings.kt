@@ -22,6 +22,16 @@ enum class SyncBackend {
     SUPABASE,
 }
 
+/** UI density — mirrors prefs.density in the macOS/web SettingsView (§2/§6). */
+enum class Density {
+    COMFORTABLE, // 34dp rows (default)
+    COMPACT;     // 28dp rows
+
+    companion object {
+        val DEFAULT = COMFORTABLE
+    }
+}
+
 class Settings(context: Context) {
     private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
@@ -443,6 +453,23 @@ class Settings(context: Context) {
     var translucency: Boolean
         get() = prefs.getBoolean("translucency", true)
         set(v) = prefs.edit().putBoolean("translucency", v).apply()
+
+    /**
+     * UI density preference — comfortable (34dp rows, default) or compact (28dp).
+     *
+     * Mirrors the macOS/web `prefs.density` setting (§2/§6 of DESIGN-SYSTEM-v2.md).
+     * Persisted as the enum name string so new variants can be added without
+     * a migration. Falls back to [Density.DEFAULT] on an unrecognised value.
+     *
+     * TODO(daemon): no daemon config field exists for this knob yet; it is stored
+     * via the Settings prefs mechanism only — mirrors how the web app does it.
+     */
+    var density: Density
+        get() = when (prefs.getString("density", Density.DEFAULT.name)) {
+            Density.COMPACT.name -> Density.COMPACT
+            else -> Density.COMFORTABLE
+        }
+        set(v) = prefs.edit().putString("density", v.name).apply()
 
     /**
      * Maximum height (in dp) for image thumbnails in the history list.

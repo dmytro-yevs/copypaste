@@ -36,6 +36,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.widthIn
 
 // ---------------------------------------------------------------------------
 // Shared design-system components — single source of truth for chrome that
@@ -220,7 +221,11 @@ fun SteppedSliderRow(
                 ),
                 color = IdeAccent,
                 textAlign = TextAlign.End,
-                modifier = Modifier.padding(start = 8.dp),
+                // §6 spec: value label fixed 80px min-width so step labels never
+                // cause the slider track to shift width between steps.
+                modifier = Modifier
+                    .widthIn(min = 80.dp)
+                    .padding(start = 8.dp),
             )
         }
 
@@ -372,6 +377,42 @@ val QUOTA_STEP_VALUES: LongArray = longArrayOf(
 )
 val QUOTA_STEP_LABELS: Array<String> = arrayOf(
     "1 GiB", "2 GiB", "5 GiB", "10 GiB", "25 GiB", "50 GiB (max)",
+)
+
+/**
+ * Max clip file size steps. The Rust core clamps max_file_size_bytes to
+ * MAX_FILE_BYTES = 100 MiB (crates/copypaste-core/src/file.rs). All steps
+ * stay at or below that ceiling so clampConfig never silently snaps the
+ * user's chosen value to a different step. "100 MiB (max)" mirrors the
+ * comment in defaults.rs ("matches crate::file::MAX_FILE_BYTES").
+ *
+ * The spec [64,128,256,512,1GB,2GB] exceeds the core hard cap — this array
+ * is the widened-to-real-ceiling version as instructed by the task brief.
+ */
+val FILE_SIZE_STEP_VALUES: LongArray = longArrayOf(
+    8L * 1024 * 1024,
+    16L * 1024 * 1024,
+    25L * 1024 * 1024,
+    50L * 1024 * 1024,
+    100L * 1024 * 1024,
+)
+val FILE_SIZE_STEP_LABELS: Array<String> = arrayOf(
+    "8 MiB", "16 MiB", "25 MiB", "50 MiB", "100 MiB (max)",
+)
+
+/**
+ * Max history items steps. Sentinel 100_000 = HISTORY_LIMIT in defaults.rs
+ * (the unbounded/Unlimited state). Pref-only — no daemon UniFFI contract
+ * exists yet for this knob.
+ *
+ * TODO(daemon): mirror to the daemon's max_history_items config field once
+ * the IPC plumbing for that knob lands.
+ */
+val MAX_ITEMS_STEP_VALUES: LongArray = longArrayOf(
+    100L, 250L, 500L, 1_000L, 2_500L, 5_000L, 10_000L, 100_000L,
+)
+val MAX_ITEMS_STEP_LABELS: Array<String> = arrayOf(
+    "100", "250", "500", "1 000", "2 500", "5 000", "10 000", "Unlimited",
 )
 
 /**
