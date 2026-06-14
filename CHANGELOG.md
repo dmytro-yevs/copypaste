@@ -22,6 +22,17 @@ macOS `.app` + `.dmg` bundled.
 - **Open-file action** for file-type clipboard items on all platforms.
 - Live peer-presence push (online dots update without opening Devices).
 - Bundled Inter + JetBrains Mono fonts (both platforms; SIL OFL 1.1).
+- **Liquid Glass conformance (Android).** Full styleguide pass: foundational light-first
+  AA token ramp (sky/mute/amber `#D9A343`), 7/9/14 radii, 3-tier glass recipe
+  (saturate(180%) + hairline rim + float shadow + per-tier blur), shared
+  `CopyPasteButton`/`CopyPasteCard`/`CopyPasteIconButton`; per-screen — nav solid-accent
+  active pill + glass bar, glass Settings cards + themed tabs/segmented controls,
+  PairActivity light theme + per-digit SAS cells + inset QR plate + 16…8 mono
+  fingerprint, History content-icon tiles + live COLOR swatch + kind-badge color table,
+  About/Logs light theming.
+- **Canonical aurora backdrop** unified web + Android (greyish light base, soft corner
+  blooms blue/violet/sky/green + mid-canvas accent/amber depth) with glass-blur tier
+  split (28px glass/card, 40px strong).
 
 ### Changed
 - PAKE PasswordFile is now **encrypted at rest** in `peers.json` (XChaCha20-Poly1305
@@ -36,6 +47,13 @@ macOS `.app` + `.dmg` bundled.
   task broke the configuration cache (script-object capture → local Boolean); the
   Inter/JetBrains-Mono `.ttf` binaries referenced by the font XML were never committed
   (AAPT link failure → committed); three never-compiled unit tests fixed.
+- **Android startup decrypt resilience.** Legacy items encrypted under a rotated/
+  mismatched key are now skipped and counted once, instead of emitting ~629 per-item
+  `DecryptionFailed` errors on launch (new batch `decrypt_text_batch` FFI / core
+  `decrypt_page`, UniFFI ABI 15 → 16; AEAD auth tag is never bypassed — graceful = skip).
+- Selection/checkbox mode no longer shrinks history-row height (Android + desktop).
+- Pairing no longer fails on retry with "a pairing is already in flight" — the
+  coordinator now claims from a stale terminal state, not just idle.
 
 ## [0.6.0] - 2026-06-03
 
