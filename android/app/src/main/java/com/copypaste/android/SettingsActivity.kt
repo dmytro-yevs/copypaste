@@ -37,7 +37,9 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.runtime.Composable
@@ -83,7 +85,10 @@ import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.IdeSwitch
 import com.copypaste.android.ui.theme.ideTextFieldColors
+import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.RadiusControl
+import com.copypaste.android.ui.theme.CopyPasteButton
+import com.copypaste.android.ui.theme.ButtonVariant
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.animation.core.animateDpAsState
@@ -409,18 +414,23 @@ fun SettingsScreen(
                         ),
                         label = "tab_underline_width",
                     )
+                    // 764n: indicator color → c.accent per styleguide active-accent token.
                     TabRowDefaults.SecondaryIndicator(
                         modifier = Modifier
                             .wrapContentSize(Alignment.BottomStart)
                             .offset(x = indicatorOffset)
                             .width(indicatorWidth),
+                        color = c.accent,
                     )
                 },
             ) {
+                // 764n: map tab text to ide tokens — selected → c.accent, unselected → c.faint.
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
+                        selectedContentColor = c.accent,
+                        unselectedContentColor = c.faint,
                         text = { Text(title) },
                     )
                 }
@@ -1147,8 +1157,14 @@ private fun IdeSegmentedControl(
     modifier: Modifier = Modifier,
 ) {
     val c = LocalIdeColors.current
+    // 4bf1: container track → mute@.18 fill + .5dp hairline border via Modifier on the row.
+    // Selected pill: c.elevated fill; selected text = c.accent (no drop shadow on Android).
+    // Unselected: transparent over the track; text = c.dim.
     SingleChoiceSegmentedButtonRow(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .background(color = c.mute.copy(alpha = 0.18f), shape = RadiusControl)
+            .border(width = 0.5.dp, color = c.border, shape = RadiusControl),
     ) {
         options.forEachIndexed { index, label ->
             SegmentedButton(
@@ -1156,14 +1172,14 @@ private fun IdeSegmentedControl(
                 onClick = { onSelect(index) },
                 selected = index == selectedIndex,
                 colors = SegmentedButtonDefaults.colors(
-                    // Selected: elevated background (white in light, dark card in dark)
-                    activeContainerColor  = c.elevated,
-                    activeContentColor    = c.accent,
-                    activeBorderColor     = c.border,
-                    // Unselected: bg (grey canvas)
-                    inactiveContainerColor = c.bg,
+                    // 4bf1: selected pill → c.elevated fill + c.accent text (no drop shadow)
+                    activeContainerColor   = c.elevated,
+                    activeContentColor     = c.accent,
+                    activeBorderColor      = c.border,
+                    // Unselected: transparent (mute track from container shows through)
+                    inactiveContainerColor = Color.Transparent,
                     inactiveContentColor   = c.dim,
-                    inactiveBorderColor    = c.border,
+                    inactiveBorderColor    = Color.Transparent,
                 ),
                 icon = {},
             ) {
@@ -1171,7 +1187,8 @@ private fun IdeSegmentedControl(
                     text = label,
                     style = MaterialTheme.typography.labelMedium.copy(
                         fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
-                        fontSize = 13.sp,
+                        // 4bf1: 12sp per styleguide (was 13sp)
+                        fontSize = 12.sp,
                     ),
                     textAlign = TextAlign.Center,
                 )
@@ -1525,13 +1542,17 @@ private fun ExcludedAppsRow(
                     Text("com.example.app", style = MaterialTheme.typography.bodySmall)
                 },
                 singleLine = true,
+                // bo95: RadiusControl (9dp) per styleguide --radius-ctl.
+                shape = RadiusControl,
                 colors = ideTextFieldColors(),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { addCurrent() }),
                 modifier = Modifier.weight(1f),
             )
-            OutlinedButton(
+            // ulxa: add-item action → CopyPasteButton(primary) per styleguide primary-button.
+            CopyPasteButton(
                 onClick = addCurrent,
+                variant = ButtonVariant.PRIMARY,
                 enabled = newApp.trim().isNotEmpty(),
                 modifier = Modifier.padding(start = 8.dp),
             ) {
@@ -1551,6 +1572,8 @@ private fun ExcludedAppsRow(
                         selected = false,
                         onClick = { onExcludedAppsChange(excludedApps.filterNot { it == bundleId }) },
                         label = { Text(bundleId) },
+                        // pjis: RadiusChip (7dp) per styleguide --radius-chip (was Material 8dp).
+                        shape = RadiusChip,
                         trailingIcon = {
                             Icon(
                                 imageVector = Icons.Default.Close,
