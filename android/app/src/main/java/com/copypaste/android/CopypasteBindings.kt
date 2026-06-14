@@ -58,7 +58,7 @@ private const val TAG = "CopypasteBindings"
  * `checkNativeAbiCompatibility()` log `rustAbi=…,kotlinAbi=…` and corrupts
  * sync serialization. `scripts/regen-uniffi.sh` asserts the two are equal.
  */
-const val APP_ABI_VERSION: UInt = 15u
+const val APP_ABI_VERSION: UInt = 16u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {

@@ -766,6 +766,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -800,6 +802,8 @@ internal interface UniffiLib : Library {
     fun uniffi_copypaste_android_fn_func_core_version(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_decrypt_text(`itemId`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`keyVersion`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_decrypt_text_batch(`items`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_default_config(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -989,6 +993,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_decrypt_text(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_decrypt_text_batch(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_default_config(
     ): Short
     fun uniffi_copypaste_android_checksum_func_derive_cloud_sync_key(
@@ -1090,6 +1096,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_decrypt_text() != 25650.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_decrypt_text_batch() != 60285.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_default_config() != 9299.toShort()) {
@@ -1554,6 +1563,64 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
 
 
 
+data class DecryptBatchResult (
+    var `items`: List<DecryptedItem>, 
+    var `skipped`: kotlin.UInt
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeDecryptBatchResult: FfiConverterRustBuffer<DecryptBatchResult> {
+    override fun read(buf: ByteBuffer): DecryptBatchResult {
+        return DecryptBatchResult(
+            FfiConverterSequenceTypeDecryptedItem.read(buf),
+            FfiConverterUInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DecryptBatchResult) = (
+            FfiConverterSequenceTypeDecryptedItem.allocationSize(value.`items`) +
+            FfiConverterUInt.allocationSize(value.`skipped`)
+    )
+
+    override fun write(value: DecryptBatchResult, buf: ByteBuffer) {
+            FfiConverterSequenceTypeDecryptedItem.write(value.`items`, buf)
+            FfiConverterUInt.write(value.`skipped`, buf)
+    }
+}
+
+
+
+data class DecryptedItem (
+    var `itemId`: kotlin.String, 
+    var `plaintext`: List<kotlin.UByte>
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeDecryptedItem: FfiConverterRustBuffer<DecryptedItem> {
+    override fun read(buf: ByteBuffer): DecryptedItem {
+        return DecryptedItem(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceUByte.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DecryptedItem) = (
+            FfiConverterString.allocationSize(value.`itemId`) +
+            FfiConverterSequenceUByte.allocationSize(value.`plaintext`)
+    )
+
+    override fun write(value: DecryptedItem, buf: ByteBuffer) {
+            FfiConverterString.write(value.`itemId`, buf)
+            FfiConverterSequenceUByte.write(value.`plaintext`, buf)
+    }
+}
+
+
+
 data class DeviceCert (
     var `deviceId`: kotlin.String, 
     var `fingerprint`: kotlin.String, 
@@ -1660,6 +1727,43 @@ public object FfiConverterTypeEncryptedBlob: FfiConverterRustBuffer<EncryptedBlo
     override fun write(value: EncryptedBlob, buf: ByteBuffer) {
             FfiConverterSequenceUByte.write(value.`nonce`, buf)
             FfiConverterSequenceUByte.write(value.`ciphertext`, buf)
+    }
+}
+
+
+
+data class EncryptedItem (
+    var `itemId`: kotlin.String, 
+    var `ciphertext`: List<kotlin.UByte>, 
+    var `nonce`: List<kotlin.UByte>, 
+    var `keyVersion`: kotlin.UByte
+) {
+    
+    companion object
+}
+
+public object FfiConverterTypeEncryptedItem: FfiConverterRustBuffer<EncryptedItem> {
+    override fun read(buf: ByteBuffer): EncryptedItem {
+        return EncryptedItem(
+            FfiConverterString.read(buf),
+            FfiConverterSequenceUByte.read(buf),
+            FfiConverterSequenceUByte.read(buf),
+            FfiConverterUByte.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: EncryptedItem) = (
+            FfiConverterString.allocationSize(value.`itemId`) +
+            FfiConverterSequenceUByte.allocationSize(value.`ciphertext`) +
+            FfiConverterSequenceUByte.allocationSize(value.`nonce`) +
+            FfiConverterUByte.allocationSize(value.`keyVersion`)
+    )
+
+    override fun write(value: EncryptedItem, buf: ByteBuffer) {
+            FfiConverterString.write(value.`itemId`, buf)
+            FfiConverterSequenceUByte.write(value.`ciphertext`, buf)
+            FfiConverterSequenceUByte.write(value.`nonce`, buf)
+            FfiConverterUByte.write(value.`keyVersion`, buf)
     }
 }
 
@@ -2513,6 +2617,31 @@ public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.Str
 
 
 
+public object FfiConverterSequenceTypeDecryptedItem: FfiConverterRustBuffer<List<DecryptedItem>> {
+    override fun read(buf: ByteBuffer): List<DecryptedItem> {
+        val len = buf.getInt()
+        return List<DecryptedItem>(len) {
+            FfiConverterTypeDecryptedItem.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<DecryptedItem>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeDecryptedItem.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<DecryptedItem>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeDecryptedItem.write(it, buf)
+        }
+    }
+}
+
+
+
+
 public object FfiConverterSequenceTypeDiscoveredPeer: FfiConverterRustBuffer<List<DiscoveredPeer>> {
     override fun read(buf: ByteBuffer): List<DiscoveredPeer> {
         val len = buf.getInt()
@@ -2531,6 +2660,31 @@ public object FfiConverterSequenceTypeDiscoveredPeer: FfiConverterRustBuffer<Lis
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeDiscoveredPeer.write(it, buf)
+        }
+    }
+}
+
+
+
+
+public object FfiConverterSequenceTypeEncryptedItem: FfiConverterRustBuffer<List<EncryptedItem>> {
+    override fun read(buf: ByteBuffer): List<EncryptedItem> {
+        val len = buf.getInt()
+        return List<EncryptedItem>(len) {
+            FfiConverterTypeEncryptedItem.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<EncryptedItem>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeEncryptedItem.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<EncryptedItem>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeEncryptedItem.write(it, buf)
         }
     }
 }
@@ -2763,6 +2917,16 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_decrypt_text(
         FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`ciphertext`),FfiConverterSequenceUByte.lower(`nonce`),FfiConverterSequenceUByte.lower(`key`),FfiConverterUByte.lower(`keyVersion`),_status)
+}
+    )
+    }
+    
+
+    @Throws(CopypasteException::class) fun `decryptTextBatch`(`items`: List<EncryptedItem>, `key`: List<kotlin.UByte>): DecryptBatchResult {
+            return FfiConverterTypeDecryptBatchResult.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_decrypt_text_batch(
+        FfiConverterSequenceTypeEncryptedItem.lower(`items`),FfiConverterSequenceUByte.lower(`key`),_status)
 }
     )
     }
