@@ -76,7 +76,6 @@ import androidx.compose.material.icons.outlined.SearchOff
 import androidx.compose.material.icons.outlined.SwapVert
 // §7 PARITY-SPEC: one "too large" glyph — the warning triangle (was CloudOff).
 import androidx.compose.material.icons.outlined.WarningAmber
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextField
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -87,8 +86,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -145,7 +142,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.rememberReducedMotion
@@ -404,7 +405,10 @@ fun HistoryScreen(
     val error by viewModel.errors.observeAsState(null)
     val totalCount by viewModel.totalCount.observeAsState(0)
     val hasMore by viewModel.hasMore.observeAsState(false)
-    val snackbarHostState = remember { SnackbarHostState() }
+    // §8 glass toast (replaces Material Snackbar): bottom-center glass surface
+    // with a leading semantic dot + slide-up. Driven through GlassToastState the
+    // same way SnackbarHostState was (scope.launch { toastState.show(...) }).
+    val toastState = remember { GlassToastState() }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -416,7 +420,6 @@ fun HistoryScreen(
     // (Accessibility → Remove animations, or Developer Options → Animator duration scale = 0).
     val reducedMotion = rememberReducedMotion()
     val loadErrorTemplate = stringResource(R.string.error_load_history)
-    val dismissLabel = stringResource(R.string.snackbar_dismiss)
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
 
     // ── In-app file picker (HB-11) ───────────────────────────────────────────
@@ -450,12 +453,12 @@ fun HistoryScreen(
                     syncManager = syncManager,
                 )
                 withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    snackbarHostState.showSnackbar(fileCapturedMsg)
+                    toastState.show(fileCapturedMsg, GlassToastKind.SUCCESS)
                 }
                 viewModel.loadItems()
             } catch (t: Throwable) {
                 withContext(kotlinx.coroutines.Dispatchers.Main) {
-                    snackbarHostState.showSnackbar(filePickFailed)
+                    toastState.show(filePickFailed, GlassToastKind.DANGER)
                 }
             }
         }
@@ -662,10 +665,7 @@ fun HistoryScreen(
 
     LaunchedEffect(error) {
         val msg = error ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(
-            message = loadErrorTemplate.format(msg),
-            actionLabel = dismissLabel,
-        )
+        toastState.show(loadErrorTemplate.format(msg), GlassToastKind.DANGER)
         viewModel.clearError()
     }
 
@@ -1024,7 +1024,6 @@ fun HistoryScreen(
                 }
             }
         },
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
     ) { innerPadding ->
         // The preview overlay must be a sibling of the list inside this Box so
         // the long-press drag gesture remains one continuous pointer stream
@@ -1078,7 +1077,7 @@ fun HistoryScreen(
                         }
                     },
                     onSensitiveTap = {
-                        scope.launch { snackbarHostState.showSnackbar(sensitiveTapMsg) }
+                        scope.launch { toastState.show(sensitiveTapMsg, GlassToastKind.INFO) }
                     },
                     onSaveFile = { id ->
                         scope.launch {
@@ -1109,10 +1108,11 @@ fun HistoryScreen(
                                     false
                                 }
                             }
-                            snackbarHostState.showSnackbar(
-                                if (saved) ctx.getString(R.string.file_saved_ok)
-                                else ctx.getString(R.string.file_save_failed)
-                            )
+                            if (saved) {
+                                toastState.show(ctx.getString(R.string.file_saved_ok), GlassToastKind.SUCCESS)
+                            } else {
+                                toastState.show(ctx.getString(R.string.file_save_failed), GlassToastKind.DANGER)
+                            }
                         }
                     },
                     onOpenFile = { id ->
@@ -1154,10 +1154,10 @@ fun HistoryScreen(
                                 if (ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
                                     ctx.startActivity(intent)
                                 } else {
-                                    snackbarHostState.showSnackbar(ctx.getString(R.string.file_open_no_app))
+                                    toastState.show(ctx.getString(R.string.file_open_no_app), GlassToastKind.DANGER)
                                 }
                             } else {
-                                snackbarHostState.showSnackbar(errorMsg)
+                                toastState.show(errorMsg, GlassToastKind.DANGER)
                             }
                         }
                     },
@@ -1286,10 +1286,11 @@ fun HistoryScreen(
                             false
                         }
                     }
-                    snackbarHostState.showSnackbar(
-                        if (saved) ctx.getString(R.string.file_saved_ok)
-                        else ctx.getString(R.string.file_save_failed)
-                    )
+                    if (saved) {
+                        toastState.show(ctx.getString(R.string.file_saved_ok), GlassToastKind.SUCCESS)
+                    } else {
+                        toastState.show(ctx.getString(R.string.file_save_failed), GlassToastKind.DANGER)
+                    }
                 }
             },
             onOpenFile = {
@@ -1329,14 +1330,19 @@ fun HistoryScreen(
                         if (ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
                             ctx.startActivity(intent)
                         } else {
-                            snackbarHostState.showSnackbar(ctx.getString(R.string.file_open_no_app))
+                            toastState.show(ctx.getString(R.string.file_open_no_app), GlassToastKind.DANGER)
                         }
                     } else {
-                        snackbarHostState.showSnackbar(payload)
+                        toastState.show(payload, GlassToastKind.DANGER)
                     }
                 }
             },
         )
+
+        // §8 glass toast host — overlays the list bottom-center. Inside this Box
+        // so it floats above the history content (replaces the Scaffold's
+        // Material SnackbarHost).
+        GlassToastHost(state = toastState)
         } // end Box
     }
 }
@@ -1447,7 +1453,9 @@ private fun ConfirmationDialog(
             stringResource(R.string.dialog_delete_selected_message, itemCount)
     }
 
-    AlertDialog(
+    // §8 glass dialog (audit #10): glass card over a dimmed scrim, danger-tinted
+    // confirm for the destructive action. Logic (onConfirm/onDismiss) unchanged.
+    GlassAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, color = c.text) },
         text = { Text(message, color = c.dim) },
@@ -1461,7 +1469,6 @@ private fun ConfirmationDialog(
                 Text(stringResource(R.string.dialog_cancel), color = c.dim)
             }
         },
-        containerColor = c.panel,
     )
 }
 

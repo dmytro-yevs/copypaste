@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,6 +25,7 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -300,6 +302,69 @@ fun CopyPasteCard(
     ) {
         Column(content = content)
     }
+}
+
+/**
+ * Theme-correct glass fill for a dialog/modal surface (PARITY-SPEC §8).
+ *
+ * Dialogs are a hair more opaque than cards so they read as a distinct layer
+ * over the dimmed scrim: we use the §2 glass fill but floor the alpha so text
+ * stays legible against whatever is behind. When translucency is off, returns
+ * the opaque elevated surface. Call from a @Composable site.
+ */
+@Composable
+fun glassDialogContainerColor(translucent: Boolean = rememberTranslucency()): Color {
+    val dark = isDarkTheme()
+    val solid = MaterialTheme.colorScheme.surfaceContainerHigh
+    if (!translucent) return solid
+    // §2 fill but at a higher floor (0.86) than cards so the modal stands out
+    // over the dim scrim and the dialog text never washes out.
+    val fill = if (dark) GlassFillDark else GlassFillLight
+    return fill.copy(alpha = 0.86f)
+}
+
+/**
+ * Glass restyle of Material [AlertDialog] (PARITY-SPEC §8, audit #10).
+ *
+ * Appearance only — the LOGIC (callbacks, button content, dismiss) is whatever
+ * the caller passes. The container is the §8 glass fill, the corner radius is
+ * the §4 modal radius (16 dp), and the scrim is dimmed (Material's default
+ * scrim drawn behind the dialog) so the frosted card floats above a darkened
+ * backdrop. Title/text colors come from the active ramp; the caller styles its
+ * own buttons (destructive actions in `c.danger`).
+ *
+ * Signature mirrors the slots of Material AlertDialog the call sites use, so it
+ * is a near drop-in: rename `AlertDialog(` → `GlassAlertDialog(` and remove any
+ * explicit `containerColor`.
+ */
+@Composable
+fun GlassAlertDialog(
+    onDismissRequest: () -> Unit,
+    confirmButton: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    dismissButton: (@Composable () -> Unit)? = null,
+    title: (@Composable () -> Unit)? = null,
+    text: (@Composable () -> Unit)? = null,
+    translucent: Boolean = rememberTranslucency(),
+    properties: DialogProperties = DialogProperties(),
+) {
+    val c = LocalIdeColors.current
+    AlertDialog(
+        onDismissRequest = onDismissRequest,
+        confirmButton = confirmButton,
+        modifier = modifier,
+        dismissButton = dismissButton,
+        title = title,
+        text = text,
+        // §8 glass container over the dimmed scrim.
+        containerColor = glassDialogContainerColor(translucent),
+        // §4 modal radius 16 dp.
+        shape = RoundedCornerShape(16.dp),
+        titleContentColor = c.text,
+        textContentColor = c.dim,
+        // §8 dimmed scrim — Material draws its default scrim behind the dialog.
+        properties = properties,
+    )
 }
 
 /**

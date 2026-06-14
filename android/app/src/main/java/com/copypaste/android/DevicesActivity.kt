@@ -42,7 +42,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -77,6 +76,7 @@ import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.SectionLabel
@@ -517,7 +517,8 @@ fun DevicesScreen(
 
     // ── Unpair confirmation ──────────────────────────────────────────────────
     unpairTarget?.let { target ->
-        AlertDialog(
+        // §8 glass dialog (audit #10) — appearance only; unpair logic unchanged.
+        GlassAlertDialog(
             onDismissRequest = { unpairTarget = null },
             title = { Text("Forget paired device?") },
             text = {
@@ -541,7 +542,8 @@ fun DevicesScreen(
 
     // ── Revoke confirmation ──────────────────────────────────────────────────
     revokeTarget?.let { target ->
-        AlertDialog(
+        // §8 glass dialog (audit #10) — appearance only; revoke logic unchanged.
+        GlassAlertDialog(
             onDismissRequest = { revokeTarget = null },
             title = { Text("Revoke pairing?") },
             text = {
@@ -594,7 +596,7 @@ fun DevicesScreen(
 
     // ── Revoke failure surface ────────────────────────────────────────────────
     revokeError?.let { msg ->
-        AlertDialog(
+        GlassAlertDialog(
             onDismissRequest = { revokeError = null },
             title = { Text("Revocation incomplete") },
             text = { Text(msg) },
@@ -616,7 +618,7 @@ fun DevicesScreen(
 
     // ── Scan error surface ────────────────────────────────────────────────────
     scanError?.let { msg ->
-        AlertDialog(
+        GlassAlertDialog(
             onDismissRequest = { scanError = null },
             title = { Text("Scanner unavailable") },
             text = { Text(msg) },
@@ -1602,7 +1604,9 @@ private fun SasPairingDialog(
 
     val title = peer.displayName()
 
-    AlertDialog(
+    // §8 glass SAS modal (audit #10, §10) — appearance only; pairing logic
+    // (handleConfirm/handleClose, status machine) is untouched.
+    GlassAlertDialog(
         onDismissRequest = { handleClose() },
         title = { Text("Pair “$title”") },
         text = {
