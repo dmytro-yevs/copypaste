@@ -15,6 +15,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -69,6 +70,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SearchOff
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextField
@@ -152,6 +154,8 @@ import com.copypaste.android.ui.theme.IdeFaint
 import com.copypaste.android.ui.theme.IdeInfo
 import com.copypaste.android.ui.theme.IdeInfoDim
 import com.copypaste.android.ui.theme.IdePanel
+import com.copypaste.android.ui.theme.IdeSuccess
+import com.copypaste.android.ui.theme.IdeSuccessDim
 import com.copypaste.android.ui.theme.IdeSelection
 import com.copypaste.android.ui.theme.IdeText
 import com.copypaste.android.ui.theme.IdeViolet
@@ -1507,9 +1511,10 @@ private fun EmptySearchState(padding: PaddingValues, query: String) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // §9 hero: search icon 28dp faint
+            // §9 hero: SearchOff icon 28dp faint — correct "no results" glyph replacing
+            // the Refresh stand-in that was acknowledged as wrong in a prior TODO comment.
             Icon(
-                imageVector = Icons.Filled.Refresh, // reuse as "search-x" visual; distinct from loading spinner
+                imageVector = Icons.Filled.SearchOff,
                 contentDescription = null,
                 tint = IdeFaint,
                 modifier = Modifier.size(28.dp),
@@ -1656,6 +1661,15 @@ private fun HistoryList(
     val maskSensitive = remember(settingsVersion) { settings.maskSensitiveContent }
     val imageMaxHeightDp = remember(settingsVersion) { settings.imageMaxHeight }
     val previewDelayMs = remember(settingsVersion) { settings.previewDelay }
+    // §2 density-aware row height: read "density" pref defensively — the Settings store
+    // (owned by a sibling agent) may not yet have this key.  Default to "comfortable" so
+    // existing installs never crash and display the larger 34dp minimum height.
+    // TODO(CopyPaste-hv5): migrate to Settings.density property once the sibling agent
+    //   adds the typed accessor; for now read the raw SharedPreferences key directly.
+    val isCompact = remember(settingsVersion) {
+        ctx.getSharedPreferences("copypaste", android.content.Context.MODE_PRIVATE)
+            .getString("density", "comfortable") == "compact"
+    }
 
     // D: hoist the per-item copy logic into a single stable lambda (copyItemById) that
     // captures only stable screen-level values (ctx, repository, settings, scope).
@@ -1840,6 +1854,7 @@ private fun HistoryList(
                         maskSensitive = maskSensitive,
                         imageMaxHeightDp = imageMaxHeightDp,
                         previewDelayMs = previewDelayMs,
+                        isCompact = isCompact,
                         selectionMode = selectionMode,
                         isSelected = selectedIds.contains(item.id),
                         reorderMode = reorderMode,
@@ -1907,6 +1922,8 @@ private fun HistoryRow(
     maskSensitive: Boolean,
     imageMaxHeightDp: Int,
     previewDelayMs: Long,
+    /** §2 Density pref: compact=28dp text rows, comfortable (default)=34dp. */
+    isCompact: Boolean = false,
     selectionMode: Boolean,
     isSelected: Boolean,
     reorderMode: Boolean = false,
@@ -1949,6 +1966,20 @@ private fun HistoryRow(
     LaunchedEffect(selectionMode) {
         if (selectionMode) expanded = false
     }
+
+    // §5/§8 Copy-success flash: 90ms IdeSuccessDim background overlay on copy.
+    // copyFlashTrigger increments on each copy; animateColorAsState fades from
+    // IdeSuccessDim → Transparent in Motion.Instant (90ms) and then resets the trigger
+    // via finishedListener so the next copy can fire again.
+    // Gated by reducedMotion: when true, durationMillis=0 means the color jumps
+    // to transparent instantly (no visible flash, but the state still clears).
+    var copyFlashTrigger by remember(item.id) { mutableStateOf(0) }
+    val copyFlashColor by animateColorAsState(
+        targetValue = if (copyFlashTrigger > 0) IdeSuccessDim else Color.Transparent,
+        animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant),
+        label = "copyFlash",
+        finishedListener = { copyFlashTrigger = 0 },
+    )
 
     // §8 press-scale: 0.98 on press, instant out-expo spring back.
     // When reduced-motion is active we hold the scale at 1f (no animation).
@@ -2012,6 +2043,10 @@ private fun HistoryRow(
             .fillMaxWidth()
             .scale(rowScale)
             .background(rowBg)
+            // §5/§8 Copy-success flash overlay: animates from IdeSuccessDim → transparent
+            // in 90ms (Motion.Instant).  Layered on top of rowBg so selection/pinned
+            // tints are still visible underneath while the flash fades.
+            .background(color = copyFlashColor)
             .drawBehind {
                 // 2.dp left accent bar for pinned rows
                 val barWidthPx = 2.dp.toPx()
@@ -2029,6 +2064,7 @@ private fun HistoryRow(
                     } else if (detectedSensitive) {
                         onSensitiveTap()
                     } else {
+                        copyFlashTrigger++   // §5/§8 trigger 90ms success flash
                         onCopy()
                     }
                 },
@@ -2157,7 +2193,8 @@ private fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp),
+                    // §2 density-aware: compact=28dp, comfortable (default)=34dp
+                    .heightIn(min = if (isCompact) 28.dp else 34.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Checkbox
@@ -2255,11 +2292,12 @@ private fun HistoryRow(
                 }
             }
         } else {
-            // ── Text row — §5 comfortable 40dp min height ─────────────────────
+            // ── Text row — §5 density-aware min height (comfortable=34dp, compact=28dp)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(40.dp),
+                    // §2 density-aware: compact=28dp, comfortable (default)=34dp
+                    .heightIn(min = if (isCompact) 28.dp else 34.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Checkbox
