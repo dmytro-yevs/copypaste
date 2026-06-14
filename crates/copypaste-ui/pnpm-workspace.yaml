@@ -9,3 +9,8 @@ allowBuilds:
   esbuild: true
 onlyBuiltDependencies:
   - esbuild
+# Force esbuild >=0.28.1 to remediate GHSA-gv7w-rqvm-qjhr (arbitrary code exec in
+# esbuild <0.28.1 dev server). vite 7.x declares ^0.27.0 so without this override
+# pnpm resolves 0.27.x; the override pins the floor without breaking vite 7.
+overrides:
+  esbuild: ">=0.28.1"
