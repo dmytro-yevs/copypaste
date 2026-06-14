@@ -9,29 +9,64 @@
  * KindChip     — the tinted full-word TYPE/URL/IMAGE/CODE pill
  */
 
-import { type LucideProps, Type, Link, Image, Code, FileText } from "lucide-react";
+import {
+  type LucideProps,
+  Type,
+  Link,
+  Image,
+  Code,
+  FileText,
+  Mail,
+  Phone,
+  Palette,
+  Hash,
+  FolderOpen,
+  Braces,
+} from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Classify a raw content_type string into one of four canonical categories.
- * Mirrors the branching used in both Popup.tsx and HistoryView.tsx so the
- * shared component produces identical output.
+ * Canonical kind values emitted by the daemon's sensitive-detection layer.
+ * Covers all distinct content categories the UI needs to handle.
  */
-function classify(contentType: string): "text" | "url" | "image" | "code" {
-  if (contentType === "text" || contentType === "text/plain") return "text";
-  if (contentType === "url") return "url";
+type ContentKind =
+  | "text"
+  | "url"
+  | "image"
+  | "code"
+  | "email"
+  | "phone"
+  | "color"
+  | "number"
+  | "path"
+  | "json"
+  | "file";
+
+/**
+ * Classify a raw content_type string into one of the canonical content kinds.
+ * Mirrors the branching used in both Popup.tsx and HistoryView.tsx, extended
+ * to cover all distinct daemon-emitted kind labels.
+ */
+function classify(contentType: string): ContentKind {
+  const ct = contentType.toLowerCase();
+  if (ct === "text" || ct === "text/plain") return "text";
+  if (ct === "url") return "url";
   // image/* (including bare "image") → image
-  if (contentType === "image" || contentType.startsWith("image/")) return "image";
+  if (ct === "image" || ct.startsWith("image/")) return "image";
   // code, text/x-*, application/* → code (matches Popup.tsx ContentChip logic)
-  if (
-    contentType === "code" ||
-    contentType.startsWith("text/x-") ||
-    contentType.startsWith("application/")
-  )
+  if (ct === "code" || ct.startsWith("text/x-") || ct.startsWith("application/"))
     return "code";
+  // Daemon-emitted kind labels (lowercase content_type strings)
+  if (ct === "email") return "email";
+  if (ct === "phone") return "phone";
+  if (ct === "color") return "color";
+  if (ct === "number") return "number";
+  if (ct === "path") return "path";
+  if (ct === "json") return "json";
+  if (ct === "file") return "file";
   // Everything else (plain "text/*" other than text/plain, file, etc.) → text fallback
   return "text";
 }
@@ -51,15 +86,22 @@ export interface ContentIconProps {
  * Renders a lucide-react icon tinted with the appropriate IDE design-token
  * color class based on the content type category:
  *
- *   text  → <Type>    text-ide-accent
- *   url   → <Link>    text-ide-info
- *   image → <Image>   text-ide-violet
- *   code  → <Code>    text-ide-violet
+ *   text   → <Type>       text-ide-accent
+ *   url    → <Link>       text-ide-sky
+ *   image  → <Image>      text-ide-sky
+ *   code   → <Code>       text-ide-violet
+ *   email  → <Mail>       text-ide-success
+ *   phone  → <Phone>      text-ide-success
+ *   color  → <Palette>    text-ide-warning
+ *   number → <Hash>       text-ide-warning
+ *   path   → <FolderOpen> text-ide-warning
+ *   json   → <Braces>     text-ide-danger
+ *   file   → <FileText>   text-ide-dim
  *
  * All icons: strokeWidth=1.5, aria-hidden=true.
  */
 export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
-  const category = classify(contentType);
+  const kind = classify(contentType);
 
   const shared: LucideProps = {
     width: size,
@@ -68,47 +110,38 @@ export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
     "aria-hidden": true,
   };
 
-  switch (category) {
+  switch (kind) {
     case "text":
-      return (
-        <Type
-          {...shared}
-          className="shrink-0 text-ide-accent"
-        />
-      );
+      return <Type {...shared} className="shrink-0 text-ide-accent" />;
     case "url":
-      return (
-        <Link
-          {...shared}
-          // 1hqt: URL/IMAGE use sky token (20 120 170 in light, teal in dark)
-          className="shrink-0 text-ide-sky"
-        />
-      );
+      // 1hqt: URL/IMAGE use sky token (20 120 170 in light, teal in dark)
+      return <Link {...shared} className="shrink-0 text-ide-sky" />;
     case "image":
-      return (
-        <Image
-          {...shared}
-          // 1hqt: IMAGE uses sky token (same family as URL), not violet
-          className="shrink-0 text-ide-sky"
-        />
-      );
+      // 1hqt: IMAGE uses sky token (same family as URL), not violet
+      return <Image {...shared} className="shrink-0 text-ide-sky" />;
     case "code":
-      return (
-        <Code
-          {...shared}
-          className="shrink-0 text-ide-violet"
-        />
-      );
+      return <Code {...shared} className="shrink-0 text-ide-violet" />;
+    case "email":
+      return <Mail {...shared} className="shrink-0 text-ide-success" />;
+    case "phone":
+      return <Phone {...shared} className="shrink-0 text-ide-success" />;
+    case "color":
+      // Live color swatch is rendered separately in history rows; this glyph
+      // represents the kind in compact contexts (chips, popup rows).
+      return <Palette {...shared} className="shrink-0 text-ide-warning" />;
+    case "number":
+      return <Hash {...shared} className="shrink-0 text-ide-warning" />;
+    case "path":
+      return <FolderOpen {...shared} className="shrink-0 text-ide-warning" />;
+    case "json":
+      return <Braces {...shared} className="shrink-0 text-ide-danger" />;
+    case "file":
+      return <FileText {...shared} className="shrink-0 text-ide-dim" />;
     default: {
-      // Exhaustive type narrowing: TypeScript knows `category` is `never` here.
-      const _exhaustive: never = category;
+      // Exhaustive type narrowing: TypeScript knows `kind` is `never` here.
+      const _exhaustive: never = kind;
       void _exhaustive;
-      return (
-        <FileText
-          {...shared}
-          className="shrink-0 text-ide-faint"
-        />
-      );
+      return <FileText {...shared} className="shrink-0 text-ide-dim" />;
     }
   }
 }

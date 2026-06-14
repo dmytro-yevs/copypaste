@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { Search, Clipboard, SearchX, PlugZap } from "lucide-react";
+import { Search, Clipboard, SearchX, PlugZap, Star, StarOff } from "lucide-react";
 import { api, HistoryEntry, ipcErrorMessage, IpcError, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking, shouldMask } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
@@ -904,25 +904,24 @@ const PopupRow = React.memo(function PopupRow({
           {relTime}
         </span>
 
-        {/* M10: Bookmark interactive hover pin button and at-rest indicator.
+        {/* Star interactive hover pin button and at-rest indicator.
             HW-M5 fix: both the hover button and the at-rest badge are absolute
             within the fixed h-5 w-5 slot — no in-flow children, so the slot
             width never changes between pinned/unpinned rows, keeping the
-            timestamp and keycap aligned across all rows. */}
+            timestamp and keycap aligned across all rows.
+            dm51: ★ star glyph (styleguide §pin) replaces bookmark SVG. */}
         <div className="relative flex items-center justify-center h-5 w-5 shrink-0">
           {/* At-rest pinned badge — visible when pinned, fades out on row hover */}
           {item.pinned && (
-            <svg
-              viewBox="0 0 16 20"
-              width="8"
-              height="10"
+            <Star
+              width={10}
+              height={10}
+              strokeWidth={0}
               fill="currentColor"
               aria-label="Pinned"
               className="absolute group-hover:opacity-0 transition-opacity"
               style={{ color: "var(--ide-warning)", transitionDuration: "120ms", zIndex: 1 }}
-            >
-              <path d="M2 1.5A1.5 1.5 0 0 1 3.5 0h9A1.5 1.5 0 0 1 14 1.5v17.25l-6-3.75-6 3.75V1.5Z" />
-            </svg>
+            />
           )}
 
           {/* Hover pin/unpin button — shown on group hover, sits above badge */}
@@ -938,13 +937,23 @@ const PopupRow = React.memo(function PopupRow({
             style={{ border: "none", background: "none", cursor: "pointer", zIndex: 2 }}
           >
             {item.pinned ? (
-              <svg viewBox="0 0 16 16" width="11" height="11" fill="currentColor" aria-hidden="true" style={{ color: "var(--ide-warning)" }}>
-                <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
-              </svg>
+              // Filled star = currently pinned; amber tint matches at-rest badge
+              <Star
+                width={11}
+                height={11}
+                strokeWidth={0}
+                fill="currentColor"
+                aria-hidden={true}
+                style={{ color: "var(--ide-warning)" }}
+              />
             ) : (
-              <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
-              </svg>
+              // Outline star = unpinned; inherits button's text-ide-dim / hover:text-white
+              <StarOff
+                width={11}
+                height={11}
+                strokeWidth={1.5}
+                aria-hidden={true}
+              />
             )}
           </button>
         </div>

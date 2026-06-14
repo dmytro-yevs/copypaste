@@ -33,6 +33,7 @@ import { AppIcon } from "../components/AppIcon";
 import { FileChip } from "../components/FileChip";
 import { ContentIcon, KindChip } from "../components/ContentIcon";
 import { useFocusTrap } from "../lib/useFocusTrap";
+import { Star, StarOff } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Toast — §8 slide-up, neutral panel + 6px semantic dot, one at a time
@@ -105,23 +106,21 @@ function parseFilename(preview: string): string {
 // ContentIcon and KindChip are imported from ../components/ContentIcon (shared component).
 
 // ---------------------------------------------------------------------------
-// Pin indicator (filled amber pin)
+// Pin indicator (filled amber star — dm51: ★ styleguide §pin)
 // ---------------------------------------------------------------------------
 
 function PinIndicator() {
   return (
-    <svg
-      viewBox="0 0 16 20"
-      width="9"
-      height="12"
+    // 8qzb: pinned glyph uses badge-warning (#D9A343) not warning text token
+    // dm51: ★ star glyph replaces bookmark ribbon per styleguide §pin
+    <Star
+      width={10}
+      height={10}
+      strokeWidth={0}
       fill="currentColor"
       aria-label="Pinned"
-      // 8qzb: pinned glyph uses badge-warning (#D9A343) not warning text token
       className="shrink-0 text-ide-badge-warning"
-    >
-      {/* Bookmark ribbon — M2: sleek bookmark instead of thumbtack */}
-      <path d="M2 1.5A1.5 1.5 0 0 1 3.5 0h9A1.5 1.5 0 0 1 14 1.5v17.25l-6-3.75-6 3.75V1.5Z" />
-    </svg>
+    />
   );
 }
 
@@ -244,21 +243,30 @@ export function rowHeightFor(
 // Icon-only action button SVGs (inline, no external icon library needed)
 // ---------------------------------------------------------------------------
 
-/** Pin icon (bookmark outline) */
+/** Pin icon (star outline) — dm51: ★ styleguide §pin */
 function IconPin({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
-      <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
-    </svg>
+    <Star
+      width={13}
+      height={13}
+      strokeWidth={1.5}
+      aria-hidden={true}
+      className={className}
+    />
   );
 }
 
-/** Unpin icon (bookmark filled) */
+/** Unpin icon (star filled) — dm51: ★ styleguide §pin */
 function IconPinOff({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true" className={className}>
-      <path d="M3.5 2v11.5l4.5-2.7 4.5 2.7V2h-9z" />
-    </svg>
+    <StarOff
+      width={13}
+      height={13}
+      strokeWidth={0}
+      fill="currentColor"
+      aria-hidden={true}
+      className={className}
+    />
   );
 }
 
