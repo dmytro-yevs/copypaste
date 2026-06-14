@@ -44,13 +44,14 @@ pub use storage::devices::{
     DevicesError, RevokedDevice,
 };
 pub use storage::items::{
-    bump_item_recency, count_items, delete_expired, delete_fts, delete_item,
+    bump_item_recency, count_items, decrypt_page, delete_expired, delete_fts, delete_item,
     delete_sensitive_expired, exists_item_by_item_id, fetch_text_preview, has_sensitive_items,
     fetch_text_previews_batch, find_recent_by_hash,
     get_device_names, get_item_by_id, get_item_by_item_id, get_page, get_page_meta,
     get_page_pinned_first, insert_item, insert_item_with_fts, insert_tombstone, next_lamport_ts,
     pin_item, prune_to_cap, reorder_pinned, search_items, set_thumb, soft_delete_item, unpin_item,
-    upsert_fts, ClipboardItem, ItemsError, ITEM_KEY_VERSION_CURRENT, MAX_PREVIEW_BYTES,
+    upsert_fts, ClipboardItem, DecryptedPage, ItemsError, ITEM_KEY_VERSION_CURRENT,
+    MAX_PREVIEW_BYTES,
 };
 pub use storage::{Database, DbError, DbRead, MigrationState, ReadHandle};
 pub use storage::{open_pool, open_pool_with_cache_mb, PoolError, SqlitePool};

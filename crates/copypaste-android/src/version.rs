@@ -209,7 +209,20 @@
 ///
 /// Kotlin generated against ABI 14 constructs `LocalItem` without the new fields
 /// and reads `SyncedItem` with the wrong shape; both must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 15;
+///
+/// **ABI 16 (graceful batch decrypt on startup load — CopyPaste-00zz):** Added
+/// `decrypt_text_batch(items, key) -> DecryptBatchResult` plus three new
+/// dictionaries `EncryptedItem`, `DecryptedItem`, `DecryptBatchResult`. This is
+/// the graceful-degradation replacement for the per-item `decrypt_text` startup
+/// loop: items that fail AEAD verification (wrong/rotated key, format drift,
+/// unsupported key_version, malformed nonce) are SKIPPED and counted in
+/// `DecryptBatchResult.skipped` instead of each throwing a `DecryptionFailed`
+/// exception (~629 of which flooded logcat after a key rotation / re-pair). A
+/// failed auth tag is never accepted as plaintext — graceful = skip, not bypass.
+/// `decrypt_text` is unchanged and retained for the single-item paste path.
+/// Kotlin generated against ABI 15 lacks the new symbol/dictionaries and must be
+/// regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 16;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

@@ -11,6 +11,15 @@ namespace copypaste_android {
   [Throws=CopypasteError]
   sequence<u8> decrypt_text(string item_id, [ByRef] sequence<u8> ciphertext, [ByRef] sequence<u8> nonce, [ByRef] sequence<u8> key, u8 key_version);
 
+  // CopyPaste-00zz: graceful batch decrypt for the startup/list load path.
+  // Decrypts every item in one FFI call; items that fail AEAD verification (or
+  // carry an unsupported key_version / malformed nonce) are SKIPPED and counted
+  // in DecryptBatchResult.skipped instead of throwing one DecryptionFailed per
+  // row. A failed auth tag is never accepted — graceful = skip, not bypass.
+  // Throws only InvalidKeyLength (key != 32 bytes).
+  [Throws=CopypasteError]
+  DecryptBatchResult decrypt_text_batch(sequence<EncryptedItem> items, [ByRef] sequence<u8> key);
+
   boolean is_sensitive(string text);
 
   string? sensitive_kind(string text);
@@ -344,6 +353,29 @@ interface VersionError {
 dictionary EncryptedBlob {
   sequence<u8> nonce;
   sequence<u8> ciphertext;
+};
+
+// CopyPaste-00zz: one encrypted local item handed to `decrypt_text_batch`.
+// Mirrors the at-rest columns Kotlin reads from its local store.
+dictionary EncryptedItem {
+  string item_id;
+  sequence<u8> ciphertext;
+  sequence<u8> nonce;
+  u8 key_version;
+};
+
+// One successfully-decrypted item returned by `decrypt_text_batch`.
+dictionary DecryptedItem {
+  string item_id;
+  sequence<u8> plaintext;
+};
+
+// Result of `decrypt_text_batch`: the decryptable items plus an aggregate count
+// of items skipped because they could not be decrypted (skip-and-count instead
+// of one DecryptionFailed per row).
+dictionary DecryptBatchResult {
+  sequence<DecryptedItem> items;
+  u32 skipped;
 };
 
 // Result of `build_pairing_qr`: the encoded QR string to display plus the PAKE

@@ -156,6 +156,115 @@ pub fn decrypt_text(
     })
 }
 
+/// One encrypted local clipboard item handed to [`decrypt_text_batch`].
+///
+/// Mirrors the at-rest columns Kotlin reads from its local SQLite store:
+/// the stable `item_id` (bound into the AEAD AAD), the `ciphertext` + `nonce`
+/// blobs, and the `key_version` (1 or 2) that selects the AAD/key format.
+#[derive(Debug)]
+pub struct EncryptedItem {
+    pub item_id: String,
+    pub ciphertext: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub key_version: u8,
+}
+
+/// One successfully-decrypted item returned by [`decrypt_text_batch`], carrying
+/// its `item_id` back so Kotlin can re-associate the plaintext with its row.
+#[derive(Debug)]
+pub struct DecryptedItem {
+    pub item_id: String,
+    pub plaintext: Vec<u8>,
+}
+
+/// Outcome of [`decrypt_text_batch`]: the decryptable items plus an aggregate
+/// count of the rows skipped because they could not be decrypted.
+#[derive(Debug)]
+pub struct DecryptBatchResult {
+    /// Items whose AEAD auth tag verified and decrypted cleanly.
+    pub items: Vec<DecryptedItem>,
+    /// Number of input items skipped because they failed to decrypt (wrong /
+    /// rotated key, format drift, an unsupported `key_version`, or a malformed
+    /// nonce). Kotlin logs this ONCE in aggregate instead of one error per row.
+    pub skipped: u32,
+}
+
+/// Decrypt a batch of local clipboard items at startup/list time, **degrading
+/// gracefully** when individual items cannot be decrypted (CopyPaste-00zz).
+///
+/// # Why this exists
+///
+/// Kotlin's startup load previously called [`decrypt_text`] once per row, and
+/// every undecryptable legacy item (encrypted under a now-rotated key/format)
+/// threw `DecryptionFailed`. After a key rotation / re-pair this fired hundreds
+/// of times on a single launch (~629 observed) — flooding logcat and degrading
+/// UX even though those rows are simply dead legacy ciphertext.
+///
+/// This batch entry point decrypts every item in one FFI call: each item that
+/// fails AEAD verification (or carries an unsupported `key_version` / malformed
+/// nonce) is **skipped, not thrown**, and counted in
+/// [`DecryptBatchResult::skipped`]. Kotlin surfaces a single aggregate line
+/// ("skipped N undecryptable legacy items") and renders only the decryptable
+/// items, instead of catching one exception per row.
+///
+/// # Security
+///
+/// Graceful means *skip*, never *bypass*. A failed auth tag is never accepted
+/// as plaintext — the item is dropped from `items`. The AAD binding of
+/// `(item_id, schema_version, key_version)` is preserved verbatim (each item's
+/// AAD is rebuilt here exactly as [`decrypt_text`] does), so this path cannot be
+/// used to swap or replay ciphertext across items. `key` is zeroized on drop via
+/// [`Zeroizing`].
+///
+/// Errors: `InvalidKeyLength` if `key` is not exactly 32 bytes. Per-item
+/// decryption failures do NOT error — they are skipped and counted.
+pub fn decrypt_text_batch(
+    items: Vec<EncryptedItem>,
+    key: &[u8],
+) -> Result<DecryptBatchResult, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        let mut decrypted = Vec::with_capacity(items.len());
+        let mut skipped: u32 = 0;
+        for item in &items {
+            match try_decrypt_one(item, &key_arr) {
+                Some(plaintext) => decrypted.push(DecryptedItem {
+                    item_id: item.item_id.clone(),
+                    plaintext,
+                }),
+                // Skip-and-count: a wrong/rotated key, format drift, malformed
+                // nonce, or unsupported key_version is NOT surfaced as an error.
+                None => skipped = skipped.saturating_add(1),
+            }
+        }
+        Ok(DecryptBatchResult {
+            items: decrypted,
+            skipped,
+        })
+    })
+}
+
+/// Attempt to decrypt a single [`EncryptedItem`], returning `None` (rather than
+/// erroring) on any failure so [`decrypt_text_batch`] can skip-and-count.
+///
+/// Rebuilds the AAD from the item's own `item_id` + `key_version` exactly as
+/// [`decrypt_text`] does, keeping the AAD binding intact. The only `Some` path
+/// is a fully-verified AEAD decrypt — a failed auth tag yields `None`, never
+/// accepted plaintext.
+fn try_decrypt_one(item: &EncryptedItem, key: &[u8; 32]) -> Option<Vec<u8>> {
+    let nonce: [u8; NONCE_SIZE] = item.nonce.as_slice().try_into().ok()?;
+    let aad = match item.key_version {
+        1 => build_item_aad(&item.item_id, AAD_SCHEMA_VERSION),
+        2 => build_item_aad_v2(&item.item_id, AAD_SCHEMA_VERSION_V4, u32::from(item.key_version)),
+        // Unknown key_version: undecryptable by definition — skip.
+        _ => return None,
+    };
+    decrypt_item_with_aad(&item.ciphertext, &nonce, key, &aad).ok()
+}
+
 /// Returns `true` if `text` is sensitive at the HIGH-confidence threshold.
 ///
 /// AB-6a (v0.6.1 threshold parity): this used to flag on `detect(&text).is_some()`
@@ -2398,6 +2507,93 @@ mod tests {
             matches!(err, CopypasteError::DecryptionFailed { .. }),
             "expected DecryptionFailed, got {err:?}"
         );
+    }
+
+    /// CopyPaste-00zz: `decrypt_text_batch` must DEGRADE GRACEFULLY across a mix
+    /// of decryptable and undecryptable (wrong-key) items: it returns ONLY the
+    /// items that verify+decrypt and reports the rest in `skipped`, instead of
+    /// throwing one `DecryptionFailed` per undecryptable legacy row (the ~629
+    /// startup-flood bug). A failed auth tag is never accepted as plaintext.
+    #[test]
+    fn decrypt_text_batch_skips_undecryptable_and_counts_them() {
+        let key = test_key();
+        // Two decryptable items encrypted under `key`.
+        let blob_a = encrypt_text("item-A".into(), b"alpha", &key, 2).expect("encrypt A");
+        let blob_b = encrypt_text("item-B".into(), b"bravo", &key, 2).expect("encrypt B");
+        // Three undecryptable legacy items: encrypted under a DIFFERENT key,
+        // standing in for a rotated/old key whose auth tag fails under `key`.
+        let stale_key = vec![0x99u8; 32];
+        let bad_1 = encrypt_text("legacy-1".into(), b"x", &stale_key, 2).expect("encrypt bad1");
+        let bad_2 = encrypt_text("legacy-2".into(), b"y", &stale_key, 2).expect("encrypt bad2");
+        let bad_3 = encrypt_text("legacy-3".into(), b"z", &stale_key, 2).expect("encrypt bad3");
+
+        let items = vec![
+            EncryptedItem {
+                item_id: "item-A".into(),
+                ciphertext: blob_a.ciphertext,
+                nonce: blob_a.nonce,
+                key_version: 2,
+            },
+            EncryptedItem {
+                item_id: "legacy-1".into(),
+                ciphertext: bad_1.ciphertext,
+                nonce: bad_1.nonce,
+                key_version: 2,
+            },
+            EncryptedItem {
+                item_id: "item-B".into(),
+                ciphertext: blob_b.ciphertext,
+                nonce: blob_b.nonce,
+                key_version: 2,
+            },
+            EncryptedItem {
+                item_id: "legacy-2".into(),
+                ciphertext: bad_2.ciphertext,
+                nonce: bad_2.nonce,
+                key_version: 2,
+            },
+            EncryptedItem {
+                item_id: "legacy-3".into(),
+                ciphertext: bad_3.ciphertext,
+                nonce: bad_3.nonce,
+                key_version: 2,
+            },
+        ];
+
+        let result = decrypt_text_batch(items, &key).expect("batch must not error");
+        assert_eq!(
+            result.skipped, 3,
+            "the 3 wrong-key items must be skipped + counted, not thrown"
+        );
+        let mut got: Vec<(String, Vec<u8>)> = result
+            .items
+            .into_iter()
+            .map(|d| (d.item_id, d.plaintext))
+            .collect();
+        got.sort();
+        let mut want = vec![
+            ("item-A".to_string(), b"alpha".to_vec()),
+            ("item-B".to_string(), b"bravo".to_vec()),
+        ];
+        want.sort();
+        assert_eq!(got, want, "only the decryptable items, with correct plaintext");
+    }
+
+    /// CopyPaste-00zz: an unknown `key_version` is undecryptable by definition
+    /// and must be skipped+counted (never panic, never accepted).
+    #[test]
+    fn decrypt_text_batch_skips_unknown_key_version() {
+        let key = test_key();
+        let blob = encrypt_text("item-A".into(), b"alpha", &key, 2).expect("encrypt");
+        let items = vec![EncryptedItem {
+            item_id: "item-A".into(),
+            ciphertext: blob.ciphertext,
+            nonce: blob.nonce,
+            key_version: 7, // unsupported
+        }];
+        let result = decrypt_text_batch(items, &key).expect("batch must not error");
+        assert!(result.items.is_empty());
+        assert_eq!(result.skipped, 1);
     }
 
     /// v0.3 OI-7: a panic raised inside a wrapped UniFFI body must surface

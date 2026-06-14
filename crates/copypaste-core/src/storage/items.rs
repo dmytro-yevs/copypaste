@@ -1,5 +1,6 @@
 use super::db::{Database, DbError, MigrationState};
 use super::pool::DbRead;
+use crate::crypto::encrypt::{decrypt_item_by_version, NONCE_SIZE};
 use rusqlite::{params, OptionalExtension};
 use thiserror::Error;
 use uuid::Uuid;
@@ -647,6 +648,90 @@ pub fn get_page_meta(
         .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
     Ok(items)
+}
+
+/// Outcome of a graceful, decrypt-while-loading page fetch ([`decrypt_page`]).
+///
+/// `items` holds only the rows whose ciphertext successfully verified and
+/// decrypted under the supplied keys (paired with their recovered plaintext).
+/// `skipped` is the count of rows that failed AEAD verification or carried an
+/// unsupported `key_version` and were therefore quarantined out of the result.
+#[derive(Debug)]
+pub struct DecryptedPage {
+    /// Successfully-decrypted rows, each paired with its recovered plaintext.
+    pub items: Vec<(ClipboardItem, Vec<u8>)>,
+    /// Number of rows skipped because they could not be decrypted (wrong /
+    /// rotated key, format drift, or an unsupported `key_version`).
+    pub skipped: usize,
+}
+
+/// Load a page of clipboard items and decrypt each one, **degrading
+/// gracefully** when an individual row cannot be decrypted.
+///
+/// # Why this exists (CopyPaste-00zz)
+///
+/// The startup item-load path used to treat every undecryptable legacy row as
+/// a hard per-item error. After a key rotation / pairing change, hundreds of
+/// old rows (encrypted under a now-mismatched key/format) each surfaced a
+/// `DecryptionFailed` error — ~629 individual failures on a single launch —
+/// spamming the log and degrading UX even though the items are simply dead
+/// legacy ciphertext.
+///
+/// This function loads the page, then for each row attempts
+/// [`decrypt_item_by_version`] (which keeps the AAD binding of
+/// `(item_id, schema_version, key_version)` fully intact). A row that fails AEAD
+/// verification — or whose `content` / `content_nonce` is missing or malformed,
+/// or whose `key_version` is unknown — is **skipped, not surfaced and not
+/// fatal**: it is counted in [`DecryptedPage::skipped`] so the caller can log a
+/// single aggregate line ("skipped N undecryptable legacy items") instead of
+/// one error per row.
+///
+/// # Security
+///
+/// "Graceful" means *skip*, never *bypass*. A failed auth tag is never accepted
+/// as valid plaintext — the row is dropped from the result entirely. The AAD
+/// binding is unchanged (it is computed inside `decrypt_item_by_version` from
+/// the row's own `item_id` + `key_version`), so this path cannot be used to
+/// swap or replay ciphertext across items.
+///
+/// Tombstone / blob rows (`content` is `None`, e.g. soft-deleted rows, image /
+/// file rows whose nonces live per-chunk) carry no item-level
+/// `(content, content_nonce)` pair and are counted as skipped here — this helper
+/// is for the text-item list path; richer blob decoding stays with the
+/// dedicated image/file decoders.
+pub fn decrypt_page<D: DbRead + ?Sized>(
+    db: &D,
+    v1_key: &[u8; 32],
+    v2_key: &[u8; 32],
+    limit: usize,
+    offset: usize,
+) -> Result<DecryptedPage, ItemsError> {
+    let rows = get_page(db, limit, offset)?;
+    let mut items = Vec::with_capacity(rows.len());
+    let mut skipped = 0usize;
+    for row in rows {
+        match try_decrypt_row(&row, v1_key, v2_key) {
+            Some(plaintext) => items.push((row, plaintext)),
+            None => skipped = skipped.saturating_add(1),
+        }
+    }
+    Ok(DecryptedPage { items, skipped })
+}
+
+/// Attempt to recover the plaintext of a single text row, returning `None`
+/// (rather than erroring) on any failure so callers can skip-and-count.
+///
+/// Returns `None` when the row lacks an item-level `(content, content_nonce)`
+/// pair (tombstone / blob row), when the nonce is the wrong length, or when the
+/// AEAD auth tag does not verify (wrong / rotated key, format drift, unsupported
+/// `key_version`). A failed auth tag is NEVER treated as success — the only
+/// `Some` path is a fully-verified decrypt.
+fn try_decrypt_row(row: &ClipboardItem, v1_key: &[u8; 32], v2_key: &[u8; 32]) -> Option<Vec<u8>> {
+    let content = row.content.as_deref()?;
+    let nonce_slice = row.content_nonce.as_deref()?;
+    // A malformed nonce can never decrypt; skip rather than panic on the cast.
+    let nonce: [u8; NONCE_SIZE] = nonce_slice.try_into().ok()?;
+    decrypt_item_by_version(row.key_version, v1_key, v2_key, &row.item_id, &nonce, content).ok()
 }
 
 /// Fetch a single clipboard item by its primary-key `id`.
@@ -1601,6 +1686,74 @@ mod tests {
             page.iter().all(|i| i.item_id != "iid-unknown"),
             "tombstone must not appear in the history list"
         );
+    }
+
+    /// CopyPaste-00zz: `decrypt_page` must DEGRADE GRACEFULLY across a mix of
+    /// decryptable and undecryptable (wrong-key) rows: it returns ONLY the
+    /// rows that verify+decrypt and reports the rest in `skipped`, instead of
+    /// aborting the whole load on the first AEAD failure. A failed auth tag is
+    /// never accepted as plaintext.
+    #[test]
+    fn decrypt_page_skips_undecryptable_legacy_rows_and_counts_them() {
+        use crate::crypto::encrypt::{
+            build_item_aad_v2, encrypt_item_with_aad, AAD_SCHEMA_VERSION_V4,
+        };
+
+        let db = Database::open_in_memory().unwrap();
+        // The "current" v2 key the load path will try. v1_key is unused by the
+        // v2 rows below but `decrypt_page` requires both, mirroring the live
+        // dual-key dispatch.
+        let v1_key = [0x11u8; 32];
+        let v2_key = [0x22u8; 32];
+        // A DIFFERENT v2 key, standing in for a rotated/old key under which the
+        // legacy rows were encrypted — their auth tag cannot verify under v2_key.
+        let stale_key = [0x99u8; 32];
+
+        // Seed a row encrypted under `enc_key` with key_version=2 (v4 AAD).
+        fn seed_v2(db: &Database, enc_key: &[u8; 32], plaintext: &[u8], lamport: i64) -> String {
+            let item_id = Uuid::new_v4().to_string();
+            let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+            let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, enc_key, &aad).unwrap();
+            let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport);
+            item.item_id = item_id;
+            let id = item.id.clone();
+            insert_item(db, &item).unwrap();
+            id
+        }
+
+        // 2 decryptable rows (encrypted under the real v2_key) ...
+        let good_a = seed_v2(&db, &v2_key, b"hello-A", 10);
+        let good_b = seed_v2(&db, &v2_key, b"hello-B", 11);
+        // ... and 3 undecryptable legacy rows (encrypted under the stale key).
+        let _bad_1 = seed_v2(&db, &stale_key, b"legacy-1", 1);
+        let _bad_2 = seed_v2(&db, &stale_key, b"legacy-2", 2);
+        let _bad_3 = seed_v2(&db, &stale_key, b"legacy-3", 3);
+
+        let page = decrypt_page(&db, &v1_key, &v2_key, 100, 0).unwrap();
+
+        assert_eq!(
+            page.items.len(),
+            2,
+            "only the 2 decryptable rows must be surfaced"
+        );
+        assert_eq!(
+            page.skipped, 3,
+            "the 3 wrong-key rows must be skipped + counted, not surfaced or fatal"
+        );
+
+        // The surfaced rows are exactly the decryptable ones, with correct plaintext.
+        let mut got: Vec<(String, Vec<u8>)> = page
+            .items
+            .into_iter()
+            .map(|(row, pt)| (row.id, pt))
+            .collect();
+        got.sort();
+        let mut want = vec![
+            (good_a, b"hello-A".to_vec()),
+            (good_b, b"hello-B".to_vec()),
+        ];
+        want.sort();
+        assert_eq!(got, want, "decrypted plaintext must match what was encrypted");
     }
 
     #[test]
