@@ -104,10 +104,12 @@ class DevicesLiquidGlassTest {
     }
 
     @Test
-    fun `qr is in warning zone when remainingSeconds is at or below 15`() {
+    fun `qr is in warning zone when remainingSeconds is at or below 20`() {
+        // PARITY-SPEC §10 / audit #26: warning threshold moved 15s → 20s.
+        assertTrue(isQrWarning(remainingSeconds = 20))
         assertTrue(isQrWarning(remainingSeconds = 15))
         assertTrue(isQrWarning(remainingSeconds = 1))
-        assertFalse(isQrWarning(remainingSeconds = 16))
+        assertFalse(isQrWarning(remainingSeconds = 21))
         assertFalse(isQrWarning(remainingSeconds = 120))
     }
 

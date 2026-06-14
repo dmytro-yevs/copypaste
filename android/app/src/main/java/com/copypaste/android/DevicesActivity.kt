@@ -45,8 +45,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -79,19 +77,7 @@ import androidx.core.content.ContextCompat
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeAccent
-import com.copypaste.android.ui.theme.IdeAccentDim
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeBorder
-import com.copypaste.android.ui.theme.IdeDanger
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeElevated
-import com.copypaste.android.ui.theme.IdeFaint
-import com.copypaste.android.ui.theme.IdeInfo
-import com.copypaste.android.ui.theme.IdeInfoDim
-import com.copypaste.android.ui.theme.IdeSuccess
-import com.copypaste.android.ui.theme.IdeText
-import com.copypaste.android.ui.theme.IdeWarning
+import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.SectionLabel
 import com.google.zxing.BarcodeFormat
@@ -151,8 +137,8 @@ internal fun qrCountdownProgress(remainingSeconds: Int, totalSeconds: Int): Floa
     (remainingSeconds.toFloat() / totalSeconds.toFloat()).coerceIn(0f, 1f)
 
 /**
- * True when the QR is in the warning zone (≤15 s remaining).
- * Matches [DEVICES_QR_URGENT_THRESHOLD_SECONDS].
+ * True when the QR is in the warning zone (≤20 s remaining).
+ * Matches [DEVICES_QR_URGENT_THRESHOLD_SECONDS] (PARITY-SPEC §10 / audit #26).
  */
 internal fun isQrWarning(remainingSeconds: Int): Boolean =
     remainingSeconds <= DEVICES_QR_URGENT_THRESHOLD_SECONDS
@@ -275,6 +261,7 @@ fun DevicesScreen(
     autoOpenSasOnEntry: Boolean = false,
 ) {
     val ctx = LocalContext.current
+    val c = LocalIdeColors.current
     val settings = remember { Settings(ctx) }
     val deviceKeyStore = remember { DeviceKeyStore(ctx) }
     val scope = rememberCoroutineScope()
@@ -544,7 +531,7 @@ fun DevicesScreen(
                     unpairTarget = null
                     unpairPeer(settings, target.fingerprint)
                     refresh()
-                }) { Text("Forget", color = IdeDanger) }
+                }) { Text("Forget", color = c.danger) }
             },
             dismissButton = {
                 TextButton(onClick = { unpairTarget = null }) { Text("Cancel") }
@@ -597,7 +584,7 @@ fun DevicesScreen(
                         )
                         if (!ok) revokeError = "Failed to record revocation. The peer was unpaired locally."
                     }
-                }) { Text("Revoke", color = IdeDanger) }
+                }) { Text("Revoke", color = c.danger) }
             },
             dismissButton = {
                 TextButton(onClick = { revokeTarget = null }) { Text("Cancel") }
@@ -641,7 +628,7 @@ fun DevicesScreen(
 
     Scaffold(
         modifier = modifier,
-        containerColor = IdeBg,
+        containerColor = c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_devices),
@@ -673,33 +660,57 @@ fun DevicesScreen(
             // when the user taps through to that screen.
             OwnQrSection(settings = settings)
 
-            // ── Single unified device list ───────────────────────────────────
-            // Parity with macOS DevicesView: this device first, then every
-            // paired peer, then discovered (unpaired) LAN peers — all in one
-            // continuous column, no separate section headers per list.
+            // ── Single grouped inset device list (PARITY-SPEC §8) ─────────────
+            // Apple Settings-style: this device first, then every paired peer,
+            // then discovered (unpaired) LAN peers — ALL inside ONE glass
+            // CopyPasteCard, rows separated by a single 1dp hairline divider.
+            // Replaces the former stack of individually-elevated Cards.
             SectionLabel("Devices")
 
-            // This device — always first.
-            ownIdentity?.let { identity ->
-                OwnDeviceCard(identity = identity, nowMs = nowMs)
+            // Assemble the ordered row list so we know where dividers go (a
+            // divider is drawn BEFORE every row except the first).
+            val deviceRows: List<@Composable () -> Unit> = buildList {
+                // This device — always first.
+                ownIdentity?.let { identity ->
+                    add { OwnDeviceRow(identity = identity, nowMs = nowMs) }
+                }
+                // Paired peers — pass the pre-computed online flag so the row dot
+                // and the footer badge are always in sync.
+                for (peer in peers) {
+                    add {
+                        PeerRow(
+                            peer = peer,
+                            online = onlineByFingerprint[peer.fingerprint] ?: false,
+                            nowMs = nowMs,
+                            onUnpair = { unpairTarget = peer },
+                            onRevoke = { revokeTarget = peer },
+                        )
+                    }
+                }
+                // Discovered (unpaired) LAN peers — only when P2P is enabled
+                // (discovery is gated on it).
+                if (p2pEnabled) {
+                    for (peer in discovered) {
+                        add {
+                            DiscoveredPeerRow(
+                                peer = peer,
+                                busy = pairStarting || pairingPeer != null,
+                                onPair = { startPairing(peer) },
+                            )
+                        }
+                    }
+                }
             }
 
-            // Paired peers — pass the pre-computed online flag so the card dot
-            // and the footer badge are always in sync.
-            if (peers.isNotEmpty()) {
-                for (peer in peers) {
-                    PeerCard(
-                        peer = peer,
-                        online = onlineByFingerprint[peer.fingerprint] ?: false,
-                        nowMs = nowMs,
-                        onUnpair = { unpairTarget = peer },
-                        onRevoke = { revokeTarget = peer },
-                    )
+            if (deviceRows.isNotEmpty()) {
+                CopyPasteCard(accent = c.border) {
+                    deviceRows.forEachIndexed { index, row ->
+                        if (index > 0) RowDivider()
+                        row()
+                    }
                 }
-            } else if (ownIdentity == null) {
-                // Show the empty state only when we also have no own-device card
-                // to anchor the list (avoids a redundant prompt when the own
-                // card is already present).
+            } else {
+                // Empty state — no own-device row to anchor the list.
                 NoPeerCard(
                     onPair = {
                         ctx.startActivity(Intent(ctx, PairActivity::class.java))
@@ -707,22 +718,11 @@ fun DevicesScreen(
                 )
             }
 
-            // Discovered on your network (unpaired LAN peers).
-            // Only shown when P2P is enabled (discovery is gated on it).
             if (p2pEnabled) {
-                if (discovered.isNotEmpty()) {
-                    for (peer in discovered) {
-                        DiscoveredPeerCard(
-                            peer = peer,
-                            busy = pairStarting || pairingPeer != null,
-                            onPair = { startPairing(peer) },
-                        )
-                    }
-                }
                 discoverError?.let { msg ->
                     Text(
                         text = msg,
-                        color = IdeDanger,
+                        color = c.danger,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
@@ -771,8 +771,11 @@ private const val DEVICES_QR_SLOT_DP = DEVICES_QR_IMAGE_DP + DEVICES_QR_PLATE_PA
 /** Mirrors PAIR_TOKEN_TTL_SECONDS in PairActivity (private there). */
 private const val DEVICES_QR_TTL_SECONDS = 120
 
-/** Mirrors PAIR_TOKEN_URGENT_THRESHOLD_SECONDS in PairActivity (private there). */
-private const val DEVICES_QR_URGENT_THRESHOLD_SECONDS = 15
+/**
+ * QR countdown urgency threshold. PARITY-SPEC §10 / audit #26: the bar + label
+ * switch from accent → warning at ≤20 s remaining (was 15 s, faint→warning).
+ */
+private const val DEVICES_QR_URGENT_THRESHOLD_SECONDS = 20
 
 /**
  * Generates a QR [Bitmap] for [text] at [sizePx] pixels. Identical to
@@ -797,8 +800,14 @@ private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap {
  *  - QR is blurred ([Modifier.blur] 16 dp) by default; a "Tap to reveal"
  *    overlay guides the user.
  *  - First tap → unblurred (revealed).
- *  - Second tap → regenerates + stays visible (mirrors HW-A5 from PairActivity).
- *  - On expiry (2-minute TTL) the QR auto-regenerates and stays visible.
+ *  - Second tap → regenerates; blur state is left untouched.
+ *  - On expiry (2-minute TTL) the QR auto-regenerates; blur state is preserved.
+ *
+ * Blur persistence (CopyPaste-v5a, android half — mirrors the web fix): the
+ * `qrBlurred` flag is INDEPENDENT of QR generation. Regenerating (manual second
+ * tap OR the automatic TTL refresh) never flips the blur — only an explicit
+ * first tap reveals, and the QR stays revealed across subsequent refreshes. This
+ * removes the surprise re-blur / unexpected reveal on auto-refresh.
  *
  * The QR is generated on first composition via [startPairing] (same FFI call
  * as PairActivity). Failures show a muted error label so the rest of the
@@ -812,18 +821,24 @@ private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap {
  */
 @Composable
 private fun OwnQrSection(settings: Settings) {
+    val c = LocalIdeColors.current
     val scope = rememberCoroutineScope()
     var qr by remember { mutableStateOf<PairingQrResult?>(null) }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
     var loading by remember { mutableStateOf(false) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
-    // Blurred by default; tap reveals; second tap regenerates (stays unblurred).
+    // Privacy blur — INDEPENDENT of QR generation (CopyPaste-v5a; mirrors web).
+    // Blurred by default; an explicit first tap reveals; regenerating (second
+    // tap OR the TTL auto-refresh) leaves this flag untouched so the user's
+    // chosen reveal/blur state survives a refresh.
     var qrBlurred by remember { mutableStateOf(true) }
 
     val expired = qr != null && remainingSeconds <= 0
 
-    fun generateQr(keepVisible: Boolean) {
+    // Generate (or regenerate) the QR. Deliberately does NOT mutate [qrBlurred]:
+    // blur is a separate, user-owned concern (see the v5a note above).
+    fun generateQr() {
         scope.launch {
             loading = true
             try {
@@ -835,7 +850,6 @@ private fun OwnQrSection(settings: Settings) {
                 }
                 qr = result
                 qrBitmap = bmp
-                if (keepVisible) qrBlurred = false
             } catch (e: Exception) {
                 errorMsg = e.message ?: e.javaClass.simpleName
             } finally {
@@ -845,7 +859,7 @@ private fun OwnQrSection(settings: Settings) {
     }
 
     // Countdown ticker — restarts whenever a fresh QR is issued. Auto-regenerates
-    // on expiry and keeps the QR visible (mirrors PairActivity HW-A5).
+    // on expiry WITHOUT changing the blur state (CopyPaste-v5a).
     LaunchedEffect(qr) {
         if (qr == null) return@LaunchedEffect
         remainingSeconds = DEVICES_QR_TTL_SECONDS
@@ -853,13 +867,13 @@ private fun OwnQrSection(settings: Settings) {
             delay(1_000L)
             remainingSeconds -= 1
         }
-        generateQr(keepVisible = true)
+        generateQr()
     }
 
     // Generate QR on first composition.
     LaunchedEffect(Unit) {
         if (qr != null || loading) return@LaunchedEffect
-        generateQr(keepVisible = false)
+        generateQr()
     }
 
     SectionLabel("Your QR code")
@@ -875,7 +889,7 @@ private fun OwnQrSection(settings: Settings) {
             Text(
                 text = "Let another device scan this to pair",
                 style = MaterialTheme.typography.bodySmall,
-                color = IdeDim,
+                color = c.dim,
                 textAlign = TextAlign.Center,
             )
 
@@ -888,7 +902,7 @@ private fun OwnQrSection(settings: Settings) {
                     loading -> {
                         CircularProgressIndicator(
                             modifier = Modifier.size(32.dp),
-                            color = IdeAccent,
+                            color = c.accent,
                             strokeWidth = 2.dp,
                         )
                     }
@@ -901,10 +915,12 @@ private fun OwnQrSection(settings: Settings) {
                                     if (qrBlurred) Modifier.blur(16.dp) else Modifier
                                 )
                                 .clickable {
+                                    // First tap reveals; subsequent taps regenerate
+                                    // WITHOUT re-blurring (blur is user-owned, v5a).
                                     if (qrBlurred) {
                                         qrBlurred = false
                                     } else {
-                                        generateQr(keepVisible = true)
+                                        generateQr()
                                     }
                                 },
                             contentAlignment = Alignment.Center,
@@ -928,7 +944,7 @@ private fun OwnQrSection(settings: Settings) {
                                 Text(
                                     text = "Tap to reveal",
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = IdeText,
+                                    color = c.text,
                                     textAlign = TextAlign.Center,
                                 )
                             }
@@ -939,29 +955,29 @@ private fun OwnQrSection(settings: Settings) {
                         Text(
                             text = "Refreshing…",
                             style = MaterialTheme.typography.bodySmall,
-                            color = IdeDim,
+                            color = c.dim,
                         )
                     }
                 }
             }
 
-            // §7 Countdown / expiry label + drain bar.
+            // §10 Countdown / expiry label + drain bar.
             if (qr != null && !expired) {
                 val urgent = isQrWarning(remainingSeconds)
                 Text(
                     text = stringResource(R.string.pair_token_expires_in_seconds, remainingSeconds),
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (urgent) IdeDanger else IdeFaint,
+                    color = if (urgent) c.warning else c.faint,
                 )
-                // §7 QR countdown drain bar: thin determinate progress bar that
+                // §10 QR countdown drain bar: thin determinate progress bar that
                 // drains from full (1f) to empty (0f) over the 120 s TTL.
-                // Colour switches to IdeWarning when ≤15 s remain (spec: "warning <20s";
-                // we use the same threshold as DEVICES_QR_URGENT_THRESHOLD_SECONDS = 15).
+                // Audit #26: fill is ACCENT normally, switching to WARNING when
+                // ≤20 s remain (DEVICES_QR_URGENT_THRESHOLD_SECONDS).
                 LinearProgressIndicator(
                     progress = { qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS) },
                     modifier = Modifier.fillMaxWidth(),
-                    color = if (urgent) IdeWarning else IdeFaint,
-                    trackColor = IdeBorder,
+                    color = if (urgent) c.warning else c.accent,
+                    trackColor = c.border,
                 )
             }
 
@@ -969,7 +985,7 @@ private fun OwnQrSection(settings: Settings) {
                 Text(
                     text = "QR unavailable: $msg",
                     style = MaterialTheme.typography.bodySmall,
-                    color = IdeDanger,
+                    color = c.danger,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -984,19 +1000,34 @@ private fun PairedPeer.displayName(): String =
     name.ifBlank { "device ${fingerprint.take(8)}" }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Peer card
+// Grouped inset list rows (PARITY-SPEC §8)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
  * Fixed width of the label column in the two-column metadata table.
  * Sized to fit the longest label ("Local IP" / "Public IP") at 11 sp so
- * values in all three card types (Own, Peer, Discovered) start at the same
- * horizontal position regardless of which card they appear in.
+ * values in all three row types (Own, Peer, Discovered) start at the same
+ * horizontal position regardless of which row they appear in.
  */
 private val META_LABEL_WIDTH: Dp = 72.dp
 
+/**
+ * Single 1dp hairline between rows in the grouped inset device list
+ * (PARITY-SPEC §4 / §8 — kills the former 0.5dp mix). Inset on the leading edge
+ * to read as an Apple grouped-list separator.
+ */
 @Composable
-private fun PeerCard(
+private fun RowDivider() {
+    val c = LocalIdeColors.current
+    HorizontalDivider(
+        modifier = Modifier.padding(start = 16.dp),
+        color = c.divider,
+        thickness = 1.dp,
+    )
+}
+
+@Composable
+private fun PeerRow(
     peer: PairedPeer,
     /**
      * Pre-computed online flag from [DevicesScreen] — the SINGLE source of truth
@@ -1010,122 +1041,119 @@ private fun PeerCard(
     onRevoke: () -> Unit,
 ) {
     val ctx = LocalContext.current
-    val dotColor = if (online) IdeSuccess else IdeFaint
+    val c = LocalIdeColors.current
+    val dotColor = if (online) c.success else c.faint
     val chip = transportChipFor(peer)
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = IdeElevated),
-        border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // ── Header row: pulse dot + name + status + transport chip ───────
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // §7 online pulse ring (replaces plain dot).
-                PulseDot(online = online, modifier = Modifier.size(10.dp))
-                Text(
-                    text = peer.name.ifBlank { "Paired device" },
-                    color = IdeText,
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Text(
-                    text = if (online) "Online" else "Offline",
-                    color = dotColor,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                // §7 transport chip: P2P (IdeInfo) or Cloud (IdeAccent).
-                TransportChipLabel(chip = chip)
-            }
-
-            Spacer(Modifier.height(10.dp))
-
-            // ── Two-column aligned table ─────────────────────────────────────
-            // Label column is [META_LABEL_WIDTH] wide; value column takes the
-            // rest. Each row uses verticalAlignment = CenterVertically so
-            // multi-line values don't cause the label to sit misaligned.
-            // Only rows with non-blank values rendered — legacy pre-ABI-14
-            // roster entries simply show fewer rows.
-            val lastSyncText: String? = if (peer.lastSyncMs > 0L) {
-                val elapsed = (nowMs - peer.lastSyncMs) / 1_000L
-                when {
-                    elapsed < 60 -> "${elapsed}s ago"
-                    elapsed < 3600 -> "${elapsed / 60}m ago"
-                    elapsed < 86400 -> "${elapsed / 3600}h ago"
-                    else -> formatEpochMs(peer.lastSyncMs)
-                }
-            } else null
-
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                peer.peerModel?.takeIf { it.isNotBlank() }?.let {
-                    MetaRow(label = "Model", value = it)
-                }
-                peer.peerOs?.takeIf { it.isNotBlank() }?.let {
-                    MetaRow(label = "OS", value = it)
-                }
-                peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
-                    MetaRow(label = "Version", value = it)
-                }
-                peer.peerLocalIp?.takeIf { it.isNotBlank() }?.let {
-                    MetaRow(label = "Local IP", value = it)
-                }
-                peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
-                    MetaRow(label = "Public IP", value = it)
-                }
-                if (peer.pairedAtMs > 0L) {
-                    MetaRow(label = "Paired", value = formatEpochMs(peer.pairedAtMs))
-                }
-                lastSyncText?.let {
-                    MetaRow(label = "Last sync", value = it)
-                }
-                // RTT: shown when FgsSyncLoop has measured a live round-trip time.
-                // FgsSyncLoop instrumentation (Ping/Pong over mTLS) deferred to CopyPaste-8dd.
-                peer.latencyMs?.let {
-                    MetaRow(label = "RTT", value = "$it ms")
-                }
-                // §7 Fingerprint row: peer shows take(16)+…+takeLast(8) + tap-to-copy.
-                // Defensive: only shown when fingerprint is non-blank.
-                peer.fingerprint.takeIf { it.isNotBlank() }?.let { fp ->
-                    val truncated = formatPeerFingerprint(fp)
-                    MonoMetaRow(
-                        label = "Fingerprint",
-                        value = truncated,
-                        onTap = { copyToSystemClipboard(ctx, fp) },
-                    )
-                }
-            }
-
-            HorizontalDivider(
-                modifier = Modifier.padding(vertical = 12.dp),
-                color = IdeBorder.copy(alpha = 0.5f),
-                thickness = 0.5.dp,
+    // Row content only — the enclosing CopyPasteCard provides the glass surface,
+    // 12dp radius, and 1dp hairline border (PARITY-SPEC §8 grouped inset list).
+    Column(modifier = Modifier.padding(16.dp)) {
+        // ── Header row: pulse dot + name + status + transport chip ───────
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // §7 online pulse ring (replaces plain dot).
+            PulseDot(online = online, modifier = Modifier.size(10.dp))
+            Text(
+                text = peer.name.ifBlank { "Paired device" },
+                color = c.text,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f, fill = false),
             )
+            Text(
+                text = if (online) "Online" else "Offline",
+                color = dotColor,
+                style = MaterialTheme.typography.labelMedium,
+            )
+            // §7 transport chip: P2P (info) or Cloud (accent).
+            TransportChipLabel(chip = chip)
+        }
 
-            // ── Actions ─────────────────────────────────────────────────────
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+        Spacer(Modifier.height(10.dp))
+
+        // ── Two-column aligned table ─────────────────────────────────────
+        // Label column is [META_LABEL_WIDTH] wide; value column takes the
+        // rest. Each row uses verticalAlignment = CenterVertically so
+        // multi-line values don't cause the label to sit misaligned.
+        // Only rows with non-blank values rendered — legacy pre-ABI-14
+        // roster entries simply show fewer rows.
+        val lastSyncText: String? = if (peer.lastSyncMs > 0L) {
+            val elapsed = (nowMs - peer.lastSyncMs) / 1_000L
+            when {
+                elapsed < 60 -> "${elapsed}s ago"
+                elapsed < 3600 -> "${elapsed / 60}m ago"
+                elapsed < 86400 -> "${elapsed / 3600}h ago"
+                else -> formatEpochMs(peer.lastSyncMs)
+            }
+        } else null
+
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            peer.peerModel?.takeIf { it.isNotBlank() }?.let {
+                MetaRow(label = "Model", value = it)
+            }
+            peer.peerOs?.takeIf { it.isNotBlank() }?.let {
+                MetaRow(label = "OS", value = it)
+            }
+            peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
+                MetaRow(label = "Version", value = it)
+            }
+            peer.peerLocalIp?.takeIf { it.isNotBlank() }?.let {
+                MetaRow(label = "Local IP", value = it)
+            }
+            peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
+                MetaRow(label = "Public IP", value = it)
+            }
+            if (peer.pairedAtMs > 0L) {
+                MetaRow(label = "Paired", value = formatEpochMs(peer.pairedAtMs))
+            }
+            lastSyncText?.let {
+                MetaRow(label = "Last sync", value = it)
+            }
+            // RTT: shown when FgsSyncLoop has measured a live round-trip time.
+            // FgsSyncLoop instrumentation (Ping/Pong over mTLS) deferred to CopyPaste-8dd.
+            peer.latencyMs?.let {
+                MetaRow(label = "RTT", value = "$it ms")
+            }
+            // §7 Fingerprint row: peer shows take(16)+…+takeLast(8) + tap-to-copy.
+            // Defensive: only shown when fingerprint is non-blank.
+            peer.fingerprint.takeIf { it.isNotBlank() }?.let { fp ->
+                val truncated = formatPeerFingerprint(fp)
+                MonoMetaRow(
+                    label = "Fingerprint",
+                    value = truncated,
+                    onTap = { copyToSystemClipboard(ctx, fp) },
+                )
+            }
+        }
+
+        // §4 single 1dp hairline above the per-row actions.
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 12.dp),
+            color = c.divider,
+            thickness = 1.dp,
+        )
+
+        // ── Actions ─────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(
+                onClick = onUnpair,
+                modifier = Modifier.weight(1f),
             ) {
-                OutlinedButton(
-                    onClick = onUnpair,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Unpair", color = IdeDanger)
-                }
-                Button(
-                    onClick = onRevoke,
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = IdeDanger.copy(alpha = 0.15f),
-                        contentColor = IdeDanger,
-                    ),
-                ) {
-                    Text("Revoke")
-                }
+                Text("Unpair", color = c.danger)
+            }
+            Button(
+                onClick = onRevoke,
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = c.danger.copy(alpha = 0.15f),
+                    contentColor = c.danger,
+                ),
+            ) {
+                Text("Revoke")
             }
         }
     }
@@ -1133,24 +1161,20 @@ private fun PeerCard(
 
 @Composable
 private fun NoPeerCard(onPair: () -> Unit) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = IdeElevated),
-        border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
-    ) {
+    val c = LocalIdeColors.current
+    CopyPasteCard(accent = c.border) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 text = "No device paired",
-                color = IdeDim,
+                color = c.dim,
                 style = MaterialTheme.typography.bodyLarge,
             )
             Text(
                 text = "Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.",
-                color = IdeFaint,
+                color = c.faint,
                 style = MaterialTheme.typography.bodySmall,
             )
             Button(onClick = onPair) {
@@ -1161,11 +1185,11 @@ private fun NoPeerCard(onPair: () -> Unit) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Own-device card
+// Own-device row
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun OwnDeviceCard(
+private fun OwnDeviceRow(
     identity: P2pIdentity,
     /** Current epoch millis from the 1-second ticker — drives live IP refresh. */
     nowMs: Long,
@@ -1178,6 +1202,7 @@ private fun OwnDeviceCard(
     // public-IP source on-device, so that row is omitted (matches the bootstrap
     // path, which sends public_ip = None for this device).
     val ctx = LocalContext.current
+    val c = LocalIdeColors.current
     val model = Build.MODEL.orEmpty().ifBlank { "Android" }
     val osVersion = "Android " + Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
@@ -1188,70 +1213,65 @@ private fun OwnDeviceCard(
     // change because it was only evaluated once at first composition.
     val localIp = remember(nowMs / 5_000L) { lanIpv4Address() }
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = IdeElevated),
-        border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header: §7 pulse dot (always online) + model name + "Online"
-            // + §7 "This Device" accent badge (parity with macOS "This Mac").
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                // Own device is always online — pulse ring always animates (unless
-                // reduced motion is enabled).
-                PulseDot(online = true, modifier = Modifier.size(10.dp))
-                Text(
-                    text = model,
-                    color = IdeText,
-                    style = MaterialTheme.typography.titleSmall,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                Text(
-                    text = "Online",
-                    color = IdeSuccess,
-                    style = MaterialTheme.typography.labelMedium,
-                )
-                // §7 "This Device" accent badge.
-                Text(
-                    text = "This Device",
-                    color = IdeAccent,
-                    fontSize = 10.sp,
-                    letterSpacing = 0.4.sp,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier
-                        .background(IdeAccentDim, RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
-                )
-            }
+    // Row content only — the enclosing CopyPasteCard provides the glass surface
+    // (PARITY-SPEC §8 grouped inset list).
+    Column(modifier = Modifier.padding(16.dp)) {
+        // Header: §7 pulse dot (always online) + model name + "Online"
+        // + §7 "This Device" accent badge (parity with macOS "This Mac").
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // Own device is always online — pulse ring always animates (unless
+            // reduced motion is enabled).
+            PulseDot(online = true, modifier = Modifier.size(10.dp))
+            Text(
+                text = model,
+                color = c.text,
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Text(
+                text = "Online",
+                color = c.success,
+                style = MaterialTheme.typography.labelMedium,
+            )
+            // §7 "This Device" accent badge.
+            Text(
+                text = "This Device",
+                color = c.accent,
+                fontSize = 10.sp,
+                letterSpacing = 0.4.sp,
+                style = MaterialTheme.typography.labelSmall,
+                modifier = Modifier
+                    .background(c.accentDim, RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            )
+        }
 
-            Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(10.dp))
 
-            // Two-column aligned table — same [META_LABEL_WIDTH] as PeerCard.
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                MetaRow(label = "Model", value = model)
-                MetaRow(label = "OS", value = osVersion)
-                MetaRow(label = "Version", value = appVersion)
-                localIp?.let { MetaRow(label = "Local IP", value = it) }
-                // §7 Fingerprint: own device shows FULL fingerprint + tap-to-copy.
-                // Defensive: only shown when fingerprint is non-blank.
-                identity.fingerprint.takeIf { it.isNotBlank() }?.let { fp ->
-                    MonoMetaRow(
-                        label = "Fingerprint",
-                        value = formatOwnFingerprint(fp),
-                        onTap = { copyToSystemClipboard(ctx, fp) },
-                    )
-                }
+        // Two-column aligned table — same [META_LABEL_WIDTH] as PeerRow.
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            MetaRow(label = "Model", value = model)
+            MetaRow(label = "OS", value = osVersion)
+            MetaRow(label = "Version", value = appVersion)
+            localIp?.let { MetaRow(label = "Local IP", value = it) }
+            // §7 Fingerprint: own device shows FULL fingerprint + tap-to-copy.
+            // Defensive: only shown when fingerprint is non-blank.
+            identity.fingerprint.takeIf { it.isNotBlank() }?.let { fp ->
+                MonoMetaRow(
+                    label = "Fingerprint",
+                    value = formatOwnFingerprint(fp),
+                    onTap = { copyToSystemClipboard(ctx, fp) },
+                )
             }
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Discovered-peer card (LAN, unpaired)
+// Discovered-peer row (LAN, unpaired)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Short label for a discovered peer: name when set, else a short device id. */
@@ -1265,21 +1285,19 @@ private fun DiscoveredPeer.displayName(): String =
  * pairing — or while another pairing is in flight ([busy]).
  */
 @Composable
-private fun DiscoveredPeerCard(
+private fun DiscoveredPeerRow(
     peer: DiscoveredPeer,
     busy: Boolean,
     onPair: () -> Unit,
 ) {
+    val c = LocalIdeColors.current
     // v1 peers (no bootstrap port) cannot do SAS pairing → disable Pair.
     val pairable = peer.bport != null
     val ip = peer.ipAddrs.firstOrNull()
 
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = IdeElevated),
-        border = androidx.compose.foundation.BorderStroke(0.5.dp, IdeBorder),
-    ) {
+    // Row content only — the enclosing CopyPasteCard provides the glass surface
+    // (PARITY-SPEC §8 grouped inset list).
+    Column {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1290,12 +1308,12 @@ private fun DiscoveredPeerCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = peer.displayName(),
-                    color = IdeText,
+                    color = c.text,
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Spacer(Modifier.height(4.dp))
                 // Fingerprint omitted; IP shown as an aligned table row matching
-                // the layout of OwnDeviceCard and PeerCard.
+                // the layout of OwnDeviceRow and PeerRow.
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     ip?.let { MetaRow(label = "Local IP", value = it) }
                 }
@@ -1310,7 +1328,7 @@ private fun DiscoveredPeerCard(
         if (!pairable) {
             Text(
                 text = "This device does not support secure pairing.",
-                color = IdeFaint,
+                color = c.faint,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
             )
@@ -1350,6 +1368,7 @@ private fun SasPairingDialog(
     onClose: () -> Unit,
     onPaired: () -> Unit,
 ) {
+    val c = LocalIdeColors.current
     val scope = rememberCoroutineScope()
 
     // Current pairing status; starts optimistically at "initiating".
@@ -1592,14 +1611,14 @@ private fun SasPairingDialog(
                     ended -> {
                         Text(
                             "Pairing ended — check the other device.",
-                            color = IdeDim,
+                            color = c.dim,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                     status.state == "confirmed" -> {
                         Text(
                             "Paired ✓",
-                            color = IdeSuccess,
+                            color = c.success,
                             style = MaterialTheme.typography.titleSmall,
                         )
                     }
@@ -1610,19 +1629,19 @@ private fun SasPairingDialog(
                                 "rejected" -> "Pairing was rejected."
                                 else -> "Pairing was cancelled."
                             },
-                            color = IdeDanger,
+                            color = c.danger,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
                     status.state == "awaiting_sas" && status.sas != null -> {
                         Text(
                             "Confirm this code matches the one shown on the other device.",
-                            color = IdeDim,
+                            color = c.dim,
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
                             text = status.sas ?: "",
-                            color = IdeText,
+                            color = c.text,
                             textAlign = TextAlign.Center,
                             fontFamily = MonoFontFamily,
                             fontSize = 32.sp,
@@ -1640,7 +1659,7 @@ private fun SasPairingDialog(
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
                                 "Waiting for the other device…",
-                                color = IdeDim,
+                                color = c.dim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -1654,7 +1673,7 @@ private fun SasPairingDialog(
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
                                 "Connecting…",
-                                color = IdeDim,
+                                color = c.dim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
                         }
@@ -1662,7 +1681,7 @@ private fun SasPairingDialog(
                 }
                 error?.let { msg ->
                     if (!terminal) {
-                        Text(msg, color = IdeDanger, style = MaterialTheme.typography.labelSmall)
+                        Text(msg, color = c.danger, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }
@@ -1688,10 +1707,10 @@ private fun SasPairingDialog(
                     TextButton(
                         enabled = !confirmPending,
                         onClick = { handleConfirm(false) },
-                    ) { Text("Doesn't match", color = IdeDim) }
+                    ) { Text("Doesn't match", color = c.dim) }
                 }
                 else -> {
-                    TextButton(onClick = { handleClose() }) { Text("Cancel", color = IdeFaint) }
+                    TextButton(onClick = { handleClose() }) { Text("Cancel", color = c.faint) }
                 }
             }
         },
@@ -1721,7 +1740,7 @@ private fun rememberReducedMotion(): Boolean {
 }
 
 /**
- * Online presence indicator: a solid [IdeSuccess] dot with an expanding
+ * Online presence indicator: a solid success-green dot with an expanding
  * semi-transparent ring when [online] is true and reduced-motion is off.
  *
  * Animation: [rememberInfiniteTransition] drives a scale 1→2 + alpha 0.4→0
@@ -1733,8 +1752,9 @@ private fun rememberReducedMotion(): Boolean {
  */
 @Composable
 private fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
+    val c = LocalIdeColors.current
     val reducedMotion = rememberReducedMotion()
-    val dotColor = if (online) IdeSuccess else IdeFaint
+    val dotColor = if (online) c.success else c.faint
     val animate = shouldPulse(online = online, reducedMotion = reducedMotion)
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
@@ -1763,7 +1783,7 @@ private fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
                     .size(10.dp)
                     .scale(pulseScale)
                     .clip(CircleShape)
-                    .background(IdeSuccess.copy(alpha = pulseAlpha)),
+                    .background(c.success.copy(alpha = pulseAlpha)),
             )
         }
         // Solid dot always on top.
@@ -1777,16 +1797,19 @@ private fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
 }
 
 /**
- * Transport chip pill: 10 sp uppercase label in a tinted rounded pill.
- * P2P = [IdeInfo] / [IdeInfoDim]; Cloud = [IdeAccent] / [IdeAccentDim].
+ * Transport chip pill: 10 sp label in a tinted rounded pill.
+ * P2P = info teal; Cloud = accent blue (theme-adaptive via [LocalIdeColors]).
+ * Label casing matches web's DevicesView ("P2P" / "Cloud" — task #5: lowercase
+ * "Cloud", not all-caps "CLOUD").
  * Defensive: never crashes on absent transport info — callers derive [chip]
  * via [transportChipFor] which is always non-null.
  */
 @Composable
 private fun TransportChipLabel(chip: TransportChip) {
+    val c = LocalIdeColors.current
     val (text, fg, bg) = when (chip) {
-        TransportChip.P2P -> Triple("P2P", IdeInfo, IdeInfoDim)
-        TransportChip.Cloud -> Triple("CLOUD", IdeAccent, IdeAccentDim)
+        TransportChip.P2P -> Triple("P2P", c.info, c.infoDim)
+        TransportChip.Cloud -> Triple("Cloud", c.accent, c.accentDim)
     }
     Text(
         text = text,
@@ -1805,10 +1828,10 @@ private fun TransportChipLabel(chip: TransportChip) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Two-column aligned table row used in device cards.
+ * Two-column aligned table row used in device rows.
  *
  * The label column is [META_LABEL_WIDTH] wide (fixed) so all labels in
- * OwnDeviceCard, PeerCard, and DiscoveredPeerCard start at the same horizontal
+ * OwnDeviceRow, PeerRow, and DiscoveredPeerRow start at the same horizontal
  * offset. Both text nodes are vertically centred within the row
  * (verticalAlignment = Alignment.CenterVertically) so multi-line values don't
  * cause the label to sit misaligned — fixing the former "Mac" misalignment in
@@ -1816,6 +1839,7 @@ private fun TransportChipLabel(chip: TransportChip) {
  */
 @Composable
 private fun MetaRow(label: String, value: String) {
+    val c = LocalIdeColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth(),
@@ -1823,14 +1847,14 @@ private fun MetaRow(label: String, value: String) {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = IdeDim,
+            color = c.dim,
             fontSize = 11.sp,
             modifier = Modifier.width(META_LABEL_WIDTH),
         )
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = IdeText,
+            color = c.text,
             fontSize = 11.sp,
             modifier = Modifier.weight(1f),
         )
@@ -1844,6 +1868,7 @@ private fun MetaRow(label: String, value: String) {
  */
 @Composable
 private fun MonoMetaRow(label: String, value: String, onTap: (() -> Unit)? = null) {
+    val c = LocalIdeColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1853,7 +1878,7 @@ private fun MonoMetaRow(label: String, value: String, onTap: (() -> Unit)? = nul
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = IdeDim,
+            color = c.dim,
             fontSize = 11.sp,
             modifier = Modifier.width(META_LABEL_WIDTH),
         )
@@ -1861,7 +1886,7 @@ private fun MonoMetaRow(label: String, value: String, onTap: (() -> Unit)? = nul
             text = value,
             // §7 fingerprint uses MonoFontFamily (bundled JetBrains Mono) per §1/§10.
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = IdeText,
+            color = c.text,
             fontSize = 11.sp,
             modifier = Modifier.weight(1f),
         )
@@ -1879,16 +1904,17 @@ private fun copyToSystemClipboard(ctx: Context, text: String) {
 
 @Composable
 private fun DeviceField(label: String, value: String) {
+    val c = LocalIdeColors.current
     Column {
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = IdeDim,
+            color = c.dim,
         )
         Text(
             text = value,
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = IdeText,
+            color = c.text,
             fontSize = 11.sp,
         )
     }
