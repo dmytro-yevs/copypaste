@@ -948,9 +948,19 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                                                 }
                                                 q.push_back(record);
                                             }
-                                            // The sender dropped (P2P shutdown) or we
-                                            // lagged — exit gracefully.
-                                            Err(_) => break,
+                                            // Broadcast lagged: receiver fell behind.
+                                            // The channel stays open — log and continue
+                                            // so live-presence push survives event bursts
+                                            // (network flaps etc.).
+                                            Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                                tracing::warn!(
+                                                    skipped = n,
+                                                    "P2P event bridge lagged; skipped {n} events"
+                                                );
+                                                continue;
+                                            }
+                                            // The sender dropped (P2P shutdown) — exit.
+                                            Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                                         }
                                     }
                                 }
@@ -1620,13 +1630,15 @@ async fn handle_tick(
             filename,
             mime,
         })) => {
+            // Do NOT log filename or mime — they may contain PII
+            // (full path, document name, content type that reveals
+            // file identity). Log size and name-length only.
             tracing::info!(
                 bytes = bytes.len(),
-                filename = %filename,
-                mime = %mime,
-                "clipboard captured: file ({} bytes, {})",
+                name_len = filename.len(),
+                "clipboard captured: file ({} bytes, name_len={})",
                 bytes.len(),
-                filename
+                filename.len()
             );
             if let Some(item) = handle_file(
                 bytes,
@@ -1690,15 +1702,26 @@ async fn handle_tick(
                     }
                 }
                 Ok(Err(e)) => {
+                    // Do NOT log path.display() — it contains the OS
+                    // username and full path (PII). Log basename only.
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "<unknown>".to_string());
                     tracing::warn!(
-                        path = %path.display(),
+                        filename = %name,
                         "clipboard: file-url read failed: {e}"
                     );
                 }
                 Err(e) => {
                     // spawn_blocking task panicked — log and continue.
+                    // Redact path for the same reason as above.
+                    let name = path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "<unknown>".to_string());
                     tracing::warn!(
-                        path = %path.display(),
+                        filename = %name,
                         "clipboard: file-url spawn_blocking panicked: {e}"
                     );
                 }
