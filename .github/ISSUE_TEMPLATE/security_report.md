@@ -12,7 +12,7 @@ labels: security
 ## How to report
 
 1. **Preferred — GitHub private advisory:**
-   <https://github.com/dmityur/CopyPaste/security/advisories/new>
+   <https://github.com/dmytro-yevs/copypaste/security/advisories/new>
 
 2. **Encrypted email:** `dmitriy.evseev.99@gmail.com`
    Encrypt with the maintainer's GPG key (fingerprint published in `SECURITY.md`).

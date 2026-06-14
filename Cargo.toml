@@ -24,7 +24,7 @@ rust-version = "1.89"
 authors = ["CopyPaste"]
 license = "MIT OR Apache-2.0"
 description = "Encrypted clipboard manager for macOS and Android"
-repository = "https://github.com/dmytro/CopyPaste"
+repository = "https://github.com/dmytro-yevs/copypaste"
 
 [workspace.dependencies]
 # Crypto

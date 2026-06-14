@@ -9,7 +9,7 @@ body:
         Thanks for taking the time to file a bug report. The more detail you provide, the faster we can reproduce and fix it.
 
         **Do not include clipboard contents, encryption keys, or other secrets in this issue.** Logs should be scrubbed before pasting.
-        For security issues, use the [private security advisory](https://github.com/dmityur/CopyPaste/security/advisories/new) instead.
+        For security issues, use the [private security advisory](https://github.com/dmytro-yevs/copypaste/security/advisories/new) instead.
 
   - type: input
     id: version

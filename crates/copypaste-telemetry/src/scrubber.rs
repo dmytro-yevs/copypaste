@@ -20,7 +20,7 @@
 //! [`docs/privacy/telemetry-policy.md`][policy] for the authoritative
 //! policy.
 //!
-//! [policy]: https://github.com/dmytro/CopyPaste/blob/main/docs/privacy/telemetry-policy.md
+//! [policy]: https://github.com/dmytro-yevs/copypaste/blob/main/docs/privacy/telemetry-policy.md
 //!
 //! # Determinism
 //!

@@ -50,7 +50,7 @@
 //! rights. The [`ReportableError`] type's documentation also describes the
 //! anonymization contract enforced at the type level.
 //!
-//! [policy]: https://github.com/dmytro/CopyPaste/blob/main/docs/privacy/telemetry-policy.md
+//! [policy]: https://github.com/dmytro-yevs/copypaste/blob/main/docs/privacy/telemetry-policy.md
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

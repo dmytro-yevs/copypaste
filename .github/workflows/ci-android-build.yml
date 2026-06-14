@@ -23,6 +23,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  NDK_VERSION: "27.2.12479018"
 
 jobs:
   build-android-ndk:
@@ -45,10 +46,10 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target/
-            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
-            ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
-          key: android-ndk-27.2.12479018-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: android-ndk-27.2.12479018-
+            ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: android-ndk-${{ env.NDK_VERSION }}-
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@v2
@@ -68,7 +69,7 @@ jobs:
         run: yes | sdkmanager --licenses || true
 
       - name: Install NDK
-        run: sdkmanager "ndk;27.2.12479018"
+        run: sdkmanager "ndk;${{ env.NDK_VERSION }}"
 
       - name: Build .so libraries via cargo-ndk
         run: |

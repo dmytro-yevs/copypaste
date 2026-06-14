@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Documentation
-    url: https://github.com/dmityur/CopyPaste/tree/main/docs
+    url: https://github.com/dmytro-yevs/copypaste/tree/main/docs
     about: Read the docs before filing — many questions are answered there.
   - name: Question or discussion
-    url: https://github.com/dmityur/CopyPaste/discussions
+    url: https://github.com/dmytro-yevs/copypaste/discussions
     about: Ask a question or start a discussion instead of filing an issue.
   - name: Security disclosure (private)
-    url: https://github.com/dmityur/CopyPaste/security/advisories/new
+    url: https://github.com/dmytro-yevs/copypaste/security/advisories/new
     about: Privately report a security vulnerability — do not open a public issue.

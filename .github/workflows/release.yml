@@ -55,6 +55,7 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  NDK_VERSION: "27.2.12479018"
 
 jobs:
   build-macos:
@@ -226,10 +227,10 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
-            ${{ env.ANDROID_SDK_ROOT }}/ndk/27.2.12479018
-          key: android-ndk-27.2.12479018-${{ runner.os }}
-          restore-keys: android-ndk-27.2.12479018-
+            ${{ env.ANDROID_HOME }}/ndk/${{ env.NDK_VERSION }}
+            ${{ env.ANDROID_SDK_ROOT }}/ndk/${{ env.NDK_VERSION }}
+          key: android-ndk-${{ env.NDK_VERSION }}-${{ runner.os }}
+          restore-keys: android-ndk-${{ env.NDK_VERSION }}-
 
       - name: Install cargo-ndk
         uses: taiki-e/install-action@v2
@@ -243,7 +244,7 @@ jobs:
           # images that ship ndk-bundle pre-installed). The explicit gate step below will
           # catch the case where neither install succeeded.
           echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
-            "ndk;27.2.12479018" 2>/dev/null \
+            "ndk;${{ env.NDK_VERSION }}" 2>/dev/null \
             || echo "y" | sudo ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
             "ndk-bundle" 2>/dev/null \
             || true
@@ -259,7 +260,7 @@ jobs:
           [ -d "${ANDROID_NDK_HOME}" ] || {
             echo "ERROR: NDK not found at ${ANDROID_NDK_HOME}"
             echo "  ANDROID_HOME=${ANDROID_HOME}"
-            echo "  Both sdkmanager installs (ndk;27.2.12479018 and ndk-bundle) failed."
+            echo "  Both sdkmanager installs (ndk;${{ env.NDK_VERSION }} and ndk-bundle) failed."
             exit 1
           }
           echo "NDK verified at ${ANDROID_NDK_HOME}"

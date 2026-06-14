@@ -25,8 +25,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
 CARGO_TOML="Cargo.toml"
+TAURI_CONF="crates/copypaste-ui/src-tauri/tauri.conf.json"
 if [[ ! -f "$CARGO_TOML" ]]; then
     echo "ERROR: $CARGO_TOML not found at $REPO_ROOT" >&2
+    exit 1
+fi
+if [[ ! -f "$TAURI_CONF" ]]; then
+    echo "ERROR: $TAURI_CONF not found at $REPO_ROOT" >&2
     exit 1
 fi
 
@@ -58,8 +63,21 @@ awk -v ver="$VERSION" '
 mv "$CARGO_TOML.tmp" "$CARGO_TOML"
 
 # Sanity check the bump landed.
-if ! grep -E "^version[[:space:]]*=[[:space:]]*\"$VERSION\"" "$CARGO_TOML" >/dev/null; then
+if ! rg -q "^version[[:space:]]*=[[:space:]]*\"$VERSION\"" "$CARGO_TOML"; then
     echo "ERROR: version bump failed — $CARGO_TOML still does not contain $VERSION" >&2
+    exit 1
+fi
+
+echo "==> Bumping $TAURI_CONF version to $VERSION"
+# Replace the top-level "version" field in tauri.conf.json.
+# The file has exactly one top-level "version" key.
+TMP="$(mktemp)"
+sed 's/"version": "[^"]*"/"version": "'"$VERSION"'"/' "$TAURI_CONF" > "$TMP"
+if rg -qF "\"version\": \"${VERSION}\"" "$TMP"; then
+    mv "$TMP" "$TAURI_CONF"
+else
+    echo "ERROR: version bump failed — $TAURI_CONF still does not contain $VERSION" >&2
+    rm -f "$TMP"
     exit 1
 fi
 
@@ -67,7 +85,7 @@ echo "==> Regenerating Cargo.lock"
 cargo generate-lockfile
 
 echo "==> Committing"
-git add Cargo.toml Cargo.lock
+git add Cargo.toml Cargo.lock "$TAURI_CONF"
 git commit -m "chore(release): cut $TAG"
 
 echo "==> Tagging $TAG"

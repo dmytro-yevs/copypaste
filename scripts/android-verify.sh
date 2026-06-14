@@ -192,8 +192,8 @@ ndk_present() {
 if ! ndk_present; then
   echo "  Android NDK not found." >&2
   echo "  Install it and point cargo-ndk at it, e.g.:" >&2
-  echo "    sdkmanager 'ndk;27.0.12077973'" >&2
-  echo "    export ANDROID_NDK_HOME=\$ANDROID_HOME/ndk/27.0.12077973" >&2
+  echo "    sdkmanager 'ndk;27.2.12479018'" >&2
+  echo "    export ANDROID_NDK_HOME=\$ANDROID_HOME/ndk/27.2.12479018" >&2
   echo "  (Android Studio: SDK Manager -> SDK Tools -> NDK.)" >&2
   fail "${STEP2}: cargo-ndk/NDK not found — install the Android NDK"
 fi
