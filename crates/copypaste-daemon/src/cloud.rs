@@ -4279,14 +4279,14 @@ mod tests {
             .unwrap();
         assert_eq!(count, 1, "LWW replace must NOT create a duplicate row");
 
-        let row = copypaste_core::get_item_by_item_id(&g, "shared-iid")
+        let row = copypaste_core::get_item_by_item_id(&*g, "shared-iid")
             .unwrap()
             .expect("item must still exist");
         assert_eq!(row.id, "local-pk", "local primary key must be preserved");
         assert_eq!(row.lamport_ts, 9, "newer remote lamport stored");
         // The peer's row id must not have leaked in.
         assert!(
-            copypaste_core::get_item_by_id(&g, "peer-pk")
+            copypaste_core::get_item_by_id(&*g, "peer-pk")
                 .unwrap()
                 .is_none(),
             "peer's row id must not be adopted"

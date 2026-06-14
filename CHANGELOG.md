@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.7.0] - 2026-06-14
+## [0.7.1] - 2026-06-14
 
 "Liquid Glass" design-system v2 ("Quiet Precision") rolled out across desktop and
 Android, plus a hardening pass that closed the open backlog and **unbroke the Android

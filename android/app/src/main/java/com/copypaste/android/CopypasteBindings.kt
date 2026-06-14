@@ -51,8 +51,14 @@ private const val TAG = "CopypasteBindings"
  * `PairStatus` gained five `peer*` fields; `P2pSyncResult` gained three per-reason
  * drop counters. (AB-6a — the `isSensitive` >= 0.70 threshold parity — ships in
  * this ABI too but is a pure behaviour change with no signature impact.)
+ * Bumped 14 → 15 for delete/pin propagation over the P2P FFI: `LocalItem` and
+ * `SyncedItem` gained `deleted: bool`, `pinned: bool`, `pin_order: f64?`. This
+ * MUST stay in lockstep with `UNIFFI_ABI_VERSION` in
+ * `crates/copypaste-android/src/version.rs` — a mismatch makes
+ * `checkNativeAbiCompatibility()` log `rustAbi=…,kotlinAbi=…` and corrupts
+ * sync serialization. `scripts/regen-uniffi.sh` asserts the two are equal.
  */
-const val APP_ABI_VERSION: UInt = 14u
+const val APP_ABI_VERSION: UInt = 15u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {
