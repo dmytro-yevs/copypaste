@@ -5,7 +5,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -39,6 +37,9 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -48,7 +49,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -80,8 +80,10 @@ import com.copypaste.android.ui.theme.ContinuousSliderRow
 import com.copypaste.android.ui.theme.SteppedSliderRow
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
+import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.IdeSwitch
 import com.copypaste.android.ui.theme.ideTextFieldColors
+import com.copypaste.android.ui.theme.RadiusControl
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.animation.core.animateDpAsState
@@ -1099,32 +1101,18 @@ private fun SettingsSectionLabel(text: String) {
 
 /**
  * Apple grouped-inset card container (§8). Holds a vertical list of rows with
- * [SettingsCardDivider]s between them. Radius 12 dp (§4), ide-elevated fill,
- * ide-border 1 dp hairline.
+ * [SettingsCardDivider]s between them.
+ *
+ * 8l9v/lr9p: replaced the flat double-nested Box (c.elevated, no glass, no border)
+ * with [CopyPasteCard] — the canonical styleguide .surface-card (14dp RadiusCard,
+ * backdrop-filter blur 28, per-tier white-alpha gradient fill, bright .5px white
+ * glass-rim hairline, soft tinted float shadow). The hairline is inherent to
+ * LiquidGlassSurface(hairline=true) inside CopyPasteCard, so lr9p is resolved here.
  */
 @Composable
 private fun SettingsCard(content: @Composable () -> Unit) {
-    val c = LocalIdeColors.current
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(c.elevated)
-            .then(
-                Modifier.padding(0.dp) // border is applied via the clip + background trick
-            ),
-    ) {
-        // Wrap in a bordered container
-        androidx.compose.foundation.layout.Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(c.elevated)
-        ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                content()
-            }
-        }
+    CopyPasteCard {
+        content()
     }
 }
 
@@ -1204,17 +1192,32 @@ private fun SettingsTextField(
     onValueChange: (String) -> Unit,
     password: Boolean = false,
 ) {
+    val c = LocalIdeColors.current
+    // u1ad: track focus so we can render the 2dp accent focus ring.
+    val interactionSource = remember { MutableInteractionSource() }
+    val focused by interactionSource.collectIsFocusedAsState()
+
     // AND4: No onCommit — values are buffered until Save is pressed.
+    // u1ad: shape = RadiusControl (9dp, styleguide --radius-ctl); 2dp solid accent@.5
+    // focus ring drawn as an outer border overlay when the field is focused (web
+    // `.field:focus-visible { outline: 2px solid rgba(accent/.5); outline-offset: 1px }`).
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
         placeholder = { Text(hint, style = MaterialTheme.typography.bodySmall) },
         singleLine = true,
+        shape = RadiusControl,
         colors = ideTextFieldColors(),
+        interactionSource = interactionSource,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp),
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .then(
+                // 2dp accent outer ring when focused — mirrors the 2px outline-offset ring.
+                if (focused) Modifier.border(2.dp, c.accent.copy(alpha = 0.5f), RadiusControl)
+                else Modifier
+            ),
         visualTransformation = if (password) PasswordVisualTransformation()
             else androidx.compose.ui.text.input.VisualTransformation.None,
         keyboardOptions = if (password) KeyboardOptions(

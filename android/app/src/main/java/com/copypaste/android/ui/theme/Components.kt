@@ -550,7 +550,7 @@ fun rememberTranslucency(): Boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Standard compact header. Dark panel surface, 14 sp medium title.
+ * Standard compact header. Dark panel surface, 18 sp SemiBold title (headlineSmall).
  *
  * When [translucent] is true (default: reads from the "copypaste" SharedPreferences
  * key "translucency"), the container is the §2 glass fill at GLASS_ALPHA so the
@@ -597,10 +597,11 @@ fun CopyPasteTopBar(
         )
         TopAppBar(
             title = {
-                // §3 view title: 14 sp medium (titleLarge), theme text color.
+                // m3xc: view title at styleguide Heading/18/600 (headlineSmall),
+                // not the compact 14sp titleLarge sub-header tier.
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineSmall,
                     color = c.text,
                 )
             },

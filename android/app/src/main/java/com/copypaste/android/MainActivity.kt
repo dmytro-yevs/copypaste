@@ -43,10 +43,12 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
+import androidx.compose.ui.graphics.RectangleShape
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.GlassTier
+import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.auroraCanvas
-import com.copypaste.android.ui.theme.glassContainerColor
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberTranslucency
 import kotlinx.coroutines.Dispatchers
@@ -268,8 +270,9 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     val c = LocalIdeColors.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-    // Glass NavigationBar: panel at 72% alpha when translucent, solid when off.
-    val navBarColor = glassContainerColor(c.panel, translucent)
+    // phyb: removed legacy glassContainerColor (flat GLASS_ALPHA_DARK for both themes).
+    // oc74: NavigationBar now wraps LiquidGlassSurface (GlassTier.GLASS) so it gets
+    // real blur + sheen + hairline — matching CopyPasteTopBar's glass recipe.
 
     // §1 aurora canvas backdrop: a COLOURED radial-glow gradient behind the whole
     // shell so the glass surfaces (nav bar, cards) frost over real colour instead
@@ -289,8 +292,21 @@ private fun MainShell(viewModel: ClipboardViewModel) {
         // TopAppBar inset were removed). See HistoryScreen / PairScreen / etc.
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
+            // oc74/phyb: LiquidGlassSurface (GlassTier.GLASS, RectangleShape) provides
+            // real API-31 backdrop-filter blur + saturate(180%) + per-tier white-alpha
+            // gradient fill + .5px top-sheen — matching the top-bar glass recipe exactly.
+            // The NavigationBar itself is transparent; the glass surface handles the fill.
+            LiquidGlassSurface(
+                shape = RectangleShape,
+                translucent = translucent,
+                dark = dark,
+                solid = c.panel,
+                tier = GlassTier.GLASS,
+                // No rim on the full-bleed rectangular nav bar (matches CopyPasteTopBar).
+                hairline = false,
+            ) {
             NavigationBar(
-                containerColor = navBarColor,
+                containerColor = Color.Transparent,
             ) {
                 NavTab.entries.forEachIndexed { index, tab ->
                     val label = stringResource(tab.labelRes)
@@ -315,16 +331,20 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                         // TalkBack announce the name twice.
                         icon = { Icon(tab.icon, contentDescription = null, modifier = Modifier.size(20.dp)) },
                         label = { Text(label) },
-                        // §9 spec: active = accent, inactive = uniform dim, indicator = accent/15.
+                        // pe0c: active item = solid accent pill (full opacity indicatorColor)
+                        // + white text+icon (accentOn). Inactive = dim. Styleguide .nav-item.active
+                        // is `background: rgb(var(--ide-accent))` + `color: #fff` — NOT the
+                        // old faint 15% tint with accent-colored label.
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor       = c.accent,
-                            selectedTextColor       = c.accent,
-                            indicatorColor          = c.accent.copy(alpha = 0.15f),
+                            selectedIconColor       = c.accentOn,
+                            selectedTextColor       = c.accentOn,
+                            indicatorColor          = c.accent,
                             unselectedIconColor     = c.dim,
                             unselectedTextColor     = c.dim,
                         ),
                     )
                 }
+            }
             }
         }
     ) { innerPadding ->
