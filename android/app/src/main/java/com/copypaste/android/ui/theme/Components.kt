@@ -32,11 +32,75 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.widthIn
+import com.copypaste.android.Settings
+
+// ---------------------------------------------------------------------------
+// §3 Translucency / glass-surface helpers  (CopyPaste-fkj)
+//
+// Design System v2 §3 token:
+//   ON  → container = rgba(panel-rgb, 0.72)  — frosted/glass feel
+//   OFF → container = panel (fully opaque)   — solid dark theme
+//
+// GLASS_ALPHA and glassAlphaFor() are pure functions so they can be unit-tested
+// on the host JVM without the Android SDK.  Call glassContainerColor() from
+// @Composable sites; call rememberTranslucency() to read the pref from context.
+// ---------------------------------------------------------------------------
+
+/**
+ * §3 canonical glass-surface alpha (rgba container with 0.72 opacity).
+ * Pure constant — usable in JVM unit tests.
+ */
+const val GLASS_ALPHA = 0.72f
+
+/**
+ * Returns the container-surface alpha for the given [translucent] flag.
+ *
+ *   translucent = true  → GLASS_ALPHA (0.72f) — frosted/glass appearance
+ *   translucent = false → 1.0f             — fully opaque solid surface
+ *
+ * Pure function — usable in JVM unit tests.
+ */
+fun glassAlphaFor(translucent: Boolean): Float = if (translucent) GLASS_ALPHA else 1.0f
+
+/**
+ * Returns [base] with its alpha adjusted for the glass effect.
+ *
+ *   translucent = true  → base.copy(alpha = GLASS_ALPHA)
+ *   translucent = false → base (unchanged, fully opaque)
+ *
+ * Compose-only (uses Color.copy); call from @Composable sites or helpers
+ * that already have Color values. When [translucent] is false, the original
+ * [base] is returned without allocation.
+ */
+fun glassContainerColor(base: Color, translucent: Boolean): Color =
+    if (translucent) base.copy(alpha = GLASS_ALPHA) else base
+
+/**
+ * Reads the `translucency` SharedPreferences boolean (key "translucency",
+ * default true — ON) from the current [LocalContext].
+ *
+ * Defensive: returns `true` when the key is absent (first launch) so new
+ * installs see the glass look immediately without any migration step.
+ *
+ * Call once at the top of a screen composable and thread the result down to
+ * CopyPasteTopBar / CopyPasteCard / NavigationBar rather than reading prefs
+ * on every recomposition.
+ */
+@Composable
+fun rememberTranslucency(): Boolean {
+    val ctx = LocalContext.current
+    // remember(ctx) so if the context ever changes (process restart) the read
+    // is refreshed; in practice ctx is stable for the activity lifetime.
+    return remember(ctx) {
+        Settings(ctx).translucency
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Shared design-system components — single source of truth for chrome that
@@ -55,7 +119,12 @@ import androidx.compose.foundation.layout.widthIn
 // ---------------------------------------------------------------------------
 
 /**
- * Standard compact header. Dark #1e2024 panel, 14 sp medium title.
+ * Standard compact header. Dark panel surface, 14 sp medium title.
+ *
+ * When [translucent] is true (default: reads from the "copypaste" SharedPreferences
+ * key "translucency"), the container color is IdePanel.copy(alpha = GLASS_ALPHA)
+ * so the root IdeBg window background bleeds through for a frosted/glass look.
+ * When false, the bar is fully opaque IdePanel — the pre-glass solid look.
  *
  * windowInsets defaults to [TopAppBarDefaults.windowInsets] so the bar
  * automatically pads its content below the status-bar / display-cutout on
@@ -71,7 +140,12 @@ fun CopyPasteTopBar(
     backContentDescription: String = "Back",
     actions: @Composable (androidx.compose.foundation.layout.RowScope.() -> Unit) = {},
     windowInsets: WindowInsets = TopAppBarDefaults.windowInsets,
+    // §3 translucency: reads the pref by default; callers may override.
+    translucent: Boolean = rememberTranslucency(),
 ) {
+    // Glass container: IdePanel at 72% alpha when translucent, fully opaque when off.
+    val containerColor = glassContainerColor(IdePanel, translucent)
+
     TopAppBar(
         title = {
             Text(
@@ -94,7 +168,7 @@ fun CopyPasteTopBar(
         },
         actions = actions,
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor             = IdePanel,      // #1e2024 (v0.5.3 darker)
+            containerColor             = containerColor, // glass when translucent, solid #1B1C22 when off
             titleContentColor          = IdeText,
             actionIconContentColor     = IdeDim,
             navigationIconContentColor = IdeDim,
@@ -114,19 +188,28 @@ fun CopyPasteTopBar(
  * success for a granted one) without flooding the whole card with color — this
  * is closer to the restrained macOS look than Material's filled containers.
  *
- * v0.5.3: uses IdeElevated (#26282d) container, 12 dp radius.
+ * When [translucent] is true (default: reads from SharedPreferences), the card
+ * container is IdeElevated.copy(alpha = GLASS_ALPHA) so the underlying surface
+ * bleeds through — the §3 "glass" token. When false, the card is fully opaque.
+ *
+ * v0.5.3: uses IdeElevated (#23252D) container, 12 dp radius.
  */
 @Composable
 fun CopyPasteCard(
     modifier: Modifier = Modifier,
     accent: Color = IdeBorder,
+    // §3 translucency: reads the pref by default; callers may override.
+    translucent: Boolean = rememberTranslucency(),
     content: @Composable (androidx.compose.foundation.layout.ColumnScope.() -> Unit),
 ) {
+    // Glass container: IdeElevated at 72% alpha when translucent, fully opaque when off.
+    val containerColor = glassContainerColor(IdeElevated, translucent)
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = IdeElevated,   // #26282d
+            containerColor = containerColor, // glass when translucent, solid #23252D when off
             contentColor   = IdeText,
         ),
         border = androidx.compose.foundation.BorderStroke(1.dp, accent),

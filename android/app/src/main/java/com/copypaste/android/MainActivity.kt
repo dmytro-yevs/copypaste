@@ -44,6 +44,8 @@ import com.copypaste.android.ui.theme.IdeAccent
 import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdePanel
+import com.copypaste.android.ui.theme.glassContainerColor
+import com.copypaste.android.ui.theme.rememberTranslucency
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -231,6 +233,14 @@ private fun MainShell(viewModel: ClipboardViewModel) {
         mutableStateOf<((proceed: () -> Unit) -> Unit)?>(null)
     }
 
+    // §3 Translucency: read once at the shell level so the pref is consistent
+    // across the NavigationBar and all child screens. CopyPasteTopBar and
+    // CopyPasteCard read it independently via rememberTranslucency() for
+    // screens rendered without MainShell (standalone activities).
+    val translucent = rememberTranslucency()
+    // Glass NavigationBar: IdePanel at 72% alpha when translucent, solid when off.
+    val navBarColor = glassContainerColor(IdePanel, translucent)
+
     Scaffold(
         containerColor = IdeBg,
         // The NavigationBar (bottomBar) consumes the navigation-bar inset itself.
@@ -243,7 +253,7 @@ private fun MainShell(viewModel: ClipboardViewModel) {
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         bottomBar = {
             NavigationBar(
-                containerColor = IdePanel,
+                containerColor = navBarColor,
             ) {
                 NavTab.entries.forEachIndexed { index, tab ->
                     val label = stringResource(tab.labelRes)
