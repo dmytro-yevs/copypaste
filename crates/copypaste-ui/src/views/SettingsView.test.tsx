@@ -300,7 +300,7 @@ describe("P2P toggle triggers daemon restart", () => {
     expect(screen.getByRole("button", { name: /compact/i })).toBeInTheDocument();
   });
 
-  it("§6.3 Storage tab has a Max history items slider row", async () => {
+  it("§6.3 Storage tab has a History display limit slider row", async () => {
     invoke.mockImplementation(makeOnlineInvoke());
     render(
       <ErrorBoundary label="Settings">
@@ -314,8 +314,8 @@ describe("P2P toggle triggers daemon restart", () => {
     const storageTab = await screen.findByText("Storage");
     await act(async () => { fireEvent.click(storageTab); });
 
-    // "Max history items" label must exist
-    expect(screen.getByText(/Max history items/i)).toBeInTheDocument();
+    // "History display limit" label must exist (UI-only pref, not daemon storage cap)
+    expect(screen.getByText(/History display limit/i)).toBeInTheDocument();
   });
 
   it("§6.5 SliderRow inputs have a datalist for tick marks", async () => {

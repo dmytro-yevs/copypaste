@@ -61,12 +61,13 @@ const QUOTA_LABELS = ["1 GB","2 GB","5 GB","10 GB","25 GB","50 GB (max)"] as con
 const SENSITIVE_TTL_STEPS = [10, 30, 60, 5 * 60, 15 * 60, 60 * 60] as const;
 const SENSITIVE_TTL_LABELS = ["10 s","30 s","1 min","5 min","15 min","1 hour"] as const;
 
-// Max history items slider — stored as a UI pref (store.ts density pref mechanism).
-// No daemon IPC contract exists for history-item count yet.
-// TODO(daemon): wire max-items to daemon config when the IPC field is available.
+// History display limit slider — controls how many items the UI renders on screen.
+// This is a UI-only preference persisted in localStorage. It does NOT cap daemon
+// storage; the daemon prunes by byte quota (storage_quota_bytes), not item count.
+// Label: "History display limit" so users understand it's a view filter, not retention.
 const MAX_ITEMS_STEPS = [100, 250, 500, 1000, 2500, 5000, 10000, 100000] as const;
 const MAX_ITEMS_LABELS = ["100","250","500","1 000","2 500","5 000","10 000","Unlimited"] as const;
-const DEFAULT_MAX_ITEMS = 1000; // matches daemon default history window
+const DEFAULT_MAX_ITEMS = 1000; // default UI display window
 
 // ---------------------------------------------------------------------------
 // Toggle — iOS-style switch using ide tokens
@@ -616,8 +617,9 @@ export function SettingsView() {
     snapToNearest(SENSITIVE_TTL_STEPS as unknown as readonly number[], DEFAULT_SENSITIVE_TTL_SECS)
   );
   const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY);
-  // §6.3: Max history items — stored as UI pref only (no daemon IPC contract yet).
-  // TODO(daemon): wire max-items to daemon config when IPC field is available.
+  // §6.3: History display limit — stored as UI pref only. Does NOT cap daemon storage;
+  // the daemon prunes by byte quota (storage_quota_bytes). This slider filters how
+  // many items the UI renders; daemon may hold more items on disk.
   const [maxItems, setMaxItems] = useState(
     snapToNearest(MAX_ITEMS_STEPS as unknown as readonly number[], DEFAULT_MAX_ITEMS)
   );
@@ -1972,22 +1974,25 @@ export function SettingsView() {
               <LimitsMsg field="image_quality" />
             </div>
           </SettingsRow>
-          {/* §6.3: Max history items — stored as UI pref only (no daemon IPC contract).
+          {/* §6.3: History display limit — UI pref only (no daemon IPC contract).
               Sentinel 100000 → "Unlimited". No onRelease IPC call — updates store only.
-              TODO(daemon): wire max-items to daemon config when IPC field is available. */}
+              Daemon storage is capped by "Local storage limit" (byte quota), not item count. */}
           <LimitSliderRow
-            label="Max history items"
+            label="History display limit"
             field="max_items"
             steps={MAX_ITEMS_STEPS as unknown as readonly number[]}
             labels={MAX_ITEMS_LABELS}
             value={maxItems}
             onChange={(v) => setMaxItems(v)}
             onRelease={(v) => {
-              // Max-items has no daemon IPC field yet — persist as UI pref only.
+              // Display-only pref — no daemon IPC field. Persist to UI store only.
               setMaxItems(v);
               showLimitsMsg("max_items", "Saved", 1500);
             }}
           />
+          <div className="border-b border-ide-divider/70 px-3 pb-2 text-[11px] text-ide-faint">
+            Limits items shown in the UI only — the daemon stores more and prunes by the byte quota above.
+          </div>
         </Panel>
 
         <SubsectionHeader label="Data" />
