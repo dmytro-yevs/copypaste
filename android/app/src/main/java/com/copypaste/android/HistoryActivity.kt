@@ -26,6 +26,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -51,27 +52,30 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.BookmarkAdded
-import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CloudOff
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.SaveAlt
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Lock
-import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.SearchOff
-import androidx.compose.material.icons.filled.SwapVert
+// §5 PARITY-SPEC: row/action icons use the thin Outlined family (closer to SF Symbols).
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.BookmarkAdded
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.CheckBox
+import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.SaveAlt
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.SearchOff
+import androidx.compose.material.icons.outlined.SwapVert
+// §7 PARITY-SPEC: one "too large" glyph — the warning triangle (was CloudOff).
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextField
 import androidx.compose.material3.CircularProgressIndicator
@@ -132,8 +136,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -142,26 +149,12 @@ import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.rememberReducedMotion
-import com.copypaste.android.ui.theme.IdeAccent
-import com.copypaste.android.ui.theme.IdeAccentDim
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeBorder
-import com.copypaste.android.ui.theme.IdeDanger
-import com.copypaste.android.ui.theme.IdeDangerDim
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeElevated
-import com.copypaste.android.ui.theme.IdeFaint
-import com.copypaste.android.ui.theme.IdeInfo
-import com.copypaste.android.ui.theme.IdeInfoDim
-import com.copypaste.android.ui.theme.IdePanel
-import com.copypaste.android.ui.theme.IdeSuccess
-import com.copypaste.android.ui.theme.IdeSuccessDim
-import com.copypaste.android.ui.theme.IdeSelection
-import com.copypaste.android.ui.theme.IdeText
-import com.copypaste.android.ui.theme.IdeViolet
-import com.copypaste.android.ui.theme.IdeVioletDim
-import com.copypaste.android.ui.theme.IdeWarning
-import com.copypaste.android.ui.theme.IdeWarningDim
+// PARITY-SPEC §1: read the ACTIVE (light-first) ramp via LocalIdeColors.current.*
+// instead of the hardcoded dark Ide* constants, so the whole History screen
+// themes light/dark in lockstep with CopyPasteTheme. The IdeColors holder is
+// passed into non-composable helpers (e.g. the chip color table) by value.
+import com.copypaste.android.ui.theme.IdeColors
+import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.Motion
 import kotlinx.coroutines.delay
 import java.text.DateFormat
@@ -226,6 +219,31 @@ private fun relativeTime(ms: Long): String {
         diff < 7 * 86_400_000L -> "${diff / 86_400_000}d ago"
         else -> DateFormat.getDateInstance(DateFormat.SHORT).format(Date(ms))
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// URL host/path split — audit #13 (bold host + dim path, web parity)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Split a URL [raw] into (host, path) for the §-13 bold-host / dim-path render.
+ *
+ * The host segment includes the scheme prefix (e.g. "https://example.com") so the
+ * displayed text stays a faithful, copy-equivalent prefix of the original URL;
+ * the path is everything after the host (path + query + fragment). Returns
+ * (raw, "") when the URL cannot be parsed so the caller still shows the full text.
+ */
+private fun splitUrl(raw: String): Pair<String, String> {
+    val schemeSep = raw.indexOf("://")
+    if (schemeSep < 0) return raw to ""
+    val afterScheme = schemeSep + 3
+    // First '/' (or '?' / '#') after the authority marks the start of the path.
+    val pathStart = raw
+        .drop(afterScheme)
+        .indexOfFirst { it == '/' || it == '?' || it == '#' }
+    if (pathStart < 0) return raw to ""  // host only, no path
+    val cut = afterScheme + pathStart
+    return raw.substring(0, cut) to raw.substring(cut)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -390,6 +408,10 @@ fun HistoryScreen(
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
+    // PARITY-SPEC §1: the active (light-first) ramp — read once at screen scope and
+    // reuse for every token below so the chrome (scaffold, top bar, dialogs) themes
+    // light/dark in lockstep with CopyPasteTheme.
+    val c = LocalIdeColors.current
     // §8 a11y: skip animated transitions when the user has requested reduced motion
     // (Accessibility → Remove animations, or Developer Options → Animator duration scale = 0).
     val reducedMotion = rememberReducedMotion()
@@ -672,7 +694,7 @@ fun HistoryScreen(
 
     Scaffold(
         modifier = modifier,
-        containerColor = IdeBg,
+        containerColor = c.bg,
         topBar = {
             if (selectionMode) {
                 SelectionTopBar(
@@ -722,7 +744,7 @@ fun HistoryScreen(
                 val keyboardController = LocalSoftwareKeyboardController.current
                 val clearRecentLabel = stringResource(R.string.action_clear_recent_searches)
 
-                Column(modifier = Modifier.background(IdePanel)) {
+                Column(modifier = Modifier.background(c.panel)) {
                     TopAppBar(
                         title = {
                             Row(
@@ -732,29 +754,36 @@ fun HistoryScreen(
                                 Text(
                                     text = stringResource(R.string.title_history),
                                     style = MaterialTheme.typography.titleLarge,
-                                    color = IdeText,
+                                    color = c.text,
                                 )
                                 // Clip count badge — shows the full stored total (not just
                                 // the loaded page count) for macOS parity. Driven by
                                 // ClipboardViewModel.totalCount which reads totalItemCount()
                                 // without decrypting items.
                                 if (totalCount > 0) {
+                                    // §9: total badge unified at 10sp + 1dp bordered
+                                    // (parity with origin/device badges).
                                     Box(
                                         modifier = Modifier
                                             .background(
-                                                color = IdeElevated,
-                                                shape = RoundedCornerShape(10.dp),
+                                                color = c.elevated,
+                                                shape = RoundedCornerShape(6.dp),
+                                            )
+                                            .border(
+                                                width = 1.dp,
+                                                color = c.border,
+                                                shape = RoundedCornerShape(6.dp),
                                             )
                                             .padding(horizontal = 6.dp, vertical = 2.dp),
                                     ) {
                                         Text(
                                             text = "$totalCount",
                                             style = TextStyle(
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Normal,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
                                                 fontFeatureSettings = "tnum",
                                             ),
-                                            color = IdeFaint,
+                                            color = c.faint,
                                             maxLines = 1,
                                         )
                                     }
@@ -765,9 +794,9 @@ fun HistoryScreen(
                             if (showBackButton) {
                                 IconButton(onClick = onBack) {
                                     Icon(
-                                        Icons.AutoMirrored.Filled.ArrowBack,
+                                        Icons.AutoMirrored.Outlined.ArrowBack,
                                         contentDescription = stringResource(R.string.cd_back),
-                                        tint = IdeDim,
+                                        tint = c.dim,
                                         modifier = Modifier.size(18.dp),
                                     )
                                 }
@@ -780,29 +809,29 @@ fun HistoryScreen(
                                 filePickLauncher.launch(arrayOf("*/*"))
                             }) {
                                 Icon(
-                                    Icons.Filled.AttachFile,
+                                    Icons.Outlined.AttachFile,
                                     contentDescription = stringResource(R.string.cd_attach_file),
-                                    tint = IdeDim,
+                                    tint = c.dim,
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
                             // Search toggle icon — toggles the inline full-width search Row below.
                             IconButton(onClick = { searchExpanded = !searchExpanded }) {
                                 Icon(
-                                    if (searchExpanded) Icons.Filled.Close else Icons.Filled.Search,
+                                    if (searchExpanded) Icons.Outlined.Close else Icons.Outlined.Search,
                                     contentDescription = stringResource(
                                         if (searchExpanded) R.string.cd_search_close
                                         else R.string.cd_search_open
                                     ),
-                                    tint = if (searchExpanded) IdeAccent else IdeDim,
+                                    tint = if (searchExpanded) c.accent else c.dim,
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
                             IconButton(onClick = { viewModel.loadItems() }) {
                                 Icon(
-                                    Icons.Filled.Refresh,
+                                    Icons.Outlined.Refresh,
                                     contentDescription = stringResource(R.string.cd_refresh),
-                                    tint = IdeDim,
+                                    tint = c.dim,
                                     modifier = Modifier.size(18.dp),
                                 )
                             }
@@ -811,9 +840,9 @@ fun HistoryScreen(
                             if (pinnedCount >= 2) {
                                 IconButton(onClick = { reorderMode = !reorderMode }) {
                                     Icon(
-                                        Icons.Filled.SwapVert,
+                                        Icons.Outlined.SwapVert,
                                         contentDescription = stringResource(R.string.cd_reorder_handle),
-                                        tint = if (reorderMode) IdeAccent else IdeDim,
+                                        tint = if (reorderMode) c.accent else c.dim,
                                         modifier = Modifier.size(18.dp),
                                     )
                                 }
@@ -822,9 +851,9 @@ fun HistoryScreen(
                                 Box {
                                     IconButton(onClick = { overflowExpanded = true }) {
                                         Icon(
-                                            Icons.Filled.MoreVert,
+                                            Icons.Outlined.MoreVert,
                                             contentDescription = stringResource(R.string.cd_more_options),
-                                            tint = IdeDim,
+                                            tint = c.dim,
                                             modifier = Modifier.size(18.dp),
                                         )
                                     }
@@ -838,11 +867,11 @@ fun HistoryScreen(
                                                 text = {
                                                     Text(
                                                         stringResource(R.string.action_clear_unpinned),
-                                                        color = IdeText,
+                                                        color = c.text,
                                                     )
                                                 },
                                                 leadingIcon = {
-                                                    Icon(Icons.Filled.Delete, null, tint = IdeDim)
+                                                    Icon(Icons.Outlined.Delete, null, tint = c.dim)
                                                 },
                                                 onClick = {
                                                     overflowExpanded = false
@@ -855,10 +884,10 @@ fun HistoryScreen(
                             }
                         },
                         colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor             = IdePanel,
-                            titleContentColor          = IdeText,
-                            actionIconContentColor     = IdeDim,
-                            navigationIconContentColor = IdeDim,
+                            containerColor             = c.panel,
+                            titleContentColor          = c.text,
+                            actionIconContentColor     = c.dim,
+                            navigationIconContentColor = c.dim,
                         ),
                         windowInsets = TopAppBarDefaults.windowInsets,
                     )
@@ -881,12 +910,12 @@ fun HistoryScreen(
                                     Text(
                                         text = stringResource(R.string.history_search_placeholder),
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = IdeFaint,
+                                        color = c.faint,
                                     )
                                 },
                                 singleLine = true,
                                 colors = ideTextFieldColors(),
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = IdeText),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.text),
                                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                                 keyboardActions = KeyboardActions(onSearch = {
                                     val q = searchQuery.trim()
@@ -901,17 +930,17 @@ fun HistoryScreen(
                                 }),
                                 leadingIcon = {
                                     Icon(
-                                        Icons.Filled.Search, null,
-                                        tint = IdeDim, modifier = Modifier.size(16.dp),
+                                        Icons.Outlined.Search, null,
+                                        tint = c.dim, modifier = Modifier.size(16.dp),
                                     )
                                 },
                                 trailingIcon = {
                                     if (searchQuery.isNotEmpty()) {
                                         IconButton(onClick = { searchQuery = "" }) {
                                             Icon(
-                                                Icons.Filled.Close,
+                                                Icons.Outlined.Close,
                                                 contentDescription = stringResource(R.string.cd_search_close),
-                                                tint = IdeDim,
+                                                tint = c.dim,
                                                 modifier = Modifier.size(16.dp),
                                             )
                                         }
@@ -933,12 +962,12 @@ fun HistoryScreen(
                                     Text(
                                         text = stringResource(R.string.history_recent_searches),
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = IdeFaint,
+                                        color = c.faint,
                                     )
                                     Text(
                                         text = clearRecentLabel,
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = IdeAccent,
+                                        color = c.accent,
                                         modifier = Modifier.clickable {
                                             recentSearches = emptyList()
                                             settings.recentSearches = emptyList()
@@ -957,13 +986,13 @@ fun HistoryScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Icon(
-                                            Icons.Filled.Search, null,
-                                            tint = IdeDim, modifier = Modifier.size(14.dp),
+                                            Icons.Outlined.Search, null,
+                                            tint = c.dim, modifier = Modifier.size(14.dp),
                                         )
                                         Spacer(modifier = Modifier.width(10.dp))
                                         Text(
                                             recent,
-                                            color = IdeText,
+                                            color = c.text,
                                             style = MaterialTheme.typography.bodyMedium,
                                         )
                                     }
@@ -1327,21 +1356,22 @@ private fun SelectionTopBar(
     onPinSelected: () -> Unit,
     onUnpinSelected: () -> Unit,
 ) {
-    // §5: NEUTRAL (not amber) multi-select bar — IdeElevated container, not warning
+    val c = LocalIdeColors.current
+    // §5: NEUTRAL (not amber) multi-select bar — elevated container, not warning
     TopAppBar(
         title = {
             Text(
                 text = stringResource(R.string.selection_count, selectedCount),
                 style = MaterialTheme.typography.titleLarge,
-                color = IdeText,
+                color = c.text,
             )
         },
         navigationIcon = {
             IconButton(onClick = onClose) {
                 Icon(
-                    Icons.Filled.Close,
+                    Icons.Outlined.Close,
                     contentDescription = stringResource(R.string.cd_close_selection),
-                    tint = IdeDim,
+                    tint = c.dim,
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -1350,34 +1380,34 @@ private fun SelectionTopBar(
             val allSelected = selectedCount == totalCount && totalCount > 0
             IconButton(onClick = onSelectAll) {
                 Icon(
-                    if (allSelected) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
+                    if (allSelected) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
                     contentDescription = stringResource(R.string.cd_select_all),
-                    tint = if (allSelected) IdeAccent else IdeDim,
+                    tint = if (allSelected) c.accent else c.dim,
                     modifier = Modifier.size(18.dp),
                 )
             }
             if (selectedCount > 0) {
                 IconButton(onClick = onPinSelected) {
                     Icon(
-                        Icons.Filled.BookmarkAdded,
+                        Icons.Outlined.BookmarkAdded,
                         contentDescription = stringResource(R.string.action_pin_selected),
-                        tint = IdeAccent,
+                        tint = c.accent,
                         modifier = Modifier.size(18.dp),
                     )
                 }
                 IconButton(onClick = onUnpinSelected) {
                     Icon(
-                        Icons.Filled.BookmarkBorder,
+                        Icons.Outlined.BookmarkBorder,
                         contentDescription = stringResource(R.string.action_unpin_selected),
-                        tint = IdeDim,
+                        tint = c.dim,
                         modifier = Modifier.size(18.dp),
                     )
                 }
                 IconButton(onClick = onDeleteSelected) {
                     Icon(
-                        Icons.Filled.Delete,
+                        Icons.Outlined.Delete,
                         contentDescription = stringResource(R.string.action_delete_selected),
-                        tint = IdeDanger,
+                        tint = c.danger,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -1385,10 +1415,10 @@ private fun SelectionTopBar(
         },
         // §5 Neutral elevated container — NOT amber/warning (desktop parity)
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor             = IdeElevated,
-            titleContentColor          = IdeText,
-            actionIconContentColor     = IdeDim,
-            navigationIconContentColor = IdeDim,
+            containerColor             = c.elevated,
+            titleContentColor          = c.text,
+            actionIconContentColor     = c.dim,
+            navigationIconContentColor = c.dim,
         ),
         windowInsets = TopAppBarDefaults.windowInsets,
     )
@@ -1405,6 +1435,7 @@ private fun ConfirmationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val c = LocalIdeColors.current
     val title = when (action) {
         ConfirmAction.CLEAR_UNPINNED -> stringResource(R.string.dialog_clear_unpinned_title)
         ConfirmAction.DELETE_SELECTED -> stringResource(R.string.dialog_delete_selected_title)
@@ -1418,19 +1449,19 @@ private fun ConfirmationDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title, color = IdeText) },
-        text = { Text(message, color = IdeDim) },
+        title = { Text(title, color = c.text) },
+        text = { Text(message, color = c.dim) },
         confirmButton = {
             TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.dialog_confirm), color = IdeDanger)
+                Text(stringResource(R.string.dialog_confirm), color = c.danger)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.dialog_cancel), color = IdeDim)
+                Text(stringResource(R.string.dialog_cancel), color = c.dim)
             }
         },
-        containerColor = IdePanel,
+        containerColor = c.panel,
     )
 }
 
@@ -1440,15 +1471,16 @@ private fun ConfirmationDialog(
 
 @Composable
 private fun LoadingBox(padding: PaddingValues) {
+    val c = LocalIdeColors.current
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(IdeBg)
+            .background(c.bg)
             .padding(padding),
         contentAlignment = Alignment.Center,
     ) {
         CircularProgressIndicator(
-            color = IdeAccent,
+            color = c.accent,
             strokeWidth = 2.dp,
             modifier = Modifier.size(20.dp),
         )
@@ -1463,10 +1495,11 @@ private fun LoadingBox(padding: PaddingValues) {
 /** §9 Empty state: history is empty — clipboard icon + "Nothing copied yet". */
 @Composable
 private fun EmptyHistoryState(padding: PaddingValues) {
+    val c = LocalIdeColors.current
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(IdeBg)
+            .background(c.bg)
             .padding(padding)
             .padding(24.dp),
         contentAlignment = Alignment.Center,
@@ -1475,22 +1508,23 @@ private fun EmptyHistoryState(padding: PaddingValues) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // §9 hero: clipboard icon 28dp faint (never accent)
+            // §7/§9 hero: clipboard icon 28dp — decorative, uses the ghostDeco token
+            // (PARITY-SPEC §1: 24px+ decorative icons), never accent.
             Icon(
-                imageVector = Icons.Filled.ContentCopy,
+                imageVector = Icons.Outlined.ContentCopy,
                 contentDescription = null,
-                tint = IdeFaint,
+                tint = c.ghostDeco,
                 modifier = Modifier.size(28.dp),
             )
             Text(
                 text = stringResource(R.string.empty_history),
                 style = MaterialTheme.typography.bodyLarge,
-                color = IdeDim,
+                color = c.dim,
             )
             Text(
                 text = stringResource(R.string.empty_history_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
-                color = IdeFaint,
+                color = c.ghost,
             )
         }
     }
@@ -1499,10 +1533,11 @@ private fun EmptyHistoryState(padding: PaddingValues) {
 /** §9 Empty state: search returned no results. */
 @Composable
 private fun EmptySearchState(padding: PaddingValues, query: String) {
+    val c = LocalIdeColors.current
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(IdeBg)
+            .background(c.bg)
             .padding(padding)
             .padding(24.dp),
         contentAlignment = Alignment.Center,
@@ -1511,76 +1546,101 @@ private fun EmptySearchState(padding: PaddingValues, query: String) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            // §9 hero: SearchOff icon 28dp faint — correct "no results" glyph replacing
-            // the Refresh stand-in that was acknowledged as wrong in a prior TODO comment.
+            // §7/§9 hero: SearchOff icon 28dp — decorative ghostDeco token (§1).
             Icon(
-                imageVector = Icons.Filled.SearchOff,
+                imageVector = Icons.Outlined.SearchOff,
                 contentDescription = null,
-                tint = IdeFaint,
+                tint = c.ghostDeco,
                 modifier = Modifier.size(28.dp),
             )
             Text(
                 text = stringResource(R.string.empty_search_title, query),
                 style = MaterialTheme.typography.bodyLarge,
-                color = IdeDim,
+                color = c.dim,
             )
             Text(
                 text = stringResource(R.string.empty_search_subtitle),
                 style = MaterialTheme.typography.bodyMedium,
-                color = IdeFaint,
+                color = c.ghost,
             )
         }
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §3 Content-type chip — tinted pill matching desktop §4 chip anatomy
-// text=accent, url=info, image=violet, code=violet, sensitive=danger
+// §6 Content-type chip — CANONICAL kind→color table (PARITY-SPEC §6).
+//
+//   TEXT=accent  URL=info  EMAIL=success  PHONE=success  COLOR=warning
+//   NUMBER=warning  PATH=warning  JSON=danger  CODE=violet  IMAGE=violet
+//   FILE=dim  PRIVATE/sensitive=danger
+//
+// Filled tint + 1dp tinted BORDER, 9sp semibold uppercase, radius 4 (§6/§4).
 // ─────────────────────────────────────────────────────────────────────────────
 
-@Composable
-private fun ContentTypeChip(
-    contentType: String,
-    isSensitive: Boolean,
-    /** Pre-classified text snippet used to pick a richer label for text-type rows. */
-    snippet: String = "",
-) {
-    val (label, fg, bg) = when {
-        isSensitive -> Triple("PRIVATE", IdeDanger, IdeDangerDim)
-        contentTypeIsImage(contentType) ->
-            Triple("IMAGE", IdeViolet, IdeVioletDim)
-        contentTypeIsText(contentType) -> {
-            // Richer label: classify the snippet text and show e.g. "URL", "EMAIL",
-            // "CODE", etc. instead of plain "TEXT" when the content matches.
-            val kind = if (snippet.isNotBlank()) TextKind.classify(snippet) else "TEXT"
-            val (chipFg, chipBg) = when (kind) {
-                "URL"   -> IdeInfo to IdeInfoDim
-                "EMAIL" -> IdeInfo to IdeInfoDim
-                "CODE"  -> IdeViolet to IdeVioletDim
-                else    -> IdeAccent to IdeAccentDim
-            }
-            Triple(kind, chipFg, chipBg)
-        }
-        else -> Triple("FILE", IdeDim, IdeElevated)
-    }
+/**
+ * Resolve the canonical foreground color for a content-type chip [kind] label
+ * against the active ramp [c]. Single source of truth for the §6 table; the
+ * chip derives its tinted fill and border from this one color. Non-composable so
+ * the row can pre-derive the chip color once and never re-evaluate the `when` on
+ * scroll recompositions.
+ */
+private fun chipColorFor(kind: String, c: IdeColors): Color = when (kind) {
+    "TEXT"   -> c.accent
+    "URL"    -> c.info
+    "EMAIL"  -> c.success
+    "PHONE"  -> c.success
+    "COLOR"  -> c.warning
+    "NUMBER" -> c.warning
+    "PATH"   -> c.warning
+    "JSON"   -> c.danger
+    "CODE"   -> c.violet
+    "IMAGE"  -> c.violet
+    "FILE"   -> c.dim
+    "PRIVATE" -> c.danger
+    else     -> c.accent  // unknown text kinds default to the TEXT slot
+}
 
+/**
+ * Pick the canonical chip label for an item: PRIVATE when sensitive, IMAGE/FILE
+ * by content-type, otherwise the classified text kind (URL/EMAIL/CODE/…). Pure
+ * function so [HistoryRow] can `remember` it per item id instead of recomputing
+ * the classification on every recomposition.
+ */
+private fun chipLabelFor(contentType: String, isSensitive: Boolean, snippet: String): String = when {
+    isSensitive                      -> "PRIVATE"
+    contentTypeIsImage(contentType)  -> "IMAGE"
+    contentTypeIsText(contentType)   ->
+        if (snippet.isNotBlank()) TextKind.classify(snippet) else "TEXT"
+    else                             -> "FILE"
+}
+
+/**
+ * Content-type chip. Pass the pre-derived [label] (see [chipLabelFor]) and
+ * [color] (see [chipColorFor]) so the chip never re-runs classification or the
+ * color `when` on scroll — the row hoists both behind a `remember` keyed on the
+ * item + active ramp.
+ */
+@Composable
+private fun ContentTypeChip(label: String, color: Color) {
     Box(
         modifier = Modifier
-            .background(color = bg, shape = RoundedCornerShape(4.dp))
+            .background(color = color.copy(alpha = 0.14f), shape = RoundedCornerShape(4.dp))
+            // §6: 1dp tinted border (was borderless).
+            .border(
+                width = 1.dp,
+                color = color.copy(alpha = 0.45f),
+                shape = RoundedCornerShape(4.dp),
+            )
             .padding(horizontal = 5.dp, vertical = 2.dp),
     ) {
         Text(
             text = label,
             style = TextStyle(
-                fontSize = 9.sp,
+                fontSize = 9.sp,                 // §3/§6 chip label: 9sp semibold uppercase
                 fontWeight = FontWeight.SemiBold,
                 letterSpacing = 0.4.sp,
-                // fontFeatureSettings not available as direct TextStyle param in Compose 1.x;
-                // tabular-nums applied via fontVariantNumeric is not directly supported in
-                // Compose 1.5 either — the Compose approach is PlatformTextStyle on API 26+.
-                // For now the chip label is short enough (3-7 chars) that tnum is irrelevant.
             ),
-            color = fg,
+            color = color,
             maxLines = 1,
         )
     }
@@ -1589,16 +1649,18 @@ private fun ContentTypeChip(
 /**
  * Small warning-tinted indicator shown on a row whose payload exceeds the sync size
  * cap ([ClipboardRepository.SYNC_MAX_BLOB_BYTES], 8 MiB) and therefore will not be
- * propagated to other devices. Sized (12.dp) and tinted ([IdeWarning]) to match the
- * adjacent pin indicator. Caller is responsible for the `!selectionMode` gating.
+ * propagated to other devices. Sized (12.dp) and tinted with the active warning
+ * token to match the adjacent pin indicator. §7: the single "too large" glyph is
+ * the warning triangle. Caller is responsible for the `!selectionMode` gating.
  */
 @Composable
 private fun TooLargeBadge() {
+    val c = LocalIdeColors.current
     Spacer(Modifier.width(4.dp))
     Icon(
-        imageVector = Icons.Filled.CloudOff,
+        imageVector = Icons.Outlined.WarningAmber,
         contentDescription = stringResource(R.string.cd_too_large_sync),
-        tint = IdeWarning.copy(alpha = 0.9f),
+        tint = c.warning.copy(alpha = 0.9f),
         modifier = Modifier.size(12.dp),
     )
 }
@@ -1606,6 +1668,14 @@ private fun TooLargeBadge() {
 // ─────────────────────────────────────────────────────────────────────────────
 // List
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * CopyPaste-z89 — per-row mount stagger step (ms). PARITY-SPEC §11: ~18–20ms step,
+ * capped at 10 rows (so the last animated row starts ≤200ms in). Previously the
+ * step was [Motion.Fast] (130ms), capped at 10 → up to 1.3s of staggered entrance,
+ * which read as sluggish on a fresh load.
+ */
+private const val ROW_STAGGER_STEP_MS = 20
 
 @Composable
 private fun HistoryList(
@@ -1642,6 +1712,12 @@ private fun HistoryList(
     val settings = remember { Settings(ctx) }
     val repository = remember { ClipboardRepository(ctx) }
     val scope = rememberCoroutineScope()
+    // CopyPaste-998 (jank): pull the active ramp ONCE at list scope and pass it into
+    // every row, so each row body does NOT touch the CompositionLocal during scroll
+    // recomposition. LocalIdeColors is staticCompositionLocalOf (changes only on a
+    // full theme switch / activity recreate), so a single read here is stable for
+    // the list's lifetime.
+    val c = LocalIdeColors.current
     // §8 a11y: skip animated transitions when the user has requested reduced motion.
     val reducedMotion = rememberReducedMotion()
     // E: hoist settings reads via a version token so they're re-read once per
@@ -1808,7 +1884,7 @@ private fun HistoryList(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
-            .background(IdeBg)
+            .background(c.bg)
             .padding(padding),
         contentPadding = PaddingValues(0.dp),
         verticalArrangement = Arrangement.spacedBy(0.dp),
@@ -1819,7 +1895,11 @@ private fun HistoryList(
             // (same id, same data) are already mounted and should skip animation.
             val isNewMount = !mountedIds.contains(item.id)
             if (isNewMount) mountedIds.add(item.id)
-            val mountDelay = if (isNewMount) (index * Motion.Fast).coerceAtMost(10 * Motion.Fast) else 0
+            // CopyPaste-z89 (stagger): ~20ms step, cap 10 rows (was Motion.Fast=130ms,
+            // i.e. up to 1.3s — far too slow). Matches PARITY-SPEC §11 (18–20ms / cap 10).
+            val mountDelay = if (isNewMount)
+                (index * ROW_STAGGER_STEP_MS).coerceAtMost(10 * ROW_STAGGER_STEP_MS)
+            else 0
             // §8 a11y: suppress entrance animation entirely when reduced-motion is active.
             AnimatedVisibility(
                 visible = true,
@@ -1850,6 +1930,7 @@ private fun HistoryList(
                 ) {
                     HistoryRow(
                         item = item,
+                        colors = c,
                         repository = repository,
                         maskSensitive = maskSensitive,
                         imageMaxHeightDp = imageMaxHeightDp,
@@ -1876,9 +1957,10 @@ private fun HistoryList(
                         onPreviewPin = onPreviewPin,
                         onPreviewDismiss = onPreviewDismiss,
                     )
+                    // §4: single 1dp hairline (kill the 0.5dp mix) using the divider token.
                     HorizontalDivider(
-                        color = IdeBorder.copy(alpha = 0.5f),
-                        thickness = 0.5.dp,
+                        color = c.divider,
+                        thickness = 1.dp,
                     )
                 }
             }
@@ -1893,7 +1975,7 @@ private fun HistoryList(
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator(
-                        color = IdeAccent.copy(alpha = 0.5f),
+                        color = c.accent.copy(alpha = 0.5f),
                         strokeWidth = 1.5.dp,
                         modifier = Modifier.size(16.dp),
                     )
@@ -1918,6 +2000,9 @@ private fun HistoryList(
 @Composable
 private fun HistoryRow(
     item: ClipboardItem,
+    /** CopyPaste-998 (jank): the active ramp, passed in from list scope so the row
+     *  never reads LocalIdeColors during scroll recomposition. */
+    colors: IdeColors,
     repository: ClipboardRepository,
     maskSensitive: Boolean,
     imageMaxHeightDp: Int,
@@ -1949,6 +2034,10 @@ private fun HistoryRow(
     /** Called when a plain release without drag-up ends the peek. */
     onPreviewDismiss: () -> Unit = {},
 ) {
+    // Local alias so token reads read uniformly as `c.<token>` like every other
+    // composable; `colors` is the hoisted ramp passed from list scope (no per-row
+    // CompositionLocal read — CopyPaste-998).
+    val c = colors
     val detectedSensitive = item.isSensitive
     // §8 a11y: skip animated transitions when the user has requested reduced motion.
     val reducedMotion = rememberReducedMotion()
@@ -1967,15 +2056,15 @@ private fun HistoryRow(
         if (selectionMode) expanded = false
     }
 
-    // §5/§8 Copy-success flash: 90ms IdeSuccessDim background overlay on copy.
+    // §5/§8 Copy-success flash: 90ms c.successDim background overlay on copy.
     // copyFlashTrigger increments on each copy; animateColorAsState fades from
-    // IdeSuccessDim → Transparent in Motion.Instant (90ms) and then resets the trigger
+    // c.successDim → Transparent in Motion.Instant (90ms) and then resets the trigger
     // via finishedListener so the next copy can fire again.
     // Gated by reducedMotion: when true, durationMillis=0 means the color jumps
     // to transparent instantly (no visible flash, but the state still clears).
     var copyFlashTrigger by remember(item.id) { mutableStateOf(0) }
     val copyFlashColor by animateColorAsState(
-        targetValue = if (copyFlashTrigger > 0) IdeSuccessDim else Color.Transparent,
+        targetValue = if (copyFlashTrigger > 0) colors.successDim else Color.Transparent,
         animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant),
         label = "copyFlash",
         finishedListener = { copyFlashTrigger = 0 },
@@ -2023,18 +2112,33 @@ private fun HistoryRow(
         else -> item.snippet
     }
 
+    // CopyPaste-998 (jank): hoist the §6 chip label + color so the classification
+    // (TextKind.classify) and the color `when` run once per (item, ramp) instead of
+    // every scroll recomposition. Keyed on the inputs that actually change the result.
+    val chipLabel = remember(item.contentType, detectedSensitive, item.snippet) {
+        chipLabelFor(item.contentType, detectedSensitive, item.snippet)
+    }
+    val chipColor = remember(chipLabel, colors) { chipColorFor(chipLabel, colors) }
+
+    // audit #13 — URL rows render bold host + dim path (web parity). Pre-parse the
+    // snippet into (host, path) once; null when the row is not a URL chip. The parse
+    // is memoised so scroll recomposition never re-splits the string.
+    val urlParts = remember(chipLabel, display) {
+        if (chipLabel == "URL") splitUrl(display) else null
+    }
+
     // §5 row background: selection > expanded > sensitive tint > transparent
     val rowBg = when {
-        isSelected        -> IdeSelection
-        expanded          -> IdeElevated
-        detectedSensitive -> IdeDanger.copy(alpha = 0.07f)
-        item.pinned       -> IdeWarning.copy(alpha = 0.16f)
+        isSelected        -> colors.selection
+        expanded          -> colors.elevated
+        detectedSensitive -> colors.danger.copy(alpha = 0.07f)
+        item.pinned       -> colors.warning.copy(alpha = 0.16f)
         else              -> Color.Transparent
     }
 
     // Left accent bar color: visible amber when pinned and no stronger state is active.
     val pinnedAccentColor = if (item.pinned && !isSelected && !expanded && !detectedSensitive)
-        IdeWarning.copy(alpha = 0.72f)
+        colors.warning.copy(alpha = 0.72f)
     else
         Color.Transparent
 
@@ -2043,7 +2147,7 @@ private fun HistoryRow(
             .fillMaxWidth()
             .scale(rowScale)
             .background(rowBg)
-            // §5/§8 Copy-success flash overlay: animates from IdeSuccessDim → transparent
+            // §5/§8 Copy-success flash overlay: animates from c.successDim → transparent
             // in 90ms (Motion.Instant).  Layered on top of rowBg so selection/pinned
             // tints are still visible underneath while the flash fades.
             .background(color = copyFlashColor)
@@ -2096,10 +2200,10 @@ private fun HistoryRow(
             ) {
                 // Checkbox
                 Icon(
-                    imageVector = if (isSelected) Icons.Filled.CheckBox
-                                  else Icons.Filled.CheckBoxOutlineBlank,
+                    imageVector = if (isSelected) Icons.Outlined.CheckBox
+                                  else Icons.Outlined.CheckBoxOutlineBlank,
                     contentDescription = null,
-                    tint = if (isSelected) IdeAccent else IdeDim.copy(alpha = 0.4f),
+                    tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable { onCheckboxTap() },
@@ -2107,15 +2211,15 @@ private fun HistoryRow(
                 Spacer(Modifier.width(6.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
-                        imageVector = Icons.Filled.BookmarkAdded,
+                        imageVector = Icons.Outlined.BookmarkAdded,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = IdeWarning.copy(alpha = 0.9f),
+                        tint = c.warning.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                 }
                 // §5 content-type chip (violet for images)
-                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive, snippet = item.snippet)
+                ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(8.dp))
                 Image(
@@ -2126,7 +2230,7 @@ private fun HistoryRow(
                         .widthIn(max = 340.dp)
                         .heightIn(max = imageMaxHeightDp.dp)
                         .clip(RoundedCornerShape(4.dp))
-                        .background(IdeElevated),
+                        .background(c.elevated),
                 )
                 Spacer(Modifier.weight(1f))
                 // §5 relative timestamp with tabular-nums via fontFeatureSettings
@@ -2137,7 +2241,7 @@ private fun HistoryRow(
                         fontWeight = FontWeight.Normal,
                         fontFeatureSettings = "tnum",
                     ),
-                    color = IdeFaint,
+                    color = c.faint,
                     maxLines = 1,
                 )
                 if (!selectionMode) {
@@ -2145,18 +2249,18 @@ private fun HistoryRow(
                     if (reorderMode && item.pinned) {
                         ScaleIconButton(onClick = onMoveUp) {
                             Icon(
-                                imageVector = Icons.Filled.KeyboardArrowUp,
+                                imageVector = Icons.Outlined.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) IdeAccent else IdeDim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex > 0) c.accent else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
                         ScaleIconButton(onClick = onMoveDown) {
                             Icon(
-                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                imageVector = Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) IdeAccent
-                                       else IdeDim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex < pinnedCount - 1) c.accent
+                                       else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -2165,13 +2269,13 @@ private fun HistoryRow(
                             onClick = { onSetPinned(item.id, !item.pinned) },
                         ) {
                             Icon(
-                                imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
-                                              else Icons.Filled.BookmarkBorder,
+                                imageVector = if (item.pinned) Icons.Outlined.BookmarkAdded
+                                              else Icons.Outlined.BookmarkBorder,
                                 contentDescription = if (item.pinned)
                                     stringResource(R.string.action_unpin)
                                 else
                                     stringResource(R.string.action_pin),
-                                tint = if (item.pinned) IdeWarning else IdeDim,
+                                tint = if (item.pinned) c.warning else c.dim,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -2179,9 +2283,9 @@ private fun HistoryRow(
                             onClick = { onDelete(item.id) },
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.Delete,
+                                imageVector = Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.cd_delete),
-                                tint = IdeDanger,
+                                tint = c.danger,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -2199,10 +2303,10 @@ private fun HistoryRow(
             ) {
                 // Checkbox
                 Icon(
-                    imageVector = if (isSelected) Icons.Filled.CheckBox
-                                  else Icons.Filled.CheckBoxOutlineBlank,
+                    imageVector = if (isSelected) Icons.Outlined.CheckBox
+                                  else Icons.Outlined.CheckBoxOutlineBlank,
                     contentDescription = null,
-                    tint = if (isSelected) IdeAccent else IdeDim.copy(alpha = 0.4f),
+                    tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable { onCheckboxTap() },
@@ -2210,22 +2314,23 @@ private fun HistoryRow(
                 Spacer(Modifier.width(6.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
-                        imageVector = Icons.Filled.BookmarkAdded,
+                        imageVector = Icons.Outlined.BookmarkAdded,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = IdeWarning.copy(alpha = 0.9f),
+                        tint = c.warning.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                 }
                 // §3 content-type chip (file = dim/elevated)
-                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive, snippet = item.snippet)
+                ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(6.dp))
-                // File icon
+                // §7 file-row glyph: amber document icon (warning token) so file rows
+                // read distinctly from text rows, matching the desktop file-chip accent.
                 Icon(
-                    imageVector = Icons.Filled.AttachFile,
+                    imageVector = Icons.AutoMirrored.Outlined.InsertDriveFile,
                     contentDescription = stringResource(R.string.cd_file_item),
-                    tint = IdeDim,
+                    tint = c.warning,
                     modifier = Modifier.size(14.dp),
                 )
                 Spacer(Modifier.width(4.dp))
@@ -2233,7 +2338,7 @@ private fun HistoryRow(
                 Text(
                     text = item.snippet,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = IdeText,
+                    color = c.text,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
@@ -2246,7 +2351,7 @@ private fun HistoryRow(
                         fontWeight = FontWeight.Normal,
                         fontFeatureSettings = "tnum",
                     ),
-                    color = IdeFaint,
+                    color = c.faint,
                     maxLines = 1,
                 )
                 if (!selectionMode) {
@@ -2254,38 +2359,38 @@ private fun HistoryRow(
                     // Open action — write to cache temp file and open with default app
                     ScaleIconButton(onClick = onOpenFile) {
                         Icon(
-                            imageVector = Icons.Filled.OpenInNew,
+                            imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
                             contentDescription = stringResource(R.string.cd_open_file),
-                            tint = IdeAccent,
+                            tint = c.accent,
                             modifier = Modifier.size(16.dp),
                         )
                     }
                     // Save action — write bytes to Downloads
                     ScaleIconButton(onClick = onSaveFile) {
                         Icon(
-                            imageVector = Icons.Filled.SaveAlt,
+                            imageVector = Icons.Outlined.SaveAlt,
                             contentDescription = stringResource(R.string.action_save_file),
-                            tint = IdeAccent,
+                            tint = c.accent,
                             modifier = Modifier.size(16.dp),
                         )
                     }
                     ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
                         Icon(
-                            imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
-                                          else Icons.Filled.BookmarkBorder,
+                            imageVector = if (item.pinned) Icons.Outlined.BookmarkAdded
+                                          else Icons.Outlined.BookmarkBorder,
                             contentDescription = if (item.pinned)
                                 stringResource(R.string.action_unpin)
                             else
                                 stringResource(R.string.action_pin),
-                            tint = if (item.pinned) IdeWarning else IdeDim,
+                            tint = if (item.pinned) c.warning else c.dim,
                             modifier = Modifier.size(16.dp),
                         )
                     }
                     ScaleIconButton(onClick = { onDelete(item.id) }) {
                         Icon(
-                            imageVector = Icons.Filled.Delete,
+                            imageVector = Icons.Outlined.Delete,
                             contentDescription = stringResource(R.string.cd_delete),
-                            tint = IdeDanger,
+                            tint = c.danger,
                             modifier = Modifier.size(16.dp),
                         )
                     }
@@ -2302,10 +2407,10 @@ private fun HistoryRow(
             ) {
                 // Checkbox
                 Icon(
-                    imageVector = if (isSelected) Icons.Filled.CheckBox
-                                  else Icons.Filled.CheckBoxOutlineBlank,
+                    imageVector = if (isSelected) Icons.Outlined.CheckBox
+                                  else Icons.Outlined.CheckBoxOutlineBlank,
                     contentDescription = null,
-                    tint = if (isSelected) IdeAccent else IdeDim.copy(alpha = 0.4f),
+                    tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable { onCheckboxTap() },
@@ -2313,26 +2418,49 @@ private fun HistoryRow(
                 Spacer(Modifier.width(6.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
-                        imageVector = Icons.Filled.BookmarkAdded,
+                        imageVector = Icons.Outlined.BookmarkAdded,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = IdeWarning.copy(alpha = 0.9f),
+                        tint = c.warning.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
                 }
                 // §5 content-type chip (tinted by type; text rows show richer kind label)
-                ContentTypeChip(contentType = item.contentType, isSensitive = detectedSensitive, snippet = item.snippet)
+                ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(8.dp))
-                // Preview text
-                Text(
-                    text = display,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = if (detectedSensitive) IdeDim else IdeText,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
+                // Preview text. audit #13: URL rows render bold host + dim path (web
+                // parity); urlParts is pre-parsed/memoised above and null for non-URLs
+                // or masked-sensitive rows.
+                if (urlParts != null && !detectedSensitive) {
+                    val (host, path) = urlParts
+                    val annotated = remember(host, path, c.text, c.dim) {
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(color = c.text, fontWeight = FontWeight.SemiBold)) {
+                                append(host)
+                            }
+                            if (path.isNotEmpty()) {
+                                withStyle(SpanStyle(color = c.dim)) { append(path) }
+                            }
+                        }
+                    }
+                    Text(
+                        text = annotated,
+                        style = MaterialTheme.typography.bodyLarge,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                } else {
+                    Text(
+                        text = display,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = if (detectedSensitive) c.dim else c.text,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
                 Spacer(Modifier.width(6.dp))
                 // §5 source-app icon + label chip (right of text, left of timestamp)
                 val ctx = LocalContext.current
@@ -2366,7 +2494,7 @@ private fun HistoryRow(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .background(
-                                color = IdeElevated.copy(alpha = 0.5f),
+                                color = c.elevated.copy(alpha = 0.5f),
                                 shape = RoundedCornerShape(4.dp),
                             )
                             .padding(horizontal = 4.dp, vertical = 2.dp),
@@ -2385,7 +2513,7 @@ private fun HistoryRow(
                         Text(
                             text = appLabel,
                             style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal),
-                            color = IdeFaint,
+                            color = c.faint,
                             maxLines = 1,
                         )
                     }
@@ -2399,7 +2527,7 @@ private fun HistoryRow(
                         fontWeight = FontWeight.Normal,
                         fontFeatureSettings = "tnum",
                     ),
-                    color = IdeFaint,
+                    color = c.faint,
                     maxLines = 1,
                 )
                 // Origin-device badge — shown when originDeviceId is known
@@ -2418,18 +2546,18 @@ private fun HistoryRow(
                         // Reorder mode: show up/down arrows instead of pin/delete
                         ScaleIconButton(onClick = onMoveUp) {
                             Icon(
-                                imageVector = Icons.Filled.KeyboardArrowUp,
+                                imageVector = Icons.Outlined.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) IdeAccent else IdeDim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex > 0) c.accent else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
                         ScaleIconButton(onClick = onMoveDown) {
                             Icon(
-                                imageVector = Icons.Filled.KeyboardArrowDown,
+                                imageVector = Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) IdeAccent
-                                       else IdeDim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex < pinnedCount - 1) c.accent
+                                       else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -2437,21 +2565,21 @@ private fun HistoryRow(
                         // §5 icon-only action buttons with press-scale (§8)
                         ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
                             Icon(
-                                imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
-                                              else Icons.Filled.BookmarkBorder,
+                                imageVector = if (item.pinned) Icons.Outlined.BookmarkAdded
+                                              else Icons.Outlined.BookmarkBorder,
                                 contentDescription = if (item.pinned)
                                     stringResource(R.string.action_unpin)
                                 else
                                     stringResource(R.string.action_pin),
-                                tint = if (item.pinned) IdeWarning else IdeDim,
+                                tint = if (item.pinned) c.warning else c.dim,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
                         ScaleIconButton(onClick = { onDelete(item.id) }) {
                             Icon(
-                                imageVector = Icons.Filled.Delete,
+                                imageVector = Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.cd_delete),
-                                tint = IdeDanger,
+                                tint = c.danger,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -2475,10 +2603,11 @@ private fun DeviceFilterRow(
     peers: List<PairedPeer>,
     onSelect: (String) -> Unit,
 ) {
+    val c = LocalIdeColors.current
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .background(IdePanel)
+            .background(c.panel)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -2513,12 +2642,13 @@ private fun DeviceChip(
     isOwn: Boolean = false,
     onClick: () -> Unit,
 ) {
+    val c = LocalIdeColors.current
     val bg = when {
-        isSelected -> IdeAccent
-        isOwn      -> IdeAccentDim
-        else       -> IdeElevated
+        isSelected -> c.accent
+        isOwn      -> c.accentDim
+        else       -> c.elevated
     }
-    val fg = if (isSelected) IdeBg else if (isOwn) IdeAccent else IdeDim
+    val fg = if (isSelected) c.accentOn else if (isOwn) c.accent else c.dim
 
     Box(
         modifier = Modifier
@@ -2549,21 +2679,25 @@ private fun OriginDeviceBadge(
     ownDeviceId: String,
     peers: List<PairedPeer>,
 ) {
+    val c = LocalIdeColors.current
     val isOwn = deviceId == ownDeviceId
     val label = deviceDisplayName(deviceId, ownDeviceId, peers)
 
+    // §9: origin badge unified at 10sp + 1dp bordered (parity with other badges).
+    val tint = if (isOwn) c.accent else c.dim
     Box(
         modifier = Modifier
             .background(
-                color = if (isOwn) IdeAccentDim else IdeElevated,
+                color = if (isOwn) c.accentDim else c.elevated,
                 shape = RoundedCornerShape(4.dp),
             )
+            .border(width = 1.dp, color = tint.copy(alpha = 0.30f), shape = RoundedCornerShape(4.dp))
             .padding(horizontal = 4.dp, vertical = 2.dp),
     ) {
         Text(
             text = label,
-            style = TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Normal),
-            color = if (isOwn) IdeAccent else IdeFaint,
+            style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium),
+            color = if (isOwn) c.accent else c.faint,
             maxLines = 1,
         )
     }
@@ -2612,12 +2746,13 @@ private fun TypeIcon(
     isSensitive: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    val c = LocalIdeColors.current
     val (icon, tint) = when {
-        isSensitive                -> Icons.Filled.Lock to IdeDanger
-        contentTypeIsImage(contentType) -> Icons.Filled.Image to IdeViolet
-        contentTypeIsText(contentType) -> Icons.Filled.ContentCopy to IdeAccent
-        contentType == "url"       -> Icons.Filled.ContentCopy to IdeInfo
-        else                       -> Icons.Filled.ContentCopy to IdeDim
+        isSensitive                -> Icons.Outlined.Lock to c.danger
+        contentTypeIsImage(contentType) -> Icons.Outlined.Image to c.violet
+        contentTypeIsText(contentType) -> Icons.Outlined.ContentCopy to c.accent
+        contentType == "url"       -> Icons.Outlined.ContentCopy to c.info
+        else                       -> Icons.Outlined.ContentCopy to c.dim
     }
     Icon(
         imageVector = icon,
