@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CopyPaste — Liquid Glass Styleguide</title>
+<style>
+  /* ===================================================================
+     LIQUID GLASS DESIGN SYSTEM — token foundations
+     Apple macOS Tahoe "Liquid Glass": light-first, greyish canvas,
+     translucent frosted surfaces that blur the aurora behind them.
+     =================================================================== */
+  :root[data-theme="light"] {
+    --ide-bg:            236 237 241;   /* cool greyish canvas base */
+    --ide-text:          29 29 31;      /* near-black primary */
+    --ide-faint:         108 108 114;   /* AA-safe secondary (4.6:1 on white) */
+    --ide-mute:          142 142 148;   /* tertiary / placeholders */
+    --ide-accent:        0 122 255;     /* Apple system blue */
+    --ide-accent-press:  0 112 235;
+    --ide-danger:        215 40 30;     /* AA-darkened red */
+    --ide-success:       40 140 70;     /* AA-darkened green */
+    --ide-warning:       176 110 20;
+    --ide-badge-warning: 217 163 67;    /* #D9A343 pinned */
+    --ide-sky:           20 120 170;
+    --ide-violet:        128 90 213;
+
+    /* glass material */
+    --glass-fill-top:    255 255 255 / .64;
+    --glass-fill-bot:    255 255 255 / .46;
+    --glass-card-top:    255 255 255 / .58;
+    --glass-card-bot:    255 255 255 / .40;
+    --glass-strong:      255 255 255 / .92;  /* modal: readable over scrim */
+    --glass-border:      255 255 255 / .65;
+    --glass-hairline:    20 20 40 / .08;
+    --specular:          255 255 255 / .75;
+    --float-shadow:      60 60 90 / .14;
+    --scrim:             0 0 0 / .42;
+    --selection:         0 122 255 / .14;
+    --hover:             20 20 40 / .05;
+    --radius-card:       14px;
+    --radius-ctl:        9px;
+    --radius-chip:       7px;
+  }
+  :root[data-theme="dark"] {
+    --ide-bg:            18 19 24;
+    --ide-text:          236 237 242;
+    --ide-faint:         150 152 160;
+    --ide-mute:          120 122 132;
+    --ide-accent:        61 139 255;
+    --ide-accent-press:  90 160 255;
+    --ide-danger:        255 99 92;
+    --ide-success:       70 200 120;
+    --ide-warning:       230 180 90;
+    --ide-badge-warning: 217 163 67;
+    --ide-sky:           90 190 235;
+    --ide-violet:        170 140 240;
+
+    --glass-fill-top:    60 62 78 / .58;
+    --glass-fill-bot:    44 46 60 / .46;
+    --glass-card-top:    62 64 82 / .55;
+    --glass-card-bot:    46 48 64 / .42;
+    --glass-strong:      40 42 56 / .86;
+    --glass-border:      255 255 255 / .12;
+    --glass-hairline:    255 255 255 / .10;
+    --specular:          255 255 255 / .14;
+    --float-shadow:      0 0 0 / .45;
+    --scrim:             0 0 0 / .55;
+    --selection:         61 139 255 / .22;
+    --hover:             255 255 255 / .06;
+    --radius-card:       14px;
+    --radius-ctl:        9px;
+    --radius-chip:       7px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    color: rgb(var(--ide-text));
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    position: relative;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ---- AURORA CANVAS: the colored backdrop the glass frosts ---- */
+  .aurora {
+    position: fixed; inset: 0; z-index: -2;
+    background-color: rgb(var(--ide-bg));
+    background-image:
+      radial-gradient(42rem 38rem at 12% 8%,  rgb(var(--ide-accent) / .22), transparent 60%),
+      radial-gradient(40rem 36rem at 88% 12%, rgb(var(--ide-violet) / .20), transparent 60%),
+      radial-gradient(46rem 40rem at 78% 92%, rgb(var(--ide-sky) / .20), transparent 62%),
+      radial-gradient(38rem 34rem at 20% 88%, rgb(var(--ide-success) / .16), transparent 60%);
+    background-attachment: fixed;
+  }
+  /* floating blobs so the blur is obviously "doing something" */
+  .aurora::after {
+    content: ""; position: absolute; inset: 0;
+    background-image:
+      radial-gradient(12rem 12rem at 50% 38%, rgb(var(--ide-accent) / .18), transparent 70%),
+      radial-gradient(9rem 9rem at 30% 60%, rgb(var(--ide-badge-warning) / .16), transparent 70%);
+  }
+
+  /* ===================================================================
+     GLASS MATERIAL — 3 tiers
+     =================================================================== */
+  .surface-glass, .surface-card, .surface-strong {
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    backdrop-filter: blur(28px) saturate(180%);
+    border: .5px solid rgb(var(--glass-border));
+    border-radius: var(--radius-card);
+    position: relative;
+  }
+  .surface-glass {
+    background: linear-gradient(180deg, rgb(var(--glass-fill-top)), rgb(var(--glass-fill-bot)));
+    box-shadow: 0 1px 0 rgb(var(--specular)) inset, 0 8px 24px rgb(var(--float-shadow));
+  }
+  .surface-card {
+    background: linear-gradient(180deg, rgb(var(--glass-card-top)), rgb(var(--glass-card-bot)));
+    box-shadow: 0 .5px 0 rgb(var(--specular)) inset, 0 4px 14px rgb(var(--float-shadow));
+  }
+  .surface-strong {
+    background: linear-gradient(180deg, rgb(var(--glass-strong)), rgb(var(--glass-strong)));
+    -webkit-backdrop-filter: blur(40px) saturate(180%);
+    backdrop-filter: blur(40px) saturate(180%);
+    box-shadow: 0 1px 0 rgb(var(--specular)) inset, 0 20px 60px rgb(var(--float-shadow));
+  }
+  /* diagonal sheen shared by all glass */
+  .sheen::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(120deg, rgb(255 255 255 / .14) 0%, transparent 32%);
+  }
+
+  /* ===================================================================
+     LAYOUT
+     =================================================================== */
+  .page { max-width: 1100px; margin: 0 auto; padding: 56px 28px 120px; }
+  header.hero { text-align: center; margin-bottom: 48px; }
+  header.hero h1 { font-size: 34px; font-weight: 700; letter-spacing: -.02em; }
+  header.hero p { color: rgb(var(--ide-faint)); font-size: 15px; margin-top: 10px; }
+  .hero-meta { margin-top: 18px; display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+  section.block { margin: 40px 0; padding: 24px; }
+  section.block > h2 { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: rgb(var(--ide-faint)); margin-bottom: 4px; }
+  section.block > .lead { font-size: 18px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 20px; }
+  .grid { display: grid; gap: 16px; }
+  .cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .cols-2 { grid-template-columns: repeat(2, 1fr); }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .stack { display: flex; flex-direction: column; gap: 14px; }
+  .label { font-size: 11px; color: rgb(var(--ide-faint)); margin-bottom: 8px; }
+  .demo-pad { padding: 18px; }
+
+  /* ---- color swatches ---- */
+  .swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px,1fr)); gap: 10px; }
+  .swatch { border-radius: 10px; overflow: hidden; border: .5px solid rgb(var(--glass-hairline)); }
+  .swatch .chip { height: 56px; }
+  .swatch .meta { padding: 8px 10px; font-size: 10.5px; }
+  .swatch .meta b { display: block; color: rgb(var(--ide-text)); font-weight: 600; }
+  .swatch .meta span { color: rgb(var(--ide-faint)); font-variant-numeric: tabular-nums; }
+
+  /* ---- type scale ---- */
+  .type-row { display: flex; align-items: baseline; gap: 14px; padding: 8px 0; border-bottom: .5px solid rgb(var(--glass-hairline)); }
+  .type-row .tag { width: 88px; font-size: 10.5px; color: rgb(var(--ide-faint)); flex: none; }
+
+  /* ===================================================================
+     COMPONENTS
+     =================================================================== */
+  /* buttons */
+  .btn { font: inherit; font-size: 13px; font-weight: 500; border-radius: var(--radius-ctl);
+         padding: 7px 14px; border: .5px solid transparent; cursor: pointer; transition: .12s; }
+  .btn-primary { background: rgb(var(--ide-accent)); color: #fff; box-shadow: 0 1px 2px rgb(var(--ide-accent) / .35); }
+  .btn-primary:hover { background: rgb(var(--ide-accent-press)); }
+  .btn-secondary { background: rgb(255 255 255 / .5); color: rgb(var(--ide-text)); border-color: rgb(var(--glass-hairline)); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  .btn-secondary:hover { background: rgb(255 255 255 / .7); }
+  .btn-danger { background: rgb(var(--ide-danger) / .15); color: rgb(var(--ide-danger)); }
+  .btn-danger:hover { background: rgb(var(--ide-danger) / .25); }
+  .btn-danger-solid { background: rgb(var(--ide-danger)); color: #fff; }
+  .btn-ghost { background: transparent; color: rgb(var(--ide-faint)); }
+  .btn-ghost:hover { background: rgb(var(--hover)); color: rgb(var(--ide-text)); }
+  .icon-btn { width: 28px; height: 28px; display: inline-grid; place-items: center; border-radius: 8px;
+              background: transparent; border: none; cursor: pointer; color: rgb(var(--ide-faint)); position: relative; }
+  .icon-btn:hover { background: rgb(var(--hover)); color: rgb(var(--ide-text)); }
+  .icon-btn::after { content:""; position:absolute; inset:-8px; } /* 44px hit target */
+
+  /* text input */
+  .field { display: block; width: 100%; font: inherit; font-size: 13px; padding: 8px 11px;
+           border-radius: var(--radius-ctl); border: .5px solid rgb(var(--glass-hairline));
+           background: rgb(255 255 255 / .7); color: rgb(var(--ide-text)); }
+  .field::placeholder { color: rgb(var(--ide-mute)); }
+  .field:focus { outline: 2px solid rgb(var(--ide-accent) / .5); outline-offset: 1px; border-color: rgb(var(--ide-accent) / .4); }
+
+  /* switch 34x18, 12px white thumb */
+  .switch { position: relative; width: 34px; height: 18px; border-radius: 999px; cursor: pointer;
+            background: rgb(var(--ide-mute) / .5); transition: background .12s; flex: none; }
+  .switch[aria-checked="true"] { background: rgb(var(--ide-accent)); }
+  .switch i { position: absolute; top: 3px; left: 3px; width: 12px; height: 12px; border-radius: 50%;
+              background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / .25); transition: transform .12s; }
+  .switch[aria-checked="true"] i { transform: translateX(16px); }
+
+  /* slider 4px track, 14px white thumb, no halo */
+  .slider { position: relative; height: 14px; width: 200px; display: flex; align-items: center; }
+  .slider .track { height: 4px; width: 100%; border-radius: 999px; background: rgb(var(--ide-mute) / .35); }
+  .slider .fill { position: absolute; height: 4px; border-radius: 999px; background: rgb(var(--ide-accent)); }
+  .slider .thumb { position: absolute; width: 14px; height: 14px; border-radius: 50%; background: #fff;
+                   box-shadow: 0 1px 3px rgb(0 0 0 / .3); }
+
+  /* segmented control */
+  .segmented { display: inline-flex; padding: 2px; border-radius: var(--radius-ctl); gap: 2px;
+               background: rgb(var(--ide-mute) / .18); border: .5px solid rgb(var(--glass-hairline)); }
+  .segmented button { font: inherit; font-size: 12px; font-weight: 500; border: none; cursor: pointer;
+                      padding: 5px 13px; border-radius: 7px; background: transparent; color: rgb(var(--ide-faint)); }
+  .segmented button[aria-selected="true"] { background: rgb(255 255 255 / .9); color: rgb(var(--ide-text));
+                      box-shadow: 0 1px 2px rgb(var(--float-shadow)); }
+
+  /* kind badges — tinted fill + colored border + colored text */
+  .badge { display: inline-flex; align-items: center; font-size: 10px; font-weight: 600; letter-spacing: .02em;
+           padding: 2px 6px; border-radius: var(--radius-chip); border: .5px solid; }
+  .b-text   { color: rgb(var(--ide-faint));  border-color: rgb(var(--ide-faint) / .45);  background: rgb(var(--ide-faint) / .12); }
+  .b-url    { color: rgb(var(--ide-sky));     border-color: rgb(var(--ide-sky) / .45);     background: rgb(var(--ide-sky) / .14); }
+  .b-email  { color: rgb(var(--ide-success)); border-color: rgb(var(--ide-success) / .45); background: rgb(var(--ide-success) / .14); }
+  .b-phone  { color: rgb(var(--ide-success)); border-color: rgb(var(--ide-success) / .45); background: rgb(var(--ide-success) / .14); }
+  .b-color  { color: rgb(var(--ide-warning)); border-color: rgb(var(--ide-warning) / .45); background: rgb(var(--ide-warning) / .14); }
+  .b-json   { color: rgb(var(--ide-danger));  border-color: rgb(var(--ide-danger) / .45);  background: rgb(var(--ide-danger) / .12); }
+  .b-code   { color: rgb(var(--ide-violet));  border-color: rgb(var(--ide-violet) / .45);  background: rgb(var(--ide-violet) / .14); }
+  .b-number { color: rgb(var(--ide-warning)); border-color: rgb(var(--ide-warning) / .45); background: rgb(var(--ide-warning) / .14); }
+  .b-path   { color: rgb(var(--ide-warning)); border-color: rgb(var(--ide-warning) / .45); background: rgb(var(--ide-warning) / .14); }
+  .b-image  { color: rgb(var(--ide-sky));     border-color: rgb(var(--ide-sky) / .45);     background: rgb(var(--ide-sky) / .14); }
+  .b-file   { color: rgb(var(--ide-faint));   border-color: rgb(var(--ide-faint) / .45);   background: rgb(var(--ide-faint) / .12); }
+
+  /* transport chip + status dot */
+  .chip-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 500;
+               padding: 3px 9px; border-radius: 999px; background: rgb(var(--ide-accent) / .14);
+               color: rgb(var(--ide-accent)); border: .5px solid rgb(var(--ide-accent) / .3); }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot-online { background: rgb(var(--ide-success)); box-shadow: 0 0 0 3px rgb(var(--ide-success) / .2); }
+  .dot-offline{ background: rgb(var(--ide-danger)); }
+
+  /* history rows */
+  .list { border-radius: var(--radius-card); overflow: hidden; }
+  .hrow { display: flex; align-items: center; gap: 11px; padding: 9px 13px; cursor: default;
+          border-bottom: .5px solid rgb(var(--glass-hairline)); }
+  .hrow:last-child { border-bottom: none; }
+  .hrow:hover { background: rgb(var(--hover)); }
+  .hrow.sel { background: rgb(var(--selection)); }
+  .hrow .ci { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; flex: none;
+              background: rgb(var(--ide-mute) / .16); color: rgb(var(--ide-faint)); font-size: 12px; }
+  .hrow .body { min-width: 0; flex: 1; }
+  .hrow .preview { font-size: 13px; color: rgb(var(--ide-text)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hrow .preview.mono { font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace; font-size: 12px; }
+  .hrow .meta { font-size: 11px; color: rgb(var(--ide-faint)); margin-top: 2px; display: flex; gap: 7px; align-items: center; }
+  .hrow .masked { filter: blur(5px); user-select: none; }
+  .swatch-inline { width: 14px; height: 14px; border-radius: 4px; border: .5px solid rgb(var(--glass-hairline)); flex: none; }
+
+  /* device card */
+  .device { padding: 14px 16px; display: flex; gap: 13px; align-items: center; }
+  .device .avatar { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex: none;
+                    background: rgb(var(--ide-accent) / .14); color: rgb(var(--ide-accent)); font-size: 17px; }
+  .device .info { flex: 1; min-width: 0; }
+  .device .name { font-size: 14px; font-weight: 600; }
+  .device .sub { font-size: 11px; color: rgb(var(--ide-faint)); margin-top: 2px; }
+  .fingerprint { font-family: "SF Mono", ui-monospace, monospace; font-size: 10.5px; color: rgb(var(--ide-mute)); letter-spacing: .02em; }
+
+  /* nav sidebar */
+  .sidebar { width: 200px; padding: 12px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 8px 11px; border-radius: 9px;
+              color: rgb(var(--ide-faint)); font-size: 13px; font-weight: 500; cursor: pointer; }
+  .nav-item:hover { background: rgb(var(--hover)); color: rgb(var(--ide-text)); }
+  .nav-item.active { background: rgb(var(--ide-accent)); color: #fff; box-shadow: 0 1px 3px rgb(var(--ide-accent) / .4); }
+  .nav-item .gi { width: 18px; text-align: center; }
+  .nav-foot { margin-top: 14px; padding: 8px 11px; font-size: 10.5px; color: rgb(var(--ide-faint)); display: flex; gap: 6px; align-items: center; }
+
+  /* modal + scrim */
+  .stage { position: relative; border-radius: 16px; overflow: hidden; min-height: 230px; padding: 0; }
+  .stage .scrim { position: absolute; inset: 0; background: rgb(var(--scrim)); display: grid; place-items: center; }
+  .modal { width: 320px; padding: 20px; }
+  .modal h3 { font-size: 15px; font-weight: 600; }
+  .modal p { font-size: 12.5px; color: rgb(var(--ide-faint)); margin: 9px 0 16px; }
+  .modal .actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* toast */
+  .toast { display: inline-flex; align-items: center; gap: 9px; padding: 9px 14px; font-size: 12.5px; }
+  .toast .ic { width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 11px; flex: none; }
+  .toast.ok .ic { background: rgb(var(--ide-success)); }
+  .toast.err .ic { background: rgb(var(--ide-danger)); }
+
+  /* SAS digits */
+  .sas { display: flex; gap: 8px; justify-content: center; margin: 6px 0 4px; }
+  .sas span { font-family: "SF Mono", ui-monospace, monospace; font-size: 28px; font-weight: 600; letter-spacing: .04em;
+              width: 38px; text-align: center; color: rgb(var(--ide-text)); }
+
+  /* qr placeholder */
+  .qr { width: 132px; height: 132px; border-radius: 12px; background:
+        repeating-conic-gradient(rgb(var(--ide-text)) 0% 25%, transparent 0% 50%) 0 0 / 16px 16px; opacity: .9; }
+
+  /* misc */
+  .pill-note { font-size: 10.5px; color: rgb(var(--ide-faint)); padding: 3px 9px; border-radius: 999px;
+               background: rgb(255 255 255 / .45); border: .5px solid rgb(var(--glass-hairline)); }
+  .keycap { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 5px;
+            font-size: 11px; border-radius: 6px; background: rgb(255 255 255 / .7); border: .5px solid rgb(var(--glass-hairline));
+            box-shadow: 0 1px 0 rgb(var(--float-shadow)); }
+  .theme-toggle { position: fixed; top: 18px; right: 18px; z-index: 10; }
+  .anno { font-size: 11px; color: rgb(var(--ide-faint)); margin-top: 8px; }
+  code.inline { font-family: "SF Mono", ui-monospace, monospace; font-size: 11px; background: rgb(var(--ide-mute) / .15); padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <div class="aurora"></div>
+
+  <button class="btn btn-secondary theme-toggle" onclick="document.documentElement.setAttribute('data-theme', document.documentElement.getAttribute('data-theme')==='light'?'dark':'light')">◐ Toggle theme</button>
+
+  <div class="page">
+    <header class="hero">
+      <h1>CopyPaste — Liquid Glass</h1>
+      <p>Apple macOS Tahoe design language · light-first, greyish canvas · translucent frosted surfaces that blur the aurora behind them</p>
+      <div class="hero-meta">
+        <span class="pill-note">backdrop-filter: blur + saturate</span>
+        <span class="pill-note">inset specular highlight</span>
+        <span class="pill-note">hairline border</span>
+        <span class="pill-note">aurora radial canvas</span>
+        <span class="pill-note">WCAG-AA text</span>
+      </div>
+    </header>
+
+    <!-- ============ FOUNDATIONS ============ -->
+    <section class="block surface-card sheen">
+      <h2>Foundations</h2>
+      <div class="lead">Color tokens</div>
+      <div class="swatches">
+        <div class="swatch"><div class="chip" style="background:rgb(var(--ide-accent))"></div><div class="meta"><b>accent</b><span>0 122 255</span></div></div>
+        <div class="swatch"><div class="chip" style="background:rgb(var(--ide-text))"></div><div class="meta"><b>text</b><span>29 29 31</span></div></div>
+        <div class="swatch"><div class="chip" style="background:rgb(var(--ide-faint))"></div><div class="meta"><b>faint · AA</b><span>108 108 114</span></div></div>
+        <div class="swatch"><div class="chip" style="background:rgb(var(--ide-danger))"></div><div class="meta"><b>danger</b><span>215 40 30</span></div></div>
+        <div class="swatch"><div class="chip" style="background:rgb(var(--ide-success))"></div><div class="meta"><b>success</b><span>40 140 70</span></div></div>
+        <div class="swatch"><div class="chip" style="background:rgb(var(--ide-sky))"></div><div class="meta"><b>sky / url</b><span>20 120 170</span></div></div>
+        <div class="swatch"><div class="chip" style="background:rgb(var(--ide-violet))"></div><div class="meta"><b>violet / code</b><span>128 90 213</span></div></div>
+        <div class="swatch"><div class="chip" style="background:rgb(var(--ide-badge-warning))"></div><div class="meta"><b>pinned</b><span>#D9A343</span></div></div>
+      </div>
+      <p class="anno">Solids carry an alpha channel (<code class="inline">rgb(var(--token) / &lt;alpha&gt;)</code>) so every utility can theme via the <code class="inline">data-theme</code> cascade and keep opacity modifiers. The light block overrides only the channel triplets.</p>
+
+      <div class="lead" style="margin-top:26px">Type scale</div>
+      <div class="type-row"><span class="tag">Title / 34</span><span style="font-size:34px;font-weight:700;letter-spacing:-.02em">Quiet Precision</span></div>
+      <div class="type-row"><span class="tag">Heading / 18</span><span style="font-size:18px;font-weight:600">Clipboard history</span></div>
+      <div class="type-row"><span class="tag">Body / 13</span><span style="font-size:13px">The quick brown fox jumps over the lazy dog.</span></div>
+      <div class="type-row"><span class="tag">Mono / 12</span><span style="font-size:12px;font-family:'SF Mono',ui-monospace,monospace">const k = derive(secret);</span></div>
+      <div class="type-row"><span class="tag">Caption / 11</span><span style="font-size:11px;color:rgb(var(--ide-faint))">2 minutes ago · Chrome · This Mac</span></div>
+      <div class="type-row"><span class="tag">Badge / 10</span><span style="font-size:10px;font-weight:600;letter-spacing:.02em">URL</span></div>
+    </section>
+
+    <!-- ============ GLASS TIERS ============ -->
+    <section class="block">
+      <h2>Material</h2>
+      <div class="lead">Three glass tiers — each frosts the aurora behind it</div>
+      <div class="grid cols-3">
+        <div class="surface-glass sheen demo-pad">
+          <div class="label">tier 1 · chrome</div>
+          <b>.surface-glass</b>
+          <p class="anno">Sidebar, headers, bulk bars. ~0.55 fill · blur(28) saturate(180%).</p>
+        </div>
+        <div class="surface-card sheen demo-pad">
+          <div class="label">tier 2 · cards</div>
+          <b>.surface-card</b>
+          <p class="anno">Device cards, settings panels, list containers. Softer float shadow.</p>
+        </div>
+        <div class="surface-strong sheen demo-pad">
+          <div class="label">tier 3 · modals</div>
+          <b>.surface-strong</b>
+          <p class="anno">Dialogs over a dim scrim. Raised to ~0.92 fill so text stays readable on the muddy composite.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ BUTTONS ============ -->
+    <section class="block surface-card sheen">
+      <h2>Components</h2>
+      <div class="lead">Buttons</div>
+      <div class="row">
+        <button class="btn btn-primary">Pair device</button>
+        <button class="btn btn-secondary">Rescan</button>
+        <button class="btn btn-danger">Revoke</button>
+        <button class="btn btn-danger-solid">Delete all</button>
+        <button class="btn btn-ghost">Cancel</button>
+        <button class="icon-btn" title="44px hit target">⤓</button>
+        <button class="icon-btn">★</button>
+        <button class="icon-btn">⧉</button>
+      </div>
+      <p class="anno">Icon buttons keep a 44×44 hit area (invisible inset) while the glyph stays 18px. Destructive text is AA-darkened red; the primary destructive action gets a solid fill.</p>
+    </section>
+
+    <!-- ============ FORM CONTROLS ============ -->
+    <section class="block surface-card sheen">
+      <div class="lead">Form controls</div>
+      <div class="grid cols-2">
+        <div class="stack">
+          <div><div class="label">Text input</div><input class="field" placeholder="com.apple.Safari" /></div>
+          <div><div class="label">Switch · 34×18, white thumb both states</div>
+            <div class="row">
+              <span class="switch" aria-checked="true" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked')==='true'?'false':'true')"><i></i></span>
+              <span class="switch" aria-checked="false" onclick="this.setAttribute('aria-checked', this.getAttribute('aria-checked')==='true'?'false':'true')"><i></i></span>
+              <span class="anno">Play sound on copy</span>
+            </div>
+          </div>
+          <div><div class="label">Slider · 4px track, 14px thumb, no halo</div>
+            <div class="slider"><div class="track"></div><div class="fill" style="width:62%"></div><div class="thumb" style="left:calc(62% - 7px)"></div></div>
+          </div>
+        </div>
+        <div class="stack">
+          <div><div class="label">Segmented · density</div>
+            <div class="segmented"><button aria-selected="true">Comfortable</button><button>Compact</button></div>
+          </div>
+          <div><div class="label">Theme picker</div>
+            <div class="segmented"><button>Light</button><button>Dark</button><button aria-selected="true">System</button></div>
+          </div>
+          <div><div class="label">Shortcut · Mac keycaps</div>
+            <div class="row"><span class="keycap">⌘</span><span class="keycap">⇧</span><span class="keycap">V</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ BADGES / CHIPS ============ -->
+    <section class="block surface-card sheen">
+      <div class="lead">Kind badges &amp; chips</div>
+      <div class="label">Content-kind badges — tinted fill + colored hairline + AA text, 10px</div>
+      <div class="row">
+        <span class="badge b-text">TEXT</span><span class="badge b-url">URL</span><span class="badge b-email">EMAIL</span>
+        <span class="badge b-phone">PHONE</span><span class="badge b-color">COLOR</span><span class="badge b-json">JSON</span>
+        <span class="badge b-code">CODE</span><span class="badge b-number">NUMBER</span><span class="badge b-path">PATH</span>
+        <span class="badge b-image">IMAGE</span><span class="badge b-file">FILE</span>
+      </div>
+      <div class="label" style="margin-top:18px">Transport · status</div>
+      <div class="row">
+        <span class="chip-pill">⟲ P2P</span>
+        <span class="chip-pill" style="background:rgb(var(--ide-success) / .14);color:rgb(var(--ide-success));border-color:rgb(var(--ide-success) / .3)">☁ Cloud</span>
+        <span class="chip-pill" style="background:rgb(var(--ide-faint) / .14);color:rgb(var(--ide-faint));border-color:rgb(var(--ide-faint) / .3)">This Mac</span>
+        <span class="row" style="gap:6px"><span class="status-dot dot-online"></span><span class="anno">2 online</span></span>
+        <span class="row" style="gap:6px"><span class="status-dot dot-offline"></span><span class="anno">offline</span></span>
+      </div>
+    </section>
+
+    <!-- ============ HISTORY ROWS ============ -->
+    <section class="block">
+      <div class="lead">History rows</div>
+      <div class="surface-card sheen list">
+        <div class="hrow sel">
+          <div class="ci">⧉</div>
+          <div class="body"><div class="preview">https://developer.apple.com/design/human-interface-guidelines</div>
+            <div class="meta"><span class="badge b-url">URL</span><span>2 min ago</span>·<span>Safari</span></div></div>
+          <button class="icon-btn">★</button>
+        </div>
+        <div class="hrow">
+          <div class="ci">A</div>
+          <div class="body"><div class="preview mono">git rebase -i HEAD~3 &amp;&amp; cargo clippy --all</div>
+            <div class="meta"><span class="badge b-code">CODE</span><span>14 min ago</span>·<span>Terminal</span></div></div>
+          <button class="icon-btn">★</button>
+        </div>
+        <div class="hrow">
+          <div class="ci">@</div>
+          <div class="body"><div class="preview masked">alex.doe@example.com</div>
+            <div class="meta"><span class="badge b-email">EMAIL</span><span>1 h ago</span>·<span>sensitive · tap to reveal</span></div></div>
+          <button class="icon-btn">★</button>
+        </div>
+        <div class="hrow">
+          <div class="swatch-inline" style="background:#D9A343"></div>
+          <div class="body"><div class="preview mono">#D9A343</div>
+            <div class="meta"><span class="badge b-color">COLOR</span><span>3 h ago</span></div></div>
+          <button class="icon-btn">★</button>
+        </div>
+        <div class="hrow">
+          <div class="ci">▦</div>
+          <div class="body"><div class="preview">Screenshot 2026-06-14 at 14.21.png</div>
+            <div class="meta"><span class="badge b-image">IMAGE</span><span>yesterday</span>·<span>This Mac</span></div></div>
+          <button class="icon-btn">★</button>
+        </div>
+      </div>
+      <p class="anno">Pinned glyph + selection-glide fill use <code class="inline">--ide-badge-warning</code> / <code class="inline">--selection</code> tokens. Sensitive spans blur with click-to-reveal.</p>
+    </section>
+
+    <!-- ============ DEVICE CARDS ============ -->
+    <section class="block">
+      <div class="lead">Device cards · grouped inset</div>
+      <div class="grid cols-2">
+        <div class="surface-card sheen device">
+          <div class="avatar">􀙗</div>
+          <div class="info">
+            <div class="name">Dmytro’s MacBook Air <span class="status-dot dot-online" style="margin-left:4px"></span></div>
+            <div class="sub">macOS 27.0 · This Mac · 203.0.113.42</div>
+            <div class="fingerprint">SHA256:4f:a2:9c:7e:11:b8:d3…</div>
+          </div>
+        </div>
+        <div class="surface-card sheen device">
+          <div class="avatar" style="background:rgb(var(--ide-success) / .14);color:rgb(var(--ide-success))">􀟠</div>
+          <div class="info">
+            <div class="name">OnePlus (CPH2305)</div>
+            <div class="sub">Android 15 · 12 ms · paired 3 days ago</div>
+            <div class="fingerprint">SHA256:9d:b3:1e:55:7c:6a:c1…</div>
+          </div>
+          <button class="btn btn-danger">Revoke</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ NAV + OVERLAYS ============ -->
+    <section class="block">
+      <div class="lead">Navigation &amp; overlays</div>
+      <div class="grid" style="grid-template-columns: 220px 1fr; align-items:start">
+        <div class="surface-glass sheen sidebar">
+          <div class="nav-item active"><span class="gi">􀐫</span> History</div>
+          <div class="nav-item"><span class="gi">􀙧</span> Devices</div>
+          <div class="nav-item"><span class="gi">􀍟</span> Settings</div>
+          <div class="nav-item"><span class="gi">􀈤</span> Logs</div>
+          <div class="nav-item"><span class="gi">􀅴</span> About</div>
+          <div class="nav-foot"><span class="status-dot dot-online"></span> CopyPaste · 3 devices</div>
+        </div>
+
+        <div class="stack">
+          <!-- modal over scrim -->
+          <div class="stage surface-card">
+            <div class="aurora" style="position:absolute;z-index:0;border-radius:16px"></div>
+            <div class="scrim">
+              <div class="surface-strong sheen modal">
+                <h3>Revoke “OnePlus”?</h3>
+                <p>This device will lose access to synced clipboard items. Rotate the sync key so it can’t decrypt future items.</p>
+                <input class="field" placeholder="New sync passphrase…" style="margin-bottom:14px" />
+                <div class="actions">
+                  <button class="btn btn-ghost">Cancel</button>
+                  <button class="btn btn-danger">Revoke only</button>
+                  <button class="btn btn-danger-solid">Revoke &amp; rotate</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- toasts -->
+          <div class="row">
+            <div class="surface-strong sheen toast ok"><span class="ic">✓</span> Copied to clipboard</div>
+            <div class="surface-strong sheen toast err"><span class="ic">!</span> Daemon offline — retrying…</div>
+          </div>
+
+          <!-- SAS pairing -->
+          <div class="surface-card sheen demo-pad" style="display:flex;gap:18px;align-items:center">
+            <div class="qr"></div>
+            <div>
+              <div class="label">SAS pairing — confirm the digits match</div>
+              <div class="sas"><span>4</span><span>8</span><span>2</span><span>9</span><span>1</span><span>7</span></div>
+              <div class="row" style="margin-top:10px">
+                <button class="btn btn-danger">Don’t match</button>
+                <button class="btn btn-primary">Confirm</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer style="text-align:center;color:rgb(var(--ide-faint));font-size:11px;margin-top:50px">
+      CopyPaste 0.7.1 · Liquid Glass styleguide · same material &amp; tokens drive web (CSS backdrop-filter) and Android (RenderEffect blur)
+    </footer>
+  </div>
+</body>
+</html>
