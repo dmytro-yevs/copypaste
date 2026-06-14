@@ -195,6 +195,45 @@ fun decryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: By
 }
 
 /**
+ * Decrypt a batch of items in a single FFI round-trip.
+ *
+ * [items] is a list of [uniffi.copypaste_android.EncryptedItem] values (each carrying
+ * [itemId], [ciphertext], [nonce], and [keyVersion] as [List<UByte>]).
+ * [key] is the 32-byte AEAD key passed as [ByteArray] and converted to [List<UByte>] here.
+ *
+ * Returns a [uniffi.copypaste_android.DecryptBatchResult] with:
+ *   - [items]: successfully decrypted items, each carrying [itemId] and [plaintext] as [List<UByte>].
+ *   - [skipped]: count of items the Rust side could not decrypt (legacy AAD, wrong key, etc.).
+ *
+ * Throws [IllegalStateException] when the native library is unavailable.
+ * Logs a warning on FFI failure (does NOT rethrow — returns an empty result so the caller
+ * can skip all items rather than crash).
+ */
+@Throws(IllegalStateException::class)
+fun decryptTextBatch(
+    items: List<uniffi.copypaste_android.EncryptedItem>,
+    key: ByteArray,
+): uniffi.copypaste_android.DecryptBatchResult {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "decryptTextBatch: native library not loaded — returning empty result")
+        throw IllegalStateException("copypaste_android native library not loaded; decryptTextBatch is unavailable")
+    }
+    return try {
+        uniffi.copypaste_android.decryptTextBatch(
+            items = items,
+            key = key.toUByteList(),
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        Log.w(TAG, "decryptTextBatch: native call failed: ${e.message}", e)
+        // Return a graceful-empty result: 0 successes, all items skipped.
+        uniffi.copypaste_android.DecryptBatchResult(items = emptyList(), skipped = items.size.toUInt())
+    } catch (e: Exception) {
+        Log.w(TAG, "decryptTextBatch: native call failed: ${e.message}", e)
+        uniffi.copypaste_android.DecryptBatchResult(items = emptyList(), skipped = items.size.toUInt())
+    }
+}
+
+/**
  * Returns true if [text] contains sensitive data (credit card, token, etc.).
  */
 fun isSensitive(text: String): Boolean {

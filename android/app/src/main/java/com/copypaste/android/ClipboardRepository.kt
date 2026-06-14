@@ -1730,47 +1730,113 @@ class ClipboardRepository(context: Context) {
         val pinnedOrderMap: Map<String, Double> =
             pinnedList.mapIndexed { idx, pid -> pid to (idx + 1).toDouble() }.toMap()
 
-        ids.mapNotNull { id ->
-            val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
+        // ── Pass 1: parse and snapshot all non-tombstone rows. ────────────────
+        // Collect row metadata and the raw crypto fields needed for batch decrypt.
+        // Tombstones are emitted directly (no decrypt needed).
+        data class ParsedRow(
+            val id: String,
+            val isPinned: Boolean,
+            val pinOrder: Double?,
+            val wallTimeMs: Long,
+            val contentType: String,
+            val parts: List<String>,
+            // null means the nonce/ciphertext fields were missing (malformed row).
+            val encryptedItem: uniffi.copypaste_android.EncryptedItem?,
+        )
+
+        val tombstones = mutableListOf<uniffi.copypaste_android.LocalItem>()
+        val parsedRows = mutableListOf<ParsedRow>()
+
+        for (id in ids) {
+            val raw = prefs.getString("item_$id", null) ?: continue
             val isPinned = id in pinnedSet
             val pinOrder: Double? = pinnedOrderMap[id]
+
             // ABI 15: include soft-delete tombstones so they propagate to peers.
             // Tombstones carry deleted=true with empty plaintext (no decrypt needed).
             if (isDeletedBlob(raw)) {
-                return@mapNotNull try {
+                try {
                     val parts = raw.split("|")
-                    // For tombstones, wall_time is parts[0] and lamport_ts is parts[5].
                     val wallTimeMs = parts[0].toLong()
                     val contentType = normalizeContentTypeForSync(parts.getOrNull(1) ?: "text")
-                    uniffi.copypaste_android.LocalItem(
-                        id = id,
-                        itemId = id,
-                        wallTimeMs = wallTimeMs,
-                        contentType = contentType,
-                        plaintext = emptyList(),
-                        fileName = null,
-                        mime = null,
-                        deleted = true,
-                        pinned = false,      // tombstones are never pinned
-                        pinOrder = null,
+                    tombstones.add(
+                        uniffi.copypaste_android.LocalItem(
+                            id = id,
+                            itemId = id,
+                            wallTimeMs = wallTimeMs,
+                            contentType = contentType,
+                            plaintext = emptyList(),
+                            fileName = null,
+                            mime = null,
+                            deleted = true,
+                            pinned = false,      // tombstones are never pinned
+                            pinOrder = null,
+                        )
                     )
                 } catch (e: Exception) {
                     Log.d(TAG, "Skipping tombstone $id for sync (parse failed): ${e.message}")
-                    null
                 }
+                continue
             }
+
             try {
                 val parts = raw.split("|")
                 val wallTimeMs = parts[0].toLong()
                 val contentType = normalizeContentTypeForSync(parts[1])
-                val nonce = Base64.decode(parts[3], Base64.NO_WRAP)
-                val ciphertext = Base64.decode(parts[4], Base64.NO_WRAP)
-                val plain = decryptText(id, ciphertext, nonce, key, keyVersionFromParts(parts))
+                val nonceB64 = parts.getOrNull(3)
+                val ctB64 = parts.getOrNull(4)
+                val encryptedItem = if (nonceB64 != null && ctB64 != null &&
+                    nonceB64.isNotEmpty() && ctB64.isNotEmpty()
+                ) {
+                    val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
+                    val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
+                    uniffi.copypaste_android.EncryptedItem(
+                        itemId = id,
+                        ciphertext = ciphertext.map { it.toUByte() },
+                        nonce = nonce.map { it.toUByte() },
+                        keyVersion = keyVersionFromParts(parts),
+                    )
+                } else {
+                    null
+                }
+                parsedRows.add(ParsedRow(id, isPinned, pinOrder, wallTimeMs, contentType, parts, encryptedItem))
+            } catch (e: Exception) {
+                Log.w(TAG, "localItemsForSync: skipping item $id for sync (parse failed): ${e.message}")
+            }
+        }
 
-                val isImage = contentTypeIsImage(contentType)
+        // ── Pass 2: ONE batch FFI call to decrypt all parseable items. ────────
+        // Items whose crypto fields were missing or malformed have encryptedItem=null
+        // and will be handled per-branch below (image/file items need no text decrypt).
+        val encryptedItems = parsedRows.mapNotNull { it.encryptedItem }
+        val batchResult = try {
+            decryptTextBatch(encryptedItems, key)
+        } catch (e: IllegalStateException) {
+            // Native library absent: stub-mode returns empty result, log once.
+            Log.w(TAG, "localItemsForSync: native library unavailable for batch decrypt — " +
+                "all text items will be skipped")
+            uniffi.copypaste_android.DecryptBatchResult(items = emptyList(), skipped = encryptedItems.size.toUInt())
+        }
+
+        // Log aggregate skip count once instead of per-item WARN spam.
+        if (batchResult.skipped > 0u) {
+            Log.i(TAG, "localItemsForSync: skipped ${batchResult.skipped} undecryptable legacy items")
+        }
+
+        // Build a map from itemId → plaintext bytes for O(1) lookup below.
+        val plaintextMap: Map<String, ByteArray> = batchResult.items.associate { decrypted ->
+            decrypted.itemId to ByteArray(decrypted.plaintext.size) { i -> decrypted.plaintext[i].toByte() }
+        }
+
+        // ── Pass 3: assemble LocalItem list. ─────────────────────────────────
+        val localItems = parsedRows.mapNotNull { row ->
+            val (id, isPinned, pinOrder, wallTimeMs, contentType, _, encryptedItem) = row
+            val isImage = contentTypeIsImage(contentType)
+            try {
                 if (contentTypeIsFile(contentType)) {
                     // For file items the raw plaintext is just a label; the peer
                     // needs the actual file bytes. Fetch from the sidecar store.
+                    // Decrypt result is irrelevant for file items — sidecar bytes are used.
                     val fileBytes = getFileBytes(id)
                     if (fileBytes == null || fileBytes.isEmpty()) {
                         Log.d(TAG, "Skipping file item $id for sync: bytes missing or empty")
@@ -1794,6 +1860,7 @@ class ClipboardRepository(context: Context) {
                     // placeholder, NOT the pixels. Attach the real image bytes from
                     // the sidecar store (mirrors the file branch) so P2P/cloud send
                     // ships actual bytes instead of a useless URI string.
+                    // Decrypt result is irrelevant for image items — sidecar bytes are used.
                     val imageBytes = getImageBytes(id)
                     if (imageBytes == null || imageBytes.isEmpty()) {
                         Log.d(TAG, "Skipping image item $id for sync: bytes missing or empty")
@@ -1813,6 +1880,13 @@ class ClipboardRepository(context: Context) {
                         pinOrder = pinOrder,
                     )
                 } else {
+                    // Text item: look up the plaintext from the batch result.
+                    // Skip gracefully when decrypt failed (legacy AAD / wrong key).
+                    val plain = plaintextMap[id]
+                    if (plain == null) {
+                        // Already counted in batchResult.skipped — no per-item log here.
+                        return@mapNotNull null
+                    }
                     uniffi.copypaste_android.LocalItem(
                         id = id,
                         // STABLE cross-device identity. The row id is minted ONCE at
@@ -1835,10 +1909,13 @@ class ClipboardRepository(context: Context) {
                 // Log at WARN with the item id so operators/devs can diagnose missing
                 // items in production without needing a debug build.
                 Log.w(TAG, "localItemsForSync: skipping item $id for sync " +
-                    "(decrypt/parse failed): ${e.message}")
+                    "(unexpected error): ${e.message}")
                 null
             }
-        }.reversed()
+        }
+
+        // Combine tombstones + live items, preserving original recency order (reversed).
+        (tombstones + localItems).reversed()
     }
 
     /**
