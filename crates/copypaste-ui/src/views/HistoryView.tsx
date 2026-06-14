@@ -22,6 +22,7 @@ import { useUI } from "../store";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 import { FileChip } from "../components/FileChip";
+import { ContentIcon, KindChip } from "../components/ContentIcon";
 
 // ---------------------------------------------------------------------------
 // Toast — §8 slide-up, neutral panel + 6px semantic dot, one at a time
@@ -92,173 +93,7 @@ function parseFilename(preview: string): string {
 }
 
 
-// ---------------------------------------------------------------------------
-// Content-type icon (colored SVG glyphs)
-// ---------------------------------------------------------------------------
-
-function ContentIcon({ type }: { type: string }) {
-  if (type === "text") {
-    // Blue "T" text icon
-    return (
-      <svg
-        viewBox="0 0 16 16"
-        width="14"
-        height="14"
-        fill="none"
-        aria-hidden="true"
-        className="shrink-0 text-ide-accent"
-      >
-        <text
-          x="8"
-          y="13"
-          textAnchor="middle"
-          fontSize="13"
-          fontWeight="700"
-          fontFamily="ui-monospace, monospace"
-          fill="currentColor"
-        >
-          T
-        </text>
-      </svg>
-    );
-  }
-
-  if (type === "url") {
-    // Teal external-link arrow
-    return (
-      <svg
-        viewBox="0 0 16 16"
-        width="14"
-        height="14"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-        className="shrink-0 text-ide-info"
-      >
-        <path d="M7 3H3a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V9" />
-        <path d="M10 2h4v4" />
-        <path d="M14 2 8 8" />
-      </svg>
-    );
-  }
-
-  if (type === "file") {
-    // Amber document icon — mirrors FileChip's FileIcon colour.
-    return (
-      <svg
-        viewBox="0 0 16 16"
-        width="14"
-        height="14"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-        className="shrink-0 text-ide-warning"
-      >
-        <path d="M9.5 1.5H3.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V5.5L9.5 1.5Z" />
-        <path d="M9.5 1.5v4h4" />
-        <line x1="5" y1="8" x2="11" y2="8" />
-        <line x1="5" y1="10.5" x2="11" y2="10.5" />
-      </svg>
-    );
-  }
-
-  if (type === "image") {
-    // Purple image frame icon
-    return (
-      <svg
-        viewBox="0 0 16 16"
-        width="14"
-        height="14"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        aria-hidden="true"
-        className="shrink-0 text-ide-violet"
-      >
-        <rect x="1.5" y="2.5" width="13" height="11" rx="1" />
-        <circle cx="5.5" cy="6" r="1.25" />
-        <path d="m1.5 11 3.5-3.5 2.5 2.5 2-2 4.5 4" />
-      </svg>
-    );
-  }
-
-  // Other — faint dot
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      fill="currentColor"
-      aria-hidden="true"
-      className="shrink-0 text-ide-faint"
-    >
-      <circle cx="8" cy="8" r="2" />
-    </svg>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// KindChip — full-word type chip powered by the daemon's text-kind classifier
-// ---------------------------------------------------------------------------
-
-/**
- * Derive a fallback kind label from content_type when the daemon does not
- * emit `kind` (older daemon builds). Mirrors the daemon's fixed labels so
- * the UI is consistent regardless of daemon version.
- */
-function kindFallback(contentType: string): string {
-  if (contentType === "image" || contentType.startsWith("image/")) return "IMAGE";
-  if (contentType === "file") return "FILE";
-  return "TEXT"; // text or unknown → "TEXT"
-}
-
-/**
- * Full-word type chip: shows the daemon-computed kind label (e.g. "URL",
- * "EMAIL", "CODE") or falls back to a content_type-derived label for older
- * daemon builds that do not emit the `kind` field.
- *
- * Replaces the single-letter "T" glyph for text items; image and file items
- * keep their ContentIcon glyph and do NOT render a KindChip (the icon is
- * already self-explanatory).
- */
-function KindChip({ kind, contentType }: { kind: string | undefined; contentType: string }) {
-  const label = kind ?? kindFallback(contentType);
-  // Color the chip based on the kind — each maps to an existing IDE token or
-  // a fixed hex that matches the ContentIcon palette for visual consistency.
-  // Map each kind to a semantic design-system token (§3 — no hardcoded hex).
-  // EMAIL/PHONE → success (green); COLOR/PATH/NUMBER → warning (amber);
-  // JSON → danger (red); CODE/IMAGE → violet; URL → info (teal); TEXT → accent.
-  const colorClass =
-    label === "URL"     ? "text-ide-info border-ide-info/40 bg-ide-info/8"
-    : label === "EMAIL"   ? "text-ide-success border-ide-success/40 bg-ide-success/8"
-    : label === "PHONE"   ? "text-ide-success border-ide-success/40 bg-ide-success/8"
-    : label === "COLOR"   ? "text-ide-warning border-ide-warning/40 bg-ide-warning/8"
-    : label === "JSON"    ? "text-ide-danger border-ide-danger/40 bg-ide-danger/8"
-    : label === "CODE"    ? "text-ide-violet border-ide-violet/40 bg-ide-violet/8"
-    : label === "NUMBER"  ? "text-ide-warning border-ide-warning/40 bg-ide-warning/8"
-    : label === "PATH"    ? "text-ide-warning border-ide-warning/40 bg-ide-warning/8"
-    : /* TEXT / fallback */ "text-ide-accent border-ide-accent/40 bg-ide-accent/8";
-  return (
-    <span
-      className={[
-        "flex shrink-0 items-center rounded border px-1 py-px",
-        "text-[9px] font-semibold leading-none tracking-wide uppercase",
-        colorClass,
-      ].join(" ")}
-      aria-label={`Type: ${label}`}
-    >
-      {label}
-    </span>
-  );
-}
+// ContentIcon and KindChip are imported from ../components/ContentIcon (shared component).
 
 // ---------------------------------------------------------------------------
 // Pin indicator (filled amber pin)
@@ -366,10 +201,10 @@ function DeviceBadge({
 /**
  * Compute the row height (px) for an entry.
  *
- * Maccy parity rules:
- *  - Text rows: `previewSize` (min 22 px).
- *  - Image rows: `imageMaxHeight` + 10 px padding (5 px top + 5 px bottom),
- *    minimum 34 px.
+ * §2 / §5 density rules:
+ *  - Text rows: 34px (comfortable) or 28px (compact), floor at 22px.
+ *  - Image rows: `imageMaxHeight` + 12px (comfortable) or +8px (compact), min 34px.
+ *  - File rows: fixed 44px (fits FileChip regardless of density).
  *
  * Kept in one place so the virtualizer's prefix-sum offset math stays in sync
  * with what HistoryRow actually renders.
@@ -377,14 +212,21 @@ function DeviceBadge({
 export function rowHeightFor(
   entry: HistoryEntry,
   previewSize: number,
-  imageMaxHeight: number
+  imageMaxHeight: number,
+  density: "comfortable" | "compact" = "comfortable"
 ): number {
   const isImage = isImageType(entry.content_type);
   // File rows get a fixed height that fits the FileChip (icon + filename + buttons).
   const isFile = entry.content_type === "file";
-  if (isImage) return Math.max(imageMaxHeight + 10, 34);
+  if (isImage) {
+    // §2: image padding 12px comfortable, 8px compact (spec: imageMaxHeight+12/+8).
+    const pad = density === "compact" ? 8 : 12;
+    return Math.max(imageMaxHeight + pad, 34);
+  }
   if (isFile) return 44; // FileChip is taller than a single-line text row
-  return Math.max(previewSize, 22);
+  // §2: comfortable = 34px, compact = 28px (floor at 22px).
+  const base = density === "compact" ? 28 : 34;
+  return Math.max(previewSize, base, 22);
 }
 
 // ---------------------------------------------------------------------------
@@ -457,6 +299,7 @@ interface RowProps {
   previewSize: number;
   imageMaxHeight: number;
   maskSensitive: boolean;
+  density: "comfortable" | "compact";
   /** Own device UUID from the HistoryPage envelope — used for device badge. */
   ownDeviceId: string;
   onSelect: () => void;
@@ -467,6 +310,10 @@ interface RowProps {
   /** Opens the Details Modal for this entry (M10). */
   onPreview: () => void;
   onMouseEnter?: () => void;
+  /** Index within the current visible list (for mount stagger delay). */
+  staggerIndex?: number;
+  /** When true, apply mount-stagger animation (§8 — initial mount only). */
+  applyStagger?: boolean;
   // Drag-to-reorder (pinned items only). Absent on unpinned rows.
   dragHandleProps?: {
     dragging: boolean;
@@ -479,6 +326,22 @@ interface RowProps {
   };
 }
 
+/**
+ * Parse a URL string and return `{ host, rest }` where `host` is the hostname
+ * (bold, ide-text) and `rest` is the remainder after the host (dim).
+ * Returns null if the string is not a parseable URL.
+ */
+function parseUrl(raw: string): { host: string; rest: string } | null {
+  try {
+    const u = new URL(raw);
+    // rest = path + search + hash (everything after the origin)
+    const rest = u.pathname + u.search + u.hash;
+    return { host: u.hostname, rest };
+  } catch {
+    return null;
+  }
+}
+
 function HistoryRow({
   entry,
   selected,
@@ -488,6 +351,7 @@ function HistoryRow({
   previewSize: _previewSize,
   imageMaxHeight,
   maskSensitive,
+  density,
   ownDeviceId,
   onSelect,
   onToggleMultiSelect,
@@ -496,6 +360,8 @@ function HistoryRow({
   onDelete,
   onPreview,
   onMouseEnter,
+  staggerIndex = 0,
+  applyStagger = false,
   dragHandleProps,
 }: RowProps) {
   // Bare "image" content_type (legacy) or MIME-typed "image/*" future rows.
@@ -504,6 +370,9 @@ function HistoryRow({
 
   // Per-row reveal toggle: user clicks the blurred text to temporarily show it.
   const [revealed, setRevealed] = useState(false);
+
+  // §8 copy-success flash: true for ~90ms after a successful copy.
+  const [copyFlash, setCopyFlash] = useState(false);
 
   // Whether this row should be visually blurred right now.
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
@@ -521,8 +390,12 @@ function HistoryRow({
   }
 
   // Row height is intentionally NOT driven by rowHeightFor — natural content
-  // height + py-1.5 padding avoids the hover layout-jump. rowHeightFor is only
-  // used by VirtualList for its offset math, not for DOM styling.
+  // height + density-aware padding avoids the hover layout-jump. rowHeightFor
+  // is only used by VirtualList for its offset math, not for DOM styling.
+
+  // §2: density-aware vertical padding for the row.
+  // comfortable → py-1.5 (6px each, ~34px total); compact → py-0.5 (2px each, ~28px total).
+  const rowPadding = density === "compact" ? "py-0.5" : "py-1.5";
 
   // In selection mode, clicking the row toggles multi-select.
   // Outside selection mode, clicking selects + copies (existing behavior).
@@ -532,8 +405,24 @@ function HistoryRow({
     } else {
       onSelect();
       onCopy();
+      // §8: flash success bg for ~90ms (var(--motion-instant)).
+      setCopyFlash(true);
+      setTimeout(() => setCopyFlash(false), 90);
     }
   };
+
+  // §8 mount stagger: on initial mount of first ≤10 rows, apply a fade+translate
+  // animation with staggered delay (index * 18ms + 160ms base). After first render
+  // the animation-name is cleared so subsequent list changes are instant.
+  const staggerStyle: React.CSSProperties = applyStagger
+    ? {
+        animationName: "row-stagger-in",
+        animationDuration: "160ms",
+        animationTimingFunction: "cubic-bezier(0.16, 1, 0.3, 1)",
+        animationFillMode: "both",
+        animationDelay: `${staggerIndex * 18}ms`,
+      }
+    : {};
 
   // Build a concise screen-reader label: type + first 80 chars of preview.
   const kindLabel = isImage ? "image" : isFile ? "file" : entry.content_type;
@@ -544,6 +433,16 @@ function HistoryRow({
     ? `${kindLabel}: (sensitive content hidden)`
     : `${kindLabel}: ${preview.slice(0, 80)}`;
 
+  // Merge stagger animation with drop-indicator box-shadow.
+  const rowStyle: React.CSSProperties = {
+    ...staggerStyle,
+    ...(dragHandleProps?.dropIndicator === "above"
+      ? { boxShadow: "inset 0 2px 0 0 var(--ide-accent)" }
+      : dragHandleProps?.dropIndicator === "below"
+      ? { boxShadow: "inset 0 -2px 0 0 var(--ide-accent)" }
+      : {}),
+  };
+
   return (
     <div
       id={`clip-${entry.id}`}
@@ -551,9 +450,13 @@ function HistoryRow({
       aria-selected={multiSelected || selected}
       aria-label={ariaRowLabel}
       draggable={dragHandleProps !== undefined}
+      style={rowStyle}
       className={[
-        "group relative flex cursor-pointer select-none items-center gap-2 px-3 py-1.5",
+        `group relative flex cursor-pointer select-none items-center gap-2 px-3 ${rowPadding}`,
         "border-b text-[13px]",
+        // §8 copy-flash: success tint for ~90ms after copy. Applied before pinned so
+        // the flash is visible (pinned adds bg-ide-warningDim which would cover it).
+        copyFlash ? "!bg-ide-success/10" : "",
         // v0.5.3: warningDim tint for pinned rows — border-l-2 gives a clear
         // amber left edge; bg-ide-warningDim (no opacity modifier) at its native
         // 0.10 alpha is visible without overwhelming. border-b remains divider.
@@ -569,13 +472,6 @@ function HistoryRow({
           : "text-ide-text hover:bg-ide-hover",   // panel surface: hover is ide-hover (darker than panel)
         dragHandleProps?.dragging ? "opacity-50" : "",
       ].join(" ")}
-      style={
-        dragHandleProps?.dropIndicator === "above"
-          ? { boxShadow: "inset 0 2px 0 0 var(--ide-accent)" }
-          : dragHandleProps?.dropIndicator === "below"
-          ? { boxShadow: "inset 0 -2px 0 0 var(--ide-accent)" }
-          : undefined
-      }
       onClick={handleRowClick}
       onMouseEnter={onMouseEnter}
       onDragStart={dragHandleProps?.onDragStart}
@@ -611,7 +507,7 @@ function HistoryRow({
           checked={multiSelected}
           onChange={() => {/* controlled via onClick above */}}
           className={[
-            "h-3.5 w-3.5 rounded accent-ide-accent cursor-pointer",
+            "h-4 w-4 rounded accent-ide-accent cursor-pointer",
             selectionMode ? "opacity-80" : "opacity-0 group-hover:opacity-60",
           ].join(" ")}
           tabIndex={-1}
@@ -640,7 +536,7 @@ function HistoryRow({
           text items use a full-word KindChip powered by the daemon's classifier. */}
       {isImage || isFile ? (
         <span className="flex w-4 shrink-0 items-center justify-center">
-          <ContentIcon type={isImage ? "image" : "file"} />
+          <ContentIcon contentType={isImage ? "image" : "file"} />
         </span>
       ) : (
         <span className="flex shrink-0 items-center">
@@ -665,6 +561,7 @@ function HistoryRow({
         </span>
       ) : (
         // Text / URL rows: multi-line preview clamped with webkit-line-clamp.
+        // §5: for URL content, show hostname bold (text-ide-text) + path dim (text-ide-dim).
         <span
           className={[
             "flex-1 min-w-0 break-words",
@@ -701,9 +598,24 @@ function HistoryRow({
             >
               {preview}
             </span>
-          ) : (
-            preview
-          )}
+          ) : (() => {
+            // §5: URL rows — parse hostname and show host bold + rest dim.
+            // Only when content_type is "url" (not on generic text that happens to look like a URL).
+            if (entry.content_type === "url" && !entry.is_sensitive) {
+              const parsed = parseUrl(preview);
+              if (parsed !== null) {
+                return (
+                  <>
+                    <span className="font-medium text-ide-text">{parsed.host}</span>
+                    {parsed.rest && parsed.rest !== "/" && (
+                      <span className="text-ide-dim">{parsed.rest}</span>
+                    )}
+                  </>
+                );
+              }
+            }
+            return preview;
+          })()}
         </span>
       )}
 
@@ -731,8 +643,8 @@ function HistoryRow({
             </span>
           ) : null;
         })()}
-        {/* Timestamp — always shown; sits before the buttons */}
-        <span className="text-[11px] text-ide-faint">
+        {/* Timestamp — always shown; sits before the buttons. §1: tabular-nums. */}
+        <span className="text-[11px] text-ide-faint tabular-nums">
           {formatRelativeTime(entry.wall_time, "long")}
         </span>
 
@@ -1152,9 +1064,15 @@ interface VirtualListProps {
   items: HistoryEntry[];
   previewSize: number;
   imageMaxHeight: number;
+  density: "comfortable" | "compact";
   listRef: React.RefObject<HTMLDivElement | null>;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
-  renderRow: (entry: HistoryEntry) => React.ReactNode;
+  /**
+   * Render a single row. `visibleIndex` is the row's 0-based position within
+   * the currently-rendered visible window (not the full list index) — used by
+   * the parent to compute mount-stagger delays.
+   */
+  renderRow: (entry: HistoryEntry, visibleIndex: number) => React.ReactNode;
   /**
    * Called when the user scrolls to within LOAD_MORE_THRESHOLD_PX of the
    * bottom of the list. The parent uses this to fetch the next page.
@@ -1163,24 +1081,33 @@ interface VirtualListProps {
   onNearBottom?: () => void;
   /** ID of the currently keyboard-selected option — drives aria-activedescendant. */
   activeDescendantId?: string | null;
+  /**
+   * §8 selection glide: absolute top/height (in list-content px) of the layer
+   * that animates to the selected row(s). `null` hides the layer. Rows carry no
+   * selection background themselves, so this is the sole selection indicator.
+   */
+  glideStyle?: { top: number; height: number } | null;
 }
 
 function VirtualList({
   items,
   previewSize,
   imageMaxHeight,
+  density,
   listRef,
   onKeyDown,
   renderRow,
   onNearBottom,
   activeDescendantId,
+  glideStyle,
 }: VirtualListProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(0);
 
   // Prefix-sum offsets: offsets[i] is the top of row i; offsets[n] is total height.
+  // density is passed through so the offset math stays in sync with rendered heights.
   const offsets = buildOffsets(
-    items.map((it) => rowHeightFor(it, previewSize, imageMaxHeight))
+    items.map((it) => rowHeightFor(it, previewSize, imageMaxHeight, density))
   );
   const totalH = offsets[items.length] ?? 0;
 
@@ -1230,19 +1157,31 @@ function VirtualList({
       {/* Spacer establishes the full scroll height; the inner block is offset
           to where the visible window starts. */}
       <div style={{ height: totalH, position: "relative" }}>
+        {/* §8 selection glide: a single absolutely-positioned layer that animates
+            its top/height to the selected row(s). Rendered before the rows so it
+            sits behind them; rows carry no selection background of their own. */}
+        {glideStyle && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute left-0 right-0 rounded-ide bg-ide-selection motion-reduce:transition-none"
+            style={{
+              top: glideStyle.top,
+              height: glideStyle.height,
+              transition:
+                "top 130ms cubic-bezier(.2,0,0,1), height 130ms cubic-bezier(.2,0,0,1)",
+            }}
+          />
+        )}
         <div style={{ position: "absolute", top: padTop, left: 0, right: 0 }}>
           {/* Wrap each row in a keyed fragment so React tracks identity by item
               id across the sliding virtual window — not by position within the
               visible slice, which changes on every scroll. The renderRow callback
               also sets key on HistoryRow (belt-and-suspenders), but the key here
-              at the map() call site is what React actually uses for reconciliation. */}
-          {visible.map((entry) => (
-            // React.Fragment with an explicit key is the correct way to place a
-            // stable key at the map() call site while delegating the actual
-            // element to renderRow. This ensures React reconciles by item id
-            // across the sliding virtual window, not by position in the slice.
+              at the map() call site is what React actually uses for reconciliation.
+              `start + i` is the row's absolute index, used for mount-stagger delay. */}
+          {visible.map((entry, i) => (
             <React.Fragment key={entry.id}>
-              {renderRow(entry)}
+              {renderRow(entry, start + i)}
             </React.Fragment>
           ))}
         </div>
@@ -1267,7 +1206,7 @@ interface ToastState {
 }
 
 export function HistoryView() {
-  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, playSoundOnCopy, notifyOnCopy } =
+  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, playSoundOnCopy, notifyOnCopy, density } =
     useUI((s) => s.prefs);
 
   // M5: historySize removed from prefs; use a fixed initial page size.
@@ -1357,6 +1296,27 @@ export function HistoryView() {
   // global that would be shared (and mutated) across multiple HistoryView
   // instances rendered in the same JS module scope.
   const toastSeqRef = useRef(0);
+
+  // §8 Mount stagger: true only during the initial mount window (before the first
+  // successful data render). Set to false after the first render completes so that
+  // subsequent filter/search re-renders are instant (never re-stagger on list change).
+  // Gate: a ref (not state) so setting it never causes a re-render.
+  const staggerActiveRef = useRef(true);
+  // Flip off on the first commit after data loads (via useEffect with no deps —
+  // runs once, after the initial render is painted).
+  useEffect(() => {
+    // Use a rAF so the first frame renders with stagger classes, then on the
+    // very next frame we mark stagger done (preventing second render from restaggering).
+    const id = requestAnimationFrame(() => {
+      staggerActiveRef.current = false;
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  // §8 Selection glide: track the pixel position + height of the selected row
+  // so the absolutely-positioned glide layer can animate to it.
+  // `null` = no selection (glide layer hidden).
+  const [glideStyle, setGlideStyle] = useState<{ top: number; height: number } | null>(null);
 
   const showToast = useCallback(
     (message: string, kind: ToastKind, durationMs = 2500) => {
@@ -1696,9 +1656,9 @@ export function HistoryView() {
     if (!el) return;
     let top = 0;
     for (let i = 0; i < selectedIdx; i++) {
-      top += rowHeightFor(filtered[i], previewSize, imageMaxHeight);
+      top += rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
     }
-    const rowH = rowHeightFor(filtered[selectedIdx], previewSize, imageMaxHeight);
+    const rowH = rowHeightFor(filtered[selectedIdx], previewSize, imageMaxHeight, density);
     const viewTop = el.scrollTop;
     const viewBottom = viewTop + el.clientHeight;
     if (top < viewTop) {
@@ -1707,7 +1667,46 @@ export function HistoryView() {
       el.scrollTop = top + rowH - el.clientHeight;
     }
     isKeyboardNavRef.current = false;
-  }, [selectedIdx, filtered, previewSize, imageMaxHeight]);
+  }, [selectedIdx, filtered, previewSize, imageMaxHeight, density]);
+
+  // §8 Selection glide: update the glide layer position whenever selection or
+  // filtered list changes. Computes the offset from rowHeightFor so it stays
+  // in sync with the virtualizer's prefix-sum math.
+  // Multi-select: glide covers the union of selected rows (first→last).
+  useEffect(() => {
+    if (selectedId === null && multiSelectedIds.size === 0) {
+      setGlideStyle(null);
+      return;
+    }
+    // Single-select path: track the selectedId row.
+    if (multiSelectedIds.size === 0 && selectedId !== null) {
+      const idx = filtered.findIndex((it) => it.id === selectedId);
+      if (idx < 0) { setGlideStyle(null); return; }
+      let top = 0;
+      for (let i = 0; i < idx; i++) {
+        top += rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
+      }
+      const height = rowHeightFor(filtered[idx], previewSize, imageMaxHeight, density);
+      setGlideStyle({ top, height });
+      return;
+    }
+    // Multi-select path: span from first to last selected row in filtered order.
+    const selectedIndices = filtered
+      .map((it, i) => (multiSelectedIds.has(it.id) ? i : -1))
+      .filter((i) => i >= 0);
+    if (selectedIndices.length === 0) { setGlideStyle(null); return; }
+    const firstIdx = selectedIndices[0];
+    const lastIdx = selectedIndices[selectedIndices.length - 1];
+    let top = 0;
+    for (let i = 0; i < firstIdx; i++) {
+      top += rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
+    }
+    let height = 0;
+    for (let i = firstIdx; i <= lastIdx; i++) {
+      height += rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
+    }
+    setGlideStyle({ top, height });
+  }, [selectedId, multiSelectedIds, filtered, previewSize, imageMaxHeight, density]);
 
   // Defined before handleKeyDown so the Enter-key path can route copies through
   // it (sound/notification fire on success via the same prefs as row-click copy).
@@ -2392,6 +2391,8 @@ export function HistoryView() {
           items={filtered}
           previewSize={previewSize}
           imageMaxHeight={imageMaxHeight}
+          density={density}
+          glideStyle={glideStyle}
           listRef={listRef}
           onKeyDown={(e) => void handleKeyDown(e)}
           // Only trigger load-more when not filtering: filtered view operates
@@ -2399,7 +2400,7 @@ export function HistoryView() {
           // to fetch" — it just means the user has reached the end of the match.
           onNearBottom={search.trim() === "" ? handleNearBottom : undefined}
           activeDescendantId={selectedId ? `clip-${selectedId}` : null}
-          renderRow={(entry) => (
+          renderRow={(entry, visibleIndex) => (
             <HistoryRow
               key={entry.id}
               entry={entry}
@@ -2409,6 +2410,9 @@ export function HistoryView() {
               previewLines={previewLinesApp}
               previewSize={previewSize}
               imageMaxHeight={imageMaxHeight}
+              density={density}
+              staggerIndex={visibleIndex}
+              applyStagger={staggerActiveRef.current && visibleIndex < 10}
               maskSensitive={maskSensitive}
               ownDeviceId={ownDeviceId}
               onSelect={() => {
