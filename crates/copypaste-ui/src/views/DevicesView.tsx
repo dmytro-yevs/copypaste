@@ -1562,7 +1562,7 @@ export function DevicesView({
           10 s list_peers poll when the store has no entry yet. */}
       <div className="mb-2 flex items-center justify-between">
         <p className="text-[11px] font-medium uppercase tracking-wider text-ide-faint">
-          Devices
+          Paired Devices
         </p>
         {loadState === "ready" && peers.length > 0 && (
           <span className="text-[11px] text-ide-faint">

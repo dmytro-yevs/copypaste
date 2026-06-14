@@ -118,8 +118,10 @@ function Toggle({
 // ---------------------------------------------------------------------------
 
 function SubsectionHeader({ label, hint }: { label: string; hint?: string }) {
+  // CopyPaste-hffp: tighter top margin in compact density to reduce whitespace.
+  const density = useUI((s) => s.prefs.density ?? "comfortable");
   return (
-    <div className="mb-1.5 mt-7 first:mt-0">
+    <div className={density === "compact" ? "mb-1.5 mt-5 first:mt-0" : "mb-1.5 mt-7 first:mt-0"}>
       {/* §3: section labels = grey (text-ide-dim), NOT accent blue; 11px semibold uppercase. */}
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ide-dim">{label}</div>
       {hint && <div className="mt-0.5 text-[11px] text-ide-faint">{hint}</div>}
@@ -134,8 +136,13 @@ function SettingsRow({
   label: string;
   children: React.ReactNode;
 }) {
+  // CopyPaste-hffp: density-aware row height/padding — compact shrinks rows to match HistoryView.
+  const density = useUI((s) => s.prefs.density ?? "comfortable");
+  const rowCls = density === "compact"
+    ? "flex min-h-[30px] items-center justify-between border-b border-ide-divider/70 px-3 py-1 last:border-b-0"
+    : "flex min-h-[36px] items-center justify-between border-b border-ide-divider/70 px-3 py-2 last:border-b-0";
   return (
-    <div className="flex min-h-[36px] items-center justify-between border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
+    <div className={rowCls}>
       {/* W4-3: fixed min-width on label column prevents wrapping on narrow labels */}
       <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">{label}</span>
       <div className="flex items-center gap-2">{children}</div>
@@ -1628,7 +1635,7 @@ export function SettingsView() {
       <div className="space-y-2">
         {/* Status banner */}
         {syncStatus !== null && syncStatus.supabase_configured && (
-          <div className="rounded-ide border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[12px] text-ide-success">
+          <div className="rounded-ide border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[13px] text-ide-success">
             Connected ✓
             {syncStatus.signed_in && syncStatus.email
               ? ` — signed in as ${syncStatus.email}`
@@ -1642,7 +1649,7 @@ export function SettingsView() {
           syncStatus.supabase_configured &&
           syncStatus.signed_in &&
           syncStatus.email && (
-            <div className="surface-card rounded-ide px-3 py-2 text-[12px] text-ide-dim">
+            <div className="surface-card rounded-ide px-3 py-2 text-[13px] text-ide-dim">
               <span className="font-medium text-ide-text">Signed in as {syncStatus.email}</span>
               <span className="ml-1">— All devices must use this same account to sync.</span>
             </div>
