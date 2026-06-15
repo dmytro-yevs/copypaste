@@ -1356,7 +1356,7 @@ fn rewrap_inbound_blob(
         // (file_name / mime) stamped by `rekey_blob_outbound`; fall back to
         // parsing blob_ref (pre-21b peers or direct non-rekey paths) and
         // finally to neutral defaults when neither is available.
-        let (filename, mime) = if wire.file_name.is_some() || wire.mime.is_some() {
+        let (raw_filename, mime) = if wire.file_name.is_some() || wire.mime.is_some() {
             (
                 wire.file_name.clone().unwrap_or_else(|| "file".to_string()),
                 wire.mime
@@ -1369,6 +1369,13 @@ fn rewrap_inbound_blob(
                 .and_then(parse_file_name_mime)
                 .unwrap_or_else(|| ("file".to_string(), "application/octet-stream".to_string()))
         };
+        // fr44: sanitize the peer-supplied filename before storage — defense in
+        // depth against path-traversal and shell-special characters injected by
+        // a malicious peer.  The dangerous-extension check is enforced at the
+        // open/view layer (Tauri ipc.rs on macOS, HistoryActivity on Android);
+        // sanitize_filename here ensures the stored name is always filesystem-safe
+        // regardless of which client later opens the item.
+        let filename = copypaste_core::sanitize_filename(&raw_filename);
         // B3: this is the INBOUND re-chunk path; the configured per-device
         // capture knob (`max_file_size_bytes`) is NOT threaded this deep (doing
         // so would change `run`'s signature and its daemon.rs call site, which is

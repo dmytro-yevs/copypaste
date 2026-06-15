@@ -1181,6 +1181,7 @@ fun HistoryScreen(
                     onOpenFile = { id ->
                         // Write file bytes to a cache temp file and open with the OS default app.
                         // Uses the same file_copy FileProvider path as the copy-back flow.
+                        // fr44: filename is sanitized and dangerous extensions are blocked.
                         scope.launch {
                             val repository = ClipboardRepository(ctx)
                             val (opened, errorMsg) = withContext(Dispatchers.IO) {
@@ -1188,7 +1189,10 @@ fun HistoryScreen(
                                     val fileBytes = repository.getFileBytes(id)
                                         ?: return@withContext false to ctx.getString(R.string.file_save_failed)
                                     val (fileName, mime) = repository.getFileMeta(id)
-                                    val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                                    // fr44: sanitize the peer-supplied filename before writing to
+                                    // disk — strips path-traversal sequences and shell-special chars.
+                                    val rawName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                                    val safeName = FileSecurityHelper.sanitizeFilename(rawName)
                                     val mimeType = mime ?: "application/octet-stream"
                                     val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
                                     val file = File(dir, safeName)
@@ -1207,17 +1211,35 @@ fun HistoryScreen(
                             if (opened) {
                                 // errorMsg holds the URI string on success
                                 val uri = android.net.Uri.parse(errorMsg)
-                                val (_, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(uri, mime ?: "*/*")
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                }
-                                // Check if any app can handle this intent before startActivity.
-                                if (ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
-                                    ctx.startActivity(intent)
+                                val (rawFileName, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
+                                // fr44: check whether the extension is dangerous before firing
+                                // ACTION_VIEW.  Dangerous types use ACTION_SEND (share chooser) so
+                                // the user consciously picks an app — mirrors the macOS "open -R"
+                                // (reveal-in-Finder) behaviour in copypaste-ui/src-tauri/src/ipc.rs.
+                                val ext = rawFileName?.substringAfterLast('.', "")?.lowercase() ?: ""
+                                if (FileSecurityHelper.isDangerousExtension(ext)) {
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        type = mime ?: "application/octet-stream"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    val chooser = Intent.createChooser(
+                                        shareIntent,
+                                        ctx.getString(R.string.file_open_dangerous_ext),
+                                    ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                                    ctx.startActivity(chooser)
                                 } else {
-                                    toastState.show(ctx.getString(R.string.file_open_no_app), GlassToastKind.DANGER)
+                                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                                        setDataAndType(uri, mime ?: "*/*")
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    }
+                                    // Check if any app can handle this intent before startActivity.
+                                    if (ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                                        ctx.startActivity(intent)
+                                    } else {
+                                        toastState.show(ctx.getString(R.string.file_open_no_app), GlassToastKind.DANGER)
+                                    }
                                 }
                             } else {
                                 toastState.show(errorMsg, GlassToastKind.DANGER)
@@ -1360,6 +1382,7 @@ fun HistoryScreen(
                 val id = previewItemId ?: return@PreviewOverlay
                 // Open the previewed file with the OS default application.
                 // Same implementation as the list-row open action.
+                // fr44: filename sanitized; dangerous extensions routed to share chooser.
                 scope.launch {
                     val repository = ClipboardRepository(ctx)
                     val (opened, payload) = withContext(Dispatchers.IO) {
@@ -1367,7 +1390,9 @@ fun HistoryScreen(
                             val fileBytes = repository.getFileBytes(id)
                                 ?: return@withContext false to ctx.getString(R.string.file_save_failed)
                             val (fileName, mime) = repository.getFileMeta(id)
-                            val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                            // fr44: sanitize peer-supplied filename before writing to disk.
+                            val rawName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                            val safeName = FileSecurityHelper.sanitizeFilename(rawName)
                             val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
                             val file = File(dir, safeName)
                             file.writeBytes(fileBytes)
@@ -1384,16 +1409,31 @@ fun HistoryScreen(
                     }
                     if (opened) {
                         val uri = android.net.Uri.parse(payload)
-                        val (_, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
-                        val intent = Intent(Intent.ACTION_VIEW).apply {
-                            setDataAndType(uri, mime ?: "*/*")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        }
-                        if (ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
-                            ctx.startActivity(intent)
+                        val (rawFileName, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
+                        // fr44: block dangerous extensions from direct ACTION_VIEW.
+                        val ext = rawFileName?.substringAfterLast('.', "")?.lowercase() ?: ""
+                        if (FileSecurityHelper.isDangerousExtension(ext)) {
+                            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                type = mime ?: "application/octet-stream"
+                                putExtra(Intent.EXTRA_STREAM, uri)
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            val chooser = Intent.createChooser(
+                                shareIntent,
+                                ctx.getString(R.string.file_open_dangerous_ext),
+                            ).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                            ctx.startActivity(chooser)
                         } else {
-                            toastState.show(ctx.getString(R.string.file_open_no_app), GlassToastKind.DANGER)
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(uri, mime ?: "*/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            if (ctx.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                                ctx.startActivity(intent)
+                            } else {
+                                toastState.show(ctx.getString(R.string.file_open_no_app), GlassToastKind.DANGER)
+                            }
                         }
                     } else {
                         toastState.show(payload, GlassToastKind.DANGER)

@@ -1,6 +1,7 @@
 pub mod config;
 pub mod crypto;
 pub mod file;
+pub mod filename_security;
 pub mod image;
 pub mod logging;
 pub mod relay;
@@ -29,6 +30,7 @@ pub use crypto::{
     PAIRING_TOKEN_LEN,
 };
 pub use file::{decode_file, encode_file, FileError, FileMeta, FILE_CHUNK_SIZE, MAX_FILE_BYTES};
+pub use filename_security::{is_dangerous_extension, sanitize_filename};
 pub use image::{
     chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_clipboard_image_limited,
     decode_image, decode_thumbnail, encode_as_png, encode_image, encode_image_full,

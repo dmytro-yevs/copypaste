@@ -341,6 +341,9 @@
     <string name="file_save_failed">Could not save file</string>
     <string name="file_copy_failed">Could not copy file</string>
 
+    <!-- fr44: dangerous-extension block message -->
+    <string name="file_open_dangerous_ext">This file type cannot be opened directly for security reasons. Use the Share button to choose an app manually.</string>
+
     <!-- HB-11: in-app file picker (history screen AttachFile button) -->
     <string name="cd_attach_file">Pick file to send</string>
     <string name="snackbar_file_captured">File added to clipboard — syncing…</string>
