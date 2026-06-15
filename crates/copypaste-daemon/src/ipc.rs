@@ -1781,6 +1781,7 @@ impl IpcServer {
     /// never used for auth/trust.
     pub(crate) fn collect_own_peer_meta(
         public_ip: Option<String>,
+        device_id: Option<String>,
     ) -> copypaste_p2p::bootstrap::PeerMeta {
         // CopyPaste-bps: use the process-wide cache warmed at daemon startup
         // instead of calling DeviceMeta::collect again (which spawns child
@@ -1797,6 +1798,7 @@ impl IpcServer {
             // from the OS hostname via DeviceMeta.
             device_name: meta.device_name.clone(),
             public_ip,
+            device_id,
         }
     }
 
@@ -2440,10 +2442,13 @@ impl IpcServer {
         // advertised in-band so the peer can show it. None if STUN unresolved or
         // collection is disabled. Reuses the daemon's single STUN source.
         let own_public_ip = self.cached_public_ip.read().await.clone();
+        let own_device_id = self.local_device_id.clone();
         let own_meta =
-            tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
-                .await
-                .unwrap_or_default();
+            tokio::task::spawn_blocking(move || {
+                Self::collect_own_peer_meta(own_public_ip, own_device_id)
+            })
+            .await
+            .unwrap_or_default();
         // "QR fully provisions all sync": advertise our Supabase/relay config +
         // derived sync key over the authenticated tunnel (None if unconfigured).
         let own_provisioning = self.build_local_provisioning().await;
@@ -2508,6 +2513,7 @@ impl IpcServer {
                     local_ip: outcome.peer_local_ip.clone(),
                     device_name: outcome.peer_device_name.clone(),
                     public_ip: outcome.peer_public_ip.clone(),
+                    device_id: outcome.peer_device_id.clone(),
                 };
                 Self::persist_paired_peer(
                     &outcome.peer_fingerprint,
@@ -2636,15 +2642,18 @@ impl IpcServer {
         // H8: clone before the move so the spawned task can call reload_sync_key
         // after persist_paired_peer writes peers.json.
         let spawn_sync_crypto = self.p2p_sync_crypto.clone();
+        let own_device_id = self.local_device_id.clone();
         tokio::spawn(async move {
             // P2P Phase 4: collect our own device metadata to advertise in-band.
             // DeviceMeta::collect spawns child processes (up to ~2 s), so run it
             // off the async worker. Falls back to empty metadata on join error.
             let own_public_ip = public_ip_cache.read().await.clone();
             let own_meta =
-                tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
-                    .await
-                    .unwrap_or_default();
+                tokio::task::spawn_blocking(move || {
+                    Self::collect_own_peer_meta(own_public_ip, own_device_id)
+                })
+                .await
+                .unwrap_or_default();
             // Read own_sync_addr here, after metadata collection, to give the P2P
             // listener the maximum window to have populated the slot.
             let own_sync_addr = own_sync_addr_slot
@@ -2687,6 +2696,7 @@ impl IpcServer {
                         local_ip: outcome.peer_local_ip.clone(),
                         device_name: outcome.peer_device_name.clone(),
                         public_ip: outcome.peer_public_ip.clone(),
+                        device_id: outcome.peer_device_id.clone(),
                     };
                     // Persist is the last observable side-effect of the bootstrap
                     // task. `list_peers` awaits `pending_bootstrap` (stored by
@@ -2771,13 +2781,16 @@ impl IpcServer {
         // B1: our own STUN-discovered global IP, advertised in-band so the peer
         // can show it. None if unresolved/disabled.
         let own_public_ip = self.cached_public_ip.read().await.clone();
+        let own_device_id = self.local_device_id.clone();
         // P2P Phase 4: collect our own device metadata to advertise in-band.
         // DeviceMeta::collect spawns child processes (up to ~2 s), so run it off
         // the async worker; empty metadata on join error.
         let own_meta =
-            tokio::task::spawn_blocking(move || Self::collect_own_peer_meta(own_public_ip))
-                .await
-                .unwrap_or_default();
+            tokio::task::spawn_blocking(move || {
+                Self::collect_own_peer_meta(own_public_ip, own_device_id)
+            })
+            .await
+            .unwrap_or_default();
         // "QR fully provisions all sync": advertise our Supabase/relay config +
         // derived sync key over the authenticated tunnel (None if unconfigured).
         let own_provisioning = self.build_local_provisioning().await;
@@ -2816,6 +2829,7 @@ impl IpcServer {
                     local_ip: outcome.peer_local_ip.clone(),
                     device_name: outcome.peer_device_name.clone(),
                     public_ip: outcome.peer_public_ip.clone(),
+                    device_id: outcome.peer_device_id.clone(),
                 };
                 Self::persist_paired_peer(
                     &outcome.peer_fingerprint,
@@ -12090,7 +12104,7 @@ mod tests {
     /// so it is advertised in-band to the peer during pairing.
     #[test]
     fn collect_own_peer_meta_copies_public_ip_into_meta() {
-        let meta = IpcServer::collect_own_peer_meta(Some("198.51.100.7".to_owned()));
+        let meta = IpcServer::collect_own_peer_meta(Some("198.51.100.7".to_owned()), None);
         assert_eq!(
             meta.public_ip.as_deref(),
             Some("198.51.100.7"),
@@ -12102,7 +12116,7 @@ mod tests {
     /// `collect_public_ip` disabled), the outgoing `PeerMeta.public_ip` is `None`.
     #[test]
     fn collect_own_peer_meta_none_public_ip_yields_none() {
-        let meta = IpcServer::collect_own_peer_meta(None);
+        let meta = IpcServer::collect_own_peer_meta(None, None);
         assert_eq!(
             meta.public_ip, None,
             "a None public_ip must not synthesise any value in PeerMeta"
@@ -13720,6 +13734,7 @@ mod tests {
             local_ip: Some("192.168.1.42".to_string()),
             device_name: Some("Alice's iPhone".to_string()),
             public_ip: Some("203.0.113.42".to_string()),
+            device_id: None,
         };
         // A dummy session key (all-zero is fine for this structural test).
         // SessionKey is a newtype tuple-struct: SessionKey([u8; 32]).

@@ -505,6 +505,9 @@ pub async fn start_p2p(
         // same Arc<Mutex<…>> backing store) so the responder can call
         // reload_sync_key after a successful button-pair without a restart.
         let sync_crypto_for_responder = sync_crypto.clone();
+        // Thread our own device UUID so the responder advertises it in-band,
+        // allowing the peer to match clipboard origin_device_id to a name.
+        let local_device_id_for_responder = Some(device_id.to_string());
         tokio::spawn(async move {
             standing_pairing_responder_loop(
                 bport,
@@ -515,6 +518,7 @@ pub async fn start_p2p(
                 own_sync_addr_for_responder,
                 public_ip_cache_for_responder,
                 sync_crypto_for_responder,
+                local_device_id_for_responder,
                 responder_shutdown,
             )
             .await;
@@ -2185,6 +2189,10 @@ async fn standing_pairing_responder_loop(
     // without a daemon restart.  Matches the three IPC-initiated pairing
     // paths (SAS initiator, QR responder, QR initiator).
     sync_crypto: Option<crate::sync_orch::SyncCrypto>,
+    // Our own stable device UUID, threaded in so the advertised PeerMeta
+    // carries device_id and the peer can match clipboard origin_device_id to
+    // a peer name without relying on the TLS cert fingerprint.
+    local_device_id: Option<String>,
     shutdown: CancellationToken,
 ) {
     tracing::info!(bport, "LAN/SAS standing pairing responder running");
@@ -2223,8 +2231,9 @@ async fn standing_pairing_responder_loop(
             .map(|s| s.clone().unwrap_or_default())
             .unwrap_or_else(|p| p.into_inner().clone().unwrap_or_default());
         let own_public_ip = public_ip_cache.read().await.clone();
+        let own_device_id = local_device_id.clone();
         let own_meta = tokio::task::spawn_blocking(move || {
-            crate::ipc::IpcServer::collect_own_peer_meta(own_public_ip)
+            crate::ipc::IpcServer::collect_own_peer_meta(own_public_ip, own_device_id)
         })
         .await
         .unwrap_or_default();
@@ -2311,6 +2320,7 @@ async fn standing_pairing_responder_loop(
                     local_ip: outcome.peer_local_ip.clone(),
                     device_name: outcome.peer_device_name.clone(),
                     public_ip: outcome.peer_public_ip.clone(),
+                    device_id: outcome.peer_device_id.clone(),
                 };
                 // CopyPaste-1w7 (H8 fix): pass the real SyncCrypto handle so
                 // `persist_paired_peer` calls `reload_sync_key` after writing
@@ -2868,6 +2878,7 @@ mod tests {
                     own_sync_addr,
                     public_ip_cache,
                     None, // sync_crypto — not needed for cancellation test
+                    None, // local_device_id — not needed for cancellation test
                     token,
                 )
                 .await;
@@ -3564,6 +3575,7 @@ mod tests {
             local_ip: None,
             device_name: Some("Test Device".to_string()),
             public_ip: None,
+            device_id: None,
         };
         let fp = "aa:bb:cc:dd:ee:ff:00:11";
 
