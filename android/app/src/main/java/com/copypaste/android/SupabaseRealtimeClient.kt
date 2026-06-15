@@ -483,13 +483,19 @@ class SupabaseRealtimeClient(
         // Build a CloudRow from the WS record JSON.
         val id = record.optString("id").takeIf { it.isNotBlank() } ?: return
         val itemId = record.optString("item_id").takeIf { it.isNotBlank() } ?: return
-        val payloadCtWire = record.optString("payload_ct").takeIf { it.isNotBlank() } ?: return
         val deviceId = record.optString("device_id", "")
         val lamportTs = record.optLong("lamport_ts", 0L)
         val wallTime = record.optLong("wall_time", 0L)
         val contentType = record.optString("content_type", "text")
         val expiresAt = if (record.isNull("expires_at")) null else record.optLong("expires_at")
         val appBundleId = if (record.isNull("app_bundle_id")) null else record.optString("app_bundle_id")
+        // CopyPaste-up1c: parse delete/pin state from WS record (Supabase Realtime
+        // sends the same column set as the REST poll).
+        val deleted = record.optBoolean("deleted", false)
+        val pinned = record.optBoolean("pinned", false)
+        val pinOrder = if (record.isNull("pin_order")) null else record.optDouble("pin_order").takeUnless { it.isNaN() }
+        // payload_ct is absent for tombstone rows (deleted=true, content wiped).
+        val payloadCtWire = record.optString("payload_ct")
 
         // Skip own-device echoes.
         if (deviceId == settings.deviceId) return
@@ -504,21 +510,36 @@ class SupabaseRealtimeClient(
             expiresAt = expiresAt,
             appBundleId = appBundleId,
             deviceId = deviceId,
+            deleted = deleted,
+            pinned = pinned,
+            pinOrder = pinOrder,
         )
 
         // Advance the Lamport clock for this row (mirrors FgsSyncLoop poll path).
         settings.lamportClock.observe(lamportTs)
-
-        val item = ctx.client.decryptRow(row, ctx.syncKey) ?: run {
-            Log.w(TAG, "WS: decryptRow failed for id=$id")
-            return
-        }
 
         // Advance the cursor if this row is strictly newer than the watermark.
         // advanceSupabaseCursor holds supabaseCursorLock so this WS push path
         // and the concurrent poll paths (FgsSyncLoop, SupabasePollWorker) all
         // serialise on the same monitor — no advance is lost.
         settings.advanceSupabaseCursor(wallTime, id)
+
+        // CopyPaste-up1c: tombstone fast-path — mirrors FgsSyncLoop delete branch.
+        if (deleted) {
+            val tombstoned = repository.applyInboundTombstoneWithLww(
+                itemId = itemId,
+                lamportTs = lamportTs,
+            )
+            if (tombstoned) {
+                Log.d(TAG, "WS: applied tombstone itemId=${itemId.take(8)}…")
+            }
+            return
+        }
+
+        val item = ctx.client.decryptRow(row, ctx.syncKey) ?: run {
+            Log.w(TAG, "WS: decryptRow failed for id=$id")
+            return
+        }
 
         val isImage = item.contentType == "image" || item.contentType.startsWith("image/")
         val isFile = item.contentType == "file"
@@ -586,6 +607,11 @@ class SupabaseRealtimeClient(
                 if (didStore) onSyncedTextClip?.invoke(text)
                 didStore
             }
+        }
+
+        // CopyPaste-up1c: apply pin state from the WS record (authoritative).
+        if (stored && item.pinned) {
+            repository.setPinned(item.itemId, true)
         }
 
         if (stored) {

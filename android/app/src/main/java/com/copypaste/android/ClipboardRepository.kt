@@ -343,13 +343,15 @@ class ClipboardRepository(context: Context) {
             val pinnedList = storedPinnedList().toMutableList()
             val wasPinned = pinnedList.remove(id)
 
-            // Write a soft-delete tombstone: bump lamportTs by 1 so a concurrent
-            // LWW re-sync of the original text (with a lower lamportTs) is rejected.
+            // Write a soft-delete tombstone: bump lamportTs to max(prev+1, nowMs) so
+            // the tombstone is time-ordered into wall-clock space (CopyPaste-up1c),
+            // preventing collisions with low-magnitude lamport values from older peers.
+            // Mirrors next_lamport_ts() in copypaste-core/src/storage/items.rs ~line 68.
             val oldLamport = try {
                 val parts = existing.split("|")
                 if (parts.size >= 6) parts[5].toLongOrNull() ?: 0L else 0L
             } catch (_: Exception) { 0L }
-            val tombstone = encodeTombstone(existing, oldLamport + 1L)
+            val tombstone = encodeTombstone(existing, nextLamportTs(oldLamport, System.currentTimeMillis()))
 
             // Clear binary sidecars: image/file bytes are no longer needed once
             // the item is logically deleted (saves storage; tombstone keeps the id
@@ -516,9 +518,23 @@ class ClipboardRepository(context: Context) {
                 pinnedList.remove(id)
             }
             if (changed) {
+                // CopyPaste-up1c: bump lamport_ts in the stored blob so pin changes
+                // are time-ordered into wall-clock space and propagate correctly via
+                // LWW. Mirrors pin_item/unpin_item in copypaste-core/src/storage/items.rs
+                // which call next_lamport_ts on every pin mutation.
+                val existing = prefs.getString("item_$id", null)
+                val nowMs = System.currentTimeMillis()
+                val editor = prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
+                if (existing != null && !isDeletedBlob(existing)) {
+                    val oldLamport = try {
+                        existing.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
+                    } catch (_: Exception) { 0L }
+                    editor.putString("item_$id", bumpBlobLamportTs(existing, nextLamportTs(oldLamport, nowMs)))
+                }
                 // commit() (synchronous) so the new pinned set survives an immediate
                 // force-stop (SIGKILL) — matches the project pattern from 0f1d1ef.
-                prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(",")).commit()
+                editor.commit()
+                evictParseCache(id) // blob changed — evict stale decrypt cache entry
             }
         }
         Log.d(TAG, "setPinned: item $id pinned=$pinned")
@@ -540,9 +556,24 @@ class ClipboardRepository(context: Context) {
             // Append any pinned ids that were not included in the caller's list.
             val missing = currentPinned.filter { it !in reordered }
             reordered.addAll(missing)
+
+            // CopyPaste-up1c: bump lamport_ts in every reordered blob so the new
+            // pin-order propagates correctly via LWW. Mirrors reorder_pinned in
+            // copypaste-core/src/storage/items.rs which calls next_lamport_ts per item.
+            val nowMs = System.currentTimeMillis()
+            val editor = prefs.edit().putString(KEY_PINNED_IDS, reordered.joinToString(","))
+            for (itemId in reordered) {
+                val existing = prefs.getString("item_$itemId", null) ?: continue
+                if (isDeletedBlob(existing)) continue
+                val oldLamport = try {
+                    existing.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
+                } catch (_: Exception) { 0L }
+                editor.putString("item_$itemId", bumpBlobLamportTs(existing, nextLamportTs(oldLamport, nowMs)))
+                evictParseCache(itemId) // blob changed — evict stale decrypt cache entry
+            }
             // commit() (synchronous) so the reordered set survives an immediate
             // force-stop (SIGKILL) — matches the project pattern from 0f1d1ef.
-            prefs.edit().putString(KEY_PINNED_IDS, reordered.joinToString(",")).commit()
+            editor.commit()
         }
         Log.d(TAG, "reorderPinned: new order = $ids")
     }
@@ -770,9 +801,36 @@ class ClipboardRepository(context: Context) {
             val existingStorageId = prefs.getString("item_id_ref_$itemId", null)
                 ?: return@synchronized false  // not yet stored → fall through to new-item path
 
-            // LWW: only replace when incoming lamport_ts is strictly newer.
-            val storedTs = storedLamportTs(existingStorageId)
-            if (incomingLamportTs <= storedTs) {
+            // LWW: apply the SAME total order as remote_wins() in
+            // copypaste-sync/src/merge.rs ~lines 97-112:
+            //   1. lamport_ts — larger wins.
+            //   2. wall_time  — larger wins (tie-break on equal lamport).
+            //   3. origin_device_id — lexicographically larger wins (deterministic).
+            // CopyPaste-up1c: previously only lamport_ts was compared; the wall_time
+            // + origin_device_id tie-break was missing, causing non-deterministic
+            // conflict resolution on simultaneous edits.
+            // Read the full raw blob once so we can extract both lamport_ts (field 5),
+            // wall_time (field 0), and origin_device_id (field 7) for the 3-key LWW
+            // without double-reading prefs.
+            val storedRaw = prefs.getString("item_$existingStorageId", null)
+            val storedParts = storedRaw?.split("|")
+            val storedTs = storedParts?.getOrNull(5)?.toLongOrNull() ?: 0L
+            val remoteWins = when {
+                incomingLamportTs > storedTs -> true
+                incomingLamportTs < storedTs -> false
+                else -> {
+                    // Equal lamport — compare wall_time then origin_device_id.
+                    // Mirrors remote_wins() in copypaste-sync/src/merge.rs ~lines 106-109.
+                    val storedWall = storedParts?.getOrNull(0)?.toLongOrNull() ?: 0L
+                    val storedOrigin = storedParts?.getOrNull(7) ?: ""
+                    when {
+                        wallTimeMs > storedWall -> true
+                        wallTimeMs < storedWall -> false
+                        else -> originDeviceId > storedOrigin
+                    }
+                }
+            }
+            if (!remoteWins) {
                 Log.d(TAG, "LWW: skipping dup item_id=$itemId (stored=$storedTs, incoming=$incomingLamportTs)")
                 return@synchronized null  // null = "skip, do not store as new item either"
             }
@@ -1301,6 +1359,25 @@ class ClipboardRepository(context: Context) {
         return raw.split("|").getOrNull(6) == "1"
     }
 
+    /**
+     * Return a new blob string with field 5 (lamport_ts) replaced by [newLamportTs].
+     *
+     * CopyPaste-up1c: used by setPinned / reorderPinned to stamp a nextLamportTs
+     * value into the blob WITHOUT re-encrypting (the AEAD ciphertext fields are
+     * unchanged — only the metadata field is updated). This is safe because
+     * lamport_ts is not part of the AEAD AAD; the cipher only covers the plaintext.
+     *
+     * Returns the raw string unchanged when the blob has fewer than 6 fields (legacy
+     * pre-lamport format) — those items cannot carry a lamport stamp.
+     */
+    private fun bumpBlobLamportTs(raw: String, newLamportTs: Long): String {
+        val parts = raw.split("|")
+        if (parts.size < 6) return raw  // legacy format — leave untouched
+        val mutable = parts.toMutableList()
+        mutable[5] = newLamportTs.toString()
+        return mutable.joinToString("|")
+    }
+
     private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
         val parts = try {
             raw.split("|")
@@ -1399,6 +1476,23 @@ class ClipboardRepository(context: Context) {
 
     companion object {
         private const val TAG = "ClipboardRepository"
+
+        /**
+         * Compute the next Lamport timestamp, mirroring `next_lamport_ts` in
+         * copypaste-core/src/storage/items.rs ~lines 68-70:
+         *   `max(prev + 1, now_ms)`
+         *
+         * This guarantees two properties:
+         *  - **monotonic**: always strictly greater than [prevLamport].
+         *  - **time-ordered**: at least [nowMs], so the newest writer across
+         *    devices wins under lamport-first LWW.
+         *
+         * CopyPaste-up1c: used in deleteItem / setPinned / reorderPinned so every
+         * local mutation bumps lamport_ts into the wall-clock value-space, preventing
+         * collisions with low-magnitude values emitted by older peers.
+         */
+        fun nextLamportTs(prevLamport: Long, nowMs: Long): Long =
+            maxOf(prevLamport + 1L, nowMs)
 
         /**
          * Sync size ceiling in bytes (8 MiB). Items whose stored payload exceeds this are
@@ -1919,15 +2013,21 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Apply an inbound P2P soft-delete tombstone with LWW semantics.
+     * Apply an inbound soft-delete tombstone (from relay, P2P, or cloud) with LWW
+     * semantics.
      *
-     * Only tombstones the local row when:
-     *  1. The item_id is known locally (already in the index via [item_id_ref_*]).
-     *  2. The incoming [lamportTs] is STRICTLY greater than the stored row's lamport_ts
-     *     (newer remote delete wins; a stale re-sync cannot resurrect a re-pinned item).
+     * Two cases:
+     *  1. **Item known locally**: tombstone iff incoming [lamportTs] is STRICTLY
+     *     greater than the stored row's lamport_ts (newer remote delete wins; a stale
+     *     re-sync cannot resurrect a re-pinned item).
+     *  2. **Item unknown locally (delete-before-create)**: insert a ghost tombstone
+     *     so that a later arriving create for the same [itemId] loses the LWW
+     *     comparison. Mirrors daemon relay.rs `insert_tombstone` ~lines 924-940
+     *     (CopyPaste-bfiu). The ghost tombstone is invisible in the UI
+     *     (isDeletedBlob → filtered by getItems).
      *
-     * If the item is not known locally → no-op (no point creating a ghost tombstone).
-     * If the stored lamport_ts >= [lamportTs] → no-op (local state is at least as new).
+     * If the stored lamport_ts >= [lamportTs] (known-item case) → no-op (local
+     * state is at least as new).
      *
      * Returns true when a tombstone was written (for caller stats).
      */
@@ -1938,7 +2038,25 @@ class ClipboardRepository(context: Context) {
         synchronized(idsWriteLock) {
             // Resolve the local storage id for this cross-device item_id.
             val storageId = prefs.getString("item_id_ref_$itemId", null)
-                ?: return@synchronized false  // unknown item — skip
+            if (storageId == null) {
+                // CopyPaste-bfiu: delete-before-create — insert a ghost tombstone so
+                // a later arriving create for this item_id loses LWW. The ghost uses
+                // itemId as the storageId (same as storeItemWithLww convention) and is
+                // written into the id-index so item_id_ref lookup finds it. The UI
+                // filters it out via isDeletedBlob.
+                val nowMs = System.currentTimeMillis()
+                // Ghost tombstone blob format mirrors encodeTombstone without an existing blob:
+                // <nowMs>|text/plain|0||tombstone|<lamportTs>|1|
+                val ghostBlob = "$nowMs|text/plain|0||tombstone|$lamportTs|1|"
+                val ids = appendUniqueId(storedIds(), itemId)
+                prefs.edit()
+                    .putString("item_$itemId", ghostBlob)
+                    .putString(KEY_ITEM_IDS, ids.joinToString(","))
+                    .putString("item_id_ref_$itemId", itemId)
+                    .apply()
+                Log.d(TAG, "applyInboundTombstone: inserted ghost tombstone for unknown item_id=$itemId (delete-before-create)")
+                return@synchronized true
+            }
             val existing = prefs.getString("item_$storageId", null)
                 ?: return@synchronized false
             // Already a tombstone — only replace if incoming ts is strictly newer.

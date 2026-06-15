@@ -133,6 +133,12 @@ class SupabaseClient(
         val expiresAt: Long?,
         val appBundleId: String?,
         val deviceId: String,
+        // CopyPaste-up1c: soft-delete and pin state columns, mirroring the
+        // daemon's clipboard_item_to_json which serializes these fields.
+        // Defaulted so rows from older schema versions (no column) parse safely.
+        val deleted: Boolean = false,
+        val pinned: Boolean = false,
+        val pinOrder: Double? = null,
     )
 
     /**
@@ -157,6 +163,10 @@ class SupabaseClient(
         val fileName: String? = null,
         /** Recovered MIME for file items; null for text/image. */
         val fileMime: String? = null,
+        // CopyPaste-up1c: soft-delete and pin state forwarded from CloudRow.
+        val deleted: Boolean = false,
+        val pinned: Boolean = false,
+        val pinOrder: Double? = null,
     )
 
     // ── Auth ─────────────────────────────────────────────────────────────────
@@ -312,7 +322,9 @@ class SupabaseClient(
     ): List<CloudRow> {
         val path = buildString {
             append("/rest/v1/clipboard_items")
-            append("?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id")
+            // CopyPaste-up1c: include deleted/pinned/pin_order so cloud delete and
+            // pin state are ingested on Android (previously these were never fetched).
+            append("?select=id,item_id,content_type,payload_ct,lamport_ts,wall_time,expires_at,app_bundle_id,device_id,deleted,pinned,pin_order")
             // Ascending compound keyset: same order as daemon's build_poll_url.
             append("&order=wall_time.asc,id.asc")
             append("&limit=$POLL_LIMIT")
@@ -342,7 +354,12 @@ class SupabaseClient(
                 val obj = arr.getJSONObject(i)
                 val id = obj.optString("id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
                 val itemId = obj.optString("item_id").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                val payloadCt = obj.optString("payload_ct").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                // CopyPaste-up1c: tombstone rows carry deleted=true and a NULL/empty
+                // payload_ct (content has been wiped). Allow empty payloadCt iff the
+                // deleted flag is set — only reject empty-and-not-deleted (malformed live row).
+                val rowDeleted = obj.optBoolean("deleted", false)
+                val payloadCt = obj.optString("payload_ct")
+                if (payloadCt.isBlank() && !rowDeleted) return@mapNotNull null
                 CloudRow(
                     id = id,
                     itemId = itemId,
@@ -353,6 +370,11 @@ class SupabaseClient(
                     expiresAt = if (obj.isNull("expires_at")) null else obj.optLong("expires_at"),
                     appBundleId = if (obj.isNull("app_bundle_id")) null else obj.optString("app_bundle_id"),
                     deviceId = obj.optString("device_id", ""),
+                    // CopyPaste-up1c: parse delete/pin state; default to safe values
+                    // when the column is absent (old schema) or null (legacy rows).
+                    deleted = rowDeleted,
+                    pinned = obj.optBoolean("pinned", false),
+                    pinOrder = if (obj.isNull("pin_order")) null else obj.optDouble("pin_order").takeUnless { it.isNaN() },
                 )
             }
         } catch (e: Exception) {
@@ -388,6 +410,26 @@ class SupabaseClient(
      * fails — never surfaces partial plaintext or throws to the caller.
      */
     fun decryptRow(row: CloudRow, syncKeyBytes: ByteArray): DecryptedItem? {
+        // CopyPaste-up1c: tombstone rows carry deleted=true and have no payload_ct
+        // (NULL or empty). Return a DecryptedItem with empty plaintext + deleted=true
+        // so callers can route to applyInboundTombstoneWithLww without decrypting.
+        if (row.deleted) {
+            return DecryptedItem(
+                id = row.id,
+                itemId = row.itemId,
+                contentType = row.contentType,
+                plaintext = ByteArray(0),
+                lamportTs = row.lamportTs,
+                wallTime = row.wallTime,
+                expiresAt = row.expiresAt,
+                appBundleId = row.appBundleId,
+                deviceId = row.deviceId,
+                deleted = true,
+                pinned = row.pinned,
+                pinOrder = row.pinOrder,
+            )
+        }
+
         // `payload_ct` comes back as a `bytea` hex literal `\x<hex>` (or, for
         // legacy rows, bare base64). [decodePayloadCt] accepts both, mirroring
         // the daemon's `decode_payload_ct`.
@@ -436,6 +478,9 @@ class SupabaseClient(
             deviceId = row.deviceId,
             fileName = fileName,
             fileMime = fileMime,
+            deleted = row.deleted,
+            pinned = row.pinned,
+            pinOrder = row.pinOrder,
         )
     }
 

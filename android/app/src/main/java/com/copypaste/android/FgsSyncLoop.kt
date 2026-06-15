@@ -393,6 +393,18 @@ class FgsSyncLoop(
                 // Decrypt; skip rows that fail (wrong key, tampered blob).
                 val item = batch.client.decryptRow(row, batch.syncKey) ?: continue
 
+                // CopyPaste-up1c: tombstone fast-path — mirrors daemon cloud.rs ~line 2659.
+                // A deleted row carries deleted=true and empty plaintext; route to
+                // applyInboundTombstoneWithLww (handles ghost tombstone for delete-before-create).
+                if (item.deleted) {
+                    val tombstoned = repository.applyInboundTombstoneWithLww(
+                        itemId = item.itemId,
+                        lamportTs = item.lamportTs,
+                    )
+                    if (tombstoned) newCount++
+                    continue
+                }
+
                 val isImage = item.contentType == "image" ||
                     item.contentType.startsWith("image/")
                 val isFile = item.contentType == "file"
@@ -458,6 +470,7 @@ class FgsSyncLoop(
                             key = settings.encryptionKey,
                             itemId = item.itemId,
                             incomingLamportTs = item.lamportTs,
+                            wallTimeMs = item.wallTime,
                             originDeviceId = item.deviceId,
                         )
                         // Track this text clip for the post-drain auto-apply
@@ -466,6 +479,12 @@ class FgsSyncLoop(
                         didStore
                     }
                 }
+
+                // CopyPaste-up1c: apply pin state from the cloud row (authoritative).
+                if (stored && item.pinned) {
+                    repository.setPinned(item.itemId, true)
+                }
+
                 if (stored) newCount++
             }
 

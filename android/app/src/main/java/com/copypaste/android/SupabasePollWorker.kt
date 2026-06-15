@@ -255,6 +255,17 @@ internal suspend fun storeDecryptedItem(
     repository: ClipboardRepository,
     settings: Settings,
 ): Boolean {
+    // CopyPaste-up1c: tombstone fast-path — mirrors daemon cloud.rs ~line 2659.
+    // A deleted row from Supabase carries deleted=true and empty plaintext.
+    // Apply via applyInboundTombstoneWithLww so cloud deletes propagate to Android
+    // and a delete-before-create still wins LWW (ghost tombstone).
+    if (item.deleted) {
+        return repository.applyInboundTombstoneWithLww(
+            itemId = item.itemId,
+            lamportTs = item.lamportTs,
+        )
+    }
+
     // Use canonical predicates from ContentType.kt so FgsSyncLoop and
     // SupabasePollWorker route content types identically.  The old
     // startsWith("application/") branch incorrectly classified PDFs and other
@@ -263,7 +274,7 @@ internal suspend fun storeDecryptedItem(
     val isImage = contentTypeIsImage(item.contentType)
     val isFile = contentTypeIsFile(item.contentType)
 
-    return when {
+    val stored = when {
         isImage -> {
             if (item.plaintext.isEmpty()) {
                 false
@@ -323,8 +334,18 @@ internal suspend fun storeDecryptedItem(
                     key = settings.encryptionKey,
                     itemId = item.itemId,
                     incomingLamportTs = item.lamportTs,
+                    wallTimeMs = item.wallTime,
+                    originDeviceId = item.deviceId,
                 )
             }
         }
     }
+
+    // CopyPaste-up1c: apply pin state from the cloud row (authoritative).
+    // Mirrors FgsSyncLoop pin-apply path (~line 472) and daemon cloud.rs.
+    if (stored && item.pinned) {
+        repository.setPinned(item.itemId, true)
+    }
+
+    return stored
 }

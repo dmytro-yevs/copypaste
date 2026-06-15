@@ -362,28 +362,61 @@ class SyncManager(
         val itemId: String,
         val lamportTs: Long,
         val ctB64: String,
+        // CopyPaste-rmuw: carry delete + pin state so they propagate over relay.
+        // All defaulted so old envelopes (no field) decode as live, unpinned items —
+        // exactly the pre-fix behaviour. Field names match the daemon's serde names.
+        val deleted: Boolean = false,
+        val pinned: Boolean = false,
+        val pinOrder: Double? = null,
+        val wallTime: Long = 0L,
+        val originDeviceId: String = "",
     ) {
         /**
          * Serialize to the canonical envelope JSON the relay carries as the
          * inner payload of `content_b64`. Byte-compatible with the daemon's
          * `ContentEnvelope` and with [parse] (round-trips). Keys are emitted as
-         * `item_id` / `lamport_ts` / `ct_b64`.
+         * `item_id` / `lamport_ts` / `ct_b64` / `deleted` / `pinned` /
+         * `pin_order` / `wall_time` / `origin_device_id`.
          */
         fun encode(): String =
             org.json.JSONObject().apply {
                 put("item_id", itemId)
                 put("lamport_ts", lamportTs)
                 put("ct_b64", ctB64)
+                put("deleted", deleted)
+                put("pinned", pinned)
+                if (pinOrder != null) put("pin_order", pinOrder) else put("pin_order", org.json.JSONObject.NULL)
+                put("wall_time", wallTime)
+                put("origin_device_id", originDeviceId)
             }.toString()
 
         companion object {
-            /** Parse the JSON envelope decoded from `content_b64`. Null on malformed. */
+            /**
+             * Parse the JSON envelope decoded from `content_b64`. Null on malformed.
+             *
+             * CopyPaste-rmuw: a tombstone envelope carries `deleted=true` and an
+             * EMPTY `ct_b64` — allow empty ct_b64 iff deleted is true. Reject
+             * empty-and-not-deleted (malformed live item).
+             */
             fun parse(json: String): RelayEnvelope? {
                 return try {
                     val o = org.json.JSONObject(json)
                     val itemId = o.optString("item_id").takeIf { it.isNotBlank() } ?: return null
-                    val ctB64 = o.optString("ct_b64").takeIf { it.isNotBlank() } ?: return null
-                    RelayEnvelope(itemId = itemId, lamportTs = o.optLong("lamport_ts", 0L), ctB64 = ctB64)
+                    val deleted = o.optBoolean("deleted", false)
+                    val ctB64 = o.optString("ct_b64")
+                    // Reject empty ciphertext for live items; tombstones carry empty ct_b64 by design.
+                    if (ctB64.isBlank() && !deleted) return null
+                    val pinOrder = if (o.isNull("pin_order")) null else o.optDouble("pin_order").takeUnless { it.isNaN() }
+                    RelayEnvelope(
+                        itemId = itemId,
+                        lamportTs = o.optLong("lamport_ts", 0L),
+                        ctB64 = ctB64,
+                        deleted = deleted,
+                        pinned = o.optBoolean("pinned", false),
+                        pinOrder = pinOrder,
+                        wallTime = o.optLong("wall_time", 0L),
+                        originDeviceId = o.optString("origin_device_id", ""),
+                    )
                 } catch (_: Exception) {
                     null
                 }
@@ -434,6 +467,21 @@ class SyncManager(
 
         // Advance the Lamport clock past this row (observe rule) — mirrors poll.
         s.lamportClock.observe(envelope.lamportTs)
+
+        // CopyPaste-rmuw: tombstone fast-path — mirrors daemon relay.rs ~lines 907-942.
+        // A delete envelope carries deleted=true and an empty ct_b64 (NULL content).
+        // Apply via applyInboundTombstoneWithLww so deletes propagate over relay-only
+        // topologies and a delete racing ahead of the create still wins LWW.
+        if (envelope.deleted) {
+            val tombstoned = repository.applyInboundTombstoneWithLww(
+                itemId = envelope.itemId,
+                lamportTs = envelope.lamportTs,
+            )
+            if (tombstoned) {
+                Log.d(TAG, "relay SSE: applied tombstone itemId=${envelope.itemId.take(8)}…")
+            }
+            return@withContext tombstoned
+        }
 
         val blob = try {
             Base64.decode(envelope.ctB64, Base64.DEFAULT)
@@ -512,8 +560,16 @@ class SyncManager(
                     itemId = envelope.itemId,
                     incomingLamportTs = envelope.lamportTs,
                     wallTimeMs = item.wallTime,
+                    originDeviceId = envelope.originDeviceId,
                 )
             }
+        }
+
+        // CopyPaste-rmuw: apply pin state from the envelope (authoritative, travels with
+        // the item). Mirrors daemon relay.rs ~lines 984-988 (TakeRemote branch applies
+        // sender's pinned/pin_order directly after storing).
+        if (stored && envelope.pinned) {
+            repository.setPinned(envelope.itemId, true)
         }
 
         if (stored) {
@@ -582,8 +638,10 @@ class SyncManager(
      *
      * Builds the SAME envelope the daemon's relay producer builds and the Android
      * SSE receiver decodes (see [RelayEnvelope]):
-     *   `content_b64 = base64( JSON{ item_id, lamport_ts, ct_b64 } )`
+     *   `content_b64 = base64( JSON{ item_id, lamport_ts, ct_b64, deleted, pinned,
+     *                                pin_order, wall_time, origin_device_id } )`
      *   `ct_b64      = base64( cloud_encrypt(item_id, plaintext, syncKey) )`
+     *   or empty string when [deleted] is true (tombstone — no content to encrypt)
      * then POSTs `{content_type, content_b64, wall_time}` to the derived inbox id
      * with the relay bearer token, registering on a token miss and re-registering
      * once on a 401.
@@ -598,6 +656,10 @@ class SyncManager(
      * caller should mint ONE lamport tick at capture and thread the SAME value
      * here and into the stored local row.
      *
+     * CopyPaste-rmuw: [deleted]/[pinned]/[pinOrder]/[originDeviceId] are now
+     * forwarded in the envelope so delete and pin operations propagate over
+     * relay-only topologies, mirroring the daemon's build_content_b64.
+     *
      * @return true iff the relay accepted the push. Never throws; logs failures
      *   at WARN and never logs the inbox id, token, ciphertext, or plaintext.
      */
@@ -606,6 +668,10 @@ class SyncManager(
         plaintext: ByteArray,
         contentType: String = "text",
         lamportTs: Long,
+        deleted: Boolean = false,
+        pinned: Boolean = false,
+        pinOrder: Double? = null,
+        originDeviceId: String = "",
     ): Boolean = withContext(Dispatchers.IO) {
         val s = settings ?: run {
             Log.w(TAG, "pushToRelay: no Settings instance provided")
@@ -620,31 +686,41 @@ class SyncManager(
             return@withContext false
         }
 
-        // Build the envelope. cloud_encrypt binds item_id into the AEAD AAD; the
-        // sync key is resolved internally and never leaves this call.
-        val syncKeyBytes = resolveCloudSyncKey(s) ?: run {
+        // Build the envelope. For live items, cloud_encrypt binds item_id into the
+        // AEAD AAD; for tombstones, ct_b64 is empty (no content to encrypt) and
+        // deleted=true so the receiver takes the tombstone fast-path — mirrors daemon.
+        val syncKeyBytes = if (!deleted) resolveCloudSyncKey(s) ?: run {
             Log.w(TAG, "pushToRelay: no cloud sync key")
             return@withContext false
-        }
+        } else null
+        val wallTime = System.currentTimeMillis()
         val contentB64 = try {
-            val blob = cloud_encrypt(itemId, plaintext, syncKeyBytes)
-            val ctB64 = Base64.encodeToString(blob, Base64.NO_WRAP)
+            val ctB64 = if (deleted) {
+                ""
+            } else {
+                val blob = cloud_encrypt(itemId, plaintext, syncKeyBytes!!)
+                Base64.encodeToString(blob, Base64.NO_WRAP)
+            }
             val envelopeJson = RelayEnvelope(
                 itemId = itemId,
                 lamportTs = lamportTs,
                 ctB64 = ctB64,
+                deleted = deleted,
+                pinned = pinned,
+                pinOrder = pinOrder,
+                wallTime = wallTime,
+                originDeviceId = originDeviceId,
             ).encode()
             Base64.encodeToString(envelopeJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
         } catch (e: Exception) {
             Log.w(TAG, "pushToRelay: envelope build failed: ${e.message}")
             return@withContext false
         } finally {
-            syncKeyBytes.fill(0)
+            syncKeyBytes?.fill(0)
         }
 
         val relayUrl = s.relayUrl
         val client = RelayClient(relayUrl)
-        val wallTime = System.currentTimeMillis()
 
         // Ensure a token (register on miss), push, and on 401 re-register once.
         var token = ensureRelayToken(client, s, reg, relayUrl) ?: run {
