@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.7.3] - 2026-06-15
+
+Cross-platform parity + security/data-loss hardening pass. A full audit of the 0.7.2
+Liquid Glass work (the redesign had landed mostly on web; Android trailed) drove
+fixes across both platforms, verified centrally and guarded by a new parity check.
+
+### Security & privacy
+- **Dangerous file-open hardening** (`fr44`): shared `is_dangerous_extension`/`sanitize_filename`
+  in `copypaste-core` (24 tests); Android routes dangerous extensions to a share chooser
+  instead of auto-`ACTION_VIEW`; daemon sanitizes stored filenames; `onSaveFile` sanitized too.
+- **PII log redaction** (`am9w`): daemon `FileRef` log paths no longer emit raw filename/mime;
+  `collect_public_ip` now defaults opt-out on web to match the daemon.
+
+### Fixed — data loss / sync
+- **Android relay tombstones** (`rmuw`): delete/pin/pin_order now propagate to Android
+  (envelope was dropping empty-ciphertext tombstones).
+- **Android lamport collisions** (`up1c`): `deleteItem`/`setPinned`/`reorderPinned` use
+  `max(prev+1, now)`; LWW wall-time/origin tie-break; Supabase delete/pin ingest.
+- **Presence** (`8i3q`): daemon evicts dead peer sinks on ping timeout; Android stamps
+  liveness after handshake; Android mTLS inbound listener wired → bidirectional.
+- **Discovery** (`ydhw`), **History count/loader** (`82vo`), **P2P image speed** (`r8gf`).
+
+### Fixed — UI (both platforms)
+- Glass actually transparent (`0fjj`): lower glass opacity (web), blur the real aurora
+  (Android); macOS native window appearance follows the theme (`spw0`).
+- Light theme, aurora parity (7-layer), scroll restored, tab-switch crossfade, History
+  row min-height, device-name dropdown, popup glide; Android light theme, floating header,
+  segmented control, slider thumb, tab bar, Star pin, distinct content icons, STUN public IP.
+- Shared components extracted (web `ActionButton`/`DeviceCard`/`SectionHeader`/`Toast`;
+  Android `QrUtils` + reused `CopyPasteButton`); 3-tier density incl **spacious**;
+  reduce-motion toggle; per-palette violet/info/sky tokens.
+
+### Added — tooling
+- **`docs/PARITY-SPEC.md` + `scripts/parity-check.mjs` + CI** (`spj2`): automated web↔Android
+  design-token parity check (53 tokens), guarding against future drift.
+
 ## [0.7.2] - 2026-06-14
 
 Liquid Glass "Graphite Mist" theming pass: every palette now works in **both** dark
