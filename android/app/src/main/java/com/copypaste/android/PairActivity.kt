@@ -785,6 +785,14 @@ fun PairScreen(
                             peerAppVersion = bootstrap.peerAppVersion,
                             peerLocalIp = bootstrap.peerLocalIp,
                             peerPublicIp = bootstrap.peerPublicIp,
+                            // CopyPaste-3k6m (ABI 17): persist the peer's stable device UUID so
+                            // OriginDeviceFilter resolves clipboard item names by UUID.
+                            // Primary: from the bootstrap tunnel's PeerMeta (ABI 17).
+                            // Fallback: the ScannedPairing.deviceId from the QR payload carries the
+                            // same UUID, so pairs made before the macOS daemon sends it in PeerMeta
+                            // still populate this field immediately at pair time.
+                            peerDeviceId = bootstrap.peerDeviceId?.takeIf { it.isNotBlank() }
+                                ?: peer.deviceId.takeIf { it.isNotBlank() },
                         )
                     )
                     pairedFingerprint = bootstrap.peerFingerprint

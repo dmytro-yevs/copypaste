@@ -1430,7 +1430,8 @@ data class BootstrapResult (
     var `peerOs`: kotlin.String?, 
     var `peerAppVersion`: kotlin.String?, 
     var `peerLocalIp`: kotlin.String?, 
-    var `peerPublicIp`: kotlin.String?
+    var `peerPublicIp`: kotlin.String?, 
+    var `peerDeviceId`: kotlin.String?
 ) {
     
     companion object
@@ -1448,6 +1449,7 @@ public object FfiConverterTypeBootstrapResult: FfiConverterRustBuffer<BootstrapR
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -1460,7 +1462,8 @@ public object FfiConverterTypeBootstrapResult: FfiConverterRustBuffer<BootstrapR
             FfiConverterOptionalString.allocationSize(value.`peerOs`) +
             FfiConverterOptionalString.allocationSize(value.`peerAppVersion`) +
             FfiConverterOptionalString.allocationSize(value.`peerLocalIp`) +
-            FfiConverterOptionalString.allocationSize(value.`peerPublicIp`)
+            FfiConverterOptionalString.allocationSize(value.`peerPublicIp`) +
+            FfiConverterOptionalString.allocationSize(value.`peerDeviceId`)
     )
 
     override fun write(value: BootstrapResult, buf: ByteBuffer) {
@@ -1473,6 +1476,7 @@ public object FfiConverterTypeBootstrapResult: FfiConverterRustBuffer<BootstrapR
             FfiConverterOptionalString.write(value.`peerAppVersion`, buf)
             FfiConverterOptionalString.write(value.`peerLocalIp`, buf)
             FfiConverterOptionalString.write(value.`peerPublicIp`, buf)
+            FfiConverterOptionalString.write(value.`peerDeviceId`, buf)
     }
 }
 
@@ -1924,7 +1928,8 @@ data class PairStatus (
     var `peerOs`: kotlin.String?, 
     var `peerAppVersion`: kotlin.String?, 
     var `peerLocalIp`: kotlin.String?, 
-    var `peerPublicIp`: kotlin.String?
+    var `peerPublicIp`: kotlin.String?, 
+    var `peerDeviceId`: kotlin.String?
 ) {
     
     companion object
@@ -1945,6 +1950,7 @@ public object FfiConverterTypePairStatus: FfiConverterRustBuffer<PairStatus> {
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -1960,7 +1966,8 @@ public object FfiConverterTypePairStatus: FfiConverterRustBuffer<PairStatus> {
             FfiConverterOptionalString.allocationSize(value.`peerOs`) +
             FfiConverterOptionalString.allocationSize(value.`peerAppVersion`) +
             FfiConverterOptionalString.allocationSize(value.`peerLocalIp`) +
-            FfiConverterOptionalString.allocationSize(value.`peerPublicIp`)
+            FfiConverterOptionalString.allocationSize(value.`peerPublicIp`) +
+            FfiConverterOptionalString.allocationSize(value.`peerDeviceId`)
     )
 
     override fun write(value: PairStatus, buf: ByteBuffer) {
@@ -1976,6 +1983,7 @@ public object FfiConverterTypePairStatus: FfiConverterRustBuffer<PairStatus> {
             FfiConverterOptionalString.write(value.`peerAppVersion`, buf)
             FfiConverterOptionalString.write(value.`peerLocalIp`, buf)
             FfiConverterOptionalString.write(value.`peerPublicIp`, buf)
+            FfiConverterOptionalString.write(value.`peerDeviceId`, buf)
     }
 }
 

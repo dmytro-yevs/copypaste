@@ -125,6 +125,11 @@ pub struct ConfirmedPairing {
     pub peer_app_version: Option<String>,
     pub peer_local_ip: Option<String>,
     pub peer_public_ip: Option<String>,
+    /// ABI 17 (CopyPaste-3k6m): the PEER's stable device UUID (from
+    /// `PeerMeta.device_id`), learned in-band during the discovery/SAS pairing.
+    /// `None` for legacy peers. Surfaced to Kotlin via `PairStatus` on
+    /// `confirmed` state.
+    pub peer_device_id: Option<String>,
 }
 
 /// The discovery-pairing state machine. Ported from the macOS daemon's
@@ -542,6 +547,9 @@ pub struct PairStatus {
     pub peer_app_version: Option<String>,
     pub peer_local_ip: Option<String>,
     pub peer_public_ip: Option<String>,
+    /// ABI 17 (CopyPaste-3k6m): the PEER's stable device UUID, set ONLY in the
+    /// `confirmed` state (copied from [`ConfirmedPairing`]).
+    pub peer_device_id: Option<String>,
 }
 
 impl PairStatus {
@@ -565,6 +573,7 @@ impl PairStatus {
             status.peer_app_version = c.peer_app_version.clone();
             status.peer_local_ip = c.peer_local_ip.clone();
             status.peer_public_ip = c.peer_public_ip.clone();
+            status.peer_device_id = c.peer_device_id.clone();
         }
         status
     }
@@ -624,6 +633,7 @@ mod tests {
             peer_app_version: Some("0.6.1".to_string()),
             peer_local_ip: Some("10.0.0.2".to_string()),
             peer_public_ip: Some("203.0.113.7".to_string()),
+            peer_device_id: Some("device-uuid-abc123".to_string()),
         }
     }
 

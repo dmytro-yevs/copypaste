@@ -222,7 +222,18 @@
 /// `decrypt_text` is unchanged and retained for the single-item paste path.
 /// Kotlin generated against ABI 15 lacks the new symbol/dictionaries and must be
 /// regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 16;
+///
+/// **ABI 17 (peer device UUID — CopyPaste-3k6m):** `BootstrapResult` and
+/// `PairStatus` each gained one trailing optional field `peer_device_id?`
+/// (the peer's stable device UUID from `PeerMeta.device_id` / the value
+/// returned by `generate_device_cert`). Kotlin persists it as
+/// `PairedPeer.peerDeviceId` so `OriginDeviceFilter` can resolve clipboard
+/// item names by UUID rather than falling back to the hex cert fingerprint.
+/// The field is additive (nullable) and back-compat at the wire level
+/// (old peers simply omit it and are deserialized as `None`). Kotlin
+/// generated against ABI 16 reads `BootstrapResult` / `PairStatus` with
+/// the wrong shape and must be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 17;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

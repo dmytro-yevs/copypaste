@@ -166,6 +166,30 @@ fn abi15_delete_pin_fields_present_in_kotlin_binding() {
     }
 }
 
+/// ABI 17 (CopyPaste-3k6m): the committed Kotlin binding must expose
+/// `peerDeviceId` on both `BootstrapResult` and `PairStatus` so Kotlin can
+/// populate `PairedPeer.peerDeviceId` and `OriginDeviceFilter` resolves
+/// clipboard item names by UUID instead of falling back to the hex fingerprint.
+#[test]
+fn abi17_peer_device_id_present_in_kotlin_binding() {
+    let path = kotlin_binding_path();
+    assert!(
+        path.exists(),
+        "Kotlin binding not found at {}: run ./scripts/generate-android-bindings.sh",
+        path.display()
+    );
+    let src = std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
+
+    // UDL `peer_device_id` → Kotlin `peerDeviceId` (camelCase). Must appear in
+    // both BootstrapResult and PairStatus data-class blocks.
+    assert!(
+        src.contains("var `peerDeviceId`"),
+        "Kotlin binding is STALE: missing `peerDeviceId` (ABI 17 CopyPaste-3k6m). \
+         Regenerate with ./scripts/generate-android-bindings.sh"
+    );
+}
+
 /// ABI 14 (HB-1 / HB-7): the committed Kotlin binding must expose the PeerMeta
 /// send params, the received peer_* fields on BootstrapResult / PairStatus, and
 /// the three P2pSyncResult drop counters. Fails if the binding was not

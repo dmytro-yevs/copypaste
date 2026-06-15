@@ -1686,6 +1686,7 @@ private fun SasPairingDialog(
                 peerAppVersion = null,
                 peerLocalIp = null,
                 peerPublicIp = null,
+                peerDeviceId = null,
             )
         )
     }
@@ -1735,6 +1736,9 @@ private fun SasPairingDialog(
                         peerAppVersion = st.peerAppVersion,
                         peerLocalIp = st.peerLocalIp,
                         peerPublicIp = st.peerPublicIp,
+                        // CopyPaste-3k6m (ABI 17): persist the peer's stable device UUID so
+                        // OriginDeviceFilter resolves clipboard item names by UUID.
+                        peerDeviceId = st.peerDeviceId,
                     )
                 )
 
@@ -1832,6 +1836,8 @@ private fun SasPairingDialog(
                                 peerAppVersion = status.peerAppVersion,
                                 peerLocalIp = status.peerLocalIp,
                                 peerPublicIp = status.peerPublicIp,
+                                // CopyPaste-3k6m: carry forward peer_device_id.
+                                peerDeviceId = status.peerDeviceId,
                             )
                             onPaired()
                         } else {

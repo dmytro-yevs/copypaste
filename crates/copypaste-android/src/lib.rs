@@ -663,6 +663,13 @@ pub struct BootstrapResult {
     pub peer_app_version: Option<String>,
     pub peer_local_ip: Option<String>,
     pub peer_public_ip: Option<String>,
+    /// ABI 17 (CopyPaste-3k6m): the PEER's stable device UUID (from its
+    /// `generate_device_cert` / `PeerMeta.device_id`), learned in-band over the
+    /// authenticated bootstrap tunnel. `None` for legacy peers that do not
+    /// advertise this field. Kotlin persists it as `PairedPeer.peerDeviceId` so
+    /// `OriginDeviceFilter` can resolve clipboard item names by UUID instead of
+    /// falling back to the TLS cert fingerprint.
+    pub peer_device_id: Option<String>,
 }
 
 /// FFI mirror of [`copypaste_p2p::bootstrap::SyncProvisioning`].
@@ -839,6 +846,7 @@ fn build_android_peer_meta(
         // Android does not collect its own public IP during pairing; the peer's
         // public_ip still flows back to us via `BootstrapResult.peer_public_ip`.
         public_ip: None,
+        device_id: None,
     }
 }
 
@@ -859,6 +867,7 @@ fn bootstrap_result_from_pairing(
         peer_app_version: pairing.peer_app_version,
         peer_local_ip: pairing.peer_local_ip,
         peer_public_ip: pairing.peer_public_ip,
+        peer_device_id: pairing.peer_device_id,
     }
 }
 
@@ -879,6 +888,7 @@ fn confirmed_pairing_from(
         peer_app_version: p.peer_app_version,
         peer_local_ip: p.peer_local_ip,
         peer_public_ip: p.peer_public_ip,
+        peer_device_id: p.peer_device_id,
     }
 }
 
@@ -2923,6 +2933,7 @@ mod tests {
                             local_ip: Some("127.0.0.1".into()),
                             device_name: Some("Test Mac".into()),
                             public_ip: Some("203.0.113.9".into()),
+                            device_id: None,
                         },
                         // Responder advertises provisioning so the FFI initiator
                         // receives it in `peer_provisioning`.

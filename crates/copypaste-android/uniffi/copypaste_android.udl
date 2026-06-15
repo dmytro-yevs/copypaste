@@ -427,6 +427,7 @@ dictionary BootstrapResult {
   string? peer_app_version;
   string? peer_local_ip;
   string? peer_public_ip;
+  string? peer_device_id;
 };
 
 // Sync-account provisioning exchanged in-band over the AUTHENTICATED bootstrap
@@ -626,4 +627,5 @@ dictionary PairStatus {
   string? peer_app_version;
   string? peer_local_ip;
   string? peer_public_ip;
+  string? peer_device_id;
 };

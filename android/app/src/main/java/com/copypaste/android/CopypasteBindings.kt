@@ -57,8 +57,13 @@ private const val TAG = "CopypasteBindings"
  * `crates/copypaste-android/src/version.rs` — a mismatch makes
  * `checkNativeAbiCompatibility()` log `rustAbi=…,kotlinAbi=…` and corrupts
  * sync serialization. `scripts/regen-uniffi.sh` asserts the two are equal.
+ * Bumped 16 → 17 (CopyPaste-3k6m): `BootstrapResult` and `PairStatus` each
+ * gained `peerDeviceId: String?` — the peer's stable device UUID (from
+ * `PeerMeta.device_id` / `generate_device_cert`). Kotlin persists it as
+ * `PairedPeer.peerDeviceId` so `OriginDeviceFilter` resolves clipboard item
+ * names by UUID. Additive nullable field; old peers surface `null`.
  */
-const val APP_ABI_VERSION: UInt = 16u
+const val APP_ABI_VERSION: UInt = 17u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {

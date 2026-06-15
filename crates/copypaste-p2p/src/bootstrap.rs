@@ -279,6 +279,13 @@ pub struct PeerMeta {
     /// an old peer's frame.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub public_ip: Option<String>,
+    /// Stable device UUID (from `generate_device_cert` / the UDL's `device_id`),
+    /// learned in-band over the post-handshake metadata extension. Allows the
+    /// receiver to match clipboard `origin_device_id` to a peer name without relying
+    /// on the TLS cert fingerprint. `#[serde(default)]` for back-compat with peers
+    /// that do not carry this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
 }
 
 /// Sync-account provisioning exchanged in-band over the bootstrap channel AFTER
@@ -499,6 +506,10 @@ pub struct BootstrapPairing {
     /// the peer opted out of public-IP collection / STUN had not yet resolved.
     /// Informational only — never used for auth or trust.
     pub peer_public_ip: Option<String>,
+    /// Peer's stable device UUID, learned over the post-handshake metadata
+    /// extension (from `PeerMeta.device_id`). `None` when the peer is a legacy
+    /// build or did not advertise this field.
+    pub peer_device_id: Option<String>,
     /// Sync-account provisioning the peer advertised over the post-handshake
     /// extension (proto version >= 2). `None` when the peer is a legacy
     /// (pre-version-2) build, when it advertised an all-`None` value, or when the
@@ -739,6 +750,7 @@ impl BootstrapResponder {
                 peer_local_ip: peer_meta.local_ip,
                 peer_device_name: peer_meta.device_name,
                 peer_public_ip: peer_meta.public_ip,
+                peer_device_id: peer_meta.device_id,
                 peer_provisioning,
             })
         })
@@ -913,6 +925,7 @@ impl BootstrapResponder {
             peer_local_ip: peer_meta.local_ip,
             peer_device_name: peer_meta.device_name,
             peer_public_ip: peer_meta.public_ip,
+            peer_device_id: peer_meta.device_id,
             peer_provisioning,
         })
     }
@@ -1076,6 +1089,7 @@ pub async fn run_initiator(
             peer_local_ip: peer_meta.local_ip,
             peer_device_name: peer_meta.device_name,
             peer_public_ip: peer_meta.public_ip,
+            peer_device_id: peer_meta.device_id,
             peer_provisioning,
         })
     })
@@ -1264,6 +1278,7 @@ where
         peer_local_ip: peer_meta.local_ip,
         peer_device_name: peer_meta.device_name,
         peer_public_ip: peer_meta.public_ip,
+        peer_device_id: peer_meta.device_id,
         peer_provisioning,
     })
 }
@@ -1561,6 +1576,7 @@ mod tests {
             local_ip: Some("192.168.1.10".into()),
             device_name: None,
             public_ip: Some("198.51.100.10".into()),
+            device_id: None,
         };
         let resp_meta_task = resp_meta.clone();
         // The responder advertises a full SyncProvisioning ("the configured PC");
@@ -1588,6 +1604,7 @@ mod tests {
             local_ip: Some("192.168.1.11".into()),
             device_name: None,
             public_ip: Some("198.51.100.11".into()),
+            device_id: None,
         };
         let init_meta_task = init_meta.clone();
         let initiator_task = tokio::spawn(async move {
@@ -1918,6 +1935,7 @@ mod tests {
             local_ip: Some("10.0.0.1".into()),
             device_name: None,
             public_ip: Some("203.0.113.7".into()),
+            device_id: None,
         };
         let meta_b = PeerMeta {
             model: Some("Mac mini".into()),
@@ -2091,6 +2109,7 @@ mod tests {
             local_ip: Some("192.168.1.5".into()),
             device_name: Some("Alice's MacBook".into()),
             public_ip: Some("203.0.113.42".into()),
+            device_id: None,
         };
         let json = serde_json::to_string(&meta).expect("serialize PeerMeta");
         assert!(
