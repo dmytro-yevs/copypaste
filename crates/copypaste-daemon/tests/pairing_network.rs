@@ -58,7 +58,10 @@ fn addr_hint_from_qr(qr: &str) -> String {
 /// the initiator. A previous commit (f5f5c645) required a non-empty address
 /// here to paper over the race — that patch is now reverted.
 fn wait_for_persisted_peer(daemon: &Daemon, want_fp_canonical: &str) -> serde_json::Value {
-    let deadline = Instant::now() + Duration::from_secs(5);
+    // 15s (not 5s): the responder persists from a DETACHED task after PAKE
+    // completes; on slow/loaded macOS CI runners that task can land >5s after
+    // the assertion, causing a flaky timeout panic (the persist itself is fine).
+    let deadline = Instant::now() + Duration::from_secs(15);
     loop {
         let peers = daemon.read_peers_json();
         if let Some(arr) = peers.as_array() {
