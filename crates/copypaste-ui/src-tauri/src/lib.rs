@@ -1553,11 +1553,11 @@ fn set_native_appearance(appearance: String, handle: tauri::AppHandle) {
         };
 
         // Resolve the target appearance name constant.
-        // NSAppearanceNameAqua/DarkAqua are `extern "C" { static ... : &'static NSAppearanceName }`,
-        // so each is already a `&NSAppearanceName`. Deref to get a `&NSAppearanceName` from the static.
+        // NSAppearanceNameAqua/DarkAqua are already `&'static NSAppearanceName`
+        // (extern statics), so bind them directly — no deref.
         let appearance_name: &NSAppearanceName = match appearance.as_str() {
-            "light" => *NSAppearanceNameAqua,
-            "dark"  => *NSAppearanceNameDarkAqua,
+            "light" => NSAppearanceNameAqua,
+            "dark"  => NSAppearanceNameDarkAqua,
             // Unknown value — leave the window at its OS-default appearance.
             _ => return,
         };
