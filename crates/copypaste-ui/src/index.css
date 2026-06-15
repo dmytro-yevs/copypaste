@@ -176,7 +176,8 @@
   --surface-strong-rgb: 42, 46, 60;   /* Graphite Mist surfaceStrongRgb */
 
   /* Glass material properties */
-  --glass-opacity:     .64;
+  --glass-opacity:     .40;  /* CopyPaste-0fjj: lowered from .64 → .40 so real NSVisualEffectView
+                                backdrop bleeds through the blur (vibrancy already applied in Rust) */
   --glass-blur:        28px;
   --glass-saturation:  1.45;
   --glow-strength:     .62;
@@ -803,10 +804,26 @@ body {
 
      Graphite Mist default (dark grey): the base gradient produces a deep
      cool-grey canvas; the accent/glow blobs add the mist quality. */
+  /* CopyPaste-nqfi: canonical 4-blob AURORA_DARK layout + 2 mid-canvas overlay blobs.
+     Blob positions match AURORA_DARK/AURORA_OVERLAY_DARK in Components.kt:
+       A (6%,-18% → top-left corner)  B (108%,118% → bottom-right corner)
+       C (95%,-12% → top-right)       D (-10%,105% → bottom-left)
+       E overlay (50%,38% accent)     F overlay (30%,60% amber)
+     Note: negative coords become edge-clipped by the fixed viewport, giving
+     large saturated edge glows — this is intentional (matching Android's bleed). */
   background:
-    radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--glow-a) 30%, transparent), transparent 34%),
-    radial-gradient(circle at 78% 10%, color-mix(in srgb, var(--accent) 38%, transparent), transparent 32%),
-    radial-gradient(circle at 86% 82%, color-mix(in srgb, var(--glow-b) 30%, transparent), transparent 35%),
+    /* F — amber overlay mid-left (rendered first = bottom layer) */
+    radial-gradient(circle at 30% 60%, color-mix(in srgb, #d9a343 16%, transparent), transparent 65%),
+    /* E — accent overlay centre-left */
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 65%),
+    /* D — glowB bottom-left corner */
+    radial-gradient(circle at -10% 105%, color-mix(in srgb, var(--glow-b) 30%, transparent), transparent 50%),
+    /* C — glowA top-right */
+    radial-gradient(circle at 95% -12%, color-mix(in srgb, var(--glow-a) 28%, transparent), transparent 46%),
+    /* B — glowB bottom-right corner */
+    radial-gradient(circle at 108% 118%, color-mix(in srgb, var(--glow-b) 38%, transparent), transparent 50%),
+    /* A — glowA top-left (largest, most prominent) */
+    radial-gradient(circle at 6% -18%, color-mix(in srgb, var(--glow-a) 42%, transparent), transparent 50%),
     linear-gradient(135deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
   background-attachment: fixed;
   color: var(--ide-text);
@@ -926,16 +943,19 @@ body::after {
 .ide-translucent {
   backdrop-filter: blur(var(--glass-blur, 28px)) saturate(var(--glass-saturation, 1.45));
   -webkit-backdrop-filter: blur(var(--glass-blur, 28px)) saturate(var(--glass-saturation, 1.45));
-  /* Relative stacking context so ::after hover-shine is clipped correctly */
+  /* Relative stacking context so ::after hover-shine positions correctly.
+     CopyPaste-yvxm: overflow NOT hidden here — that blocked overflow-auto on
+     the ViewShell content panel. overflow:hidden lives only on .card-in (below)
+     where it clips the entrance scale animation to the card's border-radius. */
   position: relative;
-  overflow: hidden;
 }
 
 .surface-glass-strong {
   backdrop-filter: blur(40px) saturate(var(--glass-saturation, 1.45));
   -webkit-backdrop-filter: blur(40px) saturate(var(--glass-saturation, 1.45));
+  /* CopyPaste-yvxm: overflow:hidden removed; the modal wrapper already clips via
+     its own max-h-[80vh] overflow-hidden Tailwind classes. */
   position: relative;
-  overflow: hidden;
 }
 
 /* ── Dark glass surfaces — token-driven fill ─────────────────────────────────
@@ -1024,24 +1044,25 @@ body::after {
 :root[data-theme="light"] .surface-glass,
 :root[data-theme="light"] .ide-translucent {
   /* [a5bn] 0.78 white fill — enough frosted glass clarity while staying crisp.
-     Previous 0.55 was too translucent causing washed/muddy look. */
+     CopyPaste-bexa: shadow bumped for tonal depth on neutral white canvas. */
   background: rgba(var(--surface-rgb, 255,255,255), .78);
   border: 1px solid var(--glass-border, rgba(20,30,48,.12));
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.90),
-    0 2px 8px rgba(60, 70, 100, 0.10),
-    0 1px 2px rgba(60, 70, 100, 0.07);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.70),
+    0 6px 24px rgba(60, 70, 100, 0.18),
+    0 2px 6px rgba(60, 70, 100, 0.10);
 }
 
 :root[data-theme="light"] .surface-card {
   /* [a5bn] card tier: 0.85 white — slightly opaque-r than chrome, diff reads as
-     elevation without competing gradient. Clean Apple-white card look. */
+     elevation without competing gradient. Clean Apple-white card look.
+     CopyPaste-bexa: shadow bumped for depth. */
   background: rgba(var(--surface-rgb, 255,255,255), .88);
   border: 1px solid var(--glass-border, rgba(20,30,48,.14));
   box-shadow:
-    inset 0 1px 0 0 rgba(255, 255, 255, 0.95),
-    0 4px 16px rgba(60, 70, 100, 0.12),
-    0 1px 3px rgba(60, 70, 100, 0.08);
+    inset 0 1px 0 0 rgba(255, 255, 255, 0.80),
+    0 8px 28px rgba(60, 70, 100, 0.18),
+    0 2px 6px rgba(60, 70, 100, 0.10);
 }
 
 :root[data-theme="light"] .surface-glass-strong {
@@ -1061,10 +1082,26 @@ body::after {
    is set. Uses the same palette-driven token approach as the dark body above,
    falling back to the Apple greyish canvas for the legacy light theme. */
 :root[data-theme="light"] body {
+  /* CopyPaste-nqfi + CopyPaste-bexa: canonical 4-blob AURORA_LIGHT + 2 overlays.
+     Blob positions match AURORA_LIGHT in Components.kt lines 297-302:
+       A (12%,8%)  B (88%,12%)  C (80%,92%)  D (18%,88%)
+     Overlay positions match AURORA_OVERLAY_LIGHT lines 308-313:
+       E (50%,38%)  F (30%,60%)
+     Opacity boosted from 26/30/24% → 36/42/32% (CopyPaste-bexa) so the frosted
+     glass surfaces have vivid enough aurora to blur through. */
   background:
-    radial-gradient(circle at 14% 18%, color-mix(in srgb, var(--glow-a, #b9c7d9) 26%, transparent), transparent 34%),
-    radial-gradient(circle at 78% 10%, color-mix(in srgb, var(--accent, #5b8def) 30%, transparent), transparent 32%),
-    radial-gradient(circle at 86% 82%, color-mix(in srgb, var(--glow-b, #dce7f7) 24%, transparent), transparent 35%),
+    /* F — amber overlay mid-left */
+    radial-gradient(circle at 30% 60%, color-mix(in srgb, #d9a343 16%, transparent), transparent 65%),
+    /* E — accent overlay centre-left */
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent, #007aff) 18%, transparent), transparent 65%),
+    /* D — green bottom-left (new — was missing) */
+    radial-gradient(circle at 18% 88%, color-mix(in srgb, var(--glow-b, #dce7f7) 32%, transparent), transparent 48%),
+    /* C — sky top-right */
+    radial-gradient(circle at 80% 92%, color-mix(in srgb, var(--glow-b, #dce7f7) 32%, transparent), transparent 35%),
+    /* B — violet top-right corner */
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--accent, #007aff) 42%, transparent), transparent 32%),
+    /* A — blue top-left (most prominent) */
+    radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--glow-a, #b9c7d9) 36%, transparent), transparent 34%),
     linear-gradient(160deg, var(--bg-0, #ECECF3) 0%, var(--bg-1, #E3E3EC) 50%, var(--bg-2, #D9DAE4) 100%);
   background-attachment: fixed;
 }

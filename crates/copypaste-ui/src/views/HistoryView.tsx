@@ -233,8 +233,8 @@ function DeviceBadge({
  * Compute the row height (px) for an entry.
  *
  * §2 / §5 density rules:
- *  - Text rows: 34px (comfortable) or 28px (compact), floor at 22px.
- *  - Image rows: `imageMaxHeight` + 12px (comfortable) or +8px (compact), min 34px.
+ *  - Text rows: 42px (spacious), 34px (comfortable) or 28px (compact), floor at 22px.
+ *  - Image rows: `imageMaxHeight` + 20px (spacious), +12px (comfortable) or +8px (compact), min 34px.
  *  - File rows: fixed 44px (fits FileChip regardless of density).
  *
  * Kept in one place so the virtualizer's prefix-sum offset math stays in sync
@@ -244,19 +244,19 @@ export function rowHeightFor(
   entry: HistoryEntry,
   previewSize: number,
   imageMaxHeight: number,
-  density: "comfortable" | "compact" = "comfortable"
+  density: "comfortable" | "compact" | "spacious" = "comfortable"
 ): number {
   const isImage = isImageType(entry.content_type);
   // File rows get a fixed height that fits the FileChip (icon + filename + buttons).
   const isFile = entry.content_type === "file";
   if (isImage) {
-    // §2: image padding 12px comfortable, 8px compact (spec: imageMaxHeight+12/+8).
-    const pad = density === "compact" ? 8 : 12;
+    // §2: image padding 20px spacious, 12px comfortable, 8px compact.
+    const pad = density === "spacious" ? 20 : density === "compact" ? 8 : 12;
     return Math.max(imageMaxHeight + pad, 34);
   }
   if (isFile) return 44; // FileChip is taller than a single-line text row
-  // §2: comfortable = 34px, compact = 28px (floor at 22px).
-  const base = density === "compact" ? 28 : 34;
+  // §2: spacious = 42px, comfortable = 34px, compact = 28px (floor at 22px).
+  const base = density === "spacious" ? 42 : density === "compact" ? 28 : 34;
   return Math.max(previewSize, base, 22);
 }
 
@@ -339,7 +339,7 @@ interface RowProps {
   previewSize: number;
   imageMaxHeight: number;
   maskSensitive: boolean;
-  density: "comfortable" | "compact";
+  density: "comfortable" | "compact" | "spacious";
   /** Own device UUID from the HistoryPage envelope — used for device badge. */
   ownDeviceId: string;
   onSelect: () => void;
@@ -434,8 +434,12 @@ const HistoryRow = React.memo(function HistoryRow({
   // is only used by VirtualList for its offset math, not for DOM styling.
 
   // §2: density-aware vertical padding for the row.
-  // comfortable → py-1.5 (6px each, ~34px total); compact → py-0.5 (2px each, ~28px total).
-  const rowPadding = density === "compact" ? "py-0.5" : "py-1.5";
+  // spacious → py-2.5 (10px each, ~42px total); comfortable → py-1.5 (6px each, ~34px total);
+  // compact → py-0.5 (2px each, ~28px total).
+  const rowPadding = density === "spacious" ? "py-2.5" : density === "compact" ? "py-0.5" : "py-1.5";
+  // 2hou: min-h guards row height in selection mode so removing action buttons
+  // doesn't collapse the row. Mirrors Android heightIn(min = ...).
+  const rowMinH = density === "spacious" ? "min-h-[42px]" : density === "compact" ? "min-h-[28px]" : "min-h-[34px]";
 
   // In selection mode, clicking the row toggles multi-select.
   // Outside selection mode, clicking selects + copies (existing behavior).
@@ -486,7 +490,9 @@ const HistoryRow = React.memo(function HistoryRow({
       draggable={dragHandleProps !== undefined}
       style={rowStyle}
       className={[
-        `group relative flex cursor-pointer select-none items-center gap-2 px-3 ${rowPadding}`,
+        // 2hou: rowMinH reserves the row height in selection mode (when action
+        // buttons are hidden) so the row never collapses below the density floor.
+        `group relative flex cursor-pointer select-none items-center gap-2 px-3 ${rowPadding} ${rowMinH}`,
         // Liquid-glass entrance stagger — .list-item-in is from index.css (listItemIn keyframe).
         applyStagger ? "list-item-in" : "",
         "border-b text-[13px]",
@@ -580,7 +586,10 @@ const HistoryRow = React.memo(function HistoryRow({
           convey the type (e.g. "URL", "EMAIL", "TEXT"). */}
       <span className="flex shrink-0 items-center gap-1">
         <span
-          className="icon-float flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] bg-ide-faint/16"
+          // s7ia: removed .icon-float — that class ran a 4s infinite iconFloat
+          // transform animation on every visible row tile (15+ GPU compositor
+          // layers simultaneously). The aurora background provides sufficient motion.
+          className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] bg-ide-faint/16"
           aria-label={getKindLabel(entry.kind, entry.content_type)}
           title={getKindLabel(entry.kind, entry.content_type)}
           role="img"
@@ -914,23 +923,56 @@ function BulkActionBar({
 // FullResImage — fetches the FULL-RESOLUTION image for the detail modal.
 // Unlike ImageThumb (which fetches the small thumbnail), this always calls
 // getItemImage so the detail view shows the original quality image.
-// One image at a time, so no shared cache needed — a simple local state
-// per-mount is sufficient.
+//
+// s7ia C1: 2-entry LRU module-level cache so re-opening the same modal or
+// flipping between two images doesn't re-fetch + re-decode the ~40 MB bitmap
+// each time. The cache lives at module scope (not in React state) so it
+// survives unmount/remount cycles across modal opens.
 // ---------------------------------------------------------------------------
 
+/** Simple 2-entry LRU cache for full-resolution image data URIs. */
+const fullResCache = new Map<string, string>();
+const FULL_RES_CACHE_MAX = 2;
+
+function fullResCacheGet(id: string): string | undefined {
+  const val = fullResCache.get(id);
+  if (val === undefined) return undefined;
+  // Touch: re-insert at tail (most-recently-used).
+  fullResCache.delete(id);
+  fullResCache.set(id, val);
+  return val;
+}
+
+function fullResCacheSet(id: string, uri: string): void {
+  fullResCache.delete(id); // remove first to update position
+  fullResCache.set(id, uri);
+  // Evict LRU entry when over capacity.
+  if (fullResCache.size > FULL_RES_CACHE_MAX) {
+    const oldest = fullResCache.keys().next().value;
+    if (oldest !== undefined) fullResCache.delete(oldest);
+  }
+}
+
 function FullResImage({ id, maxHeight }: { id: string; maxHeight: number }) {
-  const [src, setSrc] = useState<string | null>(null);
+  const [src, setSrc] = useState<string | null>(() => fullResCacheGet(id) ?? null);
   const [failed, setFailed] = useState(false);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
+    // Check the cache first — avoids the ~40MB re-decode on re-open.
+    const cached = fullResCacheGet(id);
+    if (cached !== undefined) {
+      setSrc(cached);
+      return () => { mountedRef.current = false; };
+    }
     setSrc(null);
     setFailed(false);
     api
       .getItemImage(id)
       .then(({ data_uri }) => {
         if (!mountedRef.current) return;
+        fullResCacheSet(id, data_uri);
         setSrc(data_uri);
       })
       .catch(() => {
@@ -1172,7 +1214,7 @@ interface VirtualListProps {
   items: HistoryEntry[];
   previewSize: number;
   imageMaxHeight: number;
-  density: "comfortable" | "compact";
+  density: "comfortable" | "compact" | "spacious";
   listRef: React.RefObject<HTMLDivElement | null>;
   onKeyDown: (e: React.KeyboardEvent<HTMLDivElement>) => void;
   /**
@@ -1601,7 +1643,10 @@ export function HistoryView() {
   // duplicate silent load immediately after the one that just recovered.
 
   useEffect(() => {
-    const ACTIVE_MS = 1200;
+    // s7ia B1: slowed from 1200→3000ms — cuts IPC calls from 50/min to 20/min
+    // with no UX regression (popup already uses 3 s; new clipboard captures are
+    // still seen within the next poll window).
+    const ACTIVE_MS = 3000;
     const BACKOFF_MS = 5000;
     let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -1664,16 +1709,24 @@ export function HistoryView() {
   }, [search]);
 
   // -------------------------------------------------------------------------
-  // Distinct device IDs seen in the loaded items — drives the filter dropdown.
-  // Computed with useMemo so it only recalculates when items or ownDeviceId change.
+  // Distinct device IDs+names seen in loaded items — drives the filter dropdown.
+  // v6ac: replaced knownDeviceIds (Set<string>) with knownDevices (Map<id,name>)
+  // so the dropdown shows human-readable names instead of hex UUID prefixes.
+  // The name is seeded from origin_device_name on the first item per device;
+  // the daemon always emits this field from its devices table.
   // -------------------------------------------------------------------------
-  const knownDeviceIds = useMemo(() => {
-    const ids = new Set<string>();
+  const knownDevices = useMemo(() => {
+    const map = new Map<string, string>();
     for (const it of items) {
-      if (it.origin_device_id) ids.add(it.origin_device_id);
+      if (it.origin_device_id && !map.has(it.origin_device_id)) {
+        // Prefer the daemon-emitted name; fall back to the compact UUID prefix.
+        map.set(it.origin_device_id, it.origin_device_name ?? it.origin_device_id.slice(0, 8));
+      }
     }
-    return Array.from(ids);
+    return map;
   }, [items]);
+  // Stable array of known device ids (same order as Map insertion = first-seen).
+  const knownDeviceIds = useMemo(() => Array.from(knownDevices.keys()), [knownDevices]);
 
   // -------------------------------------------------------------------------
   // Filtered + sorted list — union of client-side substring match, daemon FTS
@@ -2299,10 +2352,12 @@ export function HistoryView() {
   // -------------------------------------------------------------------------
 
   // Build human-readable label for a device id in the filter dropdown.
+  // v6ac: uses knownDevices map (id→name) so the dropdown shows names, not hex IDs.
   const deviceOptionLabel = (id: string): string => {
     if (id === "all") return "All devices";
     if (ownDeviceId && id === ownDeviceId) return "This device";
-    return id.slice(0, 8);
+    // Prefer the name we collected from origin_device_name; fall back to UUID prefix.
+    return knownDevices.get(id) ?? id.slice(0, 8);
   };
 
   const actions = (

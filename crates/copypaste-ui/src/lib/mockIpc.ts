@@ -373,7 +373,7 @@ const APP_SETTINGS: AppSettings = {
   sync_on_wifi_only: false,
   sound_on_copy: true,
   notify_on_copy: false,
-  collect_public_ip: true,
+  collect_public_ip: false, // am9w: opt-out default, matches daemon #[serde(default)]
   paste_as_plain_text: false,
   excluded_app_bundle_ids: ["com.apple.Passwords"],
   lan_visibility: true,

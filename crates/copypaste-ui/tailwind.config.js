@@ -31,6 +31,9 @@ export default {
           text:  "rgb(var(--ide-text-rgb) / <alpha-value>)",
           dim:   "rgb(var(--ide-dim-rgb) / <alpha-value>)",
           faint: "rgb(var(--ide-faint-rgb) / <alpha-value>)",
+          // mute: lighter than faint — used for segmented-control fill background
+          // (spec §form-controls mute@.18). Falls back to faint until index.css defines --ide-mute-rgb.
+          mute:  "rgb(var(--ide-mute-rgb, var(--ide-faint-rgb)) / <alpha-value>)",
           ghost: "var(--ide-ghost)",
           "ghost-deco": "var(--ide-ghost-deco)",
 

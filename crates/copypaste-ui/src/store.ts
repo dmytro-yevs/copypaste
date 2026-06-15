@@ -62,9 +62,11 @@ export interface UIPrefs {
   /**
    * Row density for the History view (Design System v2 §9 — Liquid Glass redesign).
    * "comfortable" = standard row spacing; "compact" (default) = reduced row height.
+   * "spacious" = larger row height with more breathing room.
    * Compact matches the Graphite Mist styleguide default density.
+   * CSS rule for spacious is at index.css html[data-density='spacious'] (already defined).
    */
-  density: "comfortable" | "compact";
+  density: "comfortable" | "compact" | "spacious";
   /**
    * Active palette key. Drives data-palette attribute on <html>.
    * Default: "graphite-mist" (dark grey — CopyPaste-52mz).

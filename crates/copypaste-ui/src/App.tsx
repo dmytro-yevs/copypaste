@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { useUI, type ViewId } from "./store";
 import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -22,17 +22,11 @@ const HAS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 // ---------------------------------------------------------------------------
-// ViewTransitionWrapper — smooth crossfade when the active view changes
-// (CopyPaste-2bhh)
+// ViewTransitionWrapper — per-panel fade-in wrapper (CopyPaste-2bhh / 4r48)
 // ---------------------------------------------------------------------------
-// Wraps each view with a gentle opacity+translate entrance so that switching
-// sidebar tabs feels Apple-like (~180ms cubic-bezier spring) rather than the
-// harsh immediate-remount snap.  Keyed by `viewKey` in App's <main> so React
-// unmounts the old wrapper and mounts a new one on every tab change, triggering
-// the animation.  prefers-reduced-motion: the animation duration collapses to 0ms
-// so no motion occurs.  card-in / reveal-up on ViewShell continue to fire on
-// mount (intentional — they are the semantic per-element entrance), but they're
-// now visually dominated by the outer crossfade which sets the overall pace.
+// Used by CrossfadeContainer for the INCOMING panel. Exported so
+// App.view-transition.test.tsx can assert on it directly without needing
+// to exercise the full crossfade orchestration.
 export function ViewTransitionWrapper({
   viewKey: _viewKey,
   children,
@@ -59,6 +53,88 @@ export function ViewTransitionWrapper({
       }}
     >
       {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CrossfadeContainer — 4r48 true crossfade fix
+// ---------------------------------------------------------------------------
+// Renders outgoing view (position:absolute, fading OUT) and incoming view
+// (position:absolute, fading IN) simultaneously for CROSSFADE_MS.
+// After the outgoing animation ends it is removed from the DOM.
+// This fixes the "disappear then reappear" flash caused by the keyed-remount
+// approach where the old view unmounted instantly with no fade-out.
+const CROSSFADE_MS = 180;
+
+interface CrossfadeState {
+  outKey: string;
+  outNode: ReactNode;
+}
+
+function CrossfadeContainer({
+  viewKey,
+  children,
+}: {
+  viewKey: string;
+  children: ReactNode;
+}) {
+  const prefersReduced =
+    typeof window !== "undefined" &&
+    window.matchMedia != null &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Track the outgoing panel so we can render it as fading-out overlay.
+  const [outgoing, setOutgoing] = useState<CrossfadeState | null>(null);
+  const prevKeyRef = useRef(viewKey);
+  const prevChildrenRef = useRef<ReactNode>(children);
+
+  // When viewKey changes: save old view as outgoing, schedule removal.
+  useEffect(() => {
+    if (prevKeyRef.current === viewKey) {
+      // Same tab — update saved children reference for the next transition.
+      prevChildrenRef.current = children;
+      return;
+    }
+    // Real tab switch: begin crossfade.
+    const outKey = prevKeyRef.current;
+    const outNode = prevChildrenRef.current;
+    prevKeyRef.current = viewKey;
+    prevChildrenRef.current = children;
+
+    setOutgoing({ outKey, outNode });
+
+    // Remove outgoing panel after animation + a small buffer.
+    const t = setTimeout(() => setOutgoing(null), prefersReduced ? 0 : CROSSFADE_MS + 20);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewKey]);
+
+  const animDur = prefersReduced ? "0ms" : `${CROSSFADE_MS}ms`;
+
+  return (
+    // position:relative so the absolute panels are clipped to the main area.
+    <div className="relative h-full w-full overflow-hidden">
+      {/* Outgoing view — fades out above the incoming panel */}
+      {outgoing !== null && (
+        <div
+          key={outgoing.outKey}
+          className={["absolute inset-0 h-full", !prefersReduced ? styles["view-fade-out"] : ""].join(" ").trim()}
+          style={{
+            animationDuration: animDur,
+            animationFillMode: "forwards",
+            // Sit above the incoming panel during the crossfade so the fade-out
+            // is visible (z=1 vs z=0 on the incoming wrapper).
+            zIndex: 1,
+          }}
+        >
+          {outgoing.outNode}
+        </div>
+      )}
+      {/* Incoming view — fades in below the outgoing panel */}
+      <ViewTransitionWrapper viewKey={viewKey}>
+        {children}
+      </ViewTransitionWrapper>
     </div>
   );
 }
@@ -300,12 +376,24 @@ export default function App() {
   const [axDismissed, setAxDismissed] = useState(false);
 
   useEffect(() => {
+    // s7ia B2: don't poll at all once dismissed or already granted — the
+    // banner is gone and CoreGraphics calls are wasted. The effect re-runs when
+    // axGranted or axDismissed changes so it naturally exits early.
+    if (axGranted || axDismissed) return;
+
     let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
 
     const check = async () => {
       try {
         const granted = await checkAccessibilityPermission();
-        if (!cancelled) setAxGranted(granted);
+        if (cancelled) return;
+        setAxGranted(granted);
+        // Stop the interval immediately on grant so we don't wait for cleanup.
+        if (granted && interval !== null) {
+          clearInterval(interval);
+          interval = null;
+        }
       } catch {
         // Best-effort — never block startup on this check.
       }
@@ -315,12 +403,12 @@ export default function App() {
 
     // Poll every 3 s so the banner disappears automatically once the user
     // grants the permission in System Settings (without needing an app restart).
-    const interval = setInterval(() => { void check(); }, 3000);
+    interval = setInterval(() => { void check(); }, 3000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      if (interval !== null) clearInterval(interval);
     };
-  }, []);
+  }, [axGranted, axDismissed]);
 
   const showAxBanner = !axGranted && !axDismissed;
 
@@ -420,13 +508,12 @@ export default function App() {
           )}
 
           <main className="min-h-0 flex-1 overflow-hidden">
-            {/* ViewTransitionWrapper is keyed on the view id so React unmounts
-                the old wrapper and mounts a new one on every tab switch,
-                triggering the gentle crossfade (CopyPaste-2bhh).
-                ErrorBoundary is inside the wrapper so a crash in one screen
-                stays contained, and navigating away then back remounts a fresh
-                non-crashed subtree. */}
-            <ViewTransitionWrapper key={view} viewKey={view}>
+            {/* CrossfadeContainer renders the outgoing view (fading out) and
+                incoming view (fading in) simultaneously — a true crossfade that
+                fixes the "disappear then reappear" flash of the old keyed-remount
+                approach (CopyPaste-4r48 / 2bhh).
+                ErrorBoundary is inside so a crash stays contained per tab. */}
+            <CrossfadeContainer viewKey={view}>
               <ErrorBoundary label={label}>
                 {view === "devices" ? (
                   // DevicesView gets `incomingPairing` so the SAS modal opens
@@ -439,7 +526,7 @@ export default function App() {
                   <View />
                 )}
               </ErrorBoundary>
-            </ViewTransitionWrapper>
+            </CrossfadeContainer>
           </main>
         </div>
       </div>

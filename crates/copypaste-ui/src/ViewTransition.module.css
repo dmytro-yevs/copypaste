@@ -1,11 +1,8 @@
-/* Co-located keyframe for the view-switch crossfade (CopyPaste-2bhh).
- * A gentle opacity+translate entrance that acts as the primary motion when
- * switching sidebar tabs, making the overall switch feel Apple-like and smooth.
- * The `card-in` / `reveal-up` on ViewShell still play on mount, but they're
- * now wrapped inside this outer fade so the overall impression is a soft
- * crossfade rather than a harsh pop-in.
+/* Co-located keyframes for the view-switch crossfade (CopyPaste-2bhh / 4r48).
+ * A genuine crossfade: old view fades+slides OUT while new view fades+slides IN
+ * simultaneously, so the user sees a smooth blend rather than a blink-then-appear.
  *
- * NOT in index.css (another agent owns that file — CopyPaste-2bhh constraint).
+ * NOT in index.css (another agent owns that file).
  */
 
 @keyframes viewFadeIn {
@@ -19,10 +16,31 @@
   }
 }
 
+/* 4r48: outgoing view fades out and slides slightly UP (mirror of fade-in direction
+ * flipped) so the transition feels directional rather than a mere dissolve. */
+@keyframes viewFadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
 .view-fade-in {
   animation-name: viewFadeIn;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
   /* duration and fill-mode come from inline styles so they are testable in
    * jsdom (which doesn't parse stylesheets) and so prefers-reduced-motion
    * can set duration=0ms via inline style without !important wars. */
+}
+
+/* 4r48: outgoing panel class — applied to the leaving view during crossfade. */
+.view-fade-out {
+  animation-name: viewFadeOut;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Stays at opacity:0 after animation ends (fill=forwards via inline style). */
+  pointer-events: none;
 }

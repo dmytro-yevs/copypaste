@@ -120,6 +120,13 @@ export function Popup() {
   const listRef = useRef<HTMLUListElement>(null);
   const win = getCurrentWindow();
   const isKeyboardNavRef = useRef(false);
+  // zuzu: isScrollingRef tracks momentum-scroll state so onMouseEnter doesn't
+  // fire for every row the pointer passes over during scroll, causing the
+  // GlideHighlight to jump between items.
+  // isScrolling state drives GlideHighlight to suppress transition+visibility.
+  const isScrollingRef = useRef(false);
+  const scrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isScrolling, setIsScrolling] = useState(false);
 
   // Fetch/refresh clipboard items from the daemon.
   const refresh = useCallback(async () => {
@@ -249,6 +256,27 @@ export function Popup() {
     }
     isKeyboardNavRef.current = false;
   }, [selectedIdx]);
+
+  // zuzu: track scroll momentum so onMouseEnter is suppressed during scroll
+  // and GlideHighlight hides/freezes during scroll. 120 ms idle = done.
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const onScroll = () => {
+      isScrollingRef.current = true;
+      setIsScrolling(true);
+      if (scrollIdleTimer.current !== null) clearTimeout(scrollIdleTimer.current);
+      scrollIdleTimer.current = setTimeout(() => {
+        isScrollingRef.current = false;
+        setIsScrolling(false);
+      }, 120);
+    };
+    list.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      list.removeEventListener("scroll", onScroll);
+      if (scrollIdleTimer.current !== null) clearTimeout(scrollIdleTimer.current);
+    };
+  }, []);
 
   // V-10/V-11 fix: always use invoke("hide_popup") — the Rust side runs the
   // prior-app activation before hiding. win.hide() from JS bypasses that logic.
@@ -570,6 +598,7 @@ export function Popup() {
             textRowHeight={previewSize}
             imageMaxHeight={imageMaxHeight}
             listRef={listRef}
+            isScrolling={isScrolling}
           />
           <ul
             ref={listRef}
@@ -594,6 +623,10 @@ export function Popup() {
                 previewLines={previewLinesPopup}
                 showKeycap={!showQuery && idx < 9}
                 onMouseEnter={() => {
+                  // zuzu: guard against scroll momentum — browser fires
+                  // mouseenter for every row the pointer passes over during
+                  // scroll, which makes the GlideHighlight jump between items.
+                  if (isScrollingRef.current) return;
                   isKeyboardNavRef.current = false;
                   setSelectedIdx(idx);
                 }}
@@ -663,6 +696,9 @@ interface GlideHighlightProps {
   textRowHeight: number;
   imageMaxHeight: number;
   listRef: React.RefObject<HTMLUListElement | null>;
+  /** zuzu: when true, suppress CSS transition and hide the layer if the
+   *  selected item has scrolled out of the visible clip region. */
+  isScrolling?: boolean;
 }
 
 function GlideHighlight({
@@ -671,9 +707,12 @@ function GlideHighlight({
   textRowHeight,
   imageMaxHeight,
   listRef,
+  isScrolling = false,
 }: GlideHighlightProps) {
   const [top, setTop] = useState(0);
   const [height, setHeight] = useState(textRowHeight);
+  // zuzu: track visibility separately so we can hide when out-of-viewport.
+  const [visible, setVisible] = useState(true);
   // Track whether the user prefers reduced motion so we can skip animation.
   // Guard against jsdom / test environments where matchMedia is unavailable.
   const prefersReduced = useRef(
@@ -692,18 +731,25 @@ function GlideHighlight({
     // offsetTop is relative to the list's offsetParent (which is our wrapper div).
     // We also need to offset by the list's own scrollTop so the glide layer
     // tracks the visible position (list scrolls, wrapper does not).
-    setTop(child.offsetTop - list.scrollTop);
+    const newTop = child.offsetTop - list.scrollTop;
+    setTop(newTop);
     setHeight(child.offsetHeight);
+    // zuzu: hide when the selected item has scrolled completely out of view.
+    setVisible(newTop >= 0 && newTop < list.clientHeight);
   }, [selectedIdx, items, textRowHeight, imageMaxHeight, listRef]);
 
   // Keep glide in sync when the list scrolls (user scrolls with keyboard nav).
+  // zuzu: also update visibility and freeze transition during scroll.
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
     const onScroll = () => {
       const child = list.children[selectedIdx] as HTMLElement | undefined;
       if (!child) return;
-      setTop(child.offsetTop - list.scrollTop);
+      const newTop = child.offsetTop - list.scrollTop;
+      setTop(newTop);
+      // Hide if scrolled out of the visible clip region.
+      setVisible(newTop >= 0 && newTop < list.clientHeight);
     };
     list.addEventListener("scroll", onScroll, { passive: true });
     return () => list.removeEventListener("scroll", onScroll);
@@ -720,10 +766,13 @@ function GlideHighlight({
         height,
         // §3 selection fill — token so it re-themes in light mode.
         background: "var(--ide-selection)",
-        // Glide animation: 130ms ease-standard. Skipped when reduced motion.
-        transition: prefersReduced.current
+        // zuzu: suppress the 130ms transition during scroll so the glide layer
+        // doesn't visibly slide out of the container during momentum scroll.
+        // Also hide (opacity 0) if the selected item is outside the viewport.
+        transition: prefersReduced.current || isScrolling
           ? "none"
           : "top 130ms cubic-bezier(0.2,0,0,1), height 130ms cubic-bezier(0.2,0,0,1)",
+        opacity: visible && !isScrolling ? 1 : 0,
         // Behind row content (z=0), above list background.
         zIndex: 0,
         pointerEvents: "none",

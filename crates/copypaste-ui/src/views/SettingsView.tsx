@@ -59,8 +59,10 @@ const FILE_SIZE_LABELS = ["8 MB","16 MB","25 MB","50 MB","100 MB (max)"] as cons
 const QUOTA_STEPS_BYTES = [1,2,5,10,25,50].map((n) => n * 1024 * 1024 * 1024) as unknown as readonly number[];
 const QUOTA_LABELS = ["1 GB","2 GB","5 GB","10 GB","25 GB","50 GB (max)"] as const;
 
-const SENSITIVE_TTL_STEPS = [10, 30, 60, 5 * 60, 15 * 60, 60 * 60] as const;
-const SENSITIVE_TTL_LABELS = ["10 s","30 s","1 min","5 min","15 min","1 hour"] as const;
+// 3gsk: add 0 (Off) as first step — Android already has this step so users can
+// disable auto-wipe on both platforms. 0 means "never auto-wipe sensitive items".
+const SENSITIVE_TTL_STEPS = [0, 10, 30, 60, 5 * 60, 15 * 60, 60 * 60] as const;
+const SENSITIVE_TTL_LABELS = ["Off","10 s","30 s","1 min","5 min","15 min","1 hour"] as const;
 
 // History display limit slider — controls how many items the UI renders on screen.
 // This is a UI-only preference persisted in localStorage. It does NOT cap daemon
@@ -120,9 +122,16 @@ function Toggle({
 
 function SubsectionHeader({ label, hint }: { label: string; hint?: string }) {
   // CopyPaste-hffp: tighter top margin in compact density to reduce whitespace.
+  // CopyPaste-gzli: widen density check to handle spacious as the largest margin step.
   const density = useUI((s) => s.prefs.density ?? "comfortable");
+  const mt =
+    density === "compact"
+      ? "mt-5"
+      : density === "spacious"
+        ? "mt-9"
+        : "mt-7";
   return (
-    <div className={density === "compact" ? "mb-1.5 mt-5 first:mt-0" : "mb-1.5 mt-7 first:mt-0"}>
+    <div className={`mb-1.5 ${mt} first:mt-0`}>
       {/* §3: section labels = grey (text-ide-dim), NOT accent blue; 11px semibold uppercase. */}
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ide-dim">{label}</div>
       {hint && <div className="mt-0.5 text-[11px] text-ide-faint">{hint}</div>}
@@ -138,10 +147,14 @@ function SettingsRow({
   children: React.ReactNode;
 }) {
   // CopyPaste-hffp: density-aware row height/padding — compact shrinks rows to match HistoryView.
+  // CopyPaste-gzli: spacious adds extra padding as the largest step.
   const density = useUI((s) => s.prefs.density ?? "comfortable");
-  const rowCls = density === "compact"
-    ? "flex min-h-[30px] items-center justify-between border-b border-ide-divider/70 px-3 py-1 last:border-b-0"
-    : "flex min-h-[36px] items-center justify-between border-b border-ide-divider/70 px-3 py-2 last:border-b-0";
+  const rowCls =
+    density === "compact"
+      ? "flex min-h-[30px] items-center justify-between border-b border-ide-divider/70 px-3 py-1 last:border-b-0"
+      : density === "spacious"
+        ? "flex min-h-[42px] items-center justify-between border-b border-ide-divider/70 px-3 py-2.5 last:border-b-0"
+        : "flex min-h-[36px] items-center justify-between border-b border-ide-divider/70 px-3 py-2 last:border-b-0";
   return (
     <div className={rowCls}>
       {/* W4-3: fixed min-width on label column prevents wrapping on narrow labels */}
@@ -384,7 +397,8 @@ function TabBar({
 
   return (
     // relative so the absolute indicator is contained within the tab bar.
-    <div role="tablist" className="relative mb-4 flex gap-0.5 border-b border-ide-border pb-0">
+    // sk02: border-b removed — the outer glass wrapper header div provides the separator.
+    <div role="tablist" className="relative mb-0 flex gap-0.5 pb-0">
       {TABS.map((t, idx) => (
         <button
           key={t.id}
@@ -686,7 +700,8 @@ export function SettingsView() {
   const [lanVisibility, setLanVisibility] = useState(true);
 
   // Privacy & capture — daemon AppConfig fields (config.toml).
-  const [collectPublicIp, setCollectPublicIp] = useState(true);
+  // am9w: daemon defaults collect_public_ip to false (opt-out); mirror that here.
+  const [collectPublicIp, setCollectPublicIp] = useState(false);
   const [pasteAsPlainText, setPasteAsPlainText] = useState(false);
   const [excludedApps, setExcludedApps] = useState<string[]>([]);
   // Text buffer for the "add excluded app" input.
@@ -840,7 +855,8 @@ export function SettingsView() {
           excluded_app_bundle_ids?: string[] | null;
           lan_visibility?: boolean | null;
         };
-        setCollectPublicIp(privacyCfg.collect_public_ip ?? true);
+        // am9w: absent value → opt-out (false), consistent with daemon #[serde(default)].
+        setCollectPublicIp(privacyCfg.collect_public_ip ?? false);
         setPasteAsPlainText(privacyCfg.paste_as_plain_text ?? false);
         setExcludedApps(privacyCfg.excluded_app_bundle_ids ?? []);
         // lan_visibility defaults to true (LAN-visible) on first install.
@@ -1546,15 +1562,16 @@ export function SettingsView() {
 
           {/* Density segmented control — compact / comfortable / spacious */}
           <SettingsRow label="Row density">
-            {/* bpax: styleguide §form-controls segmented control — mute/.18 group bg,
-                selected = white/.90 + e1 shadow, 7px inner radius */}
-            <div className="flex items-center gap-0.5 rounded-[10px] bg-ide-faint/18 p-0.5">
+            {/* bpax/itsu: styleguide §form-controls segmented control — mute/.18 group bg,
+                selected = white/.90 + e1 shadow, 7px inner radius.
+                itsu: hairline border + mute token (was faint, now mute per spec) */}
+            <div className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5">
               {(["compact", "comfortable", "spacious"] as const).map((opt) => (
                 <button
                   key={opt}
                   type="button"
                   aria-label={opt}
-                  onClick={() => setPrefs({ density: opt as "comfortable" | "compact" })}
+                  onClick={() => setPrefs({ density: opt })}
                   className={[
                     "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
                     activeDensity === opt
@@ -1573,8 +1590,9 @@ export function SettingsView() {
             <div className="flex items-center gap-2">
               <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />
               {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
-                  Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius */}
-              <div className="flex items-center gap-0.5 rounded-[10px] bg-ide-faint/18 p-0.5">
+                  Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius.
+                  itsu: hairline border + mute token (was faint, now mute per spec) */}
+              <div className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5">
                 {(["light", "dark", "system"] as const).map((opt) => {
                   const selected = (prefs.theme ?? "dark") === opt;
                   return (
@@ -2225,17 +2243,27 @@ export function SettingsView() {
       )}
 
       {loadState !== "loading" && (
-        // audit P2: centered ~620px column so the panels aren't stranded against
-        // a huge empty right gutter on wide windows.
+        // sk02: wrap the entire tab block (tab bar + content) in ONE floating
+        // glass card so the aurora bleeds through the whole settings panel as a unit,
+        // matching DevicesView/HistoryView patterns (CopyPaste-sk02).
+        // audit P2: centered ~620px column so panels aren't stranded on wide windows.
         <div className="mx-auto w-full" style={{ maxWidth: "620px" }}>
-          <TabBar active={activeTab} onChange={setActiveTab} />
-          {/* Each active tab's content is wrapped in a tabpanel for a11y. */}
-          {activeTab === "general"   && <div role="tabpanel" id="tabpanel-general"   aria-labelledby="tab-general">{renderGeneral()}</div>}
-          {activeTab === "display"   && <div role="tabpanel" id="tabpanel-display"   aria-labelledby="tab-display">{renderDisplay()}</div>}
-          {activeTab === "sync"      && <div role="tabpanel" id="tabpanel-sync"      aria-labelledby="tab-sync">{renderSync()}</div>}
-          {activeTab === "shortcuts" && <div role="tabpanel" id="tabpanel-shortcuts" aria-labelledby="tab-shortcuts">{renderShortcuts()}</div>}
-          {activeTab === "storage"   && <div role="tabpanel" id="tabpanel-storage"   aria-labelledby="tab-storage">{renderStorage()}</div>}
-          {activeTab === "advanced"  && <div role="tabpanel" id="tabpanel-advanced"  aria-labelledby="tab-advanced">{renderAdvanced()}</div>}
+          <div className="surface-card rounded-ide-lg overflow-hidden shadow-ide-sm">
+            {/* Tab bar header — p-4 horizontal/top padding, no bottom; border-b separates from content */}
+            <div className="px-4 pt-4 border-b border-ide-border/30">
+              <TabBar active={activeTab} onChange={setActiveTab} />
+            </div>
+            {/* Tabpanel content — scrollable inner area */}
+            <div className="p-4">
+              {/* Each active tab's content is wrapped in a tabpanel for a11y. */}
+              {activeTab === "general"   && <div role="tabpanel" id="tabpanel-general"   aria-labelledby="tab-general">{renderGeneral()}</div>}
+              {activeTab === "display"   && <div role="tabpanel" id="tabpanel-display"   aria-labelledby="tab-display">{renderDisplay()}</div>}
+              {activeTab === "sync"      && <div role="tabpanel" id="tabpanel-sync"      aria-labelledby="tab-sync">{renderSync()}</div>}
+              {activeTab === "shortcuts" && <div role="tabpanel" id="tabpanel-shortcuts" aria-labelledby="tab-shortcuts">{renderShortcuts()}</div>}
+              {activeTab === "storage"   && <div role="tabpanel" id="tabpanel-storage"   aria-labelledby="tab-storage">{renderStorage()}</div>}
+              {activeTab === "advanced"  && <div role="tabpanel" id="tabpanel-advanced"  aria-labelledby="tab-advanced">{renderAdvanced()}</div>}
+            </div>
+          </div>
         </div>
       )}
     </ViewShell>
