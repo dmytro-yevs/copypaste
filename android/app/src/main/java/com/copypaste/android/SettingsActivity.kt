@@ -32,9 +32,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.foundation.background
@@ -98,16 +95,16 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TextButton
 import com.copypaste.android.ui.theme.EaseStandard
 import com.copypaste.android.ui.theme.Palette
 import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.paletteIdeColors
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 
 /**
@@ -361,7 +358,9 @@ fun SettingsScreen(
     }
 
     Scaffold(
-        modifier = if (translucency && paintCanvasBackdrop) modifier.auroraCanvas(dark) else modifier,
+        // CopyPaste-7em1/1a61: pass paletteAurora so Settings screen uses the active palette's
+        // aurora blobs instead of the hardcoded legacy aurora (matches HistoryActivity pattern).
+        modifier = if (translucency && paintCanvasBackdrop) modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else modifier,
         containerColor = if (translucency) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
@@ -369,10 +368,10 @@ fun SettingsScreen(
                 showBackButton = showBackButton,
                 onBack = guardedOnBack,
                 backContentDescription = stringResource(R.string.cd_back),
-                // CopyPaste-65x6: header Save affordance — mirrors the sticky bottom Save but
-                // lives in the top-bar actions slot so it is always reachable without scrolling.
-                // Enabled only when dirty (unsaved changes exist); uses PRIMARY liquid-glass
-                // style to match the accent-accent bottom button.
+                // CopyPaste-65x6: header Save affordance — sole Save affordance (grjo removed
+                // the duplicate sticky-bottom Save). Lives in the top-bar actions slot so it is
+                // always reachable without scrolling. Enabled only when dirty (unsaved changes
+                // exist); uses PRIMARY liquid-glass style.
                 actions = {
                     CopyPasteButton(
                         onClick = { doSave() },
@@ -385,34 +384,20 @@ fun SettingsScreen(
                 },
             )
         },
-        bottomBar = {
-            // CopyPaste-u30t: sticky Save button — enabled only when there are unsaved changes.
-            // Full-width, accent-coloured, glass-style. Calls doSave() (same as header button).
-            Button(
-                onClick = { doSave() },
-                enabled = dirty,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = c.accent,
-                    contentColor = c.accentOn,
-                    disabledContainerColor = c.elevated,
-                    disabledContentColor = c.dim,
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                Text(
-                    text = "Save",
-                    style = MaterialTheme.typography.labelLarge,
-                )
-            }
-        },
     ) { innerPadding ->
+        // CopyPaste-sk02: wrap the entire tab panel (tab row + tab content) in a
+        // CopyPasteCard so the settings panel floats as a single glass block over
+        // the aurora canvas, matching DevicesView/HistoryView patterns.
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding),
+                .padding(innerPadding)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.Top,
+        ) {
+        CopyPasteCard(
+            modifier = Modifier.fillMaxSize(),
+            translucent = translucency,
         ) {
             // AND3: Tab row with §8 animated underline (180ms EaseStandard).
             ScrollableTabRow(
@@ -481,6 +466,8 @@ fun SettingsScreen(
                         logcatEnabled = logcatEnabled,
                         onLogcatEnabledChange = { logcatEnabled = it; dirty = true },
                         logcatStatus = logcatStatus,
+                        // CopyPaste-hffp: pass live draft density so rows update without Save.
+                        density = density,
                         ctx = ctx,
                     )
                     TAB_DISPLAY -> DisplayTab(
@@ -518,6 +505,8 @@ fun SettingsScreen(
                         onMaxItemsChange = { maxItems = it; dirty = true },
                         excludedApps = excludedApps,
                         onExcludedAppsChange = { excludedApps = it; dirty = true },
+                        // CopyPaste-hffp: pass live draft density.
+                        density = density,
                         ctx = ctx,
                     )
                     TAB_SYNC -> SyncTab(
@@ -539,16 +528,21 @@ fun SettingsScreen(
                         onSupabasePasswordChange = { v -> supabasePassword = v; dirty = true },
                         relayUrl = relayUrl,
                         onRelayUrlChange = { v -> relayUrl = v; dirty = true },
+                        // CopyPaste-hffp: pass live draft density.
+                        density = density,
                     )
                     TAB_NOTIFICATIONS -> NotificationsTab(
                         notifyOnCopy = notifyOnCopy,
                         onNotifyOnCopyChange = { notifyOnCopy = it; dirty = true },
                         soundOnCopy = soundOnCopy,
                         onSoundOnCopyChange = { soundOnCopy = it; dirty = true },
+                        // CopyPaste-hffp: pass live draft density.
+                        density = density,
                     )
                 }
             }
-        }
+        } // end CopyPasteCard
+        } // end outer Column
     }
 }
 
@@ -569,6 +563,8 @@ private fun GeneralTab(
     logcatEnabled: Boolean,
     onLogcatEnabledChange: (Boolean) -> Unit,
     logcatStatus: LogcatCaptureStatus,
+    // CopyPaste-hffp: live density state threaded from SettingsScreen (not SharedPrefs snapshot).
+    density: Density,
     ctx: android.content.Context,
 ) {
     val c = LocalIdeColors.current
@@ -581,6 +577,7 @@ private fun GeneralTab(
                 subtitle = stringResource(R.string.setting_private_mode_subtitle),
                 checked = privateMode,
                 onCheckedChange = onPrivateModeChange,
+                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -588,6 +585,7 @@ private fun GeneralTab(
                 subtitle = stringResource(R.string.setting_sync_enabled_subtitle),
                 checked = syncEnabled,
                 onCheckedChange = onSyncEnabledChange,
+                density = density,
             )
         }
 
@@ -601,6 +599,7 @@ private fun GeneralTab(
                 subtitle = stringResource(R.string.setting_collect_public_ip_subtitle),
                 checked = collectPublicIp,
                 onCheckedChange = onCollectPublicIpChange,
+                density = density,
             )
             SettingsCardDivider()
             // "Paste as plain text" — strip rich formatting (RTF/HTML) on paste. Mirrors macOS.
@@ -609,11 +608,13 @@ private fun GeneralTab(
                 subtitle = stringResource(R.string.setting_paste_as_plain_text_subtitle),
                 checked = pasteAsPlainText,
                 onCheckedChange = onPasteAsPlainTextChange,
+                density = density,
             )
             SettingsCardDivider()
             SettingsNavRow(
                 title = stringResource(R.string.setting_permissions_title),
                 subtitle = stringResource(R.string.setting_permissions_subtitle),
+                density = density,
                 onClick = {
                     ctx.startActivity(Intent(ctx, PermissionsSettingsActivity::class.java))
                 }
@@ -622,6 +623,7 @@ private fun GeneralTab(
             SettingsNavRow(
                 title = stringResource(R.string.setting_devices_title),
                 subtitle = stringResource(R.string.setting_devices_subtitle),
+                density = density,
                 onClick = {
                     ctx.startActivity(Intent(ctx, DevicesActivity::class.java))
                 }
@@ -634,6 +636,7 @@ private fun GeneralTab(
             SettingsNavRow(
                 title = stringResource(R.string.log_viewer_button),
                 subtitle = stringResource(R.string.log_viewer_description),
+                density = density,
                 onClick = {
                     ctx.startActivity(Intent(ctx, LogViewerActivity::class.java))
                 }
@@ -643,6 +646,7 @@ private fun GeneralTab(
                 title = stringResource(R.string.log_export_button),
                 subtitle = stringResource(R.string.log_export_description),
                 buttonLabel = stringResource(R.string.log_export_button),
+                density = density,
                 onClick = { LogExportHelper.shareLogsZip(ctx) }
             )
         }
@@ -666,6 +670,7 @@ private fun GeneralTab(
                 subtitle = stringResource(R.string.setting_logcat_capture_subtitle),
                 checked = logcatEnabled,
                 onCheckedChange = onLogcatEnabledChange,
+                density = density,
             )
             SettingsCardDivider()
             // Tap-to-copy ADB commands
@@ -678,6 +683,7 @@ private fun GeneralTab(
             SettingsNavRow(
                 title = stringResource(R.string.title_about),
                 subtitle = stringResource(R.string.about_tagline),
+                density = density,
                 onClick = {
                     ctx.startActivity(Intent(ctx, AboutActivity::class.java))
                 }
@@ -768,14 +774,23 @@ private fun DisplayTab(
                     color = c.dim,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
+                // CopyPaste-gzli: extended to 3 options — Comfortable / Compact / Spacious.
+                // TODO(strings): strings.xml owned by another agent; using hardcoded strings for now.
                 IdeSegmentedControl(
-                    options = listOf(
-                        stringResource(R.string.setting_density_subtitle_comfortable),
-                        stringResource(R.string.setting_density_subtitle_compact),
-                    ),
-                    selectedIndex = if (density == Density.COMPACT) 1 else 0,
+                    options = listOf("Comfortable", "Compact", "Spacious"),
+                    selectedIndex = when (density) {
+                        Density.COMPACT   -> 1
+                        Density.SPACIOUS  -> 2
+                        else              -> 0
+                    },
                     onSelect = { idx ->
-                        onDensityChange(if (idx == 1) Density.COMPACT else Density.COMFORTABLE)
+                        onDensityChange(
+                            when (idx) {
+                                1    -> Density.COMPACT
+                                2    -> Density.SPACIOUS
+                                else -> Density.COMFORTABLE
+                            }
+                        )
                     },
                 )
             }
@@ -785,6 +800,7 @@ private fun DisplayTab(
                 subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
                 checked = showWarnings,
                 onCheckedChange = onShowWarningsChange,
+                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -792,6 +808,7 @@ private fun DisplayTab(
                 subtitle = stringResource(R.string.setting_mask_sensitive_subtitle),
                 checked = maskSensitive,
                 onCheckedChange = onMaskSensitiveChange,
+                density = density,
             )
             SettingsCardDivider()
             // Privacy: FLAG_SECURE toggle. Applied immediately to the current
@@ -811,6 +828,7 @@ private fun DisplayTab(
                         else w.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                     }
                 },
+                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -818,6 +836,7 @@ private fun DisplayTab(
                 subtitle = stringResource(R.string.setting_translucency_subtitle),
                 checked = translucency,
                 onCheckedChange = onTranslucencyChange,
+                density = density,
             )
         }
 
@@ -891,6 +910,8 @@ private fun StorageTab(
     onMaxItemsChange: (Long) -> Unit,
     excludedApps: List<String>,
     onExcludedAppsChange: (List<String>) -> Unit,
+    // CopyPaste-hffp: live density from SettingsScreen for density-aware nav rows.
+    density: Density,
     ctx: android.content.Context,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -967,6 +988,7 @@ private fun StorageTab(
             SettingsNavRow(
                 title = stringResource(R.string.setting_bg_capture_title),
                 subtitle = stringResource(R.string.setting_bg_capture_subtitle),
+                density = density,
                 onClick = {
                     ctx.startActivity(Intent(ctx, BackgroundCaptureSetupActivity::class.java))
                 }
@@ -996,6 +1018,8 @@ private fun SyncTab(
     onSupabasePasswordChange: (String) -> Unit,
     relayUrl: String,
     onRelayUrlChange: (String) -> Unit,
+    // CopyPaste-hffp: live density from SettingsScreen for density-aware rows.
+    density: Density,
 ) {
     val c = LocalIdeColors.current
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -1007,6 +1031,7 @@ private fun SyncTab(
                 subtitle = stringResource(R.string.setting_p2p_sync_subtitle),
                 checked = p2pSyncEnabled,
                 onCheckedChange = onP2pSyncEnabledChange,
+                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -1014,6 +1039,7 @@ private fun SyncTab(
                 subtitle = stringResource(R.string.setting_sync_wifi_only_subtitle),
                 checked = syncOnWifiOnly,
                 onCheckedChange = onSyncOnWifiOnlyChange,
+                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -1022,7 +1048,8 @@ private fun SyncTab(
                 checked = syncBackend == SyncBackend.SUPABASE,
                 onCheckedChange = { useSupabase ->
                     onSyncBackendChange(if (useSupabase) SyncBackend.SUPABASE else SyncBackend.RELAY)
-                }
+                },
+                density = density,
             )
         }
 
@@ -1118,6 +1145,8 @@ private fun NotificationsTab(
     onNotifyOnCopyChange: (Boolean) -> Unit,
     soundOnCopy: Boolean,
     onSoundOnCopyChange: (Boolean) -> Unit,
+    // CopyPaste-hffp: live density from SettingsScreen for density-aware rows.
+    density: Density,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         SettingsSectionLabel(stringResource(R.string.section_notifications))
@@ -1127,6 +1156,7 @@ private fun NotificationsTab(
                 subtitle = stringResource(R.string.setting_notify_on_copy_subtitle),
                 checked = notifyOnCopy,
                 onCheckedChange = onNotifyOnCopyChange,
+                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -1134,6 +1164,7 @@ private fun NotificationsTab(
                 subtitle = stringResource(R.string.setting_sound_on_copy_subtitle),
                 checked = soundOnCopy,
                 onCheckedChange = onSoundOnCopyChange,
+                density = density,
             )
         }
         Spacer(modifier = Modifier.height(16.dp))
@@ -1198,6 +1229,8 @@ private fun PalettePicker(
                 PaletteSwatchItem(
                     palette = palette,
                     isActive = palette.name == activePaletteName,
+                    // CopyPaste-5hia: pass darkTheme so accent is correct for current light/dark axis.
+                    darkTheme = isDarkTheme(),
                     onClick = {
                         settings.paletteName = palette.name
                         (ctx as? android.app.Activity)?.recreate()
@@ -1226,6 +1259,8 @@ private fun PalettePicker(
                 PaletteSwatchItem(
                     palette = palette,
                     isActive = palette.name == activePaletteName,
+                    // CopyPaste-5hia: pass darkTheme so accent is correct for current light/dark axis.
+                    darkTheme = isDarkTheme(),
                     onClick = {
                         settings.paletteName = palette.name
                         (ctx as? android.app.Activity)?.recreate()
@@ -1239,15 +1274,21 @@ private fun PalettePicker(
 /**
  * A single swatch + label for [palette]. The circle is filled with the palette
  * accent; an active ring (2dp border in c.accent) marks the selected palette.
+ *
+ * CopyPaste-5hia: [darkTheme] must be passed so the accent resolves correctly for
+ * the active light/dark axis — paletteIdeColors(palette, darkTheme).accent produces
+ * the contrast-tuned accent vs. the one-arg fallback which always uses the dark scheme.
  */
 @Composable
 private fun PaletteSwatchItem(
     palette: Palette,
     isActive: Boolean,
+    darkTheme: Boolean,
     onClick: () -> Unit,
 ) {
     val c = LocalIdeColors.current
-    val accentColor = paletteIdeColors(palette).accent
+    // CopyPaste-5hia: use two-arg overload so light-theme selections show contrast-tuned accent.
+    val accentColor = paletteIdeColors(palette, darkTheme).accent
     // Active ring: 2dp border in active-theme accent; inactive: 1dp hairline divider.
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -1284,8 +1325,9 @@ private fun PaletteSwatchItem(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Section label: §3 spec — uppercase 11sp semibold, ide-dim (grey, NOT accent).
- * Renders above the card group, left-padded per Apple HIG.
+ * Section label: §3 spec — uppercase 11sp semibold, ide-faint (grey, NOT accent).
+ * CopyPaste-3gsk: use c.faint (not c.dim) to match Components.kt canonical SectionLabel
+ * and the web text-ide-faint token. Renders above the card group, left-padded per Apple HIG.
  */
 @Composable
 private fun SettingsSectionLabel(text: String) {
@@ -1298,7 +1340,7 @@ private fun SettingsSectionLabel(text: String) {
                 fontSize = 11.sp,
                 letterSpacing = 0.6.sp,
             ),
-            color = c.dim,
+            color = c.faint,
             modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp),
         )
     } else {
@@ -1338,14 +1380,18 @@ private fun SettingsCardDivider() {
 }
 
 /**
- * iOS-style segmented control (§7). Container uses ide-bg, selected pill uses
- * ide-elevated with a subtle shadow effect (achieved via border contrast).
+ * iOS-style segmented control (§7). Bespoke Row+Box implementation matching the
+ * web SettingsView div/button pattern. Avoids M3 SingleChoiceSegmentedButtonRow
+ * which has: (1) per-segment border-mess (inactiveBorderColor=Transparent leaves
+ * dangling active strokes), (2) icon-slot reserving space even when icon={},
+ * (3) 48dp min-height (too tall for Liquid Glass styleguide look ~26dp).
+ *
+ * CopyPaste-o97j: replaced M3 row with bespoke Row/Box per §7 spec.
  *
  * @param options List of label strings, one per segment.
  * @param selectedIndex Currently selected segment index.
  * @param onSelect Called with the new index when user taps a segment.
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun IdeSegmentedControl(
     options: List<String>,
@@ -1354,40 +1400,43 @@ private fun IdeSegmentedControl(
     modifier: Modifier = Modifier,
 ) {
     val c = LocalIdeColors.current
-    // 4bf1: container track → mute@.18 fill + .5dp hairline border via Modifier on the row.
-    // Selected pill: c.elevated fill; selected text = c.accent (no drop shadow on Android).
-    // Unselected: transparent over the track; text = c.dim.
-    SingleChoiceSegmentedButtonRow(
+    // Outer container: mute@.18 fill + 0.5dp hairline border (RadiusControl = 9dp outer).
+    // 2dp inner padding matches the web control's p-0.5 padding.
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .background(color = c.mute.copy(alpha = 0.18f), shape = RadiusControl)
-            .border(width = 0.5.dp, color = c.border, shape = RadiusControl),
+            .border(width = 0.5.dp, color = c.border, shape = RadiusControl)
+            .padding(2.dp),
     ) {
         options.forEachIndexed { index, label ->
-            SegmentedButton(
-                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
-                onClick = { onSelect(index) },
-                selected = index == selectedIndex,
-                colors = SegmentedButtonDefaults.colors(
-                    // 4bf1: selected pill → c.elevated fill + c.accent text (no drop shadow)
-                    activeContainerColor   = c.elevated,
-                    activeContentColor     = c.accent,
-                    activeBorderColor      = c.border,
-                    // Unselected: transparent (mute track from container shows through)
-                    inactiveContainerColor = Color.Transparent,
-                    inactiveContentColor   = c.dim,
-                    inactiveBorderColor    = Color.Transparent,
-                ),
-                icon = {},
+            val isSelected = index == selectedIndex
+            // Inner pill: 7dp radius (RadiusControl 9dp - 2dp padding = ~7dp per §4).
+            // Selected → c.elevated fill; unselected → transparent over the track.
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(7.dp))
+                    .then(
+                        if (isSelected) Modifier.background(c.elevated) else Modifier
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null, // suppress ripple — pill bg is the selection indicator
+                        onClick = { onSelect(index) },
+                    )
+                    .padding(horizontal = 10.dp, vertical = 5.dp),
             ) {
                 Text(
                     text = label,
                     style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = if (index == selectedIndex) FontWeight.SemiBold else FontWeight.Normal,
-                        // 4bf1: 12sp per styleguide (was 13sp)
+                        fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         fontSize = 12.sp,
                     ),
+                    color = if (isSelected) c.accent else c.dim,
                     textAlign = TextAlign.Center,
+                    maxLines = 1,
                 )
             }
         }
@@ -1447,17 +1496,24 @@ private fun SettingsNavRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
+    // CopyPaste-hffp: live density param — replaces the SharedPrefs snapshot read.
+    // The draft density state from SettingsScreen is threaded down so density
+    // changes are reflected immediately without waiting for Save.
+    density: Density,
 ) {
     val c = LocalIdeColors.current
-    // CopyPaste-hffp: density-aware padding — read active pref so COMPACT rows are
-    // 8dp vertical vs. 12dp for COMFORTABLE, matching the compact Type scale intent.
-    val ctx = LocalContext.current
-    val isCompact = remember(ctx) { Settings(ctx).density == Density.COMPACT }
+    val isCompact  = density == Density.COMPACT
+    val isSpacious = density == Density.SPACIOUS
+    val vertPad = when {
+        isCompact  -> 8.dp
+        isSpacious -> 16.dp
+        else       -> 12.dp
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = if (isCompact) 8.dp else 12.dp),
+            .padding(horizontal = 16.dp, vertical = vertPad),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1466,7 +1522,7 @@ private fun SettingsNavRow(
             .padding(end = 12.dp)) {
             Text(
                 text = title,
-                // hffp: compact density → bodyMedium (14sp), comfortable → bodyLarge (16sp)
+                // hffp: compact density → bodyMedium (14sp), comfortable/spacious → bodyLarge (16sp)
                 style = if (isCompact) MaterialTheme.typography.bodyMedium
                         else MaterialTheme.typography.bodyLarge,
                 color = c.text,
@@ -1483,6 +1539,9 @@ private fun SettingsNavRow(
 /**
  * A row with a description and an action button — used in the Diagnostics
  * section for log export and similar non-toggle actions.
+ *
+ * CopyPaste-hffp: added density param; compact mode reduces padding and uses
+ * bodyMedium title (was hardcoded bodyLarge + 10dp regardless of density).
  */
 @Composable
 private fun DiagnosticsNavRow(
@@ -1490,16 +1549,26 @@ private fun DiagnosticsNavRow(
     subtitle: String,
     buttonLabel: String,
     onClick: () -> Unit,
+    // CopyPaste-hffp: live density param — replaces hardcoded bodyLarge/10dp.
+    density: Density,
 ) {
     val c = LocalIdeColors.current
+    val isCompact  = density == Density.COMPACT
+    val isSpacious = density == Density.SPACIOUS
+    val vertPad = when {
+        isCompact  -> 8.dp
+        isSpacious -> 14.dp
+        else       -> 10.dp
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 16.dp, vertical = vertPad)
     ) {
         Text(
             text = title,
-            style = MaterialTheme.typography.bodyLarge,
+            style = if (isCompact) MaterialTheme.typography.bodyMedium
+                    else MaterialTheme.typography.bodyLarge,
             color = c.text,
         )
         Text(
@@ -1523,12 +1592,19 @@ private fun SettingsRow(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
+    // CopyPaste-hffp: live density param — replaces the SharedPrefs snapshot read.
+    // The draft density state from SettingsScreen is threaded down so density
+    // changes are reflected immediately without waiting for Save.
+    density: Density,
 ) {
     val c = LocalIdeColors.current
-    // CopyPaste-hffp: density-aware vertical padding and text scale.
-    // COMPACT → 8dp padding, bodyMedium title; COMFORTABLE → 12dp, bodyLarge.
-    val ctx = LocalContext.current
-    val isCompact = remember(ctx) { Settings(ctx).density == Density.COMPACT }
+    val isCompact  = density == Density.COMPACT
+    val isSpacious = density == Density.SPACIOUS
+    val vertPad = when {
+        isCompact  -> 8.dp
+        isSpacious -> 16.dp
+        else       -> 12.dp
+    }
     Row(
         // CopyPaste-aod: merge the title + subtitle + switch into ONE TalkBack node
         // labelled with the title so it reads "<title>, <subtitle>, On/Off" instead
@@ -1536,7 +1612,7 @@ private fun SettingsRow(
         modifier = Modifier
             .fillMaxWidth()
             .semantics(mergeDescendants = true) {}
-            .padding(horizontal = 16.dp, vertical = if (isCompact) 8.dp else 12.dp),
+            .padding(horizontal = 16.dp, vertical = vertPad),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
@@ -1545,7 +1621,7 @@ private fun SettingsRow(
             .padding(end = 12.dp)) {
             Text(
                 text = title,
-                // hffp: compact density → bodyMedium (14sp), comfortable → bodyLarge (16sp)
+                // hffp: compact density → bodyMedium (14sp), comfortable/spacious → bodyLarge (16sp)
                 style = if (isCompact) MaterialTheme.typography.bodyMedium
                         else MaterialTheme.typography.bodyLarge,
                 color = c.text,

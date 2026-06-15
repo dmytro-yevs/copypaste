@@ -18,7 +18,7 @@
     <!-- Screen titles -->
     <string name="title_history">History</string>
     <string name="title_devices">Devices</string>
-    <string name="title_pair">Your QR Code</string>
+    <string name="title_pair">Pair Device</string>
     <string name="title_settings">Settings</string>
 
     <!-- History screen — §9 empty states + search filter -->
@@ -34,6 +34,9 @@
     <string name="cd_search_close">Clear and close search</string>
 
     <!-- Pair screen -->
+    <!-- Devices screen — empty-state for the LAN discovery section (CopyPaste-0nd4) -->
+    <string name="no_devices_nearby">No devices found on your network yet.</string>
+
     <string name="pair_instructions">Scan this QR code with the other device to pair. To scan another device\'s QR instead, use \"Scan a device\'s QR\" on the Devices screen.</string>
     <string name="btn_scan_qr">Scan a device\'s QR</string>
     <string name="pair_token_expires_in_seconds">Expires in %1$d s</string>

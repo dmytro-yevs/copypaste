@@ -98,7 +98,9 @@ import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -138,8 +140,12 @@ private const val QR_PLATE_PADDING_DP = 10
  */
 private const val QR_SLOT_SIZE_DP = QR_IMAGE_SIZE_DP + QR_PLATE_PADDING_DP * 2
 
-/** Pixel resolution of the QR bitmap passed to ZXing. Single source of truth. */
-private const val QR_BITMAP_PX = 512
+/**
+ * Pixel resolution of the QR bitmap passed to ZXing.
+ * CopyPaste-s6cc: raised 512→800 so the bitmap is not downscaled at 3× density
+ * (512px < 480 logical px) — downscaling blurs module edges and hurts scanner decoding.
+ */
+private const val QR_BITMAP_PX = 800
 
 /**
  * Pair Device screen.
@@ -227,9 +233,21 @@ class PairActivity : ComponentActivity() {
     }
 }
 
-/** Render `text` as a square QR [Bitmap] of `sizePx` pixels using ZXing. */
+/**
+ * Render [text] as a square QR [Bitmap] of [sizePx] pixels using ZXing.
+ *
+ * CopyPaste-s6cc: added hints — ERROR_CORRECTION=M (15% recovery, up from the ZXing
+ * default EcLevel.L 7%) so the code survives partial obstruction and small-module
+ * scaling artifacts that trip built-in system scanners. MARGIN=0 avoids a double
+ * quiet-zone (ZXing default adds 4 modules; QR_PLATE_PADDING_DP provides the visual
+ * margin on the glass surface).
+ */
 private fun encodeQrBitmap(text: String, sizePx: Int): Bitmap {
-    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx)
+    val hints = mapOf(
+        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+        EncodeHintType.MARGIN to 0,
+    )
+    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
     val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
     for (x in 0 until sizePx) {
         for (y in 0 until sizePx) {

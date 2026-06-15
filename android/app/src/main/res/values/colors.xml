@@ -21,6 +21,13 @@
     <color name="ide_accent">#9DB7DF</color>
     <color name="ide_accent_dark">#8AABDA</color>
 
+    <!--
+        Light-mode launch background — EDF2F8 matches CloudSilverIdeColors.bg0.
+        Used by values/themes.xml windowBackground so the window launch frame
+        is light when ThemeMode.LIGHT is active (CopyPaste-7em1).
+    -->
+    <color name="ide_bg_light">#EDF2F8</color>
+
     <!-- Legacy DS-v2 dark ramp (Liquid Blue palette fallback) -->
     <color name="ide_bg_legacy">#13141A</color>
     <color name="ide_accent_legacy">#3D8BFF</color>

@@ -40,8 +40,9 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     private val _loadingMore = MutableLiveData(false)
     val loadingMore: LiveData<Boolean> = _loadingMore
 
-    /** True when there are more unpinned pages to load. */
-    private val _hasMore = MutableLiveData(true)
+    /** True when there are more unpinned pages to load. Starts false to avoid
+     *  a spinner flash before the first loadItems() call completes. */
+    private val _hasMore = MutableLiveData(false)
     val hasMore: LiveData<Boolean> = _hasMore
 
     private val _errors = MutableLiveData<String?>(null)

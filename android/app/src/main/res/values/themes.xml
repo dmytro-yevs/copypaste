@@ -17,15 +17,22 @@
         <item name="colorPrimaryDark">@color/ide_accent_dark</item>
         <item name="colorAccent">@color/ide_accent</item>
 
-        <!-- Graphite Mist bg0 #07090F launch background — no colour flash at cold start -->
-        <item name="android:windowBackground">@color/ide_bg</item>
-        <item name="android:colorBackground">@color/ide_bg</item>
+        <!--
+            Light-mode launch background — EDF2F8 (CloudSilver bg0, CopyPaste-7em1).
+            The values-night/ variant stays dark (#07090F); this base theme is only
+            loaded in light mode (DayNight parent + no-night suffix). Prevents the
+            dark splash-frame flash when the user selects a light palette.
+        -->
+        <item name="android:windowBackground">@color/ide_bg_light</item>
+        <item name="android:colorBackground">@color/ide_bg_light</item>
 
         <!-- Edge-to-edge: transparent system bars; Compose applies the insets. -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <!-- Default palette (Graphite Mist) is dark — use LIGHT status-bar icons. -->
-        <item name="android:windowLightStatusBar">false</item>
+        <!-- Light-mode default → dark status-bar icons (CopyPaste-7em1).
+             CopyPasteTheme SideEffect flips this at runtime, but the XML value
+             prevents the white-icon flash during the launch frame. -->
+        <item name="android:windowLightStatusBar">true</item>
         <!-- Render into the display cutout (notch / punch-hole) area on the short
              edges; combined with the Compose insets this lets the header use
              the full width while never drawing *under* the status bar / notch. -->

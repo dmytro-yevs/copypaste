@@ -61,12 +61,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 // §5 PARITY-SPEC: row/action icons use the thin Outlined family (closer to SF Symbols).
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-import androidx.compose.material.icons.outlined.BookmarkAdded
-import androidx.compose.material.icons.outlined.BookmarkBorder
+// CopyPaste-1fji: Star/StarBorder replaces BookmarkAdded/BookmarkBorder per dm51 styleguide
+// (web uses lucide Star/StarOff; Material Outlined Star/StarBorder is the Android equivalent).
+import androidx.compose.material.icons.outlined.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.Code
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.DataObject
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Tag
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -812,9 +820,11 @@ fun HistoryScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
+                                // CopyPaste-mpp6: headlineSmall (18sp/SemiBold) to match CopyPasteTopBar
+                                // and styleguide Heading/18/600 — was titleLarge (14sp/Medium).
                                 Text(
                                     text = stringResource(R.string.title_history),
-                                    style = MaterialTheme.typography.titleLarge,
+                                    style = MaterialTheme.typography.headlineSmall,
                                     color = c.text,
                                 )
                                 // Clip count badge — shows the full stored total (not just
@@ -1481,9 +1491,10 @@ private fun SelectionTopBar(
     ) {
         TopAppBar(
             title = {
+                // CopyPaste-mpp6: headlineSmall to match CopyPasteTopBar hierarchy.
                 Text(
                     text = stringResource(R.string.selection_count, selectedCount),
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineSmall,
                     color = c.text,
                 )
             },
@@ -1510,7 +1521,7 @@ private fun SelectionTopBar(
                 if (selectedCount > 0) {
                     IconButton(onClick = onPinSelected) {
                         Icon(
-                            Icons.Outlined.BookmarkAdded,
+                            Icons.Outlined.Star,
                             contentDescription = stringResource(R.string.action_pin_selected),
                             tint = c.accent,
                             modifier = Modifier.size(18.dp),
@@ -1518,7 +1529,7 @@ private fun SelectionTopBar(
                     }
                     IconButton(onClick = onUnpinSelected) {
                         Icon(
-                            Icons.Outlined.BookmarkBorder,
+                            Icons.Outlined.StarBorder,
                             contentDescription = stringResource(R.string.action_unpin_selected),
                             tint = c.dim,
                             modifier = Modifier.size(18.dp),
@@ -1964,19 +1975,21 @@ private fun parseHexColor(snippet: String): Color? {
  */
 @Composable
 private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
+    // CopyPaste-sw6u: each content kind now maps to a distinct semantic icon
+    // (was: CODE/EMAIL/PHONE/COLOR/NUMBER/JSON all fell back to ContentCopy).
     val icon = when (chipLabel) {
         "URL"     -> Icons.AutoMirrored.Outlined.OpenInNew
         "IMAGE"   -> Icons.Outlined.Image
-        "CODE"    -> Icons.Outlined.ContentCopy  // closest available; Lock used for PRIVATE
-        "EMAIL"   -> Icons.Outlined.ContentCopy
-        "PHONE"   -> Icons.Outlined.ContentCopy
-        "COLOR"   -> Icons.Outlined.ContentCopy  // superseded by color swatch when chipLabel==COLOR
-        "NUMBER"  -> Icons.Outlined.ContentCopy
+        "CODE"    -> Icons.Outlined.Code          // dm51 styleguide: code-bracket icon
+        "EMAIL"   -> Icons.Outlined.Email         // dm51: envelope
+        "PHONE"   -> Icons.Outlined.Phone         // dm51: phone handset
+        "COLOR"   -> Icons.Outlined.Palette       // dm51: colour wheel — superseded by swatch for COLOR rows
+        "NUMBER"  -> Icons.Outlined.Tag           // dm51: hash/tag for numeric literals
         "PATH"    -> Icons.Outlined.AttachFile
-        "JSON"    -> Icons.Outlined.ContentCopy
+        "JSON"    -> Icons.Outlined.DataObject    // dm51: braces/data-object for JSON
         "FILE"    -> Icons.AutoMirrored.Outlined.InsertDriveFile
         "PRIVATE" -> Icons.Outlined.Lock
-        else      -> Icons.Outlined.ContentCopy  // TEXT / fallback
+        else      -> Icons.Outlined.ContentCopy   // TEXT / fallback
     }
 
     // Micro-motion: gentle scale pulse (styleguide .item-icon @keyframes iconFloat).
@@ -2639,7 +2652,7 @@ private fun HistoryRow(
                 Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
-                        imageVector = Icons.Outlined.BookmarkAdded,
+                        imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
                         tint = c.warning.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
@@ -2697,8 +2710,8 @@ private fun HistoryRow(
                             onClick = { onSetPinned(item.id, !item.pinned) },
                         ) {
                             Icon(
-                                imageVector = if (item.pinned) Icons.Outlined.BookmarkAdded
-                                              else Icons.Outlined.BookmarkBorder,
+                                imageVector = if (item.pinned) Icons.Outlined.Star
+                                              else Icons.Outlined.StarBorder,
                                 contentDescription = if (item.pinned)
                                     stringResource(R.string.action_unpin)
                                 else
@@ -2745,7 +2758,7 @@ private fun HistoryRow(
                 Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
-                        imageVector = Icons.Outlined.BookmarkAdded,
+                        imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
                         tint = c.warning.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
@@ -2800,8 +2813,8 @@ private fun HistoryRow(
                     }
                     ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
                         Icon(
-                            imageVector = if (item.pinned) Icons.Outlined.BookmarkAdded
-                                          else Icons.Outlined.BookmarkBorder,
+                            imageVector = if (item.pinned) Icons.Outlined.Star
+                                          else Icons.Outlined.StarBorder,
                             contentDescription = if (item.pinned)
                                 stringResource(R.string.action_unpin)
                             else
@@ -2854,7 +2867,7 @@ private fun HistoryRow(
                 Spacer(Modifier.width(8.dp))
                 if (!selectionMode && item.pinned) {
                     Icon(
-                        imageVector = Icons.Outlined.BookmarkAdded,
+                        imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
                         tint = c.warning.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
@@ -3022,8 +3035,8 @@ private fun HistoryRow(
                         // §5 icon-only action buttons with press-scale (§8)
                         ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
                             Icon(
-                                imageVector = if (item.pinned) Icons.Outlined.BookmarkAdded
-                                              else Icons.Outlined.BookmarkBorder,
+                                imageVector = if (item.pinned) Icons.Outlined.Star
+                                              else Icons.Outlined.StarBorder,
                                 contentDescription = if (item.pinned)
                                     stringResource(R.string.action_unpin)
                                 else

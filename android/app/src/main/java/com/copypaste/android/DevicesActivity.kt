@@ -27,6 +27,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -88,11 +89,16 @@ import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.SectionLabel
+import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.google.zxing.BarcodeFormat
+import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -346,6 +352,15 @@ fun DevicesScreen(
     // labels update as FgsSyncLoop stamps presence.
     var peers by remember { mutableStateOf(settings.pairedPeers) }
     var ownIdentity by remember { mutableStateOf(settings.p2pIdentity) }
+
+    // CopyPaste-6qq1: own public IP from a one-shot STUN query (StunUtils.queryPublicIp).
+    // Null until the coroutine resolves or when collectPublicIp is disabled.
+    var ownPublicIp by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        ownPublicIp = withContext(Dispatchers.IO) {
+            StunUtils.queryPublicIp(settings.collectPublicIp)
+        }
+    }
 
     // ── 1-second clock tick ───────────────────────────────────────────────────
     // Drives smooth "Xm ago" / "Xs ago" updates and the online dot recomputation
@@ -653,7 +668,9 @@ fun DevicesScreen(
     }
 
     Scaffold(
-        modifier = if (translucent && paintCanvasBackdrop) modifier.auroraCanvas(dark) else modifier,
+        // CopyPaste-7em1/1a61: pass the active palette's AuroraDef so light palettes
+        // render their soft aurora blobs instead of hardcoded Liquid Blue legacy blobs.
+        modifier = if (translucent && paintCanvasBackdrop) modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else modifier,
         containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
@@ -691,14 +708,16 @@ fun DevicesScreen(
             // then discovered (unpaired) LAN peers — ALL inside ONE glass
             // CopyPasteCard, rows separated by a single 1dp hairline divider.
             // Replaces the former stack of individually-elevated Cards.
-            SectionLabel("Devices")
+            // CopyPaste-9ln4: renamed from "Devices" to "Paired Devices" — avoids
+            // duplicate with the TopBar title and matches the web SectionLabel fix.
+            SectionLabel("Paired Devices")
 
             // Assemble the ordered row list so we know where dividers go (a
             // divider is drawn BEFORE every row except the first).
             val deviceRows: List<@Composable () -> Unit> = buildList {
                 // This device — always first.
                 ownIdentity?.let { identity ->
-                    add { OwnDeviceRow(identity = identity, nowMs = nowMs) }
+                    add { OwnDeviceRow(identity = identity, nowMs = nowMs, ownPublicIp = ownPublicIp) }
                 }
                 // Paired peers — pass the pre-computed online flag so the row dot
                 // and the footer badge are always in sync.
@@ -728,13 +747,24 @@ fun DevicesScreen(
                         )
                     }
                     if (discovered.isEmpty()) {
+                        // CopyPaste-0nd4: add DiscoveryRingsIcon + text in a Row so the
+                        // empty-state has an icon anchor and visual breathing room, matching
+                        // the macOS .network-rings icon + text pattern in DevicesView.tsx.
                         add {
-                            Text(
-                                text = "Searching for nearby devices…",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = c.faint,
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 12.dp),
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                DiscoveryRingsIcon(size = 36.dp)
+                                Text(
+                                    text = stringResource(R.string.no_devices_nearby),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = c.faint,
+                                )
+                            }
                         }
                     } else {
                         for (peer in discovered) {
@@ -800,8 +830,9 @@ fun DevicesScreen(
 /**
  * Pixel side of the QR bitmap generated here — matches [QR_BITMAP_PX] in
  * PairActivity so both screens produce identical-quality codes.
+ * CopyPaste-s6cc: raised 512→800 to prevent downscaling blur at 3× density.
  */
-private const val DEVICES_QR_BITMAP_PX = 512
+private const val DEVICES_QR_BITMAP_PX = 800
 
 /**
  * On-screen dp side of the QR image inside the plate.
@@ -829,9 +860,15 @@ private const val DEVICES_QR_URGENT_THRESHOLD_SECONDS = 20
  * Generates a QR [Bitmap] for [text] at [sizePx] pixels. Identical to
  * [encodeQrBitmap] in PairActivity — duplicated to avoid a cross-file
  * private reference; both produce the same ZXing QR_CODE output.
+ *
+ * CopyPaste-s6cc: ECC=M + MARGIN=0 — keeps in sync with PairActivity fix.
  */
 private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap {
-    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx)
+    val hints = mapOf(
+        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+        EncodeHintType.MARGIN to 0,
+    )
+    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
     val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
     for (x in 0 until sizePx) {
         for (y in 0 until sizePx) {
@@ -953,7 +990,11 @@ private fun OwnQrSection(settings: Settings) {
         generateQr()
     }
 
-    SectionLabel("Your QR code")
+    // CopyPaste-0tb0: counteract the outer column's 16dp horizontal padding so this
+    // SectionLabel aligns with the card edge (SectionLabel itself adds start=16.dp,
+    // but it's already inside a column with horizontal=16.dp → net 32dp without the
+    // offset, vs 16dp for the card). The offset shifts the label 16dp back to the left.
+    SectionLabel("Your QR code", modifier = Modifier.offset(x = (-16).dp))
 
     CopyPasteCard {
         Column(
@@ -1016,12 +1057,15 @@ private fun OwnQrSection(settings: Settings) {
                                 },
                             contentAlignment = Alignment.Center,
                         ) {
-                            // White backing plate with QR and animated scan line.
+                            // CopyPaste-sry7: ioco pattern — pad → clip → background so
+                            // glass shows through at the slot corners (radius-card 10dp).
+                            // Mirrors PairActivity's pad→clip→bg at lines 1023-1026.
                             Box(
                                 modifier = Modifier
                                     .size(DEVICES_QR_SLOT_DP.dp)
-                                    .background(androidx.compose.ui.graphics.Color.White)
-                                    .padding(DEVICES_QR_PLATE_PADDING_DP.dp),
+                                    .padding(DEVICES_QR_PLATE_PADDING_DP.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(androidx.compose.ui.graphics.Color.White),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Image(
@@ -1251,23 +1295,31 @@ private fun PeerRow(
             }
         }
 
-        // §4 single 1dp hairline above the per-row actions.
+        // CopyPaste-g4ze: reduce divider gap (vertical 12dp → top 10 / bottom 8) to avoid
+        // disproportionate spacing between the metadata table and the action buttons.
         HorizontalDivider(
-            modifier = Modifier.padding(vertical = 12.dp),
+            modifier = Modifier.padding(top = 10.dp, bottom = 8.dp),
             color = c.divider,
             thickness = 1.dp,
         )
 
         // ── Actions ─────────────────────────────────────────────────────
+        // CopyPaste-g4ze: both buttons use the same filled-tint danger style
+        // (bg=danger@15%, fg=danger) so they have equal visual weight — matching
+        // web spec §7 "bg-ide-danger/15" for both Unpair and Revoke.
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            OutlinedButton(
+            Button(
                 onClick = onUnpair,
                 modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = c.danger.copy(alpha = 0.15f),
+                    contentColor = c.danger,
+                ),
             ) {
-                Text("Unpair", color = c.danger)
+                Text("Unpair")
             }
             Button(
                 onClick = onRevoke,
@@ -1436,6 +1488,8 @@ private fun OwnDeviceRow(
     identity: P2pIdentity,
     /** Current epoch millis from the 1-second ticker — drives live IP refresh. */
     nowMs: Long,
+    /** Public IP from a STUN lookup (CopyPaste-6qq1), null when not yet resolved. */
+    ownPublicIp: String? = null,
 ) {
     // HB-1c: render THIS device's info at parity with the macOS "This Mac" card.
     // ABI 14 sends these same fields to peers (own gather in PairActivity /
@@ -1518,6 +1572,13 @@ private fun OwnDeviceRow(
             MetaRow(label = "OS", value = osVersion)
             MetaRow(label = "Version", value = appVersion)
             localIp?.let { MetaRow(label = "Local IP", value = it) }
+            // CopyPaste-6qq1: show Public IP from async STUN lookup when available.
+            ownPublicIp?.let { MetaRow(label = "Public IP", value = it) }
+            // CopyPaste-0tb0: show own fingerprint — mirrors macOS ThisDeviceCard.
+            // Full fingerprint displayed (no truncation) so the user can verify identity.
+            identity.fingerprint.takeIf { it.isNotBlank() }?.let {
+                MetaRow(label = "Fingerprint", value = it)
+            }
         }
     }
 }
@@ -2128,6 +2189,8 @@ private fun TransportChipLabel(chip: TransportChip) {
     )
     val floatOffsetPx = if (!reducedMotion) floatOffsetRaw else 0f
 
+    // CopyPaste-sry7: RadiusChip (7dp) pill + 0.5dp hairline tinted border —
+    // matches the 483o PairActivity transport chip fix and web rounded-full style.
     Text(
         text = text,
         color = fg,
@@ -2136,7 +2199,8 @@ private fun TransportChipLabel(chip: TransportChip) {
         style = MaterialTheme.typography.labelSmall,
         modifier = Modifier
             .graphicsLayer { translationY = floatOffsetPx * density }
-            .background(bg, RoundedCornerShape(4.dp))
+            .background(bg, RadiusChip)
+            .border(0.5.dp, fg.copy(alpha = 0.35f), RadiusChip)
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }

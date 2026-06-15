@@ -66,7 +66,6 @@ import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.nativeCanvas
-import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
@@ -81,6 +80,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.widthIn
+import com.copypaste.android.Density
 import com.copypaste.android.Settings
 
 // ---------------------------------------------------------------------------
@@ -255,9 +255,14 @@ val supportsGlassBlur: Boolean
  * sample (PARITY-SPEC §2). Mirrors index.css: a base linear gradient (light =
  * soft greys; dark = deep aurora). Used both as the screen backdrop and as the
  * per-surface blur source.
+ *
+ * When [auroraDef] is provided (CopyPaste-bexa: palette-aware light/dark fix),
+ * the canvas gradient is derived from the palette's bg ramp via [auroraCanvasBrush]
+ * so each palette frosts the correct colours. Falls back to hardcoded greys when null.
  */
-fun glassCanvasBrush(dark: Boolean): Brush =
-    if (dark) {
+fun glassCanvasBrush(dark: Boolean, auroraDef: AuroraDef? = null): Brush {
+    if (auroraDef != null) return auroraCanvasBrush(auroraDef, dark)
+    return if (dark) {
         Brush.linearGradient(
             colors = listOf(Color(0xFF1A1F33), Color(0xFF121526), Color(0xFF0B0D17)),
         )
@@ -266,6 +271,7 @@ fun glassCanvasBrush(dark: Boolean): Brush =
             colors = listOf(Color(0xFFECECF1), Color(0xFFE3E3E9), Color(0xFFDADAE1)),
         )
     }
+}
 
 /**
  * One radial aurora blob (PARITY-SPEC §1, mirrors index.css `body` background).
@@ -470,7 +476,11 @@ fun LiquidGlassSurface(
     val sheen = if (dark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.45f)
     val specular = if (dark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.75f)
     val rim = glassHairline(dark)
-    val canvas = remember(dark) { glassCanvasBrush(dark) }
+    // CopyPaste-0fjj: the blur Box no longer draws any local canvas fill — it stays
+    // transparent so android.graphics.RenderEffect samples the real aurora composited
+    // behind it by the parent auroraCanvas modifier. Palette-aware colour is delivered
+    // to the aurora by auroraCanvas(dark, paletteAurora(palette)) at each call site
+    // (HistoryScreen, SettingsScreen, etc.) — not from within LiquidGlassSurface.
     val blurRadius = tier.blur
 
     Box(
@@ -478,7 +488,11 @@ fun LiquidGlassSurface(
         propagateMinConstraints = true,
     ) {
         if (translucent && supportsGlassBlur) {
-            // Real frosted backdrop: opaque canvas gradient, blur ∘ saturate(180%).
+            // CopyPaste-0fjj: REAL backdrop-blur — this Box draws NOTHING itself
+            // (no drawBehind fill) so the RenderEffect samples whatever the compositor
+            // has composited behind it (the aurora canvas from auroraCanvas modifier
+            // on the parent Box). A drawBehind here would make the blur run on a
+            // flat local gradient copy, not the colourful aurora — killing the effect.
             Box(
                 modifier = Modifier
                     .matchParentSize()
@@ -493,8 +507,8 @@ fun LiquidGlassSurface(
                         renderEffect = android.graphics.RenderEffect
                             .createChainEffect(saturationRenderEffect(), blur)
                             .asComposeRenderEffect()
-                    }
-                    .drawBehind { drawRect(canvas) },
+                    },
+                // No content, no drawBehind — transparent so blur samples real backdrop.
             )
         }
         // Per-tier fill + sheen + inset specular line (zd35/1k3i).
@@ -647,7 +661,7 @@ fun rememberTranslucency(): Boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * Standard compact header — liquid-glass, full-bleed (edge-to-edge).
+ * Standard compact header — liquid-glass, floating (CopyPaste-6krb parity fix).
  *
  * When [translucent] is true (default: reads from the "copypaste" SharedPreferences
  * key "translucency"), the container is the §2 glass fill at GLASS_ALPHA so the
@@ -655,11 +669,10 @@ fun rememberTranslucency(): Boolean {
  * bar is the fully opaque theme panel surface — the pre-glass solid look. All
  * text/icon colors come from the active light/dark ramp (LocalIdeColors).
  *
- * **Floating feel**: when translucent, a soft float shadow
- * (`0 8dp 24dp rgb(60 60 90 / .14)`) is drawn below the bar, giving it the sense
- * of hovering above screen content — matching the styleguide `.app-header` depth
- * cue. The glass blur + saturate(180%) fills the surface (GLASS tier). A clean
- * 18sp SemiBold title with muted icon tints keeps the hierarchy readable.
+ * **CopyPaste-6krb**: The header is now FLOATING — [RoundedCornerShape(14.dp)] with
+ * 8 dp horizontal inset padding, matching the styleguide `.app-header` treatment and
+ * the web ViewShell header. This mirrors the FloatingTabBar pattern (same inset+radius
+ * approach). When translucent, a soft float shadow appears via [glassFloatShadow].
  *
  * windowInsets defaults to [TopAppBarDefaults.windowInsets] so the bar
  * automatically pads its content below the status-bar / display-cutout on
@@ -682,24 +695,29 @@ fun CopyPasteTopBar(
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
 
-    // §2/P0: the TopAppBar is TRANSPARENT and a LiquidGlassSurface backdrop
-    // (API-31 RenderEffect blur, flat §2 tint fallback < 31) sits behind it,
-    // sized to the bar incl. the status-bar inset via matchParentSize.
-    // The outer Box carries the float shadow (downward, GLASS tier) so the header
-    // appears to hover above the content below it — the liquid-glass floating feel.
+    // CopyPaste-6krb: floating shape matching web parity — 14dp radius, 8dp side inset.
+    // Previously was RectangleShape + full-bleed. Now mirrors FloatingTabBar pattern.
+    val headerShape = RoundedCornerShape(14.dp)
+
+    // §2/P0: outer Box carries the horizontal inset padding + float shadow so the header
+    // appears to hover above content — the liquid-glass floating feel.
+    // The LiquidGlassSurface fills and rounds the clipped area; TopAppBar is transparent.
     Box(
-        modifier = if (translucent) Modifier.glassFloatShadow(GlassTier.GLASS, radius = 0.dp) else Modifier,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp)
+            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.GLASS, radius = 14.dp) else Modifier),
     ) {
         LiquidGlassSurface(
-            shape = RectangleShape,
+            shape = headerShape,
             translucent = translucent,
             dark = dark,
             solid = MaterialTheme.colorScheme.surface,
             modifier = Modifier.matchParentSize(),
-            // Top bars are the styleguide tier-1 .surface-glass recipe. No hairline
-            // rim on the full-bleed rectangular bar (the float shadow gives depth instead).
+            // Top bars are the styleguide tier-1 .surface-glass recipe.
+            // The glass rim gives edge definition on the rounded floating header.
             tier = GlassTier.GLASS,
-            hairline = false,
+            hairline = translucent, // hairline on floating glass; none on solid
             content = {},
         )
         TopAppBar(
@@ -1070,20 +1088,32 @@ fun SectionLabel(
 // ---------------------------------------------------------------------------
 
 /**
- * 14 dp white slider thumb with a 1 dp hairline border and no state-layer halo.
- * Drawn standalone (not SliderDefaults.Thumb) so the Material pressed/hovered
- * ring is suppressed entirely (§7).
+ * 14 dp white slider thumb centred in a 20 dp M3-compatible touch-target wrapper.
+ *
+ * CopyPaste-siio: the previous bare Box(size(14.dp)) caused M3 Slider's layout to
+ * only be 14dp tall, making the thumb appear off-centre relative to the 4dp track.
+ * Fix: outer Box(size(20.dp), Center) reports 20dp to SliderImpl so
+ * thumbOffsetY=(20-20)/2=0 and the 14dp visual circle is centred at (20-4)/2=8dp
+ * which aligns with the track centre at 10dp — the 2dp delta is imperceptible.
+ * No state-layer halo (§7) — our MutableInteractionSource is never fed to Thumb.
  */
 @Composable
 private fun GlassSliderThumb() {
     val c = LocalIdeColors.current
+    // Outer: 20dp touch-target box matching M3 default thumb geometry.
     Box(
-        modifier = Modifier
-            .size(14.dp)
-            .clip(CircleShape)
-            .drawBehind { drawCircle(Color.White) }
-            .border(1.dp, c.border, CircleShape),
-    )
+        modifier = Modifier.size(20.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        // Inner: 14dp visual circle with hairline border, no state-layer.
+        Box(
+            modifier = Modifier
+                .size(14.dp)
+                .clip(CircleShape)
+                .drawBehind { drawCircle(Color.White) }
+                .border(1.dp, c.border, CircleShape),
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1107,6 +1137,7 @@ private fun GlassSliderThumb() {
  * @param stepLabels Human-readable label per step (same length as [stepValues]).
  * @param currentValue The currently active raw value (snapped to nearest step on load).
  * @param onRelease  Called when the user lifts their finger with the chosen raw value.
+ * @param density    CopyPaste-hffp: current UI density — compact mode uses bodyMedium label.
  */
 @Composable
 fun SteppedSliderRow(
@@ -1116,6 +1147,7 @@ fun SteppedSliderRow(
     currentValue: Long,
     onRelease: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    density: Density = Density.COMFORTABLE,
 ) {
     require(stepValues.size >= 2) { "SteppedSliderRow needs ≥ 2 steps" }
     require(stepValues.size == stepLabels.size) { "stepValues and stepLabels must be same length" }
@@ -1131,6 +1163,13 @@ fun SteppedSliderRow(
     // (i.e. array.size - 2 means stepValues.size total positions including endpoints).
     val discreteSteps = (stepValues.size - 2).coerceAtLeast(0)
 
+    // CopyPaste-hffp: compact mode uses bodyMedium (14sp) for the label to match
+    // the density-aware Settings rows; comfortable keeps bodyLarge (16sp).
+    val labelStyle = if (density == Density.COMPACT)
+        MaterialTheme.typography.bodyMedium
+    else
+        MaterialTheme.typography.bodyLarge
+
     Column(modifier = modifier
         .fillMaxWidth()
         .padding(horizontal = 16.dp, vertical = 8.dp)
@@ -1143,7 +1182,7 @@ fun SteppedSliderRow(
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodyLarge,
+                style = labelStyle,
                 color = c.text,
             )
             Text(
@@ -1218,6 +1257,7 @@ fun SteppedSliderRow(
  * @param max         Maximum allowed value (inclusive).
  * @param formatValue Converts the current integer to a display string (e.g. "120 px").
  * @param onRelease   Called with the chosen value when the user lifts their finger.
+ * @param density     CopyPaste-hffp: current UI density — compact mode uses bodyMedium label.
  */
 @Composable
 fun ContinuousSliderRow(
@@ -1228,9 +1268,16 @@ fun ContinuousSliderRow(
     formatValue: (Int) -> String,
     onRelease: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    density: Density = Density.COMFORTABLE,
 ) {
     val c = LocalIdeColors.current
     var sliderPos by remember(value) { mutableFloatStateOf(value.coerceIn(min, max).toFloat()) }
+
+    // CopyPaste-hffp: compact mode uses bodyMedium (14sp) for the label.
+    val labelStyle = if (density == Density.COMPACT)
+        MaterialTheme.typography.bodyMedium
+    else
+        MaterialTheme.typography.bodyLarge
 
     Column(modifier = modifier
         .fillMaxWidth()
@@ -1243,7 +1290,7 @@ fun ContinuousSliderRow(
         ) {
             Text(
                 text = label,
-                style = MaterialTheme.typography.bodyLarge,
+                style = labelStyle,
                 color = c.text,
             )
             Text(

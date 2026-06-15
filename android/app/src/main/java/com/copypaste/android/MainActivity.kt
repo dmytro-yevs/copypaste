@@ -28,10 +28,7 @@ import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Hub
-import androidx.compose.material.icons.outlined.Settings
+import com.copypaste.android.ui.theme.NavIcons
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -264,13 +261,12 @@ class MainActivity : ComponentActivity() {
 // reads R.string.title_devices ("Devices") instead of the old hardcoded "Pair",
 // matching the Devices screen title — pairing lives INSIDE that screen now.
 internal enum class NavTab(@StringRes val labelRes: Int, val icon: ImageVector) {
-    // SF-like outline icons — thin stroke, ~1.8 dp optical weight (dm51 android):
-    //   CLIPS   → History  (clock + anticlockwise arrow, SF "clock.arrow.circlepath")
-    //   DEVICES → Hub      (6-spoke radial, SF "network" / "wifi.router" — paired devices)
-    //   SETTINGS→ Settings (thin gear — SF "gearshape", universally recognised)
-    CLIPS(R.string.title_history, Icons.Outlined.History),
-    DEVICES(R.string.title_devices, Icons.Outlined.Hub),
-    SETTINGS(R.string.title_settings, Icons.Outlined.Settings),
+    // CopyPaste-dm51 (NavIcons.kt): bespoke SF-like thin-stroke ImageVectors
+    // matching web NavIcons.tsx (clock.arrow.circlepath / laptopcomputer.and.iphone / gear).
+    // Previously used Icons.Outlined.History/Hub/Settings (thicker Material icons).
+    CLIPS(R.string.title_history, NavIcons.History),
+    DEVICES(R.string.title_devices, NavIcons.Devices),
+    SETTINGS(R.string.title_settings, NavIcons.Settings),
 }
 
 @Composable
@@ -325,38 +321,43 @@ private fun MainShell(viewModel: ClipboardViewModel) {
             // inset the top (status-bar) on every screen that already adds it.
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
         ) { innerPadding ->
-            // Stack the active screen above a slim sync-status strip. contentBottomPadding
-            // ensures the list body is never hidden behind the floating tab bar.
-            Column(modifier = Modifier.padding(innerPadding)) {
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(bottom = contentBottomPadding),
-                ) {
-                    when (NavTab.entries[selectedTab]) {
-                        NavTab.CLIPS -> HistoryScreen(
-                            viewModel = viewModel,
-                            showBackButton = false,
-                            onBack = {},
-                            // Shell already paints the full-window aurora behind everything.
-                            paintCanvasBackdrop = false,
-                        )
-                        NavTab.DEVICES -> DevicesScreen(
-                            showBackButton = false,
-                            onBack = {},
-                            paintCanvasBackdrop = false,
-                        )
-                        NavTab.SETTINGS -> SettingsScreen(
-                            showBackButton = false,
-                            onBack = {},
-                            onRegisterNavGuard = { guard -> settingsNavGuard = guard },
-                            paintCanvasBackdrop = false,
-                            // CopyPaste-u30t: navigate to the History/home tab after saving.
-                            onSaved = { selectedTab = NavTab.CLIPS.ordinal },
-                        )
-                    }
+            // CopyPaste-r3qq fix: use fillMaxSize instead of Column(padding(innerPadding))
+            // to eliminate the grey strip that the inner padding + Column produced above
+            // the floating bar. contentBottomPadding ensures the list clears the bar.
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(bottom = contentBottomPadding),
+            ) {
+                when (NavTab.entries[selectedTab]) {
+                    NavTab.CLIPS -> HistoryScreen(
+                        viewModel = viewModel,
+                        showBackButton = false,
+                        onBack = {},
+                        // Shell already paints the full-window aurora behind everything.
+                        paintCanvasBackdrop = false,
+                    )
+                    NavTab.DEVICES -> DevicesScreen(
+                        showBackButton = false,
+                        onBack = {},
+                        paintCanvasBackdrop = false,
+                    )
+                    NavTab.SETTINGS -> SettingsScreen(
+                        showBackButton = false,
+                        onBack = {},
+                        onRegisterNavGuard = { guard -> settingsNavGuard = guard },
+                        paintCanvasBackdrop = false,
+                        // CopyPaste-u30t: navigate to the History/home tab after saving.
+                        onSaved = { selectedTab = NavTab.CLIPS.ordinal },
+                    )
                 }
-                SyncStatusBadge()
+                // CopyPaste-r3qq: SyncStatusBadge overlaid at bottom-center as a Box
+                // child so it floats above the screen content rather than being pushed
+                // below the tab bar by Column layout. z-order: content < badge < tab bar.
+                Box(modifier = Modifier.align(Alignment.BottomCenter)) {
+                    SyncStatusBadge()
+                }
             }
         }
 
@@ -427,12 +428,15 @@ private fun FloatingTabBar(
         tier = GlassTier.GLASS,
         // The hairline glass rim gives the pill its edge definition.
         hairline = true,
+        // CopyPaste-r3qq: fillMaxWidth MUST come BEFORE padding so the horizontal
+        // padding actually bites into the full width (previously padding came first,
+        // then fillMaxWidth ignored it and expanded to full parent width).
         modifier = modifier
+            .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .padding(bottom = navBarBottomPadding)
             // Styleguide: box-shadow 0 18px 45px rgba(0,0,0,.20) — soft float shadow.
-            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.GLASS, 28.dp) else Modifier)
-            .fillMaxWidth(),
+            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.GLASS, 28.dp) else Modifier),
     ) {
         Row(
             modifier = Modifier
@@ -457,8 +461,9 @@ private fun FloatingTabBar(
 
                 val iconColor = if (isSelected) c.accentOn else c.faint
                 val textColor = if (isSelected) c.accentOn else c.faint
-                // Active pill: styleguide `color-mix(in srgb, var(--accent) 75%, transparent)`
-                val pillColor = if (isSelected) c.accent.copy(alpha = 0.75f) else Color.Transparent
+                // CopyPaste-mpp6: active pill uses solid accent per styleguide nav spec.
+                // Previous value was accent@75% (translucent) — now solid.
+                val pillColor = if (isSelected) c.accent else Color.Transparent
 
                 Box(
                     modifier = Modifier

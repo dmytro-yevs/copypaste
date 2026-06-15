@@ -25,7 +25,8 @@ enum class SyncBackend {
 /** UI density — mirrors prefs.density in the macOS/web SettingsView (§2/§6). */
 enum class Density {
     COMFORTABLE, // 34dp rows (default)
-    COMPACT;     // 28dp rows
+    COMPACT,     // 28dp rows
+    SPACIOUS;    // CopyPaste-gzli: 42dp rows — largest spacing step, mirrors web spacious branch
 
     companion object {
         val DEFAULT = COMFORTABLE
@@ -509,8 +510,9 @@ class Settings(context: Context) {
      */
     var density: Density
         get() = when (prefs.getString("density", Density.DEFAULT.name)) {
-            Density.COMPACT.name -> Density.COMPACT
-            else -> Density.COMFORTABLE
+            Density.COMPACT.name   -> Density.COMPACT
+            Density.SPACIOUS.name  -> Density.SPACIOUS  // CopyPaste-gzli: spacious density step
+            else                   -> Density.COMFORTABLE
         }
         set(v) = prefs.edit().putString("density", v.name).apply()
 

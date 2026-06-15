@@ -206,10 +206,16 @@ class ClipboardRepository(context: Context) {
      * Returns the total number of non-deleted unpinned items in the store.
      * Used by the pagination logic in [ClipboardViewModel] to detect when all
      * pages have been loaded (no more items to fetch).
+     * Excludes soft-delete tombstones — mirrors the isDeletedBlob() filter in
+     * getItems() so the hasMore sentinel stays in sync with actual visible rows.
      */
     fun unpinnedItemCount(): Int {
         val pinnedSet = storedPinnedIds()
-        return storedIds().count { it !in pinnedSet }
+        return storedIds().count { id ->
+            if (id in pinnedSet) return@count false
+            val raw = prefs.getString("item_$id", null) ?: return@count false
+            !isDeletedBlob(raw)
+        }
     }
 
     /**
@@ -942,8 +948,13 @@ class ClipboardRepository(context: Context) {
     /**
      * Total number of stored items (pinned + unpinned).
      * Used by the history header count display (parity with macOS).
+     * Excludes soft-delete tombstones that remain in KEY_ITEM_IDS to prevent
+     * re-sync resurrection — mirrors the isDeletedBlob() filter in getItems().
      */
-    fun totalItemCount(): Int = storedIds().size
+    fun totalItemCount(): Int = storedIds().count { id ->
+        val raw = prefs.getString("item_$id", null) ?: return@count false
+        !isDeletedBlob(raw)
+    }
 
     /**
      * Decrypt and return the FULL plaintext for item [id], or null when the item

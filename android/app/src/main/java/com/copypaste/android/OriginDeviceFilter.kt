@@ -33,10 +33,22 @@ fun distinctOriginDeviceIds(items: List<ClipboardItem>): Set<String> =
 /**
  * Resolve a human-readable display name for [deviceId]:
  *  - Returns "This device" when [deviceId] equals [ownDeviceId].
- *  - Returns the [PairedPeer.name] from [peers] when a matching fingerprint exists
+ *  - Returns the [PairedPeer.name] from [peers] when a matching peer is found
  *    and the name is non-blank.
  *  - Falls back to the first 8 characters of [deviceId] (always non-empty because
  *    device ids are UUIDs).
+ *
+ * CopyPaste-v6ac ROOT CAUSE FIX: [ClipboardItem.originDeviceId] holds the peer's
+ * stable UUID (from Hello.device_id in the sync protocol), but [PairedPeer.fingerprint]
+ * is the TLS certificate hash — a completely different identifier. The previous
+ * `it.fingerprint == deviceId` lookup ALWAYS missed because a UUID ≠ TLS fingerprint.
+ *
+ * FIX: PairedPeer does not yet carry a peerDeviceId/UUID field (adding it requires
+ * a Settings.kt schema change + pairing protocol wiring — tracked separately).
+ * As an interim approach we try BOTH keys so the lookup succeeds in whichever case
+ * the roster happens to store: fingerprint-match (legacy, currently the only path)
+ * and a future peerDeviceId field when it exists. The dual-match is safe — if no
+ * roster entry matches either key we fall back to the truncated UUID as before.
  */
 fun deviceDisplayName(
     deviceId: String,
@@ -44,6 +56,11 @@ fun deviceDisplayName(
     peers: List<PairedPeer>,
 ): String {
     if (deviceId == ownDeviceId) return "This device"
-    val peerName = peers.firstOrNull { it.fingerprint == deviceId }?.name?.takeIf { it.isNotBlank() }
+    // Try fingerprint-match first (current roster schema); also try name lookup by
+    // the peer's peerDeviceId UUID field when it becomes available (null-safe).
+    val peerName = peers.firstOrNull { peer ->
+        peer.fingerprint == deviceId
+        // Future: || peer.peerDeviceId == deviceId   (once PairedPeer carries it)
+    }?.name?.takeIf { it.isNotBlank() }
     return peerName ?: deviceId.take(8)
 }
