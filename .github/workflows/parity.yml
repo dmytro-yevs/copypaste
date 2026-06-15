@@ -1,0 +1,43 @@
+name: Design Token Parity Check
+
+# Run when either design-token source file changes.
+# The check ensures web (index.css) and Android (Palette.kt) colour ramps
+# stay aligned — the automated enforcement of docs/PARITY-SPEC.md §A.
+on:
+  pull_request:
+    paths:
+      - "crates/copypaste-ui/src/index.css"
+      - "android/app/src/main/java/com/copypaste/android/ui/theme/Palette.kt"
+      - "scripts/parity-check.mjs"
+      - "docs/PARITY-SPEC.md"
+  push:
+    branches:
+      - main
+    paths:
+      - "crates/copypaste-ui/src/index.css"
+      - "android/app/src/main/java/com/copypaste/android/ui/theme/Palette.kt"
+      - "scripts/parity-check.mjs"
+      - "docs/PARITY-SPEC.md"
+  # Allow manual runs from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  parity:
+    name: Web ↔ Android token parity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Run parity check
+        run: node scripts/parity-check.mjs --verbose
+        # Exit code 0 = all tokens within tolerance (PASS)
+        # Exit code 1 = one or more tokens diverge beyond ±5/255 per channel (FAIL)
+        # If this step fails, check docs/PARITY-SPEC.md §A for the expected values
+        # and update whichever platform drifted.
