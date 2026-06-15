@@ -1328,6 +1328,40 @@ pub struct IpcServer {
     /// `std::sync::Mutex` (not tokio's) because the critical section is a
     /// short drain with no `.await`.
     peer_event_queue: Arc<std::sync::Mutex<std::collections::VecDeque<PeerEventRecord>>>,
+
+    /// Handle to the most-recently-started mDNS-SD browse task (CopyPaste-ydhw).
+    ///
+    /// `rescan_discovered` calls `DiscoveryService::start()` which aborts the
+    /// previous browse task via `shutdown_inner()`.  The old code detached the
+    /// new browse handle with a bare `tokio::spawn` — the task ran indefinitely
+    /// without participating in P2P shutdown or being replaceable on the next
+    /// rescan.
+    ///
+    /// The fix: store the live browse `JoinHandle` here.  On each
+    /// `rescan_discovered` call the previous handle (if any) is aborted before
+    /// the new browse starts, and the new handle is stored in its place.  This
+    /// prevents handle accumulation across multiple rescans.
+    ///
+    /// `std::sync::Mutex` because every critical section is a quick
+    /// take/replace with no `.await`.
+    discovery_browse_handle:
+        Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+
+    /// Optional P2P subsystem shutdown token (CopyPaste-ydhw).
+    ///
+    /// When populated (via [`p2p_shutdown_token_slot`](Self::p2p_shutdown_token_slot)),
+    /// the `rescan_discovered` handler wraps the replacement browse handle in a
+    /// `select!` that exits on P2P shutdown, ensuring the detached browse
+    /// participates in graceful teardown.
+    ///
+    /// `daemon.rs` writes this slot after `start_p2p` returns (same pattern as
+    /// `live_peer_sinks_slot`).  `None` means the slot has not been populated
+    /// yet (or P2P is disabled) — the browse task then runs until the next
+    /// rescan or process exit.
+    ///
+    /// `std::sync::Mutex` because the critical section is a trivial clone with
+    /// no `.await`.
+    p2p_shutdown_token: Arc<std::sync::Mutex<Option<CancellationToken>>>,
 }
 
 /// Wire-serialisable peer event record returned by `poll_peer_events`.
@@ -1446,6 +1480,21 @@ impl IpcServer {
         &self,
     ) -> Arc<std::sync::Mutex<std::collections::VecDeque<PeerEventRecord>>> {
         Arc::clone(&self.peer_event_queue)
+    }
+
+    /// Return the slot that `daemon.rs` can write the P2P subsystem's
+    /// `CancellationToken` into after `start_p2p` returns (CopyPaste-ydhw).
+    ///
+    /// When populated, `rescan_discovered` wraps the replacement mDNS-SD browse
+    /// task in a `select!` that respects P2P shutdown, preventing the browse
+    /// from outliving the P2P subsystem.  Follows the same lazy-injection
+    /// pattern as [`live_peer_sinks_slot`](Self::live_peer_sinks_slot).
+    ///
+    /// `None` means P2P is disabled or `start_p2p` has not yet returned.
+    pub fn p2p_shutdown_token_slot(
+        &self,
+    ) -> Arc<std::sync::Mutex<Option<CancellationToken>>> {
+        Arc::clone(&self.p2p_shutdown_token)
     }
 
     /// Attach a clone of the running sync orchestrator's `SyncCrypto` context
@@ -1595,6 +1644,8 @@ impl IpcServer {
             p2p_sync_crypto: None,
             pending_bootstrap: Arc::new(tokio::sync::Mutex::new(None)),
             peer_event_queue: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            discovery_browse_handle: Arc::new(std::sync::Mutex::new(None)),
+            p2p_shutdown_token: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -5661,16 +5712,75 @@ impl IpcServer {
                     None => return Response::err(req.id, "discovery not available (P2P disabled)"),
                 };
 
-                // Restart-in-place re-browse. `start()` returns a JoinHandle for
-                // the new browse loop; detach it onto the runtime so the rebrowse
-                // keeps running after this request returns (the handle would
-                // otherwise be dropped, cancelling the task). `start()` already
-                // shuts down any prior task internally, so this does not leak.
+                // CopyPaste-ydhw: abort any browse handle stored from a prior
+                // rescan before starting a new one.  This prevents accumulation
+                // of orphaned browse tasks across multiple UI "Refresh" presses.
+                //
+                // Note: `disc.start()` (below) also calls `shutdown_inner()`
+                // which aborts the `DiscoveryService`-internal AbortHandle.
+                // Aborting `prev_handle` here covers the JoinHandle we returned
+                // from the *previous* rescan — the two mechanisms are complementary.
+                {
+                    let mut slot = self
+                        .discovery_browse_handle
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner());
+                    if let Some(prev_handle) = slot.take() {
+                        prev_handle.abort();
+                    }
+                }
+
+                // Restart-in-place re-browse.  `disc.start()` aborts the prior
+                // browse via `shutdown_inner()`, which also aborts the JoinHandle
+                // that `start_p2p`'s discovery task was select!-ing on — that
+                // task then exits (see p2p.rs discovery task, CopyPaste-ydhw).
+                // The IPC server takes over lifecycle ownership of the new browse
+                // via `discovery_browse_handle`.
+                //
+                // If the P2P shutdown token is available (daemon.rs writes it
+                // into `p2p_shutdown_token` after `start_p2p` returns), we wrap
+                // the browse handle in a select! so it participates in graceful
+                // shutdown.  When the token is absent (P2P disabled, or the slot
+                // not yet wired by daemon.rs) we still store the handle so the
+                // next rescan can abort it.
                 match disc.start().await {
                     Ok(handle) => {
-                        tokio::spawn(async move {
-                            let _ = handle.await;
-                        });
+                        // Clone the shutdown token BEFORE locking browse_handle
+                        // to avoid holding the mutex across an await.
+                        let maybe_token: Option<CancellationToken> = {
+                            self.p2p_shutdown_token
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .clone()
+                        };
+
+                        let wrapper_handle = if let Some(token) = maybe_token {
+                            // Wrap the browse handle with a cancellation select!
+                            // so P2P shutdown aborts the browse task cleanly.
+                            tokio::spawn(async move {
+                                tokio::select! {
+                                    _ = handle => {}
+                                    _ = token.cancelled() => {
+                                        tracing::debug!(
+                                            "rescan_discovered browse task shut down by P2P shutdown token"
+                                        );
+                                    }
+                                }
+                            })
+                        } else {
+                            // No shutdown token yet — spawn a plain wrapper so
+                            // dropping `wrapper_handle` does not abort the browse.
+                            // The browse runs until the next rescan aborts it.
+                            tokio::spawn(async move {
+                                let _ = handle.await;
+                            })
+                        };
+
+                        // Store the wrapper handle so the next rescan can abort it.
+                        *self
+                            .discovery_browse_handle
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner()) = Some(wrapper_handle);
                     }
                     Err(e) => {
                         return Response::err(req.id, format!("rescan failed to start: {e}"));

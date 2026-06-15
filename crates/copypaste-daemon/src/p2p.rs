@@ -629,10 +629,43 @@ pub async fn start_p2p(
                         device_name = %device_name_for_task,
                         "mDNS-SD discovery service running"
                     );
-                    // BUG F1: race the mDNS handle against cancellation so the task
-                    // exits promptly on shutdown instead of awaiting `handle` forever.
+                    // CopyPaste-ydhw: race the mDNS handle against shutdown.
+                    //
+                    // The `rescan_discovered` IPC handler calls `disc.start()`
+                    // which triggers `shutdown_inner()` inside the
+                    // `DiscoveryService`, aborting the browse JoinHandle this
+                    // select! arm is waiting on.  When that happens the `_ =
+                    // handle` arm fires and this task exits — that is now
+                    // intentional.  `rescan_discovered` stores its replacement
+                    // browse handle in `IpcServer::discovery_browse_handle` and
+                    // owns the lifecycle from that point on; this task gracefully
+                    // hands off rather than leaking or double-running.
+                    //
+                    // BUG F1 (original): race the mDNS handle against
+                    // cancellation so the task exits promptly on daemon shutdown
+                    // instead of awaiting `handle` forever.
                     tokio::select! {
-                        _ = handle => {}
+                        result = handle => {
+                            match result {
+                                Ok(()) => {
+                                    // Browse loop exited normally (channel closed).
+                                    tracing::debug!("mDNS-SD browse loop exited");
+                                }
+                                Err(e) if e.is_cancelled() => {
+                                    // Handle was aborted — most likely by a
+                                    // `rescan_discovered` call which restarts the
+                                    // browse in-place.  The IPC server now owns
+                                    // the new handle; this task exits cleanly.
+                                    tracing::debug!(
+                                        "mDNS-SD browse handle aborted (likely rescan) \
+                                         — discovery task exiting, IPC server owns new handle"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!("mDNS-SD browse task panicked: {e}");
+                                }
+                            }
+                        }
                         _ = discovery_shutdown.cancelled() => {
                             tracing::info!("mDNS-SD discovery task shutting down");
                         }
@@ -779,10 +812,25 @@ async fn accept_loop(
                         // Spawn the periodic RTT ping task. It holds a clone of
                         // cleanup_tx (the same sink as the drainer) to inject
                         // Ping frames through the normal outbound channel.
+                        // CopyPaste-8i3q: also pass peer_sinks + peer_key +
+                        // peer_event_tx so ping_loop can evict the stale sink
+                        // and emit Disconnected when a Pong times out.
                         let ping_fp = peer_fp.clone();
                         let ping_sink = cleanup_tx.clone();
+                        let ping_sinks = Arc::clone(&peer_sinks);
+                        let ping_key = peer_key.clone();
+                        let ping_event_tx = peer_event_tx.clone();
                         tokio::spawn(async move {
-                            ping_loop(ping_sink, ping_fp, pending_pings, rtt_map_for_ping).await;
+                            ping_loop(
+                                ping_sink,
+                                ping_fp,
+                                pending_pings,
+                                rtt_map_for_ping,
+                                ping_sinks,
+                                ping_key,
+                                ping_event_tx,
+                            )
+                            .await;
                         });
 
                         tokio::spawn(async move {
@@ -1252,8 +1300,23 @@ async fn peer_connector_loop(
                         let pending_pings_for_conn = Arc::clone(&pending_pings);
                         let ping_fp = peer.fingerprint.clone();
                         let ping_sink = cleanup_tx.clone();
+                        // CopyPaste-8i3q: pass peer_sinks + peer_key + event_tx
+                        // so ping_loop can evict the stale sink and emit
+                        // Disconnected when a Pong times out.
+                        let ping_sinks = Arc::clone(&peer_sinks);
+                        let ping_key = peer_key.clone();
+                        let ping_event_tx = peer_event_tx.clone();
                         tokio::spawn(async move {
-                            ping_loop(ping_sink, ping_fp, pending_pings, rtt_map_for_ping).await;
+                            ping_loop(
+                                ping_sink,
+                                ping_fp,
+                                pending_pings,
+                                rtt_map_for_ping,
+                                ping_sinks,
+                                ping_key,
+                                ping_event_tx,
+                            )
+                            .await;
                         });
 
                         tokio::spawn(async move {
@@ -1591,13 +1654,30 @@ async fn run_peer_connection_framed<S>(
 /// nonces after [`PING_PONG_TIMEOUT`] so the map doesn't grow unbounded
 /// against peers that don't speak the Ping/Pong protocol.
 ///
-/// The task exits when `peer_sink` is closed (the connection dropped and the
-/// per-connection task removed the sink from `peer_sinks`).
+/// **Dead-connection detection (CopyPaste-8i3q):** when at least one nonce is
+/// expired (i.e. a Pong never arrived within `PING_PONG_TIMEOUT`), the TCP
+/// connection has silently died (NAT drop, OS suspend, etc.).  The task then:
+/// 1. Removes `peer_fp` from `peer_sinks` so `list_peers` reports offline.
+/// 2. Emits `PeerEvent::Disconnected` so the Tauri event bridge pushes an
+///    immediate UI update without waiting for the next `list_peers` poll.
+/// 3. Exits — dropping `peer_sink` closes one sender; the connection task's
+///    `run_peer_connection_framed` will eventually exit when the dead TCP
+///    stream errors, and its cleanup block (same `same_channel` guard as the
+///    accept/connector paths) skips re-emitting `Disconnected` because `peer_fp`
+///    is already gone from `peer_sinks`.
+///
+/// The task also exits when `peer_sink.send` fails (the connection task has
+/// already exited and dropped its receiver).
+#[allow(clippy::too_many_arguments)] // RTT + presence params pushed count over 5
 async fn ping_loop(
     peer_sink: mpsc::Sender<PeerFrame>,
     peer_fp: DeviceFingerprint,
     pending_pings: PendingPings,
     peer_rtt_ms: PeerRttMs,
+    // CopyPaste-8i3q: needed to evict the stale sink when a ping times out.
+    peer_sinks: PeerSinks,
+    peer_key: DeviceFingerprint,
+    peer_event_tx: broadcast::Sender<PeerEvent>,
 ) {
     let mut interval = tokio::time::interval(PING_INTERVAL);
     // Skip the first (immediate) tick so we don't ping before the catchup
@@ -1608,10 +1688,46 @@ async fn ping_loop(
         interval.tick().await;
 
         // Expire stale pending pings before sending a new one.
-        {
+        // CopyPaste-8i3q: if any nonce expired it means we sent a Ping and
+        // never received a matching Pong within PING_PONG_TIMEOUT — the TCP
+        // connection is silently dead.  Evict the peer proactively so
+        // `list_peers` reports offline immediately (instead of waiting for the
+        // OS to eventually detect the dead TCP socket, which can take minutes).
+        let had_expired = {
             let mut map = pending_pings.lock().await;
+            let before = map.len();
             let now = Instant::now();
             map.retain(|_, sent_at| now.duration_since(*sent_at) < PING_PONG_TIMEOUT);
+            map.len() < before // true iff at least one nonce was just expired
+        };
+
+        if had_expired {
+            tracing::warn!(
+                peer = %peer_fp,
+                "RTT: Pong not received within {:?} — treating connection as dead",
+                PING_PONG_TIMEOUT,
+            );
+
+            // Remove the sink from the shared map so list_peers sees offline.
+            // The cleanup guard in the connection task uses `same_channel` to
+            // avoid re-removing an already-gone entry, so no double-eviction.
+            // Lock ordering: acquire peer_sinks, drop it, then acquire peer_rtt_ms
+            // to avoid holding two tokio Mutexes simultaneously (lock-order safety).
+            peer_sinks.lock().await.remove(&peer_key);
+            peer_rtt_ms.lock().await.remove(&peer_fp);
+
+            // Notify subscribers (Tauri event bridge) immediately so the UI
+            // goes offline without waiting for the next list_peers poll.
+            // `send` returns Err when there are no active receivers — ignore.
+            let _ = peer_event_tx.send(PeerEvent::Disconnected {
+                fingerprint: peer_key.clone(),
+            });
+
+            // Exit the ping task — the connection task will exit on its own
+            // when the dead TCP stream finally errors (may take minutes via OS
+            // keepalive), but presence is already corrected above.
+            tracing::debug!(peer = %peer_fp, "RTT: ping loop exiting (dead connection evicted)");
+            return;
         }
 
         let nonce: u64 = {

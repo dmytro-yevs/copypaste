@@ -820,11 +820,31 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 // The closure is `Fn` (sync) but the DB sits behind a tokio
                 // Mutex; `block_in_place` + `blocking_lock` safely acquires
                 // it on the multi-thread runtime without blocking the worker.
+                //
+                // Fix B (P2P image perf): split the catch-up into two phases so
+                // the DB lock is held ONLY for the sequential read, not for the
+                // CPU-heavy per-image re-key (chunk-decrypt + shared-key
+                // re-encrypt).  On reconnect with a large history this previously
+                // blocked the tokio executor for hundreds of milliseconds while
+                // holding the mutex across every image's AEAD work.
+                //   Phase 1: acquire lock, read all raw pages, release lock.
+                //   Phase 2: re-key items (CPU, no DB lock).
                 let fp = peer_fingerprint.to_owned();
-                tokio::task::block_in_place(|| {
+
+                // Pre-flight: if the connecting peer has no sync key nothing is
+                // decryptable, so skip both phases entirely (fast path).
+                if crypto.sync_key_for_peer(&fp).is_none() {
+                    return Vec::new();
+                }
+
+                // Phase 1: read raw items (DB lock held only here).
+                let raw = tokio::task::block_in_place(|| {
                     let db = catchup_db.blocking_lock();
-                    sync_orch::catchup_items(&db, &catchup_device_id, &crypto, &fp)
-                })
+                    sync_orch::catchup_read_raw(&db, &catchup_device_id)
+                });
+
+                // Phase 2: re-key outside the DB lock (CPU work).
+                sync_orch::rekey_catchup_items(raw, &crypto, &fp)
             })
         };
 

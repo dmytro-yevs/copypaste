@@ -41,6 +41,12 @@ use copypaste_core::{
     prune_to_cap, ClipboardItem, Database, MigrationState, SyncKey, AAD_SCHEMA_VERSION_V4,
     NONCE_SIZE,
 };
+// c7fp: encrypt_chunks / IMAGE_CHUNK_SIZE / ImageMeta are only used in
+// `rewrap_inbound_blob` and `read_png_dimensions` which are macOS-only
+// (`#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`).  Allow the
+// import to be unused on non-macOS so -D warnings stays green.
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+use copypaste_core::{encrypt_chunks, ImageMeta, IMAGE_CHUNK_SIZE};
 use copypaste_sync::{
     merge::{local_to_wire_owned, resolve, wire_to_local, MergeOutcome},
     protocol::WireItem,
@@ -449,175 +455,258 @@ pub async fn merge_incoming_with_crypto(
         )
     });
 
+    // A staged item ready for the CPU re-key step (runs with the DB lock
+    // released so PNG decode+re-encode does not stall other DB writers).
+    struct PendingRekey {
+        wire: WireItem,
+        local_pk: Option<String>,
+        exists: bool,
+        wall_time: i64,
+        content_type: String,
+    }
+
     let result = tokio::task::spawn_blocking(move || {
-        // Acquire the std-compatible blocking lock INSIDE the blocking closure.
-        // This keeps the tokio executor free while we hold the lock and run
-        // synchronous rusqlite calls (HIGH fix #2).
-        let db_guard = db.blocking_lock();
+        // ── Phase 1: LWW resolution + tombstone writes (DB lock held) ────────
+        //
+        // We acquire the lock, resolve LWW for every item, and immediately write
+        // tombstones (they need no CPU re-key work).  Non-tombstone winners are
+        // collected into `pending` so the CPU-heavy re-key step (image
+        // decode+re-encode inside `rekey_inbound`) can run AFTER we release the
+        // lock.  Holding the DB mutex across PNG decode was the primary cause of
+        // the "tiny image blocks all DB writers" stall (Fix A).
+        let (upserted_from_tombstones, pending): (usize, Vec<PendingRekey>) = {
+            // Acquire the std-compatible blocking lock INSIDE the blocking closure.
+            // This keeps the tokio executor free while we hold the lock and run
+            // synchronous rusqlite calls (HIGH fix #2).
+            let db_guard = db.blocking_lock();
 
-        let mut upserted = 0usize;
-        // Candidate for auto-apply: (wall_time, plaintext_bytes, content_type).
-        // We track the highest-wall_time winner across the batch so only the
-        // single freshest item is applied to NSPasteboard even during a burst.
-        let mut apply_candidate: Option<(i64, Vec<u8>, String)> = None;
+            let mut tombstone_count = 0usize;
+            let mut pending: Vec<PendingRekey> = Vec::with_capacity(items.len());
 
-        for mut wire in items {
-            // P0 security/correctness: clamp any negative lamport_ts / wall_time
-            // before processing. A hostile or buggy peer can send lamport_ts = -1
-            // which, when cast to u64 for the Lamport clock, becomes u64::MAX and
-            // wins every LWW comparison forever. Clamping to 0 at ingest makes
-            // the item a low-priority candidate that local items will override.
-            wire.clamp_timestamps();
+            for mut wire in items {
+                // P0 security/correctness: clamp any negative lamport_ts / wall_time
+                // before processing. A hostile or buggy peer can send lamport_ts = -1
+                // which, when cast to u64 for the Lamport clock, becomes u64::MAX and
+                // wins every LWW comparison forever. Clamping to 0 at ingest makes
+                // the item a low-priority candidate that local items will override.
+                wire.clamp_timestamps();
 
-            // B1 FIX: look up by the STABLE cross-device `item_id` (the CRDT
-            // identity), NOT `wire.id` (the peer's per-row primary key which is a
-            // fresh UUID on every device and therefore never matches the local row).
-            // Using `wire.id` caused the lookup to always return None, so the code
-            // treated every incoming item as new and tried to INSERT with the peer's
-            // PK — hitting the `idx_clipboard_item_id` UNIQUE constraint when the
-            // item already existed locally, silently dropping the update.
-            // Mirrors the cloud path (`cloud.rs`: `get_item_by_item_id`).
-            let existing = match copypaste_core::get_item_by_item_id(&db_guard, &wire.item_id) {
-                Ok(row) => row,
-                Err(e) => {
-                    warn!(item_id = %wire.item_id, "sync_orch: get_item_by_item_id failed: {e}");
+                // B1 FIX: look up by the STABLE cross-device `item_id` (the CRDT
+                // identity), NOT `wire.id` (the peer's per-row primary key which is a
+                // fresh UUID on every device and therefore never matches the local row).
+                // Using `wire.id` caused the lookup to always return None, so the code
+                // treated every incoming item as new and tried to INSERT with the peer's
+                // PK — hitting the `idx_clipboard_item_id` UNIQUE constraint when the
+                // item already existed locally, silently dropping the update.
+                // Mirrors the cloud path (`cloud.rs`: `get_item_by_item_id`).
+                let existing = match copypaste_core::get_item_by_item_id(&db_guard, &wire.item_id) {
+                    Ok(row) => row,
+                    Err(e) => {
+                        warn!(item_id = %wire.item_id, "sync_orch: get_item_by_item_id failed: {e}");
+                        continue;
+                    }
+                };
+                // Capture the local primary key before moving `existing` into resolve.
+                // On TakeRemote we patch `to_insert.id` so FTS / copy_item / pins that
+                // are keyed on the local `id` keep pointing at the same row — mirroring
+                // the cloud path's `preserved_pk` pattern.
+                let local_pk: Option<String> = existing.as_ref().map(|r| r.id.clone());
+                let exists = existing.is_some();
+                let take_remote = match existing.as_ref() {
+                    Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
+                    None => true,
+                };
+
+                if !take_remote {
+                    debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
                     continue;
                 }
-            };
-            // Capture the local primary key before moving `existing` into resolve.
-            // On TakeRemote we patch `to_insert.id` so FTS / copy_item / pins that
-            // are keyed on the local `id` keep pointing at the same row — mirroring
-            // the cloud path's `preserved_pk` pattern.
-            let local_pk: Option<String> = existing.as_ref().map(|r| r.id.clone());
-            let exists = existing.is_some();
-            let take_remote = match existing.as_ref() {
-                Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
-                None => true,
-            };
-
-            if !take_remote {
-                debug!(item_id = %wire.item_id, "sync_orch: LWW kept local");
-                continue;
-            }
-            // Tombstone fast-path: when the winning wire item is a soft-delete
-            // (deleted=true), apply it locally without going through the full
-            // rekey + replace path.
-            //   • Row exists locally  → soft-delete it (wipe content, set deleted=1).
-            //   • Row does not exist  → insert a tombstone row (CopyPaste-bfiu)
-            //     so a later out-of-order create loses LWW instead of
-            //     resurrecting the item (delete-before-create race).
-            if wire.deleted {
-                if exists {
-                    let local_id = local_pk
-                        .as_deref()
-                        // SAFETY: `exists` is true only when `local_pk` is Some —
-                        // it is set from `existing.as_ref().map(|r| r.id.clone())`.
-                        .unwrap_or("");
-                    match copypaste_core::storage::items::soft_delete_item(
-                        &db_guard,
-                        local_id,
-                        wire.lamport_ts,
-                        wire.wall_time,
-                    ) {
-                        Ok(_) => {
-                            debug!(item_id = %wire.item_id, "sync_orch: applied inbound tombstone");
-                            upserted += 1;
+                // Tombstone fast-path: when the winning wire item is a soft-delete
+                // (deleted=true), apply it locally without going through the full
+                // rekey + replace path.
+                //   • Row exists locally  → soft-delete it (wipe content, set deleted=1).
+                //   • Row does not exist  → insert a tombstone row (CopyPaste-bfiu)
+                //     so a later out-of-order create loses LWW instead of
+                //     resurrecting the item (delete-before-create race).
+                if wire.deleted {
+                    if exists {
+                        let local_id = local_pk
+                            .as_deref()
+                            // SAFETY: `exists` is true only when `local_pk` is Some —
+                            // it is set from `existing.as_ref().map(|r| r.id.clone())`.
+                            .unwrap_or("");
+                        match copypaste_core::storage::items::soft_delete_item(
+                            &db_guard,
+                            local_id,
+                            wire.lamport_ts,
+                            wire.wall_time,
+                        ) {
+                            Ok(_) => {
+                                debug!(item_id = %wire.item_id, "sync_orch: applied inbound tombstone");
+                                tombstone_count += 1;
+                            }
+                            Err(e) => {
+                                warn!(item_id = %wire.item_id, "sync_orch: soft_delete_item failed: {e}");
+                            }
                         }
-                        Err(e) => {
-                            warn!(item_id = %wire.item_id, "sync_orch: soft_delete_item failed: {e}");
+                    } else {
+                        // CopyPaste-bfiu: persist a tombstone for the unknown item so
+                        // a create that arrives after the delete (out-of-order over
+                        // P2P) is LWW-rejected and the item stays deleted. Honors the
+                        // soft_delete "an inbound delete cannot resurrect" contract.
+                        match copypaste_core::insert_tombstone(
+                            &db_guard,
+                            &wire.item_id,
+                            &wire.item_id,
+                            wire.lamport_ts,
+                            wire.wall_time,
+                            &wire.origin_device_id,
+                        ) {
+                            Ok(_) => {
+                                debug!(item_id = %wire.item_id, "sync_orch: inserted tombstone for unknown item (delete-before-create)");
+                                tombstone_count += 1;
+                            }
+                            Err(e) => {
+                                warn!(item_id = %wire.item_id, "sync_orch: insert_tombstone failed: {e}");
+                            }
                         }
                     }
-                } else {
-                    // CopyPaste-bfiu: persist a tombstone for the unknown item so
-                    // a create that arrives after the delete (out-of-order over
-                    // P2P) is LWW-rejected and the item stays deleted. Honors the
-                    // soft_delete "an inbound delete cannot resurrect" contract.
-                    match copypaste_core::insert_tombstone(
-                        &db_guard,
-                        &wire.item_id,
-                        &wire.item_id,
-                        wire.lamport_ts,
-                        wire.wall_time,
-                        &wire.origin_device_id,
-                    ) {
-                        Ok(_) => {
-                            debug!(item_id = %wire.item_id, "sync_orch: inserted tombstone for unknown item (delete-before-create)");
-                            upserted += 1;
+                    continue;
+                }
+
+                // Collect non-tombstone LWW winner for Phase 2 (re-key outside lock).
+                pending.push(PendingRekey {
+                    wall_time: wire.wall_time,
+                    content_type: wire.content_type.clone(),
+                    wire,
+                    local_pk,
+                    exists,
+                });
+            }
+            // `db_guard` drops here — lock released before Phase 2 re-key work.
+            (tombstone_count, pending)
+        };
+
+        // ── Phase 2: crypto re-key (no DB lock held) ─────────────────────────
+        //
+        // `rekey_inbound` for blobs calls `rewrap_inbound_blob` which runs a
+        // full PNG pixel-decode + re-encode inside `encode_image_with_limit`.
+        // This is the hot path for images and MUST run without holding the DB
+        // mutex so other DB readers/writers are not stalled (Fix A).
+        struct ReadyToInsert {
+            to_insert: ClipboardItem,
+            fts_plaintext: Option<Vec<u8>>,
+            exists: bool,
+            wall_time: i64,
+            content_type: String,
+        }
+
+        let ready: Vec<ReadyToInsert> = pending
+            .into_iter()
+            .filter_map(|p| {
+                let PendingRekey {
+                    wire,
+                    local_pk,
+                    exists,
+                    wall_time,
+                    content_type,
+                } = p;
+
+                // P2P Phase 3: unwrap the shared-key payload into a row encrypted
+                // under this device's own local key, recovering the plaintext for
+                // FTS.  Returns the row to insert plus the decrypted plaintext
+                // (when text) to index.
+                let (mut to_insert, fts_plaintext) = match crypto_owned.as_ref() {
+                    Some(c) => match rekey_inbound(c, wire) {
+                        Ok(pair) => pair,
+                        Err(w) => {
+                            // Guard: if the item looks sync-key-wrapped but we
+                            // couldn't decrypt it (shared key missing or wrong),
+                            // the wire item has no content_nonce (and for
+                            // file/image also no blob_ref).  Storing it verbatim
+                            // creates a "poison row" that consumers reject with
+                            // "missing content_nonce" / "missing blob_ref
+                            // metadata". Skip it — the peer will re-send on the
+                            // next catch-up cycle once the key is available.
+                            // (CopyPaste-jww / CopyPaste-5y4)
+                            if is_poison_wire(&w) {
+                                warn!(
+                                    item_id = %w.item_id,
+                                    content_type = %w.content_type,
+                                    "sync_orch: inbound item has no content_nonce/blob_ref \
+                                     (sync-key-wrapped but undecryptable) — skipping to avoid \
+                                     poison row (CopyPaste-jww/5y4)"
+                                );
+                                return None;
+                            }
+                            // Not sync-key-wrapped (or undecryptable): store
+                            // verbatim.
+                            (wire_to_local(*w), None)
                         }
-                        Err(e) => {
-                            warn!(item_id = %wire.item_id, "sync_orch: insert_tombstone failed: {e}");
-                        }
+                    },
+                    None => (wire_to_local(wire), None),
+                };
+
+                // Preserve the local primary key on replace so FTS / copy_item /
+                // pins (all keyed on `id`) keep pointing at the same row after the
+                // update.  `wire_to_local` copies `wire.id` (the peer's PK) into
+                // `to_insert.id`; we overwrite it here with the local row's PK
+                // when one exists.
+                if let Some(pk) = local_pk {
+                    to_insert.id = pk;
+                }
+
+                // `wire_to_local` now propagates `pinned` and `pin_order` directly
+                // from the wire (see merge.rs), so pin/unpin/reorder broadcasts
+                // converge via normal LWW TakeRemote.  We intentionally trust the
+                // wire's values here instead of OR-merging with the local state:
+                // the IPC handlers bump lamport_ts before broadcasting, so the
+                // wire wins LWW only when it is causally later — which is exactly
+                // when its pin state should take effect.
+
+                // CopyPaste-kcf fix: run SensitiveDetector on the decrypted
+                // plaintext so inbound items get the same auto-wipe TTL as
+                // locally-captured ones.  Previously `wire_to_local` always set
+                // `is_sensitive = false`, meaning a password or API key synced
+                // from another device bypassed TTL cleanup.  We reuse the same
+                // `is_sensitive_for_autowipe` the local capture path uses
+                // (daemon.rs line ~1587) — no new heuristics.  Only runs when
+                // `fts_plaintext` is Some (i.e. rekey_inbound succeeded and
+                // decrypted a text item); verbatim/image/file rows are left as-is
+                // because we have no plaintext to inspect.
+                if let Some(ref pt) = fts_plaintext {
+                    if let Ok(text) = std::str::from_utf8(pt) {
+                        to_insert.is_sensitive = is_sensitive_for_autowipe(text);
                     }
                 }
-                continue;
-            }
 
-            // Capture wall_time before wire is consumed by rekey_inbound.
-            let wire_wall_time = wire.wall_time;
-            let wire_content_type = wire.content_type.clone();
+                Some(ReadyToInsert {
+                    to_insert,
+                    fts_plaintext,
+                    exists,
+                    wall_time,
+                    content_type,
+                })
+            })
+            .collect();
 
-            // P2P Phase 3: unwrap the shared-key payload into a row encrypted under
-            // this device's own local key, recovering the plaintext for FTS. Returns
-            // the row to insert plus the decrypted plaintext (when text) to index.
-            let (mut to_insert, fts_plaintext) = match crypto_owned.as_ref() {
-                Some(c) => match rekey_inbound(c, wire) {
-                    Ok(pair) => pair,
-                    Err(w) => {
-                        // Guard: if the item looks sync-key-wrapped but we
-                        // couldn't decrypt it (shared key missing or wrong),
-                        // the wire item has no content_nonce (and for
-                        // file/image also no blob_ref).  Storing it verbatim
-                        // creates a "poison row" that consumers reject with
-                        // "missing content_nonce" / "missing blob_ref metadata".
-                        // Skip it — the peer will re-send on the next catch-up
-                        // cycle once the key is available.
-                        // (CopyPaste-jww / CopyPaste-5y4)
-                        if is_poison_wire(&w) {
-                            warn!(
-                                item_id = %w.item_id,
-                                content_type = %w.content_type,
-                                "sync_orch: inbound item has no content_nonce/blob_ref \
-                                 (sync-key-wrapped but undecryptable) — skipping to avoid \
-                                 poison row (CopyPaste-jww/5y4)"
-                            );
-                            continue;
-                        }
-                        // Not sync-key-wrapped (or undecryptable): store verbatim.
-                        (wire_to_local(*w), None)
-                    }
-                },
-                None => (wire_to_local(wire), None),
-            };
+        // ── Phase 3: DB writes + prune + auto-apply (DB lock re-acquired) ────
+        //
+        // Re-acquire the lock only for the INSERT and follow-up DB work.  The
+        // expensive re-key (image decode/re-encode) is already done in Phase 2.
+        let db_guard = db.blocking_lock();
 
-            // Preserve the local primary key on replace so FTS / copy_item / pins
-            // (all keyed on `id`) keep pointing at the same row after the update.
-            // `wire_to_local` copies `wire.id` (the peer's PK) into `to_insert.id`;
-            // we overwrite it here with the local row's PK when one exists.
-            if let Some(pk) = local_pk {
-                to_insert.id = pk;
-            }
+        let mut upserted = upserted_from_tombstones;
+        let mut apply_candidate: Option<(i64, Vec<u8>, String)> = None;
 
-            // `wire_to_local` now propagates `pinned` and `pin_order` directly from
-            // the wire (see merge.rs), so pin/unpin/reorder broadcasts converge via
-            // normal LWW TakeRemote.  We intentionally trust the wire's values here
-            // instead of OR-merging with the local state: the IPC handlers bump
-            // lamport_ts before broadcasting, so the wire wins LWW only when it is
-            // causally later — which is exactly when its pin state should take effect.
-
-            // CopyPaste-kcf fix: run SensitiveDetector on the decrypted plaintext
-            // so inbound items get the same auto-wipe TTL as locally-captured ones.
-            // Previously `wire_to_local` always set `is_sensitive = false`, meaning
-            // a password or API key synced from another device bypassed TTL cleanup.
-            // We reuse the same `is_sensitive_for_autowipe` the local capture path
-            // uses (daemon.rs line ~1587) — no new heuristics.
-            // Only runs when `fts_plaintext` is Some (i.e. rekey_inbound succeeded
-            // and decrypted a text item); verbatim/image/file rows are left as-is
-            // because we have no plaintext to inspect.
-            if let Some(ref pt) = fts_plaintext {
-                if let Ok(text) = std::str::from_utf8(pt) {
-                    to_insert.is_sensitive = is_sensitive_for_autowipe(text);
-                }
-            }
+        for item in ready {
+            let ReadyToInsert {
+                to_insert,
+                fts_plaintext,
+                exists,
+                wall_time: wire_wall_time,
+                content_type: wire_content_type,
+            } = item;
 
             // M1: make the delete-then-insert (plus FTS) ATOMIC. The previous code
             // ran `delete_item` then a separate `insert_item`; if the insert failed
@@ -838,6 +927,70 @@ fn replace_item_atomic(
     Ok(())
 }
 
+/// Read raw local history pages from the DB into wire items WITHOUT re-keying.
+///
+/// Used by the two-phase catch-up path (Fix B): the caller holds the DB lock
+/// only for this read step and releases it before calling
+/// [`rekey_catchup_items`] so the CPU-heavy per-image re-key (decrypt-chunks +
+/// re-encrypt-for-cloud) does not stall other DB writers while holding the
+/// `Arc<Mutex<Database>>`.
+///
+/// Returns raw `WireItem`s with at-rest local ciphertext — callers MUST pass
+/// them through `rekey_catchup_items` before forwarding to a peer.
+pub fn catchup_read_raw(db: &Database, device_id: &str) -> Vec<WireItem> {
+    let mut out = Vec::new();
+    let mut offset: usize = 0;
+    loop {
+        let page: Vec<ClipboardItem> =
+            match copypaste_core::get_page(db, CATCHUP_PAGE_SIZE, offset) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    warn!("sync_orch: catchup_read_raw get_page (offset={offset}) failed: {e}");
+                    break;
+                }
+            };
+        let page_len = page.len();
+        // CopyPaste-ux2i: move each item's content blob into the wire item
+        // instead of cloning it.
+        for item in page {
+            out.push(local_to_wire_owned(item, device_id));
+        }
+        if page_len < CATCHUP_PAGE_SIZE {
+            break;
+        }
+        offset += CATCHUP_PAGE_SIZE;
+    }
+    out
+}
+
+/// Re-key raw catch-up wire items under the per-peer sync key (CPU step).
+///
+/// Second half of the two-phase catch-up (Fix B): runs WITHOUT the DB lock so
+/// the image chunk-decrypt + shared-key re-encrypt does not contend with DB
+/// writers. Items that cannot be re-keyed (`NotApplicable` or `Failed`) are
+/// dropped so the peer never receives an undecryptable blob (sync H2).
+pub fn rekey_catchup_items(
+    raw: Vec<WireItem>,
+    crypto: &SyncCrypto,
+    peer_fingerprint: &str,
+) -> Vec<WireItem> {
+    raw.into_iter()
+        .filter_map(|mut wire| {
+            // Re-key under this peer's pairwise key (CopyPaste-716).
+            // Only forward items we could actually re-key — a
+            // still-locally-encrypted (NotApplicable) or failed payload is
+            // useless — or worse, undecryptable — to the peer (sync H2).
+            if rekey_outbound_for_peer(crypto, peer_fingerprint, &mut wire)
+                == RekeyOutcome::Rewrapped
+            {
+                Some(wire)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 /// Build the set of local items to push to a specific peer that has just
 /// connected (P2P Phase 3 "sync on connect" / catch-up).
 ///
@@ -859,6 +1012,12 @@ fn replace_item_atomic(
 ///
 /// Returns an empty vec when the peer has no sync key (nothing decryptable to
 /// send) or the DB read fails — catch-up is best-effort.
+///
+/// NOTE: This single-phase variant holds the DB lock across both the read and
+/// the re-key steps.  The preferred path in the daemon uses [`catchup_read_raw`]
+/// + [`rekey_catchup_items`] so the DB lock is released before the CPU-heavy
+/// re-key work.  This function is retained for callers that already hold `&Database`
+/// (e.g. internal tests) and cannot be changed (p2p.rs is owned by another agent).
 pub fn catchup_items(
     db: &Database,
     device_id: &str,
@@ -871,38 +1030,8 @@ pub fn catchup_items(
         return Vec::new();
     }
 
-    let mut out = Vec::new();
-    let mut offset: usize = 0;
-    loop {
-        let page: Vec<ClipboardItem> = match copypaste_core::get_page(db, CATCHUP_PAGE_SIZE, offset)
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                warn!("sync_orch: catchup get_page (offset={offset}) failed: {e}");
-                break;
-            }
-        };
-        let page_len = page.len();
-        // CopyPaste-ux2i: `page` is a locally-owned Vec consumed once; move each
-        // item's content blob into the wire item instead of cloning it.
-        for item in page {
-            let mut wire = local_to_wire_owned(item, device_id);
-            // Re-key under this peer's pairwise key (CopyPaste-716).
-            // Only forward items we could actually re-key — a
-            // still-locally-encrypted (NotApplicable) or failed payload is useless
-            // — or worse, undecryptable — to the peer (sync H2).
-            if rekey_outbound_for_peer(crypto, peer_fingerprint, &mut wire)
-                == RekeyOutcome::Rewrapped
-            {
-                out.push(wire);
-            }
-        }
-        if page_len < CATCHUP_PAGE_SIZE {
-            break; // last page
-        }
-        offset += CATCHUP_PAGE_SIZE;
-    }
-    out
+    let raw = catchup_read_raw(db, device_id);
+    rekey_catchup_items(raw, crypto, peer_fingerprint)
 }
 
 /// Outcome of an attempt to re-key an outgoing item under the shared sync key.
@@ -1280,6 +1409,52 @@ fn rekey_inbound(
     Ok((local, Some(plaintext)))
 }
 
+/// Byte ceiling for the small-image fast path in [`rewrap_inbound_blob`].
+///
+/// Images whose plaintext PNG is ≤ this size skip the full pixel-decode +
+/// re-encode cycle (`encode_image_with_limit`) and are stored by encrypting the
+/// original PNG bytes directly.  The AEAD AAD (`file_id`, `key_version = 1`) is
+/// identical to the full-encode path, so the decode path is unaffected.
+///
+/// 512 KB covers virtually all macOS screenshot-paste ("grab-a-selection" via
+/// ⌘⇧4), which are the dominant tiny-image case that triggers the bug report.
+/// Larger images still go through the full normalise → re-encode pipeline.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const SMALL_IMAGE_FAST_PATH_BYTES: usize = 512 * 1024;
+
+/// Read the pixel dimensions of a PNG by parsing its IHDR chunk without
+/// decoding the pixel data.
+///
+/// Used by the small-image fast path in [`rewrap_inbound_blob`] to populate
+/// [`copypaste_core::ImageMeta`] cheaply (O(1) bytes read, no heap alloc for
+/// the bitmap).  Falls back to `(0, 0)` on any parse error so the caller can
+/// proceed with neutral metadata rather than failing the whole re-wrap.
+///
+/// PNG IHDR layout (RFC 2083 §11.2.2):
+///   Offset  Bytes  Field
+///    0       8     PNG signature
+///    8       4     IHDR length (always 13)
+///   12       4     Chunk type ("IHDR")
+///   16       4     Width (big-endian u32)
+///   20       4     Height (big-endian u32)
+///   ...
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn read_png_dimensions(png: &[u8]) -> Option<(u32, u32)> {
+    // Minimum valid PNG: 8 (sig) + 4 (len) + 4 (type) + 13 (IHDR) + 4 (crc) = 33 bytes.
+    if png.len() < 24 {
+        return None;
+    }
+    // Verify the 8-byte PNG signature so we don't misparse non-PNG data.
+    const PNG_SIG: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+    if png[..8] != PNG_SIG {
+        return None;
+    }
+    // Width and height are at bytes 16–19 and 20–23 respectively.
+    let width = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
+    let height = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
+    Some((width, height))
+}
+
 /// Inverse of [`rekey_blob_outbound`]: unwrap a sync-key-wrapped image/file
 /// payload and re-chunk it under THIS device's local v1 seed so the stored row
 /// reads back through the production image/file decode path.
@@ -1288,10 +1463,18 @@ fn rekey_inbound(
 ///    PNG / file bytes).
 /// 2. Re-derive `file_id` deterministically from the plaintext content hash so
 ///    the AEAD AAD matches on both devices and item_id/dedup converge.
-/// 3. Re-encode under `crypto.v1_key` (image → [`encode_image_with_limit`],
-///    file → [`encode_file`]) → `chunks_to_blob` → `local.content`; rebuild the
-///    meta JSON; set `blob_ref`, `content_type`, `key_version = 1` (chunks are
-///    v1-keyed). `fts_plaintext = None` (blobs are not FTS-indexed).
+/// 3. Re-encode under `crypto.v1_key` (image → [`encode_image_with_limit`] or
+///    the small-image fast path, file → [`encode_file`]) → `chunks_to_blob` →
+///    `local.content`; rebuild the meta JSON; set `blob_ref`, `content_type`,
+///    `key_version = 1` (chunks are v1-keyed). `fts_plaintext = None` (blobs
+///    are not FTS-indexed).
+///
+/// **Small-image fast path (Fix C):** for images whose plaintext PNG is
+/// ≤ [`SMALL_IMAGE_FAST_PATH_BYTES`], the expensive pixel-decode + re-encode
+/// step inside `encode_image_with_limit` is skipped.  The PNG bytes are
+/// encrypted directly via `encrypt_chunks` and image dimensions are read from
+/// the PNG header without decoding the pixel data.  The AEAD keys, AAD, and
+/// stored format are identical to the full path.
 ///
 /// Returns `Err(wire)` (hand back unchanged) on any failure so the caller can
 /// fall back to verbatim storage.
@@ -1323,32 +1506,82 @@ fn rewrap_inbound_blob(
     let file_id = crate::clipboard::image_content_hash(&plaintext);
 
     let (chunks_blob, meta_json) = if wire.content_type == "image" {
-        match encode_image_with_limit(
-            &plaintext,
-            &crypto.v1_key,
-            &file_id,
-            copypaste_core::MAX_IMAGE_BYTES,
-            copypaste_core::config::MAX_DECODED_IMAGE_MB,
-        ) {
-            Ok((meta, chunks)) => {
-                let blob = match copypaste_core::chunks_to_blob(&chunks) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        warn!(item_id = %wire.item_id, "sync_orch: inbound image chunks_to_blob failed: {e}");
-                        return Err(Box::new(wire));
-                    }
-                };
-                // No thumbnail is synced (regenerated on demand); record a
-                // distinct thumb_file_id with zero dims so the meta shape stays
-                // consistent and get_item_thumbnail returns the null sentinel.
-                let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
-                let meta_json =
-                    crate::clipboard::build_image_meta_json(&meta, &thumb_file_id, 0, 0);
-                (blob, meta_json)
+        // Fix C — small-image fast path: for tiny PNGs skip the full pixel
+        // decode+re-encode cycle.  The sender already ran `encode_as_png` before
+        // storing, so the plaintext IS a valid PNG; we just re-encrypt it
+        // verbatim.  Dimensions are read from the PNG IHDR (cheap — no pixel
+        // alloc).  AEAD keys + AAD are identical to the full path.
+        if plaintext.len() <= SMALL_IMAGE_FAST_PATH_BYTES {
+            let (width, height) = read_png_dimensions(&plaintext).unwrap_or((0, 0));
+            let original_size = plaintext.len() as u64;
+            match encrypt_chunks(&plaintext, &crypto.v1_key, &file_id, IMAGE_CHUNK_SIZE) {
+                Ok(chunks) => {
+                    let chunk_count = match u32::try_from(chunks.len()) {
+                        Ok(n) => n,
+                        Err(_) => {
+                            warn!(item_id = %wire.item_id, "sync_orch: inbound image fast-path: chunk count overflow");
+                            return Err(Box::new(wire));
+                        }
+                    };
+                    let blob = match copypaste_core::chunks_to_blob(&chunks) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            warn!(item_id = %wire.item_id, "sync_orch: inbound image fast-path: chunks_to_blob failed: {e}");
+                            return Err(Box::new(wire));
+                        }
+                    };
+                    let meta = ImageMeta {
+                        width,
+                        height,
+                        original_size,
+                        chunk_count,
+                        file_id,
+                    };
+                    let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
+                    let meta_json =
+                        crate::clipboard::build_image_meta_json(&meta, &thumb_file_id, 0, 0);
+                    debug!(
+                        item_id = %wire.item_id,
+                        size = plaintext.len(),
+                        "sync_orch: inbound image stored via small-image fast path (no pixel re-encode)"
+                    );
+                    (blob, meta_json)
+                }
+                Err(e) => {
+                    warn!(item_id = %wire.item_id, "sync_orch: inbound image fast-path: encrypt_chunks failed: {e}");
+                    return Err(Box::new(wire));
+                }
             }
-            Err(e) => {
-                warn!(item_id = %wire.item_id, "sync_orch: inbound image re-encode failed: {e}");
-                return Err(Box::new(wire));
+        } else {
+            // Full encode path for larger images: pixel decode + re-encode to
+            // normalise format, then chunk-encrypt.
+            match encode_image_with_limit(
+                &plaintext,
+                &crypto.v1_key,
+                &file_id,
+                copypaste_core::MAX_IMAGE_BYTES,
+                copypaste_core::config::MAX_DECODED_IMAGE_MB,
+            ) {
+                Ok((meta, chunks)) => {
+                    let blob = match copypaste_core::chunks_to_blob(&chunks) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            warn!(item_id = %wire.item_id, "sync_orch: inbound image chunks_to_blob failed: {e}");
+                            return Err(Box::new(wire));
+                        }
+                    };
+                    // No thumbnail is synced (regenerated on demand); record a
+                    // distinct thumb_file_id with zero dims so the meta shape stays
+                    // consistent and get_item_thumbnail returns the null sentinel.
+                    let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
+                    let meta_json =
+                        crate::clipboard::build_image_meta_json(&meta, &thumb_file_id, 0, 0);
+                    (blob, meta_json)
+                }
+                Err(e) => {
+                    warn!(item_id = %wire.item_id, "sync_orch: inbound image re-encode failed: {e}");
+                    return Err(Box::new(wire));
+                }
             }
         }
     } else {
