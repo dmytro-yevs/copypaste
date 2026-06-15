@@ -2443,12 +2443,11 @@ impl IpcServer {
         // collection is disabled. Reuses the daemon's single STUN source.
         let own_public_ip = self.cached_public_ip.read().await.clone();
         let own_device_id = self.local_device_id.clone();
-        let own_meta =
-            tokio::task::spawn_blocking(move || {
-                Self::collect_own_peer_meta(own_public_ip, own_device_id)
-            })
-            .await
-            .unwrap_or_default();
+        let own_meta = tokio::task::spawn_blocking(move || {
+            Self::collect_own_peer_meta(own_public_ip, own_device_id)
+        })
+        .await
+        .unwrap_or_default();
         // "QR fully provisions all sync": advertise our Supabase/relay config +
         // derived sync key over the authenticated tunnel (None if unconfigured).
         let own_provisioning = self.build_local_provisioning().await;
@@ -2648,12 +2647,11 @@ impl IpcServer {
             // DeviceMeta::collect spawns child processes (up to ~2 s), so run it
             // off the async worker. Falls back to empty metadata on join error.
             let own_public_ip = public_ip_cache.read().await.clone();
-            let own_meta =
-                tokio::task::spawn_blocking(move || {
-                    Self::collect_own_peer_meta(own_public_ip, own_device_id)
-                })
-                .await
-                .unwrap_or_default();
+            let own_meta = tokio::task::spawn_blocking(move || {
+                Self::collect_own_peer_meta(own_public_ip, own_device_id)
+            })
+            .await
+            .unwrap_or_default();
             // Read own_sync_addr here, after metadata collection, to give the P2P
             // listener the maximum window to have populated the slot.
             let own_sync_addr = own_sync_addr_slot
@@ -2785,12 +2783,11 @@ impl IpcServer {
         // P2P Phase 4: collect our own device metadata to advertise in-band.
         // DeviceMeta::collect spawns child processes (up to ~2 s), so run it off
         // the async worker; empty metadata on join error.
-        let own_meta =
-            tokio::task::spawn_blocking(move || {
-                Self::collect_own_peer_meta(own_public_ip, own_device_id)
-            })
-            .await
-            .unwrap_or_default();
+        let own_meta = tokio::task::spawn_blocking(move || {
+            Self::collect_own_peer_meta(own_public_ip, own_device_id)
+        })
+        .await
+        .unwrap_or_default();
         // "QR fully provisions all sync": advertise our Supabase/relay config +
         // derived sync key over the authenticated tunnel (None if unconfigured).
         let own_provisioning = self.build_local_provisioning().await;
