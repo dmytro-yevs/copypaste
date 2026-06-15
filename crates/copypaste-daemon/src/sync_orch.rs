@@ -941,14 +941,14 @@ pub fn catchup_read_raw(db: &Database, device_id: &str) -> Vec<WireItem> {
     let mut out = Vec::new();
     let mut offset: usize = 0;
     loop {
-        let page: Vec<ClipboardItem> =
-            match copypaste_core::get_page(db, CATCHUP_PAGE_SIZE, offset) {
-                Ok(rows) => rows,
-                Err(e) => {
-                    warn!("sync_orch: catchup_read_raw get_page (offset={offset}) failed: {e}");
-                    break;
-                }
-            };
+        let page: Vec<ClipboardItem> = match copypaste_core::get_page(db, CATCHUP_PAGE_SIZE, offset)
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                warn!("sync_orch: catchup_read_raw get_page (offset={offset}) failed: {e}");
+                break;
+            }
+        };
         let page_len = page.len();
         // CopyPaste-ux2i: move each item's content blob into the wire item
         // instead of cloning it.
@@ -1015,9 +1015,9 @@ pub fn rekey_catchup_items(
 ///
 /// NOTE: This single-phase variant holds the DB lock across both the read and
 /// the re-key steps.  The preferred path in the daemon uses [`catchup_read_raw`]
-/// + [`rekey_catchup_items`] so the DB lock is released before the CPU-heavy
-/// re-key work.  This function is retained for callers that already hold `&Database`
-/// (e.g. internal tests) and cannot be changed (p2p.rs is owned by another agent).
+/// then [`rekey_catchup_items`] so the DB lock is released before the CPU-heavy
+/// re-key work.  This function is retained for callers that already hold a
+/// `&Database` (e.g. internal tests).
 pub fn catchup_items(
     db: &Database,
     device_id: &str,

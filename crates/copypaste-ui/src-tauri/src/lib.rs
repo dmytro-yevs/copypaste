@@ -1545,7 +1545,9 @@ fn set_native_appearance(appearance: String, handle: tauri::AppHandle) {
     #[cfg(target_os = "macos")]
     {
         use objc2::msg_send;
-        use objc2_app_kit::{NSAppearance, NSAppearanceName, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSView};
+        use objc2_app_kit::{
+            NSAppearance, NSAppearanceName, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSView,
+        };
         use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
         let Some(win) = handle.get_webview_window("main") else {

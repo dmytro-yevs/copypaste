@@ -1344,8 +1344,7 @@ pub struct IpcServer {
     ///
     /// `std::sync::Mutex` because every critical section is a quick
     /// take/replace with no `.await`.
-    discovery_browse_handle:
-        Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
+    discovery_browse_handle: Arc<std::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
 
     /// Optional P2P subsystem shutdown token (CopyPaste-ydhw).
     ///
@@ -1491,9 +1490,7 @@ impl IpcServer {
     /// pattern as [`live_peer_sinks_slot`](Self::live_peer_sinks_slot).
     ///
     /// `None` means P2P is disabled or `start_p2p` has not yet returned.
-    pub fn p2p_shutdown_token_slot(
-        &self,
-    ) -> Arc<std::sync::Mutex<Option<CancellationToken>>> {
+    pub fn p2p_shutdown_token_slot(&self) -> Arc<std::sync::Mutex<Option<CancellationToken>>> {
         Arc::clone(&self.p2p_shutdown_token)
     }
 

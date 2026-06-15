@@ -33,7 +33,7 @@ pub fn is_dangerous_extension(ext: &str) -> bool {
     matches!(
         ext.to_ascii_lowercase().as_str(),
         // macOS-specific execution vectors
-        | "app" | "action" | "workflow" | "definition"
+        |"app"| "action" | "workflow" | "definition"
         | "scpt" | "scptd" | "applescript"
         | "terminal" | "command" | "tool"
         // Shell scripts
@@ -76,15 +76,17 @@ pub fn sanitize_filename(name: &str) -> String {
     let base = name
         .replace('\\', "/")
         .split('/')
-        .filter(|c| !c.is_empty() && *c != "..")
-        .last()
+        .rfind(|c| !c.is_empty() && *c != "..")
         .unwrap_or("")
         .to_string();
 
     // Filter to safe characters only.
     let sanitized: String = base
         .chars()
-        .filter(|c| !c.is_control() && matches!(*c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '_' | ' '))
+        .filter(|c| {
+            !c.is_control()
+                && matches!(*c, 'a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '-' | '_' | ' ')
+        })
         .collect();
 
     // Strip leading dots (prevents hidden files on Unix).
@@ -128,8 +130,16 @@ mod tests {
     #[test]
     fn dangerous_macos_specific() {
         for ext in &[
-            "app", "action", "workflow", "scpt", "scptd", "applescript",
-            "terminal", "command", "tool", "definition",
+            "app",
+            "action",
+            "workflow",
+            "scpt",
+            "scptd",
+            "applescript",
+            "terminal",
+            "command",
+            "tool",
+            "definition",
         ] {
             assert!(
                 is_dangerous_extension(ext),
@@ -140,7 +150,9 @@ mod tests {
 
     #[test]
     fn dangerous_windows_executables() {
-        for ext in &["exe", "bat", "cmd", "com", "msi", "ps1", "vbs", "scr", "vb", "ws", "wsf"] {
+        for ext in &[
+            "exe", "bat", "cmd", "com", "msi", "ps1", "vbs", "scr", "vb", "ws", "wsf",
+        ] {
             assert!(
                 is_dangerous_extension(ext),
                 "expected {ext} to be dangerous"
@@ -223,7 +235,9 @@ mod tests {
 
     #[test]
     fn safe_document_extensions() {
-        for ext in &["pdf", "txt", "png", "jpg", "docx", "xlsx", "zip", "mp4", "mp3"] {
+        for ext in &[
+            "pdf", "txt", "png", "jpg", "docx", "xlsx", "zip", "mp4", "mp3",
+        ] {
             assert!(
                 !is_dangerous_extension(ext),
                 "expected {ext} to be safe (not dangerous)"
