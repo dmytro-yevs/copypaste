@@ -39,6 +39,9 @@ use tauri::Manager;
 
 /// launchd label of the legacy LaunchAgent (kept only so we can boot out any
 /// leftover instance from a prior install — we no longer install it ourselves).
+/// macOS-only: the sole use site (`bootout_launchagent`) is cfg-gated to macOS,
+/// so the const would be dead code on Linux/Windows under `-D warnings`.
+#[cfg(target_os = "macos")]
 const LAUNCHD_LABEL: &str = "com.copypaste.daemon";
 
 /// How long to poll for socket release after sending SIGTERM, before giving up.
