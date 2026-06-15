@@ -620,6 +620,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         p2p_sync_addr_slot,
         live_sinks_slot,
         live_rtt_ms_slot,
+        p2p_shutdown_token_slot,
         peer_event_queue,
         pairing_coordinator,
         _ipc_handle,
@@ -718,6 +719,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         let live_sinks_slot = server.live_peer_sinks_slot();
         // RTT slot — populated after start_p2p returns, read by list_peers.
         let live_rtt_ms_slot = server.live_peer_rtt_ms_slot();
+        // P2P shutdown token slot — populated after start_p2p returns so that
+        // rescan_discovered can cancel the mDNS browse task on P2P shutdown
+        // (CopyPaste-fbxj). Mirrors the live_peer_sinks_slot wiring pattern.
+        let p2p_shutdown_token_slot = server.p2p_shutdown_token_slot();
         // Peer-event queue — drained by `poll_peer_events` IPC handler; fed by
         // the background task below that subscribes to P2pHandle::peer_event_tx.
         let peer_event_queue = server.peer_event_queue();
@@ -754,6 +759,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             sync_addr_slot,
             live_sinks_slot,
             live_rtt_ms_slot,
+            p2p_shutdown_token_slot,
             peer_event_queue,
             pairing_coordinator,
             handle,
@@ -928,6 +934,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         .lock()
                         .unwrap_or_else(|poisoned| poisoned.into_inner());
                     *slot = Some(std::sync::Arc::clone(&handle.peer_rtt_ms));
+                }
+                {
+                    // Populate the P2P shutdown token slot so rescan_discovered
+                    // can cancel the mDNS browse task on P2P shutdown
+                    // (CopyPaste-fbxj). Mirrors the live_sinks_slot pattern.
+                    let mut slot = p2p_shutdown_token_slot
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner());
+                    *slot = Some(handle.shutdown_token.clone());
                 }
                 {
                     // Subscribe to peer connect/disconnect events and relay
