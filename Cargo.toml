@@ -16,7 +16,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.7.3"
+version = "0.7.4"
 edition = "2021"
 # Metadata only — we follow stable (see rust-toolchain.toml). 1.96 is the
 # current Cargo.lock-implied floor (tokio 1.52 select!). Bump when lockfile bumps.

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.7.4] - 2026-06-15
+
+### Added
+- **Android resolves clipboard origin-device names** instead of showing a hex id
+  (`3k6m`/`27m7`): the peer's stable device UUID now flows over UniFFI
+  (`PeerMeta` bootstrap metadata + QR payload → `BootstrapResult.peer_device_id` /
+  `PairStatus.peer_device_id`) and is persisted on the paired-peer roster, so the
+  History origin-device filter matches by UUID. UniFFI ABI 16 → 17 (new fields are
+  nullable → back-compatible with older peers).
+
 ## [0.7.3] - 2026-06-15
 
 Cross-platform parity + security/data-loss hardening pass. A full audit of the 0.7.2
