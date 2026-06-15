@@ -1696,20 +1696,24 @@ async fn handle_tick(
             match read_result {
                 Ok(Ok(bytes)) => {
                     if bytes.len() > max_file_bytes {
+                        // am9w: do NOT log filename — it contains PII (full
+                        // path / document name). Log name-length only,
+                        // mirroring the File branch above.
                         tracing::warn!(
                             bytes = bytes.len(),
                             max = max_file_bytes,
-                            filename = %filename,
+                            name_len = filename.len(),
                             "clipboard: file too large — skipping"
                         );
                     } else {
+                        // am9w: do NOT log filename or mime — PII. Log
+                        // name_len only, same as the File branch above.
                         tracing::info!(
                             bytes = bytes.len(),
-                            filename = %filename,
-                            mime = %mime,
-                            "clipboard captured: file ({} bytes, {})",
+                            name_len = filename.len(),
+                            "clipboard captured: file-ref ({} bytes, name_len={})",
                             bytes.len(),
-                            filename
+                            filename.len()
                         );
                         if let Some(item) = handle_file(
                             bytes,
