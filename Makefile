@@ -57,6 +57,9 @@ clean:
 # Requires: cargo install cargo-ndk
 #           rustup target add aarch64-linux-android x86_64-linux-android
 #           Android NDK installed (set ANDROID_NDK_HOME or let cargo-ndk auto-detect)
+# OOM GUARD (CopyPaste-5a9y): run at most ONE android-so / android-docker
+# cross-compile at a time. Two concurrent cargo-ndk builds (e.g. two agents)
+# exhaust RAM and wedge the machine. Do not parallelize this target.
 android-so:
 	@command -v cargo-ndk >/dev/null 2>&1 || { \
 		echo ""; \
