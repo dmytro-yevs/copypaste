@@ -393,6 +393,10 @@ html[data-palette="graphite-mist"] {
   --ide-badge-warning-rgb: 255 204 106;  --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(157,183,223,0.18); --ide-multi-sel: rgba(157,183,223,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(157,183,223,.45);
+  /* Graphite Mist: steel-grey palette — info/sky stay teal-adjacent, violet slightly lavender */
+  --ide-info-rgb:   90 178 196;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(90,178,196,0.12);
+  --ide-sky-rgb:    90 178 196;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(90,178,196,0.12);
+  --ide-violet-rgb: 180 130 215;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(180,130,215,0.12);
 }
 
 /* Light-mode accent tuning: graphite-mist's #9db7df is a pale steel blue that
@@ -405,6 +409,10 @@ html[data-theme="light"][data-palette="graphite-mist"] {
   --ide-accent-dim:        rgba(58,96,145,0.12);
   --ide-selection: rgba(58,96,145,0.14); --ide-multi-sel: rgba(58,96,145,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(58,96,145,.45);
+  /* Light: graphite-mist info/sky stay near default teal-blue; violet slightly grey-lavender */
+  --ide-info-rgb:   15 110 150;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,110,150,0.14);
+  --ide-sky-rgb:    20 118 165;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,118,165,0.14);
+  --ide-violet-rgb: 110 78 190;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(110,78,190,0.14);
 }
 
 /* ── Liquid Blue (dark blue) ─────────────────────────────────────────────── */
@@ -424,6 +432,10 @@ html[data-palette="liquid-blue"] {
   --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(77,141,255,0.18); --ide-multi-sel: rgba(77,141,255,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(77,141,255,.45);
+  /* Liquid Blue: blue+purple identity — info blue-purple, sky vivid blue, violet from accent3 */
+  --ide-info-rgb:   110 155 240;  --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(110,155,240,0.12);
+  --ide-sky-rgb:    80 175 255;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(80,175,255,0.12);
+  --ide-violet-rgb: 158 123 255;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(158,123,255,0.12);
 }
 
 /* Light-mode accent tuning: #4d8dff (liquid-blue) is ~2.5:1 on white — fails AA.
@@ -435,6 +447,10 @@ html[data-theme="light"][data-palette="liquid-blue"] {
   --ide-accent-dim:        rgba(26,95,212,0.12);
   --ide-selection: rgba(26,95,212,0.14); --ide-multi-sel: rgba(26,95,212,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(26,95,212,.45);
+  /* Light: liquid-blue info tracks blue-purple identity; violet AA-darkened purple */
+  --ide-info-rgb:   18 105 195;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(18,105,195,0.14);
+  --ide-sky-rgb:    20 118 200;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,118,200,0.14);
+  --ide-violet-rgb: 105 60 188;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(105,60,188,0.14);
 }
 
 /* ── Deep Sky (dark vivid blue) ──────────────────────────────────────────── */
@@ -454,6 +470,10 @@ html[data-palette="deep-sky"] {
   --ide-badge-warning-rgb: 255 199 93;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(31,156,255,0.18); --ide-multi-sel: rgba(31,156,255,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(31,156,255,.45);
+  /* Deep Sky: vivid blue+cyan identity — info/sky shift toward bright cyan, violet stays muted */
+  --ide-info-rgb:   40 195 228;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(40,195,228,0.12);
+  --ide-sky-rgb:    55 205 250;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(55,205,250,0.12);
+  --ide-violet-rgb: 140 108 232;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(140,108,232,0.12);
 }
 
 /* Light-mode accent tuning: #1f9cff is ~2.8:1 on white — fails AA.
@@ -465,6 +485,10 @@ html[data-theme="light"][data-palette="deep-sky"] {
   --ide-accent-dim:        rgba(0,112,204,0.12);
   --ide-selection: rgba(0,112,204,0.14); --ide-multi-sel: rgba(0,112,204,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(0,112,204,.45);
+  /* Light: deep-sky info tracks vivid blue-sky; violet AA-darkened blue-purple */
+  --ide-info-rgb:   15 110 170;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,110,170,0.14);
+  --ide-sky-rgb:    15 115 180;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(15,115,180,0.14);
+  --ide-violet-rgb: 105 78 198;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(105,78,198,0.14);
 }
 
 /* ── Nordic Cyan (dark teal) ─────────────────────────────────────────────── */
@@ -484,6 +508,10 @@ html[data-palette="nordic-cyan"] {
   --ide-badge-warning-rgb: 255 209 102;  --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(37,213,180,0.18); --ide-multi-sel: rgba(37,213,180,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(37,213,180,.45);
+  /* Nordic Cyan: teal+blue identity — info tracks teal accent, sky from accent3 blue, violet muted */
+  --ide-info-rgb:   37 213 180;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(37,213,180,0.12);
+  --ide-sky-rgb:    90 157 255;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(90,157,255,0.12);
+  --ide-violet-rgb: 160 120 240;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(160,120,240,0.12);
 }
 
 /* Light-mode accent tuning: #25d5b4 teal is very pale on white (~1.7:1) — fails AA.
@@ -495,6 +523,10 @@ html[data-theme="light"][data-palette="nordic-cyan"] {
   --ide-accent-dim:        rgba(10,143,120,0.12);
   --ide-selection: rgba(10,143,120,0.14); --ide-multi-sel: rgba(10,143,120,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(10,143,120,.45);
+  /* Light: nordic-cyan info tracks dark teal accent; sky tracks accent3 blue; violet muted */
+  --ide-info-rgb:   12 118 100;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(12,118,100,0.14);
+  --ide-sky-rgb:    18 100 160;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(18,100,160,0.14);
+  --ide-violet-rgb: 115 82 200;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(115,82,200,0.14);
 }
 
 /* ── Aurora Violet (dark accent) ─────────────────────────────────────────── */
@@ -514,6 +546,10 @@ html[data-palette="aurora-violet"] {
   --ide-badge-warning-rgb: 255 195 90;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(154,124,255,0.18); --ide-multi-sel: rgba(154,124,255,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(154,124,255,.45);
+  /* Aurora Violet: violet+pink identity — info/sky shift violet-pink, violet tracks accent */
+  --ide-info-rgb:   170 128 255;  --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(170,128,255,0.12);
+  --ide-sky-rgb:    220 140 255;  --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(220,140,255,0.12);
+  --ide-violet-rgb: 154 124 255;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(154,124,255,0.12);
 }
 
 /* Light-mode accent tuning: #9a7cff violet is ~2.3:1 on white — fails AA.
@@ -525,6 +561,10 @@ html[data-theme="light"][data-palette="aurora-violet"] {
   --ide-accent-dim:        rgba(90,53,200,0.12);
   --ide-selection: rgba(90,53,200,0.14); --ide-multi-sel: rgba(90,53,200,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(90,53,200,.45);
+  /* Light: aurora-violet info/sky show violet tint; violet matches AA-darkened accent */
+  --ide-info-rgb:   95 52 185;    --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(95,52,185,0.14);
+  --ide-sky-rgb:    108 70 200;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(108,70,200,0.14);
+  --ide-violet-rgb: 90 53 200;    --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(90,53,200,0.14);
 }
 
 /* ── Amber Night (dark warm) ─────────────────────────────────────────────── */
@@ -544,6 +584,10 @@ html[data-palette="amber-night"] {
   --ide-badge-warning-rgb: 255 191 71;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(255,173,51,0.18); --ide-multi-sel: rgba(255,173,51,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(255,173,51,.45);
+  /* Amber Night: warm amber+blue identity — info warm-tinted teal, sky from accent3 blue, violet muted warm */
+  --ide-info-rgb:   100 160 185;  --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(100,160,185,0.12);
+  --ide-sky-rgb:    108 160 255;  --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(108,160,255,0.12);
+  --ide-violet-rgb: 190 130 200;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(190,130,200,0.12);
 }
 
 /* Light-mode accent tuning: #ffad33 amber is ~1.4:1 on white — severe AA failure.
@@ -555,6 +599,10 @@ html[data-theme="light"][data-palette="amber-night"] {
   --ide-accent-dim:        rgba(160,93,0,0.12);
   --ide-selection: rgba(160,93,0,0.14); --ide-multi-sel: rgba(160,93,0,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(160,93,0,.45);
+  /* Light: amber-night info warm-tinted teal-blue; sky tracks accent3 blue; violet muted warm-purple */
+  --ide-info-rgb:   15 100 140;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,100,140,0.14);
+  --ide-sky-rgb:    20 105 165;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,105,165,0.14);
+  --ide-violet-rgb: 115 70 180;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(115,70,180,0.14);
 }
 
 /* ── Cloud Silver (light grey) ───────────────────────────────────────────── */
@@ -574,6 +622,10 @@ html[data-palette="cloud-silver"] {
   --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(122,171,255,0.18); --ide-multi-sel: rgba(122,171,255,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(122,171,255,.45);
+  /* Cloud Silver dark-mode: soft blue-silver identity — info/sky keep teal, violet stays default */
+  --ide-info-rgb:   86 182 194;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(86,182,194,0.12);
+  --ide-sky-rgb:    86 182 194;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(86,182,194,0.12);
+  --ide-violet-rgb: 198 120 221;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(198,120,221,0.12);
 }
 
 /* Light-mode values for cloud-silver: restore the light palette's characteristic
@@ -594,6 +646,10 @@ html[data-theme="light"][data-palette="cloud-silver"] {
   --ide-selection: rgba(91,141,239,0.14); --ide-multi-sel: rgba(91,141,239,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(91,141,239,.45);
   --glow-strength: .38;
+  /* Light: cloud-silver info/sky neutral blue; violet AA-safe indigo */
+  --ide-info-rgb:   15 110 155;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,110,155,0.14);
+  --ide-sky-rgb:    20 120 170;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,120,170,0.14);
+  --ide-violet-rgb: 110 80 190;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(110,80,190,0.14);
 }
 
 /* ── Frost Blue (light blue) ─────────────────────────────────────────────── */
@@ -610,6 +666,10 @@ html[data-palette="frost-blue"] {
   --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(90,150,255,0.18); --ide-multi-sel: rgba(90,150,255,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(90,150,255,.45);
+  /* Frost Blue dark-mode: sky-blue identity — info tracks blue, sky light cyan, violet default */
+  --ide-info-rgb:   86 182 194;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(86,182,194,0.12);
+  --ide-sky-rgb:    90 182 255;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(90,182,255,0.12);
+  --ide-violet-rgb: 198 120 221;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(198,120,221,0.12);
 }
 
 html[data-theme="light"][data-palette="frost-blue"] {
@@ -628,6 +688,10 @@ html[data-theme="light"][data-palette="frost-blue"] {
   --ide-selection: rgba(39,119,255,0.14); --ide-multi-sel: rgba(39,119,255,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(39,119,255,.45);
   --glow-strength: .38;
+  /* Light: frost-blue info/sky pure sky-blue tones; violet AA-safe indigo */
+  --ide-info-rgb:   15 110 160;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,110,160,0.14);
+  --ide-sky-rgb:    20 110 175;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,110,175,0.14);
+  --ide-violet-rgb: 100 75 195;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(100,75,195,0.14);
 }
 
 /* ── Porcelain (light grey-blue) ─────────────────────────────────────────── */
@@ -645,6 +709,10 @@ html[data-palette="porcelain"] {
   --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(106,163,245,0.18); --ide-multi-sel: rgba(106,163,245,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(106,163,245,.45);
+  /* Porcelain dark-mode: cool grey-blue — info/sky stay teal defaults, violet default */
+  --ide-info-rgb:   86 182 194;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(86,182,194,0.12);
+  --ide-sky-rgb:    86 182 194;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(86,182,194,0.12);
+  --ide-violet-rgb: 198 120 221;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(198,120,221,0.12);
 }
 
 html[data-theme="light"][data-palette="porcelain"] {
@@ -663,6 +731,10 @@ html[data-theme="light"][data-palette="porcelain"] {
   --ide-selection: rgba(60,125,217,0.14); --ide-multi-sel: rgba(60,125,217,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(60,125,217,.45);
   --glow-strength: .38;
+  /* Light: porcelain info/sky cool blue-grey; violet AA-safe indigo */
+  --ide-info-rgb:   18 115 165;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(18,115,165,0.14);
+  --ide-sky-rgb:    22 118 170;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(22,118,170,0.14);
+  --ide-violet-rgb: 105 80 195;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(105,80,195,0.14);
 }
 
 /* ── Pearl Grey (light neutral grey) ────────────────────────────────────── */
@@ -680,6 +752,10 @@ html[data-palette="pearl-grey"] {
   --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
   --ide-selection: rgba(138,164,204,0.18); --ide-multi-sel: rgba(138,164,204,0.24);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(138,164,204,.45);
+  /* Pearl Grey dark-mode: neutral grey — info/sky/violet stay at :root defaults */
+  --ide-info-rgb:   86 182 194;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(86,182,194,0.12);
+  --ide-sky-rgb:    86 182 194;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(86,182,194,0.12);
+  --ide-violet-rgb: 198 120 221;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(198,120,221,0.12);
 }
 
 html[data-theme="light"][data-palette="pearl-grey"] {
@@ -698,6 +774,10 @@ html[data-theme="light"][data-palette="pearl-grey"] {
   --ide-selection: rgba(88,103,127,0.14); --ide-multi-sel: rgba(88,103,127,0.20);
   --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(88,103,127,.45);
   --glow-strength: .38;
+  /* Light: pearl-grey info/sky stay near defaults (neutral); violet AA-safe muted indigo */
+  --ide-info-rgb:   20 120 170;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(20,120,170,0.14);
+  --ide-sky-rgb:    20 120 170;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,120,170,0.14);
+  --ide-violet-rgb: 115 88 200;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(115,88,200,0.14);
 }
 
 /* ── Contrast profile overrides ──────────────────────────────────────────────
