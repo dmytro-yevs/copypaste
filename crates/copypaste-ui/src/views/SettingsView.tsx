@@ -1626,6 +1626,19 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
+
+          {/* Reduce motion — switches aurora from cinematic to calm profile.
+              "calm" slows the aurora (--speed: 1.45) and dims it (--motion-opacity: .55).
+              OS prefers-reduced-motion still zeroes the aurora automatically via CSS. */}
+          <SettingsRow label="Reduce motion">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Slow and dim the aurora background animation. The OS 'Reduce Motion' accessibility setting stops it entirely regardless of this toggle." />
+              <Toggle
+                checked={prefs.motionReduced ?? false}
+                onChange={(v) => setPrefs({ motionReduced: v })}
+              />
+            </div>
+          </SettingsRow>
         </Panel>
 
         <SubsectionHeader label="History list" />

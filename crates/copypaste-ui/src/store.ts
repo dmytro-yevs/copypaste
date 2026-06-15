@@ -74,6 +74,13 @@ export interface UIPrefs {
    * Consuming code: App.tsx sets document.documentElement.setAttribute("data-palette", ...).
    */
   palette: string;
+  /**
+   * When true, the UI uses the "calm" motion profile (slow aurora, reduced
+   * opacity) instead of the default "cinematic" profile.  Also syncs to
+   * document.documentElement data-motion="calm"|"cinematic" in App.tsx.
+   * Default: false (cinematic — the Liquid Glass launch default).
+   */
+  motionReduced: boolean;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -89,6 +96,8 @@ const DEFAULT_PREFS: UIPrefs = {
   theme: "dark",
   density: "compact",
   palette: "graphite-mist",
+  // Cinematic (false) is the Liquid Glass launch default — full aurora animation.
+  motionReduced: false,
 };
 
 function loadPrefs(): UIPrefs {

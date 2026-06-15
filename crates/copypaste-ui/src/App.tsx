@@ -6,6 +6,7 @@ import { RestartDaemonButton } from "./components/RestartDaemonButton";
 import styles from "./ViewTransition.module.css";
 import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError, type PairSasStatus } from "./lib/ipc";
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { startPeerPresencePolling, stopPeerPresencePolling } from "./lib/peerPresence";
 import { HistoryView } from "./views/HistoryView";
 import { DevicesView } from "./views/DevicesView";
@@ -156,6 +157,7 @@ export default function App() {
   const theme = useUI((s) => s.prefs.theme);
   const palette = useUI((s) => s.prefs.palette);
   const density = useUI((s) => s.prefs.density);
+  const motionReduced = useUI((s) => s.prefs.motionReduced);
   const { Component: View, label } = VIEWS[view];
 
   // The popup window emits "open-settings" (after showing this main window) when
@@ -273,7 +275,18 @@ export default function App() {
       return "dark";
     };
 
-    document.documentElement.setAttribute("data-theme", resolve(theme));
+    const resolved = resolve(theme);
+    document.documentElement.setAttribute("data-theme", resolved);
+
+    // Sync the native NSWindow appearance so NSVisualEffectView (vibrancy) uses
+    // the correct glass tint instead of following the OS dark/light setting.
+    // No-op in browser/mock (HAS_TAURI is false) and on non-macOS (the Rust
+    // command is a cfg-gated no-op there). Best-effort — never block on this.
+    if (HAS_TAURI) {
+      void invoke("set_native_appearance", { appearance: resolved }).catch(() => {
+        // Non-fatal — the window still renders correctly; only vibrancy tint is off.
+      });
+    }
 
     // Only the "system" theme needs to react to OS-preference changes.
     if (theme !== "system" || typeof window === "undefined" || !window.matchMedia) {
@@ -281,11 +294,28 @@ export default function App() {
     }
     const mql = window.matchMedia("(prefers-color-scheme: dark)");
     const onChange = () => {
-      document.documentElement.setAttribute("data-theme", resolve("system"));
+      const r = resolve("system");
+      document.documentElement.setAttribute("data-theme", r);
+      if (HAS_TAURI) {
+        void invoke("set_native_appearance", { appearance: r }).catch(() => {});
+      }
     };
     mql.addEventListener("change", onChange);
     return () => mql.removeEventListener("change", onChange);
   }, [theme]);
+
+  // Apply the data-motion attribute whenever the motionReduced pref changes.
+  // "calm"      → slow aurora (--speed: 1.45, --motion-opacity: .55)
+  // "cinematic" → default aurora (--speed: .72, --motion-opacity: 1)
+  // The aurora CSS already defines both profiles in index.css; we just switch
+  // the attribute.  @media (prefers-reduced-motion) independently zeroes the
+  // aurora regardless of this value (already in index.css, no JS needed).
+  useEffect(() => {
+    document.documentElement.setAttribute(
+      "data-motion",
+      motionReduced ? "calm" : "cinematic",
+    );
+  }, [motionReduced]);
 
   // ---------------------------------------------------------------------------
   // Daemon spawn error banner (non-dismissible, installation-incomplete)

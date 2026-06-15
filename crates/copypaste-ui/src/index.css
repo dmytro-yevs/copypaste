@@ -785,6 +785,33 @@ html[data-motion="cinematic"] { --speed: .72;  --motion-opacity: 1;   }
   :root { --speed: 999; --motion-opacity: 0; }
 }
 
+/* ── Auto high-contrast: honour OS 'Increase Contrast' / 'prefers-contrast: more'
+   Automatically bumps to the html[data-contrast="high"] token values so users who
+   enable the OS accessibility setting get the strongest contrast without having to
+   touch the in-app control.  No UI interaction needed — this fires at the browser
+   level.  Specificity (0,1,1) matches the data-contrast blocks above; placed after
+   them so it wins when the OS preference is active (cascade order). ──────────── */
+@media (prefers-contrast: more) {
+  :root {
+    --text:          rgba(255,255,255,.99);
+    --text-soft:     rgba(241,246,255,.88);
+    --text-muted:    rgba(226,235,250,.70);
+    --text-disabled: rgba(226,235,250,.48);
+    --glass-border:        rgba(255,255,255,.23);
+    --glass-border-strong: rgba(255,255,255,.36);
+    --ide-text-rgb: 248 250 255;
+  }
+  :root[data-theme="light"] {
+    --text:          rgba(8,13,22,.98);
+    --text-soft:     rgba(23,34,52,.86);
+    --text-muted:    rgba(36,50,73,.70);
+    --text-disabled: rgba(49,65,90,.52);
+    --glass-border:        rgba(12,20,35,.22);
+    --glass-border-strong: rgba(12,20,35,.36);
+    --ide-text-rgb: 12 16 24;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    RESET / LAYOUT
    ══════════════════════════════════════════════════════════════════════════ */

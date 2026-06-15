@@ -211,6 +211,7 @@ pub fn run() {
             ipc::log_dir_path,
             ipc::open_item_file,
             focus_main_window,
+            set_native_appearance,
         ])
         .setup(|app| {
             // Load persisted config now that we have the app handle.
@@ -1520,6 +1521,84 @@ fn show_main(app: &tauri::AppHandle) {
 #[tauri::command]
 fn focus_main_window(handle: tauri::AppHandle) {
     show_main(&handle);
+}
+
+/// Synchronise the macOS native NSWindow appearance with the CSS theme so that
+/// `NSVisualEffectView` (vibrancy) renders the correct glass tint.
+///
+/// Without this, the sidebar NSVisualEffectView uses `effectiveAppearance`
+/// inherited from the NSApplication — which follows the OS dark/light setting,
+/// NOT the user's in-app theme choice.  Calling `[win setAppearance:]` pins the
+/// window to the desired variant regardless of the OS preference.
+///
+/// Accepted values for `appearance`:
+///   "light" → NSAppearanceNameAqua
+///   "dark"  → NSAppearanceNameDarkAqua
+///   anything else → no-op (leaves the window at OS default)
+///
+/// On non-macOS this command is a no-op so the invoke call is safe everywhere.
+/// In browser/mock mode (`HAS_TAURI` is false in the frontend) this is never
+/// called at all.
+#[tauri::command]
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+fn set_native_appearance(appearance: String, handle: tauri::AppHandle) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::msg_send;
+        use objc2_app_kit::{NSAppearance, NSAppearanceName, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSView};
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+
+        let Some(win) = handle.get_webview_window("main") else {
+            return;
+        };
+
+        // Resolve the target appearance name constant.
+        // NSAppearanceNameAqua/DarkAqua are `extern "C" { static ... : &'static NSAppearanceName }`,
+        // so each is already a `&NSAppearanceName`. Deref to get a `&NSAppearanceName` from the static.
+        let appearance_name: &NSAppearanceName = match appearance.as_str() {
+            "light" => *NSAppearanceNameAqua,
+            "dark"  => *NSAppearanceNameDarkAqua,
+            // Unknown value — leave the window at its OS-default appearance.
+            _ => return,
+        };
+
+        // Look up the NSAppearance by name.
+        let Some(ns_appearance) = NSAppearance::appearanceNamed(appearance_name) else {
+            tracing::warn!(
+                "set_native_appearance: NSAppearance::appearanceNamed({appearance:?}) returned nil"
+            );
+            return;
+        };
+
+        // Obtain the raw AppKit window handle.  Tauri's WebviewWindow implements
+        // HasWindowHandle; on macOS the inner handle is AppKit (ns_view pointer).
+        let raw = match win.window_handle() {
+            Ok(h) => h.as_raw(),
+            Err(e) => {
+                tracing::warn!("set_native_appearance: window_handle failed: {e}");
+                return;
+            }
+        };
+        let RawWindowHandle::AppKit(appkit_handle) = raw else {
+            return;
+        };
+
+        // SAFETY: appkit_handle.ns_view is a valid NSView* for the lifetime of
+        // the window.  We access it only on the main thread (Tauri command
+        // handlers on macOS run on the main thread).  The cast to &NSView is safe
+        // because objc2-app-kit 0.2 NSView is repr(C) / ABI-compatible.
+        unsafe {
+            let ns_view: &NSView = appkit_handle.ns_view.cast().as_ref();
+            if let Some(ns_window) = ns_view.window() {
+                // setAppearance: is declared on NSWindow via NSAppearanceCustomization
+                // but is not yet in the generated objc2-app-kit 0.2 bindings.
+                // Use msg_send! directly — the selector name matches Apple's SDK.
+                let _: () = msg_send![&*ns_window, setAppearance: &*ns_appearance];
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = handle;
 }
 
 /// V-21-A: Startup-race tray re-sync.
