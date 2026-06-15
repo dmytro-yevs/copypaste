@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -45,12 +44,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -80,6 +76,8 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
@@ -95,10 +93,6 @@ import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -811,8 +805,10 @@ fun DevicesScreen(
             // routing through PairActivity. The scan result is forwarded to
             // PairActivity as a cppair:// deep-link so PAKE + provisioning still
             // run there unmodified.
-            OutlinedButton(
+            // CopyPaste-jkbo: replaced raw OutlinedButton with shared CopyPasteButton(SECONDARY).
+            CopyPasteButton(
                 onClick = { startScanFlow() },
+                variant = ButtonVariant.SECONDARY,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.btn_scan_qr))
@@ -857,26 +853,13 @@ private const val DEVICES_QR_TTL_SECONDS = 120
 private const val DEVICES_QR_URGENT_THRESHOLD_SECONDS = 20
 
 /**
- * Generates a QR [Bitmap] for [text] at [sizePx] pixels. Identical to
- * [encodeQrBitmap] in PairActivity — duplicated to avoid a cross-file
- * private reference; both produce the same ZXing QR_CODE output.
+ * Generates a QR [Bitmap] for [text] at [sizePx] pixels.
  *
- * CopyPaste-s6cc: ECC=M + MARGIN=0 — keeps in sync with PairActivity fix.
+ * CopyPaste-jkbo: delegates to the shared [encodeQrBitmap] in QrUtils.kt,
+ * eliminating the former duplication with PairActivity's private copy.
  */
-private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap {
-    val hints = mapOf(
-        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-        EncodeHintType.MARGIN to 0,
-    )
-    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
-    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
-    for (x in 0 until sizePx) {
-        for (y in 0 until sizePx) {
-            bmp.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
-        }
-    }
-    return bmp
-}
+private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap =
+    encodeQrBitmap(text, sizePx)
 
 /**
  * Shows this device's pairing QR at the top of the Devices screen.
@@ -1205,8 +1188,9 @@ private fun RowDivider() {
     )
 }
 
+// CopyPaste-jkbo: promoted from private to internal so future screens can reuse.
 @Composable
-private fun PeerRow(
+internal fun PeerRow(
     peer: PairedPeer,
     /**
      * Pre-computed online flag from [DevicesScreen] — the SINGLE source of truth
@@ -1304,30 +1288,24 @@ private fun PeerRow(
         )
 
         // ── Actions ─────────────────────────────────────────────────────
-        // CopyPaste-g4ze: both buttons use the same filled-tint danger style
-        // (bg=danger@15%, fg=danger) so they have equal visual weight — matching
-        // web spec §7 "bg-ide-danger/15" for both Unpair and Revoke.
+        // CopyPaste-jkbo: replaced raw M3 Button/ButtonDefaults with shared
+        // CopyPasteButton(DANGER) which applies the styleguide bg=danger@15%,
+        // fg=danger recipe automatically (matching web spec §7).
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Button(
+            CopyPasteButton(
                 onClick = onUnpair,
+                variant = ButtonVariant.DANGER,
                 modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = c.danger.copy(alpha = 0.15f),
-                    contentColor = c.danger,
-                ),
             ) {
                 Text("Unpair")
             }
-            Button(
+            CopyPasteButton(
                 onClick = onRevoke,
+                variant = ButtonVariant.DANGER,
                 modifier = Modifier.weight(1f),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = c.danger.copy(alpha = 0.15f),
-                    contentColor = c.danger,
-                ),
             ) {
                 Text("Revoke")
             }
@@ -1360,7 +1338,8 @@ private fun NoPeerCard(onPair: () -> Unit) {
                     color = c.faint,
                     style = MaterialTheme.typography.bodySmall,
                 )
-                Button(onClick = onPair) {
+                // CopyPaste-jkbo: replaced raw M3 Button with CopyPasteButton(PRIMARY).
+                CopyPasteButton(onClick = onPair, variant = ButtonVariant.PRIMARY) {
                     Text("Pair a device")
                 }
             }
@@ -1483,8 +1462,9 @@ private fun DiscoveryRingsIcon(size: Dp = 58.dp) {
 // Own-device row
 // ─────────────────────────────────────────────────────────────────────────────
 
+// CopyPaste-jkbo: promoted from private to internal so future screens can reuse.
 @Composable
-private fun OwnDeviceRow(
+internal fun OwnDeviceRow(
     identity: P2pIdentity,
     /** Current epoch millis from the 1-second ticker — drives live IP refresh. */
     nowMs: Long,
@@ -1634,9 +1614,11 @@ private fun DiscoveredPeerRow(
                     ip?.let { MetaRow(label = "Local IP", value = it) }
                 }
             }
-            Button(
+            // CopyPaste-jkbo: replaced raw M3 Button with CopyPasteButton(PRIMARY).
+            CopyPasteButton(
                 onClick = onPair,
                 enabled = pairable && !busy,
+                variant = ButtonVariant.PRIMARY,
             ) {
                 Text("Pair")
             }
@@ -2219,8 +2201,9 @@ private fun TransportChipLabel(chip: TransportChip) {
  * cause the label to sit misaligned — fixing the former "Mac" misalignment in
  * the Model row.
  */
+// CopyPaste-jkbo: promoted from private to internal so future screens can reuse.
 @Composable
-private fun MetaRow(label: String, value: String) {
+internal fun MetaRow(label: String, value: String) {
     val c = LocalIdeColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,

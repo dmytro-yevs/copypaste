@@ -46,6 +46,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -289,6 +291,7 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
     val palette = LocalPalette.current
+    val density = LocalDensity.current
 
     // Styleguide floating tab bar geometry:
     //   side margin 12 dp, bottom margin 10 dp (matching web `.tabbar` margin)
@@ -299,10 +302,13 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     val navBarInsetDp = WindowInsets.navigationBars
         .asPaddingValues()
         .calculateBottomPadding()
-    // Total bottom clearance for screen content: tab bar min-height ~74dp + 10dp
-    // margin + nav inset. 74dp accounts for icon+label rows at normal density.
-    val tabBarEstimatedHeight = 74.dp
-    val contentBottomPadding = tabBarEstimatedHeight + 10.dp + navBarInsetDp
+    // Measured height of the FloatingTabBar, updated via onSizeChanged once the
+    // bar lays out. 74.dp is the initial fallback (icon + label at normal density)
+    // so content padding is reasonable on the first frame before measurement fires.
+    // Using onSizeChanged avoids over-padding on low-density and clipping on
+    // high-density / large-font-scale devices (CopyPaste-10tp item 4).
+    var tabBarHeightDp by remember { mutableStateOf(74.dp) }
+    val contentBottomPadding = tabBarHeightDp + 10.dp + navBarInsetDp
 
     // §1 aurora canvas backdrop: a COLOURED radial-glow gradient behind the whole
     // shell so the glass surfaces (tab bar, cards) frost over real colour instead
@@ -366,7 +372,11 @@ private fun MainShell(viewModel: ClipboardViewModel) {
         // with side margins (12 dp) and a rounded glass pill (radius 28 dp).
         // Positioned via Alignment.BottomCenter + padding, clears the system nav bar.
         FloatingTabBar(
-            modifier = Modifier.align(Alignment.BottomCenter),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged { size ->
+                    tabBarHeightDp = with(density) { size.height.toDp() }
+                },
             selectedTab = selectedTab,
             translucent = translucent,
             dark = dark,

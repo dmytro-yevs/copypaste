@@ -38,17 +38,17 @@ fun distinctOriginDeviceIds(items: List<ClipboardItem>): Set<String> =
  *  - Falls back to the first 8 characters of [deviceId] (always non-empty because
  *    device ids are UUIDs).
  *
- * CopyPaste-v6ac ROOT CAUSE FIX: [ClipboardItem.originDeviceId] holds the peer's
+ * CopyPaste-27m7 ROOT CAUSE FIX: [ClipboardItem.originDeviceId] holds the peer's
  * stable UUID (from Hello.device_id in the sync protocol), but [PairedPeer.fingerprint]
  * is the TLS certificate hash — a completely different identifier. The previous
  * `it.fingerprint == deviceId` lookup ALWAYS missed because a UUID ≠ TLS fingerprint.
  *
- * FIX: PairedPeer does not yet carry a peerDeviceId/UUID field (adding it requires
- * a Settings.kt schema change + pairing protocol wiring — tracked separately).
- * As an interim approach we try BOTH keys so the lookup succeeds in whichever case
- * the roster happens to store: fingerprint-match (legacy, currently the only path)
- * and a future peerDeviceId field when it exists. The dual-match is safe — if no
- * roster entry matches either key we fall back to the truncated UUID as before.
+ * FIX: match on [PairedPeer.peerDeviceId] (the peer's stable UUID, CopyPaste-27m7)
+ * first, then fall back to [PairedPeer.fingerprint] for legacy entries. The dual-match
+ * is backward-compatible: old roster entries that only carry the fingerprint still
+ * resolve when an item happens to carry the fingerprint as originDeviceId. New entries
+ * (once the FFI exposes peer_device_id) will resolve via peerDeviceId. If neither key
+ * matches we fall back to the truncated UUID as before.
  */
 fun deviceDisplayName(
     deviceId: String,
@@ -56,11 +56,10 @@ fun deviceDisplayName(
     peers: List<PairedPeer>,
 ): String {
     if (deviceId == ownDeviceId) return "This device"
-    // Try fingerprint-match first (current roster schema); also try name lookup by
-    // the peer's peerDeviceId UUID field when it becomes available (null-safe).
+    // CopyPaste-27m7: match peerDeviceId (stable UUID) first so new pairs resolve by
+    // UUID, then fall back to fingerprint (TLS cert hash) so old entries keep working.
     val peerName = peers.firstOrNull { peer ->
-        peer.fingerprint == deviceId
-        // Future: || peer.peerDeviceId == deviceId   (once PairedPeer carries it)
+        peer.peerDeviceId == deviceId || peer.fingerprint == deviceId
     }?.name?.takeIf { it.isNotBlank() }
     return peerName ?: deviceId.take(8)
 }

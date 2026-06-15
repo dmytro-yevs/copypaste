@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
-import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.view.WindowManager
@@ -97,10 +96,6 @@ import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -233,29 +228,9 @@ class PairActivity : ComponentActivity() {
     }
 }
 
-/**
- * Render [text] as a square QR [Bitmap] of [sizePx] pixels using ZXing.
- *
- * CopyPaste-s6cc: added hints — ERROR_CORRECTION=M (15% recovery, up from the ZXing
- * default EcLevel.L 7%) so the code survives partial obstruction and small-module
- * scaling artifacts that trip built-in system scanners. MARGIN=0 avoids a double
- * quiet-zone (ZXing default adds 4 modules; QR_PLATE_PADDING_DP provides the visual
- * margin on the glass surface).
- */
-private fun encodeQrBitmap(text: String, sizePx: Int): Bitmap {
-    val hints = mapOf(
-        EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-        EncodeHintType.MARGIN to 0,
-    )
-    val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
-    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.RGB_565)
-    for (x in 0 until sizePx) {
-        for (y in 0 until sizePx) {
-            bmp.setPixel(x, y, if (matrix[x, y]) Color.BLACK else Color.WHITE)
-        }
-    }
-    return bmp
-}
+// CopyPaste-jkbo: encodeQrBitmap was a private duplicate of the same function in
+// DevicesActivity. Both are now replaced by the package-level [encodeQrBitmap] in
+// QrUtils.kt — call sites in this file reference it directly (same package).
 
 /**
  * Build the human-readable label shown after a successful scan, e.g.

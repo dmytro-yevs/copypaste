@@ -1117,6 +1117,9 @@ class Settings(context: Context) {
                 peerAppVersion = o.optString("peerAppVersion", "").ifBlank { null },
                 peerLocalIp = o.optString("peerLocalIp", "").ifBlank { null },
                 peerPublicIp = o.optString("peerPublicIp", "").ifBlank { null },
+                // CopyPaste-27m7: peer UUID for origin-device-filter name resolution.
+                // Absent in legacy roster entries → null (backward-compatible).
+                peerDeviceId = o.optString("peerDeviceId", "").ifBlank { null },
             )
         }.filter { it.fingerprint.isNotBlank() }
     }.getOrElse { e ->
@@ -1141,6 +1144,8 @@ class Settings(context: Context) {
                 .putOpt("peerAppVersion", p.peerAppVersion)
                 .putOpt("peerLocalIp", p.peerLocalIp)
                 .putOpt("peerPublicIp", p.peerPublicIp)
+                // CopyPaste-27m7: peer UUID for origin-device-filter (null → omitted).
+                .putOpt("peerDeviceId", p.peerDeviceId)
             arr.put(o)
         }
         return arr.toString()
@@ -1747,6 +1752,21 @@ data class PairedPeer(
     val peerAppVersion: String? = null,
     val peerLocalIp: String? = null,
     val peerPublicIp: String? = null,
+    /**
+     * CopyPaste-27m7: the peer's stable device UUID (from Hello.device_id in the sync
+     * protocol), distinct from [fingerprint] (the TLS certificate hash).
+     *
+     * [ClipboardItem.originDeviceId] holds this UUID, NOT the TLS fingerprint, so
+     * [OriginDeviceFilter.deviceDisplayName] must match on this field to resolve peer
+     * names. Null for legacy roster entries written before this field was added.
+     *
+     * Populated in [PairActivity.runPairAndSync] and [SasPairingDialog.persistConfirmed]
+     * when the FFI surface exposes the peer's device_id (BootstrapResult/PairStatus).
+     * At the time of writing (Wave-3), neither BootstrapResult nor PairStatus carries
+     * peer_device_id in the UDL — that FFI gap is tracked separately. The field is
+     * persisted now so it will be populated automatically once the FFI is extended.
+     */
+    val peerDeviceId: String? = null,
     // Runtime-only: round-trip time in ms measured by FgsSyncLoop over the mTLS P2P
     // connection. Not persisted to the roster JSON — populated in-memory during an
     // active sync session. Wired to the UI via DevicesViewModel; actual FgsSyncLoop

@@ -1159,7 +1159,10 @@ fun HistoryScreen(
                                 try {
                                     val fileBytes = repository.getFileBytes(id) ?: return@withContext false
                                     val (fileName, mime) = repository.getFileMeta(id)
-                                    val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                                    val rawName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
+                                    // ouly: sanitize peer-supplied filename before use as MediaStore DISPLAY_NAME —
+                                    // strips path-traversal sequences and shell-special chars for consistency with onOpenFile (fr44).
+                                    val safeName = FileSecurityHelper.sanitizeFilename(rawName)
                                     val mimeType = mime ?: "application/octet-stream"
                                     // API 29+: insert into MediaStore.Downloads (no WRITE_EXTERNAL_STORAGE needed)
                                     val values = ContentValues().apply {
