@@ -50,9 +50,9 @@ val IdeGhostDeco = Color.White.copy(alpha = 0.33f)  // dark: white@0.33 (decorat
 
 // ── Brand / accent ────────────────────────────────────────────────────────
 
-val IdeAccent     = Color(0xFF3D8BFF)   // §0 canonical accent blue
+val IdeAccent     = Color(0xFF4D8DFF)   // §0 canonical accent blue (matches CSS liquid-blue, parity spj2)
 val IdeAccentOn   = Color(0xFFFFFFFF)   // text on accent surfaces
-val IdeAccentDim  = Color(0xFF3D8BFF).copy(alpha = 0.12f)  // accent container tint
+val IdeAccentDim  = Color(0xFF4D8DFF).copy(alpha = 0.12f)  // accent container tint
 val IdeAccentPress = Color(0xFF2F7AE8)  // primary-button press (dark): a touch deeper than accent
 
 // ── §3 Semantic colours ───────────────────────────────────────────────────

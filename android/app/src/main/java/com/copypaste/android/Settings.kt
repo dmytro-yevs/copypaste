@@ -499,6 +499,24 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("translucency", v).apply()
 
     /**
+     * Reduce-motion preference — mirrors the web `data-motion="calm"` attribute
+     * and the [motionDuration] gate in Theme.kt.
+     *
+     * When true, [motionDuration] returns 0 for all animation durations, producing
+     * instantaneous transitions (calm/minimal motion profile). When false (default),
+     * the active palette's [LiquidTokens.motionScale] is applied in full (cinematic).
+     *
+     * This is the user-controlled app-level toggle; the OS-level signals
+     * (ValueAnimator.areAnimatorsEnabled / ANIMATOR_DURATION_SCALE) continue to
+     * gate motion independently — either signal alone is sufficient to disable animation.
+     *
+     * Key "motion_reduced" (Boolean). Default false = cinematic (full motion).
+     */
+    var motionReduced: Boolean
+        get() = prefs.getBoolean("motion_reduced", false)
+        set(v) = prefs.edit().putBoolean("motion_reduced", v).apply()
+
+    /**
      * UI density preference — comfortable (34dp rows, default) or compact (28dp).
      *
      * Mirrors the macOS/web `prefs.density` setting (§2/§6 of DESIGN-SYSTEM-v2.md).
@@ -1361,6 +1379,8 @@ class Settings(context: Context) {
         showSensitiveWarnings: Boolean,
         maskSensitiveContent: Boolean,
         translucency: Boolean,
+        /** User-controlled reduce-motion toggle; mirrors web data-motion=calm. Default false = cinematic. */
+        motionReduced: Boolean,
         imageMaxHeight: Int,
         previewDelayMs: Long,
         imageQuality: Int,
@@ -1393,6 +1413,7 @@ class Settings(context: Context) {
             .putBoolean("show_sensitive_warnings", showSensitiveWarnings)
             .putBoolean("mask_sensitive_content", maskSensitiveContent)
             .putBoolean("translucency", translucency)
+            .putBoolean("motion_reduced", motionReduced)
             .putInt("image_max_height", imageMaxHeight.coerceIn(1, 200))
             .putLong("preview_delay_ms", previewDelayMs.coerceIn(200L, 100_000L))
             .putInt("image_quality", imageQuality.coerceIn(1, 100))

@@ -125,6 +125,17 @@ fun isReducedMotion(context: Context): Boolean {
     return scale == 0f
 }
 
+/**
+ * Returns `true` when the user has toggled "Reduce motion" in the app Settings
+ * (Display tab). This is the app-level calm/cinematic toggle and is OR-ed with
+ * [rememberReducedMotion] in [motionDuration] so EITHER signal disables animation.
+ */
+@Composable
+fun rememberUserMotionReduced(): Boolean {
+    val context = LocalContext.current
+    return remember(context) { Settings(context).motionReduced }
+}
+
 // ---------------------------------------------------------------------------
 
 /**
@@ -374,15 +385,21 @@ fun CopyPasteTheme(
 /**
  * Returns the effective animation duration for [baseMs] (a [Motion] constant),
  * scaled by the active palette's [LiquidTokens.motionScale] and zeroed when
- * the user has requested reduced motion.
+ * reduced motion is active.
  *
- * Call from within a @Composable that has access to [LocalLiquidTokens] and
- * [rememberReducedMotion]. The result is an Int suitable for [tween] durationMillis.
+ * Three signals are checked; ANY of them independently zeroes the duration:
+ *  1. OS accessibility / developer-options animation disable ([rememberReducedMotion])
+ *  2. App-level "Reduce motion" toggle in Settings → Display ([rememberUserMotionReduced])
+ *     — mirrors the web `data-motion="calm"` attribute set by the store's motionReduced key.
+ *
+ * Call from within a @Composable that has access to [LocalLiquidTokens].
+ * The result is an Int suitable for [tween] durationMillis.
  */
 @Composable
 fun motionDuration(baseMs: Int): Int {
     val tokens = LocalLiquidTokens.current
-    val reduced = rememberReducedMotion()
+    // Either OS-level or user-level reduced-motion preference disables animation.
+    val reduced = rememberReducedMotion() || rememberUserMotionReduced()
     return if (reduced) 0 else (baseMs * tokens.motionScale).toInt()
 }
 

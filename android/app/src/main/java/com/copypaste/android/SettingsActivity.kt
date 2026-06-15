@@ -194,6 +194,8 @@ fun SettingsScreen(
     var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
     var translucency by remember { mutableStateOf(settings.translucency) }
+    // hujj: user-facing reduce-motion toggle (calm ↔ cinematic), mirrors web data-motion attr.
+    var motionReduced by remember { mutableStateOf(settings.motionReduced) }
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.coerceIn(10, 200)) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
     // §3/P1#9: preview lines per history row (mirrors web niApp, 1–6).
@@ -274,6 +276,7 @@ fun SettingsScreen(
             showSensitiveWarnings = showWarnings,
             maskSensitiveContent = maskSensitive,
             translucency = translucency,
+            motionReduced = motionReduced,
             imageMaxHeight = imageMaxHeight,
             previewDelayMs = previewDelay.toLong(),
             imageQuality = imageQuality,
@@ -479,6 +482,8 @@ fun SettingsScreen(
                         onMaskSensitiveChange = { maskSensitive = it; dirty = true },
                         translucency = translucency,
                         onTranslucencyChange = { translucency = it; dirty = true },
+                        motionReduced = motionReduced,
+                        onMotionReducedChange = { motionReduced = it; dirty = true },
                         imageMaxHeight = imageMaxHeight,
                         onImageMaxHeightChange = { imageMaxHeight = it; dirty = true },
                         previewDelay = previewDelay,
@@ -704,6 +709,9 @@ private fun DisplayTab(
     onMaskSensitiveChange: (Boolean) -> Unit,
     translucency: Boolean,
     onTranslucencyChange: (Boolean) -> Unit,
+    // hujj: reduce-motion toggle — calm (true) vs. cinematic (false, default).
+    motionReduced: Boolean,
+    onMotionReducedChange: (Boolean) -> Unit,
     imageMaxHeight: Int,
     onImageMaxHeightChange: (Int) -> Unit,
     previewDelay: Int,
@@ -836,6 +844,16 @@ private fun DisplayTab(
                 subtitle = stringResource(R.string.setting_translucency_subtitle),
                 checked = translucency,
                 onCheckedChange = onTranslucencyChange,
+                density = density,
+            )
+            SettingsCardDivider()
+            // hujj: reduce-motion toggle — when ON, motionDuration() returns 0 (calm/minimal
+            // transitions). Mirrors web data-motion="calm" from the store's motionReduced key.
+            SettingsRow(
+                title = stringResource(R.string.setting_reduce_motion_title),
+                subtitle = stringResource(R.string.setting_reduce_motion_subtitle),
+                checked = motionReduced,
+                onCheckedChange = onMotionReducedChange,
                 density = density,
             )
         }

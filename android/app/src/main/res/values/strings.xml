@@ -81,6 +81,8 @@
     <string name="setting_allow_screenshots_subtitle">When off, the system blocks screenshots, screen recording and the recents preview to protect clipboard contents.</string>
     <string name="setting_translucency_title">Transparency</string>
     <string name="setting_translucency_subtitle">Use semi-transparent backgrounds on surfaces. Disable for fully solid backgrounds.</string>
+    <string name="setting_reduce_motion_title">Reduce Motion</string>
+    <string name="setting_reduce_motion_subtitle">Use minimal transitions instead of cinematic animations. Mirrors the system accessibility preference.</string>
     <string name="setting_image_max_height_label">Image max height (dp)</string>
     <string name="setting_image_max_height_hint">1–200 dp (default 40)</string>
     <string name="setting_preview_delay_label">Action-row auto-close delay (ms)</string>

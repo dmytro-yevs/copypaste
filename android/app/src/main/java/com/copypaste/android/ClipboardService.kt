@@ -282,28 +282,43 @@ class ClipboardService : Service() {
      * must never crash because discovery could not start.
      */
     private fun startFgsDiscovery() {
+        // ydhw: early-exit and diagnosable log when the native library is absent.
+        // startDiscovery() is a no-op in stub mode, but the caller cannot
+        // distinguish "not started" from "started but found nothing" without this.
+        if (!isNativeLibraryLoaded) {
+            Log.w(TAG, "startFgsDiscovery: skipped — native library not loaded (isNativeLibraryLoaded=false); discovery will be empty")
+            return
+        }
         scope.launch {
             try {
                 val cert = withContext(Dispatchers.IO) {
                     deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
                 }
-                // Race guard (j2vf): startInboundP2pListener binds the OS-assigned
-                // port asynchronously on Dispatchers.IO. Do NOT advertise before it
-                // is non-zero, else Android publishes syncPort=0 over mDNS and Mac
-                // peers see "device unavailable". Poll up to ~3 s (20ms→500ms backoff).
+                // ydhw: reactive wait for the inbound listener port rather than a
+                // hard 3s deadline. startInboundP2pListener binds asynchronously on
+                // Dispatchers.IO; advertising syncPort=0 causes macOS peers to see
+                // "device unavailable" and fail to dial back. We poll with short
+                // backoff until the port is non-zero, with a 10s safety timeout so a
+                // listener that failed silently does not block discovery indefinitely.
                 val syncPort = withContext(Dispatchers.IO) {
-                    val deadlineMs = System.currentTimeMillis() + 3_000L
+                    val deadlineMs = System.currentTimeMillis() + 10_000L
                     var backoffMs = 20L
                     while (activeListenerPort == 0 && System.currentTimeMillis() < deadlineMs) {
                         delay(backoffMs)
-                        backoffMs = (backoffMs * 2).coerceAtMost(500L)
+                        backoffMs = (backoffMs * 2).coerceAtMost(250L)
                     }
                     val port = activeListenerPort
                     if (port == 0) {
-                        Log.w(TAG, "startFgsDiscovery: listener port still 0 after wait — advertising port 0 (Mac may not reach us)")
+                        // Listener did not bind within the safety window. Log at WARN
+                        // so this is diagnosable: look for P2P listener errors above.
+                        Log.w(TAG, "startFgsDiscovery: listener port still 0 after 10 s wait — NOT advertising (would publish syncPort=0 which Mac cannot dial). Discovery deferred until listener binds.")
                     }
                     port
                 }
+                // ydhw: do not advertise if port is still 0 — a syncPort=0
+                // advertisement is worse than no advertisement (Mac dials :0 and fails).
+                // The caller will retry startFgsDiscovery if the listener binds later.
+                if (syncPort == 0) return@launch
                 withContext(Dispatchers.IO) {
                     startDiscovery(
                         deviceId = cert.deviceId,
@@ -386,6 +401,12 @@ class ClipboardService : Service() {
         p2pListener = handle
         activeListenerPort = handle.actualPort
         Log.i(TAG, "P2P listener bound on port ${handle.actualPort} (id=${handle.listenerId})")
+        // ydhw: reactive discovery retry — if startFgsDiscovery() ran before
+        // the port was known (and returned early to avoid advertising port 0),
+        // re-trigger it now that activeListenerPort is non-zero. startDiscovery()
+        // is idempotent on the native side, so a second call when discovery is
+        // already running is a no-op — safe to call unconditionally here.
+        startFgsDiscovery()
 
         p2pListenerJob = scope.launch {
             val listenerId = handle.listenerId

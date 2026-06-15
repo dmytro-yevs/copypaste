@@ -643,6 +643,17 @@ class FgsSyncLoop(
                 revokedFingerprints = revoked,
                 deviceId = settings.deviceId,
             )
+            // 8i3q: stamp the contact time immediately after a successful
+            // TCP/TLS handshake — syncWithPeer returning without throwing IS
+            // the handshake proof, regardless of item count. This keeps the
+            // 60s ONLINE_WINDOW alive on every 30s dial tick even when there
+            // are zero items to exchange. Best-effort: a write failure here
+            // must not abort item processing or the remaining peers.
+            runCatching {
+                settings.updatePeerLastSync(peerFingerprint, System.currentTimeMillis())
+            }.onFailure { e ->
+                Log.w(TAG, "Failed to stamp lastSyncMs for ${peerFingerprint.take(8)}: ${e.message}")
+            }
             var stored = 0
             // Accumulate text clips from this P2P batch; apply only the newest
             // after the full set is stored — mirrors the Supabase drain logic.
@@ -701,17 +712,6 @@ class FgsSyncLoop(
 
             // Advance the inbound high-water cursor to the max wallTimeMs received.
             settings.advanceP2pInboundHighWater(peerFingerprint, maxInboundWallTime)
-
-            // E1: stamp a real-presence contact time on the roster entry so the
-            // Devices screen "online" dot reflects an ACTUAL successful P2P sync
-            // (not a Supabase poll-cursor proxy). Replace-in-place via the
-            // dedicated helper; best-effort — a write failure here must not abort
-            // the remaining peers.
-            runCatching {
-                settings.updatePeerLastSync(peerFingerprint, System.currentTimeMillis())
-            }.onFailure { e ->
-                Log.w(TAG, "Failed to stamp lastSyncMs for ${peerFingerprint.take(8)}: ${e.message}")
-            }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
