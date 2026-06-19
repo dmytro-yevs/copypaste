@@ -593,6 +593,10 @@ fun PairScreen(
                         )
                         ""
                     }
+                    // ABI 18 (PG-28): collect own WAN address via STUN so the
+                    // peer's device record shows a reachable external candidate.
+                    // Gated behind the user's collect_public_ip setting.
+                    val ownPublicIp = StunUtils.queryPublicIp(settings.collectPublicIp)
                     val bootstrap = bootstrapPairInitiator(
                         addrHint = peer.addrHint,
                         certDer = cert.certDer,
@@ -605,13 +609,14 @@ fun PairScreen(
                         // response (bootstrap.peerProvisioning), applied below.
                         localProvisioning = null,
                         // HB-1a (ABI 14): send THIS device's own metadata so the
-                        // PC's device card shows real Android info. public_ip is
-                        // not collected here (lib.rs passes None).
+                        // PC's device card shows real Android info.
                         deviceName = android.os.Build.MODEL ?: "Android",
                         deviceModel = android.os.Build.MODEL ?: "Android",
                         osVersion = "Android " + android.os.Build.VERSION.RELEASE,
                         appVersion = BuildConfig.VERSION_NAME,
                         localIp = lanIp,
+                        // ABI 18 (PG-28): STUN-derived WAN address.
+                        publicIp = ownPublicIp,
                     )
 
                     // QR full-provisioning: if the paired PC carried its sync

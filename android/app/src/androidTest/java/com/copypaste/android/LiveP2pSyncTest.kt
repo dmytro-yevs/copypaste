@@ -103,6 +103,8 @@ class LiveP2pSyncTest {
             osVersion = "Android " + android.os.Build.VERSION.RELEASE,
             appVersion = "androidTest",
             localIp = "",
+            // ABI 18 (PG-28): public_ip — null in tests (no real STUN in the emulator).
+            publicIp = null,
         )
 
         // The daemon advertises its own_sync_addr as 127.0.0.1:<port> (host

@@ -5,6 +5,7 @@ uniffi::include_scaffolding!("copypaste_android");
 pub mod p2p_listener;
 pub mod pairing;
 pub mod panic_boundary;
+pub mod stun;
 pub mod version;
 pub use p2p_listener::{P2pListenerHandle, PeerSessionKey};
 pub use pairing::{DiscoveredPeer, PairStatus};
@@ -890,6 +891,31 @@ pub fn get_private_mode() -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// PG-28 (8cu0): STUN public-IP resolution over Android FFI
+//
+// Android performs STUN on the Rust side so the discovered WAN address can be
+// threaded into PeerMeta (same as the macOS daemon's public_ip.rs path).
+// Kotlin MUST call this on a background/IO thread (it blocks for up to 5 s)
+// and MUST gate the call behind `AppConfig.collect_public_ip` — exactly as
+// the daemon gates `resolve_public_ip` behind `AppConfig::collect_public_ip`.
+// The result (a public IPv4 string) is non-secret and may be stored in the
+// devices table, but MUST NOT be logged at info level unnecessarily.
+
+/// Discover this device's public (WAN) IPv4 address via a STUN Binding
+/// Request to `stun.l.google.com:19302`.
+///
+/// **Blocking** — runs a UDP exchange with up to a 5-second timeout. Kotlin
+/// MUST call this on an IO dispatcher, NOT the main thread. Returns `null`
+/// on any failure (network unreachable, timeout, parse error).
+///
+/// Kotlin MUST gate this call behind the `collect_public_ip` setting (parity
+/// with the macOS daemon's `AppConfig::collect_public_ip` gate). Exposing via
+/// FFI so the same result feeds `PeerMeta.public_ip` during pairing (ABI 18).
+pub fn resolve_stun_public_ip() -> Option<String> {
+    panic_boundary::catch(stun::resolve_public_ip).unwrap_or(None)
+}
+
+// ---------------------------------------------------------------------------
 // PG-12 (8qcm): Revoke peer + sync-key rotation over Android FFI
 //
 // macOS exposes `revoke_and_rotate` (ipc.rs:4882): revoke a peer's DB row +
@@ -1339,15 +1365,19 @@ pub fn bootstrap_pair_initiator(
     // (it has nothing to offer yet); the received provisioning comes back in the
     // result's `peer_provisioning`.
     local_provisioning: Option<SyncProvisioning>,
-    // HB-1a (ABI 14): THIS device's own metadata, gathered in Kotlin
-    // (`Build.MODEL`, "Android <release>", BuildConfig.VERSION_NAME, device name,
-    // LAN IP) and sent in-band so the peer's device card shows real Android info
-    // instead of a bare entry. `public_ip` is intentionally not collected here.
+    // HB-1a (ABI 14) / PG-28 (ABI 18): THIS device's own metadata, gathered in
+    // Kotlin (`Build.MODEL`, "Android <release>", BuildConfig.VERSION_NAME,
+    // device name, LAN IP, and now the STUN WAN IP) and sent in-band so the
+    // peer's device card shows real Android info including the public address.
     device_name: Option<String>,
     device_model: Option<String>,
     os_version: Option<String>,
     app_version: Option<String>,
     local_ip: Option<String>,
+    // ABI 18 (PG-28): STUN-derived WAN address. Kotlin collects it via
+    // `StunUtils.queryPublicIp` before calling this function and passes the
+    // result here. `None` when `collect_public_ip` is false or STUN failed.
+    public_ip: Option<String>,
 ) -> Result<BootstrapResult, CopypasteError> {
     panic_boundary::catch_result(|| {
         let addr: std::net::SocketAddr =
@@ -1364,15 +1394,15 @@ pub fn bootstrap_pair_initiator(
                 key_der.to_vec(),
                 &pake_password,
                 &sync_addr,
-                // HB-1a: build a real PeerMeta from the Kotlin-gathered fields so
-                // the responder records this Android device's name/model/OS/app/IP
-                // (was `PeerMeta::default()` — all None — before ABI 14).
+                // ABI 18: build PeerMeta with the STUN public_ip so the macOS
+                // peer can use it for NAT traversal / external candidate selection.
                 &build_android_peer_meta(
                     device_name,
                     device_model,
                     os_version,
                     app_version,
                     local_ip,
+                    public_ip,
                 ),
                 local_provisioning.map(Into::into),
             ))
@@ -1384,17 +1414,23 @@ pub fn bootstrap_pair_initiator(
     })
 }
 
-/// HB-1a (ABI 14): assemble a `copypaste_p2p::bootstrap::PeerMeta` from the
-/// optional device-metadata fields Kotlin gathers and passes across the FFI.
-/// `public_ip` is left `None` — Android does not run STUN here. Used by every
-/// Android pairing path (initiator, discovery initiator, standing responder) so
-/// the peer always sees real Android device info instead of `PeerMeta::default()`.
+/// HB-1a (ABI 14) / PG-28 (ABI 18): assemble a
+/// `copypaste_p2p::bootstrap::PeerMeta` from the optional device-metadata
+/// fields Kotlin gathers and passes across the FFI. Used by every Android
+/// pairing path (initiator, discovery initiator, standing responder) so the
+/// peer always sees real Android device info instead of `PeerMeta::default()`.
+///
+/// `public_ip` is the STUN-derived WAN address collected via
+/// `resolve_stun_public_ip()` (or Kotlin's `StunUtils.queryPublicIp`).
+/// Passing `None` is valid when the user has opted out of `collect_public_ip`
+/// or STUN failed — the peer will simply see no public address.
 fn build_android_peer_meta(
     device_name: Option<String>,
     device_model: Option<String>,
     os_version: Option<String>,
     app_version: Option<String>,
     local_ip: Option<String>,
+    public_ip: Option<String>,
 ) -> copypaste_p2p::bootstrap::PeerMeta {
     copypaste_p2p::bootstrap::PeerMeta {
         model: device_model,
@@ -1402,9 +1438,9 @@ fn build_android_peer_meta(
         app_version,
         local_ip,
         device_name,
-        // Android does not collect its own public IP during pairing; the peer's
-        // public_ip still flows back to us via `BootstrapResult.peer_public_ip`.
-        public_ip: None,
+        // ABI 18 (PG-28): public_ip is now threaded from Kotlin (collected via
+        // StunUtils before calling pairWithDiscovered / bootstrap_pair_initiator).
+        public_ip,
         device_id: None,
     }
 }
@@ -2444,14 +2480,18 @@ pub fn start_discovery(
     bport: u16,
     cert_der: &[u8],
     key_der: &[u8],
-    // HB-1a (ABI 14): THIS device's own metadata, threaded into the standing
-    // responder loop so a macOS-INITIATED discovery pair records real Android
-    // device info (was `PeerMeta::default()`). `device_name` is already a param;
-    // the standing responder reuses it for `PeerMeta.device_name`.
+    // HB-1a (ABI 14) / PG-28 (ABI 18): THIS device's own metadata, threaded
+    // into the standing responder loop so a macOS-INITIATED discovery pair
+    // records real Android info. `device_name` is already a param; the standing
+    // responder reuses it for `PeerMeta.device_name`.
     device_model: Option<String>,
     os_version: Option<String>,
     app_version: Option<String>,
     local_ip: Option<String>,
+    // ABI 18 (PG-28): STUN-derived WAN address. Kotlin collects it via
+    // `StunUtils.queryPublicIp` before starting discovery. `None` when
+    // `collect_public_ip` is false or STUN failed.
+    public_ip: Option<String>,
 ) -> Result<(), CopypasteError> {
     panic_boundary::catch_result(|| {
         let rt = runtime()?;
@@ -2465,6 +2505,7 @@ pub fn start_discovery(
             os_version,
             app_version,
             local_ip,
+            public_ip,
         );
 
         // Build + register the discovery service (advertise with bport so we are
@@ -2647,13 +2688,17 @@ pub fn pair_with_discovered(
     key_der: &[u8],
     sync_addr: String,
     local_provisioning: Option<SyncProvisioning>,
-    // HB-1a (ABI 14): THIS device's own metadata, advertised to the discovered
-    // peer during the initiator handshake (was `PeerMeta::default()`).
+    // HB-1a (ABI 14) / PG-28 (ABI 18): THIS device's own metadata, advertised
+    // to the discovered peer during the initiator handshake.
     device_name: Option<String>,
     device_model: Option<String>,
     os_version: Option<String>,
     app_version: Option<String>,
     local_ip: Option<String>,
+    // ABI 18 (PG-28): STUN-derived WAN address. Kotlin collects it via
+    // `StunUtils.queryPublicIp` before calling this function. `None` when
+    // `collect_public_ip` is false or STUN failed.
+    public_ip: Option<String>,
 ) -> Result<(), CopypasteError> {
     panic_boundary::catch_result(|| {
         let rt = runtime()?;
@@ -2687,9 +2732,15 @@ pub fn pair_with_discovered(
         let cert_der = cert_der.to_vec();
         let key_der = key_der.to_vec();
         let provisioning = local_provisioning.map(Into::into);
-        // HB-1a: build this device's PeerMeta before moving into the task.
-        let own_meta =
-            build_android_peer_meta(device_name, device_model, os_version, app_version, local_ip);
+        // ABI 18: build PeerMeta including the STUN-derived public_ip.
+        let own_meta = build_android_peer_meta(
+            device_name,
+            device_model,
+            os_version,
+            app_version,
+            local_ip,
+            public_ip,
+        );
 
         let task = rt.spawn(async move {
             use copypaste_p2p::bootstrap::run_initiator_with_confirm;
@@ -4076,6 +4127,8 @@ mod tests {
             Some("Android 15".into()),
             Some("0.6.1".into()),
             Some("127.0.0.1".into()),
+            // ABI 18: public_ip — None in tests (no real STUN in unit tests).
+            None,
         )
         .expect("FFI bootstrap pairing must succeed over loopback");
 
@@ -4201,6 +4254,8 @@ mod tests {
             None,
             None,
             None,
+            // ABI 18: public_ip — None in unit tests.
+            None,
         )
         .expect("FFI bootstrap pairing must succeed over loopback");
 
@@ -4260,6 +4315,8 @@ mod tests {
             None,
             None,
             None,
+            None,
+            // ABI 18: public_ip.
             None,
         )
         .expect_err("malformed addr_hint must error");
@@ -5459,6 +5516,46 @@ mod tests {
         assert!(
             matches!(err, CopypasteError::InvalidKeyLength),
             "expected InvalidKeyLength, got {err:?}"
+        );
+    }
+
+    // ── PG-28 (8cu0): build_android_peer_meta threads public_ip ─────────────
+
+    /// ABI 18: `build_android_peer_meta` must accept a `public_ip` parameter
+    /// and pass it through to `PeerMeta.public_ip` so Android can advertise its
+    /// STUN-derived WAN address to peers during pairing.
+    #[test]
+    fn build_android_peer_meta_threads_public_ip() {
+        let meta = build_android_peer_meta(
+            Some("Pixel 8".into()),
+            Some("Pixel 8".into()),
+            Some("Android 15".into()),
+            Some("2.0.0".into()),
+            Some("192.168.1.5".into()),
+            Some("203.0.113.42".into()),
+        );
+        assert_eq!(
+            meta.public_ip.as_deref(),
+            Some("203.0.113.42"),
+            "public_ip must be threaded from the FFI param into PeerMeta"
+        );
+    }
+
+    /// When `public_ip` is `None`, `PeerMeta.public_ip` must also be `None`
+    /// (backward-compatible: not collecting STUN is still valid).
+    #[test]
+    fn build_android_peer_meta_public_ip_none_when_omitted() {
+        let meta = build_android_peer_meta(
+            Some("Test".into()),
+            None,
+            None,
+            None,
+            None,
+            None, // public_ip not collected
+        );
+        assert!(
+            meta.public_ip.is_none(),
+            "public_ip must be None when not provided"
         );
     }
 }

@@ -233,7 +233,26 @@
 /// (old peers simply omit it and are deserialized as `None`). Kotlin
 /// generated against ABI 16 reads `BootstrapResult` / `PairStatus` with
 /// the wrong shape and must be regenerated.
-pub const UNIFFI_ABI_VERSION: u32 = 17;
+///
+/// **ABI 18 (Android STUN public-IP — CopyPaste-8cu0 / PG-28):** Three
+/// pairing functions gained a trailing `public_ip: String?` parameter so
+/// Android can advertise its STUN-derived WAN address to peers during pairing
+/// (parity with the macOS daemon's `public_ip.rs` path):
+///
+///   * `bootstrap_pair_initiator` — gained `public_ip?` after `local_ip?`.
+///   * `start_discovery` — gained `public_ip?` after `local_ip?` (threaded
+///     into the standing responder loop so macOS-INITIATED pairs also receive it).
+///   * `pair_with_discovered` — gained `public_ip?` after `local_ip?`.
+///
+/// Additionally, a new function `resolve_stun_public_ip() -> String?` is
+/// exported so Kotlin can collect the WAN address via the Rust STUN client
+/// (byte-for-byte equivalent to the daemon's `public_ip.rs` implementation)
+/// in addition to / as an alternative to Kotlin-side `StunUtils`.
+///
+/// Kotlin generated against ABI 17 calls the three pairing functions with the
+/// wrong arity (missing `publicIp`) and lacks `resolveStunPublicIp`; it must
+/// be regenerated.
+pub const UNIFFI_ABI_VERSION: u32 = 18;
 
 /// Returns the semantic version of the Rust `copypaste-android` crate
 /// (the `version` field from `Cargo.toml`).

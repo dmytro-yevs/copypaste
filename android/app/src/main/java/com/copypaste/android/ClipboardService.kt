@@ -320,6 +320,11 @@ class ClipboardService : Service() {
                 // The caller will retry startFgsDiscovery if the listener binds later.
                 if (syncPort == 0) return@launch
                 withContext(Dispatchers.IO) {
+                    // ABI 18 (PG-28): collect own WAN address via STUN so the
+                    // macOS peer learns a reachable external candidate. Gated
+                    // behind the user's collect_public_ip setting (parity with
+                    // the macOS daemon). Best-effort: null on failure or opt-out.
+                    val ownPublicIp = StunUtils.queryPublicIp(settings.collectPublicIp)
                     startDiscovery(
                         deviceId = cert.deviceId,
                         deviceName = Build.MODEL ?: "Android",
@@ -332,6 +337,8 @@ class ClipboardService : Service() {
                         osVersion = "Android " + Build.VERSION.RELEASE,
                         appVersion = BuildConfig.VERSION_NAME,
                         localIp = lanIpv4Address(),
+                        // ABI 18 (PG-28): STUN-derived WAN address.
+                        publicIp = ownPublicIp,
                     )
                 }
                 Log.i(TAG, "FGS discovery started (syncPort=$syncPort, bport=$SAS_BPORT)")

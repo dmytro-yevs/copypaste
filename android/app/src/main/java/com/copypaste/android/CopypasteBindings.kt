@@ -1244,6 +1244,9 @@ fun startDiscovery(
     osVersion: String? = null,
     appVersion: String? = null,
     localIp: String? = null,
+    // ABI 18 (PG-28): STUN-derived WAN address. Collect via StunUtils.queryPublicIp
+    // (or resolveStunPublicIp()) before calling; pass null if not collected / opted out.
+    publicIp: String? = null,
 ) {
     if (!isNativeLibraryLoaded) {
         Log.w(TAG, "startDiscovery: stub — native library not loaded")
@@ -1261,6 +1264,7 @@ fun startDiscovery(
             osVersion = osVersion,
             appVersion = appVersion,
             localIp = localIp,
+            publicIp = publicIp,
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw e.toAppException { CopypasteException.DatabaseError(it ?: "startDiscovery failed") }
@@ -1328,6 +1332,9 @@ fun pairWithDiscovered(
     osVersion: String? = null,
     appVersion: String? = null,
     localIp: String? = null,
+    // ABI 18 (PG-28): STUN-derived WAN address. Collect via StunUtils.queryPublicIp
+    // (or resolveStunPublicIp()) before calling; pass null if not collected / opted out.
+    publicIp: String? = null,
 ) {
     if (!isNativeLibraryLoaded) {
         throw IllegalStateException("copypaste_android native library not loaded; pairWithDiscovered is unavailable")
@@ -1344,6 +1351,7 @@ fun pairWithDiscovered(
             osVersion = osVersion,
             appVersion = appVersion,
             localIp = localIp,
+            publicIp = publicIp,
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw e.toAppException { CopypasteException.DatabaseError(it ?: "pairWithDiscovered failed") }

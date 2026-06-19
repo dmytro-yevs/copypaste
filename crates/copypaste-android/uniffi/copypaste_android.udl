@@ -233,6 +233,27 @@ namespace copypaste_android {
   [Throws=CopypasteError]
   ScannedPairing parse_pairing_qr(string payload);
 
+  // ── PG-28 (8cu0): STUN public-IP resolution ──────────────────────────────
+  // Android collects its own WAN address via STUN (RFC 5389) so pairing can
+  // advertise a reachable external candidate for NAT traversal, at parity with
+  // the macOS daemon (which uses public_ip.rs). The result is non-secret but
+  // MUST NOT be logged at info level; store it in the PairedPeer.peerPublicIp
+  // column alongside the peer's IP for future NAT-traversal use.
+  //
+  // Kotlin MUST:
+  //   1. Gate this call behind the `collect_public_ip` setting.
+  //   2. Call from an IO dispatcher (blocks up to 5 s).
+  //   3. Pass the returned String? directly to `pairWithDiscovered`,
+  //      `bootstrapPairInitiator`, and `startDiscovery` as `publicIp`.
+  //
+  // ABI 18 (PG-28).
+
+  /// Discover this device's public (WAN) IPv4 via STUN Binding Request
+  /// (stun.l.google.com:19302). **Blocking** — call on an IO thread.
+  /// Returns null on failure (network unreachable, timeout, parse error).
+  /// Kotlin MUST gate behind `collect_public_ip` setting (parity with macOS).
+  string? resolve_stun_public_ip();
+
   // Version + ABI compatibility check.
   // Kotlin calls these on startup to confirm it is talking to a compatible
   // Rust core. Bump UNIFFI_ABI_VERSION (in src/version.rs) whenever the
@@ -269,9 +290,11 @@ namespace copypaste_android {
   /// metadata (device_name, Build.MODEL, "Android <release>", app version, LAN
   /// IP) — sent in-band so the peer's device card shows real Android info instead
   /// of a bare entry. The PEER's metadata comes back in `BootstrapResult.peer_*`.
+  /// ABI 18 (PG-28): `public_ip` added — Kotlin collects it via `StunUtils`
+  /// (or `resolveStunPublicIp()`) before calling; pass null if not collected.
   /// Throws `P2pError` on a bad addr_hint or any transport/PAKE failure.
   [Throws=CopypasteError]
-  BootstrapResult bootstrap_pair_initiator(string addr_hint, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string pake_password, string sync_addr, SyncProvisioning? local_provisioning, string? device_name, string? device_model, string? os_version, string? app_version, string? local_ip);
+  BootstrapResult bootstrap_pair_initiator(string addr_hint, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string pake_password, string sync_addr, SyncProvisioning? local_provisioning, string? device_name, string? device_model, string? os_version, string? app_version, string? local_ip, string? public_ip);
 
   /// Run ONE P2P clipboard sync session against an already-paired peer.
   ///
@@ -350,9 +373,11 @@ namespace copypaste_android {
   /// ABI 14 (HB-1a): the four trailing optional params are THIS device's own
   /// metadata, threaded into the standing responder so a macOS-INITIATED pair
   /// records real Android info. `device_name` (already a param) is reused for the
-  /// friendly-name field; `public_ip` is not collected on Android.
+  /// friendly-name field.
+  /// ABI 18 (PG-28): `public_ip` added — Kotlin collects it via `StunUtils`
+  /// (or `resolveStunPublicIp()`) before calling; pass null if not collected.
   [Throws=CopypasteError]
-  void start_discovery(string device_id, string device_name, u16 sync_port, u16 bport, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string? device_model, string? os_version, string? app_version, string? local_ip);
+  void start_discovery(string device_id, string device_name, u16 sync_port, u16 bport, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string? device_model, string? os_version, string? app_version, string? local_ip, string? public_ip);
 
   /// Stop LAN discovery + the standing responder. Idempotent. Aborts the
   /// browse/responder/initiator tasks, drops the mDNS service, and aborts any
@@ -376,8 +401,10 @@ namespace copypaste_android {
   /// v1 peer (no bport), has no routable address, or a pairing is in flight.
   /// ABI 14 (HB-1a): the five trailing optional params are THIS device's own
   /// metadata, advertised to the discovered peer during the initiator handshake.
+  /// ABI 18 (PG-28): `public_ip` added — Kotlin collects it via `StunUtils`
+  /// (or `resolveStunPublicIp()`) before calling; pass null if not collected.
   [Throws=CopypasteError]
-  void pair_with_discovered(string device_id, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string sync_addr, SyncProvisioning? local_provisioning, string? device_name, string? device_model, string? os_version, string? app_version, string? local_ip);
+  void pair_with_discovered(string device_id, [ByRef] sequence<u8> cert_der, [ByRef] sequence<u8> key_der, string sync_addr, SyncProvisioning? local_provisioning, string? device_name, string? device_model, string? os_version, string? app_version, string? local_ip, string? public_ip);
 
   /// Poll the current pairing status. While active, `sas`+`role` are populated;
   /// the peer_* outputs (incl. the 32-byte `session_key`) are populated ONLY

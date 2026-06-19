@@ -587,6 +587,10 @@ fun DevicesScreen(
                         osVersion = "Android " + android.os.Build.VERSION.RELEASE,
                         appVersion = BuildConfig.VERSION_NAME,
                         localIp = lanIpv4Address(),
+                        // ABI 18 (PG-28): STUN-derived WAN address collected at
+                        // screen entry (LaunchedEffect above). Null when
+                        // collectPublicIp is disabled or STUN failed.
+                        publicIp = ownPublicIp,
                     )
                 }
                 pairingPeer = peer
