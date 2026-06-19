@@ -18,8 +18,14 @@ use copypaste_core::{
     detect, encrypt_for_cloud, encrypt_item_with_aad, is_sensitive_for_autowipe, SyncKeyError,
     AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT, NONCE_SIZE,
 };
+// PG-16 (89ve): text-kind classification re-exported so Kotlin can call it
+// instead of re-implementing the classifier in TextKind.kt.
+use copypaste_core::text_kind::classify_text;
 // Brings `Engine::encode` into scope for `relay_public_key_b64` (STANDARD base64).
 use base64::Engine as _;
+// SHA-256 for DB_BY_PATH cache key derivation (P1-8): hashing the raw 32-byte
+// DB key so raw key material is not retained on the heap as a HashMap key.
+use sha2::{Digest as _, Sha256};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use zeroize::Zeroizing;
@@ -290,11 +296,266 @@ pub fn is_sensitive(text: String) -> bool {
 
 /// Returns the sensitive-kind label for `text`, or `None` if not sensitive.
 ///
+/// PG-23 (l9z8) alignment: `sensitive_kind` now gates at the SAME >= 0.70
+/// confidence floor as `is_sensitive_for_autowipe` / `is_sensitive`. Previously
+/// it called `detect()` which fires on ANY pattern including low-confidence
+/// heuristics (phone 0.55, passport 0.55, email 0.60, IBAN 0.65, SSN 0.65).
+/// This produced a divergence where `sensitive_kind` returned `Some("Phone")`
+/// while `is_sensitive` returned `false` for the same phone number, confusing
+/// Kotlin callers that relied on `sensitive_kind.isNotNull()` as a sensitivity
+/// signal.
+///
+/// The fix: only return a non-null kind for patterns whose confidence is >= 0.70
+/// (the SAME autowipe floor). Low-confidence pattern hits that fall below the
+/// floor are still available via `detect_sensitive_spans` / `is_sensitive_for_autowipe`
+/// but `sensitive_kind` is now purely an informational label that agrees with
+/// `is_sensitive`.
+///
 /// Wrapped in [`panic_boundary::catch`] for the same reason as
 /// [`is_sensitive`]. This export returns a plain `Option<String>`, so a caught
 /// panic recovers to `None`.
 pub fn sensitive_kind(text: String) -> Option<String> {
-    panic_boundary::catch(|| detect(&text).map(|k| format!("{:?}", k))).unwrap_or(None)
+    panic_boundary::catch(|| {
+        // Only report a kind when the text also triggers the auto-wipe gate
+        // (confidence >= 0.70). This keeps sensitive_kind and is_sensitive in
+        // sync — Kotlin can safely use `sensitive_kind.isNotNull()` as a proxy
+        // for is_sensitive.
+        if !is_sensitive_for_autowipe(&text) {
+            return None;
+        }
+        detect(&text).map(|k| format!("{:?}", k))
+    })
+    .unwrap_or(None)
+}
+
+// ---------------------------------------------------------------------------
+// PG-3 (349q): sensitive_capture_decision — single source of truth for whether
+// text is sensitive at capture time. Returns `SensitiveCaptureDecision` with
+// three fields Kotlin needs to store+mask a sensitive item correctly:
+//
+//   is_sensitive   — true when confidence >= 0.70 (same as macOS daemon gate)
+//   kind           — the SensitiveKind label, or None when not sensitive
+//   expires_at_ms  — unix-ms expiry timestamp (now_unix_ms + ttl_secs * 1000),
+//                    or None when sensitive_ttl_secs == 0 ("auto-wipe disabled")
+//                    or when the text is not sensitive
+//
+// This replaces the split calls to is_sensitive / sensitive_kind / separate
+// expires_at computation that ClipboardService.kt would otherwise need to
+// coordinate. One FFI round-trip per capture is cheaper and keeps the logic
+// in Rust where it belongs.
+//
+// SECURITY: the item_id AAD binding (in encrypt_text / decrypt_text) is
+// unchanged — callers still pass item_id into the crypto functions. This
+// function is PURE (no DB I/O, no file I/O).
+//
+// PG-4  (ojsh): sensitive_spans — core detector spans for Kotlin masking.
+// PG-24 (5tnx): sensitive_expires_at_ms — per-item expires_at from core TTL.
+// ---------------------------------------------------------------------------
+
+/// Result of `sensitive_capture_decision` — single-round-trip sensitivity
+/// verdict for one clipboard item at capture time.
+///
+/// Kotlin stores `is_sensitive` and `expires_at_ms` in the DB row and uses
+/// `kind` for the badge label. If `is_sensitive` is false, `kind` and
+/// `expires_at_ms` are always `None`.
+///
+/// `expires_at_ms` is `None` when:
+///   - `is_sensitive` is false, OR
+///   - `sensitive_ttl_secs` is 0 (the "auto-wipe disabled" sentinel).
+pub struct SensitiveCaptureDecision {
+    /// True when the text triggers the >= 0.70 confidence floor.
+    pub is_sensitive: bool,
+    /// The canonical sensitive-kind label (e.g. `"AwsKey"`, `"CreditCard"`),
+    /// or `None` when the text is not sensitive.
+    pub kind: Option<String>,
+    /// Unix-millisecond expiry timestamp for this item, or `None` when
+    /// auto-wipe is disabled (`sensitive_ttl_secs == 0`) or not sensitive.
+    pub expires_at_ms: Option<i64>,
+}
+
+/// Compute the sensitivity verdict and auto-wipe expiry for one clipboard item
+/// at capture time.
+///
+/// `now_unix_ms` is the current wall-clock time in Unix milliseconds. Kotlin
+/// should pass `System.currentTimeMillis()`. `sensitive_ttl_secs` is from the
+/// user-tunable config (defaults to 30 s; 0 = "auto-wipe disabled").
+///
+/// This is the CORRECT gate for Android capture (PG-3 / 349q). It uses the
+/// SAME `is_sensitive_for_autowipe` (>= 0.70 confidence floor) as the macOS
+/// daemon, so a phone number (confidence 0.55) is NOT flagged and NOT dropped
+/// on Android. Previously ClipboardService.kt checked `is_sensitive` and
+/// early-returned, dropping items that macOS keeps.
+///
+/// PURE — no DB I/O.
+pub fn sensitive_capture_decision(
+    text: String,
+    now_unix_ms: i64,
+    sensitive_ttl_secs: u64,
+) -> SensitiveCaptureDecision {
+    panic_boundary::catch(|| {
+        let sensitive = is_sensitive_for_autowipe(&text);
+        if !sensitive {
+            return SensitiveCaptureDecision {
+                is_sensitive: false,
+                kind: None,
+                expires_at_ms: None,
+            };
+        }
+        let kind = detect(&text).map(|k| format!("{:?}", k));
+        // sensitive_ttl_secs == 0 is the "never wipe" sentinel — no expiry.
+        let expires_at_ms = if sensitive_ttl_secs == 0 {
+            None
+        } else {
+            Some(now_unix_ms.saturating_add(sensitive_ttl_secs as i64 * 1000))
+        };
+        SensitiveCaptureDecision {
+            is_sensitive: true,
+            kind,
+            expires_at_ms,
+        }
+    })
+    .unwrap_or(SensitiveCaptureDecision {
+        is_sensitive: false,
+        kind: None,
+        expires_at_ms: None,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// PG-24 (5tnx): sensitive_expires_at_ms
+//
+// macOS daemon stamps `expires_at = now_ms + sensitive_ttl_local_secs * 1000`
+// (daemon.rs:2183) at capture. Android ClipboardRepository.kt:1128-1177 only
+// pruned by age in getItems(), leaving expired items alive in suspended apps.
+//
+// This FFI computes the per-item expiry timestamp from the SAME formula so
+// Kotlin stores `expires_at` in the DB row and a WorkManager periodic job can
+// sweep stale rows even when the app is suspended.
+//
+// Returns None when sensitive_ttl_secs == 0 ("auto-wipe disabled" sentinel).
+// ---------------------------------------------------------------------------
+
+/// Compute the per-item `expires_at` timestamp (Unix milliseconds) for a
+/// sensitive clipboard item, matching the daemon's formula:
+///
+///   `expires_at = now_unix_ms + sensitive_ttl_secs * 1000`
+///
+/// Returns `None` when `sensitive_ttl_secs == 0` (the "auto-wipe disabled"
+/// sentinel — Kotlin should not write `expires_at` for such items).
+///
+/// `now_unix_ms` is `System.currentTimeMillis()` from Kotlin.
+/// `sensitive_ttl_secs` is the user-tunable `Config.sensitive_ttl_secs`
+/// (default 30, from `default_config()`).
+///
+/// PURE — no DB I/O. Wrapped in `panic_boundary::catch` as a defensive
+/// measure; the saturation math cannot panic in practice.
+pub fn sensitive_expires_at_ms(now_unix_ms: i64, sensitive_ttl_secs: u64) -> Option<i64> {
+    panic_boundary::catch(|| {
+        if sensitive_ttl_secs == 0 {
+            return None;
+        }
+        Some(now_unix_ms.saturating_add(sensitive_ttl_secs as i64 * 1000))
+    })
+    .unwrap_or(None)
+}
+
+// ---------------------------------------------------------------------------
+// PG-4 (ojsh): detect_sensitive_spans — sensitive byte spans for Kotlin masking
+//
+// macOS daemon ipc.rs:4460-4487 calls `SensitiveDetector::detect_normalised` and
+// maps byte→char offsets for the `sensitive_spans` JSON array used by
+// HistoryView.tsx to bullet-mask embedded credentials. Android had no equivalent,
+// so a card/IBAN buried in longer non-sensitive text showed unmasked.
+//
+// This FFI returns the same char-offset spans so Kotlin can mask sub-string
+// sensitive matches in the history list. PURE — no DB I/O.
+//
+// NOTE: spans are over the NFKC-NORMALISED string, not the original. Kotlin
+// must use `SensitiveSpan.start/end` as character indices into the normalised
+// string returned alongside the spans (or re-normalise the same text before
+// masking). Normalization rarely changes the string (only Unicode bypass tricks
+// trigger it), so callers can usually index into the original text directly —
+// but correctness requires the normalised form.
+// ---------------------------------------------------------------------------
+
+/// One matched sensitive span (char-offset, NOT byte-offset).
+///
+/// `start` and `end` are Unicode scalar-value indices into the NFKC-normalised
+/// form of the input text. Kotlin masks `text[start..<end]` with bullet chars.
+///
+/// NOTE ON NORMALIZATION: `copypaste_core::sensitive::nfkc_normalize` is
+/// idempotent on ASCII and almost all practical clipboard text. The only time
+/// the normalised string differs from the original is when the text contains
+/// full-width Unicode digits/letters (the NFKC form collapses them to ASCII).
+/// In that case Kotlin should normalise the text before rendering spans.
+pub struct SensitiveSpan {
+    /// Start character index (inclusive) in the NFKC-normalised text.
+    pub start: u32,
+    /// End character index (exclusive) in the NFKC-normalised text.
+    pub end: u32,
+    /// Confidence score of this match (0.0 – 1.0).
+    pub confidence: f32,
+    /// Pattern name (e.g. `"aws_access_key"`, `"credit_card"`, `"jwt"`).
+    pub pattern_name: String,
+}
+
+/// Detect sensitive spans in `text` and return their char offsets for masking.
+///
+/// Uses `SensitiveDetector::detect_normalised` (the SAME detector as the macOS
+/// daemon's `sensitive_spans` IPC response) to find all pattern matches,
+/// including low-confidence hits (phone 0.55, IBAN 0.65) — the masking
+/// decision is intentionally broader than the auto-wipe gate. Kotlin masks
+/// ALL returned spans regardless of confidence (any credential visible in the
+/// history list should be obscured).
+///
+/// The returned spans are char-offset indices into the NFKC-normalised
+/// rendering of `text`. For ASCII text (virtually all practical clipboard
+/// content) the normalised form is byte-for-byte identical to the original, so
+/// Kotlin can index directly. For unusual Unicode input Kotlin should run
+/// `text.normalize(Form.NFKC)` before applying the offsets.
+///
+/// Returns an empty `Vec` when no sensitive patterns are found. Wrapped in
+/// `panic_boundary::catch` — the detector runs regex/allocation that could
+/// panic; a caught panic returns an empty span list (safe: no masking applied).
+pub fn detect_sensitive_spans(text: String) -> Vec<SensitiveSpan> {
+    panic_boundary::catch(|| {
+        use copypaste_core::sensitive::nfkc_normalize;
+        let normalised = nfkc_normalize(&text);
+        let detector = copypaste_core::SensitiveDetector::new();
+        detector
+            .detect_normalised(&normalised)
+            .into_iter()
+            .map(|m| {
+                let start = byte_to_char_offset_android(&normalised, m.matched_range.start);
+                let end = byte_to_char_offset_android(&normalised, m.matched_range.end);
+                SensitiveSpan {
+                    start,
+                    end,
+                    confidence: m.confidence,
+                    pattern_name: m.pattern_name.to_string(),
+                }
+            })
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Convert a byte offset in `s` to a char (Unicode scalar value) offset.
+///
+/// Mirrors the daemon's `byte_to_char_offset` helper (ipc.rs) used to generate
+/// the `sensitive_spans` JSON array. A byte offset equal to `s.len()` maps to
+/// the char count (one-past-the-end). An out-of-bounds byte offset saturates to
+/// the char count. The result is capped at `u32::MAX` for the FFI type; in
+/// practice no clipboard item approaches 4 billion chars.
+fn byte_to_char_offset_android(s: &str, byte_offset: usize) -> u32 {
+    // Count the number of chars whose byte offset is strictly less than
+    // `byte_offset`. This matches the daemon's `byte_to_char_offset` helper
+    // that iterates `char_indices` and counts chars up to the target byte.
+    let count = s
+        .char_indices()
+        .take_while(|(bi, _)| *bi < byte_offset)
+        .count();
+    count.min(u32::MAX as usize) as u32
 }
 
 // ---------------------------------------------------------------------------
@@ -498,6 +759,304 @@ pub fn relay_public_key_b64(sync_key: &[u8]) -> Result<String, CopypasteError> {
         );
         let pubkey = copypaste_core::derive_relay_public_key(&key_arr);
         Ok(base64::engine::general_purpose::STANDARD.encode(pubkey))
+    })
+}
+
+// ---------------------------------------------------------------------------
+// PG-2 (kmcr): Relay registration Proof-of-Possession (PoP) over Android FFI
+//
+// The macOS daemon sends HMAC-SHA256(sync_key, "relay-registration-pop-v1:" +
+// device_id) at relay registration (relay.rs). Android was missing this export,
+// so Kotlin could not compute the PoP and registration silently skipped it.
+// This export delegates directly to `copypaste_core::derive_relay_registration_pop`
+// — no crypto reimplementation. The result MUST be base64-encoded on the wire.
+//
+// SECURITY: derived from secret key material; Kotlin MUST NOT log the result.
+// ---------------------------------------------------------------------------
+
+/// Compute the relay registration Proof-of-Possession (PoP) for a device.
+///
+/// Returns `HMAC-SHA256(key=sync_key, msg="relay-registration-pop-v1:" + device_id)`
+/// as 32 raw bytes. The caller (Kotlin) MUST base64-encode them for the wire
+/// (`pop_b64`) and MUST NOT log the result.
+///
+/// `sync_key` MUST be the 32 bytes returned by `derive_cloud_sync_key`.
+/// `device_id` is the relay inbox id (`relay_inbox_id`), which is also the
+/// `device_id` field sent at registration. Using a different value here will
+/// produce a PoP that the relay rejects.
+///
+/// # Security
+/// Derived from secret key material; do not log.
+pub fn relay_registration_pop(
+    sync_key: &[u8],
+    device_id: String,
+) -> Result<Vec<u8>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            sync_key
+                .try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        let pop = copypaste_core::derive_relay_registration_pop(&key_arr, &device_id);
+        Ok(pop.to_vec())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// PG-16 (89ve): Content-type (TextKind) classifier over Android FFI
+//
+// Android TextKind.kt re-implemented copypaste-core/src/text_kind.rs, causing
+// silent classification drift (e.g. `{;` vs `contains(;)&&contains({)` for Code
+// detection). This export delegates to `copypaste_core::text_kind::classify_text`
+// so Kotlin can call the SINGLE canonical classifier rather than maintaining a
+// parallel one. The Kotlin call-site swap in TextKind.kt is a SEPARATE agent
+// step (GRADLE-REQUIRED).
+//
+// Returns the stable uppercase label (e.g. "TEXT", "URL", "CODE") that matches
+// `TextKind::label()` in the Rust source.
+// ---------------------------------------------------------------------------
+
+/// Classify a text clipboard payload and return its stable uppercase kind label.
+///
+/// Delegates to `copypaste_core::text_kind::classify_text`, which is the SINGLE
+/// canonical classifier both macOS and (after the Kotlin call-site migration)
+/// Android will share. This eliminates the silent drift between TextKind.kt's
+/// re-implementation and the core logic.
+///
+/// Returns one of: `"TEXT"`, `"URL"`, `"EMAIL"`, `"PHONE"`, `"COLOR"`, `"JSON"`,
+/// `"CODE"`, `"NUMBER"`, `"PATH"`.
+///
+/// Wrapped in `panic_boundary::catch` — the classifier runs regex/allocation
+/// that could panic; a caught panic returns `"TEXT"` (safest fallback: no
+/// misclassification, just no decoration chip).
+pub fn classify_text_kind(text: String) -> String {
+    panic_boundary::catch(|| classify_text(&text).label().to_string())
+        .unwrap_or_else(|_| "TEXT".to_string())
+}
+
+// ---------------------------------------------------------------------------
+// PG-35 (08r1): Private mode FFI — Rust as the source of truth on Android
+//
+// macOS private mode is daemon-backed (AtomicBool in IpcHandler, persisted to
+// disk by `persist_private_mode`). Android was SharedPrefs-only (Settings.kt:795)
+// with no Rust path. The architecture note says SharedPrefs is "architecturally
+// fine (no daemon)" but the capture path (ClipboardService.kt:887) must check
+// the setting before recording any clip — if that check goes through SharedPrefs
+// alone, a Rust code path that captures a clip bypasses the guard.
+//
+// This FFI exposes a Rust-side `AtomicBool` as the authoritative in-process flag.
+// Kotlin MUST:
+//   1. At startup: call `set_private_mode(prefs.getBoolean("private_mode", false))`
+//      to seed the Rust flag from the persisted SharedPrefs value.
+//   2. On every user toggle: call `set_private_mode(enabled)` AND persist to
+//      SharedPrefs (Rust does not persist; Android has no daemon/disk store here).
+//   3. Before capturing any clip: call `get_private_mode()` on the Rust side so
+//      any Rust-side capture path honours the same flag.
+//
+// SECURITY: private mode suppresses capture of sensitive content. The flag MUST
+// be seeded from SharedPrefs before the ClipboardService starts accepting clips.
+// ---------------------------------------------------------------------------
+
+/// Process-global private-mode flag.
+///
+/// `true` = private mode ON (suppress clipboard capture).
+/// Initialised to `false` (capture on) at process start. Kotlin seeds it at
+/// startup from SharedPrefs and keeps it in sync on every toggle.
+static PRIVATE_MODE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Set the private-mode flag. Kotlin MUST call this:
+///   - At service startup, seeded from SharedPrefs.
+///   - On every user toggle (then also persist to SharedPrefs).
+///
+/// When `enabled` is `true`, clipboard capture MUST be suppressed by the
+/// ClipboardService (check `get_private_mode()` before every capture).
+///
+/// Wrapped in `panic_boundary::catch` — cannot panic in practice; defensive.
+pub fn set_private_mode(enabled: bool) {
+    panic_boundary::catch(|| {
+        PRIVATE_MODE.store(enabled, std::sync::atomic::Ordering::Relaxed);
+    })
+    .ok(); // void on panic: flag keeps its previous value rather than crashing JVM
+}
+
+/// Read the current private-mode flag. Returns `true` when private mode is ON.
+///
+/// Kotlin MUST check this on the Rust side before passing any clipboard content
+/// to a Rust capture path so Rust-initiated captures honour the same toggle as
+/// the SharedPrefs check in ClipboardService.kt:887.
+pub fn get_private_mode() -> bool {
+    panic_boundary::catch(|| PRIVATE_MODE.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(false) // conservative: default to "no private mode" on impossible panic
+}
+
+// ---------------------------------------------------------------------------
+// PG-12 (8qcm): Revoke peer + sync-key rotation over Android FFI
+//
+// macOS exposes `revoke_and_rotate` (ipc.rs:4882): revoke a peer's DB row +
+// rotate the cloud sync key under a new passphrase in one atomic step. Android
+// DevicesActivity.kt:577 only calls `revoke_device_audit` (DB revoke) — it never
+// rotates the sync key. That means the revoked peer still holds the old key and
+// can continue decrypting any blobs in the shared relay/cloud inbox.
+//
+// This FFI adds `revoke_device_and_rotate_key` which:
+//   1. Derives the new sync key from the provided passphrase (FAIL FAST if bad).
+//   2. Calls `revoke_device_audit` for the audit-table write (db side-effect).
+//   3. Returns the new 32-byte derived sync key so Kotlin can:
+//      a. Store it in AndroidKeystore (replacing the old key).
+//      b. Re-encrypt any locally-cached blobs that must survive (optional, same
+//         as macOS wave: remaining devices re-provision).
+//      c. Re-derive the relay inbox id + PoP for re-registration under the new key.
+//
+// SECURITY INVARIANTS (load-bearing — do NOT relax):
+//   - Key derivation MUST fail before any revocation mutation so a bad passphrase
+//     does not leave the DB in a half-revoked state.
+//   - The returned key bytes MUST be stored in AndroidKeystore by Kotlin. The
+//     ByteArray MUST be zeroed after persisting (identical contract to
+//     `derive_cloud_sync_key`).
+//   - Kotlin MUST also call `update_p2p_listener_peers` / `sync_with_peer` with
+//     the revoked fingerprint in `revoked_fingerprints` so the mTLS denylist is
+//     updated at the transport layer.
+//
+// RUNTIME VERIFICATION REQUIRED before trusting in production: the full
+// round-trip (revoke + re-register with new key + confirm old key rejected) can
+// only be tested with a live relay and the Android Gradle build. Flag this as
+// GRADLE-REQUIRED for integration test coverage.
+// ---------------------------------------------------------------------------
+
+/// Revoke a peer and rotate the cloud sync key to a new passphrase (live build).
+///
+/// # Steps (in order — FAIL FAST before any mutation)
+///
+/// 1. Derive `new_sync_key = Argon2id(new_passphrase)`. Returns
+///    `DecryptionFailed` if the passphrase is too short or derivation fails —
+///    this happens BEFORE any DB write so no revocation occurs on a bad passphrase.
+/// 2. Write the revocation audit row via `revoke_device` (DB I/O). Returns
+///    `DatabaseError` on failure.
+/// 3. Return `new_sync_key` (32 raw bytes) so Kotlin can store it in
+///    AndroidKeystore and re-register with the relay under the new key.
+///
+/// # SECURITY NOTE
+/// The returned `Vec<u8>` crosses the FFI boundary unzeroized. UniFFI copies it
+/// into a Kotlin `ByteArray`. The Kotlin layer MUST zero that array after
+/// persisting the key to AndroidKeystore — this is a load-bearing contract.
+/// Kotlin MUST also remove the peer from its P2P roster and call
+/// `update_p2p_listener_peers` with the revoked fingerprint in the denylist.
+///
+/// # GRADLE-REQUIRED
+/// Full end-to-end verification (relay re-registration under new key, old-key
+/// rejection) requires a live relay and can only be tested via the Android
+/// Gradle/instrumented-test pipeline — not host `cargo check`.
+#[cfg(feature = "android-uniffi-live")]
+pub fn revoke_device_and_rotate_key(
+    db_path: String,
+    key: &[u8],
+    fingerprint: String,
+    name: String,
+    new_passphrase: String,
+) -> Result<Vec<u8>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        // STEP 1: Derive the new key FIRST so a bad passphrase fails before any
+        // revocation mutation (mirrors ipc.rs:4910-4918 "Derive the new key FIRST").
+        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase)?;
+
+        // STEP 2: Revoke the peer audit row. `key` is the 32-byte device storage
+        // key (distinct from the cloud sync key being rotated).
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        with_cached_db(&db_path, &key_arr, |db| {
+            copypaste_core::revoke_device(db.conn(), &fingerprint, &name).map_err(|e| {
+                CopypasteError::DatabaseError {
+                    reason: e.to_string(),
+                }
+            })
+        })?;
+
+        // STEP 3: Return the new key bytes. Kotlin stores them in AndroidKeystore.
+        // SECURITY: ByteArray crosses FFI unzeroized — Kotlin MUST zero after storing.
+        Ok(new_key.as_bytes().to_vec())
+    })
+}
+
+/// Stub (feature off): derives and returns the new key WITHOUT the DB revocation
+/// write. Kotlin gets the new key bytes so the rotation path can be exercised
+/// even without the live DB; the DB revocation must be done separately by the
+/// Kotlin layer via `revoke_device_audit` when the live feature is not compiled in.
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn revoke_device_and_rotate_key(
+    _db_path: String,
+    key: &[u8],
+    _fingerprint: String,
+    _name: String,
+    new_passphrase: String,
+) -> Result<Vec<u8>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        // Validate the DB key shape (mirrors the live path's key check).
+        let _: [u8; 32] = key
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        // Derive + return the new key; no DB I/O in stub mode.
+        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase)?;
+        Ok(new_key.as_bytes().to_vec())
+    })
+}
+
+/// Rotate the cloud sync key to a new passphrase WITHOUT revoking a peer.
+///
+/// Use this when the user changes their sync passphrase independently of a
+/// revocation event. Mirrors the macOS `rotate_sync_key` IPC handler path
+/// (ipc.rs:5099-5105) but without the revocation audit write.
+///
+/// Returns the new 32-byte derived sync key. Kotlin MUST store it in
+/// AndroidKeystore and zero the ByteArray after persisting.
+///
+/// # GRADLE-REQUIRED
+/// Full verification requires a live relay — see `revoke_device_and_rotate_key`.
+pub fn rotate_sync_key(new_passphrase: String) -> Result<Vec<u8>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase)?;
+        Ok(new_key.as_bytes().to_vec())
+    })
+}
+
+/// Internal helper: validate a passphrase length and derive a new SyncKey.
+///
+/// Shared by `revoke_device_and_rotate_key` and `rotate_sync_key` so the
+/// validation/error-mapping path is byte-for-byte identical on both call sites —
+/// the same pattern `derive_cloud_sync_key` uses. Mirrors the macOS
+/// `ipc.rs:4910-4918` "derive FIRST so a bad passphrase fails before mutation".
+fn derive_new_sync_key_from_passphrase(
+    passphrase: &str,
+) -> Result<copypaste_core::SyncKey, CopypasteError> {
+    let char_count = passphrase.chars().count();
+    if char_count < MIN_PASSPHRASE_LEN {
+        return Err(CopypasteError::DecryptionFailed {
+            reason: format!(
+                "new passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters \
+                 (got {char_count})",
+            ),
+        });
+    }
+    derive_sync_key(passphrase).map_err(|e| match e {
+        SyncKeyError::PassphraseTooShort(n) => CopypasteError::DecryptionFailed {
+            reason: format!(
+                "new passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters \
+                 (got {n})",
+            ),
+        },
+        SyncKeyError::Argon2Params(msg) | SyncKeyError::Argon2Hash(msg) => {
+            CopypasteError::DecryptionFailed { reason: msg }
+        }
+        SyncKeyError::EncryptFailed(msg) => CopypasteError::DecryptionFailed {
+            reason: format!("key derivation encrypt step failed: {msg}"),
+        },
+        SyncKeyError::DecryptFailed => CopypasteError::DecryptionFailed {
+            reason: "key derivation decrypt step failed".into(),
+        },
+        SyncKeyError::BlobTooShort(n) => CopypasteError::DecryptionFailed {
+            reason: format!("key derivation blob too short: {n} bytes"),
+        },
     })
 }
 
@@ -1681,20 +2240,16 @@ pub fn sync_with_peer(
             // silent `continue` is what hid the "decrypt 7/7" failure).
             if wire.content_type == "text" && wire.content_nonce.is_some() {
                 items_skipped_legacy = items_skipped_legacy.saturating_add(1);
-                // NOTE: eprintln! on Android goes to a logcat black hole (stderr
-                // is not captured by the Android logging subsystem). A proper fix
-                // requires adding `android_logger` or `tracing-logcat` to this
-                // crate's dependencies and initialising a log subscriber in the
-                // FFI entry point. Until then, the skip is counted in
-                // `items_skipped_legacy` (visible to Kotlin callers) so the
-                // build-skew condition remains observable without silent data loss.
-                // FIXWAVE: replace eprintln! with log::warn! once an android
-                // logging backend (android_logger/tracing-logcat) is wired up.
-                eprintln!(
-                    "copypaste-android: WARN skipping legacy/non-rekeyed P2P text frame \
-                     (item_id={}, origin={}): content_nonce is set, peer has not migrated \
-                     to sync-key-wrapped cloud blobs; cannot decrypt with shared key",
-                    wire.item_id, wire.origin_device_id
+                // P2-2ffx: replaced eprintln! (→ logcat black hole on Android)
+                // with tracing::debug! which flows through whatever tracing
+                // subscriber is initialised in the FFI entry point (or is a
+                // no-op when none is set — still better than lost stderr output).
+                tracing::debug!(
+                    item_id = %wire.item_id,
+                    origin = %wire.origin_device_id,
+                    "copypaste-android: skipping legacy/non-rekeyed P2P text frame: \
+                     content_nonce is set, peer has not migrated to sync-key-wrapped \
+                     cloud blobs; cannot decrypt with shared key"
                 );
                 continue;
             }
@@ -2242,17 +2797,20 @@ fn db_handles() -> &'static Mutex<HashMap<u64, copypaste_core::Database>> {
 // one open+close per clipboard event. We now open once per `(db_path, key)`
 // pair and reuse the connection for the life of the process.
 //
-// The cache key includes the raw key bytes (not just the path) so that a
-// different key for the same path does NOT silently reuse the connection opened
-// under the first key — which would mask an authentication failure.
+// P1-8 fix: the cache key carries a SHA-256 HASH of the 32-byte DB key, NOT
+// the raw key bytes. This prevents the key material from surviving on the heap
+// as a HashMap key for the lifetime of the process. The hash still provides the
+// "different key for the same path → fresh connection" discrimination because
+// two distinct keys produce distinct hashes. The raw key is derived ephemerally
+// inside `with_cached_db` via `Zeroizing<[u8;32]>` and never stored.
 //
 // `Database` wraps a `rusqlite::Connection` (Send, !Sync) — serialising all
 // access behind this `Mutex` keeps it sound, exactly like the handle table.
-// Path+key keyed map of open `Database` connections. Aliased to keep the
+// Path+key-hash keyed map of open `Database` connections. Aliased to keep the
 // `static`/accessor signatures readable (and to satisfy clippy::type_complexity
-// under newer toolchains). Keyed on (db_path, raw 32-byte key) so a different
+// under newer toolchains). Keyed on (db_path, sha256(key)[..32]) so a different
 // key for the same path opens a fresh connection rather than reusing one
-// authenticated under another key.
+// authenticated under another key, without retaining raw key material.
 #[cfg(feature = "android-uniffi-live")]
 type DbByPathMap = Mutex<HashMap<(String, [u8; 32]), copypaste_core::Database>>;
 
@@ -2264,24 +2822,60 @@ fn db_by_path() -> &'static DbByPathMap {
     DB_BY_PATH.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// Derive the cache key for `DB_BY_PATH` from a 32-byte DB key.
+///
+/// P1-8: we store SHA-256(key) rather than the raw key bytes so that raw key
+/// material is NOT retained on the heap as part of the HashMap key. Two
+/// distinct keys still produce distinct hashes (collision resistance), so the
+/// "different key → fresh connection" discrimination is preserved.
+///
+/// The result is stack-allocated ([u8; 32]) and never written to a static —
+/// only the 32-byte hash digest lives in the map key.
+///
+/// Not gated on `android-uniffi-live` because `open_database` and the
+/// `DB_HANDLE_TO_CACHE_KEY` side-map machinery always need it, regardless of
+/// whether the live DB cache path is compiled in.
+fn key_cache_hash(key: &[u8; 32]) -> [u8; 32] {
+    // SHA-256 output is 32 bytes; convert the GenericArray to a plain array.
+    Sha256::digest(key.as_ref()).into()
+}
+
+/// Side-map from open_database handle → (path, key_hash) so `close_database`
+/// can evict the corresponding DB_BY_PATH entry (P1-8 use-after-close fix).
+///
+/// Populated by `open_database`; cleared by `close_database`. Only active for
+/// the handle-table path; the `with_cached_db` path does not use handles.
+// The type is self-describing given the field-name comments; aliasing would
+// not improve readability. Allow is here because the overall file size crossed
+// the clippy::type_complexity token-count threshold after the PG-* additions.
+#[allow(clippy::type_complexity)]
+static DB_HANDLE_TO_CACHE_KEY: OnceLock<Mutex<HashMap<u64, (String, [u8; 32])>>> = OnceLock::new();
+
+fn db_handle_to_cache_key() -> &'static Mutex<HashMap<u64, (String, [u8; 32])>> {
+    DB_HANDLE_TO_CACHE_KEY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
 /// Run `f` against the cached `Database` for `(db_path, key)`, opening (and
 /// caching) it on first use. The connection is reused across calls with the
 /// same path **and** the same key; a different key for the same path opens a
 /// separate connection instead of silently reusing the first one.
+///
+/// P1-8: the map key carries SHA-256(key) rather than the raw key bytes.
 #[cfg(feature = "android-uniffi-live")]
 fn with_cached_db<T>(
     db_path: &str,
     key: &[u8; 32],
     f: impl FnOnce(&copypaste_core::Database) -> Result<T, CopypasteError>,
 ) -> Result<T, CopypasteError> {
-    let cache_key = (db_path.to_string(), *key);
+    let key_hash = key_cache_hash(key); // 32-byte hash; raw key not stored
+    let cache_key = (db_path.to_string(), key_hash);
     let mut map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
     if !map.contains_key(&cache_key) {
         // #40b: evict any stale entry for the same path but a different key
         // before inserting the new connection. Without this, each key rotation
-        // leaks a connection handle (the old (path, old_key) entry stays in the
-        // map forever). Entries for OTHER paths are unaffected.
-        map.retain(|(p, k), _| p != db_path || k == key);
+        // leaks a connection handle (the old (path, old_key_hash) entry stays in
+        // the map forever). Entries for OTHER paths are unaffected.
+        map.retain(|(p, h), _| p != db_path || h == &key_hash);
         let db =
             copypaste_core::Database::open(std::path::Path::new(db_path), key).map_err(|e| {
                 CopypasteError::DatabaseError {
@@ -2304,6 +2898,11 @@ fn with_cached_db<T>(
 
 /// Open (or create) an encrypted SQLite database at `path` using the 32-byte `key`.
 /// Returns an opaque handle for subsequent calls.
+///
+/// P1-8: records a `handle → (path, SHA-256(key))` entry in
+/// `DB_HANDLE_TO_CACHE_KEY` so `close_database` can also evict the
+/// corresponding `DB_BY_PATH` entry. The raw key bytes are never stored; only
+/// the 32-byte hash is retained alongside the path.
 pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
     panic_boundary::catch_result(|| {
         let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
@@ -2317,6 +2916,13 @@ pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
                 }
             })?;
         let handle = NEXT_HANDLE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        // P1-8: record hash(key) for this handle so close_database can evict
+        // the DB_BY_PATH entry without retaining raw key bytes.
+        let key_hash = key_cache_hash(&key_arr);
+        db_handle_to_cache_key()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(handle, (path.clone(), key_hash));
         // recover from mutex poison instead of panicking across FFI boundary
         db_handles()
             .lock()
@@ -2329,16 +2935,11 @@ pub fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError> {
 /// Release the handle-table entry for `handle`, allowing the `Database`
 /// object to be dropped and its underlying SQLCipher connection closed.
 ///
-/// # Important: handle-table only — path cache is unaffected
-///
-/// This function removes `handle` from the opaque integer→`Database` map
-/// (`DB_HANDLES`) that backs `open_database` / the read/write exports.
-/// It does **NOT** touch `DB_BY_PATH` — the path+key-keyed connection cache
-/// used by the live `add_clipboard_item` / `get_history_count` exports
-/// (feature `android-uniffi-live`).  Callers that need the path-cache
-/// connection to also close (e.g. on logout) must do so at the Kotlin layer
-/// by ensuring the process is restarted or by calling the appropriate
-/// cache-clearing export when one is added.
+/// P1-8 fix: also evicts the corresponding `DB_BY_PATH` entry (via the
+/// `DB_HANDLE_TO_CACHE_KEY` side-map) so raw key material stored in the cache
+/// (now a SHA-256 hash, not the raw bytes) is released, and the use-after-close
+/// footgun is eliminated. If the handle was not opened via `open_database` (i.e.
+/// it only ever went through `with_cached_db`) the side-map lookup is a no-op.
 pub fn close_database(handle: u64) {
     // A poisoned mutex on the global handle table would otherwise abort the
     // JVM via `unwrap()`. Wrapping in `catch_result` converts that into a
@@ -2346,6 +2947,20 @@ pub fn close_database(handle: u64) {
     // is declared as void in the UDL and Kotlin callers cannot signal a
     // failure path, but at minimum we keep the process alive.
     let _ = panic_boundary::catch_result(|| {
+        // P1-8: look up and remove the (path, key_hash) for this handle, then
+        // evict the corresponding DB_BY_PATH entry so it is not kept alive
+        // after the handle has been released.
+        let _cache_key_opt = db_handle_to_cache_key()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&handle);
+        #[cfg(feature = "android-uniffi-live")]
+        if let Some(cache_key) = _cache_key_opt {
+            db_by_path()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .remove(&cache_key);
+        }
         db_handles()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -2370,6 +2985,118 @@ pub fn close_database(handle: u64) {
 // caller; that derivation lives in Kotlin).
 // ---------------------------------------------------------------------------
 
+/// Process-scoped monotonic Lamport counter shared by the two capture paths
+/// (`add_clipboard_item` and `store_clipboard_item`).
+///
+/// Using `SystemTime::now()` here produced timestamps ≈1.7×10^12 that the macOS
+/// daemon's `MAX_LAMPORT_SKEW` clamp would eventually reject, and — more critically
+/// — mixing wall-clock numbers with the daemon's small logical counter (starting at
+/// 1 and ticking once per write) broke LWW ordering: Android items appeared causally
+/// far ahead of every Mac item, so Mac writes could never win conflicts.
+///
+/// This function is the legacy UniFFI capture path (the primary Kotlin path goes
+/// through ClipboardRepository.storeItem which manages the persistent LamportClock
+/// in SharedPreferences). A per-process atomic gives correct logical ordering within
+/// this process; cross-session ordering is maintained by the daemon's `observe()` on
+/// ingest.
+#[cfg(feature = "android-uniffi-live")]
+fn next_android_lamport_ts() -> i64 {
+    static LAMPORT_COUNTER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
+    LAMPORT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Internal shared implementation for `add_clipboard_item` and
+/// `store_clipboard_item` (the new PG-3/349q path with explicit TTL).
+///
+/// `sensitive_ttl_secs`:
+///   - `None`  → use the default (`SENSITIVE_TTL_SECS = 30 s`). This preserves
+///               the pre-existing behaviour of `add_clipboard_item` callers that
+///               have not yet been updated.
+///   - `Some(0)` → auto-wipe disabled (no `expires_at`).
+///   - `Some(n)` → stamp `expires_at = now_ms + n * 1000`.
+#[cfg(feature = "android-uniffi-live")]
+fn store_clipboard_item_inner(
+    db_path: &str,
+    key_arr: &Zeroizing<[u8; 32]>,
+    text: String,
+    sensitive_ttl_secs: Option<u64>,
+) -> Result<String, CopypasteError> {
+    // PG-3 (349q): determine sensitivity using the SAME gate as macOS daemon
+    // (`is_sensitive_for_autowipe`, confidence >= 0.70). Do NOT use `detect()`
+    // which fires on any pattern — that was the old bug that misaligned the
+    // threshold with macOS and caused sensitive items to be dropped instead of
+    // stored+marked.
+    let is_sensitive = is_sensitive_for_autowipe(&text);
+
+    // v0.3: pre-generate item_id so the AAD baked into the ciphertext matches
+    // the value persisted in the row.
+    //
+    // IMPORTANT: use build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2) —
+    // NOT the 2-arg build_item_aad(…, AAD_SCHEMA_VERSION=3). The item is
+    // stamped with key_version=ITEM_KEY_VERSION_CURRENT=2 by ClipboardItem::new_text,
+    // and the daemon decrypts key_version=2 rows with AAD "{item_id}|4|2"
+    // (build_item_aad_v2). Using the 2-arg form ("{item_id}|3") causes an
+    // auth-tag mismatch and makes every FFI-inserted item undecryptable on
+    // the daemon side.
+    let item_id = uuid::Uuid::new_v4().to_string();
+    let aad = build_item_aad_v2(
+        &item_id,
+        AAD_SCHEMA_VERSION_V4,
+        ITEM_KEY_VERSION_CURRENT as u32,
+    );
+    let (nonce, ciphertext) = encrypt_item_with_aad(text.as_bytes(), key_arr, &aad)
+        .map_err(|_| CopypasteError::EncryptionFailed)?;
+
+    let lamport_ts = next_android_lamport_ts();
+
+    let mut item = copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
+    item.item_id = item_id;
+
+    // PG-3 (349q): stamp is_sensitive so the DB row, sync, and UI all agree.
+    // macOS daemon.rs:2170 does the same: `item.is_sensitive = is_sensitive`.
+    item.is_sensitive = is_sensitive;
+
+    // PG-24 (5tnx): stamp expires_at for sensitive items, matching
+    // daemon.rs:2183: `item.expires_at = Some(now_ms + ttl_secs * 1000)`.
+    if is_sensitive {
+        let ttl = sensitive_ttl_secs.unwrap_or(copypaste_core::config::SENSITIVE_TTL_SECS);
+        if ttl > 0 {
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as i64)
+                // Defensive: system clock behind epoch (impossible in practice).
+                .unwrap_or(0);
+            item.expires_at = Some(now_ms.saturating_add(ttl as i64 * 1000));
+        }
+        // ttl == 0 → "auto-wipe disabled" sentinel → leave expires_at = None.
+    }
+
+    let id = item.id.clone();
+
+    // M5: reuse a cached connection instead of open-per-call.
+    with_cached_db(db_path, key_arr, |db| {
+        copypaste_core::insert_item(db, &item).map_err(|e| CopypasteError::DatabaseError {
+            reason: e.to_string(),
+        })
+    })?;
+
+    Ok(id)
+}
+
+/// Store a clipboard text item. Sensitive items are stored with
+/// `is_sensitive = true` and `expires_at` stamped from `SENSITIVE_TTL_SECS`
+/// (default 30 s). Returns the new row UUID.
+///
+/// PG-3 (349q): items are NO LONGER dropped on sensitivity — they are stored
+/// encrypted with the `is_sensitive` flag set so the daemon, sync, and UI can
+/// all handle them correctly. Use `store_clipboard_item` for the primary path
+/// (it accepts an explicit `sensitive_ttl_secs`).
+///
+/// # GRADLE-REQUIRED
+/// Kotlin's ClipboardService.kt must remove the early-return at lines 892-896
+/// (text), 993 (image), 1169 (file) that dropped sensitive items before calling
+/// this FFI, and instead call this function for ALL captures. The Rust side now
+/// makes the store-or-drop decision.
 #[cfg(feature = "android-uniffi-live")]
 pub fn add_clipboard_item(
     db_path: String,
@@ -2381,60 +3108,42 @@ pub fn add_clipboard_item(
             key.try_into()
                 .map_err(|_| CopypasteError::InvalidKeyLength)?,
         );
+        // Use None → falls back to SENSITIVE_TTL_SECS default (30 s).
+        store_clipboard_item_inner(&db_path, &key_arr, text, None)
+    })
+}
 
-        // Skip sensitive content (caller-visible: empty string return).
-        if detect(&text).is_some() {
-            return Ok(String::new());
-        }
-
-        // v0.3: pre-generate item_id so the AAD baked into the ciphertext matches
-        // the value persisted in the row.
-        //
-        // IMPORTANT: use build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2) —
-        // NOT the 2-arg build_item_aad(…, AAD_SCHEMA_VERSION=3). The item is
-        // stamped with key_version=ITEM_KEY_VERSION_CURRENT=2 by ClipboardItem::new_text,
-        // and the daemon decrypts key_version=2 rows with AAD "{item_id}|4|2"
-        // (build_item_aad_v2). Using the 2-arg form ("{item_id}|3") causes an
-        // auth-tag mismatch and makes every FFI-inserted item undecryptable on
-        // the daemon side.
-        let item_id = uuid::Uuid::new_v4().to_string();
-        let aad = build_item_aad_v2(
-            &item_id,
-            AAD_SCHEMA_VERSION_V4,
-            ITEM_KEY_VERSION_CURRENT as u32,
+/// Store a clipboard text item with an EXPLICIT sensitive auto-wipe TTL.
+///
+/// Primary capture path for PG-3/349q-compliant Kotlin code. Sensitive items
+/// are stored encrypted with `is_sensitive = true` and `expires_at` stamped
+/// from `sensitive_ttl_secs` (pass 0 to disable auto-wipe for this item).
+/// Returns the new row UUID.
+///
+/// `sensitive_ttl_secs` should be `Config.sensitive_ttl_secs` from the current
+/// user config (call `default_config()` for the app default).
+///
+/// # GRADLE-REQUIRED
+/// ClipboardService.kt must:
+///   1. Replace `add_clipboard_item` calls with `store_clipboard_item` passing
+///      the user's configured TTL.
+///   2. Remove the sensitive early-returns (892-896, 993, 1169) that previously
+///      dropped sensitive content — the Rust side now stores+marks it.
+///   3. On the Kotlin side, check `is_sensitive` from `sensitive_capture_decision`
+///      to decide whether to show a masked preview in the notification.
+#[cfg(feature = "android-uniffi-live")]
+pub fn store_clipboard_item(
+    db_path: String,
+    key: &[u8],
+    text: String,
+    sensitive_ttl_secs: u64,
+) -> Result<String, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
         );
-        let (nonce, ciphertext) = encrypt_item_with_aad(text.as_bytes(), &key_arr, &aad)
-            .map_err(|_| CopypasteError::EncryptionFailed)?;
-
-        // Use a process-scoped monotonic counter as the Lamport timestamp, NOT
-        // wall-clock millis.  Using SystemTime::now() here produced timestamps
-        // ≈1.7×10^12 that the macOS daemon's MAX_LAMPORT_SKEW clamp would
-        // eventually reject, and — more critically — mixing wall-clock numbers
-        // with the daemon's small logical counter (starting at 1 and ticking
-        // once per write) broke LWW ordering: Android items appeared causally
-        // far ahead of every Mac item, so Mac writes could never win conflicts.
-        //
-        // This function is the legacy UniFFI capture path (the primary Kotlin
-        // path goes through ClipboardRepository.storeItem which manages the
-        // persistent LamportClock in SharedPreferences).  A per-process atomic
-        // gives correct logical ordering within this process; cross-session
-        // ordering is maintained by the daemon's observe() on ingest.
-        static LAMPORT_COUNTER: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(1);
-        let lamport_ts = LAMPORT_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-
-        let mut item =
-            copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport_ts);
-        item.item_id = item_id;
-        let id = item.id.clone();
-
-        // M5: reuse a cached connection instead of open-per-call.
-        with_cached_db(&db_path, &key_arr, |db| {
-            copypaste_core::insert_item(db, &item).map_err(|e| CopypasteError::DatabaseError {
-                reason: e.to_string(),
-            })
-        })?;
-
-        Ok(id)
+        store_clipboard_item_inner(&db_path, &key_arr, text, Some(sensitive_ttl_secs))
     })
 }
 
@@ -2453,6 +3162,25 @@ pub fn add_clipboard_item(
         // natively" and fall through to the SharedPreferences repository.
         // Previously returned "stub-uniffi-not-live" which was non-empty and
         // caused ClipboardService to skip the fallback store entirely (items lost).
+        Ok(String::new())
+    })
+}
+
+/// Stub `store_clipboard_item` (feature `android-uniffi-live` off): validates
+/// the key shape and returns an empty string so Kotlin falls through to the
+/// SharedPreferences repository. No DB I/O in stub mode.
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn store_clipboard_item(
+    _db_path: String,
+    key: &[u8],
+    _text: String,
+    _sensitive_ttl_secs: u64,
+) -> Result<String, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        // Mirror the live path's key-shape error surface.
+        let _: [u8; 32] = key
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
         Ok(String::new())
     })
 }
@@ -2481,6 +3209,220 @@ pub fn get_history_count(_db_path: String, key: &[u8]) -> Result<u64, CopypasteE
             .try_into()
             .map_err(|_| CopypasteError::InvalidKeyLength)?;
         Ok(0)
+    })
+}
+
+// ---------------------------------------------------------------------------
+// PG-17 (mxoq): FTS5 search over Android FFI
+//
+// Android ClipboardRepository.searchIds previously did a full-content O(N)
+// decrypt scan. The daemon uses `search_items` (FTS5 indexed, O(log N)), so
+// the two code paths produced different recall AND incurred vastly different
+// CPU cost on large histories.
+//
+// This export delegates to `copypaste_core::search_items` — the SAME
+// FTS5-backed function the daemon's `search` IPC handler uses. The FTS index
+// (`clipboard_fts`) lives inside the encrypted SQLCipher database and is
+// maintained by `upsert_fts` / `delete_fts` alongside every item write.
+//
+// SECURITY: only `item_id`, `content_type`, `lamport_ts`, `wall_time`, and
+// `is_sensitive` are returned across the FFI boundary — no plaintext content,
+// no nonces, no key material. The FTS plaintext index remains inside core /
+// SQLCipher and never crosses the FFI.
+//
+// GRADLE-REQUIRED: the Kotlin call-site swap in ClipboardRepository (replacing
+// the O(N) decrypt loop with `fts_search`) requires the Android Gradle build.
+// ---------------------------------------------------------------------------
+
+/// One item returned by [`fts_search`].
+///
+/// Only metadata fields are returned — no plaintext content, no nonces.
+/// The FTS index stays inside core/SQLCipher. Kotlin uses `item_id` to look
+/// up the stored ciphertext row it already holds locally for rendering or
+/// decryption.
+#[derive(Debug)]
+pub struct SearchResultItem {
+    /// The stable cross-device identity (maps to Kotlin's `item_id` column).
+    pub item_id: String,
+    /// One of "text", "image", "file".
+    pub content_type: String,
+    /// Lamport clock value — use for causal ordering if needed.
+    pub lamport_ts: i64,
+    /// Wall-clock capture time in milliseconds since Unix epoch.
+    pub wall_time_ms: i64,
+    /// Whether this item was flagged as sensitive at capture time.
+    pub is_sensitive: bool,
+}
+
+/// Search the local FTS5 index for items matching `query`.
+///
+/// Delegates to `copypaste_core::search_items` — the SAME FTS5 search used by
+/// the daemon's `search` IPC handler. Returns up to `limit` results ordered by
+/// FTS5 rank (best match first). Returns an empty list when `query` is blank or
+/// contains no valid tokens after sanitization.
+///
+/// # SECURITY
+/// Only metadata fields are returned across the FFI boundary; the FTS index
+/// and item content remain inside the encrypted SQLCipher database.
+///
+/// # GRADLE-REQUIRED
+/// The Kotlin call-site swap in ClipboardRepository that replaces the O(N)
+/// decrypt scan with this function requires the Android Gradle build.
+#[cfg(feature = "android-uniffi-live")]
+pub fn fts_search(
+    db_path: String,
+    key: &[u8],
+    query: String,
+    limit: u32,
+) -> Result<Vec<SearchResultItem>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        with_cached_db(&db_path, &key_arr, |db| {
+            let items = copypaste_core::search_items(db, &query, limit as usize).map_err(|e| {
+                CopypasteError::DatabaseError {
+                    reason: e.to_string(),
+                }
+            })?;
+            Ok(items
+                .into_iter()
+                .map(|it| SearchResultItem {
+                    item_id: it.item_id,
+                    content_type: it.content_type,
+                    lamport_ts: it.lamport_ts,
+                    wall_time_ms: it.wall_time,
+                    is_sensitive: it.is_sensitive,
+                })
+                .collect())
+        })
+    })
+}
+
+/// Stub (feature off): validates the key shape, then returns an empty list.
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn fts_search(
+    _db_path: String,
+    key: &[u8],
+    _query: String,
+    _limit: u32,
+) -> Result<Vec<SearchResultItem>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let _: [u8; 32] = key
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        Ok(Vec::new())
+    })
+}
+
+// ---------------------------------------------------------------------------
+// PG-19 (o0t3): Lamport-ordered history page for Android
+//
+// Android ClipboardRepository sorted the unpinned history by `wallTimeMs`.
+// The correct ordering is `lamport_ts DESC` (with wall_time and origin_device_id
+// as deterministic tie-breaks) because the Lamport clock advances monotonically
+// on every write and sync — it correctly reflects causal ordering after
+// cross-device sync, whereas wall-clock ordering can diverge when device clocks
+// differ.
+//
+// This export delegates to `copypaste_core::get_page_pinned_first_lamport`
+// which applies the CRDT-correct ordering: pinned items first (by pin_order),
+// then unpinned items by `lamport_ts DESC, wall_time DESC, origin_device_id ASC`.
+//
+// The lamport_ts value is also returned in `HistoryItem` so Kotlin can validate
+// or further sort client-side if needed.
+//
+// GRADLE-REQUIRED: the Kotlin call-site swap in ClipboardRepository (replacing
+// the wall-time ORDER BY with a call to this FFI function) requires the Android
+// Gradle build.
+// ---------------------------------------------------------------------------
+
+/// One item in the history page returned by [`get_history_page`].
+///
+/// Only metadata fields are returned — no plaintext content, no nonces, no
+/// key material. Kotlin uses `item_id` to look up the stored ciphertext row
+/// it already holds for rendering or decryption.
+#[derive(Debug)]
+pub struct HistoryItem {
+    /// The stable cross-device identity (maps to Kotlin's `item_id` column).
+    pub item_id: String,
+    /// One of "text", "image", "file".
+    pub content_type: String,
+    /// Lamport clock value. Primary sort key for unpinned items (descending).
+    /// Exposed here so Kotlin can verify or further sort if needed.
+    pub lamport_ts: i64,
+    /// Wall-clock capture time in milliseconds since Unix epoch.
+    pub wall_time_ms: i64,
+    /// Whether this item was flagged as sensitive at capture time.
+    pub is_sensitive: bool,
+    /// Whether this item is pinned.
+    pub pinned: bool,
+    /// Explicit pin sort order for pinned items; `None` for unpinned items.
+    pub pin_order: Option<f64>,
+}
+
+/// Return a page of clipboard history ordered by:
+///   1. Pinned items first, sorted by `pin_order ASC` (then `pin_order IS NULL`).
+///   2. Unpinned items sorted by `lamport_ts DESC, wall_time DESC, origin_device_id ASC`.
+///
+/// This is the CRDT-correct ordering for cross-device sync: the Lamport clock
+/// advances on every write/merge so post-sync ordering matches causal history
+/// rather than wall-clock skew between devices.
+///
+/// `offset` / `limit` work identically to `get_page`. The caller should
+/// mirror the daemon's `MAX_PAGE` cap (typically 200) when choosing `limit`.
+///
+/// # GRADLE-REQUIRED
+/// The Kotlin call-site swap in ClipboardRepository that replaces the wall-time
+/// ORDER BY with this function requires the Android Gradle build.
+#[cfg(feature = "android-uniffi-live")]
+pub fn get_history_page(
+    db_path: String,
+    key: &[u8],
+    limit: u32,
+    offset: u32,
+) -> Result<Vec<HistoryItem>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        with_cached_db(&db_path, &key_arr, |db| {
+            let items =
+                copypaste_core::get_page_pinned_first_lamport(db, limit as usize, offset as usize)
+                    .map_err(|e| CopypasteError::DatabaseError {
+                        reason: e.to_string(),
+                    })?;
+            Ok(items
+                .into_iter()
+                .map(|it| HistoryItem {
+                    item_id: it.item_id,
+                    content_type: it.content_type,
+                    lamport_ts: it.lamport_ts,
+                    wall_time_ms: it.wall_time,
+                    is_sensitive: it.is_sensitive,
+                    pinned: it.pinned,
+                    pin_order: it.pin_order,
+                })
+                .collect())
+        })
+    })
+}
+
+/// Stub (feature off): validates the key shape, then returns an empty list.
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn get_history_page(
+    _db_path: String,
+    key: &[u8],
+    _limit: u32,
+    _offset: u32,
+) -> Result<Vec<HistoryItem>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let _: [u8; 32] = key
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        Ok(Vec::new())
     })
 }
 
@@ -2766,21 +3708,191 @@ mod tests {
         );
     }
 
+    /// PG-3 (349q): sensitive items must be STORED (is_sensitive=true) not dropped.
+    ///
+    /// The old test asserted `id.is_empty()` and `count == 0`.  After the 349q fix,
+    /// sensitive items are encrypted, stored, and flagged — they must produce a
+    /// non-empty row id and a count of 1, matching the macOS daemon's behaviour
+    /// (daemon.rs:2170-2183).
     #[cfg(feature = "android-uniffi-live")]
     #[test]
-    fn add_clipboard_item_skips_sensitive() {
+    fn add_clipboard_item_stores_sensitive_with_flag() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("live.db");
         let key = test_key();
 
-        // GitHub PAT pattern is detected by copypaste_core::detect.
+        // GitHub PAT (confidence >= 0.70) — is_sensitive_for_autowipe returns true.
         let pat = format!("ghp_{}", "A".repeat(36));
         let id = add_clipboard_item(path.to_string_lossy().into_owned(), &key, pat)
-            .expect("sensitive returns Ok empty");
-        assert!(id.is_empty(), "sensitive content yields empty id");
+            .expect("sensitive item must be stored and return Ok");
+        assert!(
+            !id.is_empty(),
+            "PG-3 (349q): sensitive item must produce a non-empty row id"
+        );
 
         let n = get_history_count(path.to_string_lossy().into_owned(), &key).expect("count");
-        assert_eq!(n, 0, "no row inserted for sensitive content");
+        assert_eq!(
+            n, 1,
+            "PG-3 (349q): exactly one row must be inserted for sensitive content"
+        );
+    }
+
+    /// PG-3 (349q): store_clipboard_item stores with explicit TTL.
+    #[cfg(feature = "android-uniffi-live")]
+    #[test]
+    fn store_clipboard_item_stores_sensitive_with_explicit_ttl() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("live-ttl.db");
+        let key = test_key();
+
+        // Anthropic key — high-confidence sensitive (>= 0.70).
+        let ak = format!("sk-ant-api03-{}", "A".repeat(80));
+        let id = store_clipboard_item(
+            path.to_string_lossy().into_owned(),
+            &key,
+            ak,
+            60, // 60-second TTL
+        )
+        .expect("store sensitive with explicit TTL");
+        assert!(
+            !id.is_empty(),
+            "store_clipboard_item must return a non-empty row id for sensitive content"
+        );
+
+        let n = get_history_count(path.to_string_lossy().into_owned(), &key).expect("count");
+        assert_eq!(n, 1, "exactly one row stored");
+    }
+
+    /// PG-3 (349q): store_clipboard_item with TTL=0 stores but no expires_at.
+    #[cfg(feature = "android-uniffi-live")]
+    #[test]
+    fn store_clipboard_item_ttl_zero_disables_autowipe() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("live-no-ttl.db");
+        let key = test_key();
+
+        let aws = "AKIAIOSFODNN7EXAMPLE".to_string();
+        let id = store_clipboard_item(path.to_string_lossy().into_owned(), &key, aws, 0)
+            .expect("store with ttl=0 (no auto-wipe)");
+        assert!(!id.is_empty(), "item stored even with ttl=0");
+
+        let n = get_history_count(path.to_string_lossy().into_owned(), &key).expect("count");
+        assert_eq!(n, 1, "exactly one row stored");
+    }
+
+    /// PG-23 (l9z8): sensitive_kind must agree with is_sensitive (>= 0.70 floor).
+    #[test]
+    fn sensitive_kind_aligned_with_is_sensitive_threshold() {
+        // High-confidence case: AWS key (0.99) — both must return Some / true.
+        let aws = "AKIAIOSFODNN7EXAMPLE".to_string();
+        assert!(
+            is_sensitive(aws.clone()),
+            "is_sensitive must be true for AWS key"
+        );
+        assert!(
+            sensitive_kind(aws).is_some(),
+            "sensitive_kind must be Some for AWS key (>= 0.70)"
+        );
+
+        // Low-confidence case: phone_us (0.55) — both must return None / false.
+        let phone = "(555) 867-5309".to_string();
+        assert!(
+            !is_sensitive(phone.clone()),
+            "is_sensitive must be false for phone (0.55 < 0.70)"
+        );
+        assert!(
+            sensitive_kind(phone).is_none(),
+            "sensitive_kind must be None for phone (0.55 < 0.70) — PG-23 alignment"
+        );
+    }
+
+    /// PG-24 (5tnx): sensitive_expires_at_ms must compute now + ttl*1000.
+    #[test]
+    fn sensitive_expires_at_ms_basic() {
+        let now_ms: i64 = 1_700_000_000_000; // arbitrary fixed timestamp
+        let ttl_secs: u64 = 30;
+        let expires = sensitive_expires_at_ms(now_ms, ttl_secs);
+        assert_eq!(
+            expires,
+            Some(now_ms + 30_000),
+            "expires_at must equal now + ttl_secs * 1000"
+        );
+    }
+
+    /// PG-24 (5tnx): ttl=0 → None (auto-wipe disabled sentinel).
+    #[test]
+    fn sensitive_expires_at_ms_zero_ttl_returns_none() {
+        let expires = sensitive_expires_at_ms(1_700_000_000_000, 0);
+        assert!(
+            expires.is_none(),
+            "ttl=0 ('auto-wipe disabled') must return None"
+        );
+    }
+
+    /// PG-4 (ojsh): detect_sensitive_spans returns spans for embedded secrets.
+    #[test]
+    fn detect_sensitive_spans_finds_aws_key_in_text() {
+        let text = "Here is my key: AKIAIOSFODNN7EXAMPLE please keep secret".to_string();
+        let spans = detect_sensitive_spans(text.clone());
+        assert!(
+            !spans.is_empty(),
+            "detect_sensitive_spans must find at least one span for embedded AWS key"
+        );
+        // The span must point at the actual key region.
+        let aws_start = text.find("AKIAIOSFODNN7EXAMPLE").expect("key in text");
+        let any_matches = spans
+            .iter()
+            .any(|s| s.start as usize <= aws_start && (s.end as usize) > aws_start);
+        assert!(
+            any_matches,
+            "at least one span must cover the AWS key offset"
+        );
+    }
+
+    /// PG-4 (ojsh): detect_sensitive_spans returns empty list for benign text.
+    #[test]
+    fn detect_sensitive_spans_empty_for_benign_text() {
+        let text = "Hello, world! This is not sensitive.".to_string();
+        let spans = detect_sensitive_spans(text);
+        assert!(spans.is_empty(), "no spans expected for benign text");
+    }
+
+    /// PG-3 (349q): sensitive_capture_decision returns correct verdict.
+    #[test]
+    fn sensitive_capture_decision_sensitive_text() {
+        let aws = "AKIAIOSFODNN7EXAMPLE".to_string();
+        let now_ms: i64 = 1_700_000_000_000;
+        let ttl_secs: u64 = 30;
+
+        let d = sensitive_capture_decision(aws, now_ms, ttl_secs);
+        assert!(d.is_sensitive, "AWS key must be flagged sensitive");
+        assert!(d.kind.is_some(), "AWS key kind must be Some");
+        assert_eq!(
+            d.expires_at_ms,
+            Some(now_ms + 30_000),
+            "expires_at_ms must be now + ttl*1000"
+        );
+    }
+
+    /// PG-3 (349q): sensitive_capture_decision for benign text.
+    #[test]
+    fn sensitive_capture_decision_benign_text() {
+        let d = sensitive_capture_decision("Hello world".to_string(), 1_700_000_000_000, 30);
+        assert!(!d.is_sensitive);
+        assert!(d.kind.is_none());
+        assert!(d.expires_at_ms.is_none());
+    }
+
+    /// PG-3 (349q): sensitive_capture_decision with ttl=0 → no expires_at.
+    #[test]
+    fn sensitive_capture_decision_ttl_zero_no_expiry() {
+        let aws = "AKIAIOSFODNN7EXAMPLE".to_string();
+        let d = sensitive_capture_decision(aws, 1_700_000_000_000, 0);
+        assert!(d.is_sensitive, "still sensitive");
+        assert!(
+            d.expires_at_ms.is_none(),
+            "ttl=0 must produce null expires_at (auto-wipe disabled)"
+        );
     }
 
     // ── Cloud sync crypto tests ──────────────────────────────────────────────
@@ -4223,5 +5335,130 @@ mod tests {
             }
             other => panic!("expected P2pError, got {other:?}"),
         }
+    }
+
+    // ── P1-8: DB_BY_PATH cache eviction on close_database ────────────────────
+    //
+    // Verifies that:
+    //   1. `key_cache_hash` produces a deterministic 32-byte value.
+    //   2. After `close_database`, the `DB_HANDLE_TO_CACHE_KEY` side-map no
+    //      longer holds the handle, confirming the eviction path ran.
+    //
+    // Note: DB_BY_PATH itself is only populated by `with_cached_db` (the
+    // `android-uniffi-live` feature path, not exercised in host unit tests
+    // because it requires a real SQLCipher file). This test verifies the
+    // side-map eviction logic which is always compiled in.
+
+    #[test]
+    fn key_cache_hash_is_deterministic_and_not_identity() {
+        let key: [u8; 32] = [0x42u8; 32];
+        let h1 = key_cache_hash(&key);
+        let h2 = key_cache_hash(&key);
+        assert_eq!(h1, h2, "key_cache_hash must be deterministic");
+        // Hash must differ from the raw key (i.e. not a no-op passthrough).
+        assert_ne!(h1, key, "key_cache_hash must not be the identity function");
+    }
+
+    #[test]
+    fn key_cache_hash_different_keys_produce_different_hashes() {
+        let key_a: [u8; 32] = [0x01u8; 32];
+        let key_b: [u8; 32] = [0x02u8; 32];
+        assert_ne!(
+            key_cache_hash(&key_a),
+            key_cache_hash(&key_b),
+            "distinct keys must produce distinct hashes"
+        );
+    }
+
+    #[test]
+    fn close_database_evicts_handle_to_cache_key_side_map() {
+        // Simulate the side-map lifecycle without opening a real database:
+        // manually insert a (handle → cache_key) entry (as open_database does)
+        // then call close_database and assert the entry is gone.
+        let fake_handle: u64 = 0xDEAD_BEEF_1234_5678;
+        let fake_key: [u8; 32] = [0x99u8; 32];
+        let fake_hash = key_cache_hash(&fake_key);
+        let fake_path = "/tmp/test-eviction-db".to_string();
+
+        // Directly insert into the side-map, mimicking open_database.
+        db_handle_to_cache_key()
+            .lock()
+            .unwrap()
+            .insert(fake_handle, (fake_path.clone(), fake_hash));
+
+        assert!(
+            db_handle_to_cache_key()
+                .lock()
+                .unwrap()
+                .contains_key(&fake_handle),
+            "side-map must contain the handle before close"
+        );
+
+        // close_database must evict it.
+        close_database(fake_handle);
+
+        assert!(
+            !db_handle_to_cache_key()
+                .lock()
+                .unwrap()
+                .contains_key(&fake_handle),
+            "P1-8: close_database must evict the handle from DB_HANDLE_TO_CACHE_KEY \
+             — raw key material (now a hash) must not survive after close"
+        );
+    }
+
+    // ── PG-17 (mxoq): fts_search stub mode ───────────────────────────────────
+
+    /// Without `android-uniffi-live`, `fts_search` returns an empty list (not an
+    /// error) and validates the key length.
+    #[test]
+    fn fts_search_stub_returns_empty_on_valid_key() {
+        let key = test_key();
+        let result = fts_search("/tmp/stub.db".to_string(), &key, "hello".to_string(), 10)
+            .expect("stub fts_search must not error");
+        assert!(result.is_empty(), "stub must return an empty list");
+    }
+
+    /// `fts_search` must fail with `InvalidKeyLength` for a key shorter than 32
+    /// bytes, exactly like every other DB-keyed function.
+    #[test]
+    fn fts_search_stub_rejects_short_key() {
+        let short_key = vec![0u8; 16];
+        let err = fts_search(
+            "/tmp/stub.db".to_string(),
+            &short_key,
+            "hello".to_string(),
+            10,
+        )
+        .expect_err("fts_search must reject a short key");
+        assert!(
+            matches!(err, CopypasteError::InvalidKeyLength),
+            "expected InvalidKeyLength, got {err:?}"
+        );
+    }
+
+    // ── PG-19 (o0t3): get_history_page stub mode ──────────────────────────────
+
+    /// Without `android-uniffi-live`, `get_history_page` returns an empty list
+    /// and validates the key length.
+    #[test]
+    fn get_history_page_stub_returns_empty_on_valid_key() {
+        let key = test_key();
+        let result = get_history_page("/tmp/stub.db".to_string(), &key, 50, 0)
+            .expect("stub get_history_page must not error");
+        assert!(result.is_empty(), "stub must return an empty list");
+    }
+
+    /// `get_history_page` must fail with `InvalidKeyLength` for a key shorter
+    /// than 32 bytes.
+    #[test]
+    fn get_history_page_stub_rejects_short_key() {
+        let short_key = vec![0u8; 8];
+        let err = get_history_page("/tmp/stub.db".to_string(), &short_key, 50, 0)
+            .expect_err("get_history_page must reject a short key");
+        assert!(
+            matches!(err, CopypasteError::InvalidKeyLength),
+            "expected InvalidKeyLength, got {err:?}"
+        );
     }
 }

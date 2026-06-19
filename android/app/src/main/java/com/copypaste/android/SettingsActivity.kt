@@ -47,7 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
+import Modifier
 import android.app.Activity
 import android.view.WindowManager
 import androidx.compose.ui.platform.LocalContext
@@ -106,6 +106,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.collectAsState
+import com.copypaste.android.ui.SyncBadgeState
+import com.copypaste.android.ui.resolveSyncBadgeState
+import java.text.DateFormat
+import java.util.Date
 
 /**
  * Settings screen — grouped into tabs mirroring the macOS settings layout:
@@ -134,11 +139,11 @@ class SettingsActivity : ComponentActivity() {
     }
 }
 
-// Tab indices
+// Tab indices — PG-48: order matches macOS (General/Display/Sync/Storage/Notifications).
 private const val TAB_GENERAL       = 0
 private const val TAB_DISPLAY       = 1
-private const val TAB_STORAGE       = 2
-private const val TAB_SYNC          = 3
+private const val TAB_SYNC          = 2
+private const val TAB_STORAGE       = 3
 private const val TAB_NOTIFICATIONS = 4
 
 /**
@@ -232,6 +237,8 @@ fun SettingsScreen(
     var syncBackend by remember { mutableStateOf(settings.syncBackend) }
     var syncOnWifiOnly by remember { mutableStateOf(settings.syncOnWifiOnly) }
     var p2pSyncEnabled by remember { mutableStateOf(settings.p2pSyncEnabled) }
+    // PG-29 (CopyPaste-yqn5): LAN/mDNS-SD visibility toggle — mirrors macOS lan_visibility.
+    var lanVisibility by remember { mutableStateOf(settings.lanVisibility) }
     var supabaseUrl by remember { mutableStateOf(settings.supabaseUrl) }
     var supabaseAnonKey by remember { mutableStateOf(settings.supabaseAnonKey) }
     var cloudPassphrase by remember { mutableStateOf(settings.cloudSyncPassphrase) }
@@ -286,6 +293,7 @@ fun SettingsScreen(
             syncOnWifiOnly = syncOnWifiOnly,
             syncBackend = syncBackend,
             p2pSyncEnabled = p2pSyncEnabled,
+            lanVisibility = lanVisibility,
             supabaseUrl = supabaseUrl.trim(),
             supabaseAnonKey = supabaseAnonKey.trim(),
             supabaseEmail = supabaseEmail.trim(),
@@ -310,7 +318,7 @@ fun SettingsScreen(
 
     // ── Tab selection — rememberSaveable so the selected tab survives rotation ──
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
-    val tabs = listOf("General", "Display", "Storage", "Sync", "Notifications")
+    val tabs = listOf("General", "Display", "Sync", "Storage", "Notifications")
 
     // §1 aurora canvas backdrop — reacts live to the Display→Translucency toggle.
     val dark = isDarkTheme()
@@ -322,8 +330,8 @@ fun SettingsScreen(
                 showDiscardDialog = false
                 pendingProceed = null
             },
-            title = { Text("Unsaved changes") },
-            text = { Text("You have unsaved changes. Discard them and leave?") },
+            title = { Text(stringResource(R.string.dialog_unsaved_title)) },
+            text = { Text(stringResource(R.string.dialog_unsaved_body)) },
             confirmButton = {
                 TextButton(onClick = {
                     showDiscardDialog = false
@@ -331,13 +339,13 @@ fun SettingsScreen(
                     pendingProceed = null
                     dirty = false
                     proceed?.invoke()
-                }) { Text("Discard") }
+                }) { Text(stringResource(R.string.dialog_unsaved_discard)) }
             },
             dismissButton = {
                 TextButton(onClick = {
                     showDiscardDialog = false
                     pendingProceed = null
-                }) { Text("Keep editing") }
+                }) { Text(stringResource(R.string.dialog_unsaved_keep)) }
             },
         )
     }
@@ -380,9 +388,9 @@ fun SettingsScreen(
                         onClick = { doSave() },
                         variant = ButtonVariant.PRIMARY,
                         enabled = dirty,
-                        modifier = androidx.compose.ui.Modifier.padding(end = 8.dp),
+                        modifier = Modifier.padding(end = 8.dp),
                     ) {
-                        Text(text = "Save")
+                        Text(text = stringResource(R.string.btn_save))
                     }
                 },
             )
@@ -521,6 +529,8 @@ fun SettingsScreen(
                         onSyncOnWifiOnlyChange = { syncOnWifiOnly = it; dirty = true },
                         p2pSyncEnabled = p2pSyncEnabled,
                         onP2pSyncEnabledChange = { p2pSyncEnabled = it; dirty = true },
+                        lanVisibility = lanVisibility,
+                        onLanVisibilityChange = { lanVisibility = it; dirty = true },
                         supabaseUrl = supabaseUrl,
                         onSupabaseUrlChange = { v -> supabaseUrl = v; dirty = true },
                         supabaseAnonKey = supabaseAnonKey,
@@ -1024,6 +1034,9 @@ private fun SyncTab(
     onSyncOnWifiOnlyChange: (Boolean) -> Unit,
     p2pSyncEnabled: Boolean,
     onP2pSyncEnabledChange: (Boolean) -> Unit,
+    // PG-29 (CopyPaste-yqn5): LAN/mDNS-SD visibility — mirrors macOS lan_visibility.
+    lanVisibility: Boolean,
+    onLanVisibilityChange: (Boolean) -> Unit,
     supabaseUrl: String,
     onSupabaseUrlChange: (String) -> Unit,
     supabaseAnonKey: String,
@@ -1049,6 +1062,17 @@ private fun SyncTab(
                 subtitle = stringResource(R.string.setting_p2p_sync_subtitle),
                 checked = p2pSyncEnabled,
                 onCheckedChange = onP2pSyncEnabledChange,
+                density = density,
+            )
+            SettingsCardDivider()
+            // PG-29 (CopyPaste-yqn5): LAN visibility toggle — mirrors macOS lan_visibility
+            // which hot-applies mDNS-SD register/unregister via ipc.rs:198.
+            // On Android the NSD service registration is gated on this flag.
+            SettingsRow(
+                title = stringResource(R.string.setting_lan_visibility_title),
+                subtitle = stringResource(R.string.setting_lan_visibility_subtitle),
+                checked = lanVisibility,
+                onCheckedChange = onLanVisibilityChange,
                 density = density,
             )
             SettingsCardDivider()
@@ -1142,18 +1166,197 @@ private fun SyncTab(
         }
 
         // ── RELAY CONFIG ───────────────────────────────────────────────────
-        if (syncBackend == SyncBackend.RELAY) {
-            SettingsSectionLabel(stringResource(R.string.section_relay_config))
-            SettingsCard {
-                SettingsTextField(
-                    label = stringResource(R.string.setting_relay_url_label),
-                    hint = "http://localhost:8080",
-                    value = relayUrl,
-                    onValueChange = onRelayUrlChange,
+        // PG-58 (CopyPaste-fvqz): always show relay URL, matching macOS SettingsView.tsx:1806
+        // which renders the relay URL field unconditionally regardless of sync backend.
+        // Previously Android mode-gated this behind `syncBackend == RELAY`, hiding it when
+        // the user switched to Supabase — reducing discoverability and diverging from macOS.
+        SettingsSectionLabel(stringResource(R.string.section_relay_config))
+        SettingsCard {
+            SettingsTextField(
+                label = stringResource(R.string.setting_relay_url_label),
+                hint = "http://localhost:8080",
+                value = relayUrl,
+                onValueChange = onRelayUrlChange,
+            )
+        }
+
+        // ── SYNC DIAGNOSTICS (otb7) ────────────────────────────────────────
+        // Parity with the macOS Settings "Test Connection" / live diagnostics surface.
+        // Shows last-sync time, connection state, and actionable misconfig hints for
+        // the selected backend. No secrets are exposed.
+        SettingsSectionLabel("Sync Diagnostics")
+        SyncDiagnosticsCard(
+            syncBackend = syncBackend,
+            supabaseUrl = supabaseUrl,
+            supabaseAnonKey = supabaseAnonKey,
+            supabaseEmail = supabaseEmail,
+            relayUrl = relayUrl,
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+/**
+ * Cloud-sync diagnostics card (otb7) — parity with the macOS Settings diagnostics surface.
+ *
+ * Shows:
+ *  - Connection state (derived from [DevicesOnlineState] + OS connectivity, same signal
+ *    as [com.copypaste.android.ui.SyncStatusBadge] — PG-10 / 5qbe alignment).
+ *  - Last successful sync timestamp (relative, from [DevicesOnlineState.lastActivityMs]).
+ *  - Misconfig hint for the active backend when relevant fields are blank.
+ *
+ * No credentials or secrets are displayed. Read-only — no Save action needed.
+ * Live: recomposes whenever [DevicesOnlineState] emits a new value.
+ */
+@Composable
+private fun SyncDiagnosticsCard(
+    syncBackend: SyncBackend,
+    supabaseUrl: String,
+    supabaseAnonKey: String,
+    supabaseEmail: String,
+    relayUrl: String,
+) {
+    val c = LocalIdeColors.current
+    val ctx = LocalContext.current
+
+    // Primary signal: daemon-derived connectivity (same source as SyncStatusBadge).
+    val liveOnlineCount by DevicesOnlineState.onlineCount.collectAsState()
+    val lastActivityMs by DevicesOnlineState.lastActivityMs.collectAsState()
+
+    // OS-level internet: secondary signal (distinguishes NetworkOffline from DaemonUnreachable).
+    var hasInternet by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+                as? android.net.ConnectivityManager
+            val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+            hasInternet = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
+                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            kotlinx.coroutines.delay(10_000L)
+        }
+    }
+
+    val count = if (liveOnlineCount >= 0) liveOnlineCount else 0
+    val badgeState = resolveSyncBadgeState(
+        liveOnlineCount = count,
+        lastActivityMs = lastActivityMs,
+        recentSyncMs = RECENT_SYNC_MS,
+        hasInternet = hasInternet,
+    )
+
+    // Last-sync label — mirrors SyncStatusSheet format.
+    val nowMs = System.currentTimeMillis()
+    val lastSyncLabel: String = if (lastActivityMs <= 0L) {
+        "Never"
+    } else {
+        val elapsed = (nowMs - lastActivityMs) / 1_000L
+        when {
+            elapsed < 60     -> "${elapsed}s ago"
+            elapsed < 3_600  -> "${elapsed / 60}m ago"
+            elapsed < 86_400 -> "${elapsed / 3_600}h ago"
+            else -> DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                .format(Date(lastActivityMs))
+        }
+    }
+
+    // Connection-state label + colour — mirrors macOS Settings diagnostics row.
+    val (stateLabel, stateColor) = when (badgeState) {
+        SyncBadgeState.Connected         -> "Connected" to c.success
+        SyncBadgeState.NetworkOffline    -> "Offline (no internet)" to c.danger
+        SyncBadgeState.DaemonUnreachable -> "Unreachable (sync not working)" to c.danger
+    }
+
+    // Misconfig hint — actionable text guiding the user toward the root cause.
+    // Checks draft values (not yet saved) so the hint updates as the user edits.
+    val misconfigHint: String? = when {
+        syncBackend == SyncBackend.SUPABASE && supabaseUrl.isBlank() ->
+            "Supabase URL is not set. Enter it in Supabase Configuration above."
+        syncBackend == SyncBackend.SUPABASE && supabaseAnonKey.isBlank() ->
+            "Supabase Anon Key is not set. Enter it in Supabase Configuration above."
+        syncBackend == SyncBackend.SUPABASE &&
+            supabaseUrl.isNotBlank() && !supabaseUrl.startsWith("https://") ->
+            "Supabase URL must start with https://."
+        syncBackend == SyncBackend.RELAY &&
+            (relayUrl.isBlank() || relayUrl.contains("localhost") || relayUrl.contains("127.0.0.1")) ->
+            "Relay URL is blank or points to localhost, which is unreachable on a real device."
+        badgeState is SyncBadgeState.DaemonUnreachable && syncBackend == SyncBackend.SUPABASE ->
+            "Sync not working. Check your Supabase URL, anon key, passphrase, and RLS policies."
+        badgeState is SyncBadgeState.DaemonUnreachable && syncBackend == SyncBackend.RELAY ->
+            "Relay unreachable. Verify the relay URL and that the relay server is running."
+        else -> null
+    }
+
+    SettingsCard {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+            // Connection state row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Connection",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.dim,
+                )
+                Text(
+                    text = stateLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = stateColor,
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = c.divider, thickness = 1.dp)
+            Spacer(modifier = Modifier.height(8.dp))
+            // Last sync row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Last sync",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.dim,
+                )
+                Text(
+                    text = lastSyncLabel,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.text,
+                )
+            }
+            // Backend row
+            Spacer(modifier = Modifier.height(8.dp))
+            HorizontalDivider(color = c.divider, thickness = 1.dp)
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Backend",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.dim,
+                )
+                Text(
+                    text = if (syncBackend == SyncBackend.SUPABASE) "Supabase" else "Relay",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.text,
+                )
+            }
+            // Misconfig hint — shown only when there is a detected issue.
+            if (misconfigHint != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = c.divider, thickness = 1.dp)
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = misconfigHint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.danger,
                 )
             }
         }
-        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 

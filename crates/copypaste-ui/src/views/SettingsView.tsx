@@ -6,6 +6,7 @@ import { ViewShell } from "../components/ViewShell";
 import {
   api,
   ipcErrorMessage,
+  isIpcNotReady,
   appVersion,
   getPopupShortcut,
   setPopupShortcut,
@@ -18,6 +19,8 @@ import {
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
 import { PALETTE_KEYS, PALETTES } from "../lib/liquid-tokens";
+// i2sr (PG-40): shared hybrid last-sync formatter (relative ≤24 h, absolute beyond).
+import { formatSyncTime } from "../lib/time";
 // Step arrays (moved from StepSlider.tsx — StepSlider component deleted in v0.5.3,
 // all sliders now use the unified SliderRow component).
 
@@ -438,13 +441,12 @@ function TabBar({
 // Helpers
 // ---------------------------------------------------------------------------
 
+// i2sr (PG-40): delegate to the shared formatSyncTime hybrid formatter so
+// SettingsView and DeviceCard use the same relative/absolute boundary (24 h).
+// Input is ms (SyncStatus.last_sync_ms). Returns "Never" for null/0.
 function formatLastSync(ms: number | null): string {
   if (ms === null) return "Never";
-  const diff = Date.now() - ms;
-  if (diff < 60_000) return "Just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  return new Date(ms).toLocaleString();
+  return formatSyncTime(ms, "ms") ?? "Never";
 }
 
 // ---------------------------------------------------------------------------
@@ -624,9 +626,11 @@ function ShortcutCapture({
 // ---------------------------------------------------------------------------
 
 // `degraded` = daemon up but its DB is unavailable (reported only by `status`).
+// `not_ready` added alongside `offline`/`degraded` so the daemon starting-up
+// state shows a friendly banner rather than "Daemon not running."
 // Distinct from `offline` so the banner is accurate and the inputs that need a
 // working DB stay disabled.
-type LoadState = "loading" | "ready" | "offline" | "degraded";
+type LoadState = "loading" | "ready" | "offline" | "not_ready" | "degraded";
 
 export function SettingsView() {
   // Display prefs (localStorage-persisted, no daemon needed).
@@ -649,6 +653,13 @@ export function SettingsView() {
   });
   const [supabaseUrl, setSupabaseUrl] = useState("");
   const [supabaseKey, setSupabaseKey] = useState("");
+  // jhvl: Supabase GoTrue email + password for email+password sign-in.
+  // These are write-only fields — the daemon never returns them, so the UI
+  // can only show a presence flag (supabase_email_set / supabase_password_set).
+  // The inputs are always cleared after a successful Save to avoid holding
+  // credentials in memory longer than necessary.
+  const [supabaseEmail, setSupabaseEmail] = useState("");
+  const [supabasePassword, setSupabasePassword] = useState("");
   const [relayUrl, setRelayUrl] = useState("");
   const [savedMsg, setSavedMsg] = useState(false);
   const [testMsg, setTestMsg] = useState<{ text: string; ok: boolean } | null>(null);
@@ -683,21 +694,33 @@ export function SettingsView() {
     snapToNearest(SENSITIVE_TTL_STEPS as unknown as readonly number[], DEFAULT_SENSITIVE_TTL_SECS)
   );
   const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY);
-  // §6.3: History display limit — stored as UI pref only. Does NOT cap daemon storage;
-  // the daemon prunes by byte quota (storage_quota_bytes). This slider filters how
-  // many items the UI renders; daemon may hold more items on disk.
-  const [maxItems, setMaxItems] = useState(
-    snapToNearest(MAX_ITEMS_STEPS as unknown as readonly number[], DEFAULT_MAX_ITEMS)
+  // §6.3: History display limit — read from and written to the persisted UIPrefs store.
+  // Does NOT cap daemon storage; the daemon prunes by byte quota (storage_quota_bytes).
+  // This slider filters how many items the UI renders; daemon may hold more items on disk.
+  // Initialised from prefs.historyDisplayLimit so re-opening Settings shows the saved value.
+  const maxItems = snapToNearest(
+    MAX_ITEMS_STEPS as unknown as readonly number[],
+    prefs.historyDisplayLimit ?? DEFAULT_MAX_ITEMS
   );
   // Per-field save feedback: key = field name, value = error or "Saved" / null.
   const [limitsMsg, setLimitsMsg] = useState<Record<string, string | null>>({});
   const limitsMsgTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // j9xj (PG-30): master sync kill-switch — Android parity. True = sync enabled
+  // (default). False = all transports disabled. Daemon side not yet implemented;
+  // the value is sent via set_config but silently ignored until the daemon adds
+  // AppConfig::sync_enabled. See bd CopyPaste-j9xj and the AppSettings jsdoc.
+  const [syncEnabled, setSyncEnabled] = useState(true);
 
   // Sync parity — p2p toggle + wifi-only
   const [syncOnWifiOnly, setSyncOnWifiOnly] = useState(false);
 
   // LAN visibility — mDNS-SD advertisement toggle (config.toml, hot-applied).
   const [lanVisibility, setLanVisibility] = useState(true);
+
+  // auto_apply_synced_clip — writes incoming synced items to the local clipboard.
+  // Daemon default is true; mirror that here so new installs start in sync.
+  const [autoApplySyncedClip, setAutoApplySyncedClip] = useState(true);
 
   // Privacy & capture — daemon AppConfig fields (config.toml).
   // am9w: daemon defaults collect_public_ip to false (opt-out); mirror that here.
@@ -716,6 +739,15 @@ export function SettingsView() {
   // Data
   const [deleteMsg, setDeleteMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+
+  // 85n9: Backup / Restore state
+  const [exportInProgress, setExportInProgress] = useState(false);
+  const [exportMsg, setExportMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const [exportIncludeSensitive, setExportIncludeSensitive] = useState(false);
+  const [importInProgress, setImportInProgress] = useState(false);
+  const [importMsg, setImportMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const exportMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const importMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Global state
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -748,6 +780,8 @@ export function SettingsView() {
       if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
       if (deleteTimerRef.current !== null) clearTimeout(deleteTimerRef.current);
       if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
+      if (exportMsgTimerRef.current !== null) clearTimeout(exportMsgTimerRef.current);
+      if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
       for (const t of Object.values(limitsMsgTimers.current)) clearTimeout(t);
     };
   }, []);
@@ -845,6 +879,9 @@ export function SettingsView() {
 
         // Sync parity
         setSyncOnWifiOnly(rawCfg.sync_on_wifi_only ?? false);
+        // j9xj (PG-30): hydrate master sync_enabled (daemon may not emit it yet;
+        // absent/null → true so existing installs stay in "sync on" state).
+        setSyncEnabled(rawCfg.sync_enabled ?? true);
 
         // Privacy & capture — these AppConfig fields are not in the AppSettings
         // interface (kept in lib/ipc.ts), so read them off the raw response with
@@ -861,6 +898,8 @@ export function SettingsView() {
         setExcludedApps(privacyCfg.excluded_app_bundle_ids ?? []);
         // lan_visibility defaults to true (LAN-visible) on first install.
         setLanVisibility(privacyCfg.lan_visibility ?? true);
+        // auto_apply_synced_clip defaults to true (daemon default) on first install.
+        setAutoApplySyncedClip(rawCfg.auto_apply_synced_clip ?? true);
 
         // Guard again — a second reloadKey bump that fired while we were
         // awaiting could have set cancelled=true between the check above and
@@ -879,8 +918,12 @@ export function SettingsView() {
         setLoadState("ready");
       } catch (err) {
         if (cancelled) return;
-        void err;
-        setLoadState("offline");
+        if (isIpcNotReady(err)) {
+          setLoadState("not_ready");
+        } else {
+          void err;
+          setLoadState("offline");
+        }
       }
     }
 
@@ -946,6 +989,7 @@ export function SettingsView() {
 
   const offline = loadState !== "ready";
   const degraded = loadState === "degraded";
+  const notReady = loadState === "not_ready";
 
   // -------------------------------------------------------------------------
   // Helpers — per-field limits save with feedback
@@ -978,6 +1022,9 @@ export function SettingsView() {
   // with any updated limits fields. Slider values are already raw bytes/counts/secs.
   function buildConfigPatch(overrides: Partial<AppSettings> & PrivacyPatch): AppSettings & PrivacyPatch {
     return {
+      // j9xj (PG-30): include master sync_enabled in every patch so it is
+      // preserved across other config saves. Daemon ignores unknown fields.
+      sync_enabled: syncEnabled,
       p2p_enabled: config.p2p_enabled,
       supabase_url: supabaseUrl.trim() || null,
       supabase_anon_key: supabaseKey.trim() || null,
@@ -995,6 +1042,7 @@ export function SettingsView() {
       paste_as_plain_text: pasteAsPlainText,
       excluded_app_bundle_ids: excludedApps,
       lan_visibility: lanVisibility,
+      auto_apply_synced_clip: autoApplySyncedClip,
       ...overrides,
     };
   }
@@ -1103,15 +1151,26 @@ export function SettingsView() {
         ? trimmedKey
         : config.supabase_anon_key; // preserve existing; null only if never set
 
+    // jhvl: Only include email/password when the user has typed a non-empty value.
+    // Sending null would clear the stored credential; omitting the field preserves it.
+    const trimmedEmail = supabaseEmail.trim();
+    const trimmedPassword = supabasePassword;
     const next: AppSettings = {
       p2p_enabled: config.p2p_enabled,
       supabase_url: supabaseUrl.trim() || null,
       supabase_anon_key: anonKey,
       relay_url: relayUrl.trim() || null,
+      ...(trimmedEmail ? { supabase_email: trimmedEmail } : {}),
+      ...(trimmedPassword ? { supabase_password: trimmedPassword } : {}),
     };
     setSaveError(null);
     try {
       await api.setConfig(next);
+      // Clear the credential inputs after a successful save — they were write-only.
+      // The presence flags (supabase_email_set / supabase_password_set) will be
+      // refreshed on the next getSyncStatus call (triggered by the daemon restart).
+      if (trimmedEmail) setSupabaseEmail("");
+      if (trimmedPassword) setSupabasePassword("");
       setConfig(next);
       setSavedMsg(true);
       if (savedTimerRef.current !== null) clearTimeout(savedTimerRef.current);
@@ -1132,7 +1191,7 @@ export function SettingsView() {
       if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
       saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
     }
-  }, [config.p2p_enabled, config.supabase_anon_key, supabaseUrl, supabaseKey, relayUrl, saveErrTimer]);
+  }, [config.p2p_enabled, config.supabase_anon_key, supabaseUrl, supabaseKey, supabaseEmail, supabasePassword, relayUrl, saveErrTimer]);
 
   const handleTestConnection = useCallback(async () => {
     setTesting(true);
@@ -1152,6 +1211,18 @@ export function SettingsView() {
   // -------------------------------------------------------------------------
   // Sync parity — p2p toggle + wifi-only
   // -------------------------------------------------------------------------
+
+  // j9xj (PG-30): master sync_enabled toggle. NOT memoized for same reason as
+  // handleP2pToggle — buildConfigPatch closes over live slider state.
+  const handleSyncEnabledToggle = async (val: boolean) => {
+    const prev = syncEnabled;
+    setSyncEnabled(val);
+    await saveLimitsField(
+      "sync_enabled",
+      { sync_enabled: val },
+      () => setSyncEnabled(prev),
+    );
+  };
 
   // NOT memoized: buildConfigPatch reads live component state (sliders,
   // supabase fields) via closure. Memoizing on a narrow dep list would freeze
@@ -1216,6 +1287,17 @@ export function SettingsView() {
       "lan_visibility",
       { lan_visibility: val },
       () => setLanVisibility(prev),
+    );
+  };
+
+  // NOT memoized — same reasoning as handleWifiOnlyToggle above.
+  const handleAutoApplySyncedClipToggle = async (val: boolean) => {
+    const prev = autoApplySyncedClip;
+    setAutoApplySyncedClip(val);
+    await saveLimitsField(
+      "auto_apply_synced_clip",
+      { auto_apply_synced_clip: val },
+      () => setAutoApplySyncedClip(prev),
     );
   };
 
@@ -1310,6 +1392,107 @@ export function SettingsView() {
   }, [deleteTimerRef]);
 
   // -------------------------------------------------------------------------
+  // 85n9: Backup — export clipboard history as a downloaded JSON file
+  // -------------------------------------------------------------------------
+
+  const handleExport = useCallback(async () => {
+    if (exportInProgress) return;
+    setExportInProgress(true);
+    setExportMsg(null);
+    try {
+      const data = await api.exportItems(exportIncludeSensitive);
+      const json = JSON.stringify(data, null, 2);
+
+      // Trigger a browser download via Blob + temporary <a download> anchor.
+      // No fs/dialog Tauri plugin is needed — the same pattern is used by
+      // FileChip's "Save As" button (triggerDownload in FileChip.tsx).
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `copypaste-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      // Revoke after a short delay so the download starts before the blob is freed.
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+
+      const count = (data.items ?? []).length;
+      setExportMsg({ text: `Exported ${count} item${count === 1 ? "" : "s"}`, isError: false });
+      if (exportMsgTimerRef.current !== null) clearTimeout(exportMsgTimerRef.current);
+      exportMsgTimerRef.current = setTimeout(() => setExportMsg(null), 4000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setExportMsg({ text: `Export failed: ${msg}`, isError: true });
+      if (exportMsgTimerRef.current !== null) clearTimeout(exportMsgTimerRef.current);
+      exportMsgTimerRef.current = setTimeout(() => setExportMsg(null), 5000);
+    } finally {
+      setExportInProgress(false);
+    }
+  }, [exportInProgress, exportIncludeSensitive, exportMsgTimerRef]);
+
+  // -------------------------------------------------------------------------
+  // 85n9: Restore — import clipboard history from a JSON backup file
+  // -------------------------------------------------------------------------
+
+  const handleImportFile = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      // Reset the input so the same file can be re-selected after an error.
+      e.target.value = "";
+      if (!file) return;
+
+      setImportInProgress(true);
+      setImportMsg(null);
+      try {
+        // Read the file as text using the browser FileReader API — no fs Tauri
+        // plugin capability is needed; FileReader works in Tauri's webview.
+        const text = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.onerror = () => reject(new Error("Failed to read file"));
+          reader.readAsText(file);
+        });
+
+        let parsed: { items?: unknown[] };
+        try {
+          parsed = JSON.parse(text) as { items?: unknown[] };
+        } catch {
+          throw new Error("Invalid JSON — file may be corrupted or wrong format");
+        }
+
+        const items = parsed.items;
+        if (!Array.isArray(items)) {
+          throw new Error('Invalid backup file — expected { "items": [...] }');
+        }
+        if (items.length === 0) {
+          setImportMsg({ text: "No items in backup file", isError: false });
+          if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
+          importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 3000);
+          return;
+        }
+
+        const result = await api.importItems(items);
+        const { inserted, skipped } = result;
+        setImportMsg({
+          text: `Imported ${inserted} item${inserted === 1 ? "" : "s"}${skipped > 0 ? `, ${skipped} skipped (duplicates)` : ""}`,
+          isError: false,
+        });
+        if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
+        importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 5000);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        setImportMsg({ text: `Import failed: ${msg}`, isError: true });
+        if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
+        importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 5000);
+      } finally {
+        setImportInProgress(false);
+      }
+    },
+    [importMsgTimerRef],
+  );
+
+  // -------------------------------------------------------------------------
   // Render helpers
   // -------------------------------------------------------------------------
 
@@ -1346,6 +1529,22 @@ export function SettingsView() {
     return (
       <div className="space-y-2">
         <Panel>
+          {/* j9xj (PG-30): master sync kill-switch — Android parity.
+              ⚠️ Daemon-side stub: sent via set_config but ignored until
+              AppConfig::sync_enabled is added to copypaste-core (see bd CopyPaste-j9xj).
+              When off, visually gates per-transport switches in the Sync tab. */}
+          <SettingsRow label="Enable sync">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data is synced to other devices. Matches Android sync_enabled parity. ⚠ Requires a daemon update to take full effect — see bd CopyPaste-j9xj." />
+              <LimitsMsg field="sync_enabled" />
+              <Toggle
+                checked={syncEnabled}
+                onChange={(v) => void handleSyncEnabledToggle(v)}
+                disabled={offline}
+                aria-label="Enable sync"
+              />
+            </div>
+          </SettingsRow>
           <SettingsRow label="Private mode">
             <div className="flex items-center gap-2">
               {privateModeError !== null && (
@@ -1639,6 +1838,20 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
+
+          {/* n9gp (PG-34): sensitive-reveal warning toggle — Android parity.
+              When on (default), a "Sensitive — click to reveal" overlay appears
+              before the blur is lifted. When off, clicking the blur reveals
+              immediately without the extra confirmation step. */}
+          <SettingsRow label="Warn before revealing sensitive">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Show a confirmation overlay before revealing blurred sensitive content. Matches the Android warning sheet behaviour. Turn off if you find the extra step redundant." />
+              <Toggle
+                checked={prefs.showSensitiveWarnings ?? true}
+                onChange={(v) => setPrefs({ showSensitiveWarnings: v })}
+              />
+            </div>
+          </SettingsRow>
         </Panel>
 
         <SubsectionHeader label="History list" />
@@ -1724,6 +1937,8 @@ export function SettingsView() {
           )}
 
         {/* ── Local sync (P2P) ── */}
+        {/* j9xj (PG-30): per-transport controls are visually disabled when the
+            master syncEnabled kill-switch is off (they still show their state). */}
         <SubsectionHeader
           label="Local sync (P2P)"
           hint="Same network, no account needed."
@@ -1735,7 +1950,7 @@ export function SettingsView() {
               <Toggle
                 checked={config.p2p_enabled}
                 onChange={(v) => void handleP2pToggle(v)}
-                disabled={offline || syncRestarting}
+                disabled={offline || syncRestarting || !syncEnabled}
                 aria-label="P2P sync"
               />
             </div>
@@ -1746,7 +1961,7 @@ export function SettingsView() {
               <Toggle
                 checked={syncOnWifiOnly}
                 onChange={(v) => void handleWifiOnlyToggle(v)}
-                disabled={offline}
+                disabled={offline || !syncEnabled}
               />
             </div>
           </SettingsRow>
@@ -1757,8 +1972,20 @@ export function SettingsView() {
               <Toggle
                 checked={lanVisibility}
                 onChange={(v) => void handleLanVisibilityToggle(v)}
-                disabled={offline}
+                disabled={offline || !syncEnabled}
                 aria-label="LAN visibility"
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Auto-apply synced clipboard">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="When on, incoming synced items from other devices are automatically written to the local clipboard so it stays up-to-date. When off, synced items are saved to history but never applied to the active clipboard — paste manually from the history list." />
+              <LimitsMsg field="auto_apply_synced_clip" />
+              <Toggle
+                checked={autoApplySyncedClip}
+                onChange={(v) => void handleAutoApplySyncedClipToggle(v)}
+                disabled={offline || !syncEnabled}
+                aria-label="Auto-apply synced clipboard"
               />
             </div>
           </SettingsRow>
@@ -1799,6 +2026,52 @@ export function SettingsView() {
                 spellCheck={false}
               />
               {syncStatus?.supabase_configured && !supabaseKey && (
+                <span className="text-[11px] text-ide-success">set ✓</span>
+              )}
+            </div>
+          </SettingsRow>
+          {/* jhvl: Supabase GoTrue email + password for email+password sign-in.
+               These are WRITE-ONLY — the daemon never returns them; only the
+               supabase_email_set / supabase_password_set presence flags come back.
+               Inputs are cleared after a successful Save. Password is always masked. */}
+          <SettingsRow label="Supabase email">
+            <div className="flex flex-col items-end gap-0.5">
+              <input
+                type="email"
+                className={inputCls}
+                placeholder={
+                  syncStatus?.supabase_email_set && !supabaseEmail
+                    ? "set ✓ (leave blank to keep)"
+                    : "user@example.com"
+                }
+                value={supabaseEmail}
+                onChange={(e) => setSupabaseEmail(e.target.value)}
+                disabled={offline}
+                autoComplete="username"
+                spellCheck={false}
+              />
+              {syncStatus?.supabase_email_set && !supabaseEmail && (
+                <span className="text-[11px] text-ide-success">set ✓</span>
+              )}
+            </div>
+          </SettingsRow>
+          <SettingsRow label="Supabase password">
+            <div className="flex flex-col items-end gap-0.5">
+              <input
+                type="password"
+                className={inputCls}
+                placeholder={
+                  syncStatus?.supabase_password_set && !supabasePassword
+                    ? "set ✓ (leave blank to keep)"
+                    : "Password"
+                }
+                value={supabasePassword}
+                onChange={(e) => setSupabasePassword(e.target.value)}
+                disabled={offline}
+                autoComplete="current-password"
+                spellCheck={false}
+              />
+              {syncStatus?.supabase_password_set && !supabasePassword && (
                 <span className="text-[11px] text-ide-success">set ✓</span>
               )}
             </div>
@@ -1899,9 +2172,15 @@ export function SettingsView() {
                 <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
                 <StatusRow label="Supabase configured" ok={syncStatus.supabase_configured} />
                 <StatusRow label="Signed in" ok={syncStatus.signed_in} />
+                {/* i2sr (PG-40): hybrid relative/absolute format + "Synced " prefix
+                    to match Android parity. Relative when ≤24 h ago; absolute beyond. */}
                 <div className="flex items-center gap-2 text-[13px] text-ide-dim pt-0.5">
                   <span className="w-[140px] shrink-0">Last sync</span>
-                  <span className="text-ide-text">{formatLastSync(syncStatus.last_sync_ms)}</span>
+                  <span className="text-ide-text">
+                    {syncStatus.last_sync_ms
+                      ? `Synced ${formatLastSync(syncStatus.last_sync_ms)}`
+                      : "Never"}
+                  </span>
                 </div>
               </div>
             </Panel>
@@ -2103,7 +2382,7 @@ export function SettingsView() {
             </div>
           </SettingsRow>
           {/* §6.3: History display limit — UI pref only (no daemon IPC contract).
-              Sentinel 100000 → "Unlimited". No onRelease IPC call — updates store only.
+              Sentinel 100000 → "Unlimited". No onRelease IPC call — updates UIPrefs store only.
               Daemon storage is capped by "Local storage limit" (byte quota), not item count. */}
           <LimitSliderRow
             label="History display limit"
@@ -2111,15 +2390,104 @@ export function SettingsView() {
             steps={MAX_ITEMS_STEPS as unknown as readonly number[]}
             labels={MAX_ITEMS_LABELS}
             value={maxItems}
-            onChange={(v) => setMaxItems(v)}
+            onChange={(v) => {
+              // Persist live (on every drag tick) so the HistoryView cap updates in real time.
+              setPrefs({ historyDisplayLimit: v });
+            }}
             onRelease={(v) => {
-              // Display-only pref — no daemon IPC field. Persist to UI store only.
-              setMaxItems(v);
+              // Persist on commit (mouse-up / key-up) and show inline feedback.
+              setPrefs({ historyDisplayLimit: v });
               showLimitsMsg("max_items", "Saved", 1500);
             }}
           />
           <div className="border-b border-ide-divider/70 px-3 pb-2 text-[11px] text-ide-faint">
             Limits items shown in the UI only — the daemon stores more and prunes by the byte quota above.
+          </div>
+        </Panel>
+
+        {/* 85n9: Backup / Restore panel */}
+        <SubsectionHeader
+          label="Backup & Restore"
+          hint="Export your clipboard history as a JSON file, or restore it from a previous backup."
+        />
+        <Panel>
+          {/* Export row */}
+          <div className="border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">Export backup</span>
+              <div className="flex flex-col items-end gap-1.5">
+                {/* Include-sensitive checkbox with plaintext warning */}
+                <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ide-dim select-none">
+                  <input
+                    type="checkbox"
+                    checked={exportIncludeSensitive}
+                    onChange={(e) => setExportIncludeSensitive(e.target.checked)}
+                    disabled={offline || exportInProgress}
+                    className="h-3.5 w-3.5 accent-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
+                  />
+                  Include sensitive items
+                </label>
+                {exportIncludeSensitive && (
+                  <span className="text-[11px] text-ide-warning">
+                    Warning: sensitive items will be exported as plaintext. Keep the file secure and delete it when done.
+                  </span>
+                )}
+                <div className="flex items-center gap-2">
+                  {exportMsg !== null && (
+                    <span className={`text-[12px] ${exportMsg.isError ? "text-ide-danger" : "text-ide-success"}`}>
+                      {exportMsg.text}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    disabled={offline || exportInProgress}
+                    onClick={() => void handleExport()}
+                    data-testid="export-button"
+                    className={[
+                      "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                      "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                    ].join(" ")}
+                  >
+                    {exportInProgress ? "Exporting…" : "Export…"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Import row */}
+          <div className="px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">Restore backup</span>
+              <div className="flex flex-col items-end gap-1">
+                {importMsg !== null && (
+                  <span className={`text-[12px] ${importMsg.isError ? "text-ide-danger" : "text-ide-success"}`}>
+                    {importMsg.text}
+                  </span>
+                )}
+                {/* Invisible file input driven by the visible button below.
+                    accept="application/json" limits the picker to .json files.
+                    The file is read entirely in-browser via FileReader (no fs
+                    Tauri plugin needed). */}
+                <label
+                  className={[
+                    "cursor-pointer rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                    "hover:bg-ide-hover",
+                    (offline || importInProgress) ? "pointer-events-none opacity-40" : "",
+                  ].join(" ")}
+                >
+                  {importInProgress ? "Importing…" : "Import from file…"}
+                  <input
+                    type="file"
+                    accept="application/json"
+                    disabled={offline || importInProgress}
+                    onChange={(e) => void handleImportFile(e)}
+                    data-testid="import-file-input"
+                    className="sr-only"
+                  />
+                </label>
+              </div>
+            </div>
           </div>
         </Panel>
 
@@ -2201,6 +2569,20 @@ export function SettingsView() {
             it to use the latest version.
           </span>
           <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
+        </div>
+      )}
+
+      {/* Not-ready banner (daemon alive but still initialising) */}
+      {notReady && (
+        <div className="surface-card mb-4 flex items-center justify-between gap-3 rounded-ide-lg px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs">
+          <span>Clipboard service is starting up — settings will be available in a moment.</span>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            className="shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+          >
+            Retry
+          </button>
         </div>
       )}
 

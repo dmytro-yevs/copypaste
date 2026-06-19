@@ -60,7 +60,7 @@ open even though the signature is valid.
 We mitigate this in two places:
 
 1. **CI postbuild step** (`.github/workflows/release.yml`):
-   `xattr -cr target/release/CopyPaste.dmg` (and `dist/CopyPaste.app`) before
+   `xattr -cr dist/*.dmg` (and `dist/CopyPaste.app`) before
    uploading artifacts and creating the GitHub Release.
 2. **User-side installer** (`scripts/release/install.sh`): runs
    `xattr -dr com.apple.quarantine` on the installed `.app` for users who

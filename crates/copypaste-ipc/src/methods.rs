@@ -66,6 +66,48 @@ pub const METHOD_GET_CONFIG: &str = "get_config";
 /// Write / merge a partial daemon configuration object.
 pub const METHOD_SET_CONFIG: &str = "set_config";
 
+/// Store the Supabase GoTrue account password directly in the macOS Keychain
+/// (or an in-memory fallback on non-macOS) **without** routing it through
+/// `set_config` and **without** persisting it to `config.json`.
+///
+/// # Why a dedicated verb?
+///
+/// `set_config` carries the password in the JSON payload which travels over
+/// the Unix socket and is briefly held in the daemon's request-buffer memory.
+/// Although the socket is `0600` and the memory is ephemeral, the password
+/// would also have appeared in `config.json` on any platform where the Keychain
+/// write succeeded but the read-back verification failed — e.g. ephemeral-key
+/// (CI) or non-macOS builds.  A dedicated verb makes the intent unambiguous and
+/// removes the password from the general-purpose config payload.
+///
+/// # Non-macOS behaviour
+///
+/// On non-macOS the Keychain is unavailable.  The daemon holds the password
+/// in-memory for the lifetime of the current process and logs a warning.  The
+/// password is **never** written to `config.json` via this verb — callers that
+/// need persistence on non-macOS must use `set_config` explicitly.
+pub const METHOD_STORE_CLOUD_PASSWORD: &str = "store_cloud_password";
+
+/// Parameters for [`METHOD_STORE_CLOUD_PASSWORD`].
+///
+/// Carries exactly one field so the password is never mixed with other
+/// `set_config` fields and can be zeroized independently on the daemon side.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct StoreCloudPasswordRequest {
+    /// The Supabase GoTrue account password (plain-text, passed over the local
+    /// 0600 Unix socket). The daemon zeroizes this field after writing it to
+    /// the Keychain / in-memory store.
+    pub password: String,
+}
+
+/// Success payload for [`METHOD_STORE_CLOUD_PASSWORD`].
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct StoreCloudPasswordResponse {
+    /// `true` when the password was persisted to the macOS Keychain.
+    /// `false` on non-macOS platforms where only in-memory storage is used.
+    pub persisted: bool,
+}
+
 /// Query the current cloud-sync state.
 pub const METHOD_GET_SYNC_STATUS: &str = "get_sync_status";
 
@@ -226,6 +268,32 @@ pub struct ResetDatabaseResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn store_cloud_password_method_has_correct_wire_name() {
+        assert_eq!(METHOD_STORE_CLOUD_PASSWORD, "store_cloud_password");
+    }
+
+    #[test]
+    fn store_cloud_password_request_roundtrip() {
+        let req = StoreCloudPasswordRequest {
+            password: "s3cr3t".into(),
+        };
+        let s = serde_json::to_string(&req).unwrap();
+        let back: StoreCloudPasswordRequest = serde_json::from_str(&s).unwrap();
+        assert_eq!(req, back);
+        assert!(s.contains("\"password\":\"s3cr3t\""));
+    }
+
+    #[test]
+    fn store_cloud_password_response_roundtrip() {
+        for persisted in [true, false] {
+            let resp = StoreCloudPasswordResponse { persisted };
+            let s = serde_json::to_string(&resp).unwrap();
+            let back: StoreCloudPasswordResponse = serde_json::from_str(&s).unwrap();
+            assert_eq!(resp, back);
+        }
+    }
 
     #[test]
     fn method_list_discovered_has_correct_wire_name() {

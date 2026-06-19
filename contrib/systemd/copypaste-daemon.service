@@ -15,7 +15,7 @@ Environment=RUST_LOG=info
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=%h/Library/Application Support/CopyPaste
+ReadWritePaths=%h/.local/share/copypaste
 PrivateTmp=true
 
 [Install]

@@ -3,12 +3,19 @@
 ## Crate Dependency Graph
 
 ```
-copypaste-core          (library — no binary)
-  ├── copypaste-daemon  (long-running background process)
-  ├── copypaste-cli     (user-facing CLI, no core dep — speaks IPC only)
-  └── copypaste-ui      (Tauri v2 + React desktop UI, speaks IPC only)
+copypaste-core          (library — crypto, SQLCipher storage, sensitive detection, config)
+  ├── copypaste-daemon  (long-running background process — clipboard, IPC, sync orchestration)
+  │     ├── copypaste-ipc       (IPC request/response types shared by daemon, CLI, and UI)
+  │     ├── copypaste-p2p       (mTLS P2P transport + mDNS-SD discovery)
+  │     ├── copypaste-sync      (sync engine — CRDT, Lamport timestamps, protocol types)
+  │     └── copypaste-supabase  (Supabase cloud sync — opt-in via cloud-sync feature)
+  ├── copypaste-cli     (user-facing CLI — no core dep, speaks IPC only)
+  └── copypaste-ui      (Tauri v2 + React desktop UI — no core dep, speaks IPC only)
 
-copypaste-relay         (optional HTTP sync server — no core dep, standalone)
+copypaste-relay         (Axum HTTP relay server — standalone, no core dep)
+copypaste-android       (UniFFI FFI crate — cdylib for Android, links copypaste-core)
+copypaste-telemetry     (telemetry, opt-out, PII scrubbing — standalone library)
+copypaste-bench         (Criterion benchmarks — dev tool, links copypaste-core)
 ```
 
 `copypaste-cli` and `copypaste-ui` never link `copypaste-core` directly; they communicate
@@ -16,6 +23,10 @@ exclusively through the Unix domain socket owned by `copypaste-daemon`.
 
 `copypaste-relay` is a self-contained HTTP service; it receives only encrypted blobs and
 has no access to plaintext or device keys.
+
+`copypaste-android` links `copypaste-core` directly (UniFFI cdylib) and exposes a Kotlin
+API for the Android app. `copypaste-telemetry` and `copypaste-bench` have zero internal
+deps (relay, P2P, sync, Supabase are all dep-isolated from each other).
 
 ## Data Flow
 
@@ -53,14 +64,15 @@ copypaste-cli  copypaste-ui (Tauri)
 
 ```
 copypaste-daemon
-  └─► POST /upload  (ciphertext_b64, nonce_b64, lamport_ts)
+  └─► POST /devices/:id/items  (content_type, content_b64, wall_time)
            │
       copypaste-relay  [axum, in-memory + SQLite persistence]
-        - bearer token = SHA-256(public_key_bytes)[0..32 hex chars]
-        - fan-out: item lands in every OTHER device's inbox
-        - quota: 500 items/device inbox; oldest pruned on overflow
+        - bearer token = random 16-byte OsRng token (32 hex chars), NOT derived from pubkey
+        - each device registers its shared-inbox device_id with a PoP (HMAC-SHA256 of sync key)
+        - quota: 500 items/device inbox; oldest pruned on overflow; TTL default 24 h
            │
-      GET /poll  ◄── other device's daemon
+      GET /devices/:id/items?since=<wall_time>&since_id=<id>&limit=<n>  ◄── other device's daemon
+      GET /devices/:id/subscribe  (SSE, real-time push)  ◄── alternative to polling
 ```
 
 ## Security Architecture
@@ -74,7 +86,7 @@ copypaste-daemon
 | Cipher | XChaCha20-Poly1305 (192-bit nonce) | Preferred over AES-GCM: 192-bit nonce eliminates nonce-reuse risk with random generation; no hardware requirement; `chacha20poly1305` crate is pure Rust |
 | Sensitive TTL | `expires_at` set for sensitive items | Daemon purges via `delete_expired` on each tick |
 | FTS5 plaintext | Indexed before encryption; never stored as plaintext column | Separate virtual table; can be cleared independently |
-| Relay auth | `Authorization: Bearer <token>` — constant-time comparison via `subtle` crate | Relay never holds decryption keys |
+| Relay auth | `Authorization: Bearer <token>` — random 16-byte `OsRng` token (32 hex chars), constant-time compare via `subtle::ct_eq` | Token is NOT derived from the public key; relay never holds decryption keys |
 | Rate limiting | `tower_governor` on relay routes | Prevents inbox flooding |
 
 ### Why XChaCha20-Poly1305 over AES-GCM
@@ -94,7 +106,7 @@ copypaste-daemon
 - Lower latency than TCP loopback for short-lived CLI invocations.
 - Simpler: no TLS, no HTTP framing; newline-delimited JSON is sufficient.
 
-## SQLite Schema (v1)
+## SQLite Schema (v11)
 
 ```sql
 clipboard_items  (id PK, item_id, content_type, content BLOB, content_nonce BLOB,
@@ -121,7 +133,7 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 | 3 — UI | `copypaste-ui`: Tauri v2 + React desktop app, menu-bar tray (see ADR-013) | Done |
 | 3b — Linux | systemd user service unit + install script | Done |
 | 4 — Relay | `copypaste-relay`: device registration, upload/poll, quota | Done |
-| 5 — E2E sync | Daemon sync loop: push pending_uploads, poll inbox, decrypt | Planned |
+| 5 — E2E sync | Daemon sync loop: push pending_uploads, poll inbox, decrypt | Done |
 | 6 — Large items | Chunked encryption (`encrypt_chunks`), resumable TUS upload | Partial (core ready) |
 
 ## Key Design Decisions
@@ -134,5 +146,5 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
   devices without wall-clock trust.
 - **Fan-out at relay**: relay writes each uploaded item into every other registered device's
   inbox immediately; no push notifications needed — devices poll on a configurable interval.
-- **Rust 1.75 MSRV**: several dependencies pinned below their latest versions to stay compatible
-  (`tempfile <3.14`, `home <0.5.10`, `clap <4.5.40`).
+- **Rust 1.96 MSRV**: several dependencies pinned below their latest versions to stay compatible
+  (`uuid <1.21`, `home =0.5.9`, `clap <4.5.40`, `tempfile <3.14` for dev deps).

@@ -45,6 +45,11 @@ fn is_credential_value_strong(value: &str) -> bool {
 
 /// Returns true when a given pattern index produced a match that should be discarded
 /// (e.g. a `generic_password_kv` match whose captured value is too weak to be a secret).
+///
+/// `generic_bearer` FP suppression is handled via confidence lowering (0.65, below the
+/// 0.70 auto-wipe floor) rather than a post-match filter, because the pattern's 20-char
+/// minimum already ensures any matched bearer value passes `is_credential_value_strong`
+/// (≥10 chars → true), so a filter here would be a no-op.
 fn match_is_false_positive(
     pattern_idx: usize,
     full_match: &str,
@@ -186,13 +191,15 @@ impl SensitiveDetector {
     /// match (confidence >= 0.70) that warrants automatic expiry / wipe.
     ///
     /// This is the **correct gate for the auto-wipe / `sensitive_ttl` path**.
-    /// Low-confidence patterns (phone_us 0.55, passport 0.55, email 0.60, bare
-    /// IBAN 0.85 is above floor but Financial-only) are intentionally excluded
-    /// so routine phone numbers or order IDs never trigger silent data deletion.
+    /// Low-confidence patterns (phone_us 0.55, passport 0.55, email 0.60,
+    /// IBAN 0.65, SSN 0.65, discord_bot_token 0.65, twilio_signing_key_sid 0.65,
+    /// generic_bearer 0.65) are intentionally excluded so routine phone numbers,
+    /// bank details, or placeholder strings never trigger silent data deletion.
     ///
     /// High-confidence examples that DO trigger (>= 0.70):
     ///   AWS keys (0.99), JWTs (0.95), OpenAI/Anthropic keys, SSH private keys,
-    ///   Stripe/GitHub/npm tokens, Vault tokens (0.95), credit cards (Luhn).
+    ///   Stripe/GitHub/npm tokens, Vault tokens (0.95), credit cards (Luhn),
+    ///   SendGrid (0.99), Terraform Cloud (0.99), GCP SA key (0.99).
     pub fn is_sensitive_for_autowipe(&self, text: &str) -> bool {
         /// Minimum confidence for a match to trigger automatic expiry/wipe.
         const AUTOWIPE_CONFIDENCE_FLOOR: f32 = 0.70;
@@ -845,6 +852,162 @@ mod tests {
         );
     }
 
+    // ── P2 fb3e: false-positive / auto-wipe floor tests ──────────────────────
+
+    /// discord_bot_token is now 0.65 — must NOT auto-wipe.
+    #[test]
+    fn autowipe_does_not_trigger_for_discord_bot_token() {
+        // Construct a string matching the discord_bot_token shape.
+        let token = "MNabcdefghijklmnopqrstuvwx.ABCDEF.ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456";
+        assert!(
+            !is_sensitive_for_autowipe(token),
+            "discord_bot_token (conf 0.65) must not trigger auto-wipe"
+        );
+    }
+
+    /// twilio_signing_key_sid is now 0.65 — must NOT auto-wipe.
+    #[test]
+    fn autowipe_does_not_trigger_for_twilio_signing_key_sid() {
+        let sid = format!("SK{}", "a".repeat(32));
+        assert!(
+            !is_sensitive_for_autowipe(&sid),
+            "twilio_signing_key_sid (conf 0.65) must not trigger auto-wipe"
+        );
+    }
+
+    /// iban is now 0.65 — legitimately-copied bank details must NOT auto-wipe.
+    #[test]
+    fn autowipe_does_not_trigger_for_iban() {
+        // Valid IBAN shape (Germany, 22 chars).
+        assert!(
+            !is_sensitive_for_autowipe("DE89370400440532013000"),
+            "IBAN (conf 0.65) must not trigger auto-wipe"
+        );
+    }
+
+    /// ssn_us is now 0.65 — date-like strings must NOT auto-wipe.
+    #[test]
+    fn autowipe_does_not_trigger_for_date_like_ssn() {
+        assert!(
+            !is_sensitive_for_autowipe("012 31 2024"),
+            "date-like SSN pattern (conf 0.65) must not trigger auto-wipe"
+        );
+    }
+
+    /// generic_bearer is now 0.65 — must NOT trigger auto-wipe even when matched.
+    #[test]
+    fn generic_bearer_does_not_trigger_autowipe() {
+        // A realistic Bearer header with a JWT-like token. generic_bearer (0.65)
+        // is below the 0.70 auto-wipe floor, so this must not auto-wipe.
+        // (It will still appear in detect() results for display/flagging.)
+        assert!(
+            !is_sensitive_for_autowipe(
+                "Authorization: Bearer eyJhbGci0iJSUzI1NiIsInR5cCI6IkpXVCJ9"
+            ),
+            "generic_bearer (conf 0.65) must not trigger auto-wipe"
+        );
+    }
+
+    /// generic_bearer is still detected (just not auto-wiped).
+    #[test]
+    fn generic_bearer_still_detected_below_floor() {
+        let d = SensitiveDetector::new();
+        let hits = d.detect("Authorization: Bearer eyJhbGci0iJSUzI1NiIsInR5cCI6IkpXVCJ9");
+        // generic_bearer (0.65) is detected, but confidence is below 0.70.
+        let bearer_hits: Vec<_> = hits
+            .iter()
+            .filter(|m| m.pattern_name == "generic_bearer")
+            .collect();
+        assert!(
+            !bearer_hits.is_empty(),
+            "generic_bearer must still appear in detect() results for flagging"
+        );
+        assert!(
+            bearer_hits.iter().all(|m| m.confidence < 0.70),
+            "generic_bearer confidence must be below 0.70 auto-wipe floor"
+        );
+    }
+
+    // ── P2 ozzt: new cloud/infra token detection tests ───────────────────────
+
+    #[test]
+    fn detects_sendgrid_api_key() {
+        let key = format!("SG.{}.{}", "A".repeat(22), "B".repeat(43));
+        assert!(detect(&key).is_some(), "SendGrid API key must be detected");
+    }
+
+    #[test]
+    fn sendgrid_autowipe_triggers() {
+        let key = format!("SG.{}.{}", "A".repeat(22), "B".repeat(43));
+        assert!(
+            is_sensitive_for_autowipe(&key),
+            "SendGrid API key (conf 0.99) must trigger auto-wipe"
+        );
+    }
+
+    #[test]
+    fn detects_terraform_cloud_token() {
+        let token = format!("atlasv1.{}", "A".repeat(64));
+        assert!(
+            detect(&token).is_some(),
+            "Terraform Cloud token must be detected"
+        );
+    }
+
+    #[test]
+    fn terraform_cloud_autowipe_triggers() {
+        let token = format!("atlasv1.{}", "A".repeat(64));
+        assert!(
+            is_sensitive_for_autowipe(&token),
+            "Terraform Cloud token (conf 0.99) must trigger auto-wipe"
+        );
+    }
+
+    #[test]
+    fn detects_gcp_service_account_key() {
+        let json = r#"{"type": "service_account", "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEo..."}"#;
+        assert!(
+            detect(json).is_some(),
+            "GCP service account key JSON must be detected"
+        );
+    }
+
+    #[test]
+    fn gcp_service_account_autowipe_triggers() {
+        let json = r#"{"private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEo..."}"#;
+        assert!(
+            is_sensitive_for_autowipe(json),
+            "GCP service account key (conf 0.99) must trigger auto-wipe"
+        );
+    }
+
+    #[test]
+    fn detects_azure_storage_key() {
+        // Real Azure key shape lives in an `AccountKey=` connection string.
+        let key = format!("AccountKey={}==", "A".repeat(86));
+        assert!(
+            detect(&key).is_some(),
+            "Azure storage account key must be detected"
+        );
+    }
+
+    #[test]
+    fn azure_storage_key_autowipe_triggers() {
+        let key = format!("AccountKey={}==", "A".repeat(86));
+        assert!(
+            is_sensitive_for_autowipe(&key),
+            "Azure storage key (conf 0.90) must trigger auto-wipe"
+        );
+        // Regression (bug-hunt high finding): a BARE 88-char base64 blob with no
+        // AccountKey= context (e.g. a SHA-512 / random token) must NOT auto-wipe,
+        // otherwise the detector silently deletes benign content.
+        let bare_blob = format!("{}==", "A".repeat(86));
+        assert!(
+            !is_sensitive_for_autowipe(&bare_blob),
+            "bare 88-char base64 (no AccountKey=) must NOT trigger auto-wipe"
+        );
+    }
+
     /// openai_legacy sk- with 48 chars (not sk-proj-) must still trigger.
     #[test]
     fn autowipe_triggers_for_openai_legacy_key() {
@@ -856,10 +1019,24 @@ mod tests {
     }
 
     /// sk-proj- must NOT also fire openai_legacy (double-match guard).
+    // P2 r6cw: the previous comment claimed "the (?!proj-) lookahead prevents
+    // double-fire" — that was incorrect. The `regex` crate does not support
+    // lookahead. Exclusion works structurally: `openai_legacy` is
+    // `\bsk-[A-Za-z0-9]{48}\b`. A `sk-proj-AAAA…` string has a hyphen after
+    // "proj" which is NOT in `[A-Za-z0-9]`, so the 48-char alnum run can only
+    // start at offset 8 (after the second hyphen), but then `\b` fails because
+    // the preceding char `j` is also a word char — the outer `\bsk-` anchor
+    // would need to match from the very start. In practice `sk-proj-` breaks
+    // the contiguous 48-char alnum requirement, so no match occurs. This
+    // structural exclusion is what the comment in patterns.rs correctly
+    // documents; no code change is required here, only the comment correction.
     #[test]
     fn openai_legacy_does_not_match_proj_prefix() {
-        // sk-proj- keys are caught by openai_new; openai_legacy must not
-        // also match them (the (?!proj-) lookahead prevents double-fire).
+        // sk-proj- keys are caught by openai_new; openai_legacy must not also
+        // match them. Exclusion is structural: `sk-proj-` inserts a hyphen that
+        // breaks the `[A-Za-z0-9]{48}` run required by openai_legacy, so the
+        // pattern simply has no 48-char alnum run to latch onto. No lookahead
+        // is involved — the `regex` crate does not support lookahead syntax.
         let d = SensitiveDetector::new();
         let key = "sk-proj-".to_string() + &"A".repeat(48);
         let matches = d.detect(&key);

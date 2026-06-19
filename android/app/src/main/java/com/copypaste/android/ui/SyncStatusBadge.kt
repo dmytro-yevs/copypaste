@@ -3,7 +3,6 @@ package com.copypaste.android.ui
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -11,14 +10,22 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -35,12 +42,16 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.DevicesOnlineState
 import com.copypaste.android.R
+import com.copypaste.android.RECENT_SYNC_MS
 import com.copypaste.android.Settings
 import com.copypaste.android.ui.theme.LocalIdeColors
+import java.text.DateFormat
+import java.util.Date
 import kotlinx.coroutines.delay
 
 /**
@@ -50,13 +61,26 @@ import kotlinx.coroutines.delay
  *
  * Dot colour (PARITY-SPEC §9 — 3 states):
  *   - DANGER ([IdeColors.danger]) when the device itself is offline (no network).
- *   - SUCCESS ([IdeColors.success]) when at least one peer is live-online.
- *   - FAINT ([IdeColors.faint]) when online but no peers connected (idle).
+ *   - SUCCESS ([IdeColors.success]) when at least one peer is live-online AND the
+ *     most-recent sync is within [RECENT_SYNC_MS] (PG-11 recency gate — mirrors
+ *     macOS SyncStatusChip).
+ *   - FAINT ([IdeColors.faint]) when online but no peers connected, or when all
+ *     peers are stale (last sync > 5 min ago).
  *
  * The dot pulses with a 2 s infinite animation when connected (state = success),
  * mirroring the web's `animate-pulse` (PARITY-SPEC §9).
  *
  * The numeric count is shown only when it is > 0, mirroring the macOS chip.
+ *
+ * ## PG-11 recency gate
+ * "Connected" now requires BOTH count > 0 AND lastActivityMs within [RECENT_SYNC_MS]
+ * of the current wall time. A link idle for > 5 min shows the grey idle dot even
+ * if count > 0 — mirrors the macOS [SyncStatusChip.tsx] recency gate exactly.
+ *
+ * ## PG-42 tap-to-expand
+ * Tapping the badge opens a [ModalBottomSheet] with last-sync time (relative),
+ * connected device count, and masked Supabase email (when available). Mirrors
+ * the macOS chip's hover/expand metadata surface.
  *
  * ## Single source of truth
  * When the DEVICES tab is visible, [DevicesOnlineState] is updated every ~1 s
@@ -68,6 +92,7 @@ import kotlinx.coroutines.delay
  * badge falls back to counting configured sync targets (paired P2P peer +
  * Supabase) so the strip is never blank on first launch.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SyncStatusBadge(modifier: Modifier = Modifier) {
     val context = LocalContext.current
@@ -78,12 +103,15 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // every ~1 s while the Devices tab is active. -1 means not yet computed.
     val liveOnlineCount by DevicesOnlineState.onlineCount.collectAsState()
 
+    // PG-11: most-recent peer sync timestamp; used for the recency gate.
+    val lastActivityMs by DevicesOnlineState.lastActivityMs.collectAsState()
+
     // Fallback: count configured sync targets when DevicesScreen hasn't run yet.
     var configuredCount by remember { mutableIntStateOf(0) }
 
-    // Network offline flag — polled every POLL_INTERVAL_MS so the badge reflects
-    // real connectivity state (PARITY-SPEC §9: danger/red when offline).
-    var isOffline by remember { mutableStateOf(false) }
+    // OS-level internet availability — polled as the SECONDARY signal (PG-10 / 5qbe).
+    // The PRIMARY signal is DevicesOnlineState (daemon-derived sync connectivity).
+    var hasInternet by remember { mutableStateOf(true) }
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -93,8 +121,9 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
             if (settings.isSupabaseConfigured) n += 1
             configuredCount = n
 
-            // Offline detection: ConnectivityManager.NET_CAPABILITY_INTERNET on API 26+.
-            isOffline = !hasInternetConnectivity(context)
+            // OS connectivity: secondary signal only — used to distinguish
+            // NetworkOffline from DaemonUnreachable (PG-10 / 5qbe).
+            hasInternet = hasInternetConnectivity(context)
 
             delay(POLL_INTERVAL_MS)
         }
@@ -104,15 +133,22 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // otherwise fall back to the configured-target count.
     val count = if (liveOnlineCount >= 0) liveOnlineCount else configuredCount
 
-    // 3-state dot colour per §9:
-    //   offline → danger red
-    //   online (count > 0) → success green
-    //   idle (no peers) → faint grey
-    val connected = !isOffline && count > 0
-    val dotColor = when {
-        isOffline -> c.danger
-        connected -> c.success
-        else      -> c.faint
+    // PG-10 / 5qbe: resolve badge state using the daemon-derived signal first.
+    // DevicesOnlineState (the primary signal, updated by FgsSyncLoop + DevicesScreen)
+    // mirrors IPC/daemon reachability on macOS — if sync hasn't worked recently the
+    // badge shows DANGER regardless of OS network state.
+    val badgeState = resolveSyncBadgeState(
+        liveOnlineCount = count,
+        lastActivityMs = lastActivityMs,
+        recentSyncMs = RECENT_SYNC_MS,
+        hasInternet = hasInternet,
+    )
+
+    val connected = badgeState is SyncBadgeState.Connected
+    val dotColor = when (badgeState) {
+        SyncBadgeState.Connected        -> c.success
+        SyncBadgeState.NetworkOffline,
+        SyncBadgeState.DaemonUnreachable -> c.danger
     }
 
     // §9 + §11: 2 s pulse on the dot when connected, mirroring web `animate-pulse`.
@@ -129,18 +165,23 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
         label = "dot-pulse-scale",
     )
 
+    // PG-42: sheet visibility state.
+    var showSheet by remember { mutableStateOf(false) }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     // jxut: styleguide .nav-foot = left-aligned, dot FIRST, then 'CopyPaste · N devices'
     // at 10.5sp c.faint, gap 6px. Previously was right-aligned COPYPASTE + dot + count.
     // CopyPaste-3nyq: the dot conveys online/offline/idle by COLOUR only — add a
     // text equivalent so screen-reader users get the state (WCAG 1.4.1).
-    val statusCd = when {
-        isOffline -> stringResource(R.string.cd_status_offline)
-        connected -> stringResource(R.string.cd_status_connected)
-        else      -> stringResource(R.string.cd_status_idle)
+    val statusCd = when (badgeState) {
+        SyncBadgeState.Connected         -> stringResource(R.string.cd_status_connected)
+        SyncBadgeState.NetworkOffline    -> stringResource(R.string.cd_status_offline)
+        SyncBadgeState.DaemonUnreachable -> stringResource(R.string.cd_status_offline)
     }
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .clickable { showSheet = true }
             .padding(horizontal = 12.dp, vertical = 4.dp),
         horizontalArrangement = Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically,
@@ -162,6 +203,151 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
             modifier = Modifier.padding(start = 6.dp),
         )
     }
+
+    // PG-42: metadata bottom sheet — last-sync time (relative), device/peer count,
+    // masked Supabase email. Mirrors the macOS chip's hover/expand surface.
+    if (showSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showSheet = false },
+            sheetState = sheetState,
+            containerColor = c.bg,
+        ) {
+            SyncStatusSheet(
+                count = count,
+                lastActivityMs = lastActivityMs,
+                settings = settings,
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+            )
+            // Bottom spacing so the sheet content clears system gesture bar.
+            Spacer(Modifier.height(32.dp))
+        }
+    }
+}
+
+/**
+ * Content of the PG-42 tap-to-expand bottom sheet.
+ *
+ * Shows:
+ *  - Connected device count.
+ *  - Last sync time as a relative string (e.g. "3m ago"); "Never" when 0.
+ *  - Masked Supabase email (e.g. "u***r@example.com") when configured in Settings.
+ *    If email is blank/unavailable, the row is omitted (flag: see REPORT).
+ */
+@Composable
+private fun SyncStatusSheet(
+    count: Int,
+    lastActivityMs: Long,
+    settings: Settings,
+    modifier: Modifier = Modifier,
+) {
+    val c = LocalIdeColors.current
+    val nowMs = System.currentTimeMillis()
+
+    // Relative last-sync label matching the DevicesScreen PeerRow format exactly.
+    val lastSyncLabel: String = if (lastActivityMs <= 0L) {
+        "Never"
+    } else {
+        val elapsed = (nowMs - lastActivityMs) / 1_000L
+        when {
+            elapsed < 60      -> "${elapsed}s ago"
+            elapsed < 3_600   -> "${elapsed / 60}m ago"
+            elapsed < 86_400  -> "${elapsed / 3_600}h ago"
+            // Older than a day: fall back to a short locale date+time.
+            else -> DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                .format(Date(lastActivityMs))
+        }
+    }
+
+    // Masked email: show "u***r@example.com" style. If blank, omit the row.
+    // settings.supabaseEmail is wired in SyncStatusBadge already (same Settings
+    // instance created via remember { Settings(context) }).
+    val maskedEmail: String? = settings.supabaseEmail.takeIf { it.isNotBlank() }
+        ?.let { maskEmail(it) }
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(0.dp)) {
+        Text(
+            text = "Sync status",
+            fontSize = 17.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = c.text,
+        )
+
+        Spacer(Modifier.height(16.dp))
+
+        SheetRow(label = "Devices connected", value = if (count > 0) "$count" else "None")
+
+        HorizontalDivider(
+            modifier = Modifier.padding(vertical = 8.dp),
+            color = c.divider,
+            thickness = 1.dp,
+        )
+
+        SheetRow(label = "Last sync", value = lastSyncLabel)
+
+        if (maskedEmail != null) {
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 8.dp),
+                color = c.divider,
+                thickness = 1.dp,
+            )
+            SheetRow(label = "Account", value = maskedEmail)
+        }
+    }
+}
+
+/** Single label/value row for the sync status sheet. */
+@Composable
+private fun SheetRow(label: String, value: String) {
+    val c = LocalIdeColors.current
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            color = c.dim,
+            fontSize = 13.sp,
+        )
+        Text(
+            text = value,
+            color = c.text,
+            fontSize = 13.sp,
+        )
+    }
+}
+
+/**
+ * Three-state sync-badge offline model — parity with macOS SyncStatusChip (PG-10 / 5qbe).
+ *
+ * On macOS the badge derives its "offline" condition from the IPC/daemon connection —
+ * if the daemon is unreachable the badge shows DANGER even when Wi-Fi is present.
+ * Android has no Unix-socket IPC to the daemon; the equivalent signal is whether
+ * actual sync connectivity has succeeded recently ([DevicesOnlineState.onlineCount]/
+ * [DevicesOnlineState.lastActivityMs]).
+ *
+ * - [Connected]        : at least one peer synced recently (same as macOS "daemon live").
+ * - [DaemonUnreachable]: OS network is available but no recent sync activity — mirrors
+ *                        macOS "daemon not responding" (sync infra unreachable, wrong
+ *                        credentials, RLS error, relay misconfigured, etc.).
+ * - [NetworkOffline]   : no validated OS internet — the root cause is clear.
+ *
+ * The badge uses this ordering: Connected > NetworkOffline > DaemonUnreachable.
+ * [DaemonUnreachable] shows the same DANGER red as [NetworkOffline] so the user
+ * knows something is wrong even when Wi-Fi is on, matching the macOS behaviour.
+ */
+sealed interface SyncBadgeState {
+    /** Sync is working: at least one peer/backend has exchanged data recently. */
+    data object Connected : SyncBadgeState
+    /**
+     * OS has internet but no recent sync activity — daemon-equivalent signal says
+     * the sync backend is unreachable (bad credentials, relay down, RLS error, etc.).
+     */
+    data object DaemonUnreachable : SyncBadgeState
+    /** No validated OS internet connection — root cause is clear. */
+    data object NetworkOffline : SyncBadgeState
 }
 
 /**
@@ -176,6 +362,53 @@ private fun hasInternetConnectivity(context: Context): Boolean {
     val caps = cm.getNetworkCapabilities(network) ?: return false
     return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+}
+
+/**
+ * Compute the [SyncBadgeState] from the daemon-derived sync signal (primary) and
+ * OS network availability (secondary).
+ *
+ * Priority (PG-10 / 5qbe):
+ * 1. If [liveOnlineCount] >= 0 (DevicesScreen has published real P2P state) AND
+ *    [lastActivityMs] is within [recentSyncMs] → [SyncBadgeState.Connected].
+ * 2. If OS has no internet → [SyncBadgeState.NetworkOffline].
+ * 3. Otherwise (OS online but sync not working) → [SyncBadgeState.DaemonUnreachable].
+ *
+ * This mirrors the macOS SyncStatusChip which shows DANGER when the daemon IPC
+ * is unreachable even if the physical network is up.
+ */
+internal fun resolveSyncBadgeState(
+    liveOnlineCount: Int,
+    lastActivityMs: Long,
+    recentSyncMs: Long,
+    hasInternet: Boolean,
+    nowMs: Long = System.currentTimeMillis(),
+): SyncBadgeState {
+    val recentEnough = lastActivityMs > 0L && (nowMs - lastActivityMs) <= recentSyncMs
+    // Primary signal: sync actually worked recently (daemon-equivalent).
+    if (liveOnlineCount > 0 && recentEnough) return SyncBadgeState.Connected
+    // Secondary: OS offline is a clear root cause.
+    if (!hasInternet) return SyncBadgeState.NetworkOffline
+    // OS is online but sync hasn't worked — treat as daemon-unreachable.
+    return SyncBadgeState.DaemonUnreachable
+}
+
+/**
+ * Masks an email address for display in the sync-status sheet (PG-42).
+ * Pattern: keep first char of local-part, replace remaining local chars with "***",
+ * keep domain. Example: "dmytro@example.com" → "d***@example.com".
+ * Returns the original string unchanged when it does not contain "@".
+ */
+private fun maskEmail(email: String): String {
+    val atIdx = email.indexOf('@')
+    if (atIdx < 0) return email
+    val local = email.substring(0, atIdx)
+    val domain = email.substring(atIdx) // includes "@"
+    return when {
+        local.isEmpty() -> email
+        local.length == 1 -> "${local}***${domain}"
+        else -> "${local.first()}***${domain}"
+    }
 }
 
 /** Poll cadence for re-reading configured-target state and network status. Matches the macOS chip's 10 s. */

@@ -338,11 +338,28 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
      * section, then refresh. Pinned items are left in place by
      * [ClipboardRepository.bumpToTop]. Mirrors macOS `bump_item_recency`.
      */
+    /**
+     * cvns (PG-18): hook set by [HistoryActivity] (or any other copy-back host) so
+     * the ViewModel can enqueue an immediate sync push after bumping the lamport.
+     * Receives the item id and new lamport timestamp.  No-op when null (tests,
+     * screens that don't need sync).
+     *
+     * The hook runs on [Dispatchers.IO] inside [copyItem]'s coroutine, so
+     * implementations may perform I/O (relay push, etc.) without blocking the main
+     * thread.
+     */
+    var onCopyBackSync: (suspend (itemId: String, newLamport: Long) -> Unit)? = null
+
     fun copyItem(id: String) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                repository.bumpToTop(id)
+                val newLamport = repository.bumpToTop(id)
                 loadItems()
+                // cvns: if the bump produced a new lamport and a sync hook is wired,
+                // trigger an immediate push so peers see the re-copy with updated recency.
+                if (newLamport > 0L) {
+                    onCopyBackSync?.invoke(id, newLamport)
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "copyItem($id) failed", e)
                 // postValue: this coroutine runs on Dispatchers.IO, not the main thread.

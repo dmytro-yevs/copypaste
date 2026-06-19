@@ -2171,5 +2171,16 @@ fn setup_macos(app: &tauri::App) {
             Some(NSVisualEffectState::Active),
             None,
         );
+
+        // PG-25 / CopyPaste-13a3: prevent screenshots and screen recordings from
+        // capturing clipboard history.  Android parity: HistoryActivity.kt:224-227
+        // sets FLAG_SECURE; here we set NSWindow.sharingType = .none via Tauri's
+        // content-protection API, which maps to the Wry/WKWebView host window.
+        // Non-fatal: if the runtime call fails (e.g. mock environment), log and
+        // continue — the window still functions; only the screen-capture guard is
+        // absent.
+        if let Err(e) = win.set_content_protected(true) {
+            tracing::warn!("PG-25: set_content_protected(true) failed: {e}");
+        }
     }
 }

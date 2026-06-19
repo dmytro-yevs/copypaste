@@ -146,6 +146,68 @@ class ClipboardRepository(context: Context) {
             // AB-13: run the retention TTL auto-wipe on the same cadence as load
             // (cheap general-age fast-path; sensitive pass only decrypts aged rows).
             pruneByAge(key)
+
+            // PG-19 (o0t3 / osxa): use lamport-ordered history from the FFI when the
+            // native .so is loaded. getHistoryPage returns pinned items first (by
+            // pin_order), then unpinned by lamport_ts DESC so causal ordering is
+            // correct across devices (immune to wall-clock skew). Falls back to the
+            // wall-time ORDER BY from the SharedPreferences index when the feature is
+            // off (stub mode / android-uniffi-live not compiled in), as determined by
+            // an empty return from getHistoryPage.
+            val lamportOrderedIds: List<String>? = if (isNativeLibraryLoaded) {
+                try {
+                    val page = getHistoryPage(
+                        dbPath = settings.dbPath,
+                        key = key,
+                        limit = limit,
+                        offset = offset,
+                    )
+                    // A non-empty result means the live feature is on and we have a
+                    // lamport-ordered page. An empty result (feature off) falls back below.
+                    if (page.isNotEmpty()) page.map { it.itemId } else null
+                } catch (e: CopypasteException) {
+                    Log.w(TAG, "getItems: getHistoryPage failed (${e.message}) — falling back to wall-time order")
+                    null
+                }
+            } else null
+
+            if (lamportOrderedIds != null) {
+                // Fast path: lamport-ordered IDs from the FFI. Decode each from
+                // SharedPreferences using the existing parse cache + AEAD decrypt.
+                val pinnedList = storedPinnedList()
+                val pinnedSet = pinnedList.toHashSet()
+                val pinnedIndex: Map<String, Int> = pinnedList.mapIndexed { idx, id -> id to idx }.toMap()
+                return@withContext lamportOrderedIds.mapNotNull { id ->
+                    val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
+                    if (isDeletedBlob(raw)) return@mapNotNull null
+                    val item = synchronized(parseCacheLock) {
+                        val entry = parseCache[id]
+                        if (entry != null && entry.rawBlob == raw) entry.item else null
+                    } ?: run {
+                        val parsed = parseItem(id, raw, key) ?: return@mapNotNull null
+                        synchronized(parseCacheLock) {
+                            parseCache[id] = ParsedEntry(raw, parsed)
+                        }
+                        parsed
+                    }
+                    val isPinned = id in pinnedSet
+                    val binaryTooLarge = when {
+                        item.isImage ->
+                            (prefs.getString("item_img_$id", null)?.let { base64RawByteSize(it).toLong() } ?: 0L) > SYNC_MAX_BLOB_BYTES
+                        item.isFile ->
+                            (prefs.getString("item_file_$id", null)?.let { base64RawByteSize(it).toLong() } ?: 0L) > SYNC_MAX_BLOB_BYTES
+                        else -> item.tooLargeToSync
+                    }
+                    item.copy(
+                        pinned = isPinned,
+                        pinnedSortIndex = if (isPinned) (pinnedIndex[id] ?: Int.MAX_VALUE) else -1,
+                        tooLargeToSync = binaryTooLarge,
+                    )
+                }
+            }
+
+            // Fallback: wall-time ORDER BY from the SharedPreferences index.
+            // Used when the native .so is absent or android-uniffi-live is off.
             val pinnedList = storedPinnedList()
             val pinnedSet = pinnedList.toHashSet()
             // Build index map: id → position in pinned list (0 = top of pinned section).
@@ -597,32 +659,46 @@ class ClipboardRepository(context: Context) {
      * fields (nonce/ciphertext) and lamport_ts are preserved verbatim so the AEAD
      * AAD binding and LWW ordering remain intact.
      */
-    fun bumpToTop(id: String) {
+    /**
+     * Re-stamp [id] as the most-recently-used item (copy-back).
+     *
+     * cvns (PG-18): bumps BOTH the wall-time (field 0) AND the lamport timestamp
+     * (field 5) so the item wins LWW merges on remote peers. Without the lamport
+     * bump peers would keep their stale ordering because their lamport_ts for the
+     * same item_id is higher than the wall-time-only re-stamp.
+     *
+     * Returns the new lamport timestamp so the caller can enqueue an immediate
+     * sync push; returns -1L when the item was not found, pinned, or deleted.
+     */
+    fun bumpToTop(id: String): Long {
+        val newLamport: Long
         synchronized(idsWriteLock) {
-            if (id in storedPinnedIds()) return  // pinned items keep their fixed order
+            if (id in storedPinnedIds()) return -1L  // pinned items keep their fixed order
             val ids = storedIds().toMutableList()
-            if (!ids.remove(id)) return  // unknown id — nothing to bump
-            val raw = prefs.getString("item_$id", null) ?: return
+            if (!ids.remove(id)) return -1L  // unknown id — nothing to bump
+            val raw = prefs.getString("item_$id", null) ?: return -1L
             // Soft-delete tombstone: tombstoned items must not be bumped to the top
             // of the visible history — they are logically deleted.
-            if (isDeletedBlob(raw)) return
+            if (isDeletedBlob(raw)) return -1L
             val parts = raw.split("|")
             // v3 blob = <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|<deleted>
-            if (parts.size < 6) return  // legacy/malformed — leave untouched
-            val rebuilt = buildString {
-                append(System.currentTimeMillis())  // field 0: fresh wall-time
-                for (i in 1 until parts.size) {
-                    append('|')
-                    append(parts[i])
-                }
-            }
+            if (parts.size < 6) return -1L  // legacy/malformed — leave untouched
+            val nowMs = System.currentTimeMillis()
+            val prevLamport = parts[5].toLongOrNull() ?: 0L
+            // cvns: advance lamport so this copy-back wins LWW on all peers.
+            newLamport = nextLamportTs(prevLamport, nowMs)
+            val rebuiltParts = parts.toMutableList()
+            rebuiltParts[0] = nowMs.toString()    // fresh wall-time
+            rebuiltParts[5] = newLamport.toString() // bumped lamport
+            val rebuilt = rebuiltParts.joinToString("|")
             ids.add(id)  // re-append → most-recent position
             prefs.edit()
                 .putString("item_$id", rebuilt)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
                 .commit()  // synchronous: survives an immediate force-stop (SIGKILL)
         }
-        Log.d(TAG, "bumpToTop: re-stamped item $id to most-recent")
+        Log.d(TAG, "bumpToTop: re-stamped item $id to most-recent (lamport=$newLamport)")
+        return newLamport
     }
 
     /**
@@ -969,15 +1045,19 @@ class ClipboardRepository(context: Context) {
         }
 
     /**
-     * AB-11 — full-content search. Returns the subset of [ids] whose FULL
-     * decrypted text contains [query] (case-insensitive). The snippet-only filter
-     * in [HistoryActivity] missed matches past the 140-char preview; this decrypts
-     * each candidate and matches the whole payload.
+     * Full-content search. Returns the subset of [ids] whose FULL text matches [query].
      *
-     * Image / file items have no searchable text body, so they are matched on
-     * their stored snippet/label only (decrypting yields the same label). A blank
-     * [query] returns all [ids] unchanged. Decryption failures are treated as
-     * non-matches rather than propagating an error.
+     * PG-17 (mxoq / osxa): When the native library is loaded, delegates to the
+     * FTS5-indexed [ftsSearch] FFI (O(log N), ranked by relevance) so Android
+     * uses the SAME FTS5 engine as the macOS daemon's `search` IPC handler. The
+     * FTS result set (keyed by [uniffi.copypaste_android.SearchResultItem.itemId])
+     * is intersected with the caller's [ids] to respect the display-visible set.
+     *
+     * Falls back to the O(N) full-decrypt scan when the native library is absent
+     * (stub mode / test environment) so existing behaviour is preserved.
+     *
+     * A blank [query] returns all [ids] unchanged. Decryption failures in the
+     * fallback path are treated as non-matches.
      *
      * Runs on [Dispatchers.IO]; the caller is expected to debounce.
      */
@@ -985,6 +1065,31 @@ class ClipboardRepository(context: Context) {
         withContext(Dispatchers.IO) {
             val q = query.trim()
             if (q.isEmpty()) return@withContext ids.toSet()
+
+            // PG-17 (mxoq): use FTS5 when the native .so is available.
+            if (isNativeLibraryLoaded) {
+                val idsSet = ids.toHashSet()
+                return@withContext try {
+                    ftsSearch(
+                        dbPath = settings.dbPath,
+                        key = key,
+                        query = q,
+                        // Fetch up to all known ids + a small buffer; the FTS index may
+                        // contain items that have since been deleted from the local store,
+                        // so we cap at ids.size + 50 to avoid unbounded allocations.
+                        limit = (ids.size + 50).coerceAtLeast(50),
+                    ).mapTo(HashSet()) { it.itemId }.intersect(idsSet)
+                } catch (e: CopypasteException) {
+                    Log.w(TAG, "searchIds: ftsSearch failed (${e.message}) — falling back to O(N) decrypt scan")
+                    // Fall through to the O(N) fallback below.
+                    ids.filterTo(HashSet()) { id ->
+                        val full = loadFullPlaintextBlocking(id, key)
+                        full != null && full.contains(q, ignoreCase = true)
+                    }
+                }
+            }
+
+            // Fallback: O(N) full-decrypt scan (stub mode / no live .so).
             ids.filterTo(HashSet()) { id ->
                 val full = loadFullPlaintextBlocking(id, key)
                 full != null && full.contains(q, ignoreCase = true)

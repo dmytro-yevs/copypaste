@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Search, Clipboard, SearchX, PlugZap, Star, StarOff } from "lucide-react";
-import { api, HistoryEntry, ipcErrorMessage, IpcError, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
+import { api, HistoryEntry, ipcErrorMessage, IpcError, isIpcNotReady, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking, shouldMask } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { formatRelativeTime } from "../lib/time";
@@ -138,7 +138,13 @@ export function Popup() {
       setSelectedIdx(0);
     } catch (e) {
       if (e instanceof IpcError) {
-        setError(e.code === "daemon_offline" ? "daemon_offline" : (e.message ?? "Error"));
+        if (e.code === "daemon_offline") {
+          setError("daemon_offline");
+        } else if (isIpcNotReady(e)) {
+          setError("ipc_not_ready");
+        } else {
+          setError(e.message ?? "Error");
+        }
       } else {
         setError("Failed to load history");
       }
@@ -555,6 +561,12 @@ export function Popup() {
             title="Clipboard service offline"
             body="The daemon is not running. Restart it from Settings."
             action={<RestartDaemonButton onRestarted={() => void refresh()} />}
+          />
+        ) : error === "ipc_not_ready" ? (
+          <EmptyState
+            icon={<PlugZap size={28} strokeWidth={1.5} aria-hidden />}
+            title="Starting up…"
+            body="The clipboard service is initialising. It will be ready in a moment."
           />
         ) : (
           <EmptyState

@@ -1,7 +1,7 @@
 use crate::protocol::{
     Request, Response, CURRENT_PROTOCOL_VERSION, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR,
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND, ERR_CODE_RATE_LIMITED,
-    MIN_SUPPORTED_PROTOCOL_VERSION,
+    ERR_CODE_VERSION_MISMATCH, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 // derive_sync_key / SyncKey are used by both cloud-sync (Supabase) and relay-sync.
 // `revoke_and_rotate` / `rotate_sync_key` derive a key from a passphrase;
@@ -16,8 +16,8 @@ use copypaste_core::{
     decrypt_item_by_version, decrypt_item_with_aad, derive_v2, encode_thumbnail_from_png,
     encrypt_item_with_aad, ensure_revoked_devices_table, fetch_text_preview,
     fetch_text_previews_batch, get_device_names, get_item_by_id, get_page, get_page_pinned_first,
-    pin_item, reorder_pinned, revoke_device, revoke_devices, search_items, set_thumb, unpin_item,
-    Database, DbRead, FileMeta, SensitiveDetector, NONCE_SIZE,
+    is_sensitive_for_autowipe, pin_item, reorder_pinned, revoke_device, revoke_devices,
+    search_items, set_thumb, unpin_item, Database, DbRead, FileMeta, SensitiveDetector, NONCE_SIZE,
 };
 // l07l: EncryptError is only matched on the macOS pasteboard decrypt path, so
 // gate it to macOS — otherwise it's an unused import on non-macOS (-D warnings).
@@ -197,6 +197,20 @@ pub struct AppConfig {
     /// (default `true` on first install).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lan_visibility: Option<bool>,
+
+    /// Master switch for all sync transports (relay, cloud, P2P).
+    /// `false` = no data is sent to or received from any remote device.
+    /// `None` = preserve existing (default `true` on first install).
+    /// See bd CopyPaste-tke7 / PG-30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_enabled: Option<bool>,
+
+    /// Universal Clipboard: when `true`, the daemon immediately writes a
+    /// freshly-synced item to the local pasteboard.  `false` = store-only.
+    /// `None` = preserve existing (default `true`).
+    /// See bd CopyPaste-58ou / PG-31.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_apply_synced_clip: Option<bool>,
 }
 
 /// Strip account credentials from a serialised [`AppConfig`] before it leaves
@@ -312,6 +326,8 @@ pub(crate) fn read_config() -> AppConfig {
             excluded_app_bundle_ids: Some(core.excluded_app_bundle_ids.clone()),
             relay_url: core.relay_url.clone(),
             lan_visibility: Some(core.lan_visibility),
+            sync_enabled: Some(core.sync_enabled),
+            auto_apply_synced_clip: Some(core.auto_apply_synced_clip),
             ..AppConfig::default()
         };
     };
@@ -363,6 +379,8 @@ pub(crate) fn read_config() -> AppConfig {
     // relay_url is a non-secret base URL persisted in config.toml; surface it
     // verbatim so the UI prefills the current value (mirrors supabase_url).
     cfg.relay_url = core.relay_url.clone();
+    cfg.sync_enabled = Some(core.sync_enabled);
+    cfg.auto_apply_synced_clip = Some(core.auto_apply_synced_clip);
     cfg
 }
 
@@ -416,6 +434,12 @@ pub(crate) fn update_core_config(
     }
     if let Some(v) = incoming.lan_visibility {
         core.lan_visibility = v;
+    }
+    if let Some(v) = incoming.sync_enabled {
+        core.sync_enabled = v;
+    }
+    if let Some(v) = incoming.auto_apply_synced_clip {
+        core.auto_apply_synced_clip = v;
     }
     // Clamp the merged config into valid ranges ONCE, here, before both the
     // disk write and the returned (hot-loaded) value — otherwise an unclamped
@@ -471,6 +495,10 @@ fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
             .excluded_app_bundle_ids
             .or(existing.excluded_app_bundle_ids),
         lan_visibility: incoming.lan_visibility.or(existing.lan_visibility),
+        sync_enabled: incoming.sync_enabled.or(existing.sync_enabled),
+        auto_apply_synced_clip: incoming
+            .auto_apply_synced_clip
+            .or(existing.auto_apply_synced_clip),
         ..incoming
     }
 }
@@ -1361,6 +1389,22 @@ pub struct IpcServer {
     /// `std::sync::Mutex` because the critical section is a trivial clone with
     /// no `.await`.
     p2p_shutdown_token: Arc<std::sync::Mutex<Option<CancellationToken>>>,
+
+    /// nq39: in-memory Supabase password cache for non-macOS platforms.
+    ///
+    /// On macOS the `store_cloud_password` IPC handler writes directly to the
+    /// macOS Keychain and never populates this field. On non-macOS (Linux,
+    /// Windows-frozen) the Keychain is unavailable, so the password is held
+    /// here for the duration of the daemon process — it is never written to
+    /// `config.json` via this path. `None` until `store_cloud_password` is
+    /// called.
+    ///
+    /// `zeroize::Zeroizing` ensures the heap string is scrubbed when the
+    /// `Arc` is dropped (daemon shutdown or field replacement on update).
+    /// `std::sync::Mutex` (not tokio's) because the critical section is a
+    /// trivial clone/replace with no `.await`.
+    #[cfg(not(target_os = "macos"))]
+    in_memory_cloud_password: Arc<std::sync::Mutex<Option<zeroize::Zeroizing<String>>>>,
 }
 
 /// Wire-serialisable peer event record returned by `poll_peer_events`.
@@ -1643,6 +1687,10 @@ impl IpcServer {
             peer_event_queue: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
             discovery_browse_handle: Arc::new(std::sync::Mutex::new(None)),
             p2p_shutdown_token: Arc::new(std::sync::Mutex::new(None)),
+            // nq39: initialise to None; populated by `store_cloud_password`
+            // on non-macOS platforms where the Keychain is unavailable.
+            #[cfg(not(target_os = "macos"))]
+            in_memory_cloud_password: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -3201,7 +3249,11 @@ impl IpcServer {
             );
             return Response::err_with_code(
                 req.id,
-                ERR_CODE_INVALID_ARGUMENT,
+                // ADR-007: version gate must use ERR_CODE_VERSION_MISMATCH so
+                // the CLI can surface the "please upgrade" prompt. The previous
+                // ERR_CODE_INVALID_ARGUMENT caused the prompt to never fire
+                // (CLI checks for "version_mismatch" specifically). P2-ptb8.
+                ERR_CODE_VERSION_MISMATCH,
                 format!(
                     "unsupported protocol version {} (daemon supports {}..={})",
                     req.protocol_version, MIN_SUPPORTED_PROTOCOL_VERSION, CURRENT_PROTOCOL_VERSION
@@ -3235,35 +3287,93 @@ impl IpcServer {
                 let pool_opt = self.read_pool.clone();
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
-                    // Prefer pooled connection for concurrent reads (CopyPaste-j8p).
-                    // Pool connections share WAL with the writer and always see
-                    // committed data. Fall back to the write mutex if pool is
-                    // unavailable (degraded startup or pool exhaustion).
-                    if let Some(pool) = pool_opt {
-                        if let Ok(conn) = pool.get() {
-                            let handle = copypaste_core::ReadHandle(conn);
-                            let items = get_page(&handle, limit, offset)?;
-                            let total = count_items(&handle).unwrap_or(0);
-                            return Ok::<_, anyhow::Error>((items, total));
-                        }
-                    }
-                    let db = db_arc.blocking_lock();
-                    let items = get_page(&*db, limit, offset)?;
-                    let total = count_items(&*db).unwrap_or(0);
-                    Ok::<_, anyhow::Error>((items, total))
-                })
-                .await;
-                match join {
-                    Ok(Ok((items, total))) => {
-                        let json_items: Vec<_> = items
+                    // bhr8: shared builder so both the pool and fallback paths
+                    // produce the same enriched JSON (preview/kind/sensitive_spans/pinned).
+                    fn build_list_page(
+                        db: &dyn copypaste_core::DbRead,
+                        limit: usize,
+                        offset: usize,
+                    ) -> anyhow::Result<(Vec<serde_json::Value>, i64)> {
+                        let items = get_page(db, limit, offset)?;
+                        let total = count_items(db).unwrap_or(0);
+                        // Batch-fetch previews for non-sensitive text items (avoids
+                        // one SQL round-trip per item, mirrors history_page approach).
+                        let preview_ids: Vec<&str> = items
+                            .iter()
+                            .filter(|it| !it.is_sensitive && it.content_type == "text")
+                            .map(|it| it.id.as_str())
+                            .collect();
+                        let preview_map =
+                            fetch_text_previews_batch(db, &preview_ids).unwrap_or_default();
+                        let detector = SensitiveDetector::new();
+                        let json_items: Vec<serde_json::Value> = items
                             .iter()
                             .map(|item| {
+                                // Build a plain preview string first.
+                                let raw_preview = if item.is_sensitive {
+                                    format!("[sensitive — id:{}]", &item.id[..8])
+                                } else if item.content_type == "text" {
+                                    preview_map
+                                        .get(&item.id)
+                                        .cloned()
+                                        .unwrap_or_else(|| {
+                                            format!("[text — id:{}]", &item.id[..8])
+                                        })
+                                } else if item.content_type == "file" {
+                                    let name = item
+                                        .blob_ref
+                                        .as_deref()
+                                        .and_then(|j| parse_file_meta(j).ok())
+                                        .map(|m| m.filename)
+                                        .unwrap_or_else(|| format!("id:{}", &item.id[..8]));
+                                    format!("[file: {name}]")
+                                } else {
+                                    format!("[image — id:{}]", &item.id[..8])
+                                };
+                                // Normalise text previews + compute sensitive_spans
+                                // using the same approach as history_page (bhr8).
+                                let (preview, sensitive_spans): (String, Vec<serde_json::Value>) =
+                                    if !item.is_sensitive && item.content_type == "text" {
+                                        let normalised = copypaste_core::sensitive::nfkc_normalize(
+                                            &raw_preview,
+                                        );
+                                        let spans = detector
+                                            .detect_normalised(&normalised)
+                                            .into_iter()
+                                            .map(|m| {
+                                                let start = byte_to_char_offset(
+                                                    &normalised,
+                                                    m.matched_range.start,
+                                                );
+                                                let end = byte_to_char_offset(
+                                                    &normalised,
+                                                    m.matched_range.end,
+                                                );
+                                                serde_json::json!([start, end])
+                                            })
+                                            .collect();
+                                        (normalised, spans)
+                                    } else {
+                                        (raw_preview, vec![])
+                                    };
+                                let kind: &str = if item.content_type == "text" {
+                                    copypaste_core::text_kind::classify_text(&preview).label()
+                                } else if item.content_type == "file" {
+                                    "FILE"
+                                } else {
+                                    "IMAGE"
+                                };
                                 serde_json::json!({
                                     "id": item.id,
                                     "content_type": item.content_type,
                                     "is_sensitive": item.is_sensitive,
                                     "wall_time": item.wall_time,
                                     "lamport_ts": item.lamport_ts,
+                                    // bhr8: fields previously missing from the list verb.
+                                    "preview": preview,
+                                    "pinned": item.pinned,
+                                    "sensitive_spans": sensitive_spans,
+                                    "kind": kind,
                                     // Daemon-computed single source of truth: true when
                                     // this item exceeds the local sync size ceiling and
                                     // therefore won't be synced. UIs badge it.
@@ -3271,6 +3381,25 @@ impl IpcServer {
                                 })
                             })
                             .collect();
+                        Ok((json_items, total))
+                    }
+
+                    // Prefer pooled connection for concurrent reads (CopyPaste-j8p).
+                    // Pool connections share WAL with the writer and always see
+                    // committed data. Fall back to the write mutex if pool is
+                    // unavailable (degraded startup or pool exhaustion).
+                    if let Some(pool) = pool_opt {
+                        if let Ok(conn) = pool.get() {
+                            let handle = copypaste_core::ReadHandle(conn);
+                            return build_list_page(&handle, limit, offset);
+                        }
+                    }
+                    let db = db_arc.blocking_lock();
+                    build_list_page(&*db, limit, offset)
+                })
+                .await;
+                match join {
+                    Ok(Ok((json_items, total))) => {
                         Response::ok(
                             req.id,
                             serde_json::json!({"items": json_items, "total": total}),
@@ -3287,14 +3416,27 @@ impl IpcServer {
             "delete" => {
                 let id = match req.params.get("id").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => return Response::err(req.id, "missing param: id"),
+                    // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
+                    // clients can classify the error rather than getting a bare
+                    // untyped error string.
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
                 };
                 if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err(req.id, "invalid param: id must be a valid UUID");
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
                 }
                 match self.soft_delete_and_broadcast(&id).await {
                     Ok(_) => Response::ok(req.id, serde_json::Value::Null),
-                    Err(e) => Response::err(req.id, e),
+                    Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
                 }
             }
             "count" => {
@@ -3380,10 +3522,22 @@ impl IpcServer {
             "copy" | "paste" => {
                 let id = match req.params.get("id").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => return Response::err(req.id, "missing param: id"),
+                    // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
+                    // clients can classify the error.
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
                 };
                 if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err(req.id, "invalid param: id must be a valid UUID");
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
                 }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
@@ -3879,7 +4033,9 @@ impl IpcServer {
                 // one decoded copy + one base64 string, not both plus the URI;
                 // we also move `item.content` out instead of `.clone()`-ing the
                 // full encrypted blob.
-                let v1_key: [u8; 32] = **self.local_key;
+                // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop
+                // even if the spawn_blocking worker panics or is cancelled.
+                let v1_key = zeroize::Zeroizing::new(**self.local_key);
                 // ItemImageResult mirrors the response branches so error mapping
                 // stays on the async side (Response::* needs `req.id`).
                 enum ItemImageResult {
@@ -3940,9 +4096,9 @@ impl IpcServer {
                                 )))
                             }
                         };
-                        let v2_key = derive_v2(&v1_key);
-                        let key_to_use = if item.key_version == 1 {
-                            &v1_key
+                        let v2_key = derive_v2(&*v1_key);
+                        let key_to_use: &[u8; 32] = if item.key_version == 1 {
+                            &*v1_key
                         } else {
                             &*v2_key
                         };
@@ -4010,9 +4166,10 @@ impl IpcServer {
                 };
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
-                // Capture the local_key once before entering spawn_blocking;
-                // the Zeroizing wrapper is not Send so we dereference to a plain array.
-                let v1_key_thumb: [u8; 32] = **self.local_key;
+                // P2-iqkm: capture as Zeroizing so the key copy is wiped on drop
+                // even if the spawn_blocking worker panics or is cancelled.
+                // (Zeroizing<[u8;32]> is Send; the old "not Send" comment was incorrect.)
+                let v1_key_thumb = zeroize::Zeroizing::new(**self.local_key);
                 // All DB work — fetch + optional Phase-4 lazy backfill + decrypt —
                 // runs in a single spawn_blocking so we hold the mutex for one
                 // contiguous span and avoid async/sync boundary issues.
@@ -4026,11 +4183,11 @@ impl IpcServer {
                         None => return Ok::<_, anyhow::Error>(None),
                     };
                     // Dispatch on key_version: v1 rows use the raw seed; v2 rows use derive_v2.
-                    let v2_key_thumb = derive_v2(&v1_key_thumb);
+                    let v2_key_thumb = derive_v2(&*v1_key_thumb);
                     let decode_key: &[u8; 32] = if item.key_version == 1 {
-                        &v1_key_thumb
+                        &*v1_key_thumb
                     } else {
-                        &v2_key_thumb
+                        &*v2_key_thumb
                     };
 
                     let is_image =
@@ -4112,7 +4269,7 @@ impl IpcServer {
                                 // already-derived `decode_key` (passing the latter
                                 // would double-derive: derive_v2(derive_v2(seed))).
                                 &meta_json,
-                                &v1_key_thumb,
+                                &*v1_key_thumb,
                                 item.key_version,
                             ) {
                                 Ok((blob, new_meta)) => {
@@ -4205,7 +4362,9 @@ impl IpcServer {
                 // CopyPaste-eq9m: move the encrypted blob out of the item (no
                 // clone) and free the decrypted `raw_bytes` before building the
                 // response so peak RAM is one decoded copy + one base64 string.
-                let v1_key: [u8; 32] = **self.local_key;
+                // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop
+                // even if the spawn_blocking worker panics or is cancelled.
+                let v1_key = zeroize::Zeroizing::new(**self.local_key);
                 enum ItemFileResult {
                     Ok {
                         filename: String,
@@ -4265,9 +4424,9 @@ impl IpcServer {
                                 )))
                             }
                         };
-                        let v2_key = derive_v2(&v1_key);
-                        let key_to_use = if item.key_version == 1 {
-                            &v1_key
+                        let v2_key = derive_v2(&*v1_key);
+                        let key_to_use: &[u8; 32] = if item.key_version == 1 {
+                            &*v1_key
                         } else {
                             &*v2_key
                         };
@@ -4667,6 +4826,106 @@ impl IpcServer {
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
                         format!("set_config blocking task failed: {e}"),
+                    ),
+                }
+            }
+            // ── nq39: dedicated store_cloud_password verb ──────────────────
+            //
+            // Stores the Supabase GoTrue account password WITHOUT routing it
+            // through set_config and WITHOUT persisting it to config.json.
+            //
+            // On macOS: writes to the macOS Keychain via the existing
+            // `keychain::store_supabase_password_to_keychain` helper (same
+            // logic as the set_config path).
+            //
+            // On non-macOS: no Keychain is available; the password is held
+            // in the in-memory slot (`self.in_memory_cloud_password`) for the
+            // daemon's lifetime and is never written to config.json.  The
+            // caller receives `persisted: false` as a signal that the
+            // password will be lost on restart.
+            "store_cloud_password" => {
+                // nq39: parse only the `password` field we care about.
+                // Use a local struct so the daemon does not need to depend on
+                // `copypaste-ipc` (that crate is for clients — CLI and UI).
+                #[derive(serde::Deserialize)]
+                struct StoreCloudPasswordParams {
+                    password: String,
+                }
+                let params: StoreCloudPasswordParams =
+                    match serde_json::from_value(req.params.clone()) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INVALID_ARGUMENT,
+                                format!("invalid store_cloud_password params: {e}"),
+                            )
+                        }
+                    };
+
+                if params.password.trim().is_empty() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "password must not be empty",
+                    );
+                }
+
+                // Attempt Keychain write (macOS real path) via the blocking
+                // thread pool — Security-framework calls must not block the
+                // async executor.
+                let password_for_task = params.password.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    crate::keychain::store_supabase_password_to_keychain(&password_for_task)
+                })
+                .await;
+
+                match join {
+                    Ok(Ok(())) => {
+                        // Keychain write succeeded (macOS) or was a no-op
+                        // (ephemeral-key bypass).  Verify the round-trip to
+                        // distinguish real persistence from the bypass.
+                        let persisted = crate::keychain::read_supabase_password_from_keychain()
+                            .as_deref()
+                            == Some(params.password.trim());
+                        tracing::info!(
+                            persisted,
+                            "store_cloud_password: keychain write {}",
+                            if persisted {
+                                "persisted"
+                            } else {
+                                "bypassed (ephemeral/non-macOS)"
+                            }
+                        );
+                        // On non-macOS (or ephemeral bypass): hold in-memory
+                        // so cloud code can still read it this session.
+                        #[cfg(not(target_os = "macos"))]
+                        if !persisted {
+                            if let Ok(mut guard) = self.in_memory_cloud_password.lock() {
+                                *guard = Some(zeroize::Zeroizing::new(params.password.clone()));
+                            }
+                        }
+                        Response::ok(req.id, serde_json::json!({ "persisted": persisted }))
+                    }
+                    Ok(Err(e)) => {
+                        // Keychain write failed (non-macOS KeychainError::Unsupported
+                        // or a real macOS Keychain error).  Store in-memory as a
+                        // best-effort fallback; warn caller via `persisted: false`.
+                        tracing::warn!(
+                            error = %e,
+                            "store_cloud_password: keychain write failed; \
+                             holding password in-memory only (will be lost on restart)"
+                        );
+                        #[cfg(not(target_os = "macos"))]
+                        if let Ok(mut guard) = self.in_memory_cloud_password.lock() {
+                            *guard = Some(zeroize::Zeroizing::new(params.password.clone()));
+                        }
+                        Response::ok(req.id, serde_json::json!({ "persisted": false }))
+                    }
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("store_cloud_password blocking task panicked: {e}"),
                     ),
                 }
             }
@@ -5074,7 +5333,15 @@ impl IpcServer {
             "set_private_mode" => {
                 let enabled = match req.params.get("enabled").and_then(|v| v.as_bool()) {
                     Some(b) => b,
-                    None => return Response::err(req.id, "missing param: enabled (bool)"),
+                    // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
+                    // clients can classify the error.
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: enabled (bool)",
+                        )
+                    }
                 };
                 self.private_mode.store(enabled, Ordering::Relaxed);
                 // Persist so the setting survives a daemon restart (restored by
@@ -7368,6 +7635,11 @@ impl IpcServer {
                     content_type: String,
                     bytes: Vec<u8>,
                     created_at_ms: i64,
+                    /// Caller-supplied `is_sensitive` flag from the export JSON.
+                    /// Used as a floor (OR) during import — the daemon always
+                    /// recomputes sensitivity from the plaintext so a tampered
+                    /// export cannot smuggle a credential in as non-sensitive.
+                    caller_is_sensitive: bool,
                     #[allow(dead_code)]
                     metadata: Option<serde_json::Value>,
                 }
@@ -7430,10 +7702,19 @@ impl IpcServer {
                         }
                     };
                     let metadata = raw.get("metadata").cloned();
+                    // PG-26: read the caller-supplied flag but treat it only as
+                    // a floor — the daemon recomputes sensitivity from plaintext
+                    // below and ORs the two values so a tampered export file
+                    // cannot downgrade a credential to non-sensitive.
+                    let caller_is_sensitive = raw
+                        .get("is_sensitive")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     decoded.push(DecodedImport {
                         content_type,
                         bytes,
                         created_at_ms,
+                        caller_is_sensitive,
                         metadata,
                     });
                 }
@@ -7446,7 +7727,9 @@ impl IpcServer {
                 // task so imported content can be ENCRYPTED with the same
                 // (key, AAD, key_version) the normal ingest path uses — see
                 // the per-item block below.
-                let local_key_v1: [u8; 32] = **self.local_key;
+                // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop
+                // even if the spawn_blocking worker panics or is cancelled.
+                let local_key_v1 = zeroize::Zeroizing::new(**self.local_key);
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     // v0.3 post-T2: dedup is now enforced atomically by the
@@ -7512,9 +7795,25 @@ impl IpcServer {
                         let mut clip =
                             copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
                         clip.item_id = item_id;
-                        clip.content_type = item.content_type;
+                        clip.content_type = item.content_type.clone();
                         clip.wall_time = item.created_at_ms;
                         clip.content_hash = Some(hash_hex);
+
+                        // PG-26: recompute sensitivity from the decrypted
+                        // plaintext so a tampered export file cannot smuggle a
+                        // credential in with `is_sensitive=false` and bypass the
+                        // auto-wipe TTL.  Only text items carry detectable
+                        // credentials (images have no text to scan).
+                        // OR semantics: we never DOWNGRADE a caller-flagged
+                        // item — a legitimate sensitive export stays sensitive;
+                        // a credential falsely marked false is caught here.
+                        clip.is_sensitive = if item.content_type == "text" {
+                            let text = std::str::from_utf8(&item.bytes).unwrap_or("");
+                            is_sensitive_for_autowipe(text) || item.caller_is_sensitive
+                        } else {
+                            // Non-text: trust caller flag only (no text to scan).
+                            item.caller_is_sensitive
+                        };
 
                         // FTS indexing: pass "" to skip the FTS write. The
                         // searchable plaintext is no longer available as a
@@ -7612,8 +7911,20 @@ impl IpcServer {
                     .get("limit")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0);
+                // P2-tj9s: `include_sensitive` defaults to false — sensitive items
+                // are excluded by default to avoid bulk-exporting secrets via a
+                // single IPC call. Callers that genuinely need them must opt in
+                // explicitly. Note: the socket is 0600 so this is defence-in-depth,
+                // not an authentication boundary.
+                let include_sensitive = req
+                    .params
+                    .get("include_sensitive")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let db_arc = self.db.clone();
-                let local_key_v1: [u8; 32] = **self.local_key;
+                // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop
+                // even if the spawn_blocking worker panics or is cancelled.
+                let local_key_v1 = zeroize::Zeroizing::new(**self.local_key);
                 let join = tokio::task::spawn_blocking(move || {
                     let db = db_arc.blocking_lock();
                     let v2_key = derive_v2(&local_key_v1);
@@ -7681,6 +7992,10 @@ impl IpcServer {
                         if content_type != "text" {
                             continue;
                         }
+                        // P2-tj9s: skip sensitive items unless the caller opts in.
+                        if is_sensitive && !include_sensitive {
+                            continue;
+                        }
                         let Some(content) = content_opt else { continue };
                         let Some(nonce_vec) = nonce_opt else { continue };
                         // Resolve key_version: NULL in the DB means the row
@@ -7721,8 +8036,8 @@ impl IpcServer {
                         };
                         let plaintext = match decrypt_item_by_version(
                             key_version,
-                            &local_key_v1,
-                            &v2_key,
+                            &*local_key_v1,
+                            &*v2_key,
                             &item_id,
                             nonce,
                             &content,
@@ -7753,7 +8068,14 @@ impl IpcServer {
                 match join {
                     Ok(Ok(items)) => {
                         let count = items.len();
-                        tracing::info!("export: returning {count} text items");
+                        // P2-tj9s: audit log — record item COUNT only, never
+                        // content. include_sensitive is logged so operators can
+                        // detect unusual export calls in the daemon log.
+                        tracing::info!(
+                            count,
+                            include_sensitive,
+                            "export: completed (item count only; content not logged)"
+                        );
                         Response::ok(req.id, serde_json::json!({ "items": items }))
                     }
                     Ok(Err(e)) => Response::err_with_code(
@@ -7835,7 +8157,9 @@ impl IpcServer {
                 };
 
                 let db_arc = self.db.clone();
-                let local_key: [u8; 32] = **self.local_key;
+                // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop
+                // even if the spawn_blocking worker panics or is cancelled.
+                let local_key = zeroize::Zeroizing::new(**self.local_key);
                 let join = tokio::task::spawn_blocking(move || {
                     // Read config on blocking thread — same pattern as set_config.
                     let config = read_config();
@@ -7851,7 +8175,7 @@ impl IpcServer {
                         &raw_bytes,
                         &filename,
                         &mime,
-                        &local_key,
+                        &*local_key,
                         &file_id,
                         max_file_bytes,
                     )
@@ -8002,12 +8326,13 @@ impl IpcServer {
                     // Keychain). key_version = 2 items are derived from the same
                     // seed via derive_v2; we derive it inline here so the server
                     // struct does not need a second Arc field.
-                    let v1_key: [u8; 32] = **self.local_key;
-                    let v2_key = derive_v2(&v1_key);
+                    // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop.
+                    let v1_key = zeroize::Zeroizing::new(**self.local_key);
+                    let v2_key = derive_v2(&*v1_key);
                     let plaintext_bytes = decrypt_item_by_version(
                         item.key_version,
-                        &v1_key,
-                        &v2_key,
+                        &*v1_key,
+                        &*v2_key,
                         &item.item_id,
                         nonce,
                         content,
@@ -8099,12 +8424,13 @@ impl IpcServer {
                             .store(-1, std::sync::atomic::Ordering::Release);
                         PasteboardError::other(format!("image chunks_from_blob failed: {e}"))
                     })?;
-                    let wtp_v1_key: [u8; 32] = **self.local_key;
-                    let wtp_v2_key = derive_v2(&wtp_v1_key);
+                    // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop.
+                    let wtp_v1_key = zeroize::Zeroizing::new(**self.local_key);
+                    let wtp_v2_key = derive_v2(&*wtp_v1_key);
                     let wtp_img_key: &[u8; 32] = if item.key_version == 1 {
-                        &wtp_v1_key
+                        &*wtp_v1_key
                     } else {
-                        &wtp_v2_key
+                        &*wtp_v2_key
                     };
                     let png_bytes = decode_image(&chunks, wtp_img_key, &file_id).map_err(|e| {
                         self.self_write_change_count
@@ -8156,12 +8482,13 @@ impl IpcServer {
                         PasteboardError::other(format!("file chunks_from_blob failed: {e}"))
                     })?;
                     // Dispatch on key_version: v1 rows use the raw seed; v2 rows use derive_v2.
-                    let v1_key: [u8; 32] = **self.local_key;
-                    let v2_key = derive_v2(&v1_key);
+                    // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop.
+                    let v1_key = zeroize::Zeroizing::new(**self.local_key);
+                    let v2_key = derive_v2(&*v1_key);
                     let key_to_use: &[u8; 32] = if item.key_version == 1 {
-                        &v1_key
+                        &*v1_key
                     } else {
-                        &v2_key
+                        &*v2_key
                     };
                     let raw_bytes =
                         decode_file(&chunks, key_to_use, &file_meta.file_id).map_err(|e| {
@@ -13977,7 +14304,7 @@ mod tests {
         let twenty_min_ago = std::time::SystemTime::now()
             .checked_sub(std::time::Duration::from_secs(20 * 60))
             .expect("time subtraction is infallible on any plausible system clock");
-        // std::fs::FileTimes / File::set_times is stable since Rust 1.75 (MSRV = 1.89).
+        // std::fs::FileTimes / File::set_times is stable since Rust 1.75 (MSRV = 1.96).
         // set_modified lives on FileTimes directly (no platform extension trait needed).
         {
             let f = std::fs::OpenOptions::new()

@@ -23,6 +23,9 @@
 //! accelerator string.  This lets the recorder see physical keys even when
 //! Hammerspoon has remapped them.
 
+// reason: CGEventTap bindings from the `core-graphics` crate expose C-style
+// constants with lowercase_with_underscores names (e.g. kCGEventTapOptionDefault).
+// These names are set by the macOS SDK and cannot be renamed.
 #![allow(non_upper_case_globals)]
 
 use std::sync::{Mutex, OnceLock};

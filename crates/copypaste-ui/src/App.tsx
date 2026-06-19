@@ -331,7 +331,12 @@ export default function App() {
 
     // Fallback: read whatever error was stored by ensure_daemon_running_async.
     void getDaemonError().then((err) => {
-      if (!cancelled && err) setDaemonError(err);
+      if (!cancelled && err) {
+        // Log detail (may contain bundle/socket paths) to console only — not the DOM.
+        // eslint-disable-next-line no-console
+        console.error("[CopyPaste] daemon spawn error:", err);
+        setDaemonError(err);
+      }
     }).catch(() => {
       // Best-effort — never block on this.
     });
@@ -344,6 +349,9 @@ export default function App() {
       void listen<{ ok: boolean; error?: string }>("daemon-spawn-result", (event) => {
         if (cancelled) return;
         if (!event.payload.ok && event.payload.error) {
+          // Log detail to console only — DOM shows a generic message (P2-54h5).
+          // eslint-disable-next-line no-console
+          console.error("[CopyPaste] daemon-spawn-result error:", event.payload.error);
           setDaemonError(event.payload.error);
         } else if (event.payload.ok) {
           // Daemon started successfully — clear any stale error.
@@ -476,11 +484,13 @@ export default function App() {
             main use case (drag the title bar area) still works.
           */}
 
-          {/* Daemon spawn error — non-dismissible, installation-incomplete */}
+          {/* Daemon spawn error — non-dismissible, installation-incomplete.
+              Raw error (may contain bundle/socket paths) is kept in the console only;
+              the DOM shows a generic message to avoid leaking install internals. */}
           {daemonError !== null && (
             <div className="surface-glass flex shrink-0 items-start gap-3 rounded-ide-lg border border-red-500/40 px-3 py-2 text-[13px] text-red-400">
               <span className="shrink-0 font-semibold">Background service error:</span>
-              <span>{daemonError}</span>
+              <span>The background service failed to start. Please reinstall CopyPaste or restart your Mac.</span>
             </div>
           )}
 

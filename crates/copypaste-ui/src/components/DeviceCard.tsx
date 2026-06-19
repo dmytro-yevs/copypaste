@@ -5,6 +5,8 @@ import {
   type OwnDeviceInfo,
   type PairedDevice,
 } from "../lib/ipc";
+// i2sr (PG-40): hybrid relative/absolute formatter for last-sync timestamps.
+import { formatSyncTime } from "../lib/time";
 
 // ---------------------------------------------------------------------------
 // Shared device-card sub-components (CopyPaste-zxv2)
@@ -144,6 +146,10 @@ export function ThisDeviceCard({ info }: { info: OwnDeviceInfo }) {
         <MetaRow label="Version" value={info.app_version} />
         <MetaRow label="Local IP" value={info.local_ip} />
         <MetaRow label="Public IP" value={info.public_ip ?? undefined} />
+        {/* wb6s: show own-device security fingerprint at parity with Android.
+            The fingerprint is the mTLS certificate's hex SHA-256, returned by
+            get_own_device_info. Null when P2P is disabled (no cert generated). */}
+        <MetaRow label="Fingerprint" value={info.fingerprint} />
       </DeviceMetaGrid>
     </div>
   );
@@ -216,7 +222,9 @@ export function PeerRow({
 
   // Format timestamps only when they have a real value.
   const pairedStr = (peer.added_at ?? 0) > 0 ? formatEpochSecs(peer.added_at) : null;
-  const lastSyncStr = formatEpochSecs(peer.last_sync_at);
+  // i2sr (PG-40): hybrid relative/absolute — relative when ≤24 h, absolute beyond.
+  // last_sync_at is epoch seconds; formatSyncTime default unit is "secs".
+  const lastSyncStr = formatSyncTime(peer.last_sync_at);
 
   // Transport chip: P2P when we have a local LAN address/ip; Cloud otherwise.
   // Defensive: no crash when address/local_ip are absent.

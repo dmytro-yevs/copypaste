@@ -53,6 +53,8 @@ rcgen = { version = "0.12", default-features = false, features = ["ring"] }
 mdns-sd = "0.19"
 # Storage
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher", "backup"] }
+r2d2 = "0.8"
+r2d2_sqlite = { version = "0.25", default-features = false, features = ["bundled-sqlcipher"] }
 # Config
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
@@ -65,7 +67,7 @@ tracing = "0.1"
 # Errors
 thiserror = "1"
 # Misc
-# uuid 1.21+ requires Rust 1.85; safe at MSRV 1.89. Upper bound removed 2026-06-14.
+# uuid 1.21+ requires Rust 1.85; safe at MSRV 1.96. Upper bound removed 2026-06-14.
 uuid = { version = "1", features = ["v4"] }
 # Async runtime
 tokio = { version = "1", features = ["net", "io-util", "rt-multi-thread", "macros", "signal", "sync", "time"] }
@@ -85,13 +87,13 @@ security-framework = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Rotating file appender for daemon logs
 tracing-appender = "0.2"
-# home dir (0.5.12 requires Rust 1.88; safe at MSRV 1.89). Exact pin removed 2026-06-14.
+# home dir (0.5.12 requires Rust 1.88; safe at MSRV 1.96). Exact pin removed 2026-06-14.
 home = "0.5"
 # platform config / data dirs
 dirs = "5"
 # error handling
 anyhow = "1"
-# clap 4.6+ uses edition 2024 (MSRV 1.85); safe at MSRV 1.89. Upper bound removed 2026-06-14.
+# clap 4.6+ uses edition 2024 (MSRV 1.85); safe at MSRV 1.96. Upper bound removed 2026-06-14.
 clap = { version = "4", features = ["derive"] }
 # Base64 encoding
 base64 = "0.22"

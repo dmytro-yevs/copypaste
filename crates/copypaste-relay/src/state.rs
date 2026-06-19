@@ -45,12 +45,6 @@ fn history_cap_for_limit(tier_limit: Option<usize>) -> usize {
     MAX_PUSH_ITEMS_PER_DEVICE.min(tier_limit.unwrap_or(usize::MAX))
 }
 
-/// Maximum number of devices a single logical "account" can register (free tier).
-// Quota module exposes `check_device_quota`; this const is the documented limit
-// referenced by tests and docs. Not yet used in production routing.
-#[allow(dead_code)]
-pub const MAX_FREE_DEVICES: usize = 5;
-
 /// Default page size for `GET /devices/:id/items` when the caller does not
 /// supply `limit`, and the absolute upper bound a single pull may return (M4).
 /// Bounds the work done (clone + serialize) under the global store mutex on a
@@ -115,6 +109,10 @@ pub struct TokenEntry {
 pub struct DeviceRecord {
     pub device_id: String,
     pub device_name: String,
+    // Read by `routes/devices.rs` (`GET /devices/:id` response body), but
+    // `#[path]`-include test binaries that include state.rs without the routes
+    // see this field as unreachable — allow suppresses the spurious warning in
+    // those non-default-allow test crates (e.g. sse_subscribe.rs).
     #[allow(dead_code)]
     pub public_key_b64: String,
     /// The proof-of-possession (PoP) value stored at first registration.
@@ -135,11 +133,11 @@ pub struct DeviceRecord {
     /// inbox is not evicted simply because it registered long ago.
     pub last_seen: Instant,
     /// Subscription tier — determines device count and history quotas.
-    // Read by `push_item` via the per-device tier lookup, but live
-    // registration always stores `Tier::Free` today (token-/SQLite-driven tier
-    // selection is not wired to the in-memory store yet — see the relay v2
-    // quotas plan), so the compiler sees no production read and reports it as
-    // dead. Kept for the forthcoming tier-wiring.
+    // Read by `push_item_decoded` via `effective_history_cap(record.tier)`, but
+    // `#[path]`-include test binaries that compile state.rs without the routes
+    // may not exercise that path and see the field as dead.  `Tier::Pro` is now
+    // feature-gated, so production always stores/reads `Tier::Free`; keep the
+    // allow to silence the lint in those test compilations.
     #[allow(dead_code)]
     pub tier: Tier,
     /// Source IP the device registered from, used as the *scope* for the
@@ -197,9 +195,7 @@ pub struct SyncItem {
     pub wall_time: u64,
     /// Server-side wall-clock time at insert (Unix epoch seconds). Used for
     /// TTL eviction independent of (untrusted) sender `wall_time`. Read by
-    /// the background evictor (see `store.rs`) — `#[allow]` for crate
-    /// configurations that don't see the binary entry point.
-    #[allow(dead_code)]
+    /// `prune_expired` (in this module) and the background evictor in `store.rs`.
     pub inserted_at_unix: u64,
 }
 
@@ -288,6 +284,8 @@ pub struct RelayStore {
 fn tier_to_str(tier: Tier) -> &'static str {
     match tier {
         Tier::Free => "free",
+        // `Tier::Pro` is cfg-gated; this arm only exists when the variant does.
+        #[cfg(any(test, feature = "quota-tiers"))]
         Tier::Pro => "pro",
     }
 }
@@ -296,6 +294,9 @@ fn tier_to_str(tier: Tier) -> &'static str {
 /// to `Free` (the conservative default — never grant a wider quota than stored).
 fn tier_from_str(s: &str) -> Tier {
     match s {
+        // `Tier::Pro` is cfg-gated; fall back to `Free` in production builds
+        // that don't enable the `quota-tiers` feature.
+        #[cfg(any(test, feature = "quota-tiers"))]
         "pro" => Tier::Pro,
         _ => Tier::Free,
     }
@@ -306,19 +307,20 @@ fn tier_from_str(s: &str) -> Tier {
 /// pushes overflows it, the receiver observes `RecvError::Lagged` and simply
 /// re-reads the inbox from its cursor, picking up every missed item. Sized to
 /// absorb a modest burst without forcing a lag-driven full re-read on every push.
-// Used by `subscribe_notifier`, which is only reached via the SSE route; the
-// standalone `#[path]`-include test binaries don't exercise it, so the const is
-// dead there — mirror the `new()` allow pattern.
-#[allow(dead_code)]
+// Used by `subscribe_notifier`, which is called from the production SSE route
+// (`routes/items.rs`). `#[path]`-include test binaries that compile state.rs
+// without the routes module do not exercise this path; those test crates
+// suppress dead_code at the crate level (see individual test file headers).
 const SYNC_NOTIFY_CHANNEL_CAP: usize = 64;
 
 impl RelayStore {
     /// Create a store with the default `MAX_PUSH_ITEMS_PER_DEVICE` inbox cap.
     // Used by unit/integration tests (`make_store()`) and integration test
-    // binaries that `#[path]`-include state.rs. The production binary path
-    // uses `new_with_cap` to wire the operator config value, so the binary
-    // target sees this as dead — hence the allow.
-    #[allow(dead_code)]
+    // binaries that `#[path]`-include state.rs. The production binary uses
+    // `new_persistent` (via `main.rs`) so this constructor is never called
+    // there. Gated so the production binary omits it and the dead_code lint
+    // is not needed.
+    #[cfg(any(test, feature = "quota-tiers"))]
     pub fn new(_sync_ttl_secs: u64) -> Self {
         Self::new_with_cap(_sync_ttl_secs, MAX_PUSH_ITEMS_PER_DEVICE)
     }
@@ -331,6 +333,8 @@ impl RelayStore {
     /// with context (this constructor has no `Result` return for backward
     /// compatibility with the existing test call-sites). Production uses
     /// [`Self::new_persistent`], which surfaces open errors as `Result`.
+    // Called only from `new` (cfg-gated) and test code; gated alongside `new`.
+    #[cfg(any(test, feature = "quota-tiers"))]
     pub fn new_with_cap(sync_ttl_secs: u64, max_items_per_device: usize) -> Self {
         Self::new_persistent(
             sync_ttl_secs,
@@ -473,9 +477,9 @@ impl RelayStore {
     /// primitive (see [`Self::sync_notifiers`]) — the SSE handler re-reads the
     /// inbox from its cursor on every wake, so a missed/lagged tick can never
     /// drop an item.
-    // Reached only via the SSE `subscribe` route; the standalone
-    // `#[path]`-include test binaries don't mount it, so it reads as dead there.
-    #[allow(dead_code)]
+    // Called from the production SSE `subscribe` route (`routes/items.rs`).
+    // Previously marked `#[allow(dead_code)]` for `#[path]`-include test
+    // binaries; those binaries now suppress the lint at the crate level.
     pub fn subscribe_notifier(&mut self, device_id: &str) -> broadcast::Receiver<()> {
         match self.sync_notifiers.get(device_id) {
             Some(tx) => tx.subscribe(),
@@ -492,9 +496,9 @@ impl RelayStore {
     /// producer task owns exactly one receiver, so this is the count of live
     /// SSE producer tasks for the device — used to assert that a producer tears
     /// down (drops its `rx`) on client disconnect (SSE leak regression test).
-    // Reached only via the SSE-aware test binary; the standalone
-    // `#[path]`-include test binaries don't exercise it, so it reads as dead
-    // there — same pattern as `subscribe_notifier`.
+    // Called from `tests/sse_subscribe.rs` to verify SSE producer lifecycle.
+    // Not called from the production binary or the lib unit-test build; allow
+    // suppresses the dead_code lint in those compilation units.
     #[allow(dead_code)]
     pub fn notifier_receiver_count(&self, device_id: &str) -> usize {
         self.sync_notifiers
@@ -513,22 +517,6 @@ impl RelayStore {
             // (no device is currently subscribed) and not an error condition.
             let _ = tx.send(());
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // Metrics accessors (see api/metrics.rs)
-    // -----------------------------------------------------------------------
-
-    /// Snapshot the three Prometheus metric values.
-    /// Returns `(items_total, evictions_total, active_devices)`.
-    /// `active_devices` is derived from inboxes — the count of device IDs
-    /// whose inbox currently has at least one item.
-    #[allow(dead_code)] // unused in some test binaries that `#[path]`-include state.rs
-    pub fn metrics_snapshot(&self) -> (u64, u64, u64) {
-        let items = self.items_total.load(Ordering::Relaxed);
-        let evictions = self.evictions_total.load(Ordering::Relaxed);
-        let active = self.sync_items.values().filter(|v| !v.is_empty()).count() as u64;
-        (items, evictions, active)
     }
 
     // -----------------------------------------------------------------------
@@ -606,9 +594,10 @@ impl RelayStore {
     /// Returns `RelayError::DeviceQuotaExceeded` if registering a NEW device
     /// would exceed the device count limit for `tier` *within the device's scope*.
     // Production registration goes through `register_device_scoped` (which
-    // supplies the client IP); this unscoped wrapper is retained for the tier
-    // unit/integration tests that exercise the quota without a transport.
-    #[allow(dead_code)]
+    // supplies the client IP). This unscoped wrapper is used only by tests that
+    // exercise tier-aware quotas without a transport. Gated so the release
+    // binary omits it.
+    #[cfg(any(test, feature = "quota-tiers"))]
     pub fn register_device_with_tier(
         &mut self,
         device_id: String,
@@ -759,13 +748,14 @@ impl RelayStore {
                     RelayError::DeviceQuotaExceeded { limit }
                 }
                 // `check_device_quota` only ever returns `MaxDevicesExceeded`,
-                // but the enum is non-exhaustive (ItemTooLarge / HistoryFull
-                // are returned by other quota functions). Map unexpected variants
-                // to Internal rather than panicking — a new variant should not
-                // bring down the relay.
+                // but the enum has other variants (ItemTooLarge / HistoryFull)
+                // returned by other quota functions. Map them to Internal rather
+                // than panicking — a new variant should not bring down the relay.
                 QuotaViolation::ItemTooLarge { limit_bytes } => RelayError::Internal(format!(
                     "unexpected ItemTooLarge({limit_bytes}) from check_device_quota"
                 )),
+                // `HistoryFull` is cfg-gated alongside `check_history_quota`.
+                #[cfg(any(test, feature = "quota-tiers"))]
                 QuotaViolation::HistoryFull { limit } => RelayError::Internal(format!(
                     "unexpected HistoryFull({limit}) from check_device_quota"
                 )),
@@ -871,8 +861,9 @@ impl RelayStore {
     ///
     /// Returns `(bearer_token, expires_at_unix)` on success.
     // Production uses `register_device_scoped`; this unscoped form is used by
-    // the test suites that don't drive a real transport.
-    #[allow(dead_code)]
+    // the test suites that don't drive a real transport. Gated so the release
+    // binary omits it.
+    #[cfg(any(test, feature = "quota-tiers"))]
     pub fn register_device(
         &mut self,
         device_id: String,
@@ -1031,11 +1022,10 @@ impl RelayStore {
     /// Prunes the oldest item when the inbox exceeds `MAX_PUSH_ITEMS_PER_DEVICE`.
     /// Returns the auto-assigned integer ID.
     //
-    // The HTTP `push` handler now calls `push_item_decoded` directly (it decodes
-    // the payload once *before* locking the store), so this self-decoding
-    // wrapper has no production caller. It is retained for the test suites and
-    // any future non-HTTP caller that holds only the raw base64.
-    #[allow(dead_code)]
+    // The HTTP `push` handler calls `push_item_decoded` directly (decodes
+    // payload before locking the store), so this self-decoding wrapper has no
+    // production caller. Used only by tests; gated so the release binary omits it.
+    #[cfg(any(test, feature = "quota-tiers"))]
     pub fn push_item(
         &mut self,
         device_id: &str,
@@ -1388,8 +1378,10 @@ impl RelayStore {
     // Devices listing
     // -----------------------------------------------------------------------
 
-    // Used by integration tests and diagnostic helpers; no production HTTP
-    // route currently calls this method directly.
+    // Called by `list_devices_handler` in `routes/mod.rs` (`GET /devices`) in
+    // the production binary. `#[path]`-include test binaries that compile
+    // state.rs without routes/mod.rs see this as dead; allow suppresses the
+    // lint in those test compilations.
     #[allow(dead_code)]
     pub fn list_devices(&self) -> Vec<String> {
         let mut records: Vec<&DeviceRecord> = self.devices.values().collect();
@@ -1422,7 +1414,6 @@ impl RelayStore {
     /// it would just leak dead data. Without this, any inbox/counter that
     /// outlives its device would grow unboundedly; pruning keeps both maps
     /// bounded by the live device set.
-    #[allow(dead_code)]
     pub fn prune_expired(&mut self, now_unix: u64, ttl_secs: u64) -> usize {
         // Reclaim orphaned map entries regardless of TTL — these are pure
         // memory leaks unrelated to item age (H2). Bind `devices` to a local
@@ -1471,10 +1462,9 @@ impl RelayStore {
     // Stats
     // -----------------------------------------------------------------------
 
-    // stats() is retained for future use (e.g. an authenticated /stats endpoint
-    // or integration tests); the unauthenticated /health and /stats handlers no
-    // longer call it (CopyPaste-j21 — strip counts from unauthenticated endpoints).
-    #[allow(dead_code)]
+    // Not called from any current route handler (CopyPaste-j21: counts stripped
+    // from unauthenticated endpoints). Gated so the release binary omits it.
+    #[cfg(any(test, feature = "quota-tiers"))]
     pub fn stats(&self) -> (usize, usize) {
         let total = self.sync_items.values().map(|v| v.len()).sum();
         (self.devices.len(), total)

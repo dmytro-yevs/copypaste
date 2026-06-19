@@ -1,7 +1,14 @@
 package com.copypaste.android
 
 /**
- * Kotlin port of `copypaste-core/src/text_kind.rs` `classify_text`.
+ * Text kind classification — delegates to the canonical Rust FFI
+ * [classifyTextKind] (PG-16 / 89ve) so Android and macOS use the SAME
+ * classifier and cannot drift.
+ *
+ * The [Kind] enum and the private helpers below are kept as a Kotlin-side
+ * fallback: when the native library is unavailable (stub mode) [classify] and
+ * [classifyKind] fall back to the pure-Kotlin path so the UI still labels clips
+ * correctly in test/emulator environments.
  *
  * This is a PURE presentation-layer hint derived from decrypted text. It does
  * NOT change the stored content_type ("text"/"image"/"file"). Priority order
@@ -26,11 +33,22 @@ object TextKind {
 
     /**
      * Classify [text] and return its [Kind.label] string (e.g. "URL", "EMAIL").
+     * Delegates to the canonical Rust FFI [classifyTextKind] when the native
+     * library is loaded; falls back to the pure-Kotlin [classifyKind] otherwise.
      * Always returns a non-null, non-blank uppercase label.
      */
-    fun classify(text: String): String = classifyKind(text).label
+    fun classify(text: String): String {
+        // PG-16 (89ve): delegate to Rust FFI for parity with macOS classifier.
+        // classifyTextKind() returns "TEXT" in stub mode, so the fallback below
+        // is only reached when the returned label is blank (should not happen).
+        if (isNativeLibraryLoaded) {
+            val label = classifyTextKind(text)
+            if (label.isNotBlank()) return label
+        }
+        return classifyKind(text).label
+    }
 
-    /** Returns the [Kind] enum value for the given text (for testing). */
+    /** Returns the [Kind] enum value for the given text (for testing / stub fallback). */
     internal fun classifyKind(text: String): Kind {
         val trimmed = text.trim()
         if (trimmed.isEmpty()) return Kind.TEXT

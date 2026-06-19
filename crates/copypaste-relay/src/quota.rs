@@ -6,12 +6,11 @@ pub enum Tier {
     Free,
     /// Paid tier: elevated limits.
     //
-    // Live device registration always uses `Tier::Free` today — tier
-    // selection from the bearer token / SQLite `device_quotas` table is not
-    // wired to the in-memory store yet (see the relay v2 quotas plan). `Pro`
-    // is constructed only in tier-quota tests, so it reads as dead code to the
-    // production build despite being part of the public tier model.
-    #[allow(dead_code)]
+    // Live device registration always stores `Tier::Free` today — bearer-token
+    // / SQLite-driven tier selection is not yet wired (relay v2 quotas plan).
+    // Gated behind `quota-tiers` feature (or `#[cfg(test)]`) so the production
+    // binary sees only `Tier::Free`, removing the spurious dead_code lint.
+    #[cfg(any(test, feature = "quota-tiers"))]
     Pro,
 }
 
@@ -21,6 +20,7 @@ impl Tier {
     pub fn max_devices(self) -> usize {
         match self {
             Tier::Free => 5,
+            #[cfg(any(test, feature = "quota-tiers"))]
             Tier::Pro => 10,
         }
     }
@@ -30,6 +30,7 @@ impl Tier {
     pub fn max_history_items(self) -> Option<usize> {
         match self {
             Tier::Free => Some(1_000),
+            #[cfg(any(test, feature = "quota-tiers"))]
             Tier::Pro => None,
         }
     }
@@ -61,10 +62,10 @@ pub enum QuotaViolation {
     //
     // Constructed only by `check_history_quota`, which `push_item` no longer
     // calls: history enforcement is now a silent prune clamped to
-    // `effective_history_cap` (the tier limit folded into the hard cap), so no
-    // production path returns this variant. Retained as part of the public
-    // quota model and exercised by `check_history_quota`'s unit tests.
-    #[allow(dead_code)]
+    // `effective_history_cap`. Gated behind `quota-tiers` alongside
+    // `check_history_quota` so the production binary omits this variant,
+    // removing the spurious dead_code lint.
+    #[cfg(any(test, feature = "quota-tiers"))]
     HistoryFull { limit: usize },
 }
 
@@ -104,8 +105,9 @@ pub fn check_item_size(
 //
 // No production caller: `push_item` enforces history via a silent prune
 // clamped to `effective_history_cap` rather than rejecting at the tier limit.
-// Kept as part of the public quota model and covered by the tests below.
-#[allow(dead_code)]
+// Gated behind `quota-tiers` (covers test and future wiring) so the
+// production binary omits it and the spurious dead_code lint is removed.
+#[cfg(any(test, feature = "quota-tiers"))]
 pub fn check_history_quota(tier: Tier, current_count: usize) -> Result<(), QuotaViolation> {
     if let Some(limit) = tier.max_history_items() {
         if current_count >= limit {

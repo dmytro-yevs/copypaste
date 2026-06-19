@@ -40,10 +40,10 @@ impl KeystoreBackend for WindowsKeystoreBackend {
     }
 
     fn store(&self, _service: &str, _account: &str, _secret: &[u8; 32]) -> Result<(), DpapiError> {
-        unimplemented!()
+        unimplemented!("Windows DPAPI keystore store — Phase 5a (frozen, ADR-012)")
     }
 
     fn delete(&self, _service: &str, _account: &str) -> Result<(), DpapiError> {
-        unimplemented!()
+        unimplemented!("Windows DPAPI keystore delete — Phase 5a (frozen, ADR-012)")
     }
 }

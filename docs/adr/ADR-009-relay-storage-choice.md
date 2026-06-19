@@ -125,8 +125,11 @@ items whose `inserted_at_unix + RELAY_TTL_SECS <= now_unix` every 60 s.**
 
 ## Follow-ups
 
-- Remove the dead `crates/copypaste-relay/src/db.rs` scaffold (separate
-  PR — out of scope for this task per branch-isolation policy).
+- ~~Remove the dead `crates/copypaste-relay/src/db.rs` scaffold~~ — **Update:** `db.rs` was
+  subsequently wired into `main.rs`. `RelayStore` now uses SQLite write-through persistence
+  (optional — defaults to `:memory:` when no `db_path` is set). The primary in-memory read path
+  and TTL eviction model described above remain correct; SQLite is the durability layer, not the
+  hot-read path.
 - If we ever need multi-replica relay, add a Redis-backed
   `RelayStore` impl behind a trait and feature-gate it; do **not**
   retrofit SQLite for this purpose.

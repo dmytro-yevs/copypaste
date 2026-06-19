@@ -438,10 +438,10 @@ Polled every 10 s so Local IP and Public IP stay fresh.
 
 ### 13b. QR Code Pairing
 
-- A **scannable QR code** is auto-generated on Devices tab mount via `pair_generate_qr` / `pairing_qr_svg` (Tauri-direct; daemon generates a `CPPAIR1.…` PAKE token and the Tauri layer renders it as inline SVG).
+- A **scannable QR code** is auto-generated on Devices tab mount via `pair_generate_qr` / `pairing_qr_svg` (Tauri-direct; daemon generates a `CPPAIR2.…` PAKE token and the Tauri layer renders it as inline SVG).
 - The token TTL is 120 s; the UI auto-refreshes 15 s before expiry (1 s countdown tick while visible; visibility-gated to avoid burning single-use tokens when backgrounded).
 - **Blur-reveal**: the QR starts visually blurred (`blur(12px)`); first click reveals it. Subsequent clicks regenerate a fresh code.
-- **Payload**: the raw `CPPAIR1.…` string is passed to the SVG renderer; the other device scans it to pair automatically without manual entry.
+- **Payload**: the raw `CPPAIR2.…` string is passed to the SVG renderer; the other device scans it to pair automatically without manual entry.
 
 **Limitation:** only P2P pairing material is embedded; full Supabase/relay provisioning is not yet included.
 

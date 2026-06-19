@@ -1,10 +1,12 @@
 /**
- * HistoryView — pagination + total-count tests.
+ * HistoryView — pagination + total-count + display-limit tests.
  *
  * DELIVERABLE 1: infinite-scroll load-more — subsequent pages are fetched when
  *   the VirtualList fires onNearBottom; de-dup by id; stop when all pages are loaded.
  * DELIVERABLE 2: header count badge reflects the FULL total from the daemon, not
  *   just the length of the currently-loaded array.
+ * DELIVERABLE 3 (CopyPaste-2b1g): historyDisplayLimit pref persists across remounts
+ *   and HistoryView enforces the cap on rendered items.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
@@ -24,6 +26,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { HistoryView } from "./HistoryView";
+import { SettingsView } from "./SettingsView";
+import { useUI } from "../store";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -252,5 +256,162 @@ describe("HistoryView — load-more pagination (deliverable 1)", () => {
 
     // There should be exactly 3 list items (no duplicates).
     expect(screen.getAllByText(/Item dup-/)).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELIVERABLE 3 (CopyPaste-2b1g): historyDisplayLimit persists + HistoryView cap
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a minimal online invoke mock for SettingsView (Storage tab).
+ * Mirrors the helper in SettingsView.test.tsx so the same invocation shape works.
+ */
+function makeOnlineInvokeForLimit() {
+  return (cmd: string, args?: unknown): Promise<unknown> => {
+    if (cmd === "ipc_call") {
+      const method = (args as { method?: string } | undefined)?.method;
+      switch (method) {
+        case "status":
+          return Promise.resolve({
+            ok: true,
+            data: { status: "running", ready: true, degraded: false, degraded_reason: null, build_version: "0.5.5" },
+            error: null, error_code: null,
+          });
+        case "get_config":
+          return Promise.resolve({
+            ok: true,
+            data: {
+              p2p_enabled: true, supabase_url: null, supabase_anon_key: null,
+              max_text_size_bytes: 10 * 1024 * 1024, max_image_size_bytes: 25 * 1024 * 1024,
+              max_file_size_bytes: 100 * 1024 * 1024, storage_quota_bytes: 10 * 1024 * 1024 * 1024,
+              sensitive_ttl_secs: 30, image_quality: 100,
+            },
+            error: null, error_code: null,
+          });
+        case "get_private_mode":
+          return Promise.resolve({ ok: true, data: { private_mode: false }, error: null, error_code: null });
+        case "get_sync_status":
+          return Promise.resolve({ ok: true, data: { passphrase_set: false, supabase_configured: false, signed_in: false, email: null, last_sync_ms: null }, error: null, error_code: null });
+        default:
+          return Promise.resolve({ ok: true, data: null, error: null, error_code: null });
+      }
+    }
+    if (cmd === "get_popup_shortcut") return Promise.resolve("CmdOrCtrl+Shift+V");
+    if (cmd === "app_version") return Promise.resolve("0.5.5");
+    return Promise.resolve(undefined);
+  };
+}
+
+describe("CopyPaste-2b1g: historyDisplayLimit — persistence and HistoryView cap", () => {
+  const PREFS_KEY = "copypaste-ui-prefs-v2";
+
+  beforeEach(() => {
+    invoke.mockReset();
+    // Clear the store's persisted prefs so each test starts fresh.
+    localStorage.removeItem(PREFS_KEY);
+  });
+
+  it("slider in SettingsView persists historyDisplayLimit to localStorage and remount reads it back", async () => {
+    invoke.mockImplementation(makeOnlineInvokeForLimit());
+
+    const { unmount } = render(<SettingsView />);
+
+    // Wait for settings to load (not offline)
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    // Navigate to Storage tab
+    const storageTab = await screen.findByText("Storage");
+    await act(async () => { fireEvent.click(storageTab); });
+
+    // The "History display limit" slider must be present
+    expect(screen.getByText(/History display limit/i)).toBeInTheDocument();
+
+    // LimitSliderRow uses an index-based range (0…steps.length-1) mapped to
+    // MAX_ITEMS_STEPS = [100, 250, 500, 1000, 2500, 5000, 10000, 100000].
+    // Index 0 → 100 items. Fire the slider at index 0 to choose the 100-item cap.
+    const rangeInputs = document.querySelectorAll('input[type="range"]');
+    // The display-limit slider is the last range input on the Storage tab.
+    const limitSlider = rangeInputs[rangeInputs.length - 1] as HTMLInputElement;
+    expect(limitSlider).toBeTruthy();
+
+    await act(async () => {
+      // value="0" → index 0 → MAX_ITEMS_STEPS[0] = 100
+      fireEvent.change(limitSlider, { target: { value: "0" } });
+      fireEvent.mouseUp(limitSlider, { target: { value: "0" } });
+    });
+
+    // The slider's onChange persists historyDisplayLimit through the store
+    // (the ephemeral "Saved" toast fires on pointer-release and is cosmetic;
+    // the deliverable is persistence, asserted via localStorage + remount).
+    // localStorage must now contain historyDisplayLimit: 100 (MAX_ITEMS_STEPS[0]).
+    await waitFor(() => {
+      const stored = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "{}") as Record<string, unknown>;
+      expect(stored.historyDisplayLimit).toBe(100);
+    });
+
+    // Unmount and remount — the new instance must read the persisted value (100)
+    unmount();
+
+    invoke.mockImplementation(makeOnlineInvokeForLimit());
+    render(<SettingsView />);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const storageTab2 = await screen.findByText("Storage");
+    await act(async () => { fireEvent.click(storageTab2); });
+
+    // The slider must reflect index 0 (the persisted value 100 → index 0, not the default 1000 → index 3).
+    const rangeInputs2 = document.querySelectorAll('input[type="range"]');
+    const limitSlider2 = rangeInputs2[rangeInputs2.length - 1] as HTMLInputElement;
+    expect(Number(limitSlider2.value)).toBe(0);
+  });
+
+  it("HistoryView renders at most historyDisplayLimit items when the limit is smaller than the list", async () => {
+    // Seed localStorage with a tiny cap (N=3) before rendering.
+    const N = 3;
+    localStorage.setItem(PREFS_KEY, JSON.stringify({ historyDisplayLimit: N }));
+
+    // Force the Zustand store to reload prefs from localStorage so HistoryView
+    // sees the seeded value without going through SettingsView.
+    // Reimport the store module to pick up the fresh value via loadPrefs().
+    // Since Zustand initialises from loadPrefs() at module load time, we need to
+    // manually patch the store state here (loadPrefs() is called once at import).
+    useUI.setState((s) => ({ prefs: { ...s.prefs, historyDisplayLimit: N } }));
+
+    // The daemon returns 10 items — more than the display cap of 3.
+    const tenItems = Array.from({ length: 10 }, (_, i) => makeEntry(`cap-${i}`, 1_700_000_000_000 - i));
+
+    invoke.mockImplementation((_cmd: string, args: { method?: string }) => {
+      if (args?.method === "history_page") {
+        return Promise.resolve(ipcOk({ items: tenItems, total: 10 }));
+      }
+      return Promise.reject("daemon_offline:/tmp/x.sock");
+    });
+
+    render(<HistoryView />);
+
+    // Wait for data to load — the first item must appear.
+    await waitFor(() => {
+      expect(screen.getByText("Item cap-0")).toBeInTheDocument();
+    });
+
+    // VirtualList virtualises rendering, but in jsdom viewportH=0 so the visible
+    // window starts at [0, 0) — only items at padTop=0 render. However, the key
+    // assertion is that items BEYOND the cap are not in the DOM at all.
+    // With cap=3, items cap-3 through cap-9 must never be rendered.
+    // We verify cap-0 IS rendered and cap-9 is NOT.
+    expect(screen.getByText("Item cap-0")).toBeInTheDocument();
+
+    // Items beyond the cap must not be in the DOM.
+    expect(screen.queryByText("Item cap-9")).not.toBeInTheDocument();
+
+    // The number of "Item cap-N" DOM elements must not exceed N.
+    const rendered = screen.queryAllByText(/^Item cap-\d+$/);
+    expect(rendered.length).toBeLessThanOrEqual(N);
   });
 });

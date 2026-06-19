@@ -82,6 +82,11 @@ sealed class CopypasteException(message: String) : Exception(message) {
     class DecryptionFailed(detail: String = "DecryptionFailed") : CopypasteException(detail)
     class DatabaseError(detail: String) : CopypasteException("DatabaseError: $detail")
     class InvalidKeyLength : CopypasteException("InvalidKeyLength")
+    // P3: mirrors `CopypasteError::Panicked { reason }` caught at the FFI
+    // boundary by panic_boundary::catch_result. The field is named `reason`
+    // (not `message`) to avoid conflicting with Throwable.message — matching
+    // the Rust enum field name and the UniFFI-generated convention.
+    class Panicked(val reason: String) : CopypasteException("Panicked: $reason")
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +97,34 @@ sealed class CopypasteException(message: String) : Exception(message) {
 
 private fun ByteArray.toUByteList(): List<UByte> = map { it.toUByte() }
 private fun List<UByte>.toByteArray(): ByteArray = ByteArray(size) { this[it].toByte() }
+
+// ---------------------------------------------------------------------------
+// h7v8: Panic-preserving UniFFI exception mapper
+//
+// Every hand-written catch (e: uniffi.copypaste_android.CopypasteException) block
+// must call this helper so a Panicked variant is NEVER silently collapsed into a
+// generic DatabaseError / EncryptionFailed. The [fallback] lambda produces the
+// appropriate local exception for all non-panic cases.
+// ---------------------------------------------------------------------------
+
+/**
+ * Map a generated UniFFI [uniffi.copypaste_android.CopypasteException] to the
+ * app-side [CopypasteException] sealed class.
+ *
+ * [Panicked] is checked first — if the native side signalled a panic the caller
+ * receives [CopypasteException.Panicked] rather than the generic fallback type.
+ * For all other variants the [fallback] lambda is invoked with the exception
+ * message so each call-site can supply the semantically-correct sub-type
+ * (e.g. [CopypasteException.DatabaseError] for DB calls).
+ */
+private fun uniffi.copypaste_android.CopypasteException.toAppException(
+    fallback: (String?) -> CopypasteException,
+): CopypasteException = when (this) {
+    is uniffi.copypaste_android.CopypasteException.Panicked ->
+        // h7v8: propagate the panic reason verbatim — do NOT collapse to DatabaseError.
+        CopypasteException.Panicked(this.reason)
+    else -> fallback(this.message)
+}
 
 // ---------------------------------------------------------------------------
 // Library presence check
@@ -155,7 +188,7 @@ fun encryptText(itemId: String, bytes: ByteArray, key: ByteArray, keyVersion: UB
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         Log.w(TAG, "encryptText: native call failed: ${e.message}", e)
-        throw CopypasteException.EncryptionFailed(e.message ?: "native encrypt failed")
+        throw e.toAppException { CopypasteException.EncryptionFailed(it ?: "native encrypt failed") }
     } catch (e: Exception) {
         Log.w(TAG, "encryptText: native call failed: ${e.message}", e)
         throw CopypasteException.EncryptionFailed(e.message ?: "native encrypt failed")
@@ -192,7 +225,7 @@ fun decryptText(itemId: String, ciphertext: ByteArray, nonce: ByteArray, key: By
         ).toByteArray()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         Log.w(TAG, "decryptText: native call failed: ${e.message}", e)
-        throw CopypasteException.DecryptionFailed(e.message ?: "native decrypt failed")
+        throw e.toAppException { CopypasteException.DecryptionFailed(it ?: "native decrypt failed") }
     } catch (e: Exception) {
         Log.w(TAG, "decryptText: native call failed: ${e.message}", e)
         throw CopypasteException.DecryptionFailed(e.message ?: "native decrypt failed")
@@ -289,7 +322,7 @@ fun openDatabase(path: String, key: ByteArray): Long {
             key = key.toUByteList(),
         ).toLong()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "unknown")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "unknown") }
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "unknown")
     }
@@ -329,7 +362,7 @@ fun addClipboardItem(dbPath: String, key: ByteArray, text: String): String {
             text = text,
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "addClipboardItem failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "addClipboardItem failed") }
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "addClipboardItem failed")
     }
@@ -351,9 +384,161 @@ fun getHistoryCount(dbPath: String, key: ByteArray): Long {
             key = key.toUByteList(),
         ).toLong()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "getHistoryCount failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "getHistoryCount failed") }
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "getHistoryCount failed")
+    }
+}
+
+/**
+ * Insert a clipboard text item with an EXPLICIT sensitive TTL (PG-3 / 349q).
+ *
+ * Preferred over [addClipboardItem] for new code — passes the user's configured
+ * [sensitiveTtlSecs] so the expiry matches their settings exactly.
+ * [sensitiveTtlSecs] == 0 → auto-wipe disabled (no expires_at stamped).
+ * Sensitive items are STORED (not dropped) with is_sensitive=true + expires_at.
+ *
+ * Throws [CopypasteException.DatabaseError] on a native DB error.
+ * Returns empty string in stub mode.
+ */
+@Throws(CopypasteException::class)
+fun storeClipboardItem(dbPath: String, key: ByteArray, text: String, sensitiveTtlSecs: Long): String {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "storeClipboardItem: stub — native library not loaded")
+        return ""
+    }
+    return try {
+        uniffi.copypaste_android.storeClipboardItem(
+            dbPath = dbPath,
+            key = key.toUByteList(),
+            text = text,
+            sensitiveTtlSecs = sensitiveTtlSecs.toULong(),
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "storeClipboardItem failed") }
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "storeClipboardItem failed")
+    }
+}
+
+/**
+ * One-round-trip sensitivity verdict + auto-wipe expiry for a clipboard item at
+ * capture time (PG-3 / 349q). Returns [uniffi.copypaste_android.SensitiveCaptureDecision] with:
+ *   - [isSensitive]: true when confidence >= 0.70 (same gate as macOS daemon).
+ *   - [kind]: "AwsKey" / "CreditCard" / … or null when not sensitive.
+ *   - [expiresAtMs]: Unix-ms expiry (now + ttl*1000), or null when ttl==0 or not sensitive.
+ *
+ * Returns a non-sensitive decision (isSensitive=false) in stub mode.
+ */
+fun sensitiveCaptureDecision(
+    text: String,
+    nowUnixMs: Long,
+    sensitiveTtlSecs: Long,
+): uniffi.copypaste_android.SensitiveCaptureDecision {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "sensitiveCaptureDecision: stub — returns non-sensitive")
+        return uniffi.copypaste_android.SensitiveCaptureDecision(
+            isSensitive = false,
+            kind = null,
+            expiresAtMs = null,
+        )
+    }
+    return try {
+        uniffi.copypaste_android.sensitiveCaptureDecision(
+            text = text,
+            nowUnixMs = nowUnixMs,
+            sensitiveTtlSecs = sensitiveTtlSecs.toULong(),
+        )
+    } catch (e: Exception) {
+        Log.w(TAG, "sensitiveCaptureDecision: native call failed: ${e.message}")
+        uniffi.copypaste_android.SensitiveCaptureDecision(
+            isSensitive = false,
+            kind = null,
+            expiresAtMs = null,
+        )
+    }
+}
+
+/**
+ * Search the local FTS5 index for items matching [query] (PG-17 / mxoq).
+ * Returns up to [limit] [uniffi.copypaste_android.SearchResultItem]s in FTS5 rank order.
+ * Returns empty list for a blank query or in stub mode.
+ *
+ * Throws [CopypasteException.DatabaseError] on I/O failure.
+ */
+@Throws(CopypasteException::class)
+fun ftsSearch(
+    dbPath: String,
+    key: ByteArray,
+    query: String,
+    limit: Int,
+): List<uniffi.copypaste_android.SearchResultItem> {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "ftsSearch: stub — returns empty")
+        return emptyList()
+    }
+    return try {
+        uniffi.copypaste_android.ftsSearch(
+            dbPath = dbPath,
+            key = key.toUByteList(),
+            query = query,
+            limit = limit.toUInt(),
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "ftsSearch failed") }
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "ftsSearch failed")
+    }
+}
+
+/**
+ * Return a page of clipboard history in lamport-clock order (PG-19 / o0t3).
+ * Pinned items come first (by pin_order), then unpinned by
+ * lamport_ts DESC, wall_time DESC, origin_device_id ASC.
+ * Returns empty list in stub mode.
+ *
+ * Throws [CopypasteException.DatabaseError] on I/O failure.
+ */
+@Throws(CopypasteException::class)
+fun getHistoryPage(
+    dbPath: String,
+    key: ByteArray,
+    limit: Int,
+    offset: Int,
+): List<uniffi.copypaste_android.HistoryItem> {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "getHistoryPage: stub — returns empty")
+        return emptyList()
+    }
+    return try {
+        uniffi.copypaste_android.getHistoryPage(
+            dbPath = dbPath,
+            key = key.toUByteList(),
+            limit = limit.toUInt(),
+            offset = offset.toUInt(),
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "getHistoryPage failed") }
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "getHistoryPage failed")
+    }
+}
+
+/**
+ * Classify [text] and return its stable uppercase kind label (e.g. "URL", "CODE")
+ * (PG-16 / 89ve). Delegates to the canonical Rust classifier — single source of truth.
+ * Returns "TEXT" in stub mode or on a caught panic.
+ */
+fun classifyTextKind(text: String): String {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "classifyTextKind: stub — returns TEXT")
+        return "TEXT"
+    }
+    return try {
+        uniffi.copypaste_android.classifyTextKind(text)
+    } catch (e: Exception) {
+        Log.w(TAG, "classifyTextKind: native call failed: ${e.message}")
+        "TEXT"
     }
 }
 
@@ -387,7 +572,7 @@ fun derive_cloud_sync_key(passphrase: String): ByteArray {
     return try {
         uniffi.copypaste_android.deriveCloudSyncKey(passphrase).toByteArray()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.EncryptionFailed(e.message ?: "derive_cloud_sync_key failed")
+        throw e.toAppException { CopypasteException.EncryptionFailed(it ?: "derive_cloud_sync_key failed") }
     } catch (e: Exception) {
         throw CopypasteException.EncryptionFailed(e.message ?: "derive_cloud_sync_key failed")
     }
@@ -417,7 +602,7 @@ fun cloud_encrypt(itemId: String, plaintext: ByteArray, syncKeyBytes: ByteArray)
             syncKeyBytes = syncKeyBytes.toUByteList(),
         ).toByteArray()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.EncryptionFailed(e.message ?: "cloud_encrypt failed")
+        throw e.toAppException { CopypasteException.EncryptionFailed(it ?: "cloud_encrypt failed") }
     } catch (e: Exception) {
         throw CopypasteException.EncryptionFailed(e.message ?: "cloud_encrypt failed")
     }
@@ -447,7 +632,7 @@ fun cloud_decrypt(itemId: String, blob: ByteArray, syncKeyBytes: ByteArray): Byt
             syncKeyBytes = syncKeyBytes.toUByteList(),
         ).toByteArray()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DecryptionFailed(e.message ?: "cloud_decrypt failed")
+        throw e.toAppException { CopypasteException.DecryptionFailed(it ?: "cloud_decrypt failed") }
     } catch (e: Exception) {
         throw CopypasteException.DecryptionFailed(e.message ?: "cloud_decrypt failed")
     }
@@ -481,7 +666,7 @@ fun relay_inbox_id(syncKeyBytes: ByteArray): String {
     return try {
         uniffi.copypaste_android.relayInboxId(syncKey = syncKeyBytes.toUByteList())
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.EncryptionFailed(e.message ?: "relay_inbox_id failed")
+        throw e.toAppException { CopypasteException.EncryptionFailed(it ?: "relay_inbox_id failed") }
     } catch (e: Exception) {
         throw CopypasteException.EncryptionFailed(e.message ?: "relay_inbox_id failed")
     }
@@ -507,7 +692,7 @@ fun relay_public_key_b64(syncKeyBytes: ByteArray): String {
     return try {
         uniffi.copypaste_android.relayPublicKeyB64(syncKey = syncKeyBytes.toUByteList())
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.EncryptionFailed(e.message ?: "relay_public_key_b64 failed")
+        throw e.toAppException { CopypasteException.EncryptionFailed(it ?: "relay_public_key_b64 failed") }
     } catch (e: Exception) {
         throw CopypasteException.EncryptionFailed(e.message ?: "relay_public_key_b64 failed")
     }
@@ -603,7 +788,7 @@ fun startPairing(deviceId: String, deviceName: String): PairingQrResult {
         PairingQrResult(qr = wrapPairingDeepLink(payload.qr), pakePassword = payload.pakePassword)
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         Log.e(TAG, "startPairing: native call failed — refusing to emit stub QR: ${e.message}", e)
-        throw CopypasteException.EncryptionFailed(e.message ?: "buildPairingQr failed")
+        throw e.toAppException { CopypasteException.EncryptionFailed(it ?: "buildPairingQr failed") }
     } catch (e: Exception) {
         Log.e(TAG, "startPairing: native call threw — refusing to emit stub QR: ${e.message}", e)
         throw IllegalStateException("startPairing failed: ${e.message}", e)
@@ -749,7 +934,7 @@ fun revokeDeviceAudit(dbPath: String, key: ByteArray, fingerprint: String, name:
             name = name,
         ).toLong()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "revokeDeviceAudit failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "revokeDeviceAudit failed") }
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "revokeDeviceAudit failed")
     }
@@ -771,7 +956,7 @@ fun listRevokedFingerprints(dbPath: String, key: ByteArray): List<String> {
     return try {
         uniffi.copypaste_android.listRevokedFingerprints(dbPath = dbPath, key = key.toUByteList())
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "listRevokedFingerprints failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "listRevokedFingerprints failed") }
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "listRevokedFingerprints failed")
     }
@@ -793,7 +978,7 @@ fun listRevokedPeers(dbPath: String, key: ByteArray): List<RevokedPeerInfo> {
         uniffi.copypaste_android.listRevokedPeers(dbPath = dbPath, key = key.toUByteList())
             .map { RevokedPeerInfo(it.fingerprint, it.name, it.revokedAt) }
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "listRevokedPeers failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "listRevokedPeers failed") }
     } catch (e: Exception) {
         throw CopypasteException.DatabaseError(e.message ?: "listRevokedPeers failed")
     }
@@ -938,7 +1123,7 @@ fun startP2pListener(
             actualPort = handle.actualPort.toInt(),
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "startP2pListener failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "startP2pListener failed") }
     }
 }
 
@@ -956,7 +1141,7 @@ fun pollP2pListener(listenerId: Long): List<uniffi.copypaste_android.SyncedItem>
     return try {
         uniffi.copypaste_android.pollP2pListener(listenerId.toULong())
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "pollP2pListener failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "pollP2pListener failed") }
     }
 }
 
@@ -983,7 +1168,7 @@ fun updateP2pListenerPeers(
             sessionKeys = sessionKeys.toGeneratedSessionKeys(),
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "updateP2pListenerPeers failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "updateP2pListenerPeers failed") }
     }
 }
 
@@ -1000,7 +1185,7 @@ fun stopP2pListener(listenerId: Long) {
     try {
         uniffi.copypaste_android.stopP2pListener(listenerId.toULong())
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "stopP2pListener failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "stopP2pListener failed") }
     }
 }
 
@@ -1078,7 +1263,7 @@ fun startDiscovery(
             localIp = localIp,
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "startDiscovery failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "startDiscovery failed") }
     }
 }
 
@@ -1109,7 +1294,7 @@ fun listDiscovered(pairedFingerprints: List<String>): List<DiscoveredPeer> {
     return try {
         uniffi.copypaste_android.listDiscovered(pairedFingerprints)
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "listDiscovered failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "listDiscovered failed") }
     }
 }
 
@@ -1161,7 +1346,7 @@ fun pairWithDiscovered(
             localIp = localIp,
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "pairWithDiscovered failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "pairWithDiscovered failed") }
     }
 }
 
@@ -1183,7 +1368,7 @@ fun pairGetSas(): PairStatus {
     return try {
         uniffi.copypaste_android.pairGetSas()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "pairGetSas failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "pairGetSas failed") }
     }
 }
 
@@ -1203,7 +1388,7 @@ fun pairConfirmSas(accept: Boolean) {
     try {
         uniffi.copypaste_android.pairConfirmSas(accept)
     } catch (e: uniffi.copypaste_android.CopypasteException) {
-        throw CopypasteException.DatabaseError(e.message ?: "pairConfirmSas failed")
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "pairConfirmSas failed") }
     }
 }
 

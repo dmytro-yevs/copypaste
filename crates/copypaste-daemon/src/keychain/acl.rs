@@ -36,6 +36,11 @@
 //! lookup) and idempotent — once the entry already has the correct trust
 //! list we skip the rewrite.
 
+// reason: raw FFI bindings to macOS Security.framework APIs use C naming
+// conventions (non_snake_case functions like SecAccessCreate, non_upper_case
+// constants like kSecACLAuthorizationAnyOperation). The `deprecated` lint fires
+// on SecKeychainItem* APIs that have no replacement in security-framework 2.x
+// for the ACL operations we need (SecAccessCreate, SecTrustedApplicationCreateFromPath).
 #![allow(non_snake_case, non_upper_case_globals, deprecated)]
 
 use std::ffi::CString;

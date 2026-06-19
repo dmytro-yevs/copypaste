@@ -15,7 +15,9 @@ use tower_governor::key_extractor::{KeyExtractor, PeerIpKeyExtractor, SmartIpKey
 use tower_governor::GovernorLayer;
 
 use crate::api::metrics;
+use crate::auth::BearerToken;
 use crate::config::RelayConfig;
+use crate::error::RelayError;
 use crate::middleware::rate_limit::{
     PER_DEVICE_BURST_SIZE, PER_DEVICE_PER_SECOND, PER_IP_BURST_SIZE, PER_IP_PER_SECOND,
 };
@@ -287,14 +289,39 @@ async fn stats_handler(State(_state): State<AppState>) -> impl IntoResponse {
 
 /// GET /devices — list registered device IDs only.
 ///
+/// Requires a valid `Authorization: Bearer <token>` from any registered device.
+/// The token is verified against the complete device set (P2 7185 — previously
+/// unauthenticated, allowing enumeration of sync-key-derived inbox UUIDs).
+///
 /// Returns only opaque device IDs. Bearer tokens are **never** included
 /// (they would let anyone hijack the device). Other public fields like
 /// `public_key_b64` are exposed via the per-device endpoint `GET /devices/:id`.
-async fn list_devices_handler(State(state): State<AppState>) -> impl IntoResponse {
+async fn list_devices_handler(
+    State(state): State<AppState>,
+    BearerToken(token): BearerToken,
+) -> Result<impl IntoResponse, RelayError> {
     // Survive mutex poisoning (security INFO #21).
     let store = state.lock().unwrap_or_else(|e| e.into_inner());
+
+    // P2 7185: authenticate the caller — any device holding a currently-valid
+    // token may enumerate the device list. `verify_token` per device_id handles
+    // constant-time comparison and expiry; we try every device and accept if any
+    // matches. Using `verify_token` (vs. iterating TokenEntry directly) ensures
+    // we always go through the same clock-fail-closed and ct_eq path.
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs() as i64);
+    let authenticated = store
+        .devices
+        .keys()
+        .any(|id| store.verify_token_at(id, &token, now_unix).is_ok());
+    if !authenticated {
+        return Err(RelayError::Unauthorized);
+    }
+
     let device_ids = store.list_devices();
-    axum::Json(serde_json::json!({ "devices": device_ids }))
+    Ok(axum::Json(serde_json::json!({ "devices": device_ids })))
 }
 
 // ---------------------------------------------------------------------------

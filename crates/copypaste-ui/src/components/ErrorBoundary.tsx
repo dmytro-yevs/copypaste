@@ -55,9 +55,8 @@ export class ErrorBoundary extends Component<
           The daemon may be unavailable, or this screen failed to load. The rest
           of the app is still usable.
         </div>
-        <div className="max-w-md break-words text-[11px] text-ide-faint">
-          {error.message || String(error)}
-        </div>
+        {/* Error detail is logged by componentDidCatch — not rendered here
+            to avoid leaking filesystem paths or internal strings into the DOM. */}
         <button
           type="button"
           onClick={this.handleRetry}

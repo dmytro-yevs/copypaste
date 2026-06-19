@@ -32,6 +32,14 @@ pub fn run(socket_path: &Path, raw: bool) -> Result<()> {
     let expires_in = data["expires_in_secs"].as_u64().unwrap_or(0);
 
     if raw {
+        // P2-jqcp: warn before printing so the token does not appear in
+        // terminal scroll-back without a visible risk reminder. Use stderr
+        // so the token on stdout stays pipeable/scriptable while the warning
+        // is always visible to an interactive user.
+        eprintln!(
+            "WARNING: this pairing token is single-use and expires in {expires_in}s. \
+             Do not share it — anyone who scans or reads it can pair with your device."
+        );
         println!("{payload}");
         return Ok(());
     }

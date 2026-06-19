@@ -97,6 +97,32 @@ export class IpcError extends Error {
 }
 
 /**
+ * ro0r: Exponential-backoff retry parameters for `migration_in_progress`.
+ *
+ * When the daemon replies with error_code "migration_in_progress" the DB
+ * migration is briefly in flight and the request should be retried shortly.
+ * We retry up to MAX_MIGRATION_RETRIES times with the backoff schedule below
+ * (250 ms → 500 ms → 1000 ms → 2000 ms → 2000 ms …) before giving up and
+ * re-throwing the original IpcError so the caller sees it.
+ *
+ * Only "migration_in_progress" is retried — all other error codes propagate
+ * immediately. This is intentional: retrying arbitrary errors would mask bugs
+ * and create unpredictable behaviour.
+ */
+const MAX_MIGRATION_RETRIES = 5;
+const MIGRATION_BASE_DELAY_MS = 250;
+const MIGRATION_MAX_DELAY_MS = 2000;
+
+function migrationDelay(attempt: number): Promise<void> {
+  // Exponential backoff: 250, 500, 1000, 2000, 2000, …
+  const ms = Math.min(
+    MIGRATION_BASE_DELAY_MS * Math.pow(2, attempt),
+    MIGRATION_MAX_DELAY_MS
+  );
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
  * Call a daemon method over the Unix-socket bridge. Resolves to the daemon's
  * `data` payload on success; throws `IpcError` on a daemon error and on a
  * transport failure (e.g. the daemon being offline -> code "daemon_offline").
@@ -105,43 +131,82 @@ export class IpcError extends Error {
  * daemon speaks a version higher than {@link CURRENT_PROTOCOL_VERSION} the
  * client may be unable to handle future field changes — a warning is surfaced
  * via {@link protocolMismatchHandler} (defaults to `console.warn`).
+ *
+ * ro0r: When the daemon replies with error_code "migration_in_progress", the
+ * call is automatically retried with exponential backoff (up to 5 attempts,
+ * 250 ms → 2 s cap) before propagating the error. No other error codes are
+ * retried — only "migration_in_progress".
  */
 export async function ipcCall<T = unknown>(
   method: string,
   params?: Record<string, unknown>
 ): Promise<T> {
-  let reply: IpcReply;
-  try {
-    reply = await invoke<IpcReply>("ipc_call", { method, params: params ?? null });
-  } catch (e) {
-    // Transport-level failures come back as a string like "daemon_offline:/path".
-    const raw = String(e);
-    const code = raw.split(":", 1)[0] || null;
-    throw new IpcError(raw, code);
-  }
-
-  // ADR-007: check protocol version on every reply. The field is optional
-  // because (a) the Tauri bridge does not yet forward it and (b) old daemon
-  // builds predate the field — both cases arrive as `undefined`, which we
-  // treat as "no mismatch detected" rather than a false alarm.
-  const daemonVersion = reply.protocol_version;
-  if (daemonVersion !== undefined && daemonVersion !== CURRENT_PROTOCOL_VERSION) {
-    const handler = protocolMismatchHandler;
-    if (handler !== null) {
-      handler(daemonVersion);
-    } else {
-      console.warn(
-        `[copypaste] IPC protocol version mismatch: daemon speaks v${daemonVersion}, ` +
-        `client expects v${CURRENT_PROTOCOL_VERSION}. ` +
-        "Please upgrade the CopyPaste app or restart the daemon."
-      );
+  // ro0r: retry loop for migration_in_progress (only). All other errors fall
+  // through immediately. `attempt` starts at 0; the loop runs until we either
+  // succeed, hit an unretriable error, or exhaust MAX_MIGRATION_RETRIES.
+  for (let attempt = 0; ; attempt++) {
+    let reply: IpcReply;
+    try {
+      reply = await invoke<IpcReply>("ipc_call", { method, params: params ?? null });
+    } catch (e) {
+      // Transport-level failures come back as a string like "daemon_offline:/path".
+      const raw = String(e);
+      const code = raw.split(":", 1)[0] || null;
+      throw new IpcError(raw, code);
     }
-  }
 
-  if (!reply.ok) {
-    throw new IpcError(reply.error ?? "unknown daemon error", reply.error_code);
+    // ADR-007: check protocol version on every reply. The field is optional
+    // because (a) the Tauri bridge did not forward it before this fix and (b)
+    // old daemon builds predate the field — both cases arrive as `undefined`,
+    // which we treat as "no mismatch detected" rather than a false alarm.
+    const daemonVersion = reply.protocol_version;
+    if (daemonVersion !== undefined && daemonVersion !== CURRENT_PROTOCOL_VERSION) {
+      const handler = protocolMismatchHandler;
+      if (handler !== null) {
+        handler(daemonVersion);
+      } else {
+        console.warn(
+          `[copypaste] IPC protocol version mismatch: daemon speaks v${daemonVersion}, ` +
+          `client expects v${CURRENT_PROTOCOL_VERSION}. ` +
+          "Please upgrade the CopyPaste app or restart the daemon."
+        );
+      }
+    }
+
+    if (!reply.ok) {
+      // Also fire protocolMismatchHandler on the daemon's explicit version-mismatch
+      // error code ("n" / "version_mismatch"). This covers older daemons that reject
+      // the request before emitting the protocol_version field in the reply.
+      const code = reply.error_code ?? null;
+      // ERR_CODE_VERSION_MISMATCH is the string "version_mismatch" (verified in
+      // protocol.rs / copypaste-ipc error.rs). The earlier "n" alias was dead
+      // code — "n" is the redacted-secret field marker, not an error code.
+      if (code === "version_mismatch") {
+        const handler = protocolMismatchHandler;
+        if (handler !== null) {
+          // Pass CURRENT_PROTOCOL_VERSION + 1 as a sentinel so the handler knows
+          // the daemon is ahead (exact daemon version not available at error time).
+          handler(CURRENT_PROTOCOL_VERSION + 1);
+        } else {
+          console.warn(
+            "[copypaste] Daemon rejected request due to protocol version mismatch. " +
+            "Please upgrade the CopyPaste app or restart the daemon."
+          );
+        }
+      }
+
+      // ro0r: retry only on migration_in_progress — a transient state where the
+      // daemon's SQLite migration is briefly in flight. All other error codes
+      // are not retried and propagate to the caller immediately.
+      if (code === "migration_in_progress" && attempt < MAX_MIGRATION_RETRIES) {
+        await migrationDelay(attempt);
+        continue; // retry the request
+      }
+
+      throw new IpcError(reply.error ?? "unknown daemon error", code);
+    }
+    return reply.data as T;
   }
-  return reply.data as T;
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +293,24 @@ export interface HistoryPage {
 }
 
 export interface AppSettings {
+  /**
+   * j9xj (PG-30): Master sync kill-switch — Android parity.
+   * When false, ALL sync transports (P2P, Supabase cloud, relay) are disabled
+   * regardless of their individual settings. When true (default), individual
+   * transport switches apply as normal.
+   *
+   * ⚠️ DAEMON-SIDE STUB: This field is accepted by the UI and sent via
+   * set_config, but the daemon's AppConfig / copypaste-ipc crate does NOT yet
+   * have a `sync_enabled` field. The daemon will silently ignore this key until
+   * `AppConfig` in `crates/copypaste-core/src/config/mod.rs` (and the
+   * corresponding `copypaste-ipc` IPC types) add `sync_enabled: bool` (default
+   * true). Until then the toggle is persisted in set_config payloads but has no
+   * runtime effect on the daemon. See bd issue CopyPaste-j9xj for the follow-up.
+   *
+   * `null` / absent = preserve stored value. Maps to `AppConfig::sync_enabled`
+   * once the daemon side is implemented.
+   */
+  sync_enabled?: boolean | null;
   p2p_enabled: boolean;
   supabase_url: string | null;
   supabase_anon_key: string | null;
@@ -274,19 +357,41 @@ export interface AppSettings {
    */
   lan_visibility?: boolean | null;
   /**
+   * When true (daemon default), incoming synced clipboard items are automatically
+   * written to the local system clipboard so the device is always up-to-date.
+   * When false, synced items are stored in history but never applied to the
+   * active clipboard without an explicit paste action. `null` / absent = preserve
+   * stored value. Maps to `AppConfig::auto_apply_synced_clip` in copypaste-core.
+   */
+  auto_apply_synced_clip?: boolean | null;
+  /**
    * True when a Supabase GoTrue email is stored in the daemon's config.
    * The daemon never returns the email itself — only this presence flag.
-   * Read-only; ignored by `set_config`. Maps to `AppConfig::supabase_email`
-   * after redaction in `redact_config_secrets`.
+   * Read-only from `get_config`; ignored when `set_config` omits it.
+   * Maps to `AppConfig::supabase_email` after redaction in `redact_config_secrets`.
    */
   supabase_email_set?: boolean;
   /**
    * True when a Supabase GoTrue password is stored in the daemon's config.
    * The daemon never returns the password itself — only this presence flag.
-   * Read-only; ignored by `set_config`. Maps to `AppConfig::supabase_password`
-   * after redaction in `redact_config_secrets`.
+   * Read-only from `get_config`; ignored when `set_config` omits it.
+   * Maps to `AppConfig::supabase_password` after redaction in `redact_config_secrets`.
    */
   supabase_password_set?: boolean;
+  /**
+   * Supabase GoTrue email for email+password sign-in. Write-only: sent via
+   * `set_config` to the daemon; never returned by `get_config` (only the
+   * `supabase_email_set` presence flag is returned). The daemon persists it
+   * in config.toml. `null` / absent = preserve stored value.
+   */
+  supabase_email?: string | null;
+  /**
+   * Supabase GoTrue password for email+password sign-in. Write-only: sent via
+   * `set_config` to the daemon; never returned by `get_config` (only the
+   * `supabase_password_set` presence flag is returned). Never logged or echoed.
+   * `null` / absent = preserve stored value.
+   */
+  supabase_password?: string | null;
 }
 
 /**
@@ -353,6 +458,16 @@ export async function probeStatus(): Promise<StatusProbe> {
 export interface SyncStatus {
   passphrase_set: boolean;
   supabase_configured: boolean;
+  /**
+   * Presence flags for the GoTrue account credentials (PG-13 / jhvl). The daemon
+   * redacts `supabase_email`/`supabase_password` to `n: bool` on read; these expose
+   * that "is set" state so SettingsView can show a "set ✓" hint without ever
+   * receiving the secret. Optional: undefined when the daemon does not surface them
+   * (the hint is simply hidden). For the hint to display, the daemon's
+   * get_sync_status (or the redacted config) must carry these flags.
+   */
+  supabase_email_set?: boolean;
+  supabase_password_set?: boolean;
   signed_in: boolean;
   /** Unix epoch milliseconds of last sync, or null if never synced. */
   last_sync_ms: number | null;
@@ -726,6 +841,53 @@ export const api = {
     ipcCall<{ items: { id: string }[] }>("search", { query, limit }).then(
       (r) => r.items ?? []
     ),
+
+  // ---------------------------------------------------------------------------
+  // 85n9: Backup / Restore — export and import clipboard history as JSON
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Export clipboard history from the daemon.
+   *
+   * The daemon verb is "export". Params:
+   *   limit            — max items to export (0 = no cap; daemon default is 0).
+   *   include_sensitive — when true, sensitive items are included in plaintext;
+   *                       when false (default) sensitive items are omitted.
+   *
+   * The reply `data` is the bulk JSON object `{ items: [...] }` where each item
+   * carries `content_type`, `content_bytes_b64`, `created_at_ms`, and `metadata`.
+   * This is the exact shape the daemon's `import` verb expects on round-trip.
+   *
+   * The UI triggers a browser download of the JSON via Blob + anchor — no fs
+   * capability is needed (same pattern as FileChip's triggerDownload).
+   *
+   * Throws IpcError when the daemon does not support the export verb (older
+   * daemon), or on any other daemon error.
+   */
+  exportItems: (
+    includeSensitive = false,
+    limit = 0,
+  ): Promise<{ items: unknown[] }> =>
+    ipcCall<{ items: unknown[] }>("export", {
+      limit,
+      include_sensitive: includeSensitive,
+    }),
+
+  /**
+   * Import clipboard items into the daemon.
+   *
+   * The daemon verb is "import". Params:
+   *   items — the array from a previous exportItems() call (or a compatible
+   *            JSON export file). The daemon deduplicates and recomputes
+   *            sensitivity on each item (CopyPaste-vuxs).
+   *
+   * Returns `{ inserted: number; skipped: number }` on success.
+   * Throws IpcError on failure.
+   */
+  importItems: (
+    items: unknown[],
+  ): Promise<{ inserted: number; skipped: number }> =>
+    ipcCall<{ inserted: number; skipped: number }>("import", { items }),
 };
 
 /** Format Unix epoch milliseconds for display. */
@@ -753,6 +915,18 @@ export function isImageType(ct: string): boolean {
  */
 export function ipcErrorMessage(err: unknown, fallback: string): string {
   return err instanceof IpcError ? err.message : fallback;
+}
+
+/**
+ * Returns true when the error represents the daemon being alive but not yet
+ * ready to serve requests (e.g. still initialising its database). Daemon
+ * error code: `"ipc_not_ready"` or the legacy uppercase variant
+ * `"IPC_NOT_READY"`. Views should show a friendly "starting up" state rather
+ * than a hard error when this returns true.
+ */
+export function isIpcNotReady(err: unknown): boolean {
+  if (!(err instanceof IpcError)) return false;
+  return err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY";
 }
 
 // ---------------------------------------------------------------------------

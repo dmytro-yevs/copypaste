@@ -772,8 +772,9 @@ fun CopyPasteTopBar(
  * white (light) / deep (dark) glass fill so the opaque canvas behind it bleeds
  * through. When false, the card is the fully opaque theme elevated surface.
  *
- * Styleguide tier-2 .surface-card: 14 dp radius, bright .5px white glass rim,
- * soft tinted float shadow (0 4px 14px rgb(60 60 90 /.14)). [accent] still tints
+ * Styleguide tier-2 .surface-card: 12 dp radius (parity with macOS 12 px, PG-57),
+ * bright .5px white glass rim, soft tinted float shadow (0 4px 14px rgb(60 60 90 /.14)).
+ * [accent] still tints
  * a SEMANTIC border (danger/success) when the caller overrides the default — that
  * sits over the glass rim so per-screen status cards keep their colour cue.
  */
@@ -786,7 +787,8 @@ fun CopyPasteCard(
     content: @Composable (androidx.compose.foundation.layout.ColumnScope.() -> Unit),
 ) {
     val dark = isDarkTheme()
-    // oha3/5686: styleguide card radius is 14 dp (--radius-card), not 12.
+    // PG-57: card radius is now 12 dp (--radius-card), aligned with macOS 12 px
+    // (was 14 dp per oha3/5686 — that reference is now superseded by the parity fix).
     val cardShape = RadiusCard
     // Only paint an explicit Material border when the caller overrides `accent`
     // with a SEMANTIC tint; the default outline is superseded by the bright glass
@@ -795,10 +797,12 @@ fun CopyPasteCard(
 
     // vk12: drop Material tonal elevation entirely; the soft tinted float shadow
     // is drawn behind the card via glassFloatShadow (CARD tier 0 4px 14px).
+    // Shadow radius tracks RadiusCard (12 dp, PG-57) so the shadow silhouette
+    // matches the card's actual corner clip.
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.CARD, 14.dp) else Modifier),
+            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.CARD, 12.dp) else Modifier),
         shape = cardShape,
         colors = CardDefaults.cardColors(
             containerColor = Color.Transparent,

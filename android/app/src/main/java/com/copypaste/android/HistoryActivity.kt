@@ -152,7 +152,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -246,7 +248,7 @@ class HistoryActivity : ComponentActivity() {
 // Confirmation dialog enum
 // ─────────────────────────────────────────────────────────────────────────────
 
-private enum class ConfirmAction { CLEAR_UNPINNED, DELETE_SELECTED }
+private enum class ConfirmAction { CLEAR_UNPINNED, CLEAR_ALL, DELETE_SELECTED }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Relative time helper — §5 tabular-nums timestamps
@@ -271,10 +273,10 @@ private fun relativeTime(ms: Long): String {
 /**
  * Split a URL [raw] into (host, path) for the §-13 bold-host / dim-path render.
  *
- * The host segment includes the scheme prefix (e.g. "https://example.com") so the
- * displayed text stays a faithful, copy-equivalent prefix of the original URL;
- * the path is everything after the host (path + query + fragment). Returns
- * (raw, "") when the URL cannot be parsed so the caller still shows the full text.
+ * PG-52: aligns with macOS parseUrl which uses `new URL(raw).hostname` for the
+ * bold part and `pathname + search + hash` for the dim suffix. The scheme is not
+ * shown (matches macOS — the hostname alone is the visual anchor).
+ * Returns (raw, "") when the URL cannot be parsed so the caller shows the full text.
  */
 private fun splitUrl(raw: String): Pair<String, String> {
     val schemeSep = raw.indexOf("://")
@@ -284,9 +286,12 @@ private fun splitUrl(raw: String): Pair<String, String> {
     val pathStart = raw
         .drop(afterScheme)
         .indexOfFirst { it == '/' || it == '?' || it == '#' }
-    if (pathStart < 0) return raw to ""  // host only, no path
-    val cut = afterScheme + pathStart
-    return raw.substring(0, cut) to raw.substring(cut)
+    val hostEnd = if (pathStart < 0) raw.length else afterScheme + pathStart
+    val host = raw.substring(afterScheme, hostEnd)
+    if (host.isEmpty()) return raw to ""
+    // path = everything after the host (path + query + fragment), empty when host-only.
+    val path = if (pathStart < 0) "" else raw.substring(hostEnd)
+    return host to path
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -727,12 +732,14 @@ fun HistoryScreen(
             action = action,
             itemCount = when (action) {
                 ConfirmAction.CLEAR_UNPINNED -> items.count { !it.pinned }
+                ConfirmAction.CLEAR_ALL -> items.size
                 ConfirmAction.DELETE_SELECTED -> selectedIds.size
             },
             onConfirm = {
                 pendingConfirm = null
                 when (action) {
                     ConfirmAction.CLEAR_UNPINNED -> viewModel.clearUnpinned()
+                    ConfirmAction.CLEAR_ALL -> viewModel.clearAll()
                     ConfirmAction.DELETE_SELECTED -> {
                         viewModel.deleteItems(selectedIds.toList())
                         selectionMode = false
@@ -756,6 +763,8 @@ fun HistoryScreen(
         containerColor = if (translucent) Color.Transparent else c.bg,
         topBar = {
             if (selectionMode) {
+                val bulkCopiedMsg = stringResource(R.string.snackbar_bulk_copied)
+                val bulkCopiedNoTextMsg = stringResource(R.string.snackbar_bulk_copied_no_text)
                 SelectionTopBar(
                     selectedCount = selectedIds.size,
                     totalCount = sortedItems.size,
@@ -790,6 +799,44 @@ fun HistoryScreen(
                         }
                         selectionMode = false
                         selectedIds = emptySet()
+                    },
+                    // g3z4: bulk-copy — collect selected text items (sorted by recency,
+                    // sensitive items skipped — mirrors desktop Copy All semantics),
+                    // join with "\n\n", and set as the system clipboard primary clip.
+                    onCopySelected = {
+                        val ids = selectedIds
+                        scope.launch {
+                            val repository = ClipboardRepository(ctx)
+                            val key = settings.encryptionKey
+                            // Preserve display order: walk sortedItems (pinned-first then
+                            // by recency) and retain only selected text items that are
+                            // not sensitive. Sensitive items are intentionally excluded
+                            // to avoid silently placing credentials in the clipboard.
+                            val textItems = sortedItems.filter { item ->
+                                item.id in ids && item.isText && !item.isSensitive
+                            }
+                            if (textItems.isEmpty()) {
+                                toastState.show(bulkCopiedNoTextMsg, GlassToastKind.INFO)
+                            } else {
+                                val parts = withContext(Dispatchers.IO) {
+                                    textItems.map { item ->
+                                        repository.loadFullPlaintext(item.id, key)
+                                            ?: item.snippet
+                                    }
+                                }
+                                val joined = parts.joinToString("\n\n")
+                                ClipboardRepository.expectClip(joined)
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                                    as ClipboardManager
+                                cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", joined))
+                                toastState.show(
+                                    bulkCopiedMsg.format(textItems.size),
+                                    GlassToastKind.SUCCESS,
+                                )
+                            }
+                            selectionMode = false
+                            selectedIds = emptySet()
+                        }
                     },
                 )
             } else {
@@ -950,6 +997,21 @@ fun HistoryScreen(
                                                 },
                                             )
                                         }
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    stringResource(R.string.dialog_clear_all_title),
+                                                    color = c.danger,
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Outlined.Delete, null, tint = c.danger)
+                                            },
+                                            onClick = {
+                                                overflowExpanded = false
+                                                pendingConfirm = ConfirmAction.CLEAR_ALL
+                                            },
+                                        )
                                     }
                                 }
                             }
@@ -1040,10 +1102,12 @@ fun HistoryScreen(
                                         text = clearRecentLabel,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = c.accent,
-                                        modifier = Modifier.clickable {
-                                            recentSearches = emptyList()
-                                            settings.recentSearches = emptyList()
-                                        },
+                                        modifier = Modifier
+                                            .semantics { role = Role.Button }
+                                            .clickable(onClickLabel = clearRecentLabel) {
+                                                recentSearches = emptyList()
+                                                settings.recentSearches = emptyList()
+                                            },
                                     )
                                 }
                                 recentSearches.forEach { recent ->
@@ -1477,6 +1541,8 @@ private fun SelectionTopBar(
     onDeleteSelected: () -> Unit,
     onPinSelected: () -> Unit,
     onUnpinSelected: () -> Unit,
+    // g3z4: bulk-copy action — joins selected text items and puts them in the clipboard.
+    onCopySelected: () -> Unit,
 ) {
     val c = LocalIdeColors.current
     val translucent = rememberTranslucency()
@@ -1522,6 +1588,15 @@ private fun SelectionTopBar(
                     )
                 }
                 if (selectedCount > 0) {
+                    // g3z4: bulk-copy — joins selected text items and puts them in the clipboard.
+                    IconButton(onClick = onCopySelected) {
+                        Icon(
+                            Icons.Outlined.ContentCopy,
+                            contentDescription = stringResource(R.string.action_copy_selected),
+                            tint = c.dim,
+                            modifier = Modifier.size(18.dp),
+                        )
+                    }
                     IconButton(onClick = onPinSelected) {
                         Icon(
                             Icons.Outlined.Star,
@@ -1574,11 +1649,14 @@ private fun ConfirmationDialog(
     val c = LocalIdeColors.current
     val title = when (action) {
         ConfirmAction.CLEAR_UNPINNED -> stringResource(R.string.dialog_clear_unpinned_title)
+        ConfirmAction.CLEAR_ALL -> stringResource(R.string.dialog_clear_all_title)
         ConfirmAction.DELETE_SELECTED -> stringResource(R.string.dialog_delete_selected_title)
     }
     val message = when (action) {
         ConfirmAction.CLEAR_UNPINNED ->
             stringResource(R.string.dialog_clear_unpinned_message)
+        ConfirmAction.CLEAR_ALL ->
+            stringResource(R.string.dialog_clear_all_message, itemCount)
         ConfirmAction.DELETE_SELECTED ->
             stringResource(R.string.dialog_delete_selected_message, itemCount)
     }
@@ -1852,9 +1930,9 @@ private fun EmptySearchState(padding: PaddingValues, query: String) {
  * scroll recompositions.
  */
 private fun chipColorFor(kind: String, c: IdeColors): Color = when (kind) {
-    // izio: TEXT→faint (styleguide .b-text = --ide-faint), IMAGE→info/sky (parity web KindChip),
-    // FILE→faint (styleguide .b-file = --ide-faint). All others unchanged.
-    "TEXT"    -> c.faint
+    // PG-49: TEXT→accent (parity macOS KindChip spec §6: TEXT/fallback → accent blue).
+    // IMAGE→info/sky (parity web KindChip), FILE→faint (styleguide .b-file = --ide-faint).
+    "TEXT"    -> c.accent
     "URL"     -> c.info
     "EMAIL"   -> c.success
     "PHONE"   -> c.success
@@ -1971,10 +2049,10 @@ private fun parseHexColor(snippet: String): Color? {
  * Background = c.mute@0.16, glyph = c.faint, icon size = 12dp, radius = 7dp.
  * The icon is chosen by [chipLabel] to match the content kind.
  *
- * Styleguide .item-icon: gentle infinite float (translateY -2px, rotate 0.8deg,
- * 4s ease-in-out infinite). Translated here as a subtle scale pulse (1f→1.04f)
- * that mirrors the vertical float in a rotation-free Compose-safe way.
- * Gated by reducedMotion — zero-duration when animations are disabled.
+ * PG-64 parity: the macOS `.icon-float` @keyframes animation was removed on
+ * macOS (s7ia). Android previously translated it as a subtle scale pulse
+ * (1f→1.04f infinite). The pulse is now removed for parity — the icon is
+ * static, matching the macOS treatment.
  */
 @Composable
 private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
@@ -1995,24 +2073,6 @@ private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
         else      -> Icons.Outlined.ContentCopy   // TEXT / fallback
     }
 
-    // Micro-motion: gentle scale pulse (styleguide .item-icon @keyframes iconFloat).
-    // 4s ease-in-out repeating cycle. Gated by reducedMotion — no-op when off.
-    val reducedMotion = rememberReducedMotion()
-    val iconScale: Float = if (reducedMotion) {
-        1.0f
-    } else {
-        val infiniteTransition = rememberInfiniteTransition(label = "iconFloat_$chipLabel")
-        infiniteTransition.animateFloat(
-            initialValue = 1.0f,
-            targetValue = 1.04f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 2000, easing = EaseOutExpo),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "iconFloatScale",
-        ).value
-    }
-
     Box(
         modifier = Modifier
             .size(26.dp)
@@ -2026,9 +2086,7 @@ private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
             imageVector = icon,
             contentDescription = null,
             tint = colors.faint,
-            modifier = Modifier
-                .size(12.dp)
-                .scale(iconScale),
+            modifier = Modifier.size(12.dp),
         )
     }
 }
@@ -2561,6 +2619,10 @@ private fun HistoryRow(
     else
         Color.Transparent
 
+    // q649: localized labels for the semantics custom actions on this row.
+    val copyActionLabel = stringResource(R.string.cd_copy)
+    val deleteActionLabel = stringResource(R.string.cd_delete)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -2571,8 +2633,8 @@ private fun HistoryRow(
             // 2.1.1 (Keyboard), 2.5.3.
             .semantics {
                 customActions = listOf(
-                    CustomAccessibilityAction("Copy") { onCopy(); true },
-                    CustomAccessibilityAction("Delete") { onDelete(item.id); true },
+                    CustomAccessibilityAction(copyActionLabel) { onCopy(); true },
+                    CustomAccessibilityAction(deleteActionLabel) { onDelete(item.id); true },
                 )
             }
             .scale(rowScale)
@@ -2596,14 +2658,12 @@ private fun HistoryRow(
                     if (selectionMode) {
                         onCheckboxTap()
                     } else if (masked) {
-                        // §10/P1#10: first tap on a masked sensitive row reveals it
-                        // (unblur), matching web's tap-to-reveal. Still surface the
-                        // hint so the user knows a copy needs the explicit action.
+                        // §10/P1#10: first tap on a masked sensitive row reveals it (unblur).
                         revealed = true
-                        onSensitiveTap()
                     } else if (detectedSensitive) {
-                        // Revealed sensitive row: keep the deliberate-copy guard.
-                        onSensitiveTap()
+                        // PG-54: after reveal, tap copies directly (parity macOS auto-copy).
+                        copyFlashTrigger++
+                        onCopy()
                     } else {
                         copyFlashTrigger++   // §5/§8 trigger 90ms success flash
                         onCopy()
@@ -2643,11 +2703,14 @@ private fun HistoryRow(
                 Icon(
                     imageVector = if (isSelected) Icons.Outlined.CheckBox
                                   else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = null,
+                    contentDescription = if (isSelected)
+                        stringResource(R.string.cd_checkbox_deselect)
+                    else
+                        stringResource(R.string.cd_checkbox_select),
                     tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
-                        .clickable { onCheckboxTap() },
+                        .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
                 Spacer(Modifier.width(8.dp))
                 // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
@@ -2749,11 +2812,14 @@ private fun HistoryRow(
                 Icon(
                     imageVector = if (isSelected) Icons.Outlined.CheckBox
                                   else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = null,
+                    contentDescription = if (isSelected)
+                        stringResource(R.string.cd_checkbox_deselect)
+                    else
+                        stringResource(R.string.cd_checkbox_select),
                     tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
-                        .clickable { onCheckboxTap() },
+                        .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
                 Spacer(Modifier.width(8.dp))
                 // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
@@ -2853,11 +2919,14 @@ private fun HistoryRow(
                 Icon(
                     imageVector = if (isSelected) Icons.Outlined.CheckBox
                                   else Icons.Outlined.CheckBoxOutlineBlank,
-                    contentDescription = null,
+                    contentDescription = if (isSelected)
+                        stringResource(R.string.cd_checkbox_deselect)
+                    else
+                        stringResource(R.string.cd_checkbox_select),
                     tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
-                        .clickable { onCheckboxTap() },
+                        .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
                 Spacer(Modifier.width(8.dp))
                 // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
@@ -2917,12 +2986,12 @@ private fun HistoryRow(
                             color = if (detectedSensitive) c.dim else c.text,
                             maxLines = previewLines,
                             overflow = TextOverflow.Ellipsis,
-                            // iuwb: blur radius 8dp→5dp (parity .masked = blur(5px))
+                            // PG-61: blur radius 6dp (parity macOS blur(6px)).
                             // §10/P1#10: blur the real text while masked (tap reveals). On
                             // API < 31 `display` is the bullet mask instead (blur is a no-op
                             // there and must not leak the text), so blur only when canBlur.
                             modifier = if (masked && canBlur)
-                                Modifier.blur(5.dp, BlurredEdgeTreatment.Unbounded)
+                                Modifier.blur(6.dp, BlurredEdgeTreatment.Unbounded)
                             else
                                 Modifier,
                         )
@@ -3087,7 +3156,7 @@ private fun DeviceFilterRow(
         // "All" chip — always first
         item {
             DeviceChip(
-                label = "All",
+                label = stringResource(R.string.device_filter_all),
                 isSelected = selected == "all",
                 onClick = { onSelect("all") },
             )

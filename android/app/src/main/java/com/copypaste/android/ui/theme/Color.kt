@@ -31,9 +31,9 @@ val IdeDivider   = Color(0xFF2E3035)   // row separators (subtler than border)
 
 // ── Interaction states ────────────────────────────────────────────────────
 
-val IdeSelection = Color(0xFF3D8BFF).copy(alpha = 0.16f)  // selected row — accent/16 tint (§3)
+val IdeSelection = Color(0xFF4D8DFF).copy(alpha = 0.16f)  // selected row — accent/16 tint (§3); parity: #4D8DFF matches IdeAccent Liquid-Blue
 val IdeHover     = Color(0xFFFFFFFF).copy(alpha = 0.045f) // surface hover (§3)
-val IdeMultiSel  = Color(0xFF3D8BFF).copy(alpha = 0.20f)  // multi-select fill (§3)
+val IdeMultiSel  = Color(0xFF4D8DFF).copy(alpha = 0.20f)  // multi-select fill (§3); parity: #4D8DFF matches IdeAccent Liquid-Blue
 
 // ── Text hierarchy ────────────────────────────────────────────────────────
 

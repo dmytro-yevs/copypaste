@@ -4,6 +4,7 @@ import {
   api,
   ipcErrorMessage,
   IpcError,
+  isIpcNotReady,
   pairingQrSvg,
   probeStatus,
   type DiscoveredDevice,
@@ -37,10 +38,10 @@ type QrState =
 // Default: blurred (privacy-first). Cleared only when the user explicitly reveals.
 type QrBlur = "blurred" | "revealed";
 
-// Devices load outcomes. `degraded` (daemon up, DB unavailable) and `error`
-// (some other failure) are split out from `offline` so a DB-degraded daemon is
-// no longer mislabeled "Daemon not running."
-type LoadState = "loading" | "offline" | "degraded" | "error" | "ready";
+// Devices load outcomes. `degraded` (daemon up, DB unavailable), `not_ready`
+// (daemon up but still initialising), and `error` (some other failure) are split
+// out from `offline` so each condition gets its own friendly message.
+type LoadState = "loading" | "offline" | "not_ready" | "degraded" | "error" | "ready";
 
 type OwnDeviceState =
   | { status: "loading" }
@@ -502,6 +503,15 @@ function DiscoveredRow({
             {device.device_name || `Device ${device.device_id.slice(0, 8)}`}
           </p>
           <MetaRow label="Addresses" value={ips} />
+          {/* PG-43 / CopyPaste-3ese: Android parity — show a visible hint when the
+              peer has no bootstrap port (bport=null) so the user knows why Pair is
+              disabled, rather than silently greying it out (tooltip-only).
+              Matches Android: "This device does not support secure pairing." */}
+          {!pairable && (
+            <p className="mt-0.5 text-[11px] text-ide-warning">
+              This device does not support secure pairing
+            </p>
+          )}
         </div>
         <button
           onClick={() => onPair(device)}
@@ -900,6 +910,12 @@ export function DevicesView({
         setLoadState("offline");
         return;
       }
+      // Daemon is up but still initialising its database — show a friendly
+      // "starting up" state rather than a hard error.
+      if (isIpcNotReady(e)) {
+        setLoadState("not_ready");
+        return;
+      }
       // The daemon answered but list_peers failed. Probe `status` to tell a
       // DB-degraded daemon (recoverable via History → Reset database) apart from
       // a generic error — previously both fell through to "offline" and the
@@ -1193,6 +1209,20 @@ export function DevicesView({
           title="Clipboard service offline"
           body="The daemon is not running."
           action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
+        />
+      </ViewShell>
+    );
+  }
+
+  // --- Not-ready state (daemon up, still initialising) ---
+  if (loadState === "not_ready") {
+    return (
+      <ViewShell title="Devices" actions={actions}>
+        <EmptyState
+          className="h-full"
+          icon={<Zap width={28} height={28} strokeWidth={1.5} />}
+          title="Starting up…"
+          body="The clipboard service is initialising. Device list will appear in a moment."
         />
       </ViewShell>
     );

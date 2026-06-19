@@ -1,8 +1,20 @@
 package com.copypaste.android
 
 import android.app.Application
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class CopyPasteApp : Application() {
+
+    /**
+     * PG-41: application-scoped coroutine scope used to run background pollers
+     * that must outlive any single Activity (e.g. [DevicesOnlineState.startBackgroundPolling]).
+     * SupervisorJob means one child failure does not cancel siblings.
+     */
+    val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     override fun onCreate() {
         super.onCreate()
         // Belt-and-suspenders: tell UniFFI's findLibraryName() the real .so name
@@ -57,6 +69,18 @@ class CopyPasteApp : Application() {
                 .onFailure {
                     android.util.Log.w("CopyPasteApp", "ClipboardService restore failed: ${it.message}")
                 }
+        }
+
+        // PG-41: populate DevicesOnlineState before any screen is shown so the
+        // sync-status badge has real peer counts from the moment the app starts,
+        // not the binary fallback that appears until DevicesScreen is first opened.
+        // Guard: skip when the native .so is absent — pairedPeers is a plain JSON
+        // pref read (no FFI), but Settings.lastSyncMs may require FFI depending on
+        // future evolution; the guard future-proofs the call.
+        if (isNativeLibraryLoaded) {
+            applicationScope.launch(Dispatchers.IO) {
+                DevicesOnlineState.startBackgroundPolling(settings)
+            }
         }
     }
 }

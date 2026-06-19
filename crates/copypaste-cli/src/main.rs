@@ -74,6 +74,11 @@ enum Commands {
         /// Overwrite the output file if it already exists
         #[arg(long, short)]
         force: bool,
+        /// Include sensitive (flagged) items in the export.
+        /// By default sensitive items are omitted. Use with care — the export
+        /// file contains plaintext content; handle and store it securely.
+        #[arg(long)]
+        include_sensitive: bool,
     },
     /// Watch clipboard in real-time (prints new items as they arrive)
     Watch {
@@ -244,7 +249,8 @@ fn main() {
             limit,
             output,
             force,
-        } => commands::export::run(&socket, limit, output.as_deref(), force),
+            include_sensitive,
+        } => commands::export::run(&socket, limit, output.as_deref(), force, include_sensitive),
         Commands::Watch { interval } => commands::watch::run(&socket, interval),
         Commands::Clear { force } => commands::clear::run(&socket, force),
         Commands::Stats => commands::stats::run(&socket),

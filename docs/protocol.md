@@ -43,8 +43,81 @@ Adding new codes is allowed; renaming or repurposing an existing code is a break
 | `auth_failed`      | Authentication failed.                                               | Wrong credentials, expired token, missing keychain entry.                           |
 | `invalid_argument` | Request was structurally valid JSON but violated the param contract. | Missing required field, wrong type, malformed fingerprint.                          |
 | `not_implemented`  | Method is recognised but not yet implemented.                        | Cloud-sync stubs (`cloud_sign_in`, `cloud_sign_out`) until Supabase wiring lands.   |
-| `ipc_not_ready`    | Daemon is booting — DB or cloud not yet ready.                       | Client raced the daemon's startup; clients should back off and retry, not give up. |
-| `internal_error`   | Catch-all for unexpected daemon-side failures.                       | I/O error, db error, unhandled panic in a handler.                                  |
+| `ipc_not_ready`           | Daemon is booting — DB or cloud not yet ready.                                              | Client raced the daemon's startup; clients should back off and retry, not give up.                      |
+| `internal_error`          | Catch-all for unexpected daemon-side failures.                                              | I/O error, db error, unhandled panic in a handler.                                                      |
+| `version_mismatch`        | Client sent a `protocol_version` outside the daemon's supported range.                      | CLI/UI is too old or too new for this daemon; surface an upgrade prompt — do NOT retry the request.     |
+| `migration_in_progress`   | The v4 key-rotation sweep is still running; ingest writes are temporarily refused.          | Client should back off and retry after a short delay.                                                   |
+| `rate_limited`            | A conflicting single-active operation is already in flight (e.g. a second active pairing). | Wait for the current operation to finish, then retry.                                                    |
+
+## Methods
+
+All methods are defined in [`crates/copypaste-ipc/src/methods.rs`](../crates/copypaste-ipc/src/methods.rs).
+
+### Core clipboard
+
+| Method | Description |
+|---|---|
+| `list` | Fetch a paginated list of clipboard items |
+| `search` | Full-text search over clipboard items |
+| `copy` | Copy a clipboard item back to the system clipboard by id |
+| `delete` | Delete a single clipboard item by id |
+| `delete_all` | Delete all clipboard items (clear history) |
+| `count` | Return the total count of stored clipboard items |
+| `stats` | Return aggregate statistics about the clipboard database |
+| `pin_item` | Pin or unpin a clipboard item (`{id, pinned: bool}`) |
+| `add_file_item` | Ingest a file directly into clipboard history from the UI (`{filename, mime, data_b64}`) |
+
+### Daemon health
+
+| Method | Description |
+|---|---|
+| `status` | Query the running daemon's health / readiness state |
+
+### Import / export
+
+| Method | Description |
+|---|---|
+| `export` | Export clipboard items as a JSON blob |
+| `import` | Bulk-import clipboard items from a JSON blob |
+
+### Private mode
+
+| Method | Description |
+|---|---|
+| `set_private_mode` | Enable or disable clipboard recording pause mode |
+| `get_private_mode` | Query the current private-mode state |
+
+### Configuration and sync
+
+| Method | Description |
+|---|---|
+| `get_config` | Read the current daemon configuration object |
+| `set_config` | Write / merge a partial daemon configuration object |
+| `get_sync_status` | Query the current cloud-sync state |
+| `cloud_test_connection` | Run a live connection diagnostic against the configured cloud backend |
+
+### Pairing (QR)
+
+| Method | Description |
+|---|---|
+| `pair_generate_qr` | Generate a short-lived QR pairing payload |
+
+### Pairing (LAN discovery / SAS)
+
+| Method | Description |
+|---|---|
+| `list_discovered` | List peers visible via mDNS-SD, each tagged `paired` or not |
+| `pair_with_discovered` | Begin SAS pairing as initiator with a discovered peer |
+| `pair_get_sas` | Poll the SAS pairing state machine (`{state, sas?, role?}`) |
+| `pair_confirm_sas` | Deliver the local user's SAS accept/reject decision (`{accept: bool}`) |
+| `pair_abort` | Abort in-flight discovery pairing and reset to `idle` |
+
+### Database maintenance
+
+| Method | Description |
+|---|---|
+| `vacuum` | Run `VACUUM` (and optionally `REINDEX`) on the encrypted database |
+| `reset_database` | Wipe and recreate the database (requires `{confirm: true}`) — usable in degraded mode |
 
 ## Client guidance
 

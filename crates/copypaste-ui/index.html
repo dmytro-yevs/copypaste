@@ -1,15 +1,15 @@
 <!doctype html>
-<!-- Graphite Mist dark defaults (CopyPaste-52mz):
-       data-palette="graphite-mist"  — activates the grey dark palette token layer
+<!-- PARITY-SPEC §0: light-first — default theme is "light" on first paint.
+       App.tsx re-syncs data-theme to the persisted prefs.theme on first render
+       so a saved "dark" preference is honoured immediately after mount.
+       data-palette="graphite-mist"  — activates the grey palette token layer
        data-density="compact"        — 13px pad / 12px gap / 34px row-h
        data-motion="cinematic"       — --speed:.72, full aurora opacity
        data-contrast="balanced"      — readable but not harsh; matches styleguide default
-       data-theme="dark"             — tells the existing light/dark CSS cascade "dark"
-     App.tsx re-syncs data-theme to prefs.theme on first render (which now defaults
-     to "dark" in DEFAULT_PREFS). The palette, density, motion, and contrast attributes
-     are static at launch; a future palette picker will write them dynamically. -->
+     The palette, density, motion, and contrast attributes are static at launch;
+     a future palette picker will write them dynamically. -->
 <html lang="en"
-  data-theme="dark"
+  data-theme="light"
   data-palette="graphite-mist"
   data-density="compact"
   data-motion="cinematic"

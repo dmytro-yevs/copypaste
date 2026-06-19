@@ -1,5 +1,50 @@
 # Changelog
 
+## [Unreleased]
+
+Production-audit remediation pass (`o7me`). 0 P0; all 13 P1 and 19 audit-derived P2
+bugs addressed. Rust changes are pending CI compile (`fmt`/`clippy`/`test` on ≥1.96) —
+see `VERIFICATION_REPORT.md`.
+
+### Security & privacy
+- **Sensitive items never leave the device** (`jbao`, P1-1): the relay/cloud/P2P push
+  paths now skip `is_sensitive` items before any crypto, honoring the
+  `relay-api.md` guarantee that was previously unenforced (items were E2E-encrypted
+  but still uploaded).
+- **App-exclusion fails closed** (`lszh`, P1-2): when `lsappinfo` fails and an exclusion
+  list is set, capture is skipped (was fail-open — password-manager copies could be
+  ingested). The probe also moved off the async runtime (`26pd`, P1-3).
+- **CLI no longer writes the Keychain** (`v6wh`, P1-6): `security-framework` dropped from
+  the CLI; the daemon is the sole Keychain owner. (Residual pw-in-`set_config` tracked: `nq39`.)
+- **Tauri CSP** (`wb2c`, P1-7): strict Content-Security-Policy set (was `null`).
+- **Android DB key** (`xxsw`, P1-8): the raw 32-byte key is no longer retained in the
+  connection cache (re-keyed by SHA-256; evicted on close).
+- **Relay `GET /devices`** (`7185`): now requires bearer auth (was an inbox-UUID enumeration vector).
+- **Detector false-positives** (`fb3e`): over-broad patterns dropped below the auto-wipe
+  floor so benign data is no longer silently deleted; 6 new cloud-credential patterns added (`ozzt`).
+- IPC export gains an `include_sensitive` flag + audit log (`tj9s`); 9 transient key copies
+  wrapped in `Zeroizing` (`iqkm`); `pair-qr --raw` warns on stdout token exposure (`jqcp`).
+
+### Fixed — reliability / data loss
+- **Daemon no longer panics** on a locked-key startup invariant — graceful degraded mode (`oti6`, P1-4).
+- **Linux systemd** `ReadWritePaths` corrected to the XDG path (was a macOS path that
+  silently broke all DB writes) (`68uk`, P1-5).
+- **Startup TTL purge** runs before the socket binds, closing the window where expired
+  sensitive items were still searchable (`ugv7`).
+- IPC error codes corrected: `version_mismatch` on the version gate (`ptb8`); legacy arms
+  tagged `INVALID_ARGUMENT` (`8u2b`).
+
+### Changed — UI
+- **Light-first default theme** per PARITY-SPEC §0 (saved preference still wins) (`3e6g`).
+- Error strings (filesystem paths) sanitized out of the DOM (console-only) (`54h5`).
+- Android Liquid-Blue `IdeSelection`/`IdeMultiSel` → `#4D8DFF` (`vo79`).
+
+### Docs / build
+- Version drift fixed (package.json + Android → 0.7.4) (`9evm`); daemon `rust-version` added (`ivqa`).
+- `relay-api.md`, `SECURITY.md`, `ARCHITECTURE.md`, `protocol.md` corrected to the shipped
+  design; `docs/known-issues.md` created; README Intel/Rosetta + Sonoma note.
+- CI: `cargo audit` retry no longer masks advisories (`4rui`); `ci-matrix` scope broadened.
+
 ## [0.7.4] - 2026-06-15
 
 ### Added

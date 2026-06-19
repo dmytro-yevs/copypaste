@@ -303,6 +303,153 @@ async fn imported_item_is_retrievable_via_copy() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// PG-26: sensitivity recompute — import cannot smuggle a credential as non-sensitive
+// ---------------------------------------------------------------------------
+
+/// PG-26 regression test: if a caller supplies `is_sensitive=false` for an item
+/// whose plaintext is a high-confidence credential (AWS access key), the daemon
+/// must RECOMPUTE sensitivity from the plaintext and store the row as
+/// `is_sensitive=true` — so the TTL auto-wipe fires regardless of the caller flag.
+///
+/// This guards against a tampered export file or a malicious IPC client that sets
+/// `is_sensitive=false` to make credentials persist indefinitely in storage
+/// instead of being auto-wiped after the sensitive TTL.
+#[tokio::test]
+async fn import_credential_with_false_flag_is_stored_as_sensitive() {
+    let (_dir, sock, db) = start_server_returning_db().await;
+
+    // A realistic AWS access key — `is_sensitive_for_autowipe` gives this 0.99
+    // confidence, well above the 0.70 floor.
+    let credential = b"AKIAIOSFODNN7EXAMPLE";
+
+    // Build an import request that claims `is_sensitive=false`.
+    let items_json = serde_json::json!([{
+        "content_type": "text",
+        "content_bytes_b64": b64(credential),
+        "created_at_ms": 9_000_000_i64,
+        "is_sensitive": false,  // <- attacker/tampered flag
+        "metadata": null,
+    }]);
+    let req = serde_json::json!({
+        "id": "pg26",
+        "method": "import",
+        "protocol_version": 1,
+        "params": { "items": items_json },
+    })
+    .to_string();
+
+    let resp = roundtrip(&sock, &req).await;
+    assert_eq!(resp["ok"], true, "import must succeed: {resp}");
+    assert_eq!(resp["data"]["inserted"], 1);
+
+    // Read the stored row's `is_sensitive` flag directly from the DB.
+    let guard = db.lock().await;
+    let stored_is_sensitive: bool = guard
+        .conn()
+        .query_row(
+            "SELECT is_sensitive FROM clipboard_items LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("row must exist");
+
+    assert!(
+        stored_is_sensitive,
+        "PG-26: credential imported with is_sensitive=false must be stored as is_sensitive=true \
+         after recompute from plaintext"
+    );
+}
+
+/// PG-26 complementary: a non-sensitive item with `is_sensitive=false` must NOT
+/// be upgraded — we should only recompute, not blanket-flag everything.
+#[tokio::test]
+async fn import_non_sensitive_with_false_flag_stays_non_sensitive() {
+    let (_dir, sock, db) = start_server_returning_db().await;
+
+    // Clearly non-sensitive text: a plain greeting.
+    let harmless = b"Hello, world! This is a test note.";
+
+    let items_json = serde_json::json!([{
+        "content_type": "text",
+        "content_bytes_b64": b64(harmless),
+        "created_at_ms": 9_100_000_i64,
+        "is_sensitive": false,
+        "metadata": null,
+    }]);
+    let req = serde_json::json!({
+        "id": "pg26b",
+        "method": "import",
+        "protocol_version": 1,
+        "params": { "items": items_json },
+    })
+    .to_string();
+
+    let resp = roundtrip(&sock, &req).await;
+    assert_eq!(resp["ok"], true, "import must succeed: {resp}");
+    assert_eq!(resp["data"]["inserted"], 1);
+
+    let guard = db.lock().await;
+    let stored_is_sensitive: bool = guard
+        .conn()
+        .query_row(
+            "SELECT is_sensitive FROM clipboard_items LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("row must exist");
+
+    assert!(
+        !stored_is_sensitive,
+        "PG-26: non-sensitive plaintext with is_sensitive=false must remain non-sensitive"
+    );
+}
+
+/// PG-26 complementary: a non-sensitive item with `is_sensitive=true` (e.g., a
+/// legitimately flagged note) must NOT be downgraded — OR semantics preserved.
+#[tokio::test]
+async fn import_non_sensitive_text_with_true_flag_preserved_as_sensitive() {
+    let (_dir, sock, db) = start_server_returning_db().await;
+
+    // Harmless text, but caller asserts sensitive (e.g. manually marked by user).
+    let harmless = b"My private journal entry.";
+
+    let items_json = serde_json::json!([{
+        "content_type": "text",
+        "content_bytes_b64": b64(harmless),
+        "created_at_ms": 9_200_000_i64,
+        "is_sensitive": true,   // <- caller flagged
+        "metadata": null,
+    }]);
+    let req = serde_json::json!({
+        "id": "pg26c",
+        "method": "import",
+        "protocol_version": 1,
+        "params": { "items": items_json },
+    })
+    .to_string();
+
+    let resp = roundtrip(&sock, &req).await;
+    assert_eq!(resp["ok"], true, "import must succeed: {resp}");
+    assert_eq!(resp["data"]["inserted"], 1);
+
+    let guard = db.lock().await;
+    let stored_is_sensitive: bool = guard
+        .conn()
+        .query_row(
+            "SELECT is_sensitive FROM clipboard_items LIMIT 1",
+            [],
+            |r| r.get(0),
+        )
+        .expect("row must exist");
+
+    assert!(
+        stored_is_sensitive,
+        "PG-26 OR semantics: item caller-flagged as sensitive must remain sensitive \
+         even if the plaintext detector does not flag it"
+    );
+}
+
 /// GAP closer: end-to-end proof that a stored text item is retrievable via the
 /// real `copy`/`get` IPC verb, not merely countable in the `list` total.
 ///

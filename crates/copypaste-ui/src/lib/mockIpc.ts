@@ -642,6 +642,34 @@ export async function mockInvoke(
       case "revoke_all_peers":
         return ok({ revoked: 0 });
 
+      // ---------------------------------------------------------------------------
+      // 85n9: Backup / Restore — export and import
+      // ---------------------------------------------------------------------------
+
+      case "export": {
+        const includeSensitive = (params.include_sensitive as boolean | undefined) ?? false;
+        const exportItems = includeSensitive
+          ? HISTORY_ITEMS
+          : HISTORY_ITEMS.filter((i) => !i.is_sensitive);
+        // Return the minimal export shape the daemon produces (content_bytes_b64 is
+        // base64 of the raw plaintext; we use a fixed stub here for the fixture).
+        const items = exportItems.map((i) => ({
+          content_type: i.content_type,
+          content_bytes_b64: btoa(i.preview),
+          created_at_ms: i.wall_time,
+          metadata: null,
+        }));
+        return ok({ items });
+      }
+
+      case "import":
+        // The daemon returns inserted/skipped counts after dedup. Fixture returns
+        // the full length as inserted (no dedup in mock).
+        return ok({
+          inserted: ((params.items as unknown[] | undefined) ?? []).length,
+          skipped: 0,
+        });
+
       default:
         console.warn("[mock-ipc] unhandled ipc_call method:", method);
         return ok(null);

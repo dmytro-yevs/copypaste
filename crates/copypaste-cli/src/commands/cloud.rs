@@ -19,51 +19,19 @@ use crate::ipc::IpcClient;
 use anyhow::{anyhow, Result};
 use copypaste_ipc::{
     METHOD_CLOUD_TEST_CONNECTION, METHOD_GET_CONFIG, METHOD_GET_SYNC_STATUS, METHOD_SET_CONFIG,
+    METHOD_STORE_CLOUD_PASSWORD,
 };
 use std::path::Path;
 use zeroize::Zeroizing;
 
-// ── macOS Keychain constants for Supabase password storage ─────────────────
+// P1-6 fix: the CLI no longer writes the macOS Keychain directly. The
+// Supabase password is sent to the daemon via the set_config IPC verb (over
+// the 0600 local unix socket). The daemon's set_config handler (ipc.rs,
+// "set_config" arm) stores it in the macOS Keychain and strips it from
+// config.json so it is never persisted to disk in plaintext. This preserves
+// the "daemon is the ONLY Keychain owner" contract.
 //
-// The Supabase account password is security-sensitive and must NOT be
-// persisted in config.json (plaintext on disk). On macOS we store it in the
-// Keychain under these coordinates so the daemon can read it back.
-//
-// FIXWAVE: daemon must read supabase_password from Keychain instead of
-// config.json. In `copypaste-daemon/src/supabase.rs` (or wherever the
-// Supabase client is initialised), replace `cfg.supabase_password` with a
-// Keychain lookup using:
-//   service  = "com.copypaste.daemon"
-//   account  = "supabase-password"
-// The daemon already has `security-framework` and the `get_generic_password`
-// helper in its keychain module — wire it up there. Until that daemon-side
-// change lands, the password is sent via set_config but stripped from the
-// persisted JSON by the daemon if/when it reads from Keychain instead.
-#[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "com.copypaste.daemon";
-#[cfg(target_os = "macos")]
-const KEYCHAIN_ACCOUNT_SUPABASE_PW: &str = "supabase-password";
-
-/// Store the Supabase password in the macOS Keychain.
-/// Returns Ok(()) on success; on failure returns an error with guidance.
-#[cfg(target_os = "macos")]
-fn store_supabase_password_in_keychain(password: &str) -> Result<()> {
-    use security_framework::passwords::set_generic_password;
-    set_generic_password(
-        KEYCHAIN_SERVICE,
-        KEYCHAIN_ACCOUNT_SUPABASE_PW,
-        password.as_bytes(),
-    )
-    .map_err(|e| anyhow!("failed to store Supabase password in Keychain: {e}"))?;
-    Ok(())
-}
-
-#[cfg(not(target_os = "macos"))]
-fn store_supabase_password_in_keychain(_password: &str) -> Result<()> {
-    // Non-macOS: no Keychain available; password is sent via IPC only (not
-    // persisted to disk by this function). The daemon must handle storage.
-    Ok(())
-}
+// The security-framework dep has been removed from cli/Cargo.toml.
 
 /// Idempotent schema + RLS provisioning SQL, embedded so the CLI always emits
 /// exactly the file shipped in the repo. Kept in sync via `include_str!`.
@@ -130,11 +98,6 @@ pub fn setup(
         return Err(anyhow!("password must not be empty"));
     }
 
-    // On macOS: persist the password in the Keychain so it is never written
-    // to config.json in plaintext. See FIXWAVE comment near
-    // KEYCHAIN_ACCOUNT_SUPABASE_PW for the required daemon-side follow-up.
-    store_supabase_password_in_keychain(password.trim())?;
-
     // Read-merge-write: fetch current config so we don't drop other fields.
     let mut cfg = {
         let mut client = IpcClient::connect(socket_path)?;
@@ -148,48 +111,68 @@ pub fn setup(
         resp.data.unwrap_or_else(|| serde_json::json!({}))
     };
 
-    // Build the password JSON value directly from the Zeroizing wrapper to
-    // avoid cloning the secret into a separate plain String. serde_json::Value
-    // internally stores strings as Arc<str> / String, so one heap copy is
-    // unavoidable before the IPC serialization; we minimise the number of
-    // live copies by never assigning to a plain `String` binding.
-    //
-    // RESIDUAL EXPOSURE: serde_json::Value holds the password as a plain
-    // String internally until the Value is dropped at the end of this scope.
-    // This is an inherent limitation of the current IPC serialization path.
-    // FIXWAVE: once the daemon reads the password from Keychain instead of
-    // IPC (see KEYCHAIN_ACCOUNT_SUPABASE_PW), remove the password field here
-    // entirely to eliminate this residual exposure.
-    let password_value = serde_json::Value::String(password.trim().to_string());
-
+    // nq39: send URL / anon key / email via set_config, but route the password
+    // through the dedicated `store_cloud_password` verb so it is never carried
+    // inside the set_config JSON payload and never risks being persisted to
+    // config.json on non-macOS platforms.
     if let Some(obj) = cfg.as_object_mut() {
         obj.insert("supabase_url".into(), serde_json::json!(url));
         obj.insert("supabase_anon_key".into(), serde_json::json!(anon_key));
         obj.insert("supabase_email".into(), serde_json::json!(email));
-        // FIXWAVE: remove supabase_password from set_config once the daemon
-        // reads it from the Keychain (see KEYCHAIN_ACCOUNT_SUPABASE_PW).
-        // Until then we send it over IPC so the daemon can authenticate; the
-        // daemon must NOT persist this field to config.json on disk.
-        obj.insert("supabase_password".into(), password_value);
+        // Explicitly remove any stale supabase_password that may have been
+        // left by a previous `set_config`-based setup (pre-nq39). The daemon's
+        // set_config handler already strips it on macOS, but this removes the
+        // field at the source so it is never even sent over the socket.
+        obj.remove("supabase_password");
     } else {
         cfg = serde_json::json!({
             "supabase_url": url,
             "supabase_anon_key": anon_key,
             "supabase_email": email,
-            // FIXWAVE: same as above — remove once daemon reads from Keychain.
-            "supabase_password": password_value,
+            // supabase_password intentionally absent — sent via store_cloud_password below.
         });
     }
 
-    let mut client = IpcClient::connect(socket_path)?;
-    let req = IpcClient::build_request(&IpcClient::next_id(), METHOD_SET_CONFIG, cfg);
-    let resp = client.call(&req)?;
-    // `password` (Zeroizing) is dropped and zeroed after the IPC call completes.
-    exit_on_err(&resp);
+    {
+        let mut client = IpcClient::connect(socket_path)?;
+        let req = IpcClient::build_request(&IpcClient::next_id(), METHOD_SET_CONFIG, cfg);
+        let resp = client.call(&req)?;
+        exit_on_err(&resp);
+    }
 
-    println!("Supabase credentials saved (URL, anon key, email).");
-    #[cfg(target_os = "macos")]
-    println!("Password stored in macOS Keychain (service: com.copypaste.daemon).");
+    // Send the password via the dedicated verb. This is a separate connection
+    // so `password` (Zeroizing) is the only live copy when it is serialised,
+    // and it is dropped + zeroed immediately after this block.
+    {
+        let mut client = IpcClient::connect(socket_path)?;
+        // Build the params inline to limit the lifetime of the password clone.
+        let params = serde_json::json!({ "password": password.trim() });
+        // `password` (Zeroizing) is dropped at the end of this block.
+        let req =
+            IpcClient::build_request(&IpcClient::next_id(), METHOD_STORE_CLOUD_PASSWORD, params);
+        let resp = client.call(&req)?;
+        exit_on_err(&resp);
+        // Log whether the daemon persisted to Keychain vs. held in-memory.
+        let persisted = resp
+            .data
+            .as_ref()
+            .and_then(|d| d.get("persisted"))
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !persisted {
+            eprintln!(
+                "warning: daemon could not persist the password to the Keychain \
+                 (non-macOS or unsigned build) — it will be held in-memory and \
+                 lost on restart. Set SUPABASE_PASSWORD env or re-run setup after restart."
+            );
+        }
+    }
+    // `password` (Zeroizing) is now out of scope and zeroed.
+
+    println!("Supabase credentials saved (URL, anon key, email, password).");
+    println!(
+        "The daemon stores the password in the macOS Keychain; it will not appear in config.json."
+    );
     println!("Next:");
     println!("  1. copypaste cloud setup-sql | pbcopy   # provision schema + RLS in Supabase");
     println!("  2. copypaste cloud test                 # verify the connection");

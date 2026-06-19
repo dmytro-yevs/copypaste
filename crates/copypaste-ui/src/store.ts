@@ -81,6 +81,22 @@ export interface UIPrefs {
    * Default: false (cinematic — the Liquid Glass launch default).
    */
   motionReduced: boolean;
+  /**
+   * Maximum number of items rendered in the HistoryView list.
+   * This is a UI-only display filter — the daemon may store more items on disk
+   * (pruned by byte quota). Sentinel value 100000 means "Unlimited".
+   * Default: 1000. Range: one of [100, 250, 500, 1000, 2500, 5000, 10000, 100000].
+   */
+  historyDisplayLimit: number;
+  /**
+   * When true (default), show a "Sensitive — click to reveal" confirmation overlay
+   * before revealing a sensitive item in the history list or detail modal. When
+   * false, sensitive items are still blurred by maskSensitive but tapping/clicking
+   * the blur reveals them immediately without an extra confirmation step.
+   * Android parity: Android shows a warning sheet before revealing; this flag
+   * lets users who find the warning redundant disable it (default on = same behaviour).
+   */
+  showSensitiveWarnings: boolean;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -92,12 +108,16 @@ const DEFAULT_PREFS: UIPrefs = {
   playSoundOnCopy: true,
   notifyOnCopy: true,
   translucency: true,
-  // Default to Graphite Mist dark — the new Liquid Glass dark grey look (CopyPaste-52mz).
-  theme: "dark",
+  // PARITY-SPEC §0: light-first — default is "light"; saved pref overrides on load.
+  theme: "light",
   density: "compact",
   palette: "graphite-mist",
   // Cinematic (false) is the Liquid Glass launch default — full aurora animation.
   motionReduced: false,
+  // 1000 items is a sensible default — fast to render, shows plenty of history.
+  historyDisplayLimit: 1000,
+  // Show the "Sensitive — click to reveal" overlay by default (Android parity).
+  showSensitiveWarnings: true,
 };
 
 function loadPrefs(): UIPrefs {
@@ -105,7 +125,7 @@ function loadPrefs(): UIPrefs {
     let raw = localStorage.getItem(PREFS_KEY);
     // ── Liquid Glass upgrade migration (v1 → v2) ──────────────────────────
     // If only the legacy v1 prefs exist, adopt them but DROP the persisted
-    // theme so the new Graphite Mist dark default wins once.
+    // theme so the PARITY-SPEC §0 light default applies once.
     // Then re-persist under v2.
     let migratedFromLegacy = false;
     if (!raw) {
@@ -119,10 +139,11 @@ function loadPrefs(): UIPrefs {
     }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     if (migratedFromLegacy) {
-      // The old v1 default was "dark" (pre-Liquid-Glass); we still want "dark"
-      // but the palette now defaults to "graphite-mist", so drop both and let
-      // DEFAULT_PREFS fill them in fresh.
-      delete parsed.theme;
+      // The old v1 default was "dark" (pre-Liquid-Glass). PARITY-SPEC §0 now
+      // mandates light-first. Only reset theme when it was the v1 DEFAULT ("dark")
+      // — a v1 user who explicitly chose "light"/"system" keeps their choice
+      // (deleting unconditionally would silently override an explicit pick).
+      if (parsed.theme === "dark") delete parsed.theme;
       delete parsed.palette;
     }
 

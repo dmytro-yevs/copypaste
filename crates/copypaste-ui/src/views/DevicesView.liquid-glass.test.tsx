@@ -180,16 +180,21 @@ describe("§7.2 Transport chip P2P/Cloud", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §7.3 Fingerprint display — fingerprint hex removed from device cards (CopyPaste-55vf)
+// §7.3 Fingerprint display — own-device fingerprint RE-ADDED to ThisDeviceCard
+// for cross-platform parity with Android (CopyPaste-wb6s / PG-9, PG-45). This
+// reverses the earlier card-wide removal (CopyPaste-55vf) for the OWN device:
+// Android shows the full own fingerprint, so macOS must too. PeerRow fingerprint
+// remains absent here (peer-row parity is tracked separately under PG-45/oy8s).
 // ---------------------------------------------------------------------------
 describe("§7.3 Fingerprint display", () => {
-  it("ThisDeviceCard does NOT show the fingerprint hex string", async () => {
+  it("ThisDeviceCard shows the own-device fingerprint (PG-9 parity with Android)", async () => {
     render(<DevicesView />);
     await screen.findByText("Test Mac");
 
-    // Fingerprint display was removed; the hex string must not appear in the card.
+    // PG-9: the own-device security fingerprint is now displayed on the card,
+    // at parity with Android's DevicesActivity. The hex string must be present.
     const fp = BASE_OWN_INFO.fingerprint;
-    expect(screen.queryByText(fp)).toBeNull();
+    expect(screen.getByText(fp)).toBeInTheDocument();
   });
 
   it("ThisDeviceCard has no copy-fingerprint button", async () => {

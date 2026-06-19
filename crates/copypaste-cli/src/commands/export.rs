@@ -5,12 +5,27 @@ use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::Path;
 
-pub fn run(socket_path: &Path, limit: u64, output: Option<&str>, force: bool) -> Result<()> {
+pub fn run(
+    socket_path: &Path,
+    limit: u64,
+    output: Option<&str>,
+    force: bool,
+    include_sensitive: bool,
+) -> Result<()> {
+    if include_sensitive {
+        // Mirror the --raw warning style used by pair-qr: emit on stderr so
+        // that stdout output remains pipeable/scriptable.
+        eprintln!(
+            "WARNING: exporting sensitive items in plaintext — \
+             handle the output securely and delete it when done."
+        );
+    }
+
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
         &IpcClient::next_id(),
         METHOD_EXPORT,
-        serde_json::json!({"limit": limit}),
+        serde_json::json!({"limit": limit, "include_sensitive": include_sensitive}),
     );
     let resp = client.call(&req)?;
 
@@ -100,7 +115,7 @@ mod tests {
 
     #[test]
     fn run_signature_compiles() {
-        let _: fn(&Path, u64, Option<&str>, bool) -> Result<()> = run;
+        let _: fn(&Path, u64, Option<&str>, bool, bool) -> Result<()> = run;
     }
 
     fn tmp_path(name: &str) -> std::path::PathBuf {

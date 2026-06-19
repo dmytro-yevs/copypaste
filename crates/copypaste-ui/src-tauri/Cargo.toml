@@ -34,6 +34,8 @@ qrcode = { workspace = true, features = ["svg"] }
 # Base64 encoding for the file-ingest path (drag-drop + file-picker).
 # Pinned to the same major version used by copypaste-daemon.
 base64 = { workspace = true }
+# UUID v4 for per-item temp-dir isolation in open_item_file (n7qv).
+uuid.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # Translucent (NSVisualEffectView) window background for the JetBrains-style look.

@@ -593,6 +593,53 @@ pub fn get_page_pinned_first<D: DbRead + ?Sized>(
     Ok(items)
 }
 
+/// Lamport-ordered history page (pinned-first, unpinned by Lamport clock).
+///
+/// Returns items ordered by:
+///   * Pinned items first (sorted by `pin_order`, then `pin_order IS NULL`).
+///   * Unpinned items sorted by `lamport_ts DESC, wall_time DESC, origin_device_id ASC`.
+///
+/// Using `lamport_ts` as the primary ordering key for unpinned items provides
+/// causal ordering that is correct after cross-device sync: a lamport clock
+/// advances monotonically on every write/merge, so after sync the ordering
+/// matches causal history rather than wall-clock skew between devices.
+/// `wall_time` is the secondary key (tie-break for items with equal lamport
+/// values, e.g. a batch import). `origin_device_id` is the final deterministic
+/// tie-break so the sort is stable across devices.
+///
+/// This variant is intended for the Android FFI (PG-19 / CopyPaste-o0t3) and
+/// any future caller that needs causally-correct ordering. The existing
+/// [`get_page_pinned_first`] (wall-time order) is preserved for the daemon IPC
+/// path to avoid a behaviour change for existing macOS users.
+pub fn get_page_pinned_first_lamport<D: DbRead + ?Sized>(
+    db: &D,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
+    // Fix 6: clamp before cast to avoid negative LIMIT/OFFSET in SQLite.
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+    let offset_i64 = offset.min(i64::MAX as usize) as i64;
+    let mut stmt = db.conn().prepare(
+        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
+                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
+                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
+         FROM clipboard_items
+         WHERE deleted = 0
+         ORDER BY
+           CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC,
+           pin_order IS NULL ASC,
+           pin_order ASC,
+           lamport_ts DESC,
+           wall_time DESC,
+           origin_device_id ASC
+         LIMIT ?1 OFFSET ?2",
+    )?;
+    let items = stmt
+        .query_map(params![limit_i64, offset_i64], row_to_item)?
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(items)
+}
+
 /// Bump an existing item's recency fields to `now_ms` without changing its
 /// content, sensitive-flag, or any other metadata.
 ///

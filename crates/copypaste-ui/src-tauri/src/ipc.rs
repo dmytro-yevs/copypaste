@@ -59,6 +59,10 @@ pub struct IpcReply {
     pub data: Option<Value>,
     pub error: Option<String>,
     pub error_code: Option<String>,
+    /// Wire protocol version the daemon speaks (ADR-007). Forwarded verbatim
+    /// from the daemon's JSON reply so the frontend `protocolMismatchHandler`
+    /// in `src/lib/ipc.ts` can fire. `None` when the daemon predates this field.
+    pub protocol_version: Option<u32>,
 }
 
 /// Make a synchronous IPC call to the daemon from Rust code (e.g. the tray
@@ -80,7 +84,15 @@ fn do_call(method: &str, params: Value) -> Result<IpcReply, String> {
         .set_read_timeout(Some(Duration::from_secs(10)))
         .map_err(|e| format!("io_error:{e}"))?;
 
-    let req = serde_json::json!({ "id": IPC_REQUEST_ID, "method": method, "params": params });
+    let req = serde_json::json!({
+        "id": IPC_REQUEST_ID,
+        "method": method,
+        "params": params,
+        // ADR-007: tell the daemon which wire version the UI was compiled against.
+        // The daemon echoes back its own version in the reply; the frontend compares
+        // the two and fires `protocolMismatchHandler` when they diverge.
+        "protocol_version": 1u32,
+    });
     let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
     line.push('\n');
     (&stream)
@@ -106,6 +118,12 @@ fn do_call(method: &str, params: Value) -> Result<IpcReply, String> {
         },
         error: v["error"].as_str().map(str::to_owned),
         error_code: v["error_code"].as_str().map(str::to_owned),
+        // ADR-007: forward the daemon's wire protocol version to the frontend.
+        // Cast via u64 first (serde_json stores JSON numbers as u64/i64) then
+        // narrow to u32 — any daemon value that overflows u32 is treated as absent.
+        protocol_version: v["protocol_version"]
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok()),
     })
 }
 
@@ -323,20 +341,27 @@ fn sanitize_filename(name: &str) -> String {
     }
 }
 
+/// How long (seconds) to keep the per-item temp directory alive after the OS
+/// open call returns.  30 s is enough for any application to finish reading
+/// the file from disk; after that the subdir and its single file are removed.
+const OPEN_ITEM_CLEANUP_DELAY_SECS: u64 = 30;
+
 /// Open a file-type clipboard item with the OS default application.
 ///
 /// Fetches the file bytes from the daemon (`get_item_file`), writes them to a
-/// temporary file under the system temp directory, and then opens the file
-/// with the OS default application:
+/// **per-item UUID subdirectory** under `$TMPDIR/copypaste_open/<uuid>/`, then
+/// opens the file with the OS default application:
 ///   - macOS: `/usr/bin/open <path>`
 ///   - Linux: `xdg-open <path>`
 ///   - Windows: `cmd /c start "" <path>` (not the primary target; included for
 ///     completeness).
 ///
-/// The temp file is **not** deleted automatically — the OS file manager or the
-/// next boot will clean it up (standard behaviour for preview-and-forget
-/// workflows).  The file is written to `$TMPDIR/copypaste_open/<filename>` so
-/// all "open" temporaries are grouped in one place.
+/// # Cleanup (n7qv)
+/// Each call writes to a fresh `<uuid>/` subdirectory so concurrent opens
+/// never collide.  A background thread removes the entire subdirectory after
+/// [`OPEN_ITEM_CLEANUP_DELAY_SECS`] seconds — long enough for the OS and the
+/// launched application to finish reading the file, but short enough that
+/// decrypted content does not linger in `$TMPDIR` indefinitely.
 ///
 /// # Security: dangerous extension blocking
 /// Files with executable or script extensions (`.sh`, `.command`, `.app`, etc.)
@@ -374,9 +399,13 @@ pub async fn open_item_file(id: String) -> Result<(), String> {
             .decode(data_b64)
             .map_err(|e| format!("base64 decode error: {e}"))?;
 
-        // 3. Write to temp file.
-        let tmp_dir = std::env::temp_dir().join("copypaste_open");
-        std::fs::create_dir_all(&tmp_dir).map_err(|e| format!("create temp dir failed: {e}"))?;
+        // 3. Write to a per-item UUID subdirectory so concurrent opens never
+        //    collide and each call has an isolated cleanup target (n7qv).
+        let item_uuid = uuid::Uuid::new_v4();
+        let item_dir = std::env::temp_dir()
+            .join("copypaste_open")
+            .join(item_uuid.to_string());
+        std::fs::create_dir_all(&item_dir).map_err(|e| format!("create temp dir failed: {e}"))?;
 
         // Sanitise the filename: strip path separators so a malicious filename
         // cannot escape the temp directory (defence-in-depth; daemon should
@@ -399,7 +428,7 @@ pub async fn open_item_file(id: String) -> Result<(), String> {
             .to_string();
         let dangerous = is_dangerous_extension(&extension);
 
-        let tmp_path = tmp_dir.join(&safe_name);
+        let tmp_path = item_dir.join(&safe_name);
         std::fs::write(&tmp_path, &bytes).map_err(|e| format!("write temp file failed: {e}"))?;
 
         // 5. Open with OS default app, or reveal in Finder for dangerous types.
@@ -449,6 +478,17 @@ pub async fn open_item_file(id: String) -> Result<(), String> {
                 .spawn()
                 .map_err(|e| format!("open command failed: {e}"))?;
         }
+
+        // 6. Schedule cleanup: remove the per-item subdir after a short delay
+        //    so decrypted content does not linger in $TMPDIR (n7qv).  We spawn
+        //    a detached OS thread (not a tokio task) so the cleanup runs even
+        //    if the async runtime shuts down before the timer fires.  A failure
+        //    to remove the dir (e.g. the OS already cleaned it up) is benign.
+        let cleanup_dir = item_dir.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_secs(OPEN_ITEM_CLEANUP_DELAY_SECS));
+            let _ = std::fs::remove_dir_all(&cleanup_dir);
+        });
 
         Ok(())
     })

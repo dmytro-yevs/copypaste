@@ -28,11 +28,10 @@ rpassword = "7"
 # See crates/copypaste-cli/src/commands/vacuum.rs and the IPC verb
 # METHOD_VACUUM for the implementation.
 
-[target.'cfg(target_os = "macos")'.dependencies]
-# Used by `commands/cloud.rs` to store the Supabase anon-key in the macOS
-# Keychain. NOT used for the `vacuum` command (daemon owns that path now).
-security-framework.workspace = true
+# P1-6 fix: security-framework dep removed from CLI. The daemon is now the sole
+# Keychain writer; the CLI sends the Supabase password over the 0600 unix
+# socket IPC (set_config) and the daemon stores it in the Keychain.
 
 [dev-dependencies]
-# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.89. Pin removed 2026-06-14.
+# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.96. Pin removed 2026-06-14.
 tempfile = "3"

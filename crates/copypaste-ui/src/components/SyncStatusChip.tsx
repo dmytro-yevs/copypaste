@@ -13,6 +13,12 @@ interface SyncInfo {
   deviceCount: number;
   lastSyncMs: number | null;
   email: string | null;
+  /**
+   * PG-44 / CopyPaste-k1jo: true when a Supabase URL is configured but the
+   * cloud sync is not working (supabase_configured===false or !signed_in).
+   * Android parity: shows a badge chip rather than tooltip-only.
+   */
+  cloudMisconfig: boolean;
 }
 
 /** How recent a last_sync_ms must be (in ms) to count as "connected/working". */
@@ -92,6 +98,7 @@ export function SyncStatusChip() {
     deviceCount: 0,
     lastSyncMs: null,
     email: null,
+    cloudMisconfig: false,
   });
 
   // cancelRef prevents setState after unmount when the poll fires mid-flight.
@@ -114,7 +121,7 @@ export function SyncStatusChip() {
 
     // If the sync-status call itself failed → daemon is offline.
     if (syncResult.status === "rejected") {
-      setInfo({ state: "offline", deviceCount: 0, lastSyncMs: null, email: null });
+      setInfo({ state: "offline", deviceCount: 0, lastSyncMs: null, email: null, cloudMisconfig: false });
       return;
     }
 
@@ -125,11 +132,19 @@ export function SyncStatusChip() {
     const lastSyncMs = sync.last_sync_ms ?? null;
     const deviceCount = peers.length;
 
+    // PG-44 / CopyPaste-k1jo: cloud misconfig = supabase URL is set but the
+    // cloud sync layer is not properly configured (anon key missing, or auth
+    // credentials not provided). Daemon surfaces this as supabase_url non-empty
+    // but supabase_configured===false. Matches Android badge-chip behaviour.
+    const cloudMisconfig =
+      !!sync.supabase_url && !sync.supabase_configured;
+
     setInfo({
       state: deriveSyncState(lastSyncMs, deviceCount),
       deviceCount,
       lastSyncMs,
       email: sync.email ?? null,
+      cloudMisconfig,
     });
   }, []); // no external deps — api is module-level stable, setInfo is stable
 
@@ -166,6 +181,19 @@ export function SyncStatusChip() {
       {info.deviceCount > 0 && (
         <span className="text-[10px] leading-none text-ide-faint tabular-nums">
           {info.deviceCount}
+        </span>
+      )}
+      {/* PG-44 / CopyPaste-k1jo: visible cloud-misconfig chip (Android parity).
+          Android shows a badge when cloud sync is misconfigured; macOS was
+          tooltip-only. Show a compact warning pill so the state is visible
+          without hovering. Only rendered when supabase_url is set but the
+          daemon reports supabase_configured===false. */}
+      {info.cloudMisconfig && (
+        <span
+          aria-label="Cloud sync misconfigured"
+          className="shrink-0 rounded-full border border-ide-warning/30 bg-ide-warning/14 px-1.5 py-0.5 text-[10px] font-medium text-ide-warning"
+        >
+          Misconfig
         </span>
       )}
     </div>

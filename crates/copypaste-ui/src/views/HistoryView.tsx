@@ -339,6 +339,13 @@ interface RowProps {
   previewSize: number;
   imageMaxHeight: number;
   maskSensitive: boolean;
+  /**
+   * n9gp (PG-34): when true (default), sensitive-item blur requires a click on
+   * the "Sensitive — click to reveal" overlay before lifting. When false, the
+   * first click directly reveals the content (no extra confirmation step).
+   * Mirrors Android's show_sensitive_warnings pref.
+   */
+  showSensitiveWarnings: boolean;
   density: "comfortable" | "compact" | "spacious";
   /** Own device UUID from the HistoryPage envelope — used for device badge. */
   ownDeviceId: string;
@@ -391,6 +398,7 @@ const HistoryRow = React.memo(function HistoryRow({
   previewSize: _previewSize,
   imageMaxHeight,
   maskSensitive,
+  showSensitiveWarnings,
   density,
   ownDeviceId,
   onSelect,
@@ -648,8 +656,11 @@ const HistoryRow = React.memo(function HistoryRow({
             // Blur overlay: visually hides the text; click reveals for this row only.
             // title gives a screen-reader / tooltip hint. user-select:none prevents
             // accidental selection revealing the text via copy.
+            // n9gp (PG-34): when showSensitiveWarnings is true (default) the tooltip
+            // reinforces the "confirmation required" expectation; when false it signals
+            // direct reveal with no extra step (title is suppressed).
             <span
-              title="Click to reveal sensitive content"
+              title={showSensitiveWarnings ? "Click to reveal sensitive content" : undefined}
               onClick={(e) => {
                 e.stopPropagation(); // don't also trigger row copy
                 setRevealed(true);
@@ -774,6 +785,7 @@ const HistoryRow = React.memo(function HistoryRow({
   if (prev.previewLines !== next.previewLines) return false;
   if (prev.imageMaxHeight !== next.imageMaxHeight) return false;
   if (prev.maskSensitive !== next.maskSensitive) return false;
+  if (prev.showSensitiveWarnings !== next.showSensitiveWarnings) return false;
   if (prev.density !== next.density) return false;
   if (prev.ownDeviceId !== next.ownDeviceId) return false;
   // Drag state (pinned rows only). Compare structural equality of the
@@ -1015,10 +1027,14 @@ function FullResImage({ id, maxHeight }: { id: string; maxHeight: number }) {
 function DetailsModal({
   entry,
   maskSensitive,
+  showSensitiveWarnings,
   onClose,
 }: {
   entry: HistoryEntry;
   maskSensitive: boolean;
+  /** n9gp (PG-34): when false, the "Sensitive — click to reveal" overlay is skipped;
+   *  clicking the blurred pre directly unblurs without an extra confirmation step. */
+  showSensitiveWarnings: boolean;
   onClose: () => void;
 }) {
   const isImage = isImageType(entry.content_type);
@@ -1128,7 +1144,11 @@ function DetailsModal({
               >
                 {entry.preview}
               </pre>
-              {blurred && (
+              {/* n9gp (PG-34): show the confirmation overlay only when
+                  showSensitiveWarnings is true (default). When false, the user
+                  can click the blurred pre directly to reveal without an extra
+                  confirmation step (matches Android show_sensitive_warnings=false). */}
+              {blurred && showSensitiveWarnings && (
                 // Reveal overlay — sits on top of the blurred pre so the user
                 // can click without accidentally selecting text through the blur.
                 <div
@@ -1141,6 +1161,15 @@ function DetailsModal({
                     Sensitive — click to reveal
                   </span>
                 </div>
+              )}
+              {/* When warnings are off and still blurred, make the pre itself clickable to reveal. */}
+              {blurred && !showSensitiveWarnings && (
+                <div
+                  className="absolute inset-0"
+                  style={{ cursor: "pointer" }}
+                  onClick={() => setRevealed(true)}
+                  title="Click to reveal sensitive content"
+                />
               )}
             </div>
           )}
@@ -1366,7 +1395,7 @@ interface ToastState {
 }
 
 export function HistoryView() {
-  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, playSoundOnCopy, notifyOnCopy, density } =
+  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, showSensitiveWarnings, playSoundOnCopy, notifyOnCopy, density, historyDisplayLimit } =
     useUI((s) => s.prefs);
 
   // M5: historySize removed from prefs; use a fixed initial page size.
@@ -2588,7 +2617,10 @@ export function HistoryView() {
           />
         )}
         <VirtualList
-          items={filtered}
+          // Cap the rendered list to the persisted display-limit preference.
+          // Sentinel 100000 means "Unlimited" (effectively uncapped for any realistic history).
+          // The daemon may hold more items on disk; this is a UI rendering cap only.
+          items={filtered.slice(0, historyDisplayLimit ?? 1000)}
           previewSize={previewSize}
           imageMaxHeight={imageMaxHeight}
           density={density}
@@ -2614,6 +2646,7 @@ export function HistoryView() {
               staggerIndex={visibleIndex}
               applyStagger={staggerActiveRef.current && visibleIndex < 10}
               maskSensitive={maskSensitive}
+              showSensitiveWarnings={showSensitiveWarnings ?? true}
               ownDeviceId={ownDeviceId}
               onSelect={() => {
                 isKeyboardNavRef.current = false;
@@ -2763,7 +2796,7 @@ export function HistoryView() {
       )}
       {/* M10: Details modal */}
       {previewEntry !== null && (
-        <DetailsModal entry={previewEntry} maskSensitive={maskSensitive} onClose={() => setPreviewEntry(null)} />
+        <DetailsModal entry={previewEntry} maskSensitive={maskSensitive} showSensitiveWarnings={showSensitiveWarnings ?? true} onClose={() => setPreviewEntry(null)} />
       )}
     </ViewShell>
   );

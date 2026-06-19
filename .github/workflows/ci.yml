@@ -89,6 +89,41 @@ jobs:
       - name: Test daemon (includes Keychain tests)
         run: cargo test -p copypaste-daemon -- --nocapture
 
+  # Feature-combination coverage (audit zbkm): the default `test` job only
+  # exercises default features. This job catches cfg/feature-gated breakage.
+  # --no-default-features is fully tested; --all-features is compile-checked
+  # (cargo check) because some features (cloud-sync/Supabase) need network or
+  # credentials at runtime that headless CI lacks. Upgrade all-features to
+  # `cargo test` if/when those paths gain offline test doubles.
+  feature-matrix:
+    name: Features (${{ matrix.variant }})
+    runs-on: macos-latest
+    env:
+      COPYPASTE_EPHEMERAL_KEY: "1"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: no-default-features
+            cmd: cargo test --workspace --no-default-features
+          - variant: all-features
+            cmd: cargo check --workspace --all-targets --all-features
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: feature-${{ matrix.variant }}
+
+      - name: ${{ matrix.variant }}
+        run: ${{ matrix.cmd }}
+
   audit:
     name: Security audit
     runs-on: ubuntu-latest
@@ -113,9 +148,10 @@ jobs:
 
       - name: cargo audit
         # --no-fetch uses the advisory-db restored by the cache step above
-        # (keyed on ISO week); falls back to a full network fetch on a cache
-        # miss (first run of the week or a cold runner).
-        run: cargo audit --no-fetch || cargo audit
+        # (keyed on ISO week); on a cache miss we refresh the DB and re-run.
+        # Splitting cache-miss recovery from advisory failure prevents a genuine
+        # advisory hit from being masked by the retry.
+        run: cargo audit --no-fetch || { cargo audit --db-update && cargo audit --no-fetch; }
 
   # cargo-deny: license / source / ban / advisory checks on every PR and push
   # to main. Previously gated to the beta branch in ci-matrix.yml; promoted
@@ -214,3 +250,9 @@ jobs:
       - name: Run vitest
         working-directory: crates/copypaste-ui
         run: pnpm test
+
+      # PG/audit 9oyh: production build (tsc typecheck + vite bundle) on every PR,
+      # not just at release — catches type errors and build regressions early.
+      - name: Build (tsc + vite)
+        working-directory: crates/copypaste-ui
+        run: pnpm build

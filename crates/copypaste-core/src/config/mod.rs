@@ -114,6 +114,19 @@ pub struct AppConfig {
     /// Default: `true` (LAN advertisement enabled).
     #[serde(default = "default_true")]
     pub lan_visibility: bool,
+
+    /// Master switch for all sync transports (relay, cloud, P2P).
+    ///
+    /// When `false`, no clipboard data is sent to or received from any remote
+    /// device — the relay push/poll loops idle, cloud sync is suppressed, and
+    /// P2P outbound items are dropped.  Local capture and history remain
+    /// fully functional.
+    ///
+    /// Matches the Android `sync_enabled` parity field (PG-30 / bd CopyPaste-tke7).
+    ///
+    /// Default: `true` (sync enabled on first install).
+    #[serde(default = "default_true")]
+    pub sync_enabled: bool,
 }
 
 impl Default for AppConfig {
@@ -144,6 +157,7 @@ impl Default for AppConfig {
             relay_url: None,
             auto_apply_synced_clip: true,
             lan_visibility: true,
+            sync_enabled: true,
         }
     }
 }
@@ -476,6 +490,58 @@ mod tests {
         assert!(
             cfg.lan_visibility,
             "lan_visibility must default to true when absent from TOML"
+        );
+    }
+
+    // ── sync_enabled tests (tke7 / PG-30) ────────────────────────────────────
+
+    #[test]
+    fn sync_enabled_defaults_to_true() {
+        let cfg = AppConfig::default();
+        assert!(cfg.sync_enabled, "sync_enabled must default to true");
+    }
+
+    #[test]
+    fn sync_enabled_roundtrips_through_save_and_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+
+        // Explicitly disabled.
+        let cfg = AppConfig {
+            sync_enabled: false,
+            ..Default::default()
+        };
+        cfg.save(&path).unwrap();
+        let loaded = AppConfig::load(&path).unwrap();
+        assert!(
+            !loaded.sync_enabled,
+            "sync_enabled=false must survive save/load"
+        );
+
+        // Re-enable.
+        let cfg2 = AppConfig {
+            sync_enabled: true,
+            ..Default::default()
+        };
+        cfg2.save(&path).unwrap();
+        let loaded2 = AppConfig::load(&path).unwrap();
+        assert!(
+            loaded2.sync_enabled,
+            "sync_enabled=true must survive save/load"
+        );
+    }
+
+    #[test]
+    fn sync_enabled_absent_from_toml_defaults_to_true() {
+        // An old config file written before sync_enabled existed must default
+        // to true (opt-in, so existing users keep sync running).
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "config_version = 1\n").unwrap();
+        let cfg = AppConfig::load(&path).unwrap();
+        assert!(
+            cfg.sync_enabled,
+            "sync_enabled must default to true when absent from TOML"
         );
     }
 }

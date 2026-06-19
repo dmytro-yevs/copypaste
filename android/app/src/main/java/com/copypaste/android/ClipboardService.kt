@@ -889,24 +889,34 @@ class ClipboardService : Service() {
                 return
             }
 
-            val sensitive = try { isSensitive(text) } catch (_: UnsatisfiedLinkError) { false }
-            if (sensitive) {
-                Log.d(TAG, "Sensitive clip detected — skipping storage")
-                return
-            }
+            // PG-15 (qh1c) / PG-3 (349q): do NOT drop sensitive items at capture.
+            // macOS stores sensitive clips (the daemon persists every captured clip)
+            // so Android must match. The old early-return meant Android never
+            // uploaded its own sensitive clips while macOS did — breaking cross-device
+            // parity. We now STORE sensitive items encrypted with is_sensitive=true
+            // and expires_at from the user's sensitive TTL; the UI masks them.
+            // storeClipboardItem (the preferred replacement for addClipboardItem)
+            // handles the is_sensitive flag + expires_at stamping inside Rust.
 
             val key = settings.encryptionKey
 
             // Native SQLite insert (sync subsystem only) — fire-and-forget.
+            // storeClipboardItem passes the user's sensitiveTtlSecs so sensitive
+            // items get a proper expires_at instead of being silently dropped.
             try {
-                val nativeId = addClipboardItem(databasePath(context), key, text)
+                val nativeId = storeClipboardItem(
+                    dbPath = databasePath(context),
+                    key = key,
+                    text = text,
+                    sensitiveTtlSecs = settings.sensitiveTtlSecs,
+                )
                 if (nativeId.isNotEmpty()) {
                     Log.d(TAG, "Native insert ok: $nativeId")
                 }
-            } catch (e: UnsatisfiedLinkError) {
-                Log.d(TAG, "Native addClipboardItem unavailable (no live .so)")
             } catch (e: CopypasteException) {
-                Log.w(TAG, "Native addClipboardItem failed (${e.message})")
+                Log.w(TAG, "Native storeClipboardItem failed (${e.message})")
+            } catch (e: Exception) {
+                Log.w(TAG, "Native storeClipboardItem threw (${e.javaClass.simpleName}: ${e.message})")
             }
 
             // Generate ONE lamport tick at capture time and thread the SAME value

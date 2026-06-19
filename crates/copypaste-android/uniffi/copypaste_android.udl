@@ -22,7 +22,39 @@ namespace copypaste_android {
 
   boolean is_sensitive(string text);
 
+  // PG-23 (l9z8): sensitive_kind now gates at the SAME >= 0.70 confidence floor
+  // as is_sensitive / is_sensitive_for_autowipe. Previously it called detect()
+  // (any confidence), causing sensitive_kind to be non-null while is_sensitive
+  // was false for patterns like phone (0.55) or IBAN (0.65). After this fix,
+  // sensitive_kind.isNotNull() <=> is_sensitive(text) == true.
   string? sensitive_kind(string text);
+
+  // ── PG-3 (349q): sensitive_capture_decision ─────────────────────────────────
+  // Single-round-trip verdict for one clipboard item at capture time.
+  // Returns is_sensitive (>= 0.70 gate), kind label, and expires_at_ms
+  // (= now_unix_ms + sensitive_ttl_secs * 1000, or null when ttl==0 or not
+  // sensitive). Kotlin MUST pass these values to the DB store instead of the
+  // old early-return pattern.
+  //
+  // GRADLE-REQUIRED: ClipboardService.kt must remove the sensitive early-returns
+  // at :892-896 (text), :993 (image), :1169 (file) and call this function for
+  // every capture. The store-or-drop decision now lives in Rust.
+  SensitiveCaptureDecision sensitive_capture_decision(string text, i64 now_unix_ms, u64 sensitive_ttl_secs);
+
+  // ── PG-24 (5tnx): per-item sensitive expires_at ─────────────────────────────
+  // Compute expires_at (Unix ms) for a sensitive item: now_unix_ms + ttl_secs*1000.
+  // Returns null when sensitive_ttl_secs == 0 ("auto-wipe disabled" sentinel).
+  // Kotlin stores the returned value in the DB row so WorkManager periodic prune
+  // can sweep stale sensitive items even when the app is suspended.
+  i64? sensitive_expires_at_ms(i64 now_unix_ms, u64 sensitive_ttl_secs);
+
+  // ── PG-4 (ojsh): detect_sensitive_spans ─────────────────────────────────────
+  // Return all sensitive pattern match spans (char offsets, NFKC-normalised) for
+  // `text`. Kotlin uses these to bullet-mask embedded credentials in the history
+  // list even when the item as a whole is not sensitive (e.g. a card number buried
+  // in a longer email). Returns an empty list when no sensitive patterns are found.
+  // GRADLE-REQUIRED: the masking render is Kotlin / XML; this FFI is the data source.
+  sequence<SensitiveSpan> detect_sensitive_spans(string text);
 
   [Throws=CopypasteError]
   u64 open_database(string path, [ByRef] sequence<u8> key);
@@ -31,11 +63,28 @@ namespace copypaste_android {
 
   // Live binding (feature `android-uniffi-live`): inserts a clipboard text item
   // into the encrypted SQLite DB at `db_path` using `key` (32 bytes).
-  // Returns the new row UUID. Returns an empty string when the text is
-  // flagged as sensitive (caller should skip storage). With the feature off,
-  // returns a stub UUID and performs no DB I/O.
+  // Returns the new row UUID.
+  //
+  // PG-3 (349q): sensitive items are NO LONGER dropped — they are stored with
+  // is_sensitive=true and expires_at stamped from the default SENSITIVE_TTL_SECS
+  // (30 s). For explicit TTL control use store_clipboard_item instead.
+  // With the feature off, validates key shape and returns an empty string.
+  //
+  // GRADLE-REQUIRED: ClipboardService.kt must remove the sensitive early-returns
+  // at :892-896, :993, :1169 and call this function (or store_clipboard_item) for
+  // ALL captures.
   [Throws=CopypasteError]
   string add_clipboard_item(string db_path, [ByRef] sequence<u8> key, string text);
+
+  // Live binding: inserts a clipboard text item with an EXPLICIT sensitive TTL.
+  // Preferred over add_clipboard_item for new code — it accepts the user's
+  // configured sensitive_ttl_secs so the expiry matches their settings exactly.
+  // `sensitive_ttl_secs == 0` → auto-wipe disabled (no expires_at stamped).
+  // With the feature off, validates key shape and returns an empty string.
+  //
+  // GRADLE-REQUIRED: call with Config.sensitive_ttl_secs from the current settings.
+  [Throws=CopypasteError]
+  string store_clipboard_item(string db_path, [ByRef] sequence<u8> key, string text, u64 sensitive_ttl_secs);
 
   // Live binding (feature `android-uniffi-live`): returns the count of items
   // currently stored at `db_path`. Returns 0 when the feature is off.
@@ -87,6 +136,79 @@ namespace copypaste_android {
   /// registration value. Throws `InvalidKeyLength` if not 32 bytes.
   [Throws=CopypasteError]
   string relay_public_key_b64([ByRef] sequence<u8> sync_key);
+
+  // ── PG-2 (kmcr): Relay registration Proof-of-Possession ─────────────────
+  // The macOS daemon sends HMAC-SHA256(sync_key, "relay-registration-pop-v1:" +
+  // device_id) at relay registration. Android was missing this export. Delegates
+  // to `copypaste_core::derive_relay_registration_pop` — no crypto reimplementation.
+  // SECURITY: derived from secret material; Kotlin MUST NOT log the result.
+  // Base64-encode the returned bytes before sending on the wire as `pop_b64`.
+
+  /// Compute the relay registration Proof-of-Possession (PoP) for `device_id`.
+  /// Returns 32 raw bytes (HMAC-SHA256). Kotlin MUST base64-encode for the wire
+  /// and MUST NOT log. `sync_key` must be 32 bytes (throws `InvalidKeyLength`).
+  /// `device_id` MUST be the same value used as the relay inbox device_id
+  /// (i.e. the result of `relay_inbox_id`).
+  [Throws=CopypasteError]
+  sequence<u8> relay_registration_pop([ByRef] sequence<u8> sync_key, string device_id);
+
+  // ── PG-16 (89ve): Text content-type classifier ───────────────────────────
+  // Android TextKind.kt re-implemented copypaste-core text_kind classification,
+  // causing silent drift. This export delegates to the canonical Rust classifier.
+  // GRADLE-REQUIRED: the Kotlin call-site swap in TextKind.kt is a separate step.
+  // Returns a stable uppercase label: TEXT, URL, EMAIL, PHONE, COLOR, JSON, CODE,
+  // NUMBER, PATH. Returns TEXT on an impossible panic (never throws).
+
+  /// Classify `text` and return its stable uppercase kind label (e.g. "URL",
+  /// "CODE"). Delegates to `copypaste_core::text_kind::classify_text` — the
+  /// SINGLE canonical classifier. Returns "TEXT" on a caught panic.
+  string classify_text_kind(string text);
+
+  // ── PG-35 (08r1): Private-mode Rust source of truth ─────────────────────
+  // macOS private mode is daemon-backed (AtomicBool + disk persist). Android was
+  // SharedPrefs-only. These two exports expose a Rust-side AtomicBool so Rust
+  // capture paths honour the same toggle as the Kotlin SharedPrefs check.
+  // Kotlin MUST seed this at startup and update it on every toggle.
+  // See lib.rs `PRIVATE_MODE` for the full Kotlin integration contract.
+
+  /// Seed or update the Rust-side private-mode flag.
+  /// Call at service startup (from SharedPrefs) and on every user toggle.
+  void set_private_mode(boolean enabled);
+
+  /// Read the current Rust-side private-mode flag.
+  /// Check before any Rust-initiated clipboard capture.
+  boolean get_private_mode();
+
+  // ── PG-12 (8qcm): Revoke peer + sync-key rotation ───────────────────────
+  // macOS `revoke_and_rotate` (ipc.rs:4882) revokes a peer and rotates the cloud
+  // sync key in one step. Android was missing the rotation. These exports delegate
+  // to `copypaste_core::derive_sync_key` + the existing `revoke_device` DB call.
+  //
+  // SECURITY:
+  //  - Key derivation happens BEFORE any DB write (bad passphrase → no mutation).
+  //  - The returned bytes are SECRET. Kotlin MUST store in AndroidKeystore and
+  //    zero the ByteArray after persisting. NEVER log.
+  //  - Kotlin MUST also call `update_p2p_listener_peers` with the revoked
+  //    fingerprint in the denylist so the mTLS allowlist is updated.
+  //
+  // GRADLE-REQUIRED: full end-to-end verification (relay re-registration under
+  // new key, old-key rejection) requires a live relay + Gradle pipeline.
+
+  /// Revoke a peer AND rotate the cloud sync key to `new_passphrase`.
+  /// Returns the new 32-byte raw sync key. Kotlin MUST store in AndroidKeystore
+  /// and zero the ByteArray after persisting. Passphrase must be ≥8 characters.
+  /// With `android-uniffi-live` feature off, skips the DB write (stub mode);
+  /// Kotlin is responsible for calling `revoke_device_audit` separately in that case.
+  /// Throws `DecryptionFailed` for a bad passphrase, `DatabaseError` on DB failure.
+  [Throws=CopypasteError]
+  sequence<u8> revoke_device_and_rotate_key(string db_path, [ByRef] sequence<u8> key, string fingerprint, string name, string new_passphrase);
+
+  /// Rotate the cloud sync key to `new_passphrase` WITHOUT revoking a peer.
+  /// Returns the new 32-byte raw sync key. Kotlin MUST store in AndroidKeystore
+  /// and zero the ByteArray after persisting. Passphrase must be ≥8 characters.
+  /// Throws `DecryptionFailed` for a bad passphrase.
+  [Throws=CopypasteError]
+  sequence<u8> rotate_sync_key(string new_passphrase);
 
   // ── QR device pairing ─────────────────────────────────────────────────────
   // The QR code is a transport for the EXISTING PAKE pairing material — it is
@@ -323,6 +445,50 @@ namespace copypaste_android {
   /// a device-management UI. Same data source as `list_revoked_fingerprints`.
   [Throws=CopypasteError]
   sequence<RevokedPeer> list_revoked_peers(string db_path, [ByRef] sequence<u8> key);
+
+  // ── PG-17 (mxoq): FTS5 search over Android FFI ───────────────────────────
+  // Android previously did a full-content O(N) decrypt scan in
+  // ClipboardRepository.searchIds. This export delegates to
+  // copypaste_core::search_items — the SAME FTS5-indexed search the daemon's
+  // `search` IPC handler uses (O(log N), ranked by relevance). The FTS index
+  // lives inside the encrypted SQLCipher DB and never crosses the FFI; only
+  // metadata (item_id, content_type, lamport_ts, wall_time_ms, is_sensitive)
+  // is returned. With feature `android-uniffi-live` off, returns an empty list.
+  //
+  // GRADLE-REQUIRED: the Kotlin call-site swap in ClipboardRepository
+  // (replacing the O(N) decrypt loop with this call) requires the Android
+  // Gradle build.
+
+  /// Search the local FTS5 index for items matching `query`.
+  /// Returns up to `limit` results (FTS5 rank order, best match first).
+  /// Returns an empty list for a blank or token-free query.
+  /// Throws `InvalidKeyLength` if `key` != 32 bytes, `DatabaseError` on I/O
+  /// failure. With `android-uniffi-live` feature off, always returns empty.
+  [Throws=CopypasteError]
+  sequence<SearchResultItem> fts_search(string db_path, [ByRef] sequence<u8> key, string query, u32 limit);
+
+  // ── PG-19 (o0t3): Lamport-ordered history page for Android ───────────────
+  // Android sorted clipboard history by wallTimeMs; the correct causal order
+  // is lamport_ts DESC (with wall_time and origin_device_id as tie-breaks)
+  // because the Lamport clock advances on every write/sync and is immune to
+  // wall-clock skew between devices. This export delegates to
+  // copypaste_core::get_page_pinned_first_lamport so Android uses the same
+  // causal ordering as the daemon. Pinned items come first (by pin_order),
+  // unpinned items follow in lamport_ts DESC order. `lamport_ts` is included
+  // in the returned HistoryItem so Kotlin can verify or re-sort client-side.
+  // With feature `android-uniffi-live` off, returns an empty list.
+  //
+  // GRADLE-REQUIRED: the Kotlin call-site swap in ClipboardRepository
+  // (replacing the wall-time ORDER BY with a call to this function) requires
+  // the Android Gradle build.
+
+  /// Return a page of clipboard history in lamport-clock order.
+  /// Pinned items first (by pin_order), then unpinned by
+  /// lamport_ts DESC, wall_time DESC, origin_device_id ASC.
+  /// Throws `InvalidKeyLength` if `key` != 32 bytes, `DatabaseError` on I/O
+  /// failure. With `android-uniffi-live` feature off, always returns empty.
+  [Throws=CopypasteError]
+  sequence<HistoryItem> get_history_page(string db_path, [ByRef] sequence<u8> key, u32 limit, u32 offset);
 };
 
 [Error]
@@ -589,6 +755,84 @@ dictionary RevokedPeer {
   string fingerprint;
   string name;
   i64 revoked_at;
+};
+
+// PG-3 (349q): result of `sensitive_capture_decision` — one-round-trip
+// sensitivity verdict + auto-wipe expiry for a clipboard item at capture time.
+//
+// is_sensitive  — true when confidence >= 0.70 (same gate as macOS daemon).
+// kind          — "AwsKey" / "CreditCard" / … or null when not sensitive.
+// expires_at_ms — Unix-ms expiry (now + ttl*1000), or null when ttl==0 or
+//                 not sensitive. Kotlin stores this in the DB row.
+//
+// Kotlin usage:
+//   val d = CopypasteSdk.sensitiveCaptureDecision(text, System.currentTimeMillis(), cfg.sensitiveTtlSecs)
+//   row.isSensitive = d.isSensitive
+//   row.expiresAtMs = d.expiresAtMs   // null → no auto-wipe
+//   row.sensitiveKind = d.kind
+dictionary SensitiveCaptureDecision {
+  boolean is_sensitive;
+  string? kind;
+  i64? expires_at_ms;
+};
+
+// PG-4 (ojsh): one sensitive pattern match span (char offsets, NFKC-normalised).
+// Returned by `detect_sensitive_spans`. Kotlin uses start/end as character
+// indices into the normalised text to mask embedded credentials in the history
+// list. For ASCII text (virtually all practical clipboard content) these indices
+// match the original string directly.
+//
+// confidence   — detection confidence (0.0 – 1.0). Informational; Kotlin masks
+//                ALL returned spans regardless of confidence.
+// pattern_name — canonical pattern id (e.g. "aws_access_key", "credit_card").
+dictionary SensitiveSpan {
+  u32 start;
+  u32 end;
+  float confidence;
+  string pattern_name;
+};
+
+// PG-17 (mxoq): one item returned by `fts_search`.
+//
+// Only metadata fields cross the FFI — no plaintext content, no nonces.
+// `item_id` is the stable cross-device identity Kotlin already has stored
+// locally. Kotlin uses it to look up the ciphertext row for rendering or
+// decryption. The FTS index remains inside the encrypted SQLCipher database.
+dictionary SearchResultItem {
+  // Stable cross-device identity (maps to Kotlin's `item_id` column).
+  string item_id;
+  // One of "text", "image", "file".
+  string content_type;
+  // Lamport clock value for causal ordering.
+  i64 lamport_ts;
+  // Wall-clock capture time in milliseconds since Unix epoch.
+  i64 wall_time_ms;
+  // Whether the item was flagged as sensitive at capture time.
+  boolean is_sensitive;
+};
+
+// PG-19 (o0t3): one item in the history page returned by `get_history_page`.
+//
+// Only metadata fields cross the FFI — no plaintext content, no nonces.
+// `item_id` is the stable cross-device identity Kotlin already has stored
+// locally. Kotlin uses it to look up the ciphertext row for rendering or
+// decryption.
+dictionary HistoryItem {
+  // Stable cross-device identity (maps to Kotlin's `item_id` column).
+  string item_id;
+  // One of "text", "image", "file".
+  string content_type;
+  // Lamport clock value. Primary sort key for unpinned items (descending).
+  // Exposed here so Kotlin can verify or further sort if needed.
+  i64 lamport_ts;
+  // Wall-clock capture time in milliseconds since Unix epoch.
+  i64 wall_time_ms;
+  // Whether the item was flagged as sensitive at capture time.
+  boolean is_sensitive;
+  // Whether this item is pinned.
+  boolean pinned;
+  // Explicit sort order for pinned items; null for unpinned items.
+  f64? pin_order;
 };
 
 // ABI 12: a peer discovered on the LAN (mirror of

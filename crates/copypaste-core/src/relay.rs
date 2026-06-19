@@ -29,6 +29,28 @@ use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
+/// HKDF salt used for relay inbox/pubkey derivation.
+///
+/// RFC-5869 permits `None` (no salt), in which case HKDF substitutes a
+/// zero-filled block of the hash's output length. We expose this as a named
+/// constant rather than passing `None` inline so that:
+///   (a) the choice is documented and auditable in one place, and
+///   (b) future rotation to a real random salt only requires adding a new
+///       versioned constant and a migration path (bumping the `info` suffix
+///       is insufficient on its own — the salt and info together determine
+///       the output).
+///
+/// # Migration note (le8w)
+/// This constant is intentionally `None` — it **must not be changed** to a
+/// non-`None` value without a coordinated migration:
+///   • all existing relay registrations (inbox_id + public_key + PoP) are
+///     derived with `salt = None`.  Changing the salt silently reassigns
+///     every account to a different inbox, breaking relay sync for all users.
+/// If a future hardened salt is needed, introduce `RELAY_HKDF_SALT_V2` with
+/// a new `info` suffix (`…/v2`) and route new registrations through it while
+/// keeping this constant for backwards compat or an explicit migration banner.
+const RELAY_HKDF_SALT: Option<&[u8]> = None;
+
 /// HMAC-SHA256 context prefix for the relay proof-of-possession (PoP).
 /// The full HMAC input is `RELAY_POP_PREFIX + device_id.as_bytes()`.
 /// Changing this string invalidates all existing PoP values (a migration),
@@ -56,7 +78,7 @@ const RELAY_PUBKEY_INFO: &[u8] = b"copypaste/relay/public-key/v1";
 /// logged. See the module docs.
 pub fn derive_relay_inbox_id(sync_key: &[u8; 32]) -> String {
     // HKDF-SHA256 → 16 bytes, then format as a version-4 / variant-1 UUID.
-    let hk = Hkdf::<Sha256>::new(None, sync_key);
+    let hk = Hkdf::<Sha256>::new(RELAY_HKDF_SALT, sync_key);
     let mut bytes = [0u8; 16];
     hk.expand(RELAY_INBOX_INFO, &mut bytes)
         .expect("HKDF-SHA256 expand of 16 bytes is always valid");
@@ -82,7 +104,7 @@ pub fn derive_relay_inbox_id(sync_key: &[u8; 32]) -> String {
 /// # Security
 /// Derived from secret key material; do not log.
 pub fn derive_relay_public_key(sync_key: &[u8; 32]) -> [u8; 32] {
-    let hk = Hkdf::<Sha256>::new(None, sync_key);
+    let hk = Hkdf::<Sha256>::new(RELAY_HKDF_SALT, sync_key);
     let mut out = [0u8; 32];
     hk.expand(RELAY_PUBKEY_INFO, &mut out)
         .expect("HKDF-SHA256 expand of 32 bytes is always valid");
@@ -232,5 +254,44 @@ mod tests {
     #[test]
     fn public_key_is_32_bytes() {
         assert_eq!(derive_relay_public_key(&key("len-check")).len(), 32);
+    }
+
+    /// Guard that RELAY_HKDF_SALT remains None (le8w).
+    ///
+    /// Changing RELAY_HKDF_SALT to a non-None value reassigns every account to
+    /// a different relay inbox — a hard migration. This test pins the current
+    /// value so any future change triggers a deliberate, reviewed decision.
+    #[test]
+    fn relay_hkdf_salt_is_none() {
+        assert!(
+            RELAY_HKDF_SALT.is_none(),
+            "RELAY_HKDF_SALT must remain None until a versioned migration is implemented. \
+             See the le8w migration note in this module."
+        );
+    }
+
+    /// Golden-vector guard for the inbox id (le8w / stability).
+    ///
+    /// Ensures that the HKDF salt constant change (None → named constant)
+    /// produced zero functional change: the output for a fixed key must be
+    /// identical to the pre-refactor derivation using `Hkdf::new(None, …)`.
+    #[test]
+    fn relay_salt_none_golden_matches_direct_none() {
+        // Derive using the named constant (post-refactor).
+        let k = [2u8; 32];
+        let id_named = derive_relay_inbox_id(&k);
+        // Derive using a direct None (pre-refactor baseline).
+        let hk_direct = Hkdf::<Sha256>::new(None, &k);
+        let mut bytes = [0u8; 16];
+        hk_direct
+            .expand(RELAY_INBOX_INFO, &mut bytes)
+            .expect("HKDF expand");
+        bytes[6] = (bytes[6] & 0x0f) | 0x40;
+        bytes[8] = (bytes[8] & 0x3f) | 0x80;
+        let id_direct = format_uuid(&bytes);
+        assert_eq!(
+            id_named, id_direct,
+            "RELAY_HKDF_SALT=None must produce the same output as inline None"
+        );
     }
 }

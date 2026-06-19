@@ -29,7 +29,8 @@ enum class Density {
     SPACIOUS;    // CopyPaste-gzli: 42dp rows — largest spacing step, mirrors web spacious branch
 
     companion object {
-        val DEFAULT = COMFORTABLE
+        // PG-33 (CopyPaste-lvx6): align default to COMPACT to match macOS (store.ts:97 compact).
+        val DEFAULT = COMPACT
     }
 }
 
@@ -460,14 +461,31 @@ class Settings(context: Context) {
     /**
      * Number of preview lines per history row (PARITY-SPEC §3, audit P1 #9).
      *
-     * Mirrors the web `niApp` setting (store.ts): how many lines of preview text
-     * a row shows before ellipsis. 1 line (default) = single-line ellipsis; >1 =
-     * multi-line clamp. Range 1–6 (matches web's clamp). Honoured by the history
-     * row as `maxLines`.
+     * Mirrors the web `previewLinesApp` setting (store.ts M4 split): how many lines of
+     * preview text a row shows before ellipsis in the main history list.
+     * 1 line (default) = single-line ellipsis; >1 = multi-line clamp. Range 1–6
+     * (matches web's clamp). Honoured by the history row as `maxLines`.
      */
     var previewLines: Int
         get() = prefs.getInt("preview_lines", 1).coerceIn(1, 6)
         set(v) = prefs.edit().putInt("preview_lines", v.coerceIn(1, 6)).apply()
+
+    /**
+     * Number of preview lines in the Quick-Paste popup (PARITY-SPEC PG-59, web M4 split).
+     *
+     * Mirrors the web `previewLinesPopup` setting (store.ts): how many lines of preview
+     * text are shown per clip in the popup / overlay panel, independently from the main
+     * history list ([previewLines]). 1 line (default) = single-line ellipsis; >1 =
+     * multi-line clamp. Range 1–6 (matches web's clamp).
+     *
+     * NOTE (PG-59): Android does not yet have a Quick-Paste popup surface. This property
+     * is defined for parity completeness so the setting key is reserved and the Settings
+     * UI (SettingsActivity, owned by another agent) can wire a slider row in the
+     * "Popup appearance" subsection once the popup composable exists.
+     */
+    var previewLinesPopup: Int
+        get() = prefs.getInt("preview_lines_popup", 1).coerceIn(1, 6)
+        set(v) = prefs.edit().putInt("preview_lines_popup", v.coerceIn(1, 6)).apply()
 
     /**
      * When true (default), the foreground service is actively monitoring the
@@ -818,6 +836,26 @@ class Settings(context: Context) {
     var p2pSyncEnabled: Boolean
         get() = prefs.getBoolean(KEY_P2P_SYNC_ENABLED, true)
         set(v) = prefs.edit().putBoolean(KEY_P2P_SYNC_ENABLED, v).apply()
+
+    /**
+     * PG-29 (CopyPaste-yqn5): Whether this device is visible on the LAN via mDNS-SD
+     * (NSD on Android).
+     *
+     * When true (default), the NsdManager service registration is active so other
+     * devices on the same network can discover and pair with this one.
+     * When false, the NSD service is unregistered so this device disappears from
+     * LAN discovery — useful in public/untrusted networks.
+     *
+     * Mirrors macOS `AppConfig::lan_visibility` (ipc.rs:199) and the macOS
+     * SettingsView toggle at line 1753 that hot-applies mDNS-SD register/unregister.
+     *
+     * Android-side enforcement: the ClipboardService NSD registration should gate on
+     * this flag (subscribe via [observe] for hot-apply). Key: "lan_visibility".
+     * Default: true (LAN-visible on first install, matches macOS default).
+     */
+    var lanVisibility: Boolean
+        get() = prefs.getBoolean("lan_visibility", true)
+        set(v) = prefs.edit().putBoolean("lan_visibility", v).apply()
 
     /**
      * Return the P2P outbound high-water cursor for [fingerprint]:
@@ -1395,6 +1433,8 @@ class Settings(context: Context) {
         syncOnWifiOnly: Boolean,
         syncBackend: SyncBackend,
         p2pSyncEnabled: Boolean,
+        /** PG-29: LAN/mDNS-SD visibility toggle (mirrors macOS lan_visibility). Default true. */
+        lanVisibility: Boolean,
         supabaseUrl: String,
         supabaseAnonKey: String,
         supabaseEmail: String,
@@ -1428,6 +1468,7 @@ class Settings(context: Context) {
             .putBoolean("sync_on_wifi_only", syncOnWifiOnly)
             .putString("sync_backend", syncBackend.name)
             .putBoolean(KEY_P2P_SYNC_ENABLED, p2pSyncEnabled)
+            .putBoolean("lan_visibility", lanVisibility)  // PG-29: LAN mDNS-SD visibility
             .putString("supabase_url", supabaseUrl.trimEnd('/'))
             .putString("supabase_anon_key", supabaseAnonKey)
             .putString("supabase_email", supabaseEmail.trim())

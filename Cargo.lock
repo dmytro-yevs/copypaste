@@ -832,10 +832,12 @@ dependencies = [
  "futures-util",
  "rusqlite",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util",
+ "tracing",
  "uniffi",
  "uuid",
  "zeroize",
@@ -865,7 +867,6 @@ dependencies = [
  "home",
  "qrcode",
  "rpassword",
- "security-framework",
  "serde",
  "serde_json",
  "tempfile",
@@ -1087,6 +1088,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-global-shortcut",
  "tracing",
+ "uuid",
  "window-vibrancy 0.5.3",
 ]
 

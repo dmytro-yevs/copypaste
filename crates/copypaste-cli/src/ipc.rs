@@ -6,6 +6,22 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
+// ro0r: backoff/retry parameters for `migration_in_progress`.
+//
+// When the daemon is running its v4 key-rotation sweep it temporarily rejects
+// ingest writes with this code. 5 attempts with 250ms→2s exponential backoff
+// covers the typical sweep window without hanging the CLI for more than ~8s.
+// Only this one code is retried — everything else propagates immediately.
+
+/// Maximum number of retry attempts for a `migration_in_progress` response.
+const MIGRATION_MAX_RETRIES: u32 = 5;
+/// Initial backoff delay in milliseconds (doubles each attempt, capped at
+/// [`MIGRATION_BACKOFF_CAP_MS`]).
+const MIGRATION_BACKOFF_INIT_MS: u64 = 250;
+/// Upper bound on a single backoff delay (in milliseconds). Caps exponential
+/// growth so the longest single wait is ~2 s even when many retries remain.
+const MIGRATION_BACKOFF_CAP_MS: u64 = 2_000;
+
 /// Opaque counter for generating unique request ids within a process run.
 // Used by next_id(); suppress dead_code: this is intentional public API for
 // callers that want monotonic ids rather than the hardcoded "1" used today.
@@ -46,6 +62,9 @@ pub struct Response {
 
 pub struct IpcClient {
     stream: UnixStream,
+    /// Socket path retained for `call` reconnects on `migration_in_progress`
+    /// retries. Stored as `Box<Path>` to avoid a lifetime parameter on the struct.
+    socket_path: Box<Path>,
 }
 
 impl IpcClient {
@@ -62,7 +81,32 @@ impl IpcClient {
         stream
             .set_write_timeout(Some(IO_TIMEOUT))
             .context("failed to set write timeout on daemon socket")?;
-        Ok(Self { stream })
+        Ok(Self {
+            stream,
+            socket_path: socket_path.into(),
+        })
+    }
+
+    /// Open a fresh connection to the stored socket path and replace `self.stream`.
+    ///
+    /// Used by the `migration_in_progress` retry loop: each retry needs a new
+    /// TCP-like connection because the old one is in an unknown state after an
+    /// error response.
+    fn reconnect(&mut self) -> Result<()> {
+        let stream = UnixStream::connect(&self.socket_path).with_context(|| {
+            format!(
+                "daemon not running (socket: {})",
+                self.socket_path.display()
+            )
+        })?;
+        stream
+            .set_read_timeout(Some(IO_TIMEOUT))
+            .context("failed to set read timeout on daemon socket")?;
+        stream
+            .set_write_timeout(Some(IO_TIMEOUT))
+            .context("failed to set write timeout on daemon socket")?;
+        self.stream = stream;
+        Ok(())
     }
 
     /// Build a request JSON object stamped with `protocol_version` and a
@@ -92,14 +136,17 @@ impl IpcClient {
             .to_string()
     }
 
-    /// Send a JSON request and read exactly one JSON response line.
+    /// Send a JSON request and read exactly one JSON response line (raw, no retry).
     ///
     /// Enforces two framing guards beyond the raw I/O:
     /// 1. The response `id` must echo the request `id`; a mismatch indicates
     ///    a framing desync (or a rogue peer) and is rejected immediately.
     /// 2. A `version_mismatch` error code in the response is surfaced as a
     ///    clear, actionable error so the user knows to upgrade CLI or daemon.
-    pub fn call(&mut self, request: &Value) -> Result<Response> {
+    ///
+    /// This is the low-level primitive. Most callers should use [`Self::call`]
+    /// which wraps this with `migration_in_progress` backoff/retry (ro0r).
+    fn call_once(&mut self, request: &Value) -> Result<Response> {
         // Capture the id Value directly so we can compare it against the
         // response id Value without losing type information. Using
         // `.as_str().unwrap_or("")` would coerce a numeric id (e.g. `1`)
@@ -194,6 +241,55 @@ impl IpcClient {
             // keep working unchanged.
             error_code,
         })
+    }
+
+    /// Send a JSON request and read exactly one JSON response line.
+    ///
+    /// ro0r: when the daemon replies with `migration_in_progress` (v4
+    /// key-rotation sweep in flight), this method backs off and retries up to
+    /// [`MIGRATION_MAX_RETRIES`] times before giving up. Every other error code
+    /// and every transport-level error is propagated immediately without
+    /// retrying. Backoff schedule: 250 ms → 500 ms → 1 s → 2 s → 2 s.
+    ///
+    /// On exhausted retries the method prints a clear user-facing message and
+    /// exits with code 1 — the same pattern as `exit_on_err` — because at that
+    /// point there is no meaningful value to return to the caller.
+    pub fn call(&mut self, request: &Value) -> Result<Response> {
+        let mut delay_ms = MIGRATION_BACKOFF_INIT_MS;
+        for attempt in 0..=MIGRATION_MAX_RETRIES {
+            let resp = self.call_once(request)?;
+
+            match resp.error_code {
+                Some(ErrorCode::MigrationInProgress) if attempt < MIGRATION_MAX_RETRIES => {
+                    // Back off and retry. Reconnect for each attempt because the
+                    // daemon closes the connection after an error response.
+                    eprintln!(
+                        "daemon migration in progress — retrying in {delay_ms}ms \
+                         (attempt {}/{MIGRATION_MAX_RETRIES})",
+                        attempt + 1
+                    );
+                    std::thread::sleep(Duration::from_millis(delay_ms));
+                    delay_ms = (delay_ms * 2).min(MIGRATION_BACKOFF_CAP_MS);
+                    // Reconnect for next attempt.
+                    if let Err(e) = self.reconnect() {
+                        return Err(e.context("failed to reconnect for migration retry"));
+                    }
+                }
+                Some(ErrorCode::MigrationInProgress) => {
+                    // Retries exhausted. Give up with a clear message.
+                    eprintln!(
+                        "error [migration_in_progress]: daemon key-rotation is still in \
+                         progress after {MIGRATION_MAX_RETRIES} retries — \
+                         please try again in a few seconds"
+                    );
+                    std::process::exit(1);
+                }
+                _ => return Ok(resp),
+            }
+        }
+        // Unreachable: the loop above always returns or exits before reaching
+        // attempt == MIGRATION_MAX_RETRIES + 1. The compiler requires this.
+        unreachable!("migration retry loop exited without returning")
     }
 }
 
@@ -375,5 +471,55 @@ mod tests {
             err.to_string().contains("version mismatch"),
             "expected version mismatch error, got: {err}"
         );
+    }
+
+    /// ro0r: call() must retry when the first response carries
+    /// error_code = "migration_in_progress" and succeed on the next attempt
+    /// when the subsequent response is ok.
+    ///
+    /// The mock server handles two sequential connections: the first sends
+    /// migration_in_progress, the second sends ok. The test verifies that
+    /// call() retries transparently and returns the successful response.
+    #[test]
+    fn call_retries_on_migration_in_progress_and_succeeds() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc as SArc;
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("mig_retry.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let connection_count = SArc::new(AtomicUsize::new(0));
+        let cc = SArc::clone(&connection_count);
+        thread::spawn(move || {
+            // Accept two sequential connections.
+            for _ in 0..2 {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let mut buf = String::new();
+                    let mut reader = BufReader::new(&stream);
+                    reader.read_line(&mut buf).unwrap();
+                    let n = cc.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let reply = if n == 0 {
+                        // First attempt: migration in progress.
+                        r#"{"id":"1","ok":false,"error":"sweep in flight","error_code":"migration_in_progress"}"#
+                    } else {
+                        // Second attempt: success.
+                        r#"{"id":"1","ok":true,"data":{"done":true}}"#
+                    };
+                    stream.write_all(reply.as_bytes()).unwrap();
+                    stream.write_all(b"\n").unwrap();
+                }
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let mut client = IpcClient::connect(&sock).unwrap();
+        let req = serde_json::json!({"id": "1", "method": "copy", "params": {}});
+        // call() should retry transparently and return the success response.
+        let resp = client.call(&req).unwrap();
+        assert!(
+            resp.ok,
+            "expected ok=true after migration retry, got: {resp:?}"
+        );
+        assert_eq!(connection_count.load(Ordering::SeqCst), 2);
     }
 }

@@ -1,13 +1,14 @@
 name: CI Matrix (beta-bonus)
 
 on:
-  # Beta-bonus matrix: scoped to the beta/release branches it is meant for.
-  # A normal PR into main runs ci.yml (+ coverage); it must NOT duplicate this
-  # matrix, so pull_request is restricted to release branches only.
+  # Multi-toolchain matrix (stable + beta) and doc-build run on main and all
+  # release/** branches. The normal ci.yml job (single stable toolchain) already
+  # covers pull_request into main; this matrix adds beta-toolchain and release-branch
+  # coverage on top without duplicating the main PR check.
   pull_request:
-    branches: [release/v0.2.0-beta]
+    branches: [main, "release/**"]
   push:
-    branches: [release/v0.2.0-beta]
+    branches: [main, "release/**"]
   workflow_dispatch:
 
 concurrency:

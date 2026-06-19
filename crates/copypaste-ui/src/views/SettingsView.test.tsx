@@ -85,7 +85,13 @@ describe("ErrorBoundary", () => {
     spy.mockRestore();
 
     expect(screen.getByText(/Something went wrong in History/i)).toBeInTheDocument();
-    expect(screen.getByText(/kaboom from render/i)).toBeInTheDocument();
+    // P2-54h5: raw error detail is sanitized out of the DOM (logged to console
+    // only) to avoid leaking filesystem paths / internal strings. The boundary
+    // shows a generic fallback instead of the thrown message.
+    expect(screen.queryByText(/kaboom from render/i)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/The daemon may be unavailable, or this screen failed to load/i),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
   });
 });

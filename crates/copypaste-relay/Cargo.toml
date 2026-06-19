@@ -9,6 +9,13 @@ rust-version.workspace = true
 name = "copypaste-relay"
 path = "src/main.rs"
 
+# `quota-tiers` gates the Pro-tier quota model and the test/integration helpers
+# that are not called by the production binary.  It is intentionally NOT in
+# `default` so the release binary sees only `Tier::Free` paths.  Integration
+# test binaries and future tier-enforcement wiring enable it explicitly.
+[features]
+quota-tiers = []
+
 [dependencies]
 axum = { version = "0.8", features = ["macros"] }
 tokio.workspace = true
@@ -48,7 +55,7 @@ tokio = { workspace = true, features = ["test-util"] }
 tower = { version = "0.4", features = ["util"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
-# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.89. Pin removed 2026-06-14.
+# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.96. Pin removed 2026-06-14.
 tempfile = "3"
 # PoP test helper: compute_pop in pop_verification.rs uses HMAC-SHA256 to derive
 # the expected proof and compare it against the relay's stored value. Both crates

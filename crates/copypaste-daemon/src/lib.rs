@@ -11,6 +11,9 @@
 //! the original `mod` declarations in `main.rs` exactly — no behavioural
 //! change.
 
+// reason: the lib facade re-exports internal modules for integration tests;
+// many items are not used by the lib itself but are reached by the binary
+// (main.rs) or by tests/*.rs — the compiler can't see those use-sites from lib.rs.
 #![allow(dead_code)]
 
 pub mod app_icon;
@@ -19,6 +22,12 @@ pub mod daemon;
 pub mod device_meta;
 #[cfg(unix)]
 pub mod ipc;
+// P2-o8ew: wire the Windows named-pipe IPC skeleton under cfg(windows) so it is
+// no longer an undeclared orphan on disk (its own header wrongly claimed it was
+// already declared). Compiled out on unix; Windows is frozen per ADR-012, so no
+// active CI target builds it. Kept (not deleted) per the module's "Do not delete".
+#[cfg(windows)]
+pub mod ipc_win;
 pub mod keychain;
 pub mod logging;
 pub mod p2p;

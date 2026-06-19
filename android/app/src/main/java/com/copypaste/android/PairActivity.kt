@@ -424,7 +424,12 @@ fun PairScreen(
                 }
                 qr = result
                 qrBitmap = bmp
-                qrRevealed = false  // re-blur whenever a fresh QR is generated
+                // l7n0 (PG-8): do NOT reset qrRevealed here. An auto-refresh of the
+                // QR payload must preserve the user's current reveal state — re-blurring
+                // on every 120s TTL refresh is privacy-hostile (flickers reveal state).
+                // The blur is user-owned: only the initial launch starts blurred (see
+                // LaunchedEffect(Unit) below). Reveal persists across payload refreshes,
+                // matching macOS behaviour where reveal is sticky.
             } catch (e: Exception) {
                 errorMessage = e.message ?: e.javaClass.simpleName
             } finally {
@@ -1270,10 +1275,12 @@ fun PairScreen(
                                 color = c.dim,
                             )
                         }
-                        // 10hh: fingerprint mono + 16…8 truncation (matches DevicesActivity).
-                        val truncatedFp = formatPeerFingerprint(peer.fingerprint)
+                        // 65gv (PG-47): show the FULL fingerprint in the SAS confirmation
+                        // card — truncating a security fingerprint during verification
+                        // defeats its purpose. The user must compare the whole value with
+                        // the peer device. Matches macOS SAS modal which shows 64 chars.
                         Text(
-                            text = "Fingerprint: $truncatedFp",
+                            text = "Fingerprint: ${peer.fingerprint}",
                             style = MaterialTheme.typography.bodySmall.copy(
                                 fontFamily = MonoFontFamily,
                                 fontSize = 11.sp,

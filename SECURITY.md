@@ -11,7 +11,7 @@
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Report privately via email: security@copypaste.app (placeholder — replace before publishing)
+Report privately via email: security@copypaste.app
 
 Include:
 - Description of the vulnerability
@@ -30,25 +30,31 @@ Expected response: acknowledgement within 48 hours, fix timeline within 14 days 
 - Database at rest encrypted with **SQLCipher (AES-256-CBC)**
 
 ### Key Storage
-- macOS: **Keychain Services** (service: `com.copypaste.daemon`)
-- Windows: **DPAPI** (`CryptProtectData`)
-- Linux: **Secret Service API** (GNOME Keyring / KWallet)
+- macOS: **Keychain Services** (service: `com.copypaste.daemon`, `ThisDeviceOnly` accessibility)
+- Windows: **not implemented** — Windows support is frozen (ADR-012); the daemon uses an
+  ephemeral in-memory key that is lost on restart.
+- Linux: **not implemented** — the daemon uses an ephemeral in-memory key that is lost on
+  restart. A Secret Service integration (GNOME Keyring / KWallet) is planned but not shipped.
 
 ### Sensitive Data Detection
 - 20+ pattern types detected (AWS, GitHub, Stripe, OpenAI, JWT, SSH, etc.)
 - Sensitive items get automatic TTL expiry
-- Sensitive items **never synced** to relay server
+- Sensitive items **are synced encrypted** via relay/cloud/P2P; sensitivity is
+  re-evaluated by the receiving daemon. Items never leave any device in plaintext.
 
 ### Relay Server
 - Relay stores **only ciphertext** — never has decryption keys
 - End-to-end encrypted: relay cannot read clipboard content
-- Bearer token auth (Phase 2b: SHA-256 of public key — TODO: replace with signed challenges in Phase 3)
-- Per-device inbox with 500-item quota
+- Bearer token auth: **random 16-byte token** (`OsRng`) encoded as 32 hex characters,
+  issued at registration — it is NOT derived from the public key or any other secret.
+  Tokens are compared constant-time via `subtle::ct_eq` (no timing oracle).
+- Per-device inbox with 500-item hard quota (oldest pruned on overflow)
 
 ### Known Limitations
-- Relay bearer tokens use string equality comparison (not constant-time) — tracked for fix in Relay v2
 - Clipboard monitoring requires accessibility permissions on macOS
 - Android 10+ clipboard access restricted to foreground apps
+- Windows key storage is ephemeral (process-restart loses the key); Windows is frozen (ADR-012)
+- Linux key storage is ephemeral (process-restart loses the key); Secret Service integration planned
 
 ## Dependency Auditing
 

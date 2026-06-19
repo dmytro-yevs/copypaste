@@ -260,6 +260,30 @@ pub enum VersionError {
 ///
 /// Returns `Ok(())` on a match, or
 /// [`VersionError::Incompatible`] (carrying both versions) on a mismatch.
+///
+/// # Strict equality — engineering note (kvn9)
+///
+/// This check uses **strict `!=` equality**, not a semver-compatible range.
+/// The consequence is that **any** change to the UniFFI UDL surface —
+/// including additive changes (new optional fields, new functions) — requires:
+///
+/// 1. Incrementing `UNIFFI_ABI_VERSION`.
+/// 2. Regenerating the Kotlin bindings via
+///    `./scripts/generate-android-bindings.sh`.
+/// 3. A **coordinated Play Store release** of the new `.aar` / `.apk`.
+///    There is no delta-deploy path: the old Kotlin stub and the new Rust
+///    `.so` will fail `check_compatibility` at runtime with `ABI mismatch`.
+///
+/// This is by design — UniFFI's generated Kotlin/JVM glue (
+/// `copypaste_androidFFI.kt`) is not forward- or backward-compatible with
+/// a `.so` built from a different UDL revision. The strict gate surfaces the
+/// incompatibility immediately (app crash on `NativeLib.init`) rather than
+/// allowing subtle data-shape mismatches to corrupt clipboard items silently.
+///
+/// **When adding a new UDL field/function:**
+/// - Bump `UNIFFI_ABI_VERSION` first (this file).
+/// - Update the doc-comment block above the constant describing what changed.
+/// - Regenerate bindings, build, and upload a new Play track before merging.
 pub fn check_compatibility(kotlin_abi_version: u32) -> Result<(), VersionError> {
     if kotlin_abi_version == UNIFFI_ABI_VERSION {
         Ok(())

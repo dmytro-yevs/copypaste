@@ -39,8 +39,10 @@ confirmation, on each device.
 
 ## Supported platforms
 
-- **macOS** — arm64 (Apple Silicon) and x86_64 (Intel); install via
-  Homebrew Cask (see `docs/release/brew-tap-setup.md`).
+- **macOS** — arm64 (Apple Silicon) native; Intel (x86_64) is supported via
+  Rosetta 2 (release builds are arm64-only — no universal DMG is published);
+  install via Homebrew Cask (see `docs/release/brew-tap-setup.md`).
+  Requires macOS 14 (Sonoma) or later.
 - **Android** — arm64-v8a; UniFFI bindings ship as an `.aar`.
 
 Windows is **frozen** as of 2026-05-23 — see
@@ -52,11 +54,19 @@ can run the daemon under WSL2 or wait for the freeze to be lifted; no ETA.
 
 ```
 crates/
-  copypaste-core/      — pure-Rust library (encryption, detection, database)
-  copypaste-android/   — UniFFI FFI crate (cdylib + bindgen binary)
-  copypaste-relay/     — Axum relay server
-  copypaste-cli/       — CLI frontend
-android/               — Android Studio project
+  copypaste-core/       — pure-Rust library (encryption, detection, database, config)
+  copypaste-ipc/        — IPC request/response types shared by daemon, CLI, and UI
+  copypaste-daemon/     — long-running background process (clipboard, IPC server, sync)
+  copypaste-cli/        — user-facing CLI (speaks IPC only, no core dep)
+  copypaste-ui/         — Tauri v2 + React desktop UI (speaks IPC only, no core dep)
+  copypaste-relay/      — Axum HTTP relay server (standalone, no core dep)
+  copypaste-p2p/        — mTLS P2P transport + mDNS-SD discovery
+  copypaste-sync/       — sync engine (CRDT, Lamport timestamps, protocol types)
+  copypaste-supabase/   — Supabase cloud sync (opt-in via cloud-sync feature)
+  copypaste-android/    — UniFFI FFI crate (cdylib + bindgen binary)
+  copypaste-telemetry/  — telemetry, opt-out, PII scrubbing
+  copypaste-bench/      — Criterion benchmarks
+android/                — Android Studio project
 ```
 
 ## Android UniFFI Bindings
@@ -125,6 +135,7 @@ cargo run -p copypaste-cli -- --help
 
 ## Known issues
 
-See [`docs/known-issues.md`](docs/known-issues.md) for the current v0.6
-limitations and deferred work, including cloud/relay device revocation
-(sync-key rotation) and its caveats.
+See [`docs/known-issues.md`](docs/known-issues.md) for the current
+limitations and deferred work, including Intel/Rosetta 2, Linux daemon-only
+support, Windows frozen status, Android pairing requirements, relay TTL
+behaviour, sensitive-item sync, and mDNS privacy notes.

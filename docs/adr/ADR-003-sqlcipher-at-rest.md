@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (in progress — Phase 2c)
+Accepted
 
 Date: 2026-05-22
 

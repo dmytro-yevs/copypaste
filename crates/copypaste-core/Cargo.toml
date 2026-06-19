@@ -23,19 +23,14 @@ zeroize.workspace = true
 rand.workspace = true
 hex.workspace = true
 rusqlite.workspace = true
-r2d2 = "0.8"
-r2d2_sqlite = { version = "0.25", default-features = false, features = ["bundled-sqlcipher"] }
+r2d2.workspace = true
+r2d2_sqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 regex.workspace = true
 unicode-normalization.workspace = true
 tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"] }
-# Beta-bonus (daemon-log-rotation): daily-rotating file appender with non-blocking
-# writer.  Pinned crate-local (NOT workspace) to avoid concurrent edits of root
-# Cargo.toml by other beta-bonus workers; version stays in sync with workspace.
-tracing-appender = "0.2"
 thiserror.workspace = true
 uuid.workspace = true
 image.workspace = true
@@ -45,7 +40,11 @@ base64.workspace = true
 subtle.workspace = true
 
 [dev-dependencies]
-# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.89. Pin removed 2026-06-14.
+# tracing-subscriber + tracing-appender are dev-deps only in copypaste-core.
+# Production subscriber init lives in the binary crates (copypaste-daemon, etc.).
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt", "json"] }
+tracing-appender = "0.2"
+# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.96. Pin removed 2026-06-14.
 tempfile = "3"
 criterion.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }

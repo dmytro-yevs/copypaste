@@ -211,7 +211,7 @@
 ## 5. Pair Activity (`PairActivity.kt`)
 
 ### 5.1 Display Own QR
-- Auto-generates `CPPAIR1.*` pairing QR on first composition; 240 dp, 512 px bitmap. `FLAG_SECURE` on this window.
+- Auto-generates `CPPAIR2.*` pairing QR on first composition; 240 dp, 512 px bitmap. `FLAG_SECURE` on this window.
 - **Blurred by default**; first tap reveals; second tap regenerates and stays visible (HW-A5).
 - 2-minute TTL countdown, auto-refresh on expiry.
 - Parallel QR-display and scan-ready state.
@@ -220,7 +220,7 @@
 - "Scan QR" `OutlinedButton` → ZXing `ScanContract` → `PortraitCaptureActivity`.
 - Parsed via UniFFI `parsePairing` → shows `ScannedPairing` confirmation card (device name, address, fingerprint).
 - **"Pair & sync" button:** runs `bootstrapPairInitiator` (PAKE exchange), syncs items immediately, persists `PairedPeer` with KEK-wrapped session key and device metadata.
-- **Deep-link support:** `cppair://pair?p=<CPPAIR1.…>` intent (from Google Lens or DevicesActivity scan) processed in `onNewIntent`; feeds the same `parsePairing` path.
+- **Deep-link support:** `cppair://pair?p=<CPPAIR2.…>` intent (from Google Lens or DevicesActivity scan) processed in `onNewIntent`; feeds the same `parsePairing` path.
 - **Post-pair sync:** bidirectional item exchange at pairing time; item-type routing by `contentType` (text/image/file); skip-reason counters logged (`itemsSkippedLegacy`, `itemsSkippedDecryptFail`, etc.).
 - **Provisioning fill-missing:** Supabase URL, anon key, relay URL, derived sync key applied only if not already configured locally.
 

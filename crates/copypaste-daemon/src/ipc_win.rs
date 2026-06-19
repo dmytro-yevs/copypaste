@@ -68,11 +68,8 @@ pub const DEFAULT_PIPE_NAME: &str = r"\\.\pipe\copypaste-daemon";
 ///
 /// The handler is invoked on the per-connection task; long-running work
 /// should be offloaded to `tokio::task::spawn_blocking` inside the handler.
-pub type Handler = Arc<
-    dyn for<'a> Fn(&'a str) -> Pin<Box<dyn Future<Output = String> + Send + 'a>>
-        + Send
-        + Sync,
->;
+pub type Handler =
+    Arc<dyn for<'a> Fn(&'a str) -> Pin<Box<dyn Future<Output = String> + Send + 'a>> + Send + Sync>;
 
 // ---------------------------------------------------------------------------
 // Windows implementation
@@ -95,10 +92,7 @@ mod imp {
     /// Returns only on a fatal listener error (e.g. invalid pipe name or
     /// OS-level resource exhaustion). Per-connection errors are logged and
     /// do not terminate the loop.
-    pub async fn run_named_pipe_server(
-        pipe_name: &str,
-        handler: Handler,
-    ) -> anyhow::Result<()> {
+    pub async fn run_named_pipe_server(pipe_name: &str, handler: Handler) -> anyhow::Result<()> {
         tracing::info!("IPC (named pipe) listening on {}", pipe_name);
 
         // First instance must be created with `first_pipe_instance(true)`
@@ -132,10 +126,7 @@ mod imp {
         }
     }
 
-    async fn handle_connection(
-        pipe: NamedPipeServer,
-        handler: Handler,
-    ) -> anyhow::Result<()> {
+    async fn handle_connection(pipe: NamedPipeServer, handler: Handler) -> anyhow::Result<()> {
         // tokio's `NamedPipeServer` does not have `into_split`, so we keep
         // it whole and use `&mut` borrows for reads and writes serially.
         // This matches the request/response shape (no server push), so no
@@ -190,8 +181,7 @@ mod imp {
             let line = match std::str::from_utf8(&buf) {
                 Ok(s) => s,
                 Err(e) => {
-                    let resp =
-                        format!(r#"{{"id":"0","ok":false,"error":"invalid UTF-8: {e}"}}"#);
+                    let resp = format!(r#"{{"id":"0","ok":false,"error":"invalid UTF-8: {e}"}}"#);
                     let mut out = resp;
                     out.push('\n');
                     let _ = reader.get_mut().write_all(out.as_bytes()).await;
@@ -222,10 +212,7 @@ pub use imp::run_named_pipe_server;
 /// this module on macOS / Linux without conditional `use` statements at the
 /// call site.
 #[cfg(not(windows))]
-pub async fn run_named_pipe_server(
-    _pipe_name: &str,
-    _handler: Handler,
-) -> anyhow::Result<()> {
+pub async fn run_named_pipe_server(_pipe_name: &str, _handler: Handler) -> anyhow::Result<()> {
     Err(anyhow::anyhow!(
         "named-pipe IPC is only available on Windows targets"
     ))

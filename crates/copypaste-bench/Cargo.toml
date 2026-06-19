@@ -17,7 +17,7 @@ clap = { workspace = true, features = ["derive"] }
 criterion.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
-# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.89. Pin removed 2026-06-14.
+# getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.96. Pin removed 2026-06-14.
 tempfile = "3"
 
 [[bench]]

@@ -323,6 +323,32 @@ pub async fn run(
             local = new_item_rx.recv(), if !local_closed => {
                 match local {
                     Ok(item) => {
+                        // tke7 (PG-30): master sync gate — checked on every outbound
+                        // item so a runtime set_config toggle takes effect immediately.
+                        // Reads from AutoApplyCtx.core_config (shared Arc) when
+                        // available; defaults to enabled when ctx is absent (P2P off
+                        // anyway, so the gate is moot).
+                        let sync_enabled = auto_apply
+                            .as_ref()
+                            .and_then(|ctx| ctx.core_config.read().ok().map(|g| g.sync_enabled))
+                            .unwrap_or(true);
+                        if !sync_enabled {
+                            debug!(
+                                item_id = %item.item_id,
+                                "sync_orch: sync_enabled=false; not forwarding to P2P peers"
+                            );
+                            continue;
+                        }
+
+                        // P1-1: honour the "sensitive items are NEVER uploaded" guarantee.
+                        // Block P2P transport just like relay and cloud paths.
+                        if item.is_sensitive {
+                            debug!(
+                                item_id = %item.item_id,
+                                "sync_orch: skipping sensitive item (never forwarded to P2P peers)"
+                            );
+                            continue;
+                        }
                         // CopyPaste-ux2i: `item` is owned here and unused after the
                         // wire item is built, so move its content blobs instead of
                         // cloning them.
@@ -353,6 +379,21 @@ pub async fn run(
             incoming = incoming_rx.recv(), if !incoming_closed => {
                 match incoming {
                     Some(wire) => {
+                        // tke7 (PG-30): gate inbound storage behind sync_enabled.
+                        // When sync is off, we accept the wire frame from the
+                        // transport layer (to keep the channel alive) but discard
+                        // the payload rather than merging it into the local DB.
+                        let sync_enabled_inbound = auto_apply
+                            .as_ref()
+                            .and_then(|ctx| ctx.core_config.read().ok().map(|g| g.sync_enabled))
+                            .unwrap_or(true);
+                        if !sync_enabled_inbound {
+                            debug!(
+                                item_id = %wire.id,
+                                "sync_orch: sync_enabled=false; discarding inbound P2P item"
+                            );
+                            continue;
+                        }
                         if let Err(e) = merge_incoming_with_crypto(
                             &db,
                             vec![wire],
@@ -951,8 +992,16 @@ pub fn catchup_read_raw(db: &Database, device_id: &str) -> Vec<WireItem> {
         };
         let page_len = page.len();
         // CopyPaste-ux2i: move each item's content blob into the wire item
-        // instead of cloning it.
+        // instead of cloning it. P1-1: skip sensitive items — they must never
+        // leave this device, including via the P2P catch-up burst.
         for item in page {
+            if item.is_sensitive {
+                debug!(
+                    item_id = %item.item_id,
+                    "sync_orch: catchup_read_raw: omitting sensitive item from catch-up set"
+                );
+                continue;
+            }
             out.push(local_to_wire_owned(item, device_id));
         }
         if page_len < CATCHUP_PAGE_SIZE {

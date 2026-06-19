@@ -896,6 +896,17 @@ async fn push_loop(
         // steady Some state never re-sweeps.
         prev_key_present = key_present_now;
 
+        // tke7 (PG-30): hot-reload master sync gate for cloud push.
+        let sync_enabled = core_config.read().map(|g| g.sync_enabled).unwrap_or(true);
+        if !sync_enabled {
+            tracing::debug!("cloud-sync push_loop: sync_enabled=false; skipping this push cycle");
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_secs(10)) => {}
+                _ = shutdown.notified() => { break; }
+            }
+            continue;
+        }
+
         // A-SET-2 hot-reload: read sync_on_wifi_only from the live config on
         // every iteration so a runtime change via set_config takes effect
         // immediately without a daemon restart.  Items remain in the retry
@@ -993,6 +1004,16 @@ async fn push_loop(
             result = rx.recv() => {
                 match result {
                     Ok(item) => {
+                        // P1-1: honour the "sensitive items are NEVER uploaded" guarantee
+                        // (docs/relay-api.md:105). Drop before any crypto / network work
+                        // so no ciphertext escapes to Supabase.
+                        if item.is_sensitive {
+                            tracing::debug!(
+                                "cloud-sync push_loop: skipping sensitive id={} (never uploaded)",
+                                item.id
+                            );
+                            continue;
+                        }
                         // Fast no-key skip (preserved from the original): if no
                         // sync passphrase is set there is nothing to upload, so
                         // skip BEFORE doing the (now blocking-pool) decrypt. The
@@ -1261,6 +1282,26 @@ async fn run_backlog_sweep(
         tracing::info!("cloud-sync backlog: found {count} unsynced item(s) — queuing for push");
         let tmp_key = SyncKey::from_bytes(key_arr);
         for item in backlog_items {
+            // P1-1: sensitive items must never leave this device — skip them in the
+            // backlog sweep just as push_loop skips them from the broadcast channel.
+            // Mark them as synced so the sweep doesn't visit them again on restart.
+            if item.is_sensitive {
+                tracing::debug!(
+                    "cloud-sync backlog: skipping sensitive id={} (never uploaded); marking synced",
+                    item.id
+                );
+                let db_arc3 = db.clone();
+                let id_owned = item.item_id.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let g = db_arc3.blocking_lock();
+                    let _ = g.conn().execute(
+                        "UPDATE clipboard_items SET is_synced = 1 WHERE item_id = ?1",
+                        rusqlite::params![id_owned],
+                    );
+                })
+                .await;
+                continue;
+            }
             // CopyPaste-z1xt: decrypt on the blocking thread pool (CPU-bound
             // decode/decrypt was stalling the async executor). The wrapper
             // consumes + returns the item so the heavy `content` blob is moved,
@@ -1840,6 +1881,18 @@ async fn realtime_loop(
 
         tokio::select! {
             _ = interval.tick() => {
+                // tke7 (PG-30): hot-reload master sync gate for cloud poll.
+                let sync_enabled_now = core_config
+                    .read()
+                    .map(|g| g.sync_enabled)
+                    .unwrap_or(true);
+                if !sync_enabled_now {
+                    tracing::debug!(
+                        "cloud-sync poll: sync_enabled=false; skipping this poll tick"
+                    );
+                    continue;
+                }
+
                 // A-SET-2 hot-reload: read sync_on_wifi_only live so a
                 // runtime set_config change takes effect without a restart.
                 // The is_on_wifi check runs on a blocking thread (networksetup

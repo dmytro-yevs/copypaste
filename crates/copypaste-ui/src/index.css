@@ -100,8 +100,8 @@
   /* ── §3 Interaction state tokens (kill bg-white/10 magic) ───────────── */
   --ide-hover:        rgba(255,255,255,0.045);
   --ide-pressed:      rgba(255,255,255,0.07);
-  --ide-selection:    rgba(61,139,255,0.16);
-  --ide-multi-sel:    rgba(61,139,255,0.20);
+  --ide-selection:    rgba(77,141,255,0.16);
+  --ide-multi-sel:    rgba(77,141,255,0.20);
 
   /* ── §0 Text hierarchy ───────────────────────────────────────────────── */
   --ide-text-rgb:     232 234 237;   --ide-text:  rgb(var(--ide-text-rgb));
@@ -117,9 +117,9 @@
   --ide-ghost-deco:   rgba(255,255,255,0.33);
 
   /* ── §0 Brand ────────────────────────────────────────────────────────── */
-  --ide-accent-rgb:       61 139 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-rgb:       77 141 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb: 90 172 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
-  --ide-accent-dim:   rgba(61,139,255,0.12);
+  --ide-accent-dim:   rgba(77,141,255,0.12);
 
   /* ── §3 Semantic colours (base / container) ──────────────────────────── */
   --ide-danger-rgb:   224 92 92;   --ide-danger:  rgb(var(--ide-danger-rgb));   --ide-danger-dim:   rgba(224,92,92,0.10);
@@ -140,7 +140,7 @@
             inset 0 1px 0 rgba(255,255,255,.06);
 
   /* ── §3 Focus ring (:focus-visible only — layered) ───────────────────── */
-  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(61,139,255,.45);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(77,141,255,.45);
 
   /* ── §8 Motion tokens ────────────────────────────────────────────────── */
   --motion-instant: 90ms;
@@ -1804,8 +1804,8 @@ button,
 }
 
 .keycap-selected {
-  border-color: rgba(61,139,255,0.40);
-  background: rgba(61,139,255,0.18);
+  border-color: rgba(77,141,255,0.40);
+  background: rgba(77,141,255,0.18);
   color: var(--ide-accent);
 }
 

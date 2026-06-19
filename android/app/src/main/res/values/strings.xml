@@ -113,6 +113,10 @@
     <string name="setting_p2p_sync_title">P2P sync (LAN)</string>
     <string name="setting_p2p_sync_subtitle">Direct device-to-device sync over your local network. Requires a paired device. Disable for cloud-only sync.</string>
 
+    <!-- Settings — Sync (PG-29/CopyPaste-yqn5: LAN visibility toggle, mirrors macOS lan_visibility) -->
+    <string name="setting_lan_visibility_title">LAN visibility</string>
+    <string name="setting_lan_visibility_subtitle">Advertise this device on your local network (mDNS). Turn off on public or untrusted networks to hide this device from discovery.</string>
+
     <!-- Settings — Sync -->
     <string name="setting_sync_wifi_only_title">Sync on Wi-Fi only</string>
     <string name="setting_sync_wifi_only_subtitle">Restrict sync uploads and downloads to Wi-Fi connections. Mobile data is not used when enabled.</string>
@@ -269,10 +273,14 @@
     <string name="cd_more_options">More options</string>
     <string name="action_clear_all">Clear All</string>
     <string name="action_clear_unpinned">Clear Unpinned</string>
+    <string name="action_copy_selected">Copy selected</string>
     <string name="action_delete_selected">Delete selected</string>
     <string name="action_pin_selected">Pin selected</string>
     <string name="action_unpin_selected">Unpin selected</string>
     <string name="selection_count">%1$d selected</string>
+    <!-- g3z4: bulk-copy toast — shown after joining text items to clipboard -->
+    <string name="snackbar_bulk_copied">%1$d item(s) copied</string>
+    <string name="snackbar_bulk_copied_no_text">No text items to copy</string>
 
     <!-- Confirmation dialogs -->
     <!-- HW-A10: unsaved settings discard warning -->
@@ -353,4 +361,99 @@
     <string name="cd_attach_file">Pick file to send</string>
     <string name="snackbar_file_captured">File added to clipboard — syncing…</string>
     <string name="error_file_pick_failed">Could not capture file</string>
+
+    <!-- Devices screen — OwnQrSection strings (ojsq) -->
+    <string name="devices_section_paired">Paired Devices</string>
+    <string name="devices_section_your_qr">Your QR code</string>
+    <string name="devices_qr_subtitle">Let another device scan this to pair</string>
+    <string name="devices_qr_tap_to_reveal">Tap to reveal</string>
+    <string name="devices_qr_refreshing">Refreshing…</string>
+    <string name="cd_own_qr_blurred">Your pairing QR code — tap to reveal</string>
+    <string name="devices_discovered_section">Discovered on your network</string>
+
+    <!-- Devices screen — PeerRow / OwnDeviceRow labels (ojsq) -->
+    <string name="devices_status_online">Online</string>
+    <string name="devices_status_offline">Offline</string>
+    <string name="devices_badge_this_device">This Device</string>
+    <string name="devices_peer_default_name">Paired device</string>
+    <string name="meta_label_model">Model</string>
+    <string name="meta_label_os">OS</string>
+    <string name="meta_label_version">Version</string>
+    <string name="meta_label_local_ip">Local IP</string>
+    <string name="meta_label_public_ip">Public IP</string>
+    <string name="meta_label_paired">Paired</string>
+    <string name="meta_label_last_sync">Last sync</string>
+    <string name="meta_label_rtt">RTT</string>
+    <string name="meta_label_rtt_value">%1$d ms</string>
+    <string name="meta_label_fingerprint">Fingerprint</string>
+
+    <!-- Devices screen — NoPeerCard (ojsq) -->
+    <string name="devices_no_peer_title">No device paired</string>
+    <string name="devices_no_peer_body">Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.</string>
+    <string name="devices_btn_pair_device">Pair a device</string>
+
+    <!-- Devices screen — action buttons (ojsq) -->
+    <string name="btn_unpair">Unpair</string>
+    <string name="btn_revoke">Revoke</string>
+    <string name="btn_pair">Pair</string>
+
+    <!-- Devices screen — DiscoveredPeerRow (ojsq) -->
+    <string name="devices_no_secure_pairing">This device does not support secure pairing.</string>
+
+    <!-- Devices screen — SAS pairing dialog (ojsq) -->
+    <string name="sas_dialog_title">Pair “%1$s”</string>
+    <string name="sas_connecting">Connecting…</string>
+    <string name="sas_waiting_other">Waiting for the other device…</string>
+    <string name="sas_confirm_prompt">Confirm this code matches the one shown on the other device.</string>
+    <string name="sas_paired_ok">Paired ✓</string>
+    <string name="sas_ended">Pairing ended — check the other device.</string>
+    <string name="sas_timed_out">Pairing timed out.</string>
+    <string name="sas_rejected">Pairing was rejected.</string>
+    <string name="sas_cancelled">Pairing was cancelled.</string>
+    <string name="sas_btn_match">Match</string>
+    <string name="sas_btn_no_match">Doesn\'t match</string>
+    <string name="sas_btn_close">Close</string>
+    <string name="sas_copy_code_label">Copy code</string>
+    <string name="sas_code_copied">Code copied</string>
+
+    <!-- Devices screen — dialogs (ojsq) -->
+    <string name="dialog_forget_device_title">Forget paired device?</string>
+    <string name="dialog_forget_device_body">This device will no longer sync with %1$s over P2P. You can re-pair at any time by scanning a new QR code.</string>
+    <string name="dialog_forget_btn">Forget</string>
+    <string name="dialog_revoke_title">Revoke pairing?</string>
+    <string name="dialog_revoke_body">%1$s will no longer connect over P2P, and a revocation record is kept. But a revoked device that still holds the shared sync key can keep reading cloud and relay items until you rotate the sync key. To rotate it, change the Sync Passphrase in Settings — every device must then re-enter the new passphrase (or re-pair) to keep syncing.</string>
+    <string name="dialog_revoke_incomplete_title">Revocation incomplete</string>
+    <string name="dialog_scanner_unavailable_title">Scanner unavailable</string>
+
+    <!-- Devices screen — scan flow errors (ojsq) -->
+    <string name="error_scan_camera">Could not open the camera scanner: %1$s</string>
+    <string name="error_scan_camera_permission">Camera permission required to scan a pairing QR. Grant it in Settings → Apps → CopyPaste → Permissions.</string>
+    <string name="error_pair_start">Failed to start pairing.</string>
+    <string name="error_revoke_record">Failed to record revocation. The peer was unpaired locally.</string>
+
+    <!-- Devices screen — QR error (ojsq) -->
+    <string name="devices_qr_error">QR unavailable: %1$s</string>
+
+    <!-- Settings — Save button (ojsq) -->
+    <string name="btn_save">Save</string>
+
+    <!-- Settings — discard dialog (ojsq; also covers the duplicate hardcoded version) -->
+    <string name="dialog_unsaved_title">Unsaved changes</string>
+    <string name="dialog_unsaved_body">You have unsaved changes. Discard them and leave?</string>
+    <string name="dialog_unsaved_discard">Discard</string>
+    <string name="dialog_unsaved_keep">Keep editing</string>
+
+    <!-- History — checkbox a11y (q649) -->
+    <string name="cd_checkbox_select">Select item</string>
+    <string name="cd_checkbox_deselect">Deselect item</string>
+
+    <!-- Devices — QR section a11y (q649) -->
+    <string name="cd_qr_reveal_toggle">Tap to reveal pairing QR code</string>
+
+    <!-- History — DeviceFilterRow chip (ojsq) -->
+    <string name="device_filter_all">All</string>
+
+    <!-- History — row semantics custom actions (q649) -->
+    <string name="cd_copy">Copy</string>
+    <string name="cd_delete">Delete</string>
 </resources>
