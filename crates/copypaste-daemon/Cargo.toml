@@ -28,6 +28,10 @@ relay-sync = ["reqwest"]
 zeroize = { version = "1.7", features = ["derive"] }
 subtle = { workspace = true }
 copypaste-core = { path = "../copypaste-core" }
+# CopyPaste-merc: shared IPC wire types — SyncBadgeState + compute_sync_badge_state
+# so the daemon computes badge state once and consumers (macOS UI, Android) render
+# the canonical value instead of each re-deriving it from raw fields.
+copypaste-ipc = { path = "../copypaste-ipc" }
 # Beta W2.1 (arch-1): real P2P stack — mDNS-SD discovery + mTLS transport.
 copypaste-p2p = { path = "../copypaste-p2p" }
 # Beta W2.2 (arch-1): sync engine + protocol types used by sync_orch.rs.

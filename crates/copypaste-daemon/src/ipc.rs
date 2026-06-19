@@ -3,6 +3,13 @@ use crate::protocol::{
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND, ERR_CODE_RATE_LIMITED,
     ERR_CODE_VERSION_MISMATCH, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
+// CopyPaste-merc: canonical badge-state computation lives in copypaste-ipc so it
+// is shared across crates. The daemon calls this once per get_sync_status request
+// and embeds the result in the response; UI / Android consume the value directly.
+// Gated on cloud-sync: the get_sync_status handler is only compiled with that
+// feature, so the import must match to avoid an unused-import warning (-D warnings).
+#[cfg(feature = "cloud-sync")]
+use copypaste_ipc::compute_sync_badge_state;
 // derive_sync_key / SyncKey are used by both cloud-sync (Supabase) and relay-sync.
 // `revoke_and_rotate` / `rotate_sync_key` derive a key from a passphrase;
 // `revoke_peer` uses `SyncKey::random()` for automatic no-passphrase rotation
@@ -3316,9 +3323,7 @@ impl IpcServer {
                                     preview_map
                                         .get(&item.id)
                                         .cloned()
-                                        .unwrap_or_else(|| {
-                                            format!("[text — id:{}]", &item.id[..8])
-                                        })
+                                        .unwrap_or_else(|| format!("[text — id:{}]", &item.id[..8]))
                                 } else if item.content_type == "file" {
                                     let name = item
                                         .blob_ref
@@ -3334,9 +3339,8 @@ impl IpcServer {
                                 // using the same approach as history_page (bhr8).
                                 let (preview, sensitive_spans): (String, Vec<serde_json::Value>) =
                                     if !item.is_sensitive && item.content_type == "text" {
-                                        let normalised = copypaste_core::sensitive::nfkc_normalize(
-                                            &raw_preview,
-                                        );
+                                        let normalised =
+                                            copypaste_core::sensitive::nfkc_normalize(&raw_preview);
                                         let spans = detector
                                             .detect_normalised(&normalised)
                                             .into_iter()
@@ -3399,12 +3403,10 @@ impl IpcServer {
                 })
                 .await;
                 match join {
-                    Ok(Ok((json_items, total))) => {
-                        Response::ok(
-                            req.id,
-                            serde_json::json!({"items": json_items, "total": total}),
-                        )
-                    }
+                    Ok(Ok((json_items, total))) => Response::ok(
+                        req.id,
+                        serde_json::json!({"items": json_items, "total": total}),
+                    ),
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -5288,6 +5290,22 @@ impl IpcServer {
                             _ => "<redacted>".to_string(),
                         }
                     });
+                // CopyPaste-merc: compute badge state once here in the daemon so
+                // every consumer (macOS UI, Android) renders the SAME canonical
+                // value instead of each re-deriving it with a local constant.
+                // `supabase_url_val` is Some(url) when either the env var or the
+                // config has a URL, so use it as the "url_set" signal.
+                let supabase_url_set = supabase_url_val.is_some();
+                let badge_state = compute_sync_badge_state(
+                    passphrase_set,
+                    supabase_url_set,
+                    supabase_configured,
+                    signed_in,
+                    last_sync_ms_val,
+                    None, // use SystemTime::now() inside the helper
+                );
+                let badge_state_json =
+                    serde_json::to_value(&badge_state).unwrap_or(serde_json::Value::Null);
                 Response::ok(
                     req.id,
                     serde_json::json!({
@@ -5297,6 +5315,11 @@ impl IpcServer {
                         "last_sync_ms": last_sync_ms_val,
                         "supabase_url": supabase_url_val,
                         "email": email_val,
+                        // Single source of truth for the badge colour on all platforms.
+                        // Optional for backward-compat: consumers that receive this field
+                        // MUST use it; consumers talking to older daemons may not see it
+                        // and may fall back to local derivation from the raw fields above.
+                        "badge_state": badge_state_json,
                     }),
                 )
             }

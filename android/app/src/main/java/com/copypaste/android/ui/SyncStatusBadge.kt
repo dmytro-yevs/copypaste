@@ -416,3 +416,78 @@ private const val POLL_INTERVAL_MS = 10_000L
 
 /** Duration for one half of the 2 s pulse cycle (1 s per direction). */
 private const val PULSE_DURATION_MS = 1_000
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CopyPaste-merc: IPC-sourced canonical badge state
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Canonical sync-badge state as delivered over IPC from the daemon.
+ *
+ * Mirrors [copypaste_ipc::SyncBadgeState] (Rust, snake_case wire names).
+ * When the daemon returns `badge_state` in a `get_sync_status` response,
+ * callers MUST use [fromIpcString] to convert it to this enum and then
+ * call [toSyncBadgeState] to map it to the display model — rather than
+ * re-deriving it from raw fields ([RECENT_SYNC_MS], online-count, etc.).
+ *
+ * ## Migration path (build-unverified)
+ *
+ * Android does not yet have a direct IPC socket to the macOS daemon; sync
+ * connectivity is derived from [DevicesOnlineState] (P2P) and
+ * [Settings.isSupabaseConfigured] (cloud). When the FFI / sync layer gains
+ * a daemon IPC call that returns `badge_state`, the call site should:
+ *
+ * 1. Deserialise the `"badge_state"` JSON string from the response.
+ * 2. Call `IpcSyncBadgeState.fromIpcString(raw)?.toSyncBadgeState()`.
+ * 3. When non-null, publish the result to [DevicesOnlineState] or a new
+ *    dedicated `StateFlow<SyncBadgeState?>` so [SyncStatusBadge] can consume
+ *    it directly — bypassing [resolveSyncBadgeState] entirely.
+ * 4. Keep [resolveSyncBadgeState] as a fallback for older daemons or when the
+ *    IPC call fails.
+ */
+internal enum class IpcSyncBadgeState(val wireValue: String) {
+    /** At least one peer/backend exchanged data within the RECENT_SYNC_MS window. */
+    SYNCED("synced"),
+    /** A sync round-trip is actively in flight. */
+    SYNCING("syncing"),
+    /** Configured but no recent successful exchange. Peers may be off. */
+    IDLE("idle"),
+    /** Daemon cannot reach any sync backend. */
+    OFFLINE("offline"),
+    /** Backend returned an explicit error (auth failure, RLS, relay down). */
+    ERROR("error"),
+    /** Cloud URL is set but credentials are missing or invalid. */
+    MISCONFIGURED("misconfigured");
+
+    companion object {
+        /**
+         * Parse a raw IPC wire string (e.g. `"synced"`) to the typed enum.
+         * Returns `null` when the string is unrecognised — callers should fall
+         * back to [resolveSyncBadgeState] on null.
+         */
+        fun fromIpcString(raw: String): IpcSyncBadgeState? =
+            entries.firstOrNull { it.wireValue == raw }
+    }
+
+    /**
+     * Map to the display-level [SyncBadgeState] used by [SyncStatusBadge].
+     *
+     * Consumers MUST call this instead of [resolveSyncBadgeState] when the
+     * daemon has provided an authoritative [IpcSyncBadgeState].
+     *
+     * Mapping rationale:
+     *  - SYNCED / SYNCING → Connected (green): sync is working.
+     *  - OFFLINE / ERROR  → DaemonUnreachable (red): sync is broken; user action needed.
+     *  - IDLE             → DaemonUnreachable (red, secondary): no recent activity even
+     *    though configured — treat as "something may be wrong" to match the existing
+     *    Android model where the non-Connected path shows red. A future iteration can
+     *    add a grey IDLE state to the Android display model for parity with macOS.
+     *  - MISCONFIGURED    → DaemonUnreachable (red): cloud URL set but credentials
+     *    missing; the user must open Settings to fix it.
+     */
+    fun toSyncBadgeState(): SyncBadgeState = when (this) {
+        SYNCED, SYNCING            -> SyncBadgeState.Connected
+        OFFLINE, ERROR, IDLE,
+        MISCONFIGURED              -> SyncBadgeState.DaemonUnreachable
+    }
+}

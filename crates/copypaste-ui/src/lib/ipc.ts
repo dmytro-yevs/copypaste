@@ -466,6 +466,25 @@ export async function probeStatus(): Promise<StatusProbe> {
   }
 }
 
+/**
+ * CopyPaste-merc: canonical sync-badge state computed once by the daemon.
+ *
+ * Mirrors `copypaste_ipc::SyncBadgeState` (snake_case wire names). When this
+ * field is present in a `get_sync_status` response, consumers MUST use it
+ * directly and MUST NOT re-derive the badge colour from raw fields (`last_sync_ms`,
+ * `supabase_configured`, etc.). The daemon is the single source of truth.
+ *
+ * A thin fallback to the local `deriveSyncState` is permitted ONLY when the
+ * field is absent (daemons predating this field will not include it).
+ */
+export type SyncBadgeState =
+  | "synced"
+  | "syncing"
+  | "idle"
+  | "offline"
+  | "error"
+  | "misconfigured";
+
 export interface SyncStatus {
   passphrase_set: boolean;
   supabase_configured: boolean;
@@ -486,6 +505,13 @@ export interface SyncStatus {
   supabase_url?: string | null;
   /** Signed-in account email, if available. */
   email?: string | null;
+  /**
+   * CopyPaste-merc: canonical badge state, daemon-computed.
+   *
+   * When present, render this directly — do NOT re-derive from raw fields.
+   * Absent on daemons predating this field; fall back to local derivation then.
+   */
+  badge_state?: SyncBadgeState | null;
   // NOTE: degraded state is intentionally NOT modeled here. get_sync_status does
   // not report it — the daemon exposes degraded/ready ONLY via `status` (see
   // DaemonStatus / probeStatus). The fields below are kept for SettingsView

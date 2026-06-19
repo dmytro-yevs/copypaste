@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatWallTime } from "../lib/ipc";
-import type { PairedDevice } from "../lib/ipc";
+import type { PairedDevice, SyncBadgeState } from "../lib/ipc";
 
 // ---------------------------------------------------------------------------
-// SyncState — the three conditions we surface
+// SyncState — the three display conditions we surface
 // ---------------------------------------------------------------------------
 
 type SyncState = "connected" | "idle" | "offline";
@@ -21,8 +21,18 @@ interface SyncInfo {
   cloudMisconfig: boolean;
 }
 
-/** How recent a last_sync_ms must be (in ms) to count as "connected/working". */
-const RECENT_SYNC_MS = 5 * 60 * 1000; // 5 minutes
+/**
+ * How recent a last_sync_ms must be (in ms) to count as "connected/working".
+ *
+ * @deprecated CopyPaste-merc: this constant is a LOCAL FALLBACK ONLY. When the
+ * daemon is new enough to emit `badge_state` in get_sync_status, this constant
+ * is NOT used — the daemon-computed value is consumed directly. This code path
+ * runs only against daemons that predate the `badge_state` field.
+ *
+ * The canonical threshold is `SYNC_BADGE_RECENT_MS` in copypaste-ipc (5 min),
+ * which the daemon uses to compute `badge_state`.
+ */
+const RECENT_SYNC_MS_FALLBACK = 5 * 60 * 1000; // 5 minutes — FALLBACK ONLY
 
 /** Polling interval. 10 s is light enough to be invisible. */
 const POLL_INTERVAL_MS = 10_000;
@@ -31,7 +41,37 @@ const POLL_INTERVAL_MS = 10_000;
 // Helpers
 // ---------------------------------------------------------------------------
 
-function deriveSyncState(
+/**
+ * Map the daemon's canonical `SyncBadgeState` to the component's internal
+ * `SyncState`. This is a THIN ADAPTER — the mapping is straightforward because
+ * the canonical states are richer than the three-way display model.
+ *
+ * Consumers must call this when `badge_state` is present in the IPC response.
+ * Do NOT re-derive from raw fields when badge_state is available.
+ */
+export function badgeStateToSyncState(badge: SyncBadgeState): SyncState {
+  switch (badge) {
+    case "synced":
+    case "syncing":
+      return "connected";
+    case "offline":
+    case "error":
+      return "offline";
+    case "idle":
+    case "misconfigured":
+    default:
+      return "idle";
+  }
+}
+
+/**
+ * Fallback derivation for daemons that predate `badge_state`.
+ *
+ * @deprecated Use `badgeStateToSyncState(sync.badge_state)` when `badge_state`
+ * is present in the IPC response. This function is only called when `badge_state`
+ * is absent (daemon version predating CopyPaste-merc).
+ */
+function deriveSyncStateFallback(
   lastSyncMs: number | null,
   deviceCount: number
 ): SyncState {
@@ -41,7 +81,7 @@ function deriveSyncState(
   // updated by both the P2P and Supabase paths on a successful exchange. With
   // zero paired devices there is nothing to be "connected" to, so we stay grey.
   const recentSync =
-    lastSyncMs !== null && Date.now() - lastSyncMs <= RECENT_SYNC_MS;
+    lastSyncMs !== null && Date.now() - lastSyncMs <= RECENT_SYNC_MS_FALLBACK;
   if (deviceCount > 0 && recentSync) {
     return "connected";
   }
@@ -139,8 +179,20 @@ export function SyncStatusChip() {
     const cloudMisconfig =
       !!sync.supabase_url && !sync.supabase_configured;
 
+    // CopyPaste-merc: use the daemon-computed canonical badge state when present.
+    // This is the single source of truth — no local re-derivation from raw fields.
+    // Fall back to the old derivation only for daemons predating badge_state.
+    let state: SyncState;
+    if (sync.badge_state != null) {
+      // New path: daemon computed the state — consume it directly.
+      state = badgeStateToSyncState(sync.badge_state);
+    } else {
+      // Legacy fallback: daemon is old; derive locally as before.
+      state = deriveSyncStateFallback(lastSyncMs, deviceCount);
+    }
+
     setInfo({
-      state: deriveSyncState(lastSyncMs, deviceCount),
+      state,
       deviceCount,
       lastSyncMs,
       email: sync.email ?? null,
