@@ -480,9 +480,11 @@ class FgsSyncLoop(
                     }
                 }
 
-                // CopyPaste-up1c: apply pin state from the cloud row (authoritative).
-                if (stored && item.pinned) {
-                    repository.setPinned(item.itemId, true)
+                // lcmq: apply authoritative pin state (pin/unpin/reorder) from cloud row.
+                // Uses applyAuthoritativePinState — not setPinned — so authoritative unpins
+                // and pin_order convergence work without minting a new local mutation.
+                if (stored) {
+                    repository.applyAuthoritativePinState(item.itemId, item.pinned, item.pinOrder)
                 }
 
                 if (stored) newCount++
@@ -896,12 +898,11 @@ class FgsSyncLoop(
                 }
             }
 
-            // ABI 15: apply inbound pin state when the item was stored/updated.
-            // Use setPinned (which is idempotent) so a re-dial carrying the same
-            // pin state is a no-op. Only apply when the item was actually stored to
-            // avoid spuriously pinning a deduped item on every re-dial.
-            if (stored && item.pinned) {
-                repository.setPinned(item.itemId, true)
+            // lcmq: apply authoritative pin state (pin/unpin/reorder) from the P2P item.
+            // Uses applyAuthoritativePinState — not setPinned — so authoritative unpins and
+            // pin_order convergence work without minting a new local mutation.
+            if (stored) {
+                repository.applyAuthoritativePinState(item.itemId, item.pinned, item.pinOrder)
             }
 
             stored

@@ -139,10 +139,12 @@ class SettingsParityTest {
     }
 
     @Test
-    fun `Density default is COMFORTABLE`() {
+    fun `Density default is COMPACT`() {
+        // PG-33 (CopyPaste-lvx6): default aligned to COMPACT to match macOS store.ts:97.
+        // Previous §2 spec said COMFORTABLE; overridden by PG-33 decision.
         assertEquals(
-            "Default density must be COMFORTABLE per §2 spec (34px rows)",
-            Density.COMFORTABLE,
+            "Default density must be COMPACT per PG-33 (CopyPaste-lvx6, matches macOS)",
+            Density.COMPACT,
             Density.DEFAULT,
         )
     }

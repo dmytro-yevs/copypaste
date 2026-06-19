@@ -46,6 +46,18 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Rust toolchain PATH — source ~/.cargo/env when cargo is not already on PATH.
+# rustup installs cargo to ~/.cargo/bin but login-shell PATH is not always
+# inherited by subshells / IDE terminals / Bash invoked via exec.
+# ---------------------------------------------------------------------------
+if ! command -v cargo >/dev/null 2>&1; then
+  if [[ -f "${HOME}/.cargo/env" ]]; then
+    # shellcheck source=/dev/null
+    source "${HOME}/.cargo/env"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Colours (disabled when stdout is not a TTY, e.g. under CI log capture).
 # ---------------------------------------------------------------------------
 if [[ -t 1 ]]; then
@@ -198,11 +210,91 @@ if ! ndk_present; then
   fail "${STEP2}: cargo-ndk/NDK not found — install the Android NDK"
 fi
 
+# Auto-export ANDROID_HOME / ANDROID_NDK_HOME when the SDK/NDK exist in
+# well-known locations but the env vars are not set.
+#   - ANDROID_HOME: Gradle (AGP) + the NDK discovery loop below both need it.
+#   - ANDROID_NDK_HOME: cargo-ndk requires this (does NOT auto-discover from
+#     ANDROID_HOME/ndk/). Without it the ndk_present() check above passes but
+#     cargo-ndk still fails with "Could not find any NDK".
+_SDK_SEARCH_PATHS=(
+  "${ANDROID_HOME:-}"
+  "${ANDROID_SDK_ROOT:-}"
+  "${HOME}/Library/Android/sdk"
+  "/opt/homebrew/share/android-commandlinetools"
+  "/usr/local/share/android-commandlinetools"
+)
+
+# Auto-set ANDROID_HOME when Gradle would otherwise report "SDK location not found".
+if [[ -z "${ANDROID_HOME:-}" && -z "${ANDROID_SDK_ROOT:-}" ]]; then
+  for _sdk in "${_SDK_SEARCH_PATHS[@]}"; do
+    if [[ -n "${_sdk}" && -d "${_sdk}/platforms" ]]; then
+      export ANDROID_HOME="${_sdk}"
+      note "Auto-set ANDROID_HOME=${ANDROID_HOME}"
+      break
+    fi
+  done
+fi
+
+if [[ -z "${ANDROID_NDK_HOME:-}" && -z "${ANDROID_NDK_ROOT:-}" ]]; then
+  for _sdk in "${_SDK_SEARCH_PATHS[@]}"; do
+    if [[ -n "${_sdk}" && -d "${_sdk}/ndk" ]]; then
+      # Pick the highest version directory.
+      _ndk_ver="$(ls "${_sdk}/ndk" 2>/dev/null | sort -V | tail -1)"
+      if [[ -n "${_ndk_ver}" ]]; then
+        export ANDROID_NDK_HOME="${_sdk}/ndk/${_ndk_ver}"
+        note "Auto-set ANDROID_NDK_HOME=${ANDROID_NDK_HOME}"
+        break
+      fi
+    fi
+  done
+fi
+
 if ! make -C "${REPO_ROOT}" android-so; then
   fail "${STEP2}"
 fi
 step_pass "${STEP2}"
 echo ""
+
+# ---------------------------------------------------------------------------
+# JDK guard: Gradle 8.7 supports Java ≤ 21. If JAVA_HOME points at a newer
+# JDK (e.g. temurin-26), auto-switch to the highest ≤ 21 JDK available via
+# /usr/libexec/java_home (macOS) or the common symlink locations.
+# This only applies to steps 3/4 (Gradle); steps 1/2 (cargo) are unaffected.
+# ---------------------------------------------------------------------------
+_resolve_jdk_le21() {
+  local jv
+  jv="$( (java -version 2>&1 | head -1 | rg -o '[0-9]+\.[0-9]+' | head -1) 2>/dev/null || true )"
+  # Normalise "17.x" -> major 17, "1.8.x" -> major 8, "21.x" -> major 21.
+  local major="${jv%%.*}"
+  [[ "${jv}" == 1.* ]] && major="${jv#*.}" && major="${major%%.*}"
+  if [[ -n "${major}" ]] && (( major > 21 )); then
+    if command -v /usr/libexec/java_home >/dev/null 2>&1; then
+      local jdk17
+      jdk17="$(/usr/libexec/java_home -v 17 2>/dev/null || true)"
+      if [[ -n "${jdk17}" && -d "${jdk17}" ]]; then
+        export JAVA_HOME="${jdk17}"
+        note "Auto-set JAVA_HOME=${JAVA_HOME} (Gradle 8.7 requires Java ≤ 21)"
+        export PATH="${JAVA_HOME}/bin:${PATH}"
+        return
+      fi
+      # Try any ≤ 21 JDK
+      local v
+      for v in 21 17 11; do
+        local jhome
+        jhome="$(/usr/libexec/java_home -v "${v}" 2>/dev/null || true)"
+        if [[ -n "${jhome}" && -d "${jhome}" ]]; then
+          export JAVA_HOME="${jhome}"
+          note "Auto-set JAVA_HOME=${JAVA_HOME} (Gradle 8.7 requires Java ≤ 21)"
+          export PATH="${JAVA_HOME}/bin:${PATH}"
+          return
+        fi
+      done
+    fi
+    echo "  WARNING: Java ${major} detected (> 21) and no ≤ 21 JDK found." >&2
+    echo "  Gradle 8.7 may fail. Install temurin-17 or set JAVA_HOME manually." >&2
+  fi
+}
+_resolve_jdk_le21
 
 # ---------------------------------------------------------------------------
 # Step 3: Assemble the debug APK (./gradlew assembleDebug, run inside android/).

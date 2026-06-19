@@ -459,11 +459,26 @@ impl ClipboardMonitor {
                 // image is actually present.
                 let image_bytes: Option<Vec<u8>> = if text.is_none() && image_present {
                     let png_data = unsafe { pb.dataForType(png_type) };
+                    // 1f5c: check NSData.len() BEFORE calling .bytes().to_vec() so
+                    // a multi-GiB pasteboard image never gets fully copied into the
+                    // Rust heap — NSData already owns the memory; `.len()` is a single
+                    // field read with no allocation.  On size overage we skip the
+                    // copy; the post-read gate (below) would have rejected it anyway.
                     if let Some(ref d) = png_data {
-                        Some(d.bytes().to_vec())
+                        if d.len() > self.max_image_bytes {
+                            None // too large — skip the copy
+                        } else {
+                            Some(d.bytes().to_vec())
+                        }
                     } else {
                         let tiff_data = unsafe { pb.dataForType(tiff_type) };
-                        tiff_data.as_deref().map(|d: &NSData| d.bytes().to_vec())
+                        tiff_data.as_deref().and_then(|d: &NSData| {
+                            if d.len() > self.max_image_bytes {
+                                None // too large — skip the copy
+                            } else {
+                                Some(d.bytes().to_vec())
+                            }
+                        })
                     }
                 } else {
                     None

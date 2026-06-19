@@ -1240,12 +1240,11 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     {
         monitor.self_write_change_count = self_write_change_count_arc;
     }
-    // TODO(audit P3): poll_interval_ms changes require daemon restart — the
-    // interval timer is created once here from the startup config value and is
-    // NOT hot-reloaded when `set_config` updates the live config.  Hot-reload
-    // would require recreating the interval inside the tick loop, which is a
-    // larger refactor tracked separately.
-    let mut ticker = interval(Duration::from_millis(config.poll_interval_ms));
+    // at2m: ticker is `mut` so we can recreate it when poll_interval_ms changes
+    // at runtime via set_config.  The current interval value is tracked in
+    // `current_poll_ms`; when live_config diverges we replace the interval.
+    let mut current_poll_ms = config.poll_interval_ms;
+    let mut ticker = interval(Duration::from_millis(current_poll_ms));
     let mut cleanup_ticks: u64 = 0;
     // Sensitive TTL cleanup runs every 5 seconds; track elapsed ticks separately.
     let mut sensitive_cleanup_ticks: u64 = 0;
@@ -1279,6 +1278,20 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         .read()
                         .map(|g| g.clone())
                         .unwrap_or_else(|_| config.clone());
+                    // at2m: hot-reload the poll interval when set_config changes it.
+                    // Recreating the interval resets its internal deadline to "now",
+                    // which is safe: at worst we poll once immediately on the next
+                    // select! iteration.  Reset cleanup_ticks to avoid a spurious
+                    // early TTL run after a potentially large interval change.
+                    if live_config.poll_interval_ms != current_poll_ms {
+                        tracing::info!(
+                            old_ms = current_poll_ms,
+                            new_ms = live_config.poll_interval_ms,
+                            "clipboard: poll_interval_ms changed — recreating interval timer"
+                        );
+                        current_poll_ms = live_config.poll_interval_ms;
+                        ticker = interval(Duration::from_millis(current_poll_ms));
+                    }
                     // P2: guard sensitive_ttl_secs == 0 → "disabled". When the
                     // user sets ttl to 0 (no auto-wipe), sensitive_ttl_ms would be
                     // 0, making threshold = now_ms - 0 = now_ms which deletes ALL
@@ -1309,14 +1322,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     let do_sensitive = sensitive_ttl_ms.is_some()
                         && sensitive_cleanup_ticks
                             >= (SENSITIVE_CLEANUP_INTERVAL_MS
-                                / config.poll_interval_ms.max(1))
+                                / current_poll_ms.max(1))
                             .max(1);
                     if do_sensitive {
                         sensitive_cleanup_ticks = 0;
                     }
                     // General expires_at TTL: run every GENERAL_CLEANUP_INTERVAL_MS.
                     let do_general =
-                        cleanup_ticks >= (GENERAL_CLEANUP_INTERVAL_MS / config.poll_interval_ms.max(1)).max(1);
+                        cleanup_ticks >= (GENERAL_CLEANUP_INTERVAL_MS / current_poll_ms.max(1)).max(1);
                     if do_general {
                         cleanup_ticks = 0;
                     }
@@ -1372,6 +1385,16 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         .read()
                         .map(|g| g.clone())
                         .unwrap_or_else(|_| config.clone());
+                    // at2m: hot-reload the poll interval when set_config changes it.
+                    if live_config.poll_interval_ms != current_poll_ms {
+                        tracing::info!(
+                            old_ms = current_poll_ms,
+                            new_ms = live_config.poll_interval_ms,
+                            "clipboard: poll_interval_ms changed — recreating interval timer"
+                        );
+                        current_poll_ms = live_config.poll_interval_ms;
+                        ticker = interval(Duration::from_millis(current_poll_ms));
+                    }
                     let sensitive_ttl_ms = if live_config.sensitive_ttl_secs == 0 {
                         None
                     } else {
@@ -1395,14 +1418,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     let do_sensitive = sensitive_ttl_ms.is_some()
                         && sensitive_cleanup_ticks
                             >= (SENSITIVE_CLEANUP_INTERVAL_MS
-                                / config.poll_interval_ms.max(1))
+                                / current_poll_ms.max(1))
                             .max(1);
                     if do_sensitive {
                         sensitive_cleanup_ticks = 0;
                     }
                     // General expires_at TTL: run every GENERAL_CLEANUP_INTERVAL_MS.
                     let do_general =
-                        cleanup_ticks >= (GENERAL_CLEANUP_INTERVAL_MS / config.poll_interval_ms.max(1)).max(1);
+                        cleanup_ticks >= (GENERAL_CLEANUP_INTERVAL_MS / current_poll_ms.max(1)).max(1);
                     if do_general {
                         cleanup_ticks = 0;
                     }
@@ -1974,17 +1997,14 @@ async fn handle_tick(
                 }
             }
         }
-        Ok(Some(ClipboardContent::SkippedBatch(missed))) => {
-            // Rapid clipboard burst — the monitor already logged the gap;
-            // we just bump telemetry here and let the next poll capture
-            // the now-current pasteboard value.
-            tracing::warn!(
-                missed,
-                "clipboard rapid-burst: {} intermediate updates lost between polls",
-                missed
-            );
-        }
-        Ok(None) => {}
+        // 8w6h: `SkippedBatch` is structurally dead here.  The old early-return
+        // path (clipboard.rs §CRITICAL fix) was removed: rapid bursts (changeCount
+        // delta ≥ SKIPPED_BATCH_THRESHOLD) now fall through in `poll()` so the
+        // most-recent pasteboard value is still captured.  NSPasteboard does not
+        // buffer intermediate writes, so any skipped items are irrecoverably lost
+        // regardless — this is an inherent OS-level limitation of the clipboard API.
+        // The enum variant is kept for test coverage and potential future telemetry.
+        Ok(Some(ClipboardContent::SkippedBatch(_))) | Ok(None) => {}
         Err(e) => tracing::warn!("clipboard poll error: {e}"),
     }
 }

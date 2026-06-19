@@ -181,29 +181,30 @@ describe("§7.2 Transport chip P2P/Cloud", () => {
 
 // ---------------------------------------------------------------------------
 // §7.3 Fingerprint display — own-device fingerprint RE-ADDED to ThisDeviceCard
-// for cross-platform parity with Android (CopyPaste-wb6s / PG-9, PG-45). This
-// reverses the earlier card-wide removal (CopyPaste-55vf) for the OWN device:
-// Android shows the full own fingerprint, so macOS must too. PeerRow fingerprint
-// remains absent here (peer-row parity is tracked separately under PG-45/oy8s).
+// for cross-platform parity with Android (CopyPaste-wb6s / PG-9, PG-45).
+// Updated by CopyPaste-cg2h: now shown TRUNCATED (first8…last8) with tap-to-copy
+// instead of the full 64-char hex, matching Android parity style.
 // ---------------------------------------------------------------------------
 describe("§7.3 Fingerprint display", () => {
-  it("ThisDeviceCard shows the own-device fingerprint (PG-9 parity with Android)", async () => {
+  it("ThisDeviceCard shows the TRUNCATED own-device fingerprint (PG-9 / cg2h)", async () => {
     render(<DevicesView />);
     await screen.findByText("Test Mac");
 
-    // PG-9: the own-device security fingerprint is now displayed on the card,
-    // at parity with Android's DevicesActivity. The hex string must be present.
+    // cg2h: shows first 8 + "…" + last 8 chars; full hex must NOT appear verbatim.
     const fp = BASE_OWN_INFO.fingerprint;
-    expect(screen.getByText(fp)).toBeInTheDocument();
+    const truncated = `${fp.slice(0, 8)}…${fp.slice(-8)}`;
+    expect(screen.getByText(truncated)).toBeInTheDocument();
+    // Full 64-char hex must NOT appear as a raw text node.
+    expect(screen.queryByText(fp)).toBeNull();
   });
 
-  it("ThisDeviceCard has no copy-fingerprint button", async () => {
+  it("ThisDeviceCard has a tap-to-copy fingerprint button (cg2h)", async () => {
     render(<DevicesView />);
     await screen.findByText("Test Mac");
 
-    // No copy button for fingerprint should be present.
-    const copyBtns = screen.queryAllByTitle(/copy fingerprint/i);
-    expect(copyBtns).toHaveLength(0);
+    // cg2h: a clickable element with 'fingerprint' in its title exists.
+    const copyBtn = document.querySelector("[data-testid='fingerprint-copy']");
+    expect(copyBtn).not.toBeNull();
   });
 
   it("PeerRow does NOT show truncated fingerprint", async () => {

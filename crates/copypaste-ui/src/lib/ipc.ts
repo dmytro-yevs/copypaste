@@ -71,6 +71,17 @@ export const CURRENT_PROTOCOL_VERSION = 1;
  */
 export let protocolMismatchHandler: ((daemonVersion: number) => void) | null = null;
 
+/**
+ * Replace the module-level {@link protocolMismatchHandler}. Call once at
+ * app startup (App.tsx) to wire in a UI banner instead of the default
+ * `console.warn`. Pass `null` to restore the default warn-only behaviour.
+ */
+export function setProtocolMismatchHandler(
+  handler: ((daemonVersion: number) => void) | null
+): void {
+  protocolMismatchHandler = handler;
+}
+
 /** Raw daemon reply, mirrored from the Rust `ipc_call` bridge. */
 export interface IpcReply {
   ok: boolean;
@@ -79,9 +90,9 @@ export interface IpcReply {
   error_code: string | null;
   /**
    * Wire protocol version the daemon speaks (ADR-007). Optional for back-compat
-   * with daemon builds predating the field and with the current Tauri bridge
-   * (`src-tauri/src/ipc.rs`) which does not yet forward this field — until that
-   * bridge is updated the field arrives as `undefined`.
+   * with daemon builds predating the field. The Tauri bridge (`src-tauri/src/ipc.rs`)
+   * forwards this field; absent only on pre-ABI-17 daemon builds where the bridge
+   * did not yet forward it — those arrive as `undefined`.
    */
   protocol_version?: number;
 }

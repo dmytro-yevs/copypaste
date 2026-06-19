@@ -147,21 +147,21 @@ class AppearanceSectionTest {
         assertEquals(defaultName, Palette.DEFAULT.name)
     }
 
-    // ── 6. Density picker: only COMFORTABLE/COMPACT (no SPACIOUS yet) ─────────
+    // ── 6. Density picker: COMFORTABLE/COMPACT/SPACIOUS (CopyPaste-gzli landed) ─
 
     @Test
-    fun `Density has exactly COMFORTABLE and COMPACT variants`() {
+    fun `Density has COMFORTABLE COMPACT and SPACIOUS variants`() {
         val names = Density.entries.map { it.name }.toSet()
         assertTrue("Density must contain COMFORTABLE", names.contains("COMFORTABLE"))
         assertTrue("Density must contain COMPACT", names.contains("COMPACT"))
-        assertFalse("Density must NOT contain SPACIOUS (not yet landed)", names.contains("SPACIOUS"))
+        assertTrue("Density must contain SPACIOUS (CopyPaste-gzli: 42dp step, landed)", names.contains("SPACIOUS"))
     }
 
     @Test
-    fun `Density has exactly 2 entries`() {
+    fun `Density has exactly 3 entries`() {
         assertEquals(
-            "Density must have exactly 2 entries (COMFORTABLE + COMPACT)",
-            2,
+            "Density must have exactly 3 entries (COMFORTABLE + COMPACT + SPACIOUS)",
+            3,
             Density.entries.size,
         )
     }

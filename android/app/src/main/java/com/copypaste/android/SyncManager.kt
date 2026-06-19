@@ -565,11 +565,11 @@ class SyncManager(
             }
         }
 
-        // CopyPaste-rmuw: apply pin state from the envelope (authoritative, travels with
-        // the item). Mirrors daemon relay.rs ~lines 984-988 (TakeRemote branch applies
-        // sender's pinned/pin_order directly after storing).
-        if (stored && envelope.pinned) {
-            repository.setPinned(envelope.itemId, true)
+        // lcmq: apply authoritative pin state (pin/unpin/reorder) from the relay envelope.
+        // Uses applyAuthoritativePinState — not setPinned — so authoritative unpins and
+        // pin_order convergence work without minting a new local mutation.
+        if (stored) {
+            repository.applyAuthoritativePinState(envelope.itemId, envelope.pinned, envelope.pinOrder)
         }
 
         if (stored) {

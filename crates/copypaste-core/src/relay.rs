@@ -28,6 +28,7 @@
 use hkdf::Hkdf;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use zeroize::Zeroizing;
 
 /// HKDF salt used for relay inbox/pubkey derivation.
 ///
@@ -135,7 +136,10 @@ pub fn derive_relay_public_key(sync_key: &[u8; 32]) -> [u8; 32] {
 ///
 /// # Security
 /// Derived from secret key material; do not log.
-pub fn derive_relay_registration_pop(sync_key: &[u8; 32], device_id: &str) -> [u8; 32] {
+pub fn derive_relay_registration_pop(
+    sync_key: &[u8; 32],
+    device_id: &str,
+) -> Zeroizing<[u8; 32]> {
     // HMAC-SHA256(key=sync_key, msg="relay-registration-pop-v1:" + device_id)
     let mut mac =
         <Hmac<Sha256> as Mac>::new_from_slice(sync_key).expect("HMAC accepts any key length");
@@ -144,7 +148,9 @@ pub fn derive_relay_registration_pop(sync_key: &[u8; 32], device_id: &str) -> [u
     let result = mac.finalize().into_bytes();
     let mut out = [0u8; 32];
     out.copy_from_slice(&result);
-    out
+    // 0t9q: wrap in Zeroizing so the derived secret is wiped from memory
+    // as soon as the caller drops it (it is sent over TLS, then discarded).
+    Zeroizing::new(out)
 }
 
 /// Format 16 bytes as a canonical lowercase hyphenated UUID string

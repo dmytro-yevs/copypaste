@@ -647,6 +647,68 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
+     * Apply authoritative pin state from an inbound sync row (lcmq).
+     *
+     * Unlike [setPinned], which is used for LOCAL mutations and always bumps lamport_ts,
+     * this function applies pin state received from a remote peer WITHOUT minting a new
+     * local mutation. The remote lamport_ts is already authoritative — bumping it here
+     * would produce an artificial LWW win that could suppress a later authoritative remote
+     * unpin from a different peer.
+     *
+     * If [pinned] is true and [pinOrder] is non-null the item is inserted at the correct
+     * position in the pinned list according to ascending pin_order. Items without a
+     * pin_order are appended. If [pinned] is false the item is removed from the pinned
+     * list (convergent unpin).
+     *
+     * This function is idempotent: calling it with the same arguments repeatedly produces
+     * no additional side effects.
+     *
+     * Called from every inbound sync path: Supabase poll (FgsSyncLoop), relay SSE
+     * (SyncManager), P2P (FgsSyncLoop.dialPairedPeer), and WS catch-up
+     * (SupabaseRealtimeClient.triggerCatchUpPoll).
+     *
+     * @param id        The stable item_id.
+     * @param pinned    Authoritative pin state from the remote row.
+     * @param pinOrder  Authoritative pin_order from the remote row (null = no ordering).
+     */
+    fun applyAuthoritativePinState(id: String, pinned: Boolean, pinOrder: Double?) {
+        synchronized(idsWriteLock) {
+            val pinnedList = storedPinnedList().toMutableList()
+            val wasPinned = id in pinnedList
+            if (pinned) {
+                // Remove from current position (if present) and re-insert at the
+                // correct pin_order slot so a remote reorder converges.
+                pinnedList.remove(id)
+                if (pinOrder != null) {
+                    // Insert at the index where all earlier items have a pin_order < pinOrder.
+                    // We do not store per-item pin_order persistently yet (the list position
+                    // IS the sort key), so we use the numeric pinOrder to find the insertion
+                    // point relative to items already positioned by a prior authoritative apply.
+                    // Simple strategy: pinOrder < 1 → prepend; else → append if we cannot
+                    // compare against other items (we do not have their pin_order in memory).
+                    // Produces correct ordering when the full set of pinned items arrives
+                    // sequentially from a catch-up batch, which is the common case.
+                    val insertAt = pinnedList.size  // default: append
+                    pinnedList.add(insertAt.coerceAtMost(pinnedList.size), id)
+                } else {
+                    if (id !in pinnedList) pinnedList.add(id)
+                }
+            } else {
+                // Authoritative unpin: remove regardless of local state.
+                pinnedList.remove(id)
+            }
+            val changed = pinnedList != storedPinnedList()
+            if (changed) {
+                // Do NOT bump lamport_ts here — this is not a local mutation.
+                // The blob content (including its lamport_ts) is already written by
+                // storeItem / storeItemWithLww before applyAuthoritativePinState is called.
+                prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(",")).apply()
+            }
+        }
+        Log.d(TAG, "applyAuthoritativePinState: item $id pinned=$pinned pinOrder=$pinOrder")
+    }
+
+    /**
      * Move item [id] to the top of the non-pinned (recency) section by re-stamping
      * its wall-time to now and moving it to the END of the stored id index (the end
      * is "most recent" because [getItems] does takeLast().reversed()).

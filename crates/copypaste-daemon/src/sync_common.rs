@@ -528,12 +528,30 @@ pub(crate) fn replace_cloud_item_by_item_id(
     db: &Database,
     item: &ClipboardItem,
 ) -> anyhow::Result<()> {
-    use rusqlite::params;
+    use rusqlite::{params, OptionalExtension};
     let tx = db.conn().unchecked_transaction()?;
+    // e5oe: collect the row id(s) being replaced so we can delete the
+    // matching clipboard_fts rows in the same transaction.  Without this, the
+    // old plaintext content_text accumulates as an orphaned FTS row every time
+    // a cloud/relay LWW overwrite lands.
+    let old_id: Option<String> = tx
+        .query_row(
+            "SELECT id FROM clipboard_items WHERE item_id = ?1",
+            params![item.item_id],
+            |r| r.get(0),
+        )
+        .optional()?;
     tx.execute(
         "DELETE FROM clipboard_items WHERE item_id = ?1",
         params![item.item_id],
     )?;
+    // Delete the corresponding FTS row (if any) in the same transaction.
+    if let Some(ref old_id) = old_id {
+        tx.execute(
+            "DELETE FROM clipboard_fts WHERE id = ?1",
+            params![old_id],
+        )?;
+    }
     tx.execute(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
@@ -692,6 +710,89 @@ mod tests {
         assert_eq!(
             stored.key_version, 1,
             "replace_cloud_item_by_item_id must persist item.key_version, not ITEM_KEY_VERSION_CURRENT"
+        );
+    }
+
+    /// e5oe: replace_cloud_item_by_item_id must NOT leave an orphaned FTS row
+    /// after the replace.  Before the fix the old clipboard_fts row was never
+    /// deleted, allowing stale plaintext to remain searchable.
+    #[test]
+    fn replace_cloud_item_removes_old_fts_row() {
+        use copypaste_core::{insert_item_with_fts, Database};
+
+        let db = Database::open_in_memory().expect("in-memory DB");
+
+        let old_plaintext = "super secret old clipboard content";
+        let seed = ClipboardItem {
+            id: "fts-row-id".to_string(),
+            item_id: "fts-item-id".to_string(),
+            content_type: "text".to_string(),
+            content: Some(b"old ciphertext".to_vec()),
+            content_nonce: Some(vec![0u8; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            is_synced: true,
+            lamport_ts: 1,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+            origin_device_id: "device-a".to_string(),
+            key_version: 2,
+            pinned: false,
+            pin_order: None,
+            thumb: None,
+            deleted: false,
+        };
+        insert_item_with_fts(&db, &seed, old_plaintext).expect("insert with FTS");
+
+        // Verify the FTS row exists before the replace.
+        let fts_before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                rusqlite::params!["fts-row-id"],
+                |r| r.get(0),
+            )
+            .expect("count before");
+        assert_eq!(fts_before, 1, "FTS row must exist before replace");
+
+        // Replace with an item that has the same item_id but a different row id.
+        let replacement = ClipboardItem {
+            id: "fts-row-id-v2".to_string(),
+            item_id: "fts-item-id".to_string(),
+            content_type: "text".to_string(),
+            content: Some(b"new ciphertext".to_vec()),
+            content_nonce: Some(vec![1u8; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            is_synced: true,
+            lamport_ts: 2,
+            wall_time: 1_700_000_001_000,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+            origin_device_id: "device-b".to_string(),
+            key_version: 2,
+            pinned: false,
+            pin_order: None,
+            thumb: None,
+            deleted: false,
+        };
+        replace_cloud_item_by_item_id(&db, &replacement).expect("replace");
+
+        // The old FTS row must be gone (no orphan).
+        let old_fts_after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                rusqlite::params!["fts-row-id"],
+                |r| r.get(0),
+            )
+            .expect("count old id after");
+        assert_eq!(
+            old_fts_after, 0,
+            "old FTS row must be deleted by replace_cloud_item_by_item_id (e5oe)"
         );
     }
 }

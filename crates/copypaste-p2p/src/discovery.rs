@@ -133,7 +133,11 @@ pub struct DiscoveryService {
 struct Registration {
     port: u16,
     device_id: String,
-    device_name: String,
+    // device_name is intentionally not stored here (CopyPaste-sh9a): the human
+    // name is no longer included in the mDNS advertisement to avoid PII leakage
+    // on the LAN. The name is retained in the daemon's own config and exchanged
+    // post-PAKE during pairing. The public `register()` API still accepts the
+    // name parameter for caller compatibility but does not persist it.
     /// Bootstrap port for SAS pairing (Phase 0). None = v1 advertisement.
     bport: Option<u16>,
 }
@@ -221,7 +225,9 @@ impl DiscoveryService {
         &self,
         port: u16,
         device_id: String,
-        device_name: String,
+        // device_name accepted for API compatibility but not persisted —
+        // it is no longer included in the mDNS advertisement (CopyPaste-sh9a).
+        _device_name: String,
         bport: Option<u16>,
     ) -> Result<(), DiscoveryError> {
         let mut reg = lock_safe(&self.registration);
@@ -231,7 +237,6 @@ impl DiscoveryService {
         *reg = Some(Registration {
             port,
             device_id,
-            device_name,
             bport,
         });
         Ok(())
@@ -372,38 +377,24 @@ impl DiscoveryService {
 
     /// Announce own service on the local network.
     fn advertise(&self, daemon: &ServiceDaemon, reg: &Registration) -> Result<(), DiscoveryError> {
-        // Instance name: sanitized device name + first 8 chars of device_id.
-        // Slice by `chars()`, not byte index, so a non-ASCII device_id cannot
-        // panic by splitting a UTF-8 codepoint mid-byte.
-        let id_short: String = reg.device_id.chars().take(8).collect();
-        // DNS labels must be ≤63 bytes (RFC 1035 §2.3.4). id_short is 8 chars
-        // and the separator "." is 1, so cap the device-name portion to 54 chars
-        // to keep the whole instance_name within DNS_LABEL_MAX.
-        let name_max = DNS_LABEL_MAX - id_short.len() - 1; // 1 for the "." separator
-        let name_part: String = sanitize_label(&reg.device_name)
-            .chars()
-            .take(name_max)
-            .collect();
-        let instance_name = format!("{}.{}", name_part, id_short);
+        // Instance name: opaque label derived only from device_id.
+        // The human device name is intentionally excluded (CopyPaste-sh9a):
+        // embedding it here was leaking PII to any passive LAN observer.
+        let instance_name = opaque_instance_label(&reg.device_id);
 
-        // hostname — mdns-sd resolves local addresses automatically; supply a
-        // label-safe host name so the daemon has something to work with.
-        // Truncate the label portion (before ".local.") to DNS_LABEL_MAX chars.
-        let host_label: String = sanitize_label(&reg.device_name)
-            .chars()
-            .take(DNS_LABEL_MAX)
-            .collect();
-        let hostname = format!("{}.local.", host_label);
+        // Hostname: also opaque — no human name, just the same derived label.
+        let hostname = format!("{}.local.", opaque_hostname_label(&reg.device_id));
 
-        // Build TXT properties. bport is optional (Phase 0: absent; Phase 2:
-        // set by `register_with_bport`). We heap-allocate the bport string so
-        // it lives long enough to be referenced by the slice below.
+        // Build TXT properties via the extracted helper.
+        // Human device name is intentionally absent — see `build_txt_properties`.
+        let base_props = build_txt_properties(&reg.device_id);
+
+        // bport is optional (Phase 0: absent; Phase 2: set by `register_with_bport`).
+        // We assemble a borrowed-slice view for ServiceInfo.
         let bport_str: String;
-        let mut properties: Vec<(&str, &str)> = vec![
-            (TXT_VERSION, PROTOCOL_VERSION),
-            (TXT_DEVICE_ID, reg.device_id.as_str()),
-            (TXT_DEVICE_NAME, reg.device_name.as_str()),
-        ];
+        // Build a Vec<(&str, &str)> that borrows from base_props + bport_str.
+        let mut properties: Vec<(&str, &str)> =
+            base_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
         if let Some(bp) = reg.bport {
             bport_str = bp.to_string();
             properties.push((TXT_BPORT, bport_str.as_str()));
@@ -443,9 +434,10 @@ impl DiscoveryService {
             .register(service_info)
             .map_err(|e| DiscoveryError::Register(e.to_string()))?;
 
+        // device_name is NOT logged to avoid leaking it into log files accessible
+        // on the LAN or in telemetry. Log only the opaque device_id and port.
         info!(
             device_id = %reg.device_id,
-            device_name = %reg.device_name,
             port = reg.port,
             fullname = %fullname,
             "Registered mDNS-SD service"
@@ -577,13 +569,19 @@ fn handle_event(
 // ── helpers ──────────────────────────────────────────────────────────────────
 
 /// Build a [`PeerInfo`] from a resolved mDNS service, if the required
-/// TXT records (`v`, `did`, `name`) are present and version is supported.
+/// TXT records (`v`, `did`) are present and version is supported.
 ///
 /// Accepts both v1 (`PROTOCOL_VERSION_V1 = "1"`, no `bport`) and v2
 /// (`PROTOCOL_VERSION = "2"`, optional `bport`) so that existing v1 peers
 /// are never silently dropped from the discovered list after the Phase 0
 /// version bump. v1 peers produce a `PeerInfo` with `bport: None`; the UI
 /// disables the "Pair" button for those entries.
+///
+/// The `name` TXT key is now **optional** (CopyPaste-sh9a): v3+ peers no
+/// longer advertise it because it leaks PII on the LAN. Legacy v1/v2 peers
+/// that still include `name` will have it accepted into `device_name`; newer
+/// peers that omit it get an empty `device_name` in the returned `PeerInfo`.
+/// The authoritative human name is exchanged post-PAKE during pairing.
 fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
     let version = resolved.get_property_val_str(TXT_VERSION)?;
     // Accept v1 (legacy) and v2 (current). Any other version is unsupported.
@@ -593,7 +591,12 @@ fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
     }
 
     let device_id = resolved.get_property_val_str(TXT_DEVICE_ID)?.to_string();
-    let device_name = resolved.get_property_val_str(TXT_DEVICE_NAME)?.to_string();
+    // `name` is optional since CopyPaste-sh9a: upgraded peers no longer
+    // advertise it. Empty string = "unknown until post-PAKE exchange".
+    let device_name = resolved
+        .get_property_val_str(TXT_DEVICE_NAME)
+        .unwrap_or("")
+        .to_string();
 
     // Collect all addresses, deduplicated and sorted for determinism.
     // Unknown ScopedIp variants return None and are filtered out so 0.0.0.0
@@ -681,6 +684,11 @@ fn scoped_ip_to_ip_addr(scoped: &ScopedIp) -> Option<IpAddr> {
 /// non-alphanumeric characters such as `"!!!"`) a hardcoded fallback label
 /// `"copypaste"` is substituted so `ServiceInfo` is never constructed with an
 /// invalid `".{id}"` label that would cause `mdns-sd` to reject registration.
+///
+/// No longer called in production code (CopyPaste-sh9a: opaque labels replace
+/// human-name-based labels) but retained for tests so existing `sanitize_label`
+/// test coverage continues to document the invariants.
+#[cfg(test)]
 fn sanitize_label(s: &str) -> String {
     let sanitized: String = s
         .chars()
@@ -698,6 +706,52 @@ fn sanitize_label(s: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/// Build the opaque mDNS instance label from a `device_id`.
+///
+/// Uses the first 8 chars of `device_id` prefixed with `"cp-"` so the label
+/// is stable across restarts of the same device but carries no human-readable
+/// name. This replaces the old `"{device_name}.{id_short}"` scheme that leaked
+/// PII to any passive LAN observer.
+///
+/// The result is guaranteed to be ≤ `DNS_LABEL_MAX` (63) characters.
+///
+/// TODO(CopyPaste-sh9a): For stronger unlinkability across network changes or
+/// device resets, rotate the ephemeral prefix (e.g. derive from a daily HKDF
+/// epoch tied to the static key) so a passive LAN observer cannot durably track
+/// the same device by its `did` across sessions.
+fn opaque_instance_label(device_id: &str) -> String {
+    // "cp-" (3) + up to 8 id chars = 11 chars max, well within DNS_LABEL_MAX.
+    // The compile-time assertion below references DNS_LABEL_MAX so the
+    // constant is not considered dead code by the compiler.
+    const _: () = assert!(3 + 8 <= DNS_LABEL_MAX);
+    let id_short: String = device_id.chars().take(8).collect();
+    format!("cp-{id_short}")
+}
+
+/// Build the hostname label (the part before `.local.`) for mDNS advertisement.
+///
+/// Uses the opaque instance label so the hostname does not embed the human
+/// device name. Previously this used the sanitised device name.
+fn opaque_hostname_label(device_id: &str) -> String {
+    opaque_instance_label(device_id)
+}
+
+/// Build the ordered TXT record property list for our mDNS advertisement.
+///
+/// The human device name is intentionally **not** included — it is PII and
+/// must not be broadcast to passive LAN observers. Paired peers learn the
+/// human name through the post-PAKE authenticated exchange instead.
+///
+/// Returns a `Vec` of `(key, value)` pairs in stable order. The caller is
+/// responsible for allocating the `bport` string and extending the slice.
+fn build_txt_properties(device_id: &str) -> Vec<(&'static str, String)> {
+    vec![
+        (TXT_VERSION, PROTOCOL_VERSION.to_string()),
+        (TXT_DEVICE_ID, device_id.to_string()),
+        // TXT_DEVICE_NAME is deliberately absent — see CopyPaste-sh9a.
+    ]
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
@@ -810,7 +864,8 @@ mod tests {
         let reg = reg.as_ref().unwrap();
         assert_eq!(reg.port, 12345);
         assert_eq!(reg.device_id, "mydeviceid");
-        assert_eq!(reg.device_name, "Test Device");
+        // device_name is no longer stored in Registration (CopyPaste-sh9a):
+        // it is not advertised in the mDNS TXT record to avoid PII leakage.
     }
 
     /// LAN/SAS Phase 2: `register_with_bport` stores the bootstrap port so the
@@ -1181,6 +1236,100 @@ mod tests {
             ),
             Ok(Ok(())) => {} // task returned on its own (daemon shutdown closed the channel)
             Err(_) => panic!("browse task was not aborted within timeout — leak"),
+        }
+    }
+
+    // ── privacy: TXT name redaction (CopyPaste-sh9a) ─────────────────────────
+
+    /// The opaque instance label must NOT contain the human device name.
+    ///
+    /// Regression guard: the old scheme embedded the human name directly into
+    /// the mDNS label (e.g. `"Alice-s-MacBook.aabbccdd"`), leaking PII to any
+    /// passive LAN observer.
+    #[test]
+    fn opaque_instance_label_does_not_contain_human_name() {
+        let label = opaque_instance_label("aabbccdddeadbeef");
+        assert!(
+            label.starts_with("cp-"),
+            "opaque label must start with 'cp-' prefix, got: {label}"
+        );
+        assert!(
+            label.len() <= DNS_LABEL_MAX,
+            "opaque label exceeds DNS_LABEL_MAX: {label}"
+        );
+        // Verify no free-form string ended up in the label.
+        assert!(!label.contains("Alice"), "name must not appear in label");
+        assert!(!label.contains("Mac"), "name must not appear in label");
+    }
+
+    /// The opaque label is determined solely by `device_id`.
+    #[test]
+    fn opaque_instance_label_depends_only_on_device_id() {
+        let label_a = opaque_instance_label("aabbccdd00000000");
+        let label_b = opaque_instance_label("aabbccdd00000000");
+        assert_eq!(label_a, label_b, "same device_id must produce same label");
+
+        let label_c = opaque_instance_label("1122334400000000");
+        assert_ne!(
+            label_a, label_c,
+            "different device_id must produce different label"
+        );
+    }
+
+    /// `build_txt_properties` must NOT contain `TXT_DEVICE_NAME`.
+    ///
+    /// This is the primary regression guard for CopyPaste-sh9a: if someone
+    /// accidentally adds the human name back to the emitted TXT record, this
+    /// test will catch it immediately.
+    #[test]
+    fn build_txt_properties_does_not_include_device_name_key() {
+        let device_id = "aabbccdd12345678";
+        let props = build_txt_properties(device_id);
+        for (k, _v) in &props {
+            assert_ne!(
+                *k, TXT_DEVICE_NAME,
+                "TXT record must not include '{TXT_DEVICE_NAME}' key (PII leak)"
+            );
+        }
+    }
+
+    /// `build_txt_properties` must contain `TXT_DEVICE_ID` and `TXT_VERSION`.
+    ///
+    /// The `did` key is required for pairing resolution (peers dial by mDNS
+    /// `did` when no address hint is available).
+    #[test]
+    fn build_txt_properties_contains_did_and_version() {
+        let device_id = "cafebabe12345678";
+        let props = build_txt_properties(device_id);
+        let keys: Vec<&str> = props.iter().map(|(k, _)| *k).collect();
+        assert!(
+            keys.contains(&TXT_DEVICE_ID),
+            "TXT must contain '{TXT_DEVICE_ID}' for pairing resolution"
+        );
+        assert!(
+            keys.contains(&TXT_VERSION),
+            "TXT must contain '{TXT_VERSION}'"
+        );
+        // did value must match the device_id passed in.
+        let did_val = props
+            .iter()
+            .find(|(k, _)| *k == TXT_DEVICE_ID)
+            .map(|(_, v)| v.as_str());
+        assert_eq!(did_val, Some(device_id));
+    }
+
+    /// The human device name must not appear in any value of the TXT properties.
+    #[test]
+    fn build_txt_properties_values_do_not_contain_human_name() {
+        let device_id = "aabbccdd12345678";
+        let human_name = "Alice's MacBook Pro";
+        let props = build_txt_properties(device_id);
+        for (_k, v) in &props {
+            assert!(
+                !v.contains("Alice"),
+                "human name must not appear in TXT value '{v}'"
+            );
+            let _ = human_name;
         }
     }
 }

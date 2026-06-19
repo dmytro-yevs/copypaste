@@ -4,7 +4,7 @@ import { Sidebar } from "./components/Sidebar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
 import styles from "./ViewTransition.module.css";
-import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError, type PairSasStatus } from "./lib/ipc";
+import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError, setProtocolMismatchHandler, type PairSasStatus } from "./lib/ipc";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { startPeerPresencePolling, stopPeerPresencePolling } from "./lib/peerPresence";
@@ -318,6 +318,29 @@ export default function App() {
   }, [motionReduced]);
 
   // ---------------------------------------------------------------------------
+  // Protocol-version mismatch banner (dismissible)
+  // ---------------------------------------------------------------------------
+  // Assigned once on mount so all subsequent ipcCall()s use this handler.
+  // Shows when the daemon speaks a protocol version that differs from the
+  // client's CURRENT_PROTOCOL_VERSION — the daemon is ahead (needs app upgrade)
+  // or behind (needs daemon restart). Dismissible so it doesn't block use.
+  const [protocolMismatch, setProtocolMismatch] = useState<number | null>(null);
+  const [mismatchDismissed, setMismatchDismissed] = useState(false);
+
+  useEffect(() => {
+    // Register handler so subsequent ipcCall()s surface the banner instead
+    // of the default console.warn. We only update state if not already dismissed.
+    setProtocolMismatchHandler((daemonVersion) => {
+      setProtocolMismatch(daemonVersion);
+    });
+    // Deregister on unmount to restore the default console.warn behaviour.
+    return () => { setProtocolMismatchHandler(null); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const showMismatchBanner = protocolMismatch !== null && !mismatchDismissed;
+
+  // ---------------------------------------------------------------------------
   // Daemon spawn error banner (non-dismissible, installation-incomplete)
   // ---------------------------------------------------------------------------
   // On mount: call getDaemonError() for the case where the app launched,
@@ -491,6 +514,28 @@ export default function App() {
             <div className="surface-glass flex shrink-0 items-start gap-3 rounded-ide-lg border border-red-500/40 px-3 py-2 text-[13px] text-red-400">
               <span className="shrink-0 font-semibold">Background service error:</span>
               <span>The background service failed to start. Please reinstall CopyPaste or restart your Mac.</span>
+            </div>
+          )}
+
+          {/* Protocol version mismatch — dismissible. Shown when the daemon speaks
+              a different wire protocol version than this UI expects (ADR-007). */}
+          {showMismatchBanner && (
+            <div
+              data-testid="protocol-mismatch-banner"
+              className="surface-glass flex shrink-0 items-start justify-between gap-3 rounded-ide-lg border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
+            >
+              <span>
+                CopyPaste app and background daemon are on incompatible versions
+                {protocolMismatch !== null ? ` (daemon protocol v${protocolMismatch})` : ""}.
+                Restart the app or the daemon to resolve.
+              </span>
+              <button
+                type="button"
+                onClick={() => setMismatchDismissed(true)}
+                className="shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+              >
+                Dismiss
+              </button>
             </div>
           )}
 

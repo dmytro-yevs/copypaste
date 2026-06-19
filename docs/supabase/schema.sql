@@ -20,7 +20,7 @@
 --   * `device_id` corresponds to `WireItem.origin_device_id`.
 --   * Payload is stored as `bytea` (`payload_ct`) — the daemon encrypts
 --     ChaCha20-Poly1305 client-side; the server never sees plaintext.
---   * `content_hash` is a 32-byte BLAKE3 digest of the *plaintext*, used
+--   * `content_hash` is a 32-byte SHA-256 digest of the *plaintext*, used
 --     for client-side dedup. Optional (nullable for legacy rows).
 --   * `lamport_ts` + `wall_time` give LWW conflict resolution semantics.
 --
@@ -45,7 +45,7 @@ create table if not exists public.clipboard_items (
     content_type      text           not null,
     payload_ct        bytea,                     -- ChaCha20-Poly1305 ciphertext
     content_nonce     bytea,                     -- 24-byte XChaCha20 nonce
-    content_hash      bytea,                     -- BLAKE3-256 of plaintext (32 bytes)
+    content_hash      bytea,                     -- SHA-256 of plaintext (32 bytes, used for client-side dedup)
     blob_ref          text,                      -- optional large-blob CAS pointer
     is_sensitive      boolean        not null default false,
 
@@ -78,7 +78,7 @@ comment on column public.clipboard_items.user_id          is 'Owner — RLS scop
 comment on column public.clipboard_items.device_id        is 'Origin device UUID (mirrors WireItem.origin_device_id).';
 comment on column public.clipboard_items.payload_ct       is 'ChaCha20-Poly1305 ciphertext of the clipboard payload. Server never sees plaintext.';
 comment on column public.clipboard_items.content_nonce    is '24-byte XChaCha20-Poly1305 nonce. Must be unique per (user_id, key).';
-comment on column public.clipboard_items.content_hash     is 'BLAKE3-256 hash of plaintext for client-side dedup. Server cannot verify.';
+comment on column public.clipboard_items.content_hash     is 'SHA-256 hash of plaintext for client-side dedup. Server cannot verify.';
 comment on column public.clipboard_items.lamport_ts       is 'Lamport clock at the time of last write — drives LWW conflict resolution.';
 comment on column public.clipboard_items.wall_time        is 'Wall-clock time (Unix ms) — tiebreaker when lamport_ts is equal.';
 

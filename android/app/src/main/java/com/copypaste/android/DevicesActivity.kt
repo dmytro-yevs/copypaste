@@ -372,14 +372,15 @@ fun DevicesScreen(
     fun launchScanner() {
         val opts = ScanOptions()
             .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
-            .setPrompt(ctx.getString(R.string.pair_instructions))
+            .setPrompt("Scan the pairing QR on the other device")
             .setBeepEnabled(false)
             .setOrientationLocked(true)
             .setCaptureActivity(PortraitCaptureActivity::class.java)
         try {
             scanLauncher.launch(opts)
         } catch (e: Exception) {
-            scanError = ctx.getString(R.string.error_scan_camera, e.message ?: e.javaClass.simpleName)
+            scanError = "Could not open the camera scanner: " +
+                (e.message ?: e.javaClass.simpleName)
         }
     }
 
@@ -389,7 +390,8 @@ fun DevicesScreen(
         if (granted) {
             launchScanner()
         } else {
-            scanError = ctx.getString(R.string.error_scan_camera_permission)
+            scanError = "Camera permission required to scan a pairing QR. " +
+                "Grant it in Settings → Apps → CopyPaste → Permissions."
         }
     }
 
@@ -590,7 +592,7 @@ fun DevicesScreen(
                 pairingPeer = peer
             } catch (e: Exception) {
                 Log.w(TAG, "pairWithDiscovered failed: ${e.message}", e)
-                discoverError = e.message ?: ctx.getString(R.string.error_pair_start)
+                discoverError = e.message ?: "Failed to start pairing."
                 // HB-8: pairWithDiscovered may have claimed the native SM (via
                 // try_begin) before failing — reset defensively so a retry is not
                 // refused with "a pairing is already in flight".
@@ -616,19 +618,22 @@ fun DevicesScreen(
         // §8 glass dialog (audit #10) — appearance only; unpair logic unchanged.
         GlassAlertDialog(
             onDismissRequest = { unpairTarget = null },
-            title = { Text(stringResource(R.string.dialog_forget_device_title)) },
+            title = { Text("Forget paired device?") },
             text = {
-                Text(stringResource(R.string.dialog_forget_device_body, target.displayName()))
+                Text(
+                    "This device will no longer sync with ${target.displayName()} over P2P. " +
+                    "You can re-pair at any time by scanning a new QR code."
+                )
             },
             confirmButton = {
                 TextButton(onClick = {
                     unpairTarget = null
                     unpairPeer(settings, target.fingerprint)
                     refresh()
-                }) { Text(stringResource(R.string.dialog_forget_btn), color = c.danger) }
+                }) { Text("Forget", color = c.danger) }
             },
             dismissButton = {
-                TextButton(onClick = { unpairTarget = null }) { Text(stringResource(R.string.dialog_cancel)) }
+                TextButton(onClick = { unpairTarget = null }) { Text("Cancel") }
             },
         )
     }
@@ -638,9 +643,16 @@ fun DevicesScreen(
         // §8 glass dialog (audit #10) — appearance only; revoke logic unchanged.
         GlassAlertDialog(
             onDismissRequest = { revokeTarget = null },
-            title = { Text(stringResource(R.string.dialog_revoke_title)) },
+            title = { Text("Revoke pairing?") },
             text = {
-                Text(stringResource(R.string.dialog_revoke_body, target.displayName()))
+                Text(
+                    "${target.displayName()} will no longer connect over P2P, and a " +
+                    "revocation record is kept. But a revoked device that still holds " +
+                    "the shared sync key can keep reading cloud and relay items until " +
+                    "you rotate the sync key. To rotate it, change the Sync Passphrase " +
+                    "in Settings — every device must then re-enter the new passphrase " +
+                    "(or re-pair) to keep syncing."
+                )
             },
             confirmButton = {
                 TextButton(onClick = {
@@ -670,12 +682,12 @@ fun DevicesScreen(
                                 false
                             },
                         )
-                        if (!ok) revokeError = ctx.getString(R.string.error_revoke_record)
+                        if (!ok) revokeError = "Failed to record revocation. The peer was unpaired locally."
                     }
-                }) { Text(stringResource(R.string.btn_revoke), color = c.danger) }
+                }) { Text("Revoke", color = c.danger) }
             },
             dismissButton = {
-                TextButton(onClick = { revokeTarget = null }) { Text(stringResource(R.string.dialog_cancel)) }
+                TextButton(onClick = { revokeTarget = null }) { Text("Cancel") }
             },
         )
     }
@@ -684,10 +696,10 @@ fun DevicesScreen(
     revokeError?.let { msg ->
         GlassAlertDialog(
             onDismissRequest = { revokeError = null },
-            title = { Text(stringResource(R.string.dialog_revoke_incomplete_title)) },
+            title = { Text("Revocation incomplete") },
             text = { Text(msg) },
             confirmButton = {
-                TextButton(onClick = { revokeError = null }) { Text(stringResource(R.string.sas_btn_close)) }
+                TextButton(onClick = { revokeError = null }) { Text("OK") }
             },
         )
     }
@@ -706,10 +718,10 @@ fun DevicesScreen(
     scanError?.let { msg ->
         GlassAlertDialog(
             onDismissRequest = { scanError = null },
-            title = { Text(stringResource(R.string.dialog_scanner_unavailable_title)) },
+            title = { Text("Scanner unavailable") },
             text = { Text(msg) },
             confirmButton = {
-                TextButton(onClick = { scanError = null }) { Text(stringResource(R.string.sas_btn_close)) }
+                TextButton(onClick = { scanError = null }) { Text("OK") }
             },
         )
     }
@@ -724,7 +736,7 @@ fun DevicesScreen(
                 title = stringResource(R.string.title_devices),
                 showBackButton = showBackButton,
                 onBack = onBack,
-                backContentDescription = stringResource(R.string.cd_back),
+                backContentDescription = "Back",
             )
         },
     ) { innerPadding ->
@@ -757,7 +769,7 @@ fun DevicesScreen(
             // Replaces the former stack of individually-elevated Cards.
             // CopyPaste-9ln4: renamed from "Devices" to "Paired Devices" — avoids
             // duplicate with the TopBar title and matches the web SectionLabel fix.
-            SectionLabel(stringResource(R.string.devices_section_paired))
+            SectionLabel("Paired Devices")
 
             // Assemble the ordered row list so we know where dividers go (a
             // divider is drawn BEFORE every row except the first).
@@ -787,7 +799,7 @@ fun DevicesScreen(
                 if (p2pEnabled) {
                     add {
                         Text(
-                            text = stringResource(R.string.devices_discovered_section),
+                            text = "Discovered on your network",
                             style = MaterialTheme.typography.labelSmall,
                             color = c.dim,
                             modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 4.dp),
@@ -898,8 +910,6 @@ private const val DEVICES_QR_SLOT_DP = DEVICES_QR_IMAGE_DP + DEVICES_QR_PLATE_PA
 
 /** Mirrors PAIR_TOKEN_TTL_SECONDS in PairActivity (private there). */
 private const val DEVICES_QR_TTL_SECONDS = 120
-/** PG-56: refresh QR this many seconds before expiry (parity macOS QR_REFRESH_MARGIN_SECS=15). */
-private const val DEVICES_QR_REFRESH_MARGIN_SECS = 15
 
 /**
  * QR countdown urgency threshold. PARITY-SPEC §10 / audit #26: the bar + label
@@ -1011,13 +1021,11 @@ private fun OwnQrSection(settings: Settings) {
     }
 
     // Countdown ticker — restarts whenever a fresh QR is issued. Auto-regenerates
-    // QR_REFRESH_MARGIN_SECS before expiry WITHOUT changing the blur state (CopyPaste-v5a).
-    // PG-56: mirrors macOS QR_REFRESH_MARGIN_SECS=15 so the QR is refreshed before the
-    // user sees an expired code (was: count to 0 then refresh, showing expired briefly).
+    // on expiry WITHOUT changing the blur state (CopyPaste-v5a).
     LaunchedEffect(qr) {
         if (qr == null) return@LaunchedEffect
         remainingSeconds = DEVICES_QR_TTL_SECONDS
-        while (remainingSeconds > DEVICES_QR_REFRESH_MARGIN_SECS) {
+        while (remainingSeconds > 0) {
             delay(1_000L)
             remainingSeconds -= 1
         }
@@ -1034,7 +1042,7 @@ private fun OwnQrSection(settings: Settings) {
     // SectionLabel aligns with the card edge (SectionLabel itself adds start=16.dp,
     // but it's already inside a column with horizontal=16.dp → net 32dp without the
     // offset, vs 16dp for the card). The offset shifts the label 16dp back to the left.
-    SectionLabel(stringResource(R.string.devices_section_your_qr), modifier = Modifier.offset(x = (-16).dp))
+    SectionLabel("Your QR code", modifier = Modifier.offset(x = (-16).dp))
 
     CopyPasteCard {
         Column(
@@ -1045,7 +1053,7 @@ private fun OwnQrSection(settings: Settings) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
-                text = stringResource(R.string.devices_qr_subtitle),
+                text = "Let another device scan this to pair",
                 style = MaterialTheme.typography.bodySmall,
                 color = c.dim,
                 textAlign = TextAlign.Center,
@@ -1086,9 +1094,7 @@ private fun OwnQrSection(settings: Settings) {
                                 .then(
                                     if (qrBlurred) Modifier.blur(16.dp) else Modifier
                                 )
-                                .clickable(
-                                    onClickLabel = stringResource(R.string.cd_qr_reveal_toggle),
-                                ) {
+                                .clickable {
                                     // First tap reveals; subsequent taps regenerate
                                     // WITHOUT re-blurring (blur is user-owned, v5a).
                                     if (qrBlurred) {
@@ -1112,7 +1118,7 @@ private fun OwnQrSection(settings: Settings) {
                             ) {
                                 Image(
                                     bitmap = bmp.asImageBitmap(),
-                                    contentDescription = stringResource(R.string.cd_own_qr_blurred),
+                                    contentDescription = "Your pairing QR code — tap to reveal",
                                     modifier = Modifier.size(DEVICES_QR_IMAGE_DP.dp),
                                 )
                             }
@@ -1150,7 +1156,7 @@ private fun OwnQrSection(settings: Settings) {
                             // Reveal overlay (only while blurred).
                             if (qrBlurred) {
                                 Text(
-                                    text = stringResource(R.string.devices_qr_tap_to_reveal),
+                                    text = "Tap to reveal",
                                     style = MaterialTheme.typography.labelLarge,
                                     color = c.text,
                                     textAlign = TextAlign.Center,
@@ -1161,7 +1167,7 @@ private fun OwnQrSection(settings: Settings) {
                     else -> {
                         // Expired placeholder while auto-regeneration is in flight.
                         Text(
-                            text = stringResource(R.string.devices_qr_refreshing),
+                            text = "Refreshing…",
                             style = MaterialTheme.typography.bodySmall,
                             color = c.dim,
                         )
@@ -1204,7 +1210,7 @@ private fun OwnQrSection(settings: Settings) {
 
             errorMsg?.let { msg ->
                 Text(
-                    text = stringResource(R.string.devices_qr_error, msg),
+                    text = "QR unavailable: $msg",
                     style = MaterialTheme.typography.bodySmall,
                     color = c.danger,
                     textAlign = TextAlign.Center,
@@ -1279,13 +1285,13 @@ internal fun PeerRow(
             // §7 online pulse ring (replaces plain dot).
             PulseDot(online = online, modifier = Modifier.size(10.dp))
             Text(
-                text = peer.name.ifBlank { stringResource(R.string.devices_peer_default_name) },
+                text = peer.name.ifBlank { "Paired device" },
                 color = c.text,
                 style = MaterialTheme.typography.titleSmall,
                 modifier = Modifier.weight(1f, fill = false),
             )
             Text(
-                text = if (online) stringResource(R.string.devices_status_online) else stringResource(R.string.devices_status_offline),
+                text = if (online) "Online" else "Offline",
                 color = dotColor,
                 style = MaterialTheme.typography.labelMedium,
             )
@@ -1313,13 +1319,13 @@ internal fun PeerRow(
 
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             peer.peerModel?.takeIf { it.isNotBlank() }?.let {
-                MetaRow(label = stringResource(R.string.meta_label_model), value = it)
+                MetaRow(label = "Model", value = it)
             }
             peer.peerOs?.takeIf { it.isNotBlank() }?.let {
-                MetaRow(label = stringResource(R.string.meta_label_os), value = it)
+                MetaRow(label = "OS", value = it)
             }
             peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
-                MetaRow(label = stringResource(R.string.meta_label_version), value = it)
+                MetaRow(label = "Version", value = it)
             }
             // PG-39: show peerLocalIp when present, else fall back to the host
             // portion of syncAddr — mirrors macOS DeviceCard.tsx:215
@@ -1328,28 +1334,28 @@ internal fun PeerRow(
             val localIpDisplay = peer.peerLocalIp?.takeIf { it.isNotBlank() }
                 ?: syncAddrToIp(peer.syncAddr)
             localIpDisplay?.let {
-                MetaRow(label = stringResource(R.string.meta_label_local_ip), value = it)
+                MetaRow(label = "Local IP", value = it)
             }
             peer.peerPublicIp?.takeIf { it.isNotBlank() }?.let {
-                MetaRow(label = stringResource(R.string.meta_label_public_ip), value = it)
+                MetaRow(label = "Public IP", value = it)
             }
             if (peer.pairedAtMs > 0L) {
-                MetaRow(label = stringResource(R.string.meta_label_paired), value = formatEpochMs(peer.pairedAtMs))
+                MetaRow(label = "Paired", value = formatEpochMs(peer.pairedAtMs))
             }
             lastSyncText?.let {
-                MetaRow(label = stringResource(R.string.meta_label_last_sync), value = it)
+                MetaRow(label = "Last sync", value = it)
             }
             // RTT: shown when FgsSyncLoop has measured a live round-trip time.
             // FgsSyncLoop instrumentation (Ping/Pong over mTLS) deferred to CopyPaste-8dd.
             peer.latencyMs?.let {
-                MetaRow(label = stringResource(R.string.meta_label_rtt), value = stringResource(R.string.meta_label_rtt_value, it))
+                MetaRow(label = "RTT", value = "$it ms")
             }
             // PG-45: show truncated peer fingerprint so the user can verify the
             // peer's identity inline — mirrors macOS DeviceCard which shows a
             // truncated fingerprint in the MetaGrid. Format: first16…last8.
             // formatPeerFingerprint() is the shared helper at the top of this file.
             peer.fingerprint.takeIf { it.isNotBlank() }?.let {
-                MetaRow(label = stringResource(R.string.meta_label_fingerprint), value = formatPeerFingerprint(it))
+                MetaRow(label = "Fingerprint", value = formatPeerFingerprint(it))
             }
         }
 
@@ -1374,14 +1380,14 @@ internal fun PeerRow(
                 variant = ButtonVariant.DANGER,
                 modifier = Modifier.weight(1f),
             ) {
-                Text(stringResource(R.string.btn_unpair))
+                Text("Unpair")
             }
             CopyPasteButton(
                 onClick = onRevoke,
                 variant = ButtonVariant.DANGER,
                 modifier = Modifier.weight(1f),
             ) {
-                Text(stringResource(R.string.btn_revoke))
+                Text("Revoke")
             }
         }
     }
@@ -1403,18 +1409,18 @@ private fun NoPeerCard(onPair: () -> Unit) {
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
-                    text = stringResource(R.string.devices_no_peer_title),
+                    text = "No device paired",
                     color = c.dim,
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 Text(
-                    text = stringResource(R.string.devices_no_peer_body),
+                    text = "Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.",
                     color = c.faint,
                     style = MaterialTheme.typography.bodySmall,
                 )
                 // CopyPaste-jkbo: replaced raw M3 Button with CopyPasteButton(PRIMARY).
                 CopyPasteButton(onClick = onPair, variant = ButtonVariant.PRIMARY) {
-                    Text(stringResource(R.string.devices_btn_pair_device))
+                    Text("Pair a device")
                 }
             }
         }
@@ -1600,13 +1606,13 @@ internal fun OwnDeviceRow(
                 modifier = Modifier.weight(1f, fill = false),
             )
             Text(
-                text = stringResource(R.string.devices_status_online),
+                text = "Online",
                 color = c.success,
                 style = MaterialTheme.typography.labelMedium,
             )
             // §7 "This Device" accent badge — subtle float animation.
             Text(
-                text = stringResource(R.string.devices_badge_this_device),
+                text = "This Device",
                 color = c.accent,
                 fontSize = 10.sp,
                 letterSpacing = 0.4.sp,
@@ -1622,16 +1628,16 @@ internal fun OwnDeviceRow(
 
         // Two-column aligned table — same [META_LABEL_WIDTH] as PeerRow.
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            MetaRow(label = stringResource(R.string.meta_label_model), value = model)
-            MetaRow(label = stringResource(R.string.meta_label_os), value = osVersion)
-            MetaRow(label = stringResource(R.string.meta_label_version), value = appVersion)
-            localIp?.let { MetaRow(label = stringResource(R.string.meta_label_local_ip), value = it) }
+            MetaRow(label = "Model", value = model)
+            MetaRow(label = "OS", value = osVersion)
+            MetaRow(label = "Version", value = appVersion)
+            localIp?.let { MetaRow(label = "Local IP", value = it) }
             // CopyPaste-6qq1: show Public IP from async STUN lookup when available.
-            ownPublicIp?.let { MetaRow(label = stringResource(R.string.meta_label_public_ip), value = it) }
+            ownPublicIp?.let { MetaRow(label = "Public IP", value = it) }
             // CopyPaste-0tb0: show own fingerprint — mirrors macOS ThisDeviceCard.
             // Full fingerprint displayed (no truncation) so the user can verify identity.
             identity.fingerprint.takeIf { it.isNotBlank() }?.let {
-                MetaRow(label = stringResource(R.string.meta_label_fingerprint), value = it)
+                MetaRow(label = "Fingerprint", value = it)
             }
         }
     }
@@ -1685,7 +1691,7 @@ private fun DiscoveredPeerRow(
                 // Fingerprint omitted; IP shown as an aligned table row matching
                 // the layout of OwnDeviceRow and PeerRow.
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ip?.let { MetaRow(label = stringResource(R.string.meta_label_local_ip), value = it) }
+                    ip?.let { MetaRow(label = "Local IP", value = it) }
                 }
             }
             // CopyPaste-jkbo: replaced raw M3 Button with CopyPasteButton(PRIMARY).
@@ -1694,12 +1700,12 @@ private fun DiscoveredPeerRow(
                 enabled = pairable && !busy,
                 variant = ButtonVariant.PRIMARY,
             ) {
-                Text(stringResource(R.string.btn_pair))
+                Text("Pair")
             }
         }
         if (!pairable) {
             Text(
-                text = stringResource(R.string.devices_no_secure_pairing),
+                text = "This device does not support secure pairing.",
                 color = c.faint,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
@@ -1984,59 +1990,57 @@ private fun SasPairingDialog(
     // (handleConfirm/handleClose, status machine) is untouched.
     GlassAlertDialog(
         onDismissRequest = { handleClose() },
-        title = { Text(stringResource(R.string.sas_dialog_title, title)) },
+        title = { Text("Pair “$title”") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 when {
                     ended -> {
                         Text(
-                            stringResource(R.string.sas_ended),
+                            "Pairing ended — check the other device.",
                             color = c.dim,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
-                    status.state == “confirmed” -> {
+                    status.state == "confirmed" -> {
                         Text(
-                            stringResource(R.string.sas_paired_ok),
+                            "Paired ✓",
                             color = c.success,
                             style = MaterialTheme.typography.titleSmall,
                         )
                     }
-                    status.state == “rejected” || status.state == “aborted” || status.state == “timed_out” -> {
+                    status.state == "rejected" || status.state == "aborted" || status.state == "timed_out" -> {
                         Text(
                             when (status.state) {
-                                “timed_out” -> stringResource(R.string.sas_timed_out)
-                                “rejected” -> stringResource(R.string.sas_rejected)
-                                else -> stringResource(R.string.sas_cancelled)
+                                "timed_out" -> "Pairing timed out."
+                                "rejected" -> "Pairing was rejected."
+                                else -> "Pairing was cancelled."
                             },
                             color = c.danger,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
-                    status.state == “awaiting_sas” && status.sas != null -> {
+                    status.state == "awaiting_sas" && status.sas != null -> {
                         Text(
-                            stringResource(R.string.sas_confirm_prompt),
+                            "Confirm this code matches the one shown on the other device.",
                             color = c.dim,
                             style = MaterialTheme.typography.bodySmall,
                         )
                         // §10 SAS per-digit cells — styleguide .sas: each digit in its
                         // own 38dp-wide centered mono cell, 28sp/600, letterSpacing 1.1sp
                         // (≈.04em at 28sp), gap 8dp, whole row tap-to-copy.
-                        val sasFull = status.sas ?: “”
+                        val sasFull = status.sas ?: ""
                         val ctx = LocalContext.current
-                        val copyCodeLabel = stringResource(R.string.sas_copy_code_label)
-                        val codeCopiedMsg = stringResource(R.string.sas_code_copied)
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(vertical = 8.dp)
-                                .clickable(onClickLabel = copyCodeLabel) {
+                                .clickable(onClickLabel = "Copy code") {
                                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
                                         as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText(“SAS code”, sasFull))
-                                    android.widget.Toast.makeText(ctx, codeCopiedMsg, android.widget.Toast.LENGTH_SHORT).show()
+                                    cm.setPrimaryClip(ClipData.newPlainText("SAS code", sasFull))
+                                    android.widget.Toast.makeText(ctx, "Code copied", android.widget.Toast.LENGTH_SHORT).show()
                                 },
                         ) {
                             sasFull.forEach { digit ->
@@ -2065,7 +2069,7 @@ private fun SasPairingDialog(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
-                                stringResource(R.string.sas_waiting_other),
+                                "Waiting for the other device…",
                                 color = c.dim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
@@ -2079,7 +2083,7 @@ private fun SasPairingDialog(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
-                                stringResource(R.string.sas_connecting),
+                                "Connecting…",
                                 color = c.dim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
@@ -2096,13 +2100,13 @@ private fun SasPairingDialog(
         confirmButton = {
             when {
                 terminal -> {
-                    TextButton(onClick = { onClose() }) { Text(stringResource(R.string.sas_btn_close)) }
+                    TextButton(onClick = { onClose() }) { Text("Close") }
                 }
                 status.state == "awaiting_sas" && status.sas != null -> {
                     TextButton(
                         enabled = !confirmPending,
                         onClick = { handleConfirm(true) },
-                    ) { Text(if (confirmPending) "…" else stringResource(R.string.sas_btn_match)) }
+                    ) { Text(if (confirmPending) "…" else "Match") }
                 }
                 else -> {}
             }
@@ -2114,10 +2118,10 @@ private fun SasPairingDialog(
                     TextButton(
                         enabled = !confirmPending,
                         onClick = { handleConfirm(false) },
-                    ) { Text(stringResource(R.string.sas_btn_no_match), color = c.dim) }
+                    ) { Text("Doesn't match", color = c.dim) }
                 }
                 else -> {
-                    TextButton(onClick = { handleClose() }) { Text(stringResource(R.string.dialog_cancel), color = c.faint) }
+                    TextButton(onClick = { handleClose() }) { Text("Cancel", color = c.faint) }
                 }
             }
         },
@@ -2355,11 +2359,11 @@ private fun syncAddrToIp(syncAddr: String): String? {
 /** Poll cadence for refreshing peer state on the Devices screen. */
 private const val PEER_POLL_MS = 10_000L
 
-/** PG-60: aligned to macOS DISCOVERED_POLL_MS=3000 ms. */
-private const val DISCOVERED_POLL_MS = 3_000L
+/** Poll cadence for refreshing the LAN-discovered peer list (~2 s). */
+private const val DISCOVERED_POLL_MS = 2_000L
 
-/** PG-60: aligned to macOS SAS_POLL_MS=700 ms. */
-private const val SAS_POLL_MS = 700L
+/** Poll cadence for the SAS pairing state machine (~500 ms). */
+private const val SAS_POLL_MS = 500L
 
 /**
  * Fixed bootstrap (SAS-pairing) listener port this device advertises in its mDNS

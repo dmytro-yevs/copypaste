@@ -39,7 +39,7 @@ use crate::error::ReportableError;
 //
 // Each LazyLock is initialised on first use and reused for the process
 // lifetime, avoiding the per-call Regex::new overhead in with_defaults().
-// MSRV 1.96 stabilises std::sync::LazyLock (available since 1.80; 1.96 is the current floor), so no extra crate is needed.
+// MSRV 1.96 stabilises std::sync::LazyLock (available since 1.80; 1.89 was previous floor), so no extra crate is needed.
 // The .expect() strings are only ever reached on a malformed static literal,
 // which would be caught by the scrubber_patterns_compile unit test below.
 // ---------------------------------------------------------------------------

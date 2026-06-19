@@ -16,6 +16,16 @@
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
+# Rust toolchain PATH — source ~/.cargo/env when cargo is not already on PATH.
+# ---------------------------------------------------------------------------
+if ! command -v cargo >/dev/null 2>&1; then
+  if [[ -f "${HOME}/.cargo/env" ]]; then
+    # shellcheck source=/dev/null
+    source "${HOME}/.cargo/env"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -14,11 +14,31 @@ use serde::{Deserialize, Serialize};
 /// Fetch a paginated list of clipboard items.
 pub const METHOD_LIST: &str = "list";
 
+/// Fetch one page of clipboard history items (with pagination).
+///
+/// Params: `{ limit: u32, offset: u32 }`.  Response: `{ items: […], total: u32,
+/// own_device_id: String }`.  The UI uses this (not the legacy `list`) for the
+/// paginated history view so it can load incrementally.
+pub const METHOD_HISTORY_PAGE: &str = "history_page";
+
 /// Full-text search over clipboard items.
 pub const METHOD_SEARCH: &str = "search";
 
 /// Copy a clipboard item back to the system clipboard by id.
+///
+/// Params: `{ id: String }`.  Different from the legacy `copy` method in that
+/// it uses the item's stable UUID rather than an integer index, and returns a
+/// richer response (including the decrypted text for paste-back).
+pub const METHOD_COPY_ITEM: &str = "copy_item";
+
+/// Copy a clipboard item back to the system clipboard by id.
 pub const METHOD_COPY: &str = "copy";
+
+/// Delete a single clipboard item by id.
+///
+/// Params: `{ id: String }`.  Deletes the item with the given UUID from the
+/// encrypted database and removes it from the FTS index.
+pub const METHOD_DELETE_ITEM: &str = "delete_item";
 
 /// Delete a single clipboard item by id.
 pub const METHOD_DELETE: &str = "delete";
@@ -57,6 +77,29 @@ pub const METHOD_SET_PRIVATE_MODE: &str = "set_private_mode";
 
 /// Query the current private-mode state.
 pub const METHOD_GET_PRIVATE_MODE: &str = "get_private_mode";
+
+// ── Sync key management ─────────────────────────────────────────────────────
+
+/// Store the shared sync passphrase and derive the content-sync key from it.
+///
+/// Params: `{ passphrase: String }`.  The daemon stores the key material in the
+/// Keychain (macOS) or in-memory; the passphrase itself is never persisted.
+pub const METHOD_SET_SYNC_PASSPHRASE: &str = "set_sync_passphrase";
+
+/// Rotate the shared content-sync key to a new passphrase.
+///
+/// Params: `{ passphrase: String }`.  After rotation the old key is zeroized;
+/// previously paired devices that haven't re-provisioned can no longer decrypt
+/// new items.  Returns `{ ok: bool, rotated: bool }`.
+pub const METHOD_ROTATE_SYNC_KEY: &str = "rotate_sync_key";
+
+/// Revoke a peer from P2P AND rotate the sync key in one atomic call.
+///
+/// Params: `{ fingerprint: String, passphrase: String }`.  The daemon derives
+/// the new key first (bad passphrase → fail before any state is mutated) then
+/// removes the peer from `peers.json` and rotates the key.
+/// Returns `{ revoked_at: i64, rotated: bool }`.
+pub const METHOD_REVOKE_AND_ROTATE: &str = "revoke_and_rotate";
 
 // ── Cloud sync ──────────────────────────────────────────────────────────────
 
@@ -159,6 +202,105 @@ pub const METHOD_PAIR_CONFIRM_SAS: &str = "pair_confirm_sas";
 
 /// Abort an in-flight discovery pairing and reset the state machine to `idle`.
 pub const METHOD_PAIR_ABORT: &str = "pair_abort";
+
+/// Pair with a peer using a shared password (non-QR / non-SAS path).
+///
+/// Params: `{ peer_fingerprint: String, password: String }`.  Used when the
+/// other device provides a fixed password instead of a QR / SAS code.
+pub const METHOD_PAIR_PEER_WITH_PASSWORD: &str = "pair_peer_with_password";
+
+// ── Peer management ──────────────────────────────────────────────────────────
+
+/// Remove a paired peer (untrust, delete from `peers.json`, no key rotation).
+///
+/// Params: `{ fingerprint: String }`.  The peer is removed from the local trust
+/// store; items it synced remain in history.  Use [`METHOD_REVOKE_PEER`] for a
+/// stronger revoke that also logs the revocation timestamp.
+pub const METHOD_UNPAIR_PEER: &str = "unpair_peer";
+
+/// Revoke a paired peer with a logged revocation timestamp.
+///
+/// Params: `{ fingerprint: String }`.  More forceful than unpair: the peer's
+/// entry is removed AND a `revoked_at` timestamp is persisted.
+/// Returns `{ revoked_at: i64 }`.
+pub const METHOD_REVOKE_PEER: &str = "revoke_peer";
+
+/// Revoke ALL paired peers in one call.
+///
+/// Returns `{ revoked: u32 }` — the number of peers removed.
+pub const METHOD_REVOKE_ALL_PEERS: &str = "revoke_all_peers";
+
+/// List all paired devices.
+///
+/// Returns `{ peers: [PairedDevice] }` including online/offline status,
+/// last-seen, latency, and sync timestamps.
+pub const METHOD_LIST_PEERS: &str = "list_peers";
+
+/// Reorder the pinned-item display sequence.
+///
+/// Params: `{ ids: [String] }` — complete ordered list of pinned item IDs.
+/// The daemon stores the order and returns items sorted by it in subsequent
+/// `history_page` responses.
+pub const METHOD_REORDER_PINNED: &str = "reorder_pinned";
+
+/// Drain all pending peer connect/disconnect events since the last call.
+///
+/// Returns `{ events: [{ kind: "connected" | "disconnected", fingerprint: String }] }`.
+/// Used by the app-global peer-presence polling loop; individual UI components
+/// subscribe to the derived presence store rather than calling this directly.
+pub const METHOD_POLL_PEER_EVENTS: &str = "poll_peer_events";
+
+/// Force an mDNS-SD rescan (restart-in-place re-browse) and return the
+/// fresh discovered device list.  Same response shape as [`METHOD_LIST_DISCOVERED`].
+pub const METHOD_RESCAN_DISCOVERED: &str = "rescan_discovered";
+
+// ── Item media access ───────────────────────────────────────────────────────
+
+/// Fetch the full image bytes for a `content_type == "image"` clipboard item.
+///
+/// Params: `{ id: String }`.  Returns `{ data_uri: String }` (a `data:image/…`
+/// URL with base64-encoded bytes).  Use [`METHOD_GET_ITEM_THUMBNAIL`] for the
+/// pre-computed low-resolution preview.
+pub const METHOD_GET_ITEM_IMAGE: &str = "get_item_image";
+
+/// Fetch the full binary payload for a `content_type == "file"` clipboard item.
+///
+/// Params: `{ id: String }`.  Returns `{ filename: String, mime: String,
+/// data_b64: String }` where `data_b64` is standard base64.  The daemon reads
+/// the encrypted blob, decrypts it, and returns the raw bytes.
+pub const METHOD_GET_ITEM_FILE: &str = "get_item_file";
+
+/// Fetch the pre-computed thumbnail for a clipboard image item.
+///
+/// Params: `{ id: String }`.  Returns `{ thumbnail: String | null }` where
+/// `thumbnail` is a `data:image/webp;base64,…` URL.  `null` when thumbnails are
+/// unavailable for this item (older daemon, non-image item, or generation
+/// failed at capture time).  Callers fall back to [`METHOD_GET_ITEM_IMAGE`].
+pub const METHOD_GET_ITEM_THUMBNAIL: &str = "get_item_thumbnail";
+
+/// Resolve a macOS app bundle identifier to a 32×32 PNG icon (base64).
+///
+/// Params: `{ bundle_id: String }`.  Returns `{ png_b64: String | null }`.
+/// `null` when the app is not installed or the daemon cannot extract the icon.
+/// Results are cached in the daemon so repeated calls are fast.
+pub const METHOD_GET_APP_ICON: &str = "get_app_icon";
+
+// ── Own device identity ──────────────────────────────────────────────────────
+
+/// Return this device's mTLS certificate fingerprint (hex SHA-256).
+///
+/// Returns `{ fingerprint: String }`.  Null when P2P is disabled (no cert).
+/// Superseded by [`METHOD_GET_OWN_DEVICE_INFO`] which returns the full
+/// identity; retained for back-compat with older callers.
+pub const METHOD_GET_OWN_FINGERPRINT: &str = "get_own_fingerprint";
+
+/// Return rich identity for THIS device: name, model, OS, version, IPs,
+/// and mTLS fingerprint.
+///
+/// Returns `{ fingerprint, device_name, device_model, os_version,
+/// app_version, local_ip, public_ip }`.  All fields except `app_version`
+/// are optional — gracefully handle absent ones.
+pub const METHOD_GET_OWN_DEVICE_INFO: &str = "get_own_device_info";
 
 // ── File ingest ─────────────────────────────────────────────────────────────
 
@@ -372,5 +514,55 @@ mod tests {
         let s = serde_json::to_string(&resp).unwrap();
         let back: VacuumResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);
+    }
+
+    // PG-62: verify all previously-missing METHOD_* constants have the correct
+    // wire names (matching the string literals used in the UI's ipc.ts api object).
+    #[test]
+    fn pg62_history_page_method_has_correct_wire_name() {
+        assert_eq!(METHOD_HISTORY_PAGE, "history_page");
+    }
+
+    #[test]
+    fn pg62_copy_item_method_has_correct_wire_name() {
+        assert_eq!(METHOD_COPY_ITEM, "copy_item");
+    }
+
+    #[test]
+    fn pg62_delete_item_method_has_correct_wire_name() {
+        assert_eq!(METHOD_DELETE_ITEM, "delete_item");
+    }
+
+    #[test]
+    fn pg62_sync_key_methods_have_correct_wire_names() {
+        assert_eq!(METHOD_SET_SYNC_PASSPHRASE, "set_sync_passphrase");
+        assert_eq!(METHOD_ROTATE_SYNC_KEY, "rotate_sync_key");
+        assert_eq!(METHOD_REVOKE_AND_ROTATE, "revoke_and_rotate");
+    }
+
+    #[test]
+    fn pg62_item_media_methods_have_correct_wire_names() {
+        assert_eq!(METHOD_GET_ITEM_IMAGE, "get_item_image");
+        assert_eq!(METHOD_GET_ITEM_FILE, "get_item_file");
+        assert_eq!(METHOD_GET_ITEM_THUMBNAIL, "get_item_thumbnail");
+        assert_eq!(METHOD_GET_APP_ICON, "get_app_icon");
+    }
+
+    #[test]
+    fn pg62_own_device_methods_have_correct_wire_names() {
+        assert_eq!(METHOD_GET_OWN_FINGERPRINT, "get_own_fingerprint");
+        assert_eq!(METHOD_GET_OWN_DEVICE_INFO, "get_own_device_info");
+    }
+
+    #[test]
+    fn pg62_peer_management_methods_have_correct_wire_names() {
+        assert_eq!(METHOD_LIST_PEERS, "list_peers");
+        assert_eq!(METHOD_POLL_PEER_EVENTS, "poll_peer_events");
+        assert_eq!(METHOD_PAIR_PEER_WITH_PASSWORD, "pair_peer_with_password");
+        assert_eq!(METHOD_UNPAIR_PEER, "unpair_peer");
+        assert_eq!(METHOD_REVOKE_PEER, "revoke_peer");
+        assert_eq!(METHOD_REVOKE_ALL_PEERS, "revoke_all_peers");
+        assert_eq!(METHOD_REORDER_PINNED, "reorder_pinned");
+        assert_eq!(METHOD_RESCAN_DISCOVERED, "rescan_discovered");
     }
 }

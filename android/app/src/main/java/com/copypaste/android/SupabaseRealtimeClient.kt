@@ -609,9 +609,11 @@ class SupabaseRealtimeClient(
             }
         }
 
-        // CopyPaste-up1c: apply pin state from the WS record (authoritative).
-        if (stored && item.pinned) {
-            repository.setPinned(item.itemId, true)
+        // lcmq: apply authoritative pin state (pin/unpin/reorder) from the WS record.
+        // Uses applyAuthoritativePinState — not setPinned — so authoritative unpins and
+        // pin_order convergence work without minting a new local mutation.
+        if (stored) {
+            repository.applyAuthoritativePinState(item.itemId, item.pinned, item.pinOrder)
         }
 
         if (stored) {
@@ -659,6 +661,22 @@ class SupabaseRealtimeClient(
                 // Advance Lamport clock.
                 settings.lamportClock.observe(row.lamportTs)
 
+                // vfai: tombstone fast-path — mirrors ingestWsRow and FgsSyncLoop.
+                // Without this the tombstone decrypts to empty plaintext, falls through
+                // to the text branch as a blank string, is silently skipped, and the
+                // cursor is advanced past it — delete is permanently missed.
+                if (row.deleted) {
+                    val tombstoned = repository.applyInboundTombstoneWithLww(
+                        itemId = row.itemId,
+                        lamportTs = row.lamportTs,
+                    )
+                    if (tombstoned) {
+                        Log.d(TAG, "WS catch-up: applied tombstone itemId=${row.itemId.take(8)}…")
+                    }
+                    if (tombstoned) newCount++
+                    continue
+                }
+
                 val item = batch.client.decryptRow(row, batch.syncKey)
                 if (item == null) {
                     Log.w(TAG, "WS catch-up: decryptRow failed for id=${row.id}")
@@ -678,6 +696,8 @@ class SupabaseRealtimeClient(
                             overrideId = item.itemId,
                             contentType = item.contentType,
                             lamportTs = item.lamportTs,
+                            wallTimeMs = item.wallTime,
+                            originDeviceId = item.deviceId,
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeImageBytes(storedId, item.plaintext)
@@ -700,6 +720,8 @@ class SupabaseRealtimeClient(
                             overrideId = item.itemId,
                             contentType = item.contentType,
                             lamportTs = item.lamportTs,
+                            wallTimeMs = item.wallTime,
+                            originDeviceId = item.deviceId,
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeFileBytes(storedId, item.plaintext)
@@ -717,8 +739,16 @@ class SupabaseRealtimeClient(
                         key = settings.encryptionKey,
                         itemId = item.itemId,
                         incomingLamportTs = item.lamportTs,
+                        wallTimeMs = item.wallTime,
+                        originDeviceId = item.deviceId,
                     )
                 }
+
+                // lcmq: apply authoritative pin state (pin/unpin/reorder) from catch-up row.
+                if (stored) {
+                    repository.applyAuthoritativePinState(item.itemId, item.pinned, item.pinOrder)
+                }
+
                 if (stored) newCount++
             }
 

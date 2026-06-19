@@ -41,7 +41,7 @@ create table if not exists public.clipboard_items (
     content_type      text           not null,
     payload_ct        bytea,                     -- ChaCha20-Poly1305 ciphertext
     content_nonce     bytea,                     -- 24-byte XChaCha20 nonce
-    content_hash      bytea,                     -- BLAKE3-256 of plaintext (32 bytes)
+    content_hash      bytea,                     -- SHA-256 of plaintext (32 bytes, used for client-side dedup)
     blob_ref          text,                      -- optional large-blob CAS pointer
     is_sensitive      boolean        not null default false,
 
@@ -53,6 +53,17 @@ create table if not exists public.clipboard_items (
     -- Provenance
     app_bundle_id     text,
 
+    -- Op-propagation state (schema v10+)
+    -- `deleted`   — soft-delete tombstone; true means the item was deleted on
+    --               the originating device. Receiving devices must apply a local
+    --               hard-delete and must NOT resurrect the row on future syncs.
+    -- `pinned`    — whether the item is explicitly pinned on the origin device.
+    -- `pin_order` — drag-to-reorder sort key among pinned items (NULL for
+    --               unpinned rows). f64 so fractional positions are valid.
+    deleted           boolean        not null default false,
+    pinned            boolean        not null default false,
+    pin_order         double precision,
+
     -- Server bookkeeping
     created_at        timestamptz    not null default now(),
     updated_at        timestamptz    not null default now()
@@ -63,7 +74,7 @@ comment on column public.clipboard_items.user_id          is 'Owner — RLS scop
 comment on column public.clipboard_items.device_id        is 'Origin device UUID (mirrors WireItem.origin_device_id).';
 comment on column public.clipboard_items.payload_ct       is 'ChaCha20-Poly1305 ciphertext of the clipboard payload. Server never sees plaintext.';
 comment on column public.clipboard_items.content_nonce    is '24-byte XChaCha20-Poly1305 nonce. Must be unique per (user_id, key).';
-comment on column public.clipboard_items.content_hash     is 'BLAKE3-256 hash of plaintext for client-side dedup. Server cannot verify.';
+comment on column public.clipboard_items.content_hash     is 'SHA-256 hash of plaintext for client-side dedup. Server cannot verify.';
 comment on column public.clipboard_items.lamport_ts       is 'Lamport clock at the time of last write — drives LWW conflict resolution.';
 comment on column public.clipboard_items.wall_time        is 'Wall-clock time (Unix ms) — tiebreaker when lamport_ts is equal.';
 
@@ -100,6 +111,26 @@ create trigger clipboard_items_set_updated_at
     before update on public.clipboard_items
     for each row
     execute function public.set_updated_at();
+
+-- ── Migration: add op-propagation columns (idempotent) ───────────────────────
+--
+-- Run this block against an existing Supabase project that was provisioned
+-- before schema v10 (i.e. the CREATE TABLE above did not yet include these
+-- columns). The IF NOT EXISTS guard makes it safe to re-run on a fresh schema
+-- that already has them.
+--
+-- After applying: existing rows get the column defaults (deleted=false,
+-- pinned=false, pin_order=NULL), which is correct — legacy rows are live,
+-- unpinned, and unordered until a client pushes an updated row.
+
+alter table public.clipboard_items
+    add column if not exists deleted   boolean          not null default false;
+
+alter table public.clipboard_items
+    add column if not exists pinned    boolean          not null default false;
+
+alter table public.clipboard_items
+    add column if not exists pin_order double precision;
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- PART 2 — ROW-LEVEL SECURITY

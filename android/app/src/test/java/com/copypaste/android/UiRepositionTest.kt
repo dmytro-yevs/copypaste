@@ -41,7 +41,18 @@ class UiRepositionTest {
     @Test
     fun expiresCountdownIsInsideQrCard() {
         val src = source("PairActivity.kt")
-        val cardStart = src.indexOf("CopyPasteCard {")
+        // CopyPasteCard may be called with or without modifier arguments — match either.
+        // E.g.: `CopyPasteCard {` or `CopyPasteCard(modifier = …) {`
+        val cardStart = run {
+            val idx1 = src.indexOf("CopyPasteCard {")
+            val idx2 = src.indexOf("CopyPasteCard(")
+            when {
+                idx1 >= 0 && idx2 >= 0 -> minOf(idx1, idx2)
+                idx1 >= 0 -> idx1
+                idx2 >= 0 -> idx2
+                else -> -1
+            }
+        }
         assertTrue("CopyPasteCard (grey QR block) not found", cardStart >= 0)
 
         // The CopyPasteCard lambda is the grey block. The closing brace that ends
