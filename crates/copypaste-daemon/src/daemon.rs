@@ -3900,12 +3900,9 @@ mod tests {
             let row_id = uuid::Uuid::new_v4().to_string();
             let item_id = uuid::Uuid::new_v4().to_string();
             let aad = copypaste_core::build_item_aad(&item_id, copypaste_core::AAD_SCHEMA_VERSION);
-            let (nonce, ciphertext) = copypaste_core::encrypt_item_with_aad(
-                b"sk-supersecrettoken",
-                &*local_key_arc,
-                &aad,
-            )
-            .expect("encrypt");
+            let (nonce, ciphertext) =
+                copypaste_core::encrypt_item_with_aad(b"sk-supersecrettoken", &local_key_arc, &aad)
+                    .expect("encrypt");
             guard
                 .conn()
                 .execute(

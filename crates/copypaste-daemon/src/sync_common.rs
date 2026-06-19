@@ -547,10 +547,7 @@ pub(crate) fn replace_cloud_item_by_item_id(
     )?;
     // Delete the corresponding FTS row (if any) in the same transaction.
     if let Some(ref old_id) = old_id {
-        tx.execute(
-            "DELETE FROM clipboard_fts WHERE id = ?1",
-            params![old_id],
-        )?;
+        tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![old_id])?;
     }
     tx.execute(
         "INSERT INTO clipboard_items

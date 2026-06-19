@@ -4096,11 +4096,11 @@ impl IpcServer {
                                 )))
                             }
                         };
-                        let v2_key = derive_v2(&*v1_key);
+                        let v2_key = derive_v2(&v1_key);
                         let key_to_use: &[u8; 32] = if item.key_version == 1 {
-                            &*v1_key
+                            &v1_key
                         } else {
-                            &*v2_key
+                            &v2_key
                         };
                         let png_bytes = match decode_image(&chunks, key_to_use, &file_id) {
                             Ok(b) => b,
@@ -4183,11 +4183,11 @@ impl IpcServer {
                         None => return Ok::<_, anyhow::Error>(None),
                     };
                     // Dispatch on key_version: v1 rows use the raw seed; v2 rows use derive_v2.
-                    let v2_key_thumb = derive_v2(&*v1_key_thumb);
+                    let v2_key_thumb = derive_v2(&v1_key_thumb);
                     let decode_key: &[u8; 32] = if item.key_version == 1 {
-                        &*v1_key_thumb
+                        &v1_key_thumb
                     } else {
-                        &*v2_key_thumb
+                        &v2_key_thumb
                     };
 
                     let is_image =
@@ -4269,7 +4269,7 @@ impl IpcServer {
                                 // already-derived `decode_key` (passing the latter
                                 // would double-derive: derive_v2(derive_v2(seed))).
                                 &meta_json,
-                                &*v1_key_thumb,
+                                &v1_key_thumb,
                                 item.key_version,
                             ) {
                                 Ok((blob, new_meta)) => {
@@ -4424,11 +4424,11 @@ impl IpcServer {
                                 )))
                             }
                         };
-                        let v2_key = derive_v2(&*v1_key);
+                        let v2_key = derive_v2(&v1_key);
                         let key_to_use: &[u8; 32] = if item.key_version == 1 {
-                            &*v1_key
+                            &v1_key
                         } else {
-                            &*v2_key
+                            &v2_key
                         };
                         let raw_bytes = match decode_file(&chunks, key_to_use, &file_meta.file_id) {
                             Ok(b) => b,
@@ -8034,15 +8034,18 @@ impl IpcServer {
                                 continue;
                             }
                         };
+                        // P2-zpd1: wrap plaintext in Zeroizing so the decrypted
+                        // bytes are wiped on drop, even on early-exit paths
+                        // (encode errors, serialisation failure, etc.).
                         let plaintext = match decrypt_item_by_version(
                             key_version,
-                            &*local_key_v1,
-                            &*v2_key,
+                            &local_key_v1,
+                            &v2_key,
                             &item_id,
                             nonce,
                             &content,
                         ) {
-                            Ok(p) => p,
+                            Ok(p) => zeroize::Zeroizing::new(p),
                             Err(e) => {
                                 tracing::warn!(
                                     id = %id,
@@ -8175,7 +8178,7 @@ impl IpcServer {
                         &raw_bytes,
                         &filename,
                         &mime,
-                        &*local_key,
+                        &local_key,
                         &file_id,
                         max_file_bytes,
                     )
@@ -8328,11 +8331,11 @@ impl IpcServer {
                     // struct does not need a second Arc field.
                     // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop.
                     let v1_key = zeroize::Zeroizing::new(**self.local_key);
-                    let v2_key = derive_v2(&*v1_key);
+                    let v2_key = derive_v2(&v1_key);
                     let plaintext_bytes = decrypt_item_by_version(
                         item.key_version,
-                        &*v1_key,
-                        &*v2_key,
+                        &v1_key,
+                        &v2_key,
                         &item.item_id,
                         nonce,
                         content,
@@ -8426,11 +8429,11 @@ impl IpcServer {
                     })?;
                     // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop.
                     let wtp_v1_key = zeroize::Zeroizing::new(**self.local_key);
-                    let wtp_v2_key = derive_v2(&*wtp_v1_key);
+                    let wtp_v2_key = derive_v2(&wtp_v1_key);
                     let wtp_img_key: &[u8; 32] = if item.key_version == 1 {
-                        &*wtp_v1_key
+                        &wtp_v1_key
                     } else {
-                        &*wtp_v2_key
+                        &wtp_v2_key
                     };
                     let png_bytes = decode_image(&chunks, wtp_img_key, &file_id).map_err(|e| {
                         self.self_write_change_count
@@ -8484,11 +8487,11 @@ impl IpcServer {
                     // Dispatch on key_version: v1 rows use the raw seed; v2 rows use derive_v2.
                     // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop.
                     let v1_key = zeroize::Zeroizing::new(**self.local_key);
-                    let v2_key = derive_v2(&*v1_key);
+                    let v2_key = derive_v2(&v1_key);
                     let key_to_use: &[u8; 32] = if item.key_version == 1 {
-                        &*v1_key
+                        &v1_key
                     } else {
-                        &*v2_key
+                        &v2_key
                     };
                     let raw_bytes =
                         decode_file(&chunks, key_to_use, &file_meta.file_id).map_err(|e| {
@@ -13415,6 +13418,116 @@ mod tests {
             TOTAL,
             "absent limit must return all {TOTAL} items, got {}",
             no_limit_items.len()
+        );
+    }
+
+    // ── CopyPaste-tj9s: export include_sensitive filter ──────────────────────
+
+    /// `export` must exclude sensitive items by default and include them only
+    /// when `include_sensitive: true` is explicitly passed.
+    ///
+    /// Contract:
+    /// - 1 non-sensitive item + 1 sensitive item inserted.
+    /// - `export` with no `include_sensitive` (or `include_sensitive: false`) →
+    ///   count == 1 (only the non-sensitive item).
+    /// - `export` with `include_sensitive: true` → count == 2 (both items).
+    #[tokio::test]
+    async fn export_excludes_sensitive_by_default_and_includes_with_flag() {
+        use copypaste_core::{
+            build_item_aad_v2, derive_v2, encrypt_item_with_aad, AAD_SCHEMA_VERSION_V4,
+        };
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("export_sensitive.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // The test server uses a zero v1 key. Derive v2 to match the handler.
+        let v1_key = [0u8; 32];
+        let v2_key = derive_v2(&v1_key);
+
+        // Seed a non-sensitive item (is_sensitive = 0) and a sensitive item
+        // (is_sensitive = 1), both encrypted with key_version = 2.
+        {
+            let guard = db.lock().await;
+            for (i, is_sensitive) in [(0i64, false), (1i64, true)] {
+                let plaintext = format!("item-sens-{i}").into_bytes();
+                let item_id = uuid::Uuid::new_v4().to_string();
+                let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+                let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &v2_key, &aad).unwrap();
+                let wall_time = 2_000_000i64 + i;
+                guard
+                    .conn()
+                    .execute(
+                        "INSERT INTO clipboard_items \
+                         (id, item_id, content_type, content, content_nonce, \
+                          is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                         VALUES (?1, ?2, 'text', ?3, ?4, ?5, 0, ?6, ?7, 2)",
+                        rusqlite::params![
+                            uuid::Uuid::new_v4().to_string(),
+                            item_id,
+                            ciphertext,
+                            nonce.as_slice(),
+                            is_sensitive as i64,
+                            i + 1,
+                            wall_time,
+                        ],
+                    )
+                    .unwrap();
+            }
+        }
+
+        // ── default (no flag): only the non-sensitive item is returned.
+        let resp = call_one(&sock, r#"{"id":"xs1","method":"export","params":{}}"#).await;
+        assert_eq!(resp["ok"], true, "export must succeed: {resp}");
+        let items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            items.len(),
+            1,
+            "default export must exclude sensitive items; got {}: {resp}",
+            items.len()
+        );
+        assert_eq!(
+            items[0]["is_sensitive"], false,
+            "the returned item must not be sensitive"
+        );
+
+        // ── include_sensitive: false → same as default.
+        let resp = call_one(
+            &sock,
+            r#"{"id":"xs2","method":"export","params":{"include_sensitive":false}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "export must succeed: {resp}");
+        let items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            items.len(),
+            1,
+            "include_sensitive=false must exclude sensitive items; got {}: {resp}",
+            items.len()
+        );
+
+        // ── include_sensitive: true → both items are returned.
+        let resp = call_one(
+            &sock,
+            r#"{"id":"xs3","method":"export","params":{"include_sensitive":true}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "export must succeed: {resp}");
+        let items = resp["data"]["items"].as_array().expect("items array");
+        assert_eq!(
+            items.len(),
+            2,
+            "include_sensitive=true must include all items; got {}: {resp}",
+            items.len()
+        );
+        // Verify one of each kind is present.
+        let sensitive_count = items
+            .iter()
+            .filter(|it| it["is_sensitive"].as_bool() == Some(true))
+            .count();
+        assert_eq!(
+            sensitive_count, 1,
+            "exactly one sensitive item must appear when include_sensitive=true"
         );
     }
 

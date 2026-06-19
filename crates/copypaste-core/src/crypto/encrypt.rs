@@ -192,36 +192,13 @@ pub fn decrypt_item_by_version(
     }
 }
 
-/// Encrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
-///
-/// Equivalent to `encrypt_item_with_aad(plaintext, key, &[])`. New call
-/// sites SHOULD use `encrypt_item_with_aad` and pass an AAD bound to
-/// the row's `(item_id, schema_version)` — see `build_item_aad`.
-#[deprecated(
-    note = "Use encrypt_item_with_aad to bind AAD context. Empty-AAD allows replay/swap attacks."
-)]
-pub fn encrypt_item(
-    plaintext: &[u8],
-    key: &[u8; 32],
-) -> Result<([u8; NONCE_SIZE], Vec<u8>), EncryptError> {
-    encrypt_item_with_aad(plaintext, key, &[])
-}
-
-/// Decrypt with XChaCha20-Poly1305 and no AAD (legacy/back-compat).
-///
-/// Equivalent to `decrypt_item_with_aad(ciphertext, nonce, key, &[])`.
-/// For ciphertexts produced by `encrypt_item_with_aad` with non-empty
-/// AAD, call `decrypt_item_with_aad` with the matching AAD.
-#[deprecated(
-    note = "Use decrypt_item_with_aad to bind AAD context. Empty-AAD allows replay/swap attacks."
-)]
-pub fn decrypt_item(
-    ciphertext: &[u8],
-    nonce: &[u8; NONCE_SIZE],
-    key: &[u8; 32],
-) -> Result<Vec<u8>, EncryptError> {
-    decrypt_item_with_aad(ciphertext, nonce, key, &[])
-}
+// P3-t8pl: `encrypt_item` and `decrypt_item` (the bare empty-AAD wrappers)
+// have been REMOVED. Audit found zero production callers; the only external
+// reference was in the fuzz target, which has been updated to call
+// `decrypt_item_with_aad(.., &[])` directly.  Callers that need empty-AAD
+// semantics (tests, tooling) should use `decrypt_item_with_aad(.., &[])` /
+// `encrypt_item_with_aad(.., &[])` explicitly.  Removing rather than keeping
+// as `pub(crate)` avoids a dead-code warning under `-D warnings`.
 
 #[cfg(test)]
 mod tests {

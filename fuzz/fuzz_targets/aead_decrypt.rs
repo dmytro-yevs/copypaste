@@ -32,7 +32,7 @@
 
 #![no_main]
 
-use copypaste_core::crypto::encrypt::{decrypt_item, decrypt_item_with_aad, NONCE_SIZE};
+use copypaste_core::crypto::encrypt::{decrypt_item_with_aad, NONCE_SIZE};
 use libfuzzer_sys::fuzz_target;
 
 const KEY_SIZE: usize = 32;
@@ -60,15 +60,14 @@ fuzz_target!(|data: &[u8]| {
     let aad_len = aad_byte.min(suffix.len());
     let (aad, ciphertext) = suffix.split_at(aad_len);
 
-    // Two parallel surfaces — both share the same XChaCha20-Poly1305
-    // primitive but reach it through different wrappers. Fuzz both so we
+    // Two parallel call configurations — both share the same XChaCha20-Poly1305
+    // primitive but reach it with different AAD inputs. Fuzz both so we
     // catch any wrapper-side panic (slice indexing in AAD setup, payload
-    // construction, etc.) regardless of which one a future call site picks.
+    // construction, etc.) regardless of which AAD a future call site picks.
     let _ = decrypt_item_with_aad(ciphertext, &nonce, &key, aad);
 
-    // The no-AAD wrapper (legacy/back-compat path) ignores `aad` and is
-    // equivalent to `decrypt_item_with_aad(.., &[])`. Re-running it on the
-    // same ciphertext costs almost nothing and protects the legacy entry
-    // point from regressions on adversarial ciphertexts.
-    let _ = decrypt_item(ciphertext, &nonce, &key);
+    // Empty-AAD path: equivalent to the old `decrypt_item` no-AAD wrapper
+    // (now pub(crate)-gated). Re-running with empty AAD costs almost nothing
+    // and exercises the same AEAD primitive on adversarial ciphertexts.
+    let _ = decrypt_item_with_aad(ciphertext, &nonce, &key, &[]);
 });
