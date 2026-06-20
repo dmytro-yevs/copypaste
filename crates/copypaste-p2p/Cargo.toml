@@ -10,6 +10,12 @@ description = "P2P mutual-TLS transport + mDNS-SD peer discovery for CopyPaste"
 crate-type = ["rlib"]
 
 [dependencies]
+# Shared IPC wire types — referenced here for `QR_PAIRING_TTL_SECS`, which must
+# be identical to the daemon's QR-code TTL (the single project-wide source of
+# truth lives in copypaste-ipc so both crates cannot drift independently).
+# copypaste-ipc is a tiny crate (serde + serde_json only), so the coupling cost
+# is negligible compared to the correctness risk of two independent literals.
+copypaste-ipc = { path = "../copypaste-ipc" }
 # TLS: rustls 0.23 works on Rust 1.65+; tokio-rustls 0.26 requires rustls 0.23
 # tls12 is intentionally NOT listed: all CopyPaste peers are first-party
 # rustls 0.23 clients, so TLS 1.2 downgrade is not needed and removing

@@ -969,6 +969,7 @@ dependencies = [
  "argon2",
  "base64 0.22.1",
  "bytes",
+ "copypaste-ipc",
  "futures-util",
  "generic-array",
  "hex",

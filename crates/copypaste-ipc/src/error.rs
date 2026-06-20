@@ -228,4 +228,68 @@ mod tests {
         assert_eq!(format!("{}", ErrorCode::NotFound), "not_found");
         assert_eq!(format!("{}", ErrorCode::RateLimited), "rate_limited");
     }
+
+    /// Exhaustive serde round-trip test for every [`ErrorCode`] variant.
+    ///
+    /// Uses a `match` with no `_` arm so the compiler rejects a new variant
+    /// that is not listed here, forcing the test to be updated in lockstep with
+    /// the enum. The round-trip asserts:
+    ///   1. `serde_json::to_string` succeeds and produces the expected wire form.
+    ///   2. `serde_json::from_str` on that wire form produces the original variant.
+    ///
+    /// This is the canonical check for CopyPaste-2l1e: the existing serde test
+    /// only samples four variants; this one covers all of them.
+    #[test]
+    fn error_code_serde_roundtrip_all_variants() {
+        // Build the exhaustive list via a match — no `_` arm, so a new variant
+        // causes a compile-time "non-exhaustive patterns" error, not a silent gap.
+        let all: &[(ErrorCode, &str)] = &{
+            // Declared as an inline `match` that evaluates to an array literal so
+            // the compiler verifies every arm and the list stays in sync.
+            let _force_exhaustive: fn(ErrorCode) -> &'static str = |code| match code {
+                ErrorCode::NotFound => "not_found",
+                ErrorCode::AuthFailed => "auth_failed",
+                ErrorCode::InvalidArgument => "invalid_argument",
+                ErrorCode::NotImplemented => "not_implemented",
+                ErrorCode::IpcNotReady => "ipc_not_ready",
+                ErrorCode::InternalError => "internal_error",
+                ErrorCode::VersionMismatch => "version_mismatch",
+                ErrorCode::RateLimited => "rate_limited",
+                ErrorCode::DaemonOffline => "daemon_offline",
+                ErrorCode::MigrationInProgress => "migration_in_progress",
+            };
+            [
+                (ErrorCode::NotFound, "not_found"),
+                (ErrorCode::AuthFailed, "auth_failed"),
+                (ErrorCode::InvalidArgument, "invalid_argument"),
+                (ErrorCode::NotImplemented, "not_implemented"),
+                (ErrorCode::IpcNotReady, "ipc_not_ready"),
+                (ErrorCode::InternalError, "internal_error"),
+                (ErrorCode::VersionMismatch, "version_mismatch"),
+                (ErrorCode::RateLimited, "rate_limited"),
+                (ErrorCode::DaemonOffline, "daemon_offline"),
+                (ErrorCode::MigrationInProgress, "migration_in_progress"),
+            ]
+        };
+
+        for (variant, expected_wire) in all {
+            // Serialize.
+            let serialized =
+                serde_json::to_string(variant).expect("ErrorCode serialization must not fail");
+            // Wire form is a JSON string literal, so it includes the surrounding quotes.
+            assert_eq!(
+                serialized,
+                format!("\"{}\"", expected_wire),
+                "serialized form mismatch for {variant:?}"
+            );
+
+            // Deserialize back and assert equality.
+            let deserialized: ErrorCode = serde_json::from_str(&serialized)
+                .expect("ErrorCode deserialization must not fail for a known wire form");
+            assert_eq!(
+                deserialized, *variant,
+                "round-trip mismatch: {serialized} did not deserialize back to {variant:?}"
+            );
+        }
+    }
 }

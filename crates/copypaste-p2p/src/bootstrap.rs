@@ -100,6 +100,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+// Re-use the project-wide QR pairing TTL from copypaste-ipc — the single
+// source of truth for the window within which the user must scan the QR,
+// confirm, and have the initiator connect. Both the daemon's
+// `generate_pairing_qr` handler (which stamps `expires_at = now + this`) and
+// the bootstrap responder accept timeout are derived from this value so they
+// cannot drift independently. Previously this crate carried a local copy
+// (`const QR_PAIRING_TTL_SECS: u64 = 120`) — removed by CopyPaste-ijm0.
+use copypaste_ipc::QR_PAIRING_TTL_SECS;
 use futures_util::{SinkExt, StreamExt};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName, UnixTime};
@@ -122,23 +130,6 @@ use crate::transport::{
     tls_channel_binder_client, tls_channel_binder_server, DeviceFingerprint, TransportError,
     P2P_SNI_SENTINEL, TCP_CONNECT_TIMEOUT, TLS_HANDSHAKE_TIMEOUT,
 };
-
-/// QR-pairing token lifetime / bootstrap accept window, in seconds.
-///
-/// This is the single source of truth for the pairing window *within this
-/// crate*. It is intentionally kept equal to `copypaste_ipc::QR_PAIRING_TTL_SECS`
-/// (the project-wide source of truth, consumed by the daemon's
-/// `generate_pairing_qr` handler which stamps `expires_at = now + this`).
-///
-/// `copypaste-p2p` does not depend on `copypaste-ipc` (and adding that
-/// cross-crate dependency for a single scalar is not worth the coupling), so we
-/// cannot reference `copypaste_ipc::QR_PAIRING_TTL_SECS` directly here. The two
-/// constants must therefore be kept numerically identical by hand.
-//
-// TODO(shared-const): if `copypaste-p2p` ever gains a `copypaste-ipc`
-// dependency, replace this with
-// `copypaste_ipc::QR_PAIRING_TTL_SECS` so the two values cannot drift.
-const QR_PAIRING_TTL_SECS: u64 = 120;
 
 /// Maximum time the responder bootstrap listener waits for the single inbound
 /// pairing connection before giving up.
