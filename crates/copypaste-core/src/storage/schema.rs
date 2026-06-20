@@ -216,6 +216,13 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         "PRAGMA cache_size=-{};",
         i64::from(crate::config::SQLITE_CACHE_MB) * 1024
     ))?;
+    // CopyPaste-kexs: enable incremental auto_vacuum mode so PRAGMA incremental_vacuum
+    // can reclaim free pages in bounded increments without a full blocking VACUUM.
+    // This pragma is a no-op on databases that already have tables (auto_vacuum cannot
+    // change once the schema is created — it takes effect only on a fresh empty DB).
+    // For existing databases, incremental_vacuum() still works but reclaims nothing
+    // until a full VACUUM is run to rebuild the file with the new mode.
+    conn.execute_batch("PRAGMA auto_vacuum = INCREMENTAL;")?;
 
     let current_version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
 
@@ -802,7 +809,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 1, "revoked_devices table must be created by v12 migration");
+        assert_eq!(
+            count, 1,
+            "revoked_devices table must be created by v12 migration"
+        );
 
         // Index must exist.
         let idx_count: i64 = conn
@@ -855,7 +865,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(before, 0, "revoked_devices must not exist before v12 migration");
+        assert_eq!(
+            before, 0,
+            "revoked_devices must not exist before v12 migration"
+        );
 
         // Run the migration.
         apply_migrations(&conn).unwrap();

@@ -514,15 +514,28 @@ impl Database {
 
     /// Open an in-memory (unencrypted) database.
     ///
-    /// Used exclusively in tests. Signature is unchanged so all existing test
-    /// callers compile without modification. Uses the default 8 MiB cache; see
+    /// **Test-only (CopyPaste-9vcn).** This function creates a database WITHOUT
+    /// SQLCipher encryption. The `#[cfg(any(test, feature = "test-helpers"))]`
+    /// gate ensures no production build can call it accidentally and expose
+    /// clipboard contents in plaintext. All production callers must use
+    /// `Database::open` which requires a 32-byte encryption key.
+    ///
+    /// Within this crate the function is always available under `#[cfg(test)]`.
+    /// External crates (e.g. copypaste-daemon's unit tests) must opt in via the
+    /// `test-helpers` feature in their `[dev-dependencies]` entry for this crate.
+    ///
+    /// Uses the default 8 MiB cache; see
     /// [`Database::open_in_memory_with_cache_mb`] to tune it.
+    #[cfg(any(test, feature = "test-helpers"))]
     pub fn open_in_memory() -> Result<Self, DbError> {
         Self::open_in_memory_with_cache_mb(crate::config::SQLITE_CACHE_MB)
     }
 
     /// Like [`Database::open_in_memory`] but applies `cache_mb` MiB of page
     /// cache instead of the 8 MiB default.
+    ///
+    /// **Test-only** for the same reason as `open_in_memory` (CopyPaste-9vcn).
+    #[cfg(any(test, feature = "test-helpers"))]
     pub fn open_in_memory_with_cache_mb(cache_mb: u32) -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
         conn.execute_batch(&connection_pragmas(cache_mb))?;

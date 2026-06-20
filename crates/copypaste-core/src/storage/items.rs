@@ -2,6 +2,7 @@ use super::db::{Database, DbError, MigrationState};
 use super::pool::DbRead;
 use crate::crypto::encrypt::{decrypt_item_by_version, NONCE_SIZE};
 use rusqlite::{params, OptionalExtension};
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -508,6 +509,31 @@ pub fn backfill_origin_device_id(
     Ok(changed)
 }
 
+/// Compute the SHA-256 content hash of raw (pre-encryption) clipboard bytes.
+///
+/// Returns the **full** 64-character lowercase hexadecimal encoding of the
+/// 32-byte SHA-256 digest.
+///
+/// # Why the full digest (CopyPaste-y4v1)
+///
+/// The original implementation in `copypaste-daemon::clipboard::image_content_hash`
+/// truncated the SHA-256 output to its first 16 bytes (a 128-bit fingerprint),
+/// producing a 32-character hex string. While 128 bits is collision-resistant for
+/// most practical purposes, the truncation:
+///   * weakens second-preimage resistance unnecessarily (the daemon already pays
+///     the full SHA-256 computation cost; dropping half the bits is pure loss);
+///   * risks silent cross-content collisions in a large history — a 1-in-2^128
+///     collision probability per pair is acceptable, but adversarial or
+///     corpus-sensitive inputs could be crafted to collide at 16 bytes while
+///     not colliding at 32 bytes.
+///
+/// This canonical function always returns the full 256-bit (64 hex char) hash.
+/// The daemon should migrate `image_content_hash` to call this instead.
+pub fn compute_content_hash(raw: &[u8]) -> String {
+    let digest = Sha256::digest(raw);
+    hex::encode(digest)
+}
+
 /// Find the id of an item with the given content hash stored within the last
 /// `within_ms` milliseconds. Returns `None` if no such item exists.
 ///
@@ -651,6 +677,12 @@ pub fn get_page_pinned_first_lamport<D: DbRead + ?Sized>(
 ///   * `wall_time` — sets the visible recency to `now_ms`.
 ///   * `lamport_ts` — set to `new_lamport` so the sync layer recognises this
 ///     as a newer item than its previous version.
+///   * `expires_at` — **recomputed** for sensitive items: if `sensitive_ttl_ms`
+///     is `Some(t)` and the row has `is_sensitive = 1`, `expires_at` is updated
+///     to `now_ms + t` so the new expiry tracks the re-copy, not the original
+///     capture time. (CopyPaste-89ib: the stale `expires_at` would fire after the
+///     bump and wipe a freshly-recopied sensitive item immediately.)
+///     Non-sensitive items are unaffected; their `expires_at` is left unchanged.
 ///
 /// Returns the number of rows actually updated (`0` if `id` does not exist).
 pub fn bump_item_recency(
@@ -658,7 +690,23 @@ pub fn bump_item_recency(
     id: &str,
     now_ms: i64,
     new_lamport: i64,
+    sensitive_ttl_ms: Option<i64>,
 ) -> Result<usize, ItemsError> {
+    // CopyPaste-89ib: recompute expires_at when a sensitive item is re-copied.
+    // Sensitive items carry a fixed TTL relative to their most-recent wall_time,
+    // so advancing wall_time without also advancing expires_at causes the stale
+    // deadline to trigger immediately — wiping content the user just re-copied.
+    if let Some(ttl) = sensitive_ttl_ms {
+        let changed = db.conn().execute(
+            "UPDATE clipboard_items
+             SET wall_time = ?1,
+                 lamport_ts = ?2,
+                 expires_at = CASE WHEN is_sensitive = 1 THEN ?1 + ?4 ELSE expires_at END
+             WHERE id = ?3",
+            params![now_ms, new_lamport, id, ttl],
+        )?;
+        return Ok(changed);
+    }
     let changed = db.conn().execute(
         "UPDATE clipboard_items SET wall_time = ?1, lamport_ts = ?2 WHERE id = ?3",
         params![now_ms, new_lamport, id],
@@ -970,45 +1018,81 @@ pub fn has_sensitive_items(db: &Database) -> bool {
         .unwrap_or(true)
 }
 
-/// Delete sensitive items whose `wall_time` is older than `sensitive_ttl_ms` milliseconds ago.
-/// This enforces a local auto-wipe TTL for items marked `is_sensitive = 1`.
+/// Delete sensitive items whose TTL has expired.
 ///
-/// Pinned items are excluded (Fix 1). Threshold uses saturating_sub to avoid
-/// underflow when sensitive_ttl_ms > now_ms (Fix 2). FTS rows are pruned in
-/// the same transaction to avoid orphan FTS entries (Fix 4).
+/// # Unified TTL path (CopyPaste-3e7y)
+///
+/// Previously this function used a divergent `wall_time < now_ms - ttl_ms`
+/// predicate while `delete_expired` used `expires_at < now_ms`. Two separate
+/// code paths with different semantics meant a sensitive item without an
+/// explicit `expires_at` (e.g. inserted before the bump fix) was invisible to
+/// `delete_expired` and could outlive its intended TTL if the wall_time path
+/// was skipped.
+///
+/// The unified approach:
+///   1. **Backfill** any sensitive row that lacks `expires_at` by computing it
+///      from `wall_time + sensitive_ttl_ms`, clamping to avoid overflow.
+///   2. **Delegate** to `delete_expired(db, now_ms)` which handles both plain
+///      and sensitive items via the single `expires_at` predicate.
+///
+/// This makes `delete_expired` the canonical, only TTL sweep path.
+///
+/// Pinned items are excluded by both the backfill (`AND pinned = 0`) and by
+/// `delete_expired` itself.
 pub fn delete_sensitive_expired(
     db: &Database,
     now_ms: i64,
     sensitive_ttl_ms: i64,
 ) -> Result<usize, ItemsError> {
-    // saturating_sub prevents underflow when ttl > now (e.g. in tests or on a
-    // clock that has not advanced far past epoch).
-    let threshold = now_ms.saturating_sub(sensitive_ttl_ms);
-    // Collect ids first, then delete items + FTS in one transaction so no
-    // orphan FTS entries accumulate (mirrors delete_expired).
-    let conn = db.conn();
-    let tx = conn.unchecked_transaction()?;
-    let mut stmt = tx.prepare(
-        // `AND pinned = 0` mirrors `delete_expired`: pinned items are exempt from
-        // every TTL prune (see ClipboardItem::pinned docs). Without this guard a
-        // pinned+sensitive item is silently wiped after the sensitive TTL,
-        // violating the pin contract.
-        "SELECT id FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1 AND pinned = 0",
+    // Step 1: backfill expires_at for sensitive rows that pre-date the bump fix.
+    // We use saturating_add to avoid overflow on pathologically large TTL values.
+    // The backfill is idempotent — rows that already carry expires_at are left alone.
+    db.conn().execute(
+        "UPDATE clipboard_items
+         SET expires_at = MIN(wall_time + ?1, 9223372036854775807)
+         WHERE is_sensitive = 1 AND expires_at IS NULL AND pinned = 0",
+        params![sensitive_ttl_ms],
     )?;
-    let ids: Vec<String> = stmt
-        .query_map(params![threshold], |r| r.get(0))?
-        .collect::<Result<_, _>>()?;
-    drop(stmt);
-    // CopyPaste-6fd: clean pending_uploads before the items delete.
-    delete_pending_uploads_for_ids(&tx, &ids)?;
-    let changed = tx.execute(
-        "DELETE FROM clipboard_items WHERE is_sensitive = 1 AND wall_time < ?1 AND pinned = 0",
-        params![threshold],
-    )?;
-    // CopyPaste-c1dd: batch FTS deletes into one statement (was N+1).
-    delete_fts_for_ids(&tx, &ids)?;
-    tx.commit()?;
-    Ok(changed)
+
+    // Step 2: unified expiry sweep — delete_expired handles the predicate
+    // `expires_at IS NOT NULL AND expires_at < now_ms AND pinned = 0`.
+    delete_expired(db, now_ms)
+}
+
+/// Run `PRAGMA incremental_vacuum(pages)` to reclaim up to `pages` free SQLite
+/// pages without a full blocking VACUUM.
+///
+/// # Why incremental vacuum (CopyPaste-kexs)
+///
+/// SQLite reclaims deleted-row space into its free-list but does NOT shrink the
+/// database file until `VACUUM` runs.  A full `VACUUM` rebuilds the entire
+/// database in a single serialised write and can hold the write lock for
+/// hundreds of milliseconds on large histories — unacceptable in the clipboard
+/// hot path.
+///
+/// `PRAGMA incremental_vacuum(N)` reclaims at most `N` free pages per call,
+/// returning them to the OS in small, bounded increments.  The caller controls
+/// the budget via `max_pages`:
+///   * A small value (e.g. `10`) adds a few microseconds of latency each call;
+///     called periodically (e.g. after every TTL sweep) it keeps the file size
+///     near its minimum without ever blocking.
+///   * `0` reclaims ALL free pages — equivalent to a full VACUUM but still
+///     WAL-safe; use only at low-traffic moments (startup, explicit user action).
+///
+/// For `incremental_vacuum` to have any effect the database MUST be opened with
+/// `PRAGMA auto_vacuum = INCREMENTAL` (value 2). The schema migration sets this
+/// on the first open. Pre-existing databases that were opened without it keep
+/// `auto_vacuum = NONE` (0) and the pragma is a no-op — harmless, but also
+/// silent. Callers should not depend on a specific freed-page count.
+///
+/// # Returns
+///
+/// `Ok(())` on success (including the no-op case). `Err(ItemsError::Sqlite(_))`
+/// on any SQLite error.
+pub fn incremental_vacuum(db: &Database, max_pages: u32) -> Result<(), ItemsError> {
+    db.conn()
+        .execute_batch(&format!("PRAGMA incremental_vacuum({max_pages});"))?;
+    Ok(())
 }
 
 /// Delete the clipboard item with the given primary-key `id`.
@@ -1329,19 +1413,21 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     // sentinel for the `id <> ?` filters below.
     let keep_id = newest_unpinned_id.unwrap_or_default();
 
-    // Fix (re-audit): collect the ids to evict first, then delete clipboard_items
-    // AND clipboard_fts in a single transaction — mirrors the pattern used in
-    // `delete_expired` / `delete_sensitive_expired`. Without the FTS sweep every
-    // size-cap eviction leaves orphan FTS rows, causing unbounded FTS growth and
-    // ghost search results.
+    // CopyPaste-yfm8: single-pass — collect eviction ids via the window CTE once,
+    // then DELETE directly by the collected id list.  The previous implementation
+    // computed the window CTE twice (once for SELECT, once inside the DELETE's
+    // sub-SELECT), doubling the O(n log n) sort work for large tables and risking
+    // a stale result if rows changed between the two executions (unlikely but
+    // possible if locks were released).  Using the materialised id list for the
+    // DELETE removes the second CTE entirely.
     let conn = db.conn();
     let tx = conn.unchecked_transaction()?;
 
-    // Single-pass window function: select the ids in the eviction prefix.
+    // Select the eviction prefix via a single window-function pass.
     // A row belongs to the prefix when cum_bytes - row_bytes < excess (i.e. the
-    // running total before this row has not yet covered the excess).  The
-    // "tipping" row (first one that brings the total to or past excess) is
-    // included because cum_bytes[tipping-1] < excess by definition.
+    // running total BEFORE adding this row has not yet covered the excess). The
+    // "tipping" row (first one whose cum_bytes meets or exceeds `excess`) is
+    // also included because its pre-row total is still < excess by definition.
     let mut stmt = tx.prepare(
         "WITH ranked AS (
              SELECT
@@ -1370,25 +1456,13 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     // delete (resolves item_id while those rows still exist).
     delete_pending_uploads_for_ids(&tx, &ids)?;
 
-    let deleted = tx.execute(
-        "WITH ranked AS (
-             SELECT
-                 id,
-                 LENGTH(COALESCE(content, '')) AS row_bytes,
-                 SUM(LENGTH(COALESCE(content, ''))) OVER (
-                     ORDER BY wall_time ASC, id ASC
-                     ROWS UNBOUNDED PRECEDING
-                 ) AS cum_bytes
-             FROM clipboard_items
-             WHERE pinned = 0 AND id <> ?2
-         )
-         DELETE FROM clipboard_items
-         WHERE id IN (
-             SELECT id FROM ranked
-             WHERE cum_bytes - row_bytes < ?1
-         )",
-        params![excess, keep_id],
-    )?;
+    // DELETE by the already-materialised id list — no second CTE needed.
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let delete_sql = format!("DELETE FROM clipboard_items WHERE id IN ({placeholders})");
+    let deleted = tx.execute(&delete_sql, rusqlite::params_from_iter(ids.iter()))?;
+
     // CopyPaste-c1dd: batch FTS deletes into one statement (was N+1).
     delete_fts_for_ids(&tx, &ids)?;
     tx.commit()?;
@@ -2125,7 +2199,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(count, 1, "exactly one FTS row must exist after atomic upsert");
+        assert_eq!(
+            count, 1,
+            "exactly one FTS row must exist after atomic upsert"
+        );
 
         // Verify the FTS row reflects the new text (not the old one).
         let results = search_items(&db, "replaced", 10).unwrap();
@@ -3145,7 +3222,7 @@ mod tests {
         item.wall_time = 1_000;
         insert_item(&db, &item).unwrap();
 
-        let changed = bump_item_recency(&db, &item.id, 99_000, 99_000).unwrap();
+        let changed = bump_item_recency(&db, &item.id, 99_000, 99_000, None).unwrap();
         assert_eq!(changed, 1, "one row must be updated");
 
         let fetched = get_item_by_id(&db, &item.id).unwrap().unwrap();
@@ -3157,7 +3234,7 @@ mod tests {
     #[test]
     fn bump_item_recency_returns_zero_for_missing_id() {
         let db = Database::open_in_memory().unwrap();
-        let changed = bump_item_recency(&db, "nonexistent-id", 999, 999).unwrap();
+        let changed = bump_item_recency(&db, "nonexistent-id", 999, 999, None).unwrap();
         assert_eq!(changed, 0, "no row matched; must return 0");
     }
 
@@ -3182,7 +3259,7 @@ mod tests {
         insert_item(&db, &item_c).unwrap();
 
         // Bump item_a to wall_time=999 (the new highest).
-        bump_item_recency(&db, &id_a, 999, 999).unwrap();
+        bump_item_recency(&db, &id_a, 999, 999, None).unwrap();
 
         let page = get_page_pinned_first(&db, 10, 0).unwrap();
         assert_eq!(page[0].id, id_a, "bumped item must appear at the top");
@@ -3284,7 +3361,7 @@ mod tests {
         assert_eq!(existing_id, id_first, "must find the original row");
 
         // Bump it.
-        let changed = bump_item_recency(&db, &existing_id, now_ms, now_ms).unwrap();
+        let changed = bump_item_recency(&db, &existing_id, now_ms, now_ms, None).unwrap();
         assert_eq!(changed, 1, "bump must affect one row");
 
         // Still only two rows total — no duplicate inserted.
@@ -3790,4 +3867,175 @@ mod tests {
             .unwrap();
         assert_eq!(survivor, 1, "unrelated pending_uploads row must survive");
     }
+
+    // --- CopyPaste-89ib: sensitive TTL must be recomputed on recency bump ---
+
+    /// When a sensitive item is re-copied (bump_item_recency), `expires_at` must
+    /// advance to `now_ms + sensitive_ttl_ms`. Without this fix the old
+    /// expires_at fires immediately after the bump, wiping a freshly-recopied
+    /// sensitive item.
+    #[test]
+    fn bump_item_recency_recomputes_expires_at_for_sensitive_items() {
+        let db = Database::open_in_memory().unwrap();
+
+        let ttl_ms: i64 = 30_000;
+        let original_wall: i64 = 1_000;
+        let original_expires: i64 = original_wall + ttl_ms; // 31_000
+
+        let mut item = make_item(1);
+        item.is_sensitive = true;
+        item.wall_time = original_wall;
+        item.expires_at = Some(original_expires);
+        insert_item(&db, &item).unwrap();
+
+        // Re-copy at now_ms=50_000. New expires_at must be 50_000 + 30_000 = 80_000.
+        let now_ms: i64 = 50_000;
+        let changed = bump_item_recency(&db, &item.id, now_ms, now_ms, Some(ttl_ms)).unwrap();
+        assert_eq!(changed, 1);
+
+        let fetched = get_item_by_id(&db, &item.id).unwrap().unwrap();
+        assert_eq!(fetched.wall_time, now_ms, "wall_time must be bumped");
+        assert_eq!(
+            fetched.expires_at,
+            Some(now_ms + ttl_ms),
+            "expires_at must be recalculated as now_ms + sensitive_ttl_ms"
+        );
+    }
+
+    /// Non-sensitive items must NOT have expires_at changed by bump_item_recency
+    /// even if a ttl_ms hint is supplied.
+    #[test]
+    fn bump_item_recency_does_not_set_expires_at_for_non_sensitive_items() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut item = make_item(1);
+        item.is_sensitive = false;
+        item.wall_time = 1_000;
+        item.expires_at = None;
+        insert_item(&db, &item).unwrap();
+
+        bump_item_recency(&db, &item.id, 50_000, 50_000, Some(30_000)).unwrap();
+
+        let fetched = get_item_by_id(&db, &item.id).unwrap().unwrap();
+        assert_eq!(
+            fetched.expires_at, None,
+            "non-sensitive items must not gain an expires_at from the bump"
+        );
+    }
+
+    // --- CopyPaste-3e7y: unified TTL path via expires_at ---
+
+    /// delete_sensitive_expired must backfill expires_at for sensitive items
+    /// that lack it, then delegate to delete_expired's expires_at predicate.
+    /// The result must be identical to the old wall_time-based path.
+    #[test]
+    fn delete_sensitive_expired_unified_via_expires_at() {
+        let db = Database::open_in_memory().unwrap();
+        let ttl_ms: i64 = 30_000;
+        let now_ms: i64 = 200_000;
+        // threshold = now_ms - ttl_ms = 170_000
+
+        // Old sensitive item (wall_time=1_000, no expires_at) → should be deleted.
+        let mut old_sensitive = make_item(1);
+        old_sensitive.is_sensitive = true;
+        old_sensitive.wall_time = 1_000;
+        old_sensitive.expires_at = None; // old-style: no expires_at
+        insert_item(&db, &old_sensitive).unwrap();
+
+        // Recent sensitive item (wall_time=190_000) → should survive.
+        let mut new_sensitive = make_item(2);
+        new_sensitive.is_sensitive = true;
+        new_sensitive.wall_time = 190_000;
+        new_sensitive.expires_at = None;
+        insert_item(&db, &new_sensitive).unwrap();
+
+        let removed = delete_sensitive_expired(&db, now_ms, ttl_ms).unwrap();
+        assert_eq!(removed, 1, "only the old sensitive item must be deleted");
+        assert_eq!(count_items(&db).unwrap(), 1);
+    }
+
+    // --- CopyPaste-kexs: incremental_vacuum support ---
+
+    /// incremental_vacuum must execute without error and return Ok.
+    #[test]
+    fn incremental_vacuum_runs_without_error() {
+        let db = Database::open_in_memory().unwrap();
+        // Insert and delete an item to give SQLite some pages to reclaim.
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        delete_item(&db, &item.id).unwrap();
+
+        let result = incremental_vacuum(&db, 10);
+        assert!(
+            result.is_ok(),
+            "incremental_vacuum must succeed: {:?}",
+            result.err()
+        );
+    }
+
+    // --- CopyPaste-yfm8: prune_to_cap single-pass ---
+
+    /// After refactoring, prune_to_cap must still produce the same result as
+    /// before. This test is identical to existing prune_to_cap tests; the point
+    /// is that the single-pass implementation stays correct.
+    #[test]
+    fn prune_to_cap_single_pass_matches_reference() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Insert 10 items with known sizes (content = N bytes, wall_time = N ms).
+        for i in 1i64..=10 {
+            let mut item = make_item(i);
+            item.wall_time = i * 1_000;
+            // Force content length = i * 10 bytes.
+            item.content = Some(vec![0u8; (i * 10) as usize]);
+            insert_item(&db, &item).unwrap();
+        }
+
+        // Total = sum(10..=100 step 10) = 550 bytes. Cap at 300 → must free 250.
+        let deleted = prune_to_cap(&db, 300).unwrap();
+        assert!(deleted > 0, "must delete rows to free space");
+
+        let remaining: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(COALESCE(content,''))),0) FROM clipboard_items",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(
+            remaining <= 300,
+            "remaining bytes {remaining} must be within the cap"
+        );
+    }
+
+    // --- CopyPaste-y4v1: compute_content_hash returns full SHA-256 hex ---
+
+    /// compute_content_hash must return a 64-character lowercase hex string
+    /// (the full SHA-256 digest), not a 32-character truncated version.
+    #[test]
+    fn compute_content_hash_returns_full_sha256_hex() {
+        let hash = compute_content_hash(b"hello clipboard");
+        assert_eq!(
+            hash.len(),
+            64,
+            "SHA-256 hex must be 64 chars (32 bytes); got {} chars: {}",
+            hash.len(),
+            hash
+        );
+        // Must be deterministic.
+        let hash2 = compute_content_hash(b"hello clipboard");
+        assert_eq!(hash, hash2, "hash must be deterministic");
+        // Different inputs must differ.
+        let other = compute_content_hash(b"different content");
+        assert_ne!(
+            hash, other,
+            "different inputs must produce different hashes"
+        );
+    }
+
+    // --- CopyPaste-9vcn: open_in_memory visibility is test-only ---
+    // (Compile-time enforcement — no runtime test needed.
+    //  The function's #[cfg(test)] gate is verified by the fact that this test
+    //  module CAN call it while non-test callers cannot.)
 }
