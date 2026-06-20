@@ -760,6 +760,12 @@ export function SettingsView() {
   const [deleteMsg, setDeleteMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
+  // gq51: Vacuum + stats state
+  const [vacuumBusy, setVacuumBusy] = useState(false);
+  const [vacuumMsg, setVacuumMsg] = useState<{ text: string; isError: boolean } | null>(null);
+  const [dbStats, setDbStats] = useState<{ item_count: number; size_bytes: number } | null>(null);
+  const vacuumMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // 85n9: Backup / Restore state
   const [exportInProgress, setExportInProgress] = useState(false);
   const [exportMsg, setExportMsg] = useState<{ text: string; isError: boolean } | null>(null);
@@ -802,6 +808,7 @@ export function SettingsView() {
       if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
       if (exportMsgTimerRef.current !== null) clearTimeout(exportMsgTimerRef.current);
       if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
+      if (vacuumMsgTimerRef.current !== null) clearTimeout(vacuumMsgTimerRef.current);
       for (const t of Object.values(limitsMsgTimers.current)) clearTimeout(t);
     };
   }, []);
@@ -958,6 +965,15 @@ export function SettingsView() {
         }
 
         setLoadState("ready");
+
+        // gq51: fetch db stats best-effort after the main load succeeds.
+        // Failure is non-fatal — stats simply won't display (older daemons that
+        // don't support the db_stats verb will reject with an IpcError).
+        api.getDbStats().then((stats) => {
+          if (!cancelled) setDbStats(stats);
+        }).catch(() => {
+          // Non-fatal: db_stats not supported on this daemon version.
+        });
       } catch (err) {
         if (cancelled) return;
         // tk2j: mirror DevicesView — only mark offline when the transport error
@@ -1455,6 +1471,31 @@ export function SettingsView() {
   }, [deleteTimerRef]);
 
   // -------------------------------------------------------------------------
+  // gq51: Vacuum — compact the SQLite WAL and refresh stats afterwards
+  // -------------------------------------------------------------------------
+
+  const handleVacuum = useCallback(async () => {
+    if (vacuumBusy) return;
+    setVacuumBusy(true);
+    setVacuumMsg(null);
+    try {
+      await api.vacuum();
+      setVacuumMsg({ text: "Vacuum done — database compacted", isError: false });
+      // Refresh stats so the new size is shown immediately.
+      api.getDbStats().then((stats) => setDbStats(stats)).catch(() => {});
+      if (vacuumMsgTimerRef.current !== null) clearTimeout(vacuumMsgTimerRef.current);
+      vacuumMsgTimerRef.current = setTimeout(() => setVacuumMsg(null), 4000);
+    } catch (err) {
+      const msg = ipcErrorMessage(err, "Vacuum failed");
+      setVacuumMsg({ text: msg, isError: true });
+      if (vacuumMsgTimerRef.current !== null) clearTimeout(vacuumMsgTimerRef.current);
+      vacuumMsgTimerRef.current = setTimeout(() => setVacuumMsg(null), 5000);
+    } finally {
+      setVacuumBusy(false);
+    }
+  }, [vacuumBusy, vacuumMsgTimerRef]);
+
+  // -------------------------------------------------------------------------
   // 85n9: Backup — export clipboard history as a downloaded JSON file
   // -------------------------------------------------------------------------
 
@@ -1543,6 +1584,10 @@ export function SettingsView() {
         });
         if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
         importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 5000);
+        // h97m: notify HistoryView (and any other view) to refresh so imported
+        // items appear immediately without waiting for the next poll interval.
+        // Fire-and-forget; failure just means the other view refreshes later.
+        void emit("history-refresh", null).catch(() => {});
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setImportMsg({ text: `Import failed: ${msg}`, isError: true });
@@ -2600,6 +2645,45 @@ export function SettingsView() {
 
         <SubsectionHeader label="Data" />
         <Panel>
+          {/* gq51: Database stats — shown when the daemon reports them.
+              Falls back gracefully when db_stats is not available (older daemon). */}
+          {dbStats !== null && (
+            <SettingsRow label="Database">
+              <span className="text-[13px] text-ide-dim tabular-nums">
+                {dbStats.item_count} item{dbStats.item_count === 1 ? "" : "s"}
+                {" — "}
+                {dbStats.size_bytes < 1024
+                  ? `${dbStats.size_bytes} B`
+                  : dbStats.size_bytes < 1024 * 1024
+                  ? `${(dbStats.size_bytes / 1024).toFixed(1)} KB`
+                  : `${(dbStats.size_bytes / (1024 * 1024)).toFixed(1)} MB`}
+              </span>
+            </SettingsRow>
+          )}
+          {/* gq51: Vacuum button — compacts the SQLite WAL to reclaim disk space */}
+          <SettingsRow label="Compact database">
+            <div className="flex items-center gap-3">
+              {vacuumMsg !== null && (
+                <span
+                  className={[
+                    "text-[13px]",
+                    vacuumMsg.isError ? "text-ide-danger" : "text-ide-success",
+                  ].join(" ")}
+                >
+                  {vacuumMsg.text}
+                </span>
+              )}
+              <button
+                type="button"
+                disabled={offline || vacuumBusy}
+                onClick={() => void handleVacuum()}
+                className={btnCls}
+                style={btnStyle}
+              >
+                {vacuumBusy ? "Vacuuming…" : "Vacuum"}
+              </button>
+            </div>
+          </SettingsRow>
           <SettingsRow label="Clear clipboard history">
             <div className="flex items-center gap-3">
               {deleteMsg !== null && (

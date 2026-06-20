@@ -670,6 +670,21 @@ export async function mockInvoke(
           skipped: 0,
         });
 
+      // ---------------------------------------------------------------------------
+      // gq51: Database maintenance
+      // ---------------------------------------------------------------------------
+
+      case "vacuum":
+        // Simulate a successful vacuum (no-op in the mock).
+        return ok({ ok: true });
+
+      case "db_stats":
+        return ok({
+          item_count: HISTORY_ITEMS.length,
+          // Approximate: 4 KB per item as a rough fixture.
+          size_bytes: HISTORY_ITEMS.length * 4096,
+        });
+
       default:
         console.warn("[mock-ipc] unhandled ipc_call method:", method);
         return ok(null);

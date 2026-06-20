@@ -925,6 +925,32 @@ export const api = {
     items: unknown[],
   ): Promise<{ inserted: number; skipped: number }> =>
     ipcCall<{ inserted: number; skipped: number }>("import", { items }),
+
+  // ---------------------------------------------------------------------------
+  // gq51: Database maintenance — vacuum and stats
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Run `VACUUM` on the SQLite/SQLCipher database to compact free pages and
+   * reclaim disk space. Long-running (can take several seconds on large DBs);
+   * the UI should show a busy indicator.
+   *
+   * Returns `{ ok: true }` on success. Throws IpcError on failure.
+   */
+  vacuum: (): Promise<{ ok: boolean }> =>
+    ipcCall<{ ok: boolean }>("vacuum", {}),
+
+  /**
+   * Fetch storage statistics for the local clipboard database.
+   *
+   * Returns:
+   *  - item_count  — total number of items stored (all pages).
+   *  - size_bytes  — approximate on-disk size of the database file in bytes.
+   *
+   * Throws IpcError when the daemon does not support the verb (older daemon).
+   */
+  getDbStats: (): Promise<{ item_count: number; size_bytes: number }> =>
+    ipcCall<{ item_count: number; size_bytes: number }>("db_stats", {}),
 };
 
 /** Format Unix epoch milliseconds for display. */

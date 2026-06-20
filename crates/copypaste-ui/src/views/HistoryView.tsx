@@ -9,6 +9,9 @@ if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
     _getCurrentWebview = m.getCurrentWebview;
   });
 }
+// h97m: listen for cross-view "history-refresh" events emitted after a
+// successful backup import so HistoryView re-fetches immediately.
+import { listen } from "@tauri-apps/api/event";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -1502,9 +1505,14 @@ export function HistoryView() {
   // mode — e.g. the DB cannot be decrypted). Drives the "Reset database"
   // recovery affordance below.
   const [degraded, setDegraded] = useState(false);
-  // Inline confirm + in-flight state for the destructive database reset.
+  // 5j9x: modal confirm state for the destructive database reset.
+  // Replaced the misclick-prone inline Yes/No with a ConfirmModal.
   const [resetConfirm, setResetConfirm] = useState(false);
   const [resetting, setResetting] = useState(false);
+
+  // kayk: "Clear all" — modal confirm + in-flight state.
+  const [clearAllConfirmOpen, setClearAllConfirmOpen] = useState(false);
+  const [clearAllBusy, setClearAllBusy] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Multi-select state
@@ -1802,6 +1810,34 @@ export function HistoryView() {
     return () => {
       stop();
       document.removeEventListener("visibilitychange", sync);
+    };
+  }, [load]);
+
+  // h97m: Listen for the "history-refresh" event emitted by SettingsView after
+  // a successful backup import so this view refreshes immediately. Uses the
+  // same pattern as SettingsView's "private-mode-changed" listener.
+  useEffect(() => {
+    const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+
+    if (hasTauri) {
+      // listen() returns a Promise<UnlistenFn>. Guard: it may resolve after the
+      // component unmounts, so check the cancelled flag before storing.
+      const p = listen<void>("history-refresh", () => {
+        void load(true);
+      });
+      // p may be undefined in test environments where the event module is only
+      // partially mocked; optional chaining guards against that.
+      void p?.then((fn) => {
+        if (cancelled) fn();
+        else unlisten = fn;
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
   }, [load]);
 
@@ -2362,6 +2398,27 @@ export function HistoryView() {
     }
   }, [load, showToast]);
 
+  // kayk: Clear all clipboard history — calls delete_all and reloads.
+  // Wrapped behind ConfirmModal so it can't be triggered by a misclick.
+  const handleClearAllConfirmed = useCallback(async () => {
+    setClearAllBusy(true);
+    try {
+      const result = await api.deleteAll();
+      setClearAllConfirmOpen(false);
+      setItems([]);
+      clearImageCache();
+      sigRef.current = "";
+      showToast(`Cleared ${result.deleted} item${result.deleted === 1 ? "" : "s"}`, "success");
+      void load(true);
+    } catch (err) {
+      const msg = ipcErrorMessage(err, String(err));
+      showToast(`Clear failed: ${msg}`, "error");
+      setClearAllConfirmOpen(false);
+    } finally {
+      setClearAllBusy(false);
+    }
+  }, [load, showToast]);
+
   // -------------------------------------------------------------------------
   // D2: File picker — read the chosen file via the browser File API and send
   // to the daemon. No Rust-side file dialog needed; <input type="file"> gives
@@ -2564,6 +2621,28 @@ export function HistoryView() {
           {totalCount} {totalCount === 1 ? "item" : "items"}
         </span>
       )}
+      {/* kayk: Clear all — destructive action hidden behind a ConfirmModal; only
+          shown when there are items to delete (totalCount > 0) so the button
+          doesn't appear on an already-empty history. */}
+      {totalCount !== null && totalCount > 0 && (
+        <button
+          type="button"
+          title="Clear all clipboard history"
+          aria-label="Clear all"
+          disabled={clearAllBusy}
+          onClick={() => setClearAllConfirmOpen(true)}
+          className="flex h-7 items-center gap-1 border border-ide-danger/50 bg-ide-elevated px-2 text-[11px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+        >
+          {/* Trash icon */}
+          <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="1 3.5 2.5 3.5 13 3.5" />
+            <path d="M11.5 3.5l-.75 8.5h-7.5L2.5 3.5" />
+            <path d="M5 3.5V2a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5v1.5" />
+          </svg>
+          Clear all
+        </button>
+      )}
       {/* Search bar: premium focus ring — accent glow + smooth transition per styleguide §searchbar. */}
       <input
         ref={searchRef}
@@ -2630,33 +2709,15 @@ export function HistoryView() {
               You can reset it to recover — this permanently erases this device's
               clipboard history.
             </div>
-            {resetConfirm ? (
-              <div className="flex items-center gap-2">
-                <span className="text-[12px] text-ide-dim">Erase and reset?</span>
-                <button
-                  disabled={resetting}
-                  onClick={() => void handleResetConfirmed()}
-                  // puf4: solid-danger for primary destructive confirm (reset database)
-                  className="rounded-ide bg-ide-danger px-3 py-1 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:opacity-50"
-                >
-                  {resetting ? "Resetting…" : "Yes, erase"}
-                </button>
-                <button
-                  disabled={resetting}
-                  onClick={() => setResetConfirm(false)}
-                  className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1 text-[12px] text-ide-dim hover:bg-ide-hover disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setResetConfirm(true)}
-                className="rounded-ide border border-ide-danger/60 bg-ide-elevated px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-hover"
-              >
-                Reset database (erases local history)
-              </button>
-            )}
+            {/* 5j9x: replaced misclick-prone inline Yes/No with a ConfirmModal.
+                Clicking the button opens the modal; the modal calls handleResetConfirmed
+                only after the user explicitly confirms. */}
+            <button
+              onClick={() => setResetConfirm(true)}
+              className="rounded-ide border border-ide-danger/60 bg-ide-elevated px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-hover"
+            >
+              Reset database (erases local history)
+            </button>
           </>
         )}
         {!degraded && (
@@ -2926,6 +2987,28 @@ export function HistoryView() {
           void handleBulkDelete();
         }}
         onCancel={() => setBulkDeleteConfirmOpen(false)}
+      />
+      {/* 5j9x: Reset database — replaces the inline Yes/No confirm with a proper modal
+          so accidental clicks in the degraded error state don't wipe the database. */}
+      <ConfirmModal
+        open={resetConfirm}
+        title="Reset clipboard database?"
+        body="This will permanently erase all clipboard history on this device and recreate a fresh database. This cannot be undone."
+        confirmLabel="Erase and reset"
+        busy={resetting}
+        onConfirm={() => void handleResetConfirmed()}
+        onCancel={() => setResetConfirm(false)}
+      />
+      {/* kayk: Clear all — destructive delete_all behind a confirm modal, matching
+          Android and CLI behaviour. The modal prevents accidental mass-deletion. */}
+      <ConfirmModal
+        open={clearAllConfirmOpen}
+        title="Clear all clipboard history?"
+        body="This will permanently delete all clipboard items on this device. This cannot be undone."
+        confirmLabel="Clear all"
+        busy={clearAllBusy}
+        onConfirm={() => void handleClearAllConfirmed()}
+        onCancel={() => setClearAllConfirmOpen(false)}
       />
     </ViewShell>
   );
