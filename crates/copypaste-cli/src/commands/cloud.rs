@@ -15,8 +15,8 @@
 //!   (`copypaste cloud setup-sql | pbcopy`).
 
 use crate::commands::common::exit_on_err;
-use crate::ipc::IpcClient;
-use anyhow::{anyhow, Result};
+use crate::ipc::{IpcClient, Response};
+use anyhow::{anyhow, bail, Result};
 use copypaste_ipc::{
     METHOD_CLOUD_TEST_CONNECTION, METHOD_GET_CONFIG, METHOD_GET_SYNC_STATUS, METHOD_SET_CONFIG,
     METHOD_STORE_CLOUD_PASSWORD,
@@ -99,6 +99,13 @@ pub fn setup(
     }
 
     // Read-merge-write: fetch current config so we don't drop other fields.
+    //
+    // CopyPaste-liaz: use `check_resp` (returns Result) rather than `exit_on_err`
+    // (calls process::exit) for ALL IPC calls inside `setup`. The `password`
+    // (Zeroizing<String>) is live for the duration of this function. Calling
+    // process::exit while it is live bypasses its Drop impl, leaving key material
+    // in memory unzeroed. Returning Err instead lets the caller stack unwind
+    // normally so Zeroizing::drop runs and wipes the bytes.
     let mut cfg = {
         let mut client = IpcClient::connect(socket_path)?;
         let req = IpcClient::build_request(
@@ -107,7 +114,7 @@ pub fn setup(
             serde_json::json!({}),
         );
         let resp = client.call(&req)?;
-        exit_on_err(&resp);
+        check_resp(&resp)?;
         resp.data.unwrap_or_else(|| serde_json::json!({}))
     };
 
@@ -137,7 +144,8 @@ pub fn setup(
         let mut client = IpcClient::connect(socket_path)?;
         let req = IpcClient::build_request(&IpcClient::next_id(), METHOD_SET_CONFIG, cfg);
         let resp = client.call(&req)?;
-        exit_on_err(&resp);
+        // CopyPaste-liaz: return Err so `password` (Zeroizing) is dropped normally.
+        check_resp(&resp)?;
     }
 
     // Send the password via the dedicated verb. This is a separate connection
@@ -151,7 +159,9 @@ pub fn setup(
         let req =
             IpcClient::build_request(&IpcClient::next_id(), METHOD_STORE_CLOUD_PASSWORD, params);
         let resp = client.call(&req)?;
-        exit_on_err(&resp);
+        // CopyPaste-liaz: return Err rather than process::exit so `password`
+        // (Zeroizing) is dropped and zeroed by the normal unwinding path.
+        check_resp(&resp)?;
         // Log whether the daemon persisted to Keychain vs. held in-memory.
         let persisted = resp
             .data
@@ -176,6 +186,26 @@ pub fn setup(
     println!("Next:");
     println!("  1. copypaste cloud setup-sql | pbcopy   # provision schema + RLS in Supabase");
     println!("  2. copypaste cloud test                 # verify the connection");
+    Ok(())
+}
+
+/// Convert a daemon response into `Result<()>`, propagating errors without
+/// calling `process::exit`.
+///
+/// CopyPaste-liaz: `exit_on_err` (in `common.rs`) calls `process::exit(1)` on
+/// failure. In `setup`, the caller holds a `Zeroizing<String>` password that
+/// must be dropped (zeroed) before the process terminates. Calling
+/// `process::exit` bypasses all destructors, leaving key material in memory.
+/// This helper returns `Err` instead so the call stack unwinds normally and
+/// `Zeroizing::drop` runs to wipe the bytes.
+fn check_resp(resp: &Response) -> Result<()> {
+    if !resp.ok {
+        let msg = resp.error.as_deref().unwrap_or_default();
+        match resp.error_code {
+            Some(ref code) => bail!("error [{code}]: {msg}"),
+            None => bail!("error: {msg}"),
+        }
+    }
     Ok(())
 }
 
@@ -308,6 +338,60 @@ mod tests {
         assert!(
             SETUP_SQL.contains("clipboard_items_insert_own"),
             "embedded SQL must define the insert RLS policy"
+        );
+    }
+
+    // ── CopyPaste-liaz: check_resp returns Err instead of process::exit ───────
+
+    /// `check_resp` must return Ok when `resp.ok == true`.
+    #[test]
+    fn check_resp_ok_passes_through() {
+        let resp = Response {
+            id: "1".to_string(),
+            ok: true,
+            data: None,
+            error: None,
+            error_code: None,
+        };
+        assert!(check_resp(&resp).is_ok(), "ok response must pass");
+    }
+
+    /// `check_resp` must return Err (not call process::exit) when `resp.ok == false`.
+    /// This ensures Zeroizing<…> secrets in the caller's scope are dropped.
+    #[test]
+    fn check_resp_error_returns_err_not_exits() {
+        let resp = Response {
+            id: "2".to_string(),
+            ok: false,
+            data: None,
+            error: Some("daemon refused".to_string()),
+            error_code: None,
+        };
+        let result = check_resp(&resp);
+        assert!(result.is_err(), "error response must yield Err");
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("daemon refused"),
+            "error message must include daemon message, got: {msg}"
+        );
+    }
+
+    /// When an `error_code` is present, `check_resp` must format it as
+    /// `error [code]: message` so the caller sees the same format as `exit_on_err`.
+    #[test]
+    fn check_resp_includes_error_code_in_message() {
+        use copypaste_ipc::ErrorCode;
+        let resp = Response {
+            id: "3".to_string(),
+            ok: false,
+            data: None,
+            error: Some("not implemented".to_string()),
+            error_code: Some(ErrorCode::NotImplemented),
+        };
+        let msg = check_resp(&resp).unwrap_err().to_string();
+        assert!(
+            msg.contains("not_implemented"),
+            "error message must contain the error code, got: {msg}"
         );
     }
 }

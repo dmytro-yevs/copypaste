@@ -8803,13 +8803,21 @@ fn probe_listening_daemon(socket_path: &std::path::Path) -> Option<ProbedDaemon>
 /// socket) and polls until the socket stops answering or a short deadline
 /// elapses. Returns `true` once the socket is free.
 ///
-/// TOCTOU / pid-recycle guard (LOW):
-/// * pid == 0 or pid == 1 would send SIGTERM to every process in the group /
-///   init respectively — never valid targets.
-/// * pid == std::process::id() would suicide the new daemon before it starts.
-/// * After sending SIGTERM we verify the socket *actually* freed (re-probe) —
-///   if a recycled pid (different process, same number) was signalled but still
-///   held the socket, we surface failure rather than unlinking a live socket.
+/// CopyPaste-dl1e TOCTOU / pid-recycle guard:
+///
+/// The `pid` comes from a prior IPC `status` response. Between when we read it
+/// and when we call `kill(2)` the OS may have reaped the original daemon and
+/// assigned the same numeric PID to an unrelated process. Without validation we
+/// could signal any arbitrary process.
+///
+/// Defence layers (fail-safe: if we cannot confirm identity, we do NOT signal):
+/// 1. Never signal pid 0 (whole process group), 1 (init), or ourselves.
+/// 2. Validate that the target exe path contains "copypaste" — if it does not,
+///    the PID has been recycled and we abort rather than SIGTERM a stranger.
+///    Validated via `/proc/<pid>/exe` (Linux) or `proc_pidpath` (macOS).
+/// 3. After sending SIGTERM we verify the socket *actually* freed (re-probe) —
+///    if a recycled pid (different process, same number) was signalled but still
+///    held the socket, we surface failure rather than unlinking a live socket.
 #[cfg(unix)]
 fn evict_stale_daemon(socket_path: &std::path::Path, pid: u32) -> bool {
     use std::time::{Duration, Instant};
@@ -8825,9 +8833,42 @@ fn evict_stale_daemon(socket_path: &std::path::Path, pid: u32) -> bool {
         return false;
     }
 
+    // CopyPaste-dl1e: validate the process exe before signalling.
+    // `pid_exe_is_copypaste` resolves the exe path for `pid` and checks it
+    // contains "copypaste". This catches the most common PID-recycle scenario:
+    // a completely unrelated process (e.g. a user app) that happened to get
+    // the same numeric PID after our predecessor exited.
+    //
+    // Fail-safe: if the exe cannot be determined (e.g. the process exited
+    // between our probe and this check, or we lack permissions), we do NOT
+    // signal — a false negative (missing the eviction) is far safer than a
+    // false positive (killing an unrelated process).
+    match pid_exe_is_copypaste(pid) {
+        Some(true) => {
+            // Confirmed copypaste daemon — safe to proceed.
+        }
+        Some(false) => {
+            // PID has been recycled by a non-copypaste process. Do NOT signal.
+            tracing::warn!(
+                "evict_stale_daemon: pid {pid} exe does not match copypaste; \
+                 PID may have been recycled — refusing to signal (CopyPaste-dl1e)"
+            );
+            return false;
+        }
+        None => {
+            // Could not determine the exe (process may have already exited,
+            // or we lack permissions to inspect it). Fail safe: don't signal.
+            tracing::warn!(
+                "evict_stale_daemon: could not verify exe for pid {pid}; \
+                 failing safe by not signalling (CopyPaste-dl1e)"
+            );
+            return false;
+        }
+    }
+
     // SAFETY: `kill(2)` with SIGTERM is a thin libc wrapper; the only effect is
     // delivering a signal to `pid`. We have already excluded 0, 1, and self
-    // above, so this is safe to call.
+    // above and confirmed the exe belongs to copypaste, so this is safe.
     let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
     if rc != 0 {
         let err = std::io::Error::last_os_error();
@@ -8860,6 +8901,76 @@ fn evict_stale_daemon(socket_path: &std::path::Path, pid: u32) -> bool {
     }
     // Final re-probe: success only when the socket is confirmed free.
     !is_socket_live(socket_path)
+}
+
+/// Resolve the executable path for `pid` and check whether it looks like a
+/// CopyPaste daemon binary (path contains "copypaste", case-insensitive).
+///
+/// Returns:
+/// - `Some(true)`  — exe resolved and matches "copypaste"
+/// - `Some(false)` — exe resolved but does NOT match — PID may be recycled
+/// - `None`        — exe could not be determined (process gone, permission denied)
+///
+/// CopyPaste-dl1e: called by `evict_stale_daemon` before signalling to prevent
+/// the PID-recycle TOCTOU where a non-copypaste process inherits the stale PID.
+#[cfg(unix)]
+fn pid_exe_is_copypaste(pid: u32) -> Option<bool> {
+    let exe = pid_exe_path(pid)?;
+    let exe_lower = exe.to_string_lossy().to_lowercase();
+    Some(exe_lower.contains("copypaste"))
+}
+
+/// Return the exe path for `pid` using a platform-specific mechanism.
+///
+/// - **Linux**: reads the `/proc/<pid>/exe` symlink.
+/// - **macOS**: calls `proc_pidpath(2)` via `libc`.
+/// - Other platforms: falls back to `None` (fail-safe: caller will not signal).
+#[cfg(unix)]
+fn pid_exe_path(pid: u32) -> Option<std::path::PathBuf> {
+    #[cfg(target_os = "linux")]
+    {
+        // /proc/<pid>/exe is a symlink to the actual executable. readlink
+        // requires no special privileges for processes owned by the same user.
+        std::fs::read_link(format!("/proc/{pid}/exe")).ok()
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // proc_pidpath fills a buffer with the null-terminated exe path.
+        // PROC_PIDPATHINFO_MAXSIZE is 4096 on all Apple platforms.
+        const MAXSIZE: usize = 4096;
+        let mut buf = vec![0u8; MAXSIZE];
+        // SAFETY: buf is MAXSIZE bytes; proc_pidpath writes at most MAXSIZE bytes
+        // including a null terminator. Returns number of bytes written (>0) or ≤0
+        // on error (permission denied, process gone). The pointer cast to *mut
+        // c_void is valid for a byte buffer. We hold `buf` alive for the duration.
+        let ret = unsafe {
+            libc::proc_pidpath(
+                pid as libc::c_int,
+                buf.as_mut_ptr() as *mut libc::c_void,
+                MAXSIZE as u32,
+            )
+        };
+        if ret <= 0 {
+            return None;
+        }
+        // Trim to the written length (ret bytes, no null terminator needed).
+        buf.truncate(ret as usize);
+        // Remove trailing null bytes if proc_pidpath included them.
+        while buf.last() == Some(&0) {
+            buf.pop();
+        }
+        Some(std::path::PathBuf::from(std::ffi::OsString::from(
+            String::from_utf8_lossy(&buf).into_owned(),
+        )))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        // Unknown platform: fail safe — caller will not signal the pid.
+        let _ = pid;
+        None
+    }
 }
 
 /// Bind a [`UnixListener`] at `socket_path`, self-healing a stale socket file
@@ -9971,6 +10082,42 @@ mod tests {
         assert_eq!(probed.build_version.as_deref(), Some("9.9.9+abc"));
         assert_eq!(probed.pid, Some(4242));
         handle.join().ok();
+    }
+
+    // ── CopyPaste-dl1e: PID exe validation ───────────────────────────────────
+
+    /// `pid_exe_is_copypaste` must return `Some(true)` for THIS process (whose
+    /// exe path definitely contains "copypaste" in CI / cargo test paths, OR
+    /// at minimum must return `Some(_)` meaning the exe was resolved without error).
+    ///
+    /// We also verify the negative: a non-existent PID must return `None` (process
+    /// gone → fail safe → do not signal).
+    #[cfg(unix)]
+    #[test]
+    fn pid_exe_is_copypaste_returns_none_for_dead_pid() {
+        // PID 2_000_000_001 is above the typical Linux/macOS pid_max and cannot
+        // exist — resolving its exe must return None (fail-safe path).
+        let result = pid_exe_is_copypaste(2_000_000_001u32);
+        assert!(
+            result.is_none(),
+            "dead/impossible pid must return None, got {result:?}"
+        );
+    }
+
+    /// Our own process (current pid) must resolve its exe successfully.
+    /// The result is `Some(true)` when run via `cargo test` (binary path contains
+    /// "copypaste" or "deps") or `Some(false)` on non-copypaste test runners —
+    /// either way it must be `Some(_)`, not `None`, because the process exists.
+    #[cfg(unix)]
+    #[test]
+    fn pid_exe_path_resolves_own_pid() {
+        let own_pid = std::process::id();
+        let exe = pid_exe_path(own_pid);
+        // Must resolve (Some); the exact path depends on the runner.
+        assert!(
+            exe.is_some(),
+            "pid_exe_path must resolve current pid {own_pid}, got None"
+        );
     }
 
     #[tokio::test]

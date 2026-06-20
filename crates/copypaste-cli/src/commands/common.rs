@@ -87,6 +87,12 @@ fn is_leap(y: u64) -> bool {
 ///
 /// Centralising this avoids 8+ near-identical copy-paste blocks and ensures
 /// a single, consistent error format and exit code across all commands.
+///
+/// CopyPaste-liaz: `exit_on_err` is ONLY safe to call from command paths that
+/// do not hold `Zeroizing<…>` or other secret material in scope — `process::exit`
+/// bypasses all destructors. For paths that do hold secrets (e.g. `cloud::setup`
+/// which holds a `Zeroizing<String>` password), use `check_resp` (returns `Err`)
+/// instead so the normal unwinding path drops and zeroes the secrets.
 pub fn exit_on_err(resp: &Response) {
     if !resp.ok {
         let msg = resp.error.as_deref().unwrap_or_default();
@@ -94,6 +100,9 @@ pub fn exit_on_err(resp: &Response) {
             Some(code) => eprintln!("error [{code}]: {msg}"),
             None => eprintln!("error: {msg}"),
         }
+        // CopyPaste-liaz: process::exit is acceptable here because callers
+        // of exit_on_err must guarantee no Zeroizing<…> secrets are live.
+        // Callers that cannot guarantee this must use a Result-returning helper.
         std::process::exit(1);
     }
 }

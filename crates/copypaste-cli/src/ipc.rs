@@ -251,9 +251,10 @@ impl IpcClient {
     /// and every transport-level error is propagated immediately without
     /// retrying. Backoff schedule: 250 ms → 500 ms → 1 s → 2 s → 2 s.
     ///
-    /// On exhausted retries the method prints a clear user-facing message and
-    /// exits with code 1 — the same pattern as `exit_on_err` — because at that
-    /// point there is no meaningful value to return to the caller.
+    /// On exhausted retries the method returns `Err` (rather than calling
+    /// `process::exit`) so that callers holding `Zeroizing<…>` secret material
+    /// have their destructors run before the process terminates.
+    /// (CopyPaste-liaz: `process::exit` bypasses all Drop impls.)
     pub fn call(&mut self, request: &Value) -> Result<Response> {
         let mut delay_ms = MIGRATION_BACKOFF_INIT_MS;
         for attempt in 0..=MIGRATION_MAX_RETRIES {
@@ -276,13 +277,15 @@ impl IpcClient {
                     }
                 }
                 Some(ErrorCode::MigrationInProgress) => {
-                    // Retries exhausted. Give up with a clear message.
-                    eprintln!(
+                    // Retries exhausted. Return Err so callers can drop Zeroizing
+                    // secrets before process termination (CopyPaste-liaz).
+                    // The error message is the same that was previously printed
+                    // before process::exit(1) — main.rs will print it via eprintln.
+                    return Err(anyhow::anyhow!(
                         "error [migration_in_progress]: daemon key-rotation is still in \
                          progress after {MIGRATION_MAX_RETRIES} retries — \
                          please try again in a few seconds"
-                    );
-                    std::process::exit(1);
+                    ));
                 }
                 _ => return Ok(resp),
             }

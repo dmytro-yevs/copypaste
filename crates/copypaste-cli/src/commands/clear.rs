@@ -30,6 +30,11 @@ pub fn run(socket_path: &Path, force: bool) -> Result<()> {
             // commands (`copypaste clear && next`) don't proceed as if the
             // history were cleared. We exit directly (rather than returning
             // Err, which main.rs maps to code 1) to keep the abort code stable.
+            //
+            // CopyPaste-liaz: process::exit(ABORT_EXIT_CODE) is safe here —
+            // no Zeroizing<…> or other secret material is live in this scope.
+            // `input` is a plain String containing only the user's yes/no
+            // response, not a password or key.
             eprintln!("aborted.");
             std::process::exit(ABORT_EXIT_CODE);
         }

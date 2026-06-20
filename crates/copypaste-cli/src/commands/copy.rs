@@ -40,6 +40,10 @@ pub fn run(
             eprintln!("copypaste copy: specify INDEX, --id <UUID>, --search <QUERY>, or --list");
             eprintln!("  copypaste copy 1          # copy most recent item");
             eprintln!("  copypaste copy --list     # show numbered history");
+            // CopyPaste-liaz: process::exit(2) is safe here — no Zeroizing<…>
+            // or secret material is live in this scope. Exit code 2 (distinct
+            // from 1=error) signals "bad usage" to shell callers; returning Err
+            // would lose the distinct code because main.rs always exits 1.
             std::process::exit(2);
         }
 

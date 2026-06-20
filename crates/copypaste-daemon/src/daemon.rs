@@ -2949,6 +2949,14 @@ fn load_private_mode() -> bool {
 ///
 /// Best-effort: a write failure is logged but does not fail the IPC call —
 /// the in-memory atomic is still authoritative for the running process.
+///
+/// CopyPaste-ki7p: previously used `std::fs::write` which inherits the process
+/// umask (typically 0022), creating the flag file world-readable at 0644.
+/// The flag file is not a secret itself but its presence reveals whether the user
+/// is in private/pause mode — information that should not leak to other local
+/// users on a multi-user machine. We use `write_text_atomic_0600` which opens
+/// the temp file with O_CREAT|mode(0600) before any bytes are written, so there
+/// is never a window where the file exists at a permissive mode.
 pub(crate) fn persist_private_mode(enabled: bool) {
     let path = match crate::paths::private_mode_path() {
         Ok(p) => p,
@@ -2957,13 +2965,9 @@ pub(crate) fn persist_private_mode(enabled: bool) {
             return;
         }
     };
-    if let Some(parent) = path.parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            tracing::warn!("could not create private_mode parent dir ({e}); not persisting");
-            return;
-        }
-    }
-    if let Err(e) = std::fs::write(&path, if enabled { "1" } else { "0" }) {
+    // write_text_atomic_0600 creates the parent directory, writes atomically via
+    // a temp-file rename, and sets mode 0600 before any bytes are written.
+    if let Err(e) = write_text_atomic_0600(&path, if enabled { "1" } else { "0" }) {
         tracing::warn!(
             path = %path.display(),
             error = %e,
@@ -3384,6 +3388,48 @@ mod tests {
         assert!(
             !after_disable,
             "disabled private mode must persist across restart"
+        );
+    }
+
+    /// CopyPaste-ki7p: `persist_private_mode` must create the flag file with
+    /// mode 0600, not the umask-derived 0644. Verified on Unix only — Windows
+    /// has no meaningful POSIX mode bits.
+    #[cfg(unix)]
+    #[test]
+    fn private_mode_flag_file_is_created_with_mode_0600() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("private_mode");
+
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev = std::env::var_os("COPYPASTE_PRIVATE_MODE_PATH");
+        // SAFETY: held under TEST_ENV_LOCK; restored unconditionally below.
+        unsafe {
+            std::env::set_var("COPYPASTE_PRIVATE_MODE_PATH", &path);
+        }
+
+        persist_private_mode(true);
+
+        // Restore env before any assertions so a failure doesn't leak state.
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("COPYPASTE_PRIVATE_MODE_PATH", v),
+                None => std::env::remove_var("COPYPASTE_PRIVATE_MODE_PATH"),
+            }
+        }
+
+        assert!(path.exists(), "flag file must be created");
+        let mode = std::fs::metadata(&path)
+            .expect("metadata")
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "CopyPaste-ki7p: private_mode flag file must be 0600, got {mode:#o}"
         );
     }
 

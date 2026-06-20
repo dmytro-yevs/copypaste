@@ -77,8 +77,14 @@ enum Commands {
         /// Include sensitive (flagged) items in the export.
         /// By default sensitive items are omitted. Use with care — the export
         /// file contains plaintext content; handle and store it securely.
+        /// A confirmation prompt will be shown unless --yes is also passed.
         #[arg(long)]
         include_sensitive: bool,
+        /// Skip the interactive confirmation prompt when --include-sensitive is
+        /// used. Required for non-interactive / scripted invocations.
+        /// (CopyPaste-phit: explicit double opt-in for bulk plaintext export.)
+        #[arg(long)]
+        yes: bool,
     },
     /// Watch clipboard in real-time (prints new items as they arrive)
     Watch {
@@ -250,7 +256,15 @@ fn main() {
             output,
             force,
             include_sensitive,
-        } => commands::export::run(&socket, limit, output.as_deref(), force, include_sensitive),
+            yes,
+        } => commands::export::run(
+            &socket,
+            limit,
+            output.as_deref(),
+            force,
+            include_sensitive,
+            yes,
+        ),
         Commands::Watch { interval } => commands::watch::run(&socket, interval),
         Commands::Clear { force } => commands::clear::run(&socket, force),
         Commands::Stats => commands::stats::run(&socket),
@@ -306,6 +320,12 @@ fn main() {
 
     if let Err(e) = result {
         eprintln!("copypaste: {e}");
+        // CopyPaste-liaz: process::exit(1) is safe here — `result` is already
+        // consumed (moved into the Err variant pattern) and all local variables
+        // in the match arms have been dropped before reaching this point.
+        // Callers that hold Zeroizing<…> secrets (e.g. cloud::setup) must NOT
+        // call process::exit while secrets are in scope; they return Err instead,
+        // which unwinds the call stack and runs Drop before arriving here.
         std::process::exit(1);
     }
 }
