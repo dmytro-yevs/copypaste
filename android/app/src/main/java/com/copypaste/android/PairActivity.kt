@@ -85,6 +85,7 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import com.copypaste.android.ui.theme.LocalLiquidTokens
@@ -950,6 +951,23 @@ fun PairScreen(
         label = "pairCardAlpha",
     )
 
+    // CopyPaste-wfba: progress-bar pulse animation — always created at composable
+    // scope (Compose rule: no conditional remember). Gated on !reduced at use site.
+    // Mirrors the same animation in DevicesActivity OwnQrSection §10.
+    val progressPulseTransition = rememberInfiniteTransition(label = "pairQrProgress")
+    val progressAlphaRaw by progressPulseTransition.animateFloat(
+        initialValue = 0.85f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(
+                durationMillis = (2600 * lt.motionScale).toInt(),
+                easing = FastOutSlowInEasing,
+            ),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "pairProgressAlpha",
+    )
+
     Box(Modifier.fillMaxSize()) {
     // 9g57: aurora canvas backdrop — mirrors DevicesScreen pattern.
     // A-C5 / CopyPaste-a8ne: three-way background gate by tok.background:
@@ -1179,9 +1197,12 @@ fun PairScreen(
                         }
                     }
 
-                    // Countdown sits INSIDE the grey QR card, directly under the
-                    // code, so the expiry is read together with the QR.
-                    if (qr != null) {
+                    // §10 Countdown text + drain bar — sits INSIDE the grey QR card,
+                    // directly under the code, so the expiry is read together with the QR.
+                    // CopyPaste-h59h: guard on !loading prevents a 1-frame flash of
+                    // remainingSeconds==0 between LaunchedEffect(qr) restarts on
+                    // visibility-restore after the previous token expired.
+                    if (qr != null && !loading) {
                         when {
                             expired -> {
                                 Text(
@@ -1203,6 +1224,26 @@ fun PairScreen(
                                     // voyf: theme-adaptive warning/accent tokens.
                                     color = if (urgent) c.warning else c.accent,
                                 )
+                                // CopyPaste-wfba: drain bar — matches DevicesActivity OwnQrSection §10.
+                                // 2dp thin track (muted @ 35%); fill drains left-to-right over the
+                                // 120 s TTL. Switches accent → warning at ≤20 s remaining.
+                                // progressAlpha pulse is suppressed when reduced-motion is on.
+                                val progressAlpha = if (!reduced) progressAlphaRaw else 1f
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(2.dp)
+                                        .clip(RoundedCornerShape(999.dp))
+                                        .background(c.mute.copy(alpha = 0.35f)),
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth(qrCountdownProgress(remainingSeconds, PAIR_TOKEN_TTL_SECONDS))
+                                            .height(2.dp)
+                                            .graphicsLayer { alpha = progressAlpha }
+                                            .background(if (urgent) c.warning else c.accent),
+                                    )
+                                }
                             }
                         }
                     }

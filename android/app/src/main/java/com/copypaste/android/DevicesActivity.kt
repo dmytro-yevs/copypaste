@@ -1468,7 +1468,11 @@ private fun OwnQrSection(settings: Settings) {
             }
 
             // §10 Countdown / expiry label + drain bar.
-            if (qr != null && !expired) {
+            // CopyPaste-h59h: guard on !loading prevents a 1-frame flash of
+            // remainingSeconds==0 between LaunchedEffect(qr) restarts when the
+            // composable re-enters after the previous token expired on visibility-restore
+            // (>105 s hidden). During regeneration the loading spinner is shown instead.
+            if (qr != null && !expired && !loading) {
                 val urgent = isQrWarning(remainingSeconds)
                 Text(
                     text = stringResource(R.string.pair_token_expires_in_seconds, remainingSeconds),
