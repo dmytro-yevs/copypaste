@@ -54,7 +54,12 @@ export interface SkinTokens {
   /** Backdrop saturation multiplier (1.0 = identity). */
   saturation: number;
 
-  /** Surface fill opacity (0–1). For glass: the frosted fill alpha; for flat: solid = 1.0. */
+  /**
+   * Surface fill opacity (0–1). For glass: the frosted fill alpha; for flat: solid = 1.0.
+   * Classic value is 0.40 — matches CSS --skin-fill:.40 and :root --glass-opacity:.40.
+   * (The skins-implementation-plan §2.2 draft had 0.62 but that was a stale draft value;
+   *  the actual rendered pre-skin value has always been 0.40 per CopyPaste-0fjj.)
+   */
   fillAlpha: number;
 
   /** Inner sheen/highlight alpha on glass surfaces (0 = none). */
@@ -101,6 +106,24 @@ export interface SkinTokens {
 
   /** Motion duration multiplier (1.0 = default; 1.3 = cinematic/slower). */
   motionScale: number;
+
+  /**
+   * Strong-tier backdrop blur radius in px (modals, popovers, toasts).
+   * Separate from glassBlur (chrome/card tier). classic=40, quiet=0, vapor=44.
+   * CopyPaste-fuxf (M5): formalized from the hardcoded legacy 40px value.
+   * CSS: .surface-glass-strong reads var(--skin-blur-strong, 40px).
+   * Android canonical name: glassBlurStrongDp (normalizes to glassblurstrong).
+   */
+  glassBlurStrong: number;
+
+  /**
+   * Light-mode specular sheen alpha on glass surfaces (0 = none).
+   * Orthogonal to sheen (which is the dark-mode value).
+   * classic=0.45, quiet=0, vapor=0.70.
+   * CopyPaste-0kbq (M2): formalized from CSS html[data-skin=vapor][data-theme=light]{--skin-sheen:.70}.
+   * Android canonical name: sheenLight (normalizes to sheenlight).
+   */
+  sheenLight: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -122,7 +145,9 @@ export const SKINS: Record<SkinId, SkinTokens> = {
     material: "glass",
     glassBlur: 28,
     saturation: 1.45,
-    fillAlpha: 0.62,
+    // CopyPaste-yvor: reconciled to 0.40 — matches CSS html[data-skin=classic] --skin-fill:.40
+    // which equals :root --glass-opacity:.40 (the pre-skin rendered value per CopyPaste-0fjj).
+    fillAlpha: 0.40,
     sheen: 0.06,
     tintAlpha: 0,
     elevation: "glass-float",
@@ -138,6 +163,10 @@ export const SKINS: Record<SkinId, SkinTokens> = {
     background: "aurora",
     glow: 0.62,
     motionScale: 1.3,
+    // CopyPaste-fuxf (M5): strong-tier blur; matches legacy hardcoded 40px value.
+    glassBlurStrong: 40,
+    // CopyPaste-0kbq (M2): light-mode sheen alpha.
+    sheenLight: 0.45,
   },
 
   /**
@@ -164,6 +193,10 @@ export const SKINS: Record<SkinId, SkinTokens> = {
     background: "flat",
     glow: 0,
     motionScale: 1.0,
+    // CopyPaste-fuxf (M5): flat skin has no strong blur.
+    glassBlurStrong: 0,
+    // CopyPaste-0kbq (M2): no sheen in quiet (flat skin).
+    sheenLight: 0,
   },
 
   /**
@@ -190,5 +223,9 @@ export const SKINS: Record<SkinId, SkinTokens> = {
     background: "tint-blob",
     glow: 0.45,
     motionScale: 1.0,
+    // CopyPaste-fuxf (M5): deeper frosted modals in vapor (larger than classic).
+    glassBlurStrong: 44,
+    // CopyPaste-0kbq (M2): matches CSS html[data-skin=vapor][data-theme=light]{--skin-sheen:.70}.
+    sheenLight: 0.70,
   },
 };

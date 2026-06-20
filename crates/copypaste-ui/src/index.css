@@ -1071,6 +1071,9 @@ html[data-skin="classic"] {
   /* Strong-tier blur (modals/popovers — separate from chrome/card blur) */
   --skin-blur-strong:   40px;     /* hardcoded 40px in legacy, kept identical */
 
+  /* CopyPaste-0kbq (M2): light-mode sheen alpha (dark sheen is --skin-sheen) */
+  --skin-sheen-light:   .45;
+
   /* ── Bridge: map skin vars → existing consumed vars ────────────────────
      Existing components consume --glass-blur, --glass-saturation,
      --glass-opacity, --glow-strength directly. Map them here so those
@@ -1122,6 +1125,9 @@ html[data-skin="quiet"] {
   /* Strong-tier blur — zero (flat skin) */
   --skin-blur-strong:   0px;
 
+  /* CopyPaste-0kbq (M2): no sheen in quiet (flat skin) */
+  --skin-sheen-light:   0;
+
   /* ── Bridge ─────────────────────────────────────────────────────────── */
   --glass-blur:          var(--skin-blur);
   --glass-saturation:    var(--skin-sat);
@@ -1170,6 +1176,11 @@ html[data-skin="vapor"] {
   /* Strong-tier blur — larger than classic for deeper frosted modals */
   --skin-blur-strong:   44px;
 
+  /* CopyPaste-0kbq (M2): dark sheen=.16 (above); light sheen override below via
+     html[data-skin="vapor"][data-theme="light"]{--skin-sheen-light:.70}.
+     This dark-mode default is set here for consistency. */
+  --skin-sheen-light:   .16;
+
   /* ── Bridge ─────────────────────────────────────────────────────────── */
   --glass-blur:          var(--skin-blur);
   --glass-saturation:    var(--skin-sat);
@@ -1183,6 +1194,11 @@ html[data-skin="vapor"] {
 /* Vapor light: sheen is brighter per showcase (.sheen=rgba(255,255,255,.7)) */
 html[data-skin="vapor"][data-theme="light"] {
   --skin-sheen:         .70;
+  /* CopyPaste-0kbq (M2): sheenLight canonical value for vapor light mode.
+     --skin-sheen-light and --skin-sheen converge here: both are .70.
+     Existing CSS used --skin-sheen:.70 in light; --skin-sheen-light is the
+     formalized token for JS/Android parity. */
+  --skin-sheen-light:   .70;
   --skin-tint:          .18;    /* slightly stronger tint wash on light surfaces */
 }
 
@@ -1190,7 +1206,11 @@ html[data-skin="vapor"][data-theme="light"] {
 /* (The :root already sets --glass-blur:28px / --glass-saturation:1.45 /
     --glass-opacity:.40 / --glow-strength:.62, so absence of data-skin
     is byte-identical to classic. This block just adds the skin-* names
-    for components that reference them without needing a JS fallback.) */
+    for components that reference them without needing a JS fallback.)
+   CopyPaste-fuxf (M5): DEDUP NOTE — html[data-skin="classic"] is the SINGLE SOURCE
+   of truth for classic token values. This :root:not([data-skin]) block MUST stay
+   byte-for-byte identical to the classic block (same values, no additions).
+   If you add a new --skin-* token to classic, add it here too — do NOT drift. */
 :root:not([data-skin]) {
   --skin-material:      glass;
   --skin-blur:          28px;
@@ -1211,7 +1231,8 @@ html[data-skin="vapor"][data-theme="light"] {
   --skin-bg:            aurora;
   --skin-glow:          .62;
   --skin-motion:        1.3;
-  --skin-blur-strong:   40px;
+  --skin-blur-strong:   40px;   /* CopyPaste-fuxf (M5): mirrors classic glassBlurStrong=40 */
+  --skin-sheen-light:   .45;    /* CopyPaste-0kbq (M2): mirrors classic sheenLight=0.45 */
   --skin-aurora-scale:  1;
 }
 
@@ -1491,7 +1512,8 @@ textarea {
   background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
-  border-radius: 9px; /* ix8u: styleguide --radius-ctl 9px */
+  /* CopyPaste-i6qj (W3): use skin token so radius follows the active skin. */
+  border-radius: var(--skin-r-ctl, 9px); /* ix8u: styleguide --radius-ctl 9px */
   outline: none;
   font-family: inherit;
   font-size: 13px;
@@ -1530,7 +1552,8 @@ select {
   background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
-  border-radius: 9px; /* ix8u: styleguide --radius-ctl 9px */
+  /* CopyPaste-i6qj (W3): use skin token so radius follows the active skin. */
+  border-radius: var(--skin-r-ctl, 9px); /* ix8u: styleguide --radius-ctl 9px */
   padding: 4px 28px 4px 10px;
   font-family: inherit;
   font-size: 13px;

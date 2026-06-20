@@ -22,10 +22,16 @@
  * Platform-only fields (neither side has any as of V1):
  *   none — both registries cover exactly the same canonical set.
  *
- * Canonical token list (19 tokens):
- *   background, elevation, fillapha, glow, glassblur, material, motionscale,
- *   navactive, radiuscard, radiuschip, radiuscontrol, radiusmodal, rowgap,
- *   rowtreatment, saturation, shadowcard, shadowfloat, sheen, tintalpha
+ * Canonical token list (21 tokens):
+ *   background, elevation, fillapha, glow, glassblur, glassblurstrong, material,
+ *   motionscale, navactive, radiuscard, radiuschip, radiuscontrol, radiusmodal,
+ *   rowgap, rowtreatment, saturation, shadowcard, shadowfloat, sheen, sheenlight,
+ *   tintalpha
+ *
+ * New tokens added (CopyPaste-fuxf M5, CopyPaste-0kbq M2):
+ *   glassblurstrong — strong-tier backdrop blur (modals/popovers): classic=40, quiet=0, vapor=44
+ *   sheenlight      — light-mode specular sheen alpha: classic=0.45, quiet=0, vapor=0.70
+ *   Android side uses glassBlurStrongDp / sheenLight (both normalize correctly).
  *
  * Usage:
  *   node scripts/check-skin-parity.mjs          # from repo root

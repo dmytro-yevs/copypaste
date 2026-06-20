@@ -32,6 +32,10 @@ const REQUIRED_KEYS: (keyof SkinTokens)[] = [
   "background",
   "glow",
   "motionScale",
+  // CopyPaste-fuxf (M5): strong-tier blur token
+  "glassBlurStrong",
+  // CopyPaste-0kbq (M2): light-mode sheen token
+  "sheenLight",
 ];
 
 describe("SKINS registry completeness", () => {
@@ -52,7 +56,8 @@ describe("SKINS.classic — frozen values match §2.2", () => {
   it("material is 'glass'", () => expect(c.material).toBe("glass"));
   it("glassBlur is 28", () => expect(c.glassBlur).toBe(28));
   it("saturation is 1.45", () => expect(c.saturation).toBe(1.45));
-  it("fillAlpha is 0.62", () => expect(c.fillAlpha).toBe(0.62));
+  // CopyPaste-yvor: reconciled to 0.40 (matches CSS --skin-fill:.40 and :root --glass-opacity:.40)
+  it("fillAlpha is 0.40", () => expect(c.fillAlpha).toBe(0.40));
   it("sheen is 0.06", () => expect(c.sheen).toBe(0.06));
   it("tintAlpha is 0", () => expect(c.tintAlpha).toBe(0));
   it("elevation is 'glass-float'", () => expect(c.elevation).toBe("glass-float"));
@@ -113,4 +118,63 @@ describe("SKINS.vapor — key values from §2.2", () => {
   it("background is 'tint-blob'", () => expect(v.background).toBe("tint-blob"));
   it("glow is 0.45", () => expect(v.glow).toBe(0.45));
   it("motionScale is 1.0", () => expect(v.motionScale).toBe(1.0));
+});
+
+// ---------------------------------------------------------------------------
+// CopyPaste-yvor (M3): fillAlpha reconciliation
+// Classic CSS renders --skin-fill:.40 (= :root --glass-opacity .40).
+// skins.ts must match the rendered value so JS consumers see 0.40.
+// ---------------------------------------------------------------------------
+describe("CopyPaste-yvor — classic fillAlpha reconciled to rendered 0.40", () => {
+  it("classic fillAlpha is 0.40 (matches CSS --skin-fill and :root --glass-opacity)", () => {
+    expect(SKINS.classic.fillAlpha).toBe(0.40);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CopyPaste-fuxf (M5): glassBlurStrong token
+// ---------------------------------------------------------------------------
+describe("CopyPaste-fuxf — glassBlurStrong token in SkinTokens", () => {
+  it("classic glassBlurStrong is 40 (px, matches legacy hardcoded value)", () => {
+    expect(SKINS.classic.glassBlurStrong).toBe(40);
+  });
+  it("quiet glassBlurStrong is 0 (flat skin — no strong blur)", () => {
+    expect(SKINS.quiet.glassBlurStrong).toBe(0);
+  });
+  it("vapor glassBlurStrong is 44 (deeper frosted modals)", () => {
+    expect(SKINS.vapor.glassBlurStrong).toBe(44);
+  });
+  it("SkinTokens interface includes glassBlurStrong as required key", () => {
+    // TypeScript compile check: every skin bundle must have the key
+    const requiredKeys: (keyof SkinTokens)[] = ["glassBlurStrong"];
+    for (const id of SKIN_IDS) {
+      for (const key of requiredKeys) {
+        expect(SKINS[id]).toHaveProperty(key);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CopyPaste-0kbq (M2): sheenLight token (light-mode sheen)
+// classic=0.45, quiet=0, vapor=0.70
+// ---------------------------------------------------------------------------
+describe("CopyPaste-0kbq — sheenLight token in SkinTokens", () => {
+  it("classic sheenLight is 0.45", () => {
+    expect(SKINS.classic.sheenLight).toBe(0.45);
+  });
+  it("quiet sheenLight is 0", () => {
+    expect(SKINS.quiet.sheenLight).toBe(0);
+  });
+  it("vapor sheenLight is 0.70 (matches CSS html[data-skin=vapor][data-theme=light]{--skin-sheen:.70})", () => {
+    expect(SKINS.vapor.sheenLight).toBe(0.70);
+  });
+  it("SkinTokens interface includes sheenLight as required key", () => {
+    const requiredKeys: (keyof SkinTokens)[] = ["sheenLight"];
+    for (const id of SKIN_IDS) {
+      for (const key of requiredKeys) {
+        expect(SKINS[id]).toHaveProperty(key);
+      }
+    }
+  });
 });
