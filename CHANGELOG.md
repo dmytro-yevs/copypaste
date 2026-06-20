@@ -2,10 +2,21 @@
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-06-20
+
 Production-audit remediation pass (`o7me`). 0 P0; all 13 P1 and audit-derived
 P2/P3 bugs addressed. Verified on Rust 1.96: `cargo fmt --all --check` and
 `cargo clippy --workspace --all-targets -D warnings` clean; `cargo test --workspace`
 in final validation.
+
+### Added
+- **Android STUN public-IP collection** during pairing (`8cu0`, ABI 18): the Android
+  peer now gathers its own STUN-reflexive public IP so direct P2P connect candidates
+  are exchanged symmetrically.
+
+### Changed — sync internals
+- **Canonical `SyncBadgeState`** is now computed once in the daemon and consumed verbatim
+  by the desktop UI and Android, removing independent badge-state derivation drift (`merc`).
 
 ### Security & privacy
 - **Sensitive items never leave the device** (`jbao`, P1-1): the relay/cloud/P2P push
