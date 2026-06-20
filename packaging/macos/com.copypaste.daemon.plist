@@ -44,10 +44,10 @@
     <string>Interactive</string>
 
     <key>StandardOutPath</key>
-    <string>/Users/USERNAME/Library/Logs/CopyPaste/daemon.out.log</string>
+    <string>@HOME@/Library/Logs/CopyPaste/daemon.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/USERNAME/Library/Logs/CopyPaste/daemon.err.log</string>
+    <string>@HOME@/Library/Logs/CopyPaste/daemon.err.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>

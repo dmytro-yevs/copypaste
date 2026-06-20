@@ -43,8 +43,10 @@ echo "==> creating launch agents dir ${TARGET_DIR}"
 mkdir -p "${TARGET_DIR}"
 
 echo "==> installing plist to ${TARGET_PLIST}"
-# Substitute USERNAME placeholder with the actual home directory user
-sed "s|/Users/USERNAME|${HOME}|g" "${SOURCE_PLIST}" > "${TARGET_PLIST}"
+# Substitute @HOME@ template token with the actual user home directory.
+# Using @HOME@ (not a literal username like /Users/USERNAME) avoids embedding
+# any real account name in the committed plist template.
+sed "s|@HOME@|${HOME}|g" "${SOURCE_PLIST}" > "${TARGET_PLIST}"
 chmod 644 "${TARGET_PLIST}"
 
 echo "==> validating plist"

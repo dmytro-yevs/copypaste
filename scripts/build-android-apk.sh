@@ -107,22 +107,16 @@ echo "==[4/5] sign (beta keystore) =="
 KEYSTORE_PATH="${KEYSTORE_PATH:-$ANDROID_DIR/keystore-beta.jks}"
 KEY_ALIAS="${KEY_ALIAS:-copypaste-beta}"
 
-# SECURITY: KEYSTORE_PASS must be set in the environment for any real release.
-# Do NOT hardcode a production keystore password here.
-# LOCAL BETA FALLBACK ONLY: if running inside Docker without an explicit
-# KEYSTORE_PASS and no real keystore exists (keytool will generate one below),
-# a well-known placeholder is acceptable for local/CI beta builds only.
-# Set KEYSTORE_PASS in your environment or CI secrets for any distribution build.
+# SECURITY: KEYSTORE_PASS must always be set in the environment.
+# Never default to a known password — doing so would silently produce a keystore
+# (and signed APK) whose password is publicly known, creating a false sense of
+# security. Callers must supply KEYSTORE_PASS explicitly; CI should inject it via
+# a secret (e.g. ANDROID_KEYSTORE_PASS GitHub secret).
 if [[ -z "${KEYSTORE_PASS:-}" ]]; then
-  if [[ -f "$KEYSTORE_PATH" ]]; then
-    echo "!! KEYSTORE_PASS is not set but $KEYSTORE_PATH already exists." >&2
-    echo "   Set KEYSTORE_PASS in your environment before signing." >&2
-    exit 1
-  fi
-  # Keystore does not exist yet — we will generate a local-beta one below.
-  # LOCAL BETA ONLY: not for distribution.
-  KEYSTORE_PASS="copypaste-beta"
-  echo "  (LOCAL BETA ONLY) KEYSTORE_PASS not set; using placeholder for generated beta keystore."
+  echo "!! KEYSTORE_PASS is not set." >&2
+  echo "   Export KEYSTORE_PASS in your environment before signing." >&2
+  echo "   For local beta builds, generate a keystore and set KEYSTORE_PASS to its password." >&2
+  exit 1
 fi
 
 if [[ ! -f "$KEYSTORE_PATH" ]]; then
