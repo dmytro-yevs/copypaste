@@ -1036,7 +1036,7 @@ class SyncManager(
      * @param repository     Used only to resolve the current pin state for validation.
      * @return               Number of records successfully delivered.
      */
-    @Suppress("UNUSED_PARAMETER") // repository reserved for future Supabase tombstone push
+    @Suppress("UNUSED_PARAMETER") // repository reserved for future use
     suspend fun drainOutboundMutationQueue(
         context: android.content.Context,
         repository: ClipboardRepository,
@@ -1051,14 +1051,27 @@ class SyncManager(
 
         Log.d(TAG, "drainOutboundMutationQueue: draining ${pending.size} pending mutation(s)")
 
+        // CopyPaste-yaip: resolve Supabase context once outside the per-record loop.
+        // resolveSyncContext is ~0 ms on the happy path (cached JWT + cached sync key).
+        // Null when Supabase is unconfigured; Supabase pushes are skipped in that case.
+        val supaCtx = if (s.isSupabaseConfigured) {
+            try {
+                resolveSyncContext()
+            } catch (e: Exception) {
+                Log.w(TAG, "drainOutboundMutationQueue: Supabase context unavailable: ${e.message}")
+                null
+            }
+        } else {
+            null
+        }
+
         val delivered = mutableSetOf<Pair<String, Long>>()
 
         for (rec in pending) {
             val isDelete = rec.op == OutboundMutationQueue.OP_DELETE ||
                 rec.op == OutboundMutationQueue.OP_BULK_DELETE ||
                 rec.op == OutboundMutationQueue.OP_CLEAR
-            // isPinOp reserved for the future Supabase pin-update transport.
-            @Suppress("UNUSED_VARIABLE")
+            // CopyPaste-yaip: un-suppress isPinOp — pin mutations now push to Supabase.
             val isPinOp = rec.op == OutboundMutationQueue.OP_PIN ||
                 rec.op == OutboundMutationQueue.OP_UNPIN ||
                 rec.op == OutboundMutationQueue.OP_REORDER
@@ -1097,11 +1110,42 @@ class SyncManager(
                 }
             }
 
-            // ── Supabase transport (tombstones only via existing delete path) ──
-            // Supabase tombstone push is not yet implemented in SupabaseClient
-            // (requires a new pushTombstone API). This is the remaining gap.
-            // Pin-state-only updates also need a new pushPinUpdate API.
-            // TODO(CopyPaste-0qpn): implement SupabaseClient.pushTombstone and wire it here.
+            // ── Supabase transport (CopyPaste-yaip) ───────────────────────────
+            // Tombstones and pin mutations both use SupabaseClient.pushMutationRow,
+            // which PATCHes the existing row (filtered by item_id) to set
+            // deleted/pinned/pin_order + bumped lamport_ts — mirrors the daemon's
+            // cloud.rs `mark_deleted` / `update_pin_state` paths.
+            //
+            // A successful Supabase push also marks the record as delivered so it is
+            // removed from the queue even if the relay push failed (and vice versa).
+            if (supaCtx != null && (isDelete || isPinOp)) {
+                try {
+                    val supaOk = supaCtx.client.pushMutationRow(
+                        bearerToken = supaCtx.bearer,
+                        itemId = rec.itemId,
+                        lamportTs = rec.lamportTs,
+                        isDelete = isDelete,
+                        pinned = rec.pinned,
+                        pinOrder = rec.pinOrder,
+                    )
+                    if (supaOk) {
+                        pushed = true
+                        Log.d(
+                            TAG,
+                            "drainOutboundMutationQueue: supabase ok ${rec.op} " +
+                                "itemId=${rec.itemId.take(8)}… lamport=${rec.lamportTs}",
+                        )
+                    } else {
+                        Log.w(
+                            TAG,
+                            "drainOutboundMutationQueue: supabase push failed for ${rec.op} " +
+                                "itemId=${rec.itemId.take(8)}…",
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "drainOutboundMutationQueue: supabase exception for ${rec.op}: ${e.message}")
+                }
+            }
 
             if (pushed) {
                 delivered.add(rec.itemId to rec.lamportTs)

@@ -187,6 +187,10 @@ class ClipboardService : Service() {
             deviceKeyStore = deviceKeyStore,
             wsClient = realtimeClient,
             onSyncedTextClip = { text -> applyTextToClipboard(text) },
+            // CopyPaste-yaip: supply application context so dialPairedPeer can read
+            // the OutboundMutationQueue and include pin/reorder/delete mutations in
+            // the P2P outbound set even when they have an old wallTimeMs.
+            context = applicationContext,
         )
 
         // Relay SSE subscription — the third independent receive transport.
@@ -258,6 +262,29 @@ class ClipboardService : Service() {
 
         // Start the catch-up poll loop (WS-aware intervals: 120s connected / 60s down).
         fgsSyncLoop.start(scope)
+
+        // CopyPaste-yaip (startup drain): drain the outbound mutation queue on every
+        // service (re)start. Without this, mutations queued while the service was dead
+        // (e.g. process killed, device restarted, or service swipe-away) sit in
+        // SharedPreferences indefinitely — they only drain on the NEXT UI mutation
+        // (which calls requestMutationQueueDrain via ClipboardViewModel.onMutationSync).
+        //
+        // The drain is fire-and-forget on the IO scope: it must not block startForeground
+        // (which would ANR) and must not hold a lock across the FGS start sequence.
+        // The queue is durable; if the drain fails the records stay for the next tick.
+        val startupDrainContext = applicationContext
+        val startupDrainManager = syncManager
+        val startupDrainRepo = repository
+        scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val n = startupDrainManager.drainOutboundMutationQueue(startupDrainContext, startupDrainRepo)
+                if (n > 0) {
+                    Log.i(TAG, "Startup drain: flushed $n queued mutation(s) accumulated while service was dead")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Startup drain: drainOutboundMutationQueue failed: ${e.message}")
+            }
+        }
 
         // Inbound mTLS P2P listener (macOS→Android direction). Gated on the same
         // toggles as the dialer so the user's P2P switch governs BOTH directions.

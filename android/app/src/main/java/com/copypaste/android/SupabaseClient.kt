@@ -484,6 +484,77 @@ class SupabaseClient(
         )
     }
 
+    // ── Mutation push (tombstone / pin-state-only) ────────────────────────────
+
+    /**
+     * CopyPaste-yaip: push a UI mutation (tombstone or pin-state update) for an
+     * EXISTING Supabase row identified by [itemId].
+     *
+     * Uses PostgREST PATCH filtered by `item_id=eq.<itemId>` so the update lands
+     * on the existing row (not a new insert), mirroring the daemon's cloud.rs
+     * `mark_deleted` / `update_pin_state` paths.
+     *
+     * ## Tombstone ([isDelete] = true)
+     * Sets `deleted=true`, `lamport_ts=<bumped>`, `pinned=false`, `pin_order=null`.
+     * `payload_ct` is NOT updated — tombstone row bodies are already NULL in the
+     * daemon path; receivers route `deleted=true` rows through
+     * `applyInboundTombstoneWithLww`, which ignores `payload_ct`.
+     *
+     * ## Pin-state update ([isDelete] = false)
+     * Sets `pinned=<state>`, `pin_order=<order>`, `lamport_ts=<bumped>`. Does NOT
+     * touch `payload_ct` or `deleted`. Receivers apply `applyAuthoritativePinState`.
+     *
+     * LWW guarantee: `lamport_ts` is always bumped (caller provides the
+     * queue-recorded value), so a stale re-push loses to a newer local write.
+     *
+     * @param bearerToken  Valid Supabase bearer (from GoTrue or anon key).
+     * @param itemId       The stable cross-device item_id of the target row.
+     * @param lamportTs    Bumped lamport timestamp (from the queued MutationRecord).
+     * @param isDelete     true → tombstone, false → pin-state update.
+     * @param pinned       Pin state to apply (ignored when isDelete=true).
+     * @param pinOrder     Pin order to apply (null = unpin / tombstone).
+     * @param wallTime     Current wall-clock ms (for `wall_time` update; informational).
+     * @return true iff the PATCH returned 2xx. Never throws; logs failures at WARN.
+     */
+    suspend fun pushMutationRow(
+        bearerToken: String,
+        itemId: String,
+        lamportTs: Long,
+        isDelete: Boolean,
+        pinned: Boolean,
+        pinOrder: Double?,
+        wallTime: Long = System.currentTimeMillis(),
+    ): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val body = JSONObject().apply {
+                put("lamport_ts", lamportTs)
+                put("wall_time", wallTime)
+                if (isDelete) {
+                    put("deleted", true)
+                    put("pinned", false)
+                    put("pin_order", JSONObject.NULL)
+                } else {
+                    put("deleted", false)
+                    put("pinned", pinned)
+                    if (pinOrder != null) put("pin_order", pinOrder) else put("pin_order", JSONObject.NULL)
+                }
+            }.toString()
+
+            // PATCH /rest/v1/clipboard_items?item_id=eq.<itemId>
+            // PostgREST PATCH with equality filter updates only the matching row.
+            val path = "/rest/v1/clipboard_items?item_id=eq.$itemId"
+            val resp = patch(path, body, bearerToken = bearerToken)
+            val ok = resp.code in 200..299
+            if (!ok) {
+                Log.w(TAG, "pushMutationRow failed (${resp.code}) itemId=${itemId.take(8)}…: ${resp.body.take(200)}")
+            }
+            ok
+        } catch (e: Exception) {
+            Log.w(TAG, "pushMutationRow exception itemId=${itemId.take(8)}…: ${e.message}")
+            false
+        }
+    }
+
     // ── HTTP helpers ─────────────────────────────────────────────────────────
 
     private data class HttpResponse(val code: Int, val body: String)
@@ -514,6 +585,33 @@ class SupabaseClient(
         if (bearerToken != null) {
             conn.setRequestProperty("Authorization", "Bearer $bearerToken")
         }
+        extraHeaders.forEach { (k, v) -> conn.setRequestProperty(k, v) }
+        conn.connectTimeout = TIMEOUT_MS
+        conn.readTimeout = TIMEOUT_MS
+        OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { it.write(body) }
+        return readResponse(conn)
+    }
+
+    private fun patch(
+        path: String,
+        body: String,
+        bearerToken: String,
+        extraHeaders: Map<String, String> = emptyMap(),
+    ): HttpResponse {
+        val url = URL("$supabaseUrl$path")
+        val conn = url.openConnection() as HttpURLConnection
+        // Java HttpURLConnection does not support PATCH natively until Java 11
+        // (via setRequestMethod("PATCH")). For Android API < 26 compatibility we
+        // override via X-HTTP-Method-Override is NOT reliable; setRequestMethod("PATCH")
+        // works on all recent Android/OkHttp stacks (Okhttp is not used here but
+        // HttpURLConnection on API 26+ and robolectric both support PATCH directly).
+        conn.requestMethod = "PATCH"
+        conn.doOutput = true
+        conn.setRequestProperty("Content-Type", "application/json")
+        conn.setRequestProperty("apikey", anonKey)
+        conn.setRequestProperty("Authorization", "Bearer $bearerToken")
+        // Prefer=return=minimal avoids returning the full updated row (saves bandwidth).
+        conn.setRequestProperty("Prefer", "return=minimal")
         extraHeaders.forEach { (k, v) -> conn.setRequestProperty(k, v) }
         conn.connectTimeout = TIMEOUT_MS
         conn.readTimeout = TIMEOUT_MS

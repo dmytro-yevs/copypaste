@@ -91,6 +91,14 @@ class FgsSyncLoop(
      * do not have a live system clipboard context.
      */
     private val onSyncedTextClip: ((text: String) -> Unit)? = null,
+    /**
+     * CopyPaste-yaip: Android context used to read [OutboundMutationQueue] during
+     * P2P outbound selection. Required to bypass the wall-time high-water filter for
+     * pin/reorder/delete mutations that only bump `lamport_ts`. Null when no context
+     * is available (unit tests, stub mode) — in that case the queue-augmentation
+     * step is silently skipped and only the wall-time filter is applied.
+     */
+    private val context: android.content.Context? = null,
 ) {
     private var job: Job? = null
 
@@ -210,6 +218,58 @@ class FgsSyncLoop(
          */
         fun maxWallTime(items: List<Pair<String, Long>>): Long =
             if (items.isEmpty()) 0L else items.maxOf { it.second }
+
+        /**
+         * CopyPaste-yaip (P2P gap): select mutation-queue records for P2P outbound,
+         * BYPASSING the wall-time high-water filter.
+         *
+         * [filterByOutboundHighWater] uses `wallTimeMs > highWater` to select items.
+         * A pin/reorder/delete mutation only bumps `lamport_ts` — `wallTimeMs` is
+         * unchanged, so those mutations are silently dropped by the wall-time filter
+         * after the initial sync when `highWater == wallTimeMs`. The queue-based path
+         * must send them regardless of wall-time.
+         *
+         * This function returns ALL [pending] mutations unconditionally (no wall-time
+         * filter). The caller merges the result with the regular localItems list before
+         * calling syncWithPeer. Both lists carry distinct item semantics (LocalItem vs.
+         * MutationRecord), so the merge step is handled in [mergeQueuedItemIdsWithLocal].
+         *
+         * Pure function — no Android runtime — intentionally kept in the companion
+         * object so it can be unit-tested on the plain JVM.
+         *
+         * @param pending         Pending mutation records from [OutboundMutationQueue].
+         * @param outboundHighWater Current P2P outbound high-water cursor (ignored for
+         *                          filtering — documented here for call-site clarity).
+         * @return All [pending] records, unchanged.
+         */
+        fun filterQueuedMutationsForP2P(
+            pending: List<OutboundMutationQueue.MutationRecord>,
+            @Suppress("UNUSED_PARAMETER") outboundHighWater: Long,
+        ): List<OutboundMutationQueue.MutationRecord> = pending
+
+        /**
+         * CopyPaste-yaip (P2P dedup): merge the item IDs of locally-stored items
+         * ([localItemIds]) with the item IDs of queued mutations ([queuedMutations]),
+         * deduplicating on item ID.
+         *
+         * An item may appear in BOTH lists when it exists locally AND has a pending
+         * pin/delete mutation. Returning the UNION ensures:
+         *   - Regular items: selected by the wall-time filter (existing behaviour).
+         *   - Queued-only mutations: items whose wallTimeMs == highWater or older
+         *     but with a new lamport bump (pin/reorder) are included via the queue.
+         *   - No double-send: a single item ID appears at most once in the merged set.
+         *
+         * The caller uses the merged set to drive syncWithPeer, which dedups by
+         * item_id on the wire so even if both sources somehow produced the same
+         * item, the peer applies LWW and ignores the lower-lamport copy.
+         *
+         * Pure function — no Android runtime — intentionally kept in the companion
+         * object so it can be unit-tested on the plain JVM.
+         */
+        fun mergeQueuedItemIdsWithLocal(
+            localItemIds: Set<String>,
+            queuedMutations: List<OutboundMutationQueue.MutationRecord>,
+        ): Set<String> = localItemIds + queuedMutations.map { it.itemId }.toSet()
 
         /**
          * Select the newest text clip from a list of (text, wallTime) pairs
@@ -628,10 +688,62 @@ class FgsSyncLoop(
             // dial leaves the cursor unchanged so the next dial retransmits the
             // same window — no data is lost.
             val outboundHw = settings.p2pOutboundHighWater(peerFingerprint)
-            val localItems = if (outboundHw == 0L) {
+            val hwFiltered = if (outboundHw == 0L) {
                 allLocalItems
             } else {
                 allLocalItems.filter { it.wallTimeMs > outboundHw }
+            }
+
+            // CopyPaste-yaip (P2P gap): augment the wall-time-filtered list with
+            // any items from the outbound mutation queue that were excluded because
+            // their wallTimeMs == outboundHw (pin/reorder mutations only bump
+            // lamport_ts, not wallTime). Without this, pin/reorder/delete mutations
+            // are silently dropped on every P2P dial after the first full sync.
+            //
+            // Strategy: read the pending queue, find the subset whose itemId exists
+            // in allLocalItems (so we have the actual encrypted bytes to send), and
+            // union those items into the outbound set. Items in the queue whose itemId
+            // does NOT exist locally (e.g. the item was physically deleted after the
+            // mutation was queued) are skipped — they propagate via the tombstone
+            // path already present in allLocalItems (isDeletedBlob rows).
+            //
+            // The union deduplicates by identity: allLocalItems items are UniFFI
+            // structs that don't implement equals(), so we build a Set<String> of
+            // already-included itemIds and skip duplicates. Tombstone rows (deleted=true)
+            // are already in allLocalItems from localItemsForSync — no extra handling needed.
+            val localItems = if (outboundHw == 0L || context == null) {
+                // First dial or no context: full set already; no queue augmentation needed.
+                hwFiltered
+            } else {
+                val pendingMutations = runCatching {
+                    OutboundMutationQueue.peekQueue(context)
+                }.getOrElse { e ->
+                    Log.w(TAG, "dialPairedPeer: could not read mutation queue for P2P augment: ${e.message}")
+                    emptyList()
+                }
+                if (pendingMutations.isEmpty()) {
+                    hwFiltered
+                } else {
+                    // Build an index of allLocalItems by itemId for O(1) lookup.
+                    val localIndex: Map<String, uniffi.copypaste_android.LocalItem> =
+                        allLocalItems.associateBy { it.itemId }
+                    // IDs already selected by the HW filter (to avoid double-sending).
+                    val alreadySelected = hwFiltered.map { it.itemId }.toHashSet()
+                    // Select items from the queue that are present locally but excluded by HW filter.
+                    val queueAugments = pendingMutations
+                        .filter { it.itemId !in alreadySelected }
+                        .mapNotNull { localIndex[it.itemId] }
+                    if (queueAugments.isNotEmpty()) {
+                        Log.d(
+                            TAG,
+                            "dialPairedPeer ${peerFingerprint.take(8)}: augmenting P2P outbound " +
+                                "with ${queueAugments.size} mutation-queue item(s) bypassing HW filter",
+                        )
+                        hwFiltered + queueAugments
+                    } else {
+                        hwFiltered
+                    }
+                }
             }
 
             try {
