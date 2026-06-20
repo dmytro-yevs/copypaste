@@ -15,6 +15,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -62,6 +63,9 @@ import com.copypaste.android.ui.theme.GlassTier
 import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.LocalSkin
+import com.copypaste.android.ui.theme.SkinNavActive
+import com.copypaste.android.ui.theme.skinTokens
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.glassFloatShadow
 import com.copypaste.android.ui.theme.isDarkTheme
@@ -422,6 +426,9 @@ private fun FloatingTabBar(
     onTabSelected: (Int) -> Unit,
 ) {
     val c = LocalIdeColors.current
+    // CopyPaste-jr5a: skin-aware active indicator for the nav tab bar.
+    // Reads the skin token once per composition (staticCompositionLocalOf, stable).
+    val tok = skinTokens(LocalSkin.current)
     val reducedMotion = rememberReducedMotion()
     // Spring spec for the active-tab scale pop: stiffness Low → smooth spring,
     // dampingRatio NoBouncy → one clean overshoot then settle.
@@ -469,11 +476,24 @@ private fun FloatingTabBar(
                     label = "tabScale_$index",
                 )
 
-                val iconColor = if (isSelected) c.accentOn else c.faint
-                val textColor = if (isSelected) c.accentOn else c.faint
-                // CopyPaste-mpp6: active pill uses solid accent per styleguide nav spec.
-                // Previous value was accent@75% (translucent) — now solid.
-                val pillColor = if (isSelected) c.accent else Color.Transparent
+                // CopyPaste-jr5a: skin-aware active pill — driven by tok.navActive.
+                //   FILL_GLOW  — Classic: solid accent fill, accentOn text. No ring. (byte-identical to old behaviour)
+                //   TINT       — Quiet: accentDim tinted background, accent text. No ring.
+                //   GLASS_RING — Vapor: elevated background + 1dp accent outline ring, accent text.
+                val activePillBg = when (tok.navActive) {
+                    SkinNavActive.FILL_GLOW  -> c.accent     // Classic: solid accent pill
+                    SkinNavActive.TINT       -> c.accentDim  // Quiet: subtle tint
+                    SkinNavActive.GLASS_RING -> c.elevated   // Vapor: elevated surface + ring
+                }
+                val activeIconColor = when (tok.navActive) {
+                    SkinNavActive.FILL_GLOW  -> c.accentOn  // on-accent icon
+                    SkinNavActive.TINT       -> c.accent    // accent-coloured icon on tint
+                    SkinNavActive.GLASS_RING -> c.accent    // accent-coloured icon on glass
+                }
+                val iconColor = if (isSelected) activeIconColor else c.faint
+                val textColor = if (isSelected) activeIconColor else c.faint
+                val pillColor = if (isSelected) activePillBg else Color.Transparent
+                val showRing = isSelected && tok.navActive == SkinNavActive.GLASS_RING
 
                 Box(
                     modifier = Modifier
@@ -481,6 +501,12 @@ private fun FloatingTabBar(
                         .scale(scale)
                         .clip(RoundedCornerShape(18.dp))
                         .background(pillColor)
+                        .then(
+                            // GLASS_RING: 1dp accent outline ring on the selected tab (Vapor nav spec).
+                            // Classic and Quiet do not add a border — Classic is visually byte-identical.
+                            if (showRing) Modifier.border(1.dp, c.accent, RoundedCornerShape(18.dp))
+                            else Modifier
+                        )
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
