@@ -1,0 +1,1434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CopyPaste Skin Design Showcase — Classic · Quiet · Vapor</title>
+<style>
+/* ── Reset & base ─────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  background: #0d0e14;
+  color: #e8eaed;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* ── Layout ───────────────────────────────────────────────────────────────── */
+.page-header {
+  padding: 40px 48px 28px;
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.page-header h1 { font-size: 22px; font-weight: 600; letter-spacing: -.3px; color: #e8eaed; }
+.page-header p  { margin-top: 6px; font-size: 13px; color: rgba(232,234,237,.55); }
+
+.controls {
+  display: flex; gap: 12px; align-items: center;
+  padding: 16px 48px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  background: rgba(27,28,34,.7);
+  position: sticky; top: 0; z-index: 100;
+}
+.controls label { font-size: 11px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; color: rgba(232,234,237,.45); margin-right: 4px; }
+.ctrl-btn {
+  padding: 5px 14px; border-radius: 6px; border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.06); color: #e8eaed; font-size: 12px; font-weight: 500;
+  cursor: pointer; transition: background .13s, border-color .13s;
+}
+.ctrl-btn:hover { background: rgba(255,255,255,.10); }
+.ctrl-btn.active { background: rgba(77,141,255,.18); border-color: rgba(77,141,255,.5); color: #4d8dff; }
+.divider { width: 1px; height: 20px; background: rgba(255,255,255,.1); margin: 0 4px; }
+
+.showcase-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+}
+
+.skin-col {
+  border-right: 1px solid rgba(255,255,255,.06);
+  padding: 32px 28px 48px;
+}
+.skin-col:last-child { border-right: none; }
+
+.skin-header {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 20px;
+}
+.skin-badge {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  letter-spacing: .4px; text-transform: uppercase;
+}
+.skin-name { font-size: 15px; font-weight: 600; }
+
+.section-label {
+  font-size: 10px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase;
+  color: rgba(232,234,237,.38); margin-bottom: 8px; margin-top: 24px;
+}
+
+/* ── Legend ───────────────────────────────────────────────────────────────── */
+.legend {
+  background: rgba(27,28,34,.9);
+  border-top: 1px solid rgba(255,255,255,.07);
+  padding: 32px 48px 40px;
+}
+.legend h2 { font-size: 13px; font-weight: 600; margin-bottom: 18px; color: rgba(232,234,237,.7); letter-spacing: .3px; }
+.legend-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 24px; }
+.legend-skin h3 { font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+.token-table { border-collapse: collapse; width: 100%; }
+.token-table td { padding: 3px 0; font-size: 11px; vertical-align: top; }
+.token-table td:first-child { color: rgba(232,234,237,.45); width: 120px; font-family: "SF Mono", "JetBrains Mono", monospace; }
+.token-table td:last-child { color: #e8eaed; font-family: "SF Mono", "JetBrains Mono", monospace; }
+
+/* ── SKIN: Classic ────────────────────────────────────────────────────────── */
+.classic {
+  /* Token bundle */
+  --s-blur:       28px;
+  --s-blur-str:   40px;
+  --s-sat:        1.45;
+  --s-fill:       .40;
+  --s-sheen:      .06;
+  --s-tint:       0;
+  --s-r-ctl:      9px;
+  --s-r-chip:     7px;
+  --s-r-card:     14px;
+  --s-r-modal:    16px;
+  --s-row:        card;
+  --s-row-gap:    0px;
+  --s-glow:       .62;
+  /* surface */
+  --s-bg:         #13141a;
+  --s-panel:      rgba(28,31,42,.40);
+  --s-card:       rgba(28,31,42,.46);
+  --s-border:     rgba(255,255,255,.16);
+  --s-shadow:     0 2px 8px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.35);
+  --s-shadow-row: 0 2px 8px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.28);
+  --s-accent:     #4d8dff;
+  --s-accent-dim: rgba(77,141,255,.12);
+  --s-success:    #5fad65;
+  --s-warning:    #d9a343;
+  --s-danger:     #e05c5c;
+  --s-info:       #56b6c2;
+  --s-violet:     #c678dd;
+  --s-text:       #e8eaed;
+  --s-dim:        #9da0a8;
+  --s-faint:      rgba(255,255,255,.46);
+  --s-row-bg:     rgba(28,31,42,.46);
+  --s-row-border: rgba(255,255,255,.16);
+  --s-row-sheen:  rgba(255,255,255,.06);
+  background: linear-gradient(135deg, #07090f, #141924 45%, #202330);
+}
+.classic .bg-aurora {
+  background:
+    radial-gradient(circle at 6% -18%, rgba(127,141,163,.42) 0%, transparent 50%),
+    radial-gradient(circle at 95% -12%, rgba(90,106,131,.28) 0%, transparent 46%),
+    radial-gradient(circle at 108% 118%, rgba(90,106,131,.38) 0%, transparent 50%),
+    radial-gradient(circle at -10% 105%, rgba(90,106,131,.30) 0%, transparent 50%),
+    radial-gradient(circle at 50% 38%, rgba(157,183,223,.22) 0%, transparent 65%),
+    linear-gradient(135deg, #07090f, #141924 45%, #202330);
+  border-radius: 10px; padding: 12px; margin-bottom: 8px;
+}
+
+/* ── SKIN: Quiet ──────────────────────────────────────────────────────────── */
+.quiet {
+  --s-blur:       0px;
+  --s-blur-str:   0px;
+  --s-sat:        1.0;
+  --s-fill:       1.0;
+  --s-sheen:      0;
+  --s-tint:       0;
+  --s-r-ctl:      7px;
+  --s-r-chip:     6px;
+  --s-r-card:     10px;
+  --s-r-modal:    12px;
+  --s-row:        line;
+  --s-row-gap:    0px;
+  --s-glow:       0;
+  --s-bg:         #13141a;
+  --s-panel:      #1b1c22;
+  --s-card:       #23252d;
+  --s-border:     rgba(56,59,66,1);
+  --s-shadow:     none;
+  --s-shadow-row: none;
+  --s-accent:     #4d8dff;
+  --s-accent-dim: rgba(77,141,255,.12);
+  --s-success:    #5fad65;
+  --s-warning:    #d9a343;
+  --s-danger:     #e05c5c;
+  --s-info:       #56b6c2;
+  --s-violet:     #c678dd;
+  --s-text:       #e8eaed;
+  --s-dim:        #9da0a8;
+  --s-faint:      rgba(232,234,237,.46);
+  --s-row-bg:     transparent;
+  --s-row-border: rgba(46,48,53,1);
+  --s-row-sheen:  transparent;
+  background: #13141a;
+}
+
+/* ── SKIN: Vapor ──────────────────────────────────────────────────────────── */
+.vapor {
+  --s-blur:       34px;
+  --s-blur-str:   44px;
+  --s-sat:        1.7;
+  --s-fill:       .50;
+  --s-sheen:      .16;
+  --s-tint:       .10;
+  --s-r-ctl:      12px;
+  --s-r-chip:     10px;
+  --s-r-card:     16px;
+  --s-r-modal:    16px;
+  --s-row:        inset;
+  --s-row-gap:    3px;
+  --s-glow:       .45;
+  --s-bg:         #07090f;
+  --s-panel:      rgba(28,31,42,.50);
+  --s-card:       rgba(28,31,42,.56);
+  --s-border:     rgba(255,255,255,.16);
+  --s-shadow:     none;
+  --s-shadow-row: none;
+  --s-accent:     #4d8dff;
+  --s-accent-dim: rgba(77,141,255,.14);
+  --s-success:    #5fad65;
+  --s-warning:    #d9a343;
+  --s-danger:     #e05c5c;
+  --s-info:       #56b6c2;
+  --s-violet:     #c678dd;
+  --s-text:       #e8eaed;
+  --s-dim:        #9da0a8;
+  --s-faint:      rgba(255,255,255,.46);
+  --s-row-bg:     rgba(77,141,255,.10);
+  --s-row-border: rgba(255,255,255,.12);
+  --s-row-sheen:  rgba(255,255,255,.16);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(77,141,255,.22) 0%, transparent 65%),
+    radial-gradient(circle at 6% -18%, rgba(77,141,255,.18) 0%, transparent 50%),
+    radial-gradient(circle at 95% 110%, rgba(77,141,255,.14) 0%, transparent 50%),
+    linear-gradient(135deg, #07090f, #0e1220 45%, #111826);
+}
+
+/* ── Light theme overrides ────────────────────────────────────────────────── */
+.light-theme.classic {
+  --s-bg:         #e3e3e8;
+  --s-panel:      rgba(255,255,255,.82);
+  --s-card:       rgba(255,255,255,.88);
+  --s-border:     rgba(20,30,48,.14);
+  --s-shadow:     0 2px 8px rgba(0,0,0,.10), 0 1px 2px rgba(0,0,0,.08);
+  --s-shadow-row: 0 1px 4px rgba(0,0,0,.08);
+  --s-accent:     #007aff;
+  --s-accent-dim: rgba(0,122,255,.12);
+  --s-success:    #28885a;
+  --s-warning:    #b06e14;
+  --s-danger:     #d7281e;
+  --s-info:       #147898;
+  --s-violet:     #805ad5;
+  --s-text:       #1d1d1f;
+  --s-dim:        #5b5b60;
+  --s-faint:      rgba(60,60,67,.55);
+  --s-row-bg:     rgba(255,255,255,.88);
+  --s-row-border: rgba(20,30,48,.14);
+  --s-row-sheen:  rgba(255,255,255,.45);
+  background: linear-gradient(135deg, #e3e3e8, #f0f0f5 45%, #fafafa);
+}
+.light-theme.classic .bg-aurora {
+  background:
+    radial-gradient(circle at 6% -18%, rgba(184,192,208,.62) 0%, transparent 50%),
+    radial-gradient(circle at 95% -12%, rgba(184,192,208,.38) 0%, transparent 46%),
+    radial-gradient(circle at 108% 118%, rgba(216,220,232,.48) 0%, transparent 50%),
+    radial-gradient(circle at 50% 38%, rgba(91,141,239,.14) 0%, transparent 65%),
+    linear-gradient(135deg, #e3e3e8, #f0f0f5 45%, #fafafa);
+  border-radius: 10px; padding: 12px; margin-bottom: 8px;
+}
+.light-theme.quiet {
+  --s-bg:         #e3e3e8;
+  --s-panel:      #f2f2f5;
+  --s-card:       #ffffff;
+  --s-border:     rgba(211,211,216,1);
+  --s-shadow:     none;
+  --s-shadow-row: none;
+  --s-accent:     #007aff;
+  --s-accent-dim: rgba(0,122,255,.12);
+  --s-success:    #28885a;
+  --s-warning:    #b06e14;
+  --s-danger:     #d7281e;
+  --s-info:       #147898;
+  --s-violet:     #805ad5;
+  --s-text:       #1d1d1f;
+  --s-dim:        #5b5b60;
+  --s-faint:      rgba(60,60,67,.55);
+  --s-row-bg:     transparent;
+  --s-row-border: rgba(226,226,230,1);
+  --s-row-sheen:  transparent;
+  background: #f2f2f5;
+}
+.light-theme.vapor {
+  --s-bg:         #e3e3e8;
+  --s-panel:      rgba(255,255,255,.70);
+  --s-card:       rgba(255,255,255,.80);
+  --s-border:     rgba(20,30,48,.16);
+  --s-shadow:     none;
+  --s-shadow-row: none;
+  --s-accent:     #007aff;
+  --s-accent-dim: rgba(0,122,255,.14);
+  --s-success:    #28885a;
+  --s-warning:    #b06e14;
+  --s-danger:     #d7281e;
+  --s-info:       #147898;
+  --s-violet:     #805ad5;
+  --s-text:       #1d1d1f;
+  --s-dim:        #5b5b60;
+  --s-faint:      rgba(60,60,67,.55);
+  --s-row-bg:     rgba(0,122,255,.08);
+  --s-row-border: rgba(20,30,48,.12);
+  --s-row-sheen:  rgba(255,255,255,.70);
+  background:
+    radial-gradient(circle at 50% 38%, rgba(0,122,255,.14) 0%, transparent 65%),
+    radial-gradient(circle at 6% -18%, rgba(0,122,255,.10) 0%, transparent 50%),
+    linear-gradient(135deg, #e0e5f0, #eaeef8 45%, #f5f7fc);
+}
+
+/* ── Shared component styles ──────────────────────────────────────────────── */
+.panel-wrap {
+  border-radius: var(--s-r-card);
+  background: var(--s-panel);
+  border: 1px solid var(--s-border);
+  box-shadow: var(--s-shadow);
+  overflow: hidden;
+  backdrop-filter: blur(var(--s-blur)) saturate(var(--s-sat));
+  -webkit-backdrop-filter: blur(var(--s-blur)) saturate(var(--s-sat));
+}
+
+/* history rows */
+.history-list { }
+.h-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px;
+  height: 34px;
+  position: relative;
+  color: var(--s-text);
+  cursor: pointer;
+  transition: background .13s;
+}
+.h-row + .h-row { border-top: 1px solid var(--s-row-border); }
+
+/* Classic: card rows — each row is a subtle raised card */
+.classic .h-row {
+  background: var(--s-row-bg);
+  border-radius: 0;
+  border-top: 1px solid var(--s-row-border);
+  box-shadow: none;
+}
+.classic .h-row:first-child { border-top: none; }
+.classic .h-row.selected {
+  background: rgba(77,141,255,.16);
+  border-left: 2px solid var(--s-accent);
+  padding-left: 10px;
+}
+
+/* Quiet: hairline rows — no background, just dividers */
+.quiet .h-row {
+  background: transparent;
+  border-top: 1px solid var(--s-row-border);
+}
+.quiet .h-row:first-child { border-top: none; }
+.quiet .h-row.selected {
+  background: rgba(77,141,255,.10);
+  border-left: 2px solid var(--s-accent);
+  padding-left: 10px;
+}
+
+/* Vapor: inset rounded rows with gap */
+.vapor .history-list { display: flex; flex-direction: column; gap: var(--s-row-gap); padding: 4px; }
+.vapor .h-row {
+  border-radius: 10px;
+  background: var(--s-row-bg);
+  border: 1px solid var(--s-row-border);
+  box-shadow: inset 0 1px 0 var(--s-row-sheen);
+  margin: 0;
+}
+.vapor .h-row + .h-row { border-top: 1px solid var(--s-row-border); }
+.vapor .h-row.selected {
+  background: rgba(77,141,255,.18);
+  border-color: rgba(77,141,255,.3);
+  border-left: 2px solid var(--s-accent);
+  padding-left: 10px;
+}
+
+.h-row:hover:not(.selected) { background: rgba(255,255,255,.045); }
+.light-theme .h-row:hover:not(.selected) { background: rgba(0,0,0,.04); }
+
+.h-icon {
+  width: 14px; height: 14px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.h-chip {
+  padding: 1px 5px; border-radius: var(--s-r-chip);
+  font-size: 10px; font-weight: 600; letter-spacing: .3px; text-transform: uppercase;
+  flex-shrink: 0;
+}
+.chip-text   { background: rgba(77,141,255,.14); color: var(--s-accent); }
+.chip-url    { background: rgba(86,182,194,.14); color: var(--s-info); }
+.chip-image  { background: rgba(198,120,221,.14); color: var(--s-violet); }
+.chip-code   { background: rgba(198,120,221,.14); color: var(--s-violet); }
+.light-theme .chip-text  { background: rgba(0,122,255,.12); color: var(--s-accent); }
+.light-theme .chip-url   { background: rgba(20,120,170,.12); color: var(--s-info); }
+.light-theme .chip-image { background: rgba(128,90,213,.12); color: var(--s-violet); }
+
+.h-content { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--s-text); }
+.h-time { font-size: 11px; color: var(--s-faint); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.h-pin { font-size: 10px; color: var(--s-warning); margin-left: 2px; }
+
+/* ── Device card ──────────────────────────────────────────────────────────── */
+.device-card {
+  border-radius: var(--s-r-card);
+  background: var(--s-card);
+  border: 1px solid var(--s-border);
+  box-shadow: var(--s-shadow);
+  padding: 12px;
+  backdrop-filter: blur(var(--s-blur)) saturate(var(--s-sat));
+  -webkit-backdrop-filter: blur(var(--s-blur)) saturate(var(--s-sat));
+}
+.device-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.device-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-online  { background: var(--s-success); box-shadow: 0 0 0 3px rgba(95,173,101,.25); }
+.dot-offline { background: var(--s-dim); }
+.dot-sync    { background: var(--s-warning); }
+.light-theme .dot-online  { background: var(--s-success); box-shadow: 0 0 0 3px rgba(40,136,90,.22); }
+.device-name { font-size: 13px; font-weight: 600; color: var(--s-text); flex: 1; }
+.device-badge {
+  font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 20px;
+  letter-spacing: .3px; text-transform: uppercase;
+}
+.badge-this   { background: rgba(77,141,255,.16); color: var(--s-accent); border: 1px solid rgba(77,141,255,.3); }
+.badge-p2p    { background: rgba(86,182,194,.14); color: var(--s-info); border: 1px solid rgba(86,182,194,.25); }
+.badge-cloud  { background: rgba(77,141,255,.14); color: var(--s-accent); border: 1px solid rgba(77,141,255,.25); }
+.light-theme .badge-this  { background: rgba(0,122,255,.12); color: var(--s-accent); border-color: rgba(0,122,255,.28); }
+.light-theme .badge-p2p   { background: rgba(20,120,170,.10); color: var(--s-info); border-color: rgba(20,120,170,.22); }
+.light-theme .badge-cloud { background: rgba(0,122,255,.10); color: var(--s-accent); border-color: rgba(0,122,255,.22); }
+
+.device-field { display: flex; gap: 6px; font-size: 11px; color: var(--s-dim); margin-top: 4px; }
+.device-field span:first-child { color: var(--s-faint); min-width: 72px; }
+.device-fingerprint { font-family: "SF Mono","JetBrains Mono",monospace; font-size: 10px; color: var(--s-faint); margin-top: 6px; letter-spacing: .5px; }
+.device-sync-line { font-size: 11px; color: var(--s-success); margin-top: 6px; display: flex; align-items: center; gap: 4px; }
+
+/* ── Settings panel ───────────────────────────────────────────────────────── */
+.settings-panel {
+  border-radius: var(--s-r-card);
+  background: var(--s-panel);
+  border: 1px solid var(--s-border);
+  box-shadow: var(--s-shadow);
+  overflow: hidden;
+  backdrop-filter: blur(var(--s-blur)) saturate(var(--s-sat));
+  -webkit-backdrop-filter: blur(var(--s-blur)) saturate(var(--s-sat));
+}
+.settings-tabs {
+  display: flex; border-bottom: 1px solid var(--s-row-border);
+  padding: 0 12px;
+}
+.s-tab {
+  padding: 8px 10px; font-size: 11px; font-weight: 500; color: var(--s-dim);
+  cursor: pointer; position: relative; white-space: nowrap;
+}
+.s-tab.active {
+  color: var(--s-accent);
+}
+.s-tab.active::after {
+  content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 2px;
+  background: var(--s-accent); border-radius: 2px 2px 0 0;
+}
+.settings-row {
+  display: flex; align-items: center; padding: 8px 12px; gap: 12px;
+  border-bottom: 1px solid var(--s-row-border); min-height: 36px;
+}
+.settings-row:last-child { border-bottom: none; }
+.s-label { flex: 1; font-size: 13px; color: var(--s-text); }
+.s-sublabel { font-size: 11px; color: var(--s-faint); margin-top: 1px; }
+.s-toggle {
+  width: 32px; height: 18px; border-radius: 9px; position: relative; cursor: pointer;
+  flex-shrink: 0; transition: background .13s;
+}
+.s-toggle.on  { background: var(--s-accent); }
+.s-toggle.off { background: var(--s-dim); opacity: .4; }
+.s-toggle::after {
+  content: ''; position: absolute; top: 2px; width: 14px; height: 14px;
+  border-radius: 50%; background: #fff;
+  transition: left .13s;
+}
+.s-toggle.on::after  { left: 16px; }
+.s-toggle.off::after { left: 2px; }
+.s-select {
+  padding: 4px 8px; border-radius: var(--s-r-ctl);
+  background: var(--s-card); border: 1px solid var(--s-border);
+  color: var(--s-text); font-size: 11px; cursor: pointer;
+}
+.slider-wrap { display: flex; align-items: center; gap: 8px; }
+.s-slider {
+  -webkit-appearance: none; appearance: none;
+  width: 80px; height: 4px; border-radius: 2px;
+  background: linear-gradient(to right, var(--s-accent) 60%, rgba(255,255,255,.15) 60%);
+  cursor: pointer;
+}
+.s-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: none; box-shadow: 0 1px 3px rgba(0,0,0,.3);
+}
+.slider-val { font-size: 11px; color: var(--s-faint); width: 44px; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ── Buttons / chips row ──────────────────────────────────────────────────── */
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  padding: 5px 14px; border-radius: var(--s-r-ctl);
+  font-size: 12px; font-weight: 500; cursor: pointer;
+  border: 1px solid transparent; transition: background .13s;
+}
+.btn-primary {
+  background: var(--s-accent); color: #fff; border-color: var(--s-accent);
+}
+.btn-secondary {
+  background: var(--s-card); border-color: var(--s-border); color: var(--s-text);
+  backdrop-filter: blur(var(--s-blur));
+  -webkit-backdrop-filter: blur(var(--s-blur));
+}
+.btn-danger {
+  background: rgba(224,92,92,.14); border-color: rgba(224,92,92,.3); color: var(--s-danger);
+}
+.light-theme .btn-danger { background: rgba(215,40,30,.10); border-color: rgba(215,40,30,.25); color: var(--s-danger); }
+
+.chip-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.ui-chip {
+  padding: 3px 10px; border-radius: var(--s-r-chip);
+  font-size: 11px; font-weight: 500; cursor: pointer;
+  border: 1px solid var(--s-border); color: var(--s-dim);
+  background: var(--s-card);
+}
+.ui-chip.active-chip {
+  background: var(--s-accent-dim); border-color: rgba(77,141,255,.35); color: var(--s-accent);
+}
+.light-theme .ui-chip { background: rgba(0,0,0,.04); border-color: rgba(0,0,0,.10); color: var(--s-dim); }
+.light-theme .ui-chip.active-chip { background: rgba(0,122,255,.10); border-color: rgba(0,122,255,.3); color: var(--s-accent); }
+
+/* ── Sync badge ───────────────────────────────────────────────────────────── */
+.sync-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: var(--s-r-chip);
+  font-size: 12px; font-weight: 500;
+  background: rgba(95,173,101,.12); border: 1px solid rgba(95,173,101,.25);
+  color: var(--s-success);
+}
+.sync-badge-warn {
+  background: rgba(217,163,67,.12); border-color: rgba(217,163,67,.25); color: var(--s-warning);
+}
+.sync-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.light-theme .sync-badge { background: rgba(40,136,90,.10); border-color: rgba(40,136,90,.22); color: var(--s-success); }
+.light-theme .sync-badge-warn { background: rgba(176,110,20,.10); border-color: rgba(176,110,20,.22); color: var(--s-warning); }
+
+/* ── Nav tab strip ────────────────────────────────────────────────────────── */
+.nav-strip { display: flex; gap: 2px; padding: 4px; border-radius: var(--s-r-ctl); background: var(--s-card); border: 1px solid var(--s-border); }
+.nav-item { padding: 5px 10px; border-radius: calc(var(--s-r-ctl) - 2px); font-size: 11px; font-weight: 500; color: var(--s-dim); cursor: pointer; }
+
+/* Classic: fill+glow nav active */
+.classic .nav-item.active { background: var(--s-accent); color: #fff; box-shadow: 0 0 8px rgba(77,141,255,.4); }
+/* Quiet: tint text only */
+.quiet .nav-item.active { color: var(--s-accent); background: rgba(77,141,255,.10); }
+/* Vapor: glass pill with ring */
+.vapor .nav-item.active {
+  background: rgba(77,141,255,.18); color: var(--s-accent);
+  border: 1px solid rgba(77,141,255,.35);
+  box-shadow: 0 0 0 2px rgba(77,141,255,.2), inset 0 1px 0 rgba(255,255,255,.16);
+}
+.light-theme.classic .nav-item.active { background: var(--s-accent); color: #fff; box-shadow: 0 0 8px rgba(0,122,255,.3); }
+.light-theme.quiet   .nav-item.active { color: var(--s-accent); background: rgba(0,122,255,.10); }
+.light-theme.vapor   .nav-item.active { background: rgba(0,122,255,.12); color: var(--s-accent); border-color: rgba(0,122,255,.3); box-shadow: 0 0 0 2px rgba(0,122,255,.15), inset 0 1px 0 rgba(255,255,255,.70); }
+
+/* ── Utility ──────────────────────────────────────────────────────────────── */
+.mt4  { margin-top: 4px; }
+.mt8  { margin-top: 8px; }
+.mt12 { margin-top: 12px; }
+.mt16 { margin-top: 16px; }
+.fw6  { font-weight: 600; }
+.color-dim   { color: var(--s-dim); }
+.color-faint { color: var(--s-faint); }
+.color-accent { color: var(--s-accent); }
+.fs11 { font-size: 11px; }
+.fs10 { font-size: 10px; }
+.mono { font-family: "SF Mono","JetBrains Mono",monospace; }
+
+svg.icon { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; vertical-align: middle; }
+
+/* ── Theme toggle ─────────────────────────────────────────────────────────── */
+.theme-row { display: flex; gap: 24px; padding: 0 48px 0; }
+.theme-col  { flex: 1; }
+.theme-label { font-size: 10px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: rgba(232,234,237,.35); padding: 12px 0 6px; }
+
+/* ── Skin badge colors ────────────────────────────────────────────────────── */
+.badge-classic { background: rgba(77,141,255,.14); color: #4d8dff; border: 1px solid rgba(77,141,255,.28); }
+.badge-quiet   { background: rgba(157,160,168,.12); color: #9da0a8; border: 1px solid rgba(157,160,168,.25); }
+.badge-vapor   { background: rgba(198,120,221,.14); color: #c678dd; border: 1px solid rgba(198,120,221,.28); }
+</style>
+</head>
+<body>
+
+<div class="page-header">
+  <h1>CopyPaste — Skin Design Showcase</h1>
+  <p>Live reference for Classic · Quiet · Vapor skins across dark &amp; light themes. Token values sourced directly from <code>crates/copypaste-ui/src/index.css</code> §SKIN and <code>docs/design/DESIGN-SYSTEM-v2.md</code>.</p>
+</div>
+
+<div class="controls">
+  <label>View:</label>
+  <button class="ctrl-btn active" onclick="showTheme('both')">Both themes</button>
+  <button class="ctrl-btn" onclick="showTheme('dark')">Dark only</button>
+  <button class="ctrl-btn" onclick="showTheme('light')">Light only</button>
+  <div class="divider"></div>
+  <label>Platform:</label>
+  <button class="ctrl-btn active" onclick="">macOS + Android</button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DARK THEME ROWS
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div id="dark-section">
+<div style="padding: 8px 48px 0; font-size: 10px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: rgba(232,234,237,.3);">DARK THEME</div>
+<div class="showcase-grid">
+
+  <!-- ── Classic Dark ─────────────────────────────────────────────────────── -->
+  <div class="skin-col classic">
+    <div class="skin-header">
+      <span class="skin-badge badge-classic">Classic</span>
+      <span class="skin-name" style="color:#e8eaed;">Liquid Glass</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38);">Background mode: Aurora</div>
+    <div class="bg-aurora" style="height:48px; position:relative; overflow:hidden;">
+      <span style="font-size:10px; color:rgba(232,234,237,.38); position:absolute; bottom:6px; left:12px;">Aurora canvas — radial glow blobs animate behind frosted surfaces</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38);">History list — card rows</div>
+    <div class="panel-wrap">
+      <div class="history-list">
+        <div class="h-row selected">
+          <span class="h-chip chip-text">TXT</span>
+          <span class="h-content">npm install --save-dev @types/react vite</span>
+          <span class="h-pin">⚑</span>
+          <span class="h-time">now</span>
+        </div>
+        <div class="h-row">
+          <span class="h-chip chip-url">URL</span>
+          <span class="h-content">github.com/rust-lang/rust/issues/131 · Tracking Issue</span>
+          <span class="h-time">2m</span>
+        </div>
+        <div class="h-row">
+          <span class="h-chip chip-image">IMG</span>
+          <span class="h-content">screenshot-2026-06-20.png · 1280×800</span>
+          <span class="h-time">18m</span>
+        </div>
+        <div class="h-row">
+          <span class="h-chip chip-code">&lt;/&gt;</span>
+          <span class="h-content">fn encrypt_item&amp;self, pt: &amp;[u8]) → Result&lt;Vec…</span>
+          <span class="h-time">1h</span>
+        </div>
+        <div class="h-row">
+          <span class="h-chip chip-text">TXT</span>
+          <span class="h-content">Meeting notes — Q3 2026 planning session</span>
+          <span class="h-time">3h</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Devices card</div>
+    <div class="device-card">
+      <div class="device-header">
+        <span class="device-dot dot-online"></span>
+        <span class="device-name">MacBook Pro 16"</span>
+        <span class="device-badge badge-this">This device</span>
+      </div>
+      <div class="device-field"><span>Model</span><span>macOS 15.4 · arm64</span></div>
+      <div class="device-field"><span>App ver</span><span>0.7.5</span></div>
+      <div class="device-field"><span>Local IP</span><span>192.168.1.42</span></div>
+      <div class="device-fingerprint">4D:8A:3C:91:F2:07:B6:E5:12:88:4A:C3:77:DA:09:21</div>
+      <div class="device-sync-line">&#10003; Synced 2m ago</div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div class="device-card mt4">
+        <div class="device-header">
+          <span class="device-dot dot-offline"></span>
+          <span class="device-name">Pixel 9 Pro</span>
+          <span class="device-badge badge-cloud">Cloud</span>
+        </div>
+        <div class="device-field"><span>Last seen</span><span>4h ago</span></div>
+        <div class="device-sync-line" style="color:rgba(157,160,168,.6);">&#9679; Offline</div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Settings panel</div>
+    <div class="settings-panel">
+      <div class="settings-tabs">
+        <div class="s-tab active">General</div>
+        <div class="s-tab">Display</div>
+        <div class="s-tab">Sync</div>
+        <div class="s-tab">Storage</div>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="s-label">Launch at login</div>
+          <div class="s-sublabel" style="font-size:11px; color:rgba(232,234,237,.38);">Start CopyPaste when you log in</div>
+        </div>
+        <div class="s-toggle on"></div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Translucency</div>
+        <div class="s-toggle on"></div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Max items</div>
+        <div class="slider-wrap">
+          <input type="range" class="s-slider" min="0" max="7" value="5">
+          <span class="slider-val">2 500</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Skin</div>
+        <select class="s-select" style="background:#23252d; border-color:rgba(56,59,66,1); color:#e8eaed;">
+          <option selected>Classic</option>
+          <option>Quiet</option>
+          <option>Vapor</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Buttons &amp; chips</div>
+    <div class="btn-row">
+      <button class="btn btn-primary">Paste</button>
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-danger">Delete</button>
+    </div>
+    <div class="chip-row">
+      <span class="ui-chip active-chip">All</span>
+      <span class="ui-chip">Text</span>
+      <span class="ui-chip">URLs</span>
+      <span class="ui-chip">Images</span>
+      <span class="ui-chip">Code</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Sync badge &amp; nav</div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <span class="sync-badge"><span class="sync-dot"></span>Synced</span>
+      <span class="sync-badge sync-badge-warn"><span class="sync-dot"></span>Syncing…</span>
+    </div>
+    <div class="nav-strip mt8">
+      <div class="nav-item active">History</div>
+      <div class="nav-item">Devices</div>
+      <div class="nav-item">Settings</div>
+    </div>
+  </div>
+
+  <!-- ── Quiet Dark ──────────────────────────────────────────────────────── -->
+  <div class="skin-col quiet">
+    <div class="skin-header">
+      <span class="skin-badge badge-quiet">Quiet</span>
+      <span class="skin-name" style="color:#e8eaed;">Flat / Hairline</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38);">Background mode: Flat solid</div>
+    <div style="height:48px; background:#13141a; border-radius:6px; border: 1px solid rgba(56,59,66,.6); display:flex; align-items:center; padding:0 12px; margin-bottom:8px;">
+      <span style="font-size:10px; color:rgba(232,234,237,.38);">Solid #13141A — no blur, no aurora, no glow</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38);">History list — hairline rows</div>
+    <div class="panel-wrap" style="border-radius:10px;">
+      <div class="history-list">
+        <div class="h-row selected">
+          <span class="h-chip chip-text">TXT</span>
+          <span class="h-content">npm install --save-dev @types/react vite</span>
+          <span class="h-pin">⚑</span>
+          <span class="h-time">now</span>
+        </div>
+        <div class="h-row">
+          <span class="h-chip chip-url">URL</span>
+          <span class="h-content">github.com/rust-lang/rust/issues/131</span>
+          <span class="h-time">2m</span>
+        </div>
+        <div class="h-row">
+          <span class="h-chip chip-image">IMG</span>
+          <span class="h-content">screenshot-2026-06-20.png · 1280×800</span>
+          <span class="h-time">18m</span>
+        </div>
+        <div class="h-row">
+          <span class="h-chip chip-code">&lt;/&gt;</span>
+          <span class="h-content">fn encrypt_item(&amp;self, pt: &amp;[u8]) → Result…</span>
+          <span class="h-time">1h</span>
+        </div>
+        <div class="h-row">
+          <span class="h-chip chip-text">TXT</span>
+          <span class="h-content">Meeting notes — Q3 2026 planning session</span>
+          <span class="h-time">3h</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Devices card</div>
+    <div class="device-card">
+      <div class="device-header">
+        <span class="device-dot dot-online"></span>
+        <span class="device-name">MacBook Pro 16"</span>
+        <span class="device-badge badge-this">This device</span>
+      </div>
+      <div class="device-field"><span>Model</span><span>macOS 15.4 · arm64</span></div>
+      <div class="device-field"><span>App ver</span><span>0.7.5</span></div>
+      <div class="device-field"><span>Local IP</span><span>192.168.1.42</span></div>
+      <div class="device-fingerprint">4D:8A:3C:91:F2:07:B6:E5:12:88:4A:C3:77:DA:09:21</div>
+      <div class="device-sync-line">&#10003; Synced 2m ago</div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div class="device-card">
+        <div class="device-header">
+          <span class="device-dot dot-sync"></span>
+          <span class="device-name">iPhone 16 Pro</span>
+          <span class="device-badge badge-p2p">P2P</span>
+        </div>
+        <div class="device-field"><span>Last seen</span><span>Just now</span></div>
+        <div class="device-sync-line" style="color:#d9a343;">&#9679; Reconnecting…</div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Settings panel</div>
+    <div class="settings-panel">
+      <div class="settings-tabs">
+        <div class="s-tab active">General</div>
+        <div class="s-tab">Display</div>
+        <div class="s-tab">Sync</div>
+        <div class="s-tab">Storage</div>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="s-label">Launch at login</div>
+          <div class="s-sublabel" style="font-size:11px; color:rgba(232,234,237,.38);">Start CopyPaste when you log in</div>
+        </div>
+        <div class="s-toggle on"></div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Translucency</div>
+        <div class="s-toggle off"></div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Max items</div>
+        <div class="slider-wrap">
+          <input type="range" class="s-slider" min="0" max="7" value="5">
+          <span class="slider-val">2 500</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Skin</div>
+        <select class="s-select" style="background:#23252d; border-color:rgba(56,59,66,1); color:#e8eaed;">
+          <option>Classic</option>
+          <option selected>Quiet</option>
+          <option>Vapor</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Buttons &amp; chips</div>
+    <div class="btn-row">
+      <button class="btn btn-primary">Paste</button>
+      <button class="btn btn-secondary">Cancel</button>
+      <button class="btn btn-danger">Delete</button>
+    </div>
+    <div class="chip-row">
+      <span class="ui-chip active-chip">All</span>
+      <span class="ui-chip">Text</span>
+      <span class="ui-chip">URLs</span>
+      <span class="ui-chip">Images</span>
+      <span class="ui-chip">Code</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Sync badge &amp; nav</div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <span class="sync-badge"><span class="sync-dot"></span>Synced</span>
+      <span class="sync-badge sync-badge-warn"><span class="sync-dot"></span>Syncing…</span>
+    </div>
+    <div class="nav-strip mt8">
+      <div class="nav-item active">History</div>
+      <div class="nav-item">Devices</div>
+      <div class="nav-item">Settings</div>
+    </div>
+  </div>
+
+  <!-- ── Vapor Dark ──────────────────────────────────────────────────────── -->
+  <div class="skin-col vapor">
+    <div class="skin-header">
+      <span class="skin-badge badge-vapor">Vapor</span>
+      <span class="skin-name" style="color:#e8eaed;">Refined Glass</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38);">Background mode: Tint-blob</div>
+    <div style="height:48px; border-radius:10px; overflow:hidden; margin-bottom:8px; background: radial-gradient(circle at 30% 50%, rgba(77,141,255,.32) 0%, transparent 60%), radial-gradient(circle at 80% 30%, rgba(198,120,221,.18) 0%, transparent 50%), linear-gradient(135deg, #07090f, #0e1220 45%, #111826); display:flex; align-items:center; padding:0 12px;">
+      <span style="font-size:10px; color:rgba(232,234,237,.5);">Accent-tinted radial blobs — no rainbow aurora</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38);">History list — inset rounded rows</div>
+    <div class="panel-wrap">
+      <div class="history-list" style="padding:4px; display:flex; flex-direction:column; gap:3px;">
+        <div class="h-row selected" style="border-radius:10px; border:1px solid rgba(77,141,255,.3);">
+          <span class="h-chip chip-text">TXT</span>
+          <span class="h-content">npm install --save-dev @types/react vite</span>
+          <span class="h-pin">⚑</span>
+          <span class="h-time">now</span>
+        </div>
+        <div class="h-row" style="border-radius:10px; border:1px solid rgba(255,255,255,.12); background:rgba(77,141,255,.10);">
+          <span class="h-chip chip-url">URL</span>
+          <span class="h-content">github.com/rust-lang/rust/issues/131</span>
+          <span class="h-time">2m</span>
+        </div>
+        <div class="h-row" style="border-radius:10px; border:1px solid rgba(255,255,255,.12); background:rgba(77,141,255,.10);">
+          <span class="h-chip chip-image">IMG</span>
+          <span class="h-content">screenshot-2026-06-20.png · 1280×800</span>
+          <span class="h-time">18m</span>
+        </div>
+        <div class="h-row" style="border-radius:10px; border:1px solid rgba(255,255,255,.12); background:rgba(77,141,255,.10);">
+          <span class="h-chip chip-code">&lt;/&gt;</span>
+          <span class="h-content">fn encrypt_item(&amp;self, pt: &amp;[u8]) → Result…</span>
+          <span class="h-time">1h</span>
+        </div>
+        <div class="h-row" style="border-radius:10px; border:1px solid rgba(255,255,255,.12); background:rgba(77,141,255,.10);">
+          <span class="h-chip chip-text">TXT</span>
+          <span class="h-content">Meeting notes — Q3 2026 planning session</span>
+          <span class="h-time">3h</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Devices card</div>
+    <div class="device-card" style="border-radius:16px;">
+      <div class="device-header">
+        <span class="device-dot dot-online"></span>
+        <span class="device-name">MacBook Pro 16"</span>
+        <span class="device-badge badge-this">This device</span>
+      </div>
+      <div class="device-field"><span>Model</span><span>macOS 15.4 · arm64</span></div>
+      <div class="device-field"><span>App ver</span><span>0.7.5</span></div>
+      <div class="device-field"><span>Local IP</span><span>192.168.1.42</span></div>
+      <div class="device-fingerprint">4D:8A:3C:91:F2:07:B6:E5:12:88:4A:C3:77:DA:09:21</div>
+      <div class="device-sync-line">&#10003; Synced 2m ago</div>
+    </div>
+
+    <div style="margin-top:10px;">
+      <div class="device-card" style="border-radius:16px;">
+        <div class="device-header">
+          <span class="device-dot dot-offline"></span>
+          <span class="device-name">Pixel 9 Pro</span>
+          <span class="device-badge badge-cloud">Cloud</span>
+        </div>
+        <div class="device-field"><span>Last seen</span><span>4h ago</span></div>
+        <div class="device-sync-line" style="color:rgba(157,160,168,.6);">&#9679; Offline</div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Settings panel</div>
+    <div class="settings-panel" style="border-radius:16px;">
+      <div class="settings-tabs">
+        <div class="s-tab active">General</div>
+        <div class="s-tab">Display</div>
+        <div class="s-tab">Sync</div>
+        <div class="s-tab">Storage</div>
+      </div>
+      <div class="settings-row">
+        <div>
+          <div class="s-label">Launch at login</div>
+          <div class="s-sublabel" style="font-size:11px; color:rgba(232,234,237,.38);">Start CopyPaste when you log in</div>
+        </div>
+        <div class="s-toggle on"></div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Translucency</div>
+        <div class="s-toggle on"></div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Max items</div>
+        <div class="slider-wrap">
+          <input type="range" class="s-slider" min="0" max="7" value="5">
+          <span class="slider-val">2 500</span>
+        </div>
+      </div>
+      <div class="settings-row">
+        <div class="s-label">Skin</div>
+        <select class="s-select" style="background:rgba(28,31,42,.5); border-color:rgba(255,255,255,.16); color:#e8eaed;">
+          <option>Classic</option>
+          <option>Quiet</option>
+          <option selected>Vapor</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Buttons &amp; chips</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" style="border-radius:12px;">Paste</button>
+      <button class="btn btn-secondary" style="border-radius:12px;">Cancel</button>
+      <button class="btn btn-danger" style="border-radius:12px;">Delete</button>
+    </div>
+    <div class="chip-row">
+      <span class="ui-chip active-chip" style="border-radius:10px;">All</span>
+      <span class="ui-chip" style="border-radius:10px;">Text</span>
+      <span class="ui-chip" style="border-radius:10px;">URLs</span>
+      <span class="ui-chip" style="border-radius:10px;">Images</span>
+      <span class="ui-chip" style="border-radius:10px;">Code</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(232,234,237,.38); margin-top:16px;">Sync badge &amp; nav</div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <span class="sync-badge" style="border-radius:10px;"><span class="sync-dot"></span>Synced</span>
+      <span class="sync-badge sync-badge-warn" style="border-radius:10px;"><span class="sync-dot"></span>Syncing…</span>
+    </div>
+    <div class="nav-strip mt8" style="border-radius:12px;">
+      <div class="nav-item active" style="border-radius:10px;">History</div>
+      <div class="nav-item" style="border-radius:10px;">Devices</div>
+      <div class="nav-item" style="border-radius:10px;">Settings</div>
+    </div>
+  </div>
+
+</div><!-- /showcase-grid dark -->
+</div><!-- /dark-section -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     LIGHT THEME ROWS
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div id="light-section" style="border-top: 2px solid rgba(255,255,255,.07); margin-top:4px;">
+<div style="padding: 8px 48px 0; font-size: 10px; font-weight: 600; letter-spacing: .8px; text-transform: uppercase; color: rgba(232,234,237,.3);">LIGHT THEME</div>
+<div class="showcase-grid">
+
+  <!-- ── Classic Light ────────────────────────────────────────────────────── -->
+  <div class="skin-col classic light-theme">
+    <div class="skin-header">
+      <span class="skin-badge badge-classic">Classic</span>
+      <span class="skin-name" style="color:#1d1d1f;">Liquid Glass · Light</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4);">Background: Aurora (light palette)</div>
+    <div class="bg-aurora" style="height:48px; position:relative; overflow:hidden;">
+      <span style="font-size:10px; color:rgba(29,29,31,.38); position:absolute; bottom:6px; left:12px;">Frosted glass over light aurora canvas</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4);">History list — card rows</div>
+    <div class="panel-wrap" style="background:rgba(255,255,255,.82); border-color:rgba(20,30,48,.14); box-shadow:0 2px 8px rgba(0,0,0,.10);">
+      <div class="history-list">
+        <div class="h-row selected" style="background:rgba(0,122,255,.12); border-left:2px solid #007aff; padding-left:10px; border-top:none;">
+          <span class="h-chip chip-text" style="background:rgba(0,122,255,.10); color:#007aff;">TXT</span>
+          <span class="h-content" style="color:#1d1d1f;">npm install --save-dev @types/react vite</span>
+          <span class="h-pin" style="color:#b06e14;">⚑</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">now</span>
+        </div>
+        <div class="h-row" style="border-top:1px solid rgba(226,226,230,1);">
+          <span class="h-chip chip-url" style="background:rgba(20,120,170,.10); color:#147898;">URL</span>
+          <span class="h-content" style="color:#1d1d1f;">github.com/rust-lang/rust/issues/131</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">2m</span>
+        </div>
+        <div class="h-row" style="border-top:1px solid rgba(226,226,230,1);">
+          <span class="h-chip chip-image" style="background:rgba(128,90,213,.10); color:#805ad5;">IMG</span>
+          <span class="h-content" style="color:#1d1d1f;">screenshot-2026-06-20.png</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">18m</span>
+        </div>
+        <div class="h-row" style="border-top:1px solid rgba(226,226,230,1);">
+          <span class="h-chip chip-code" style="background:rgba(128,90,213,.10); color:#805ad5;">&lt;/&gt;</span>
+          <span class="h-content" style="color:#1d1d1f;">fn encrypt_item(&amp;self, pt: &amp;[u8])…</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">1h</span>
+        </div>
+        <div class="h-row" style="border-top:1px solid rgba(226,226,230,1);">
+          <span class="h-chip chip-text" style="background:rgba(0,122,255,.10); color:#007aff;">TXT</span>
+          <span class="h-content" style="color:#1d1d1f;">Meeting notes — Q3 2026</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">3h</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Devices card</div>
+    <div class="device-card" style="background:rgba(255,255,255,.88); border-color:rgba(20,30,48,.14); box-shadow:0 2px 8px rgba(0,0,0,.10);">
+      <div class="device-header">
+        <span class="device-dot dot-online" style="background:#28885a; box-shadow:0 0 0 3px rgba(40,136,90,.22);"></span>
+        <span class="device-name" style="color:#1d1d1f;">MacBook Pro 16"</span>
+        <span class="device-badge badge-this" style="background:rgba(0,122,255,.10); color:#007aff; border-color:rgba(0,122,255,.28);">This device</span>
+      </div>
+      <div class="device-field" style="color:#5b5b60;"><span style="color:rgba(60,60,67,.55);">Model</span><span>macOS 15.4 · arm64</span></div>
+      <div class="device-field" style="color:#5b5b60;"><span style="color:rgba(60,60,67,.55);">App ver</span><span>0.7.5</span></div>
+      <div class="device-fingerprint" style="color:rgba(60,60,67,.55);">4D:8A:3C:91:F2:07:B6:E5:12:88:4A:C3:77:DA:09:21</div>
+      <div class="device-sync-line" style="color:#28885a;">&#10003; Synced 2m ago</div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Settings panel</div>
+    <div class="settings-panel" style="background:rgba(255,255,255,.82); border-color:rgba(20,30,48,.14); box-shadow:0 2px 8px rgba(0,0,0,.10);">
+      <div class="settings-tabs" style="border-color:rgba(226,226,230,1);">
+        <div class="s-tab active" style="color:#007aff;">General</div>
+        <div class="s-tab" style="color:#5b5b60;">Display</div>
+        <div class="s-tab" style="color:#5b5b60;">Sync</div>
+        <div class="s-tab" style="color:#5b5b60;">Storage</div>
+      </div>
+      <div class="settings-row" style="border-color:rgba(226,226,230,1);">
+        <div><div class="s-label" style="color:#1d1d1f;">Launch at login</div><div style="font-size:11px; color:rgba(60,60,67,.55);">Start CopyPaste when you log in</div></div>
+        <div class="s-toggle on" style="background:#007aff;"></div>
+      </div>
+      <div class="settings-row" style="border-color:rgba(226,226,230,1);">
+        <div class="s-label" style="color:#1d1d1f;">Translucency</div>
+        <div class="s-toggle on" style="background:#007aff;"></div>
+      </div>
+      <div class="settings-row" style="border-bottom:none;">
+        <div class="s-label" style="color:#1d1d1f;">Skin</div>
+        <select class="s-select" style="background:#fff; border-color:rgba(20,30,48,.14); color:#1d1d1f;">
+          <option selected>Classic</option><option>Quiet</option><option>Vapor</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Buttons, chips, nav</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" style="background:#007aff; border-color:#007aff;">Paste</button>
+      <button class="btn btn-secondary" style="background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.10); color:#1d1d1f;">Cancel</button>
+      <button class="btn btn-danger" style="background:rgba(215,40,30,.10); border-color:rgba(215,40,30,.25); color:#d7281e;">Delete</button>
+    </div>
+    <div class="chip-row">
+      <span class="ui-chip active-chip" style="background:rgba(0,122,255,.10); border-color:rgba(0,122,255,.3); color:#007aff;">All</span>
+      <span class="ui-chip" style="background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.10); color:#5b5b60;">Text</span>
+      <span class="ui-chip" style="background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.10); color:#5b5b60;">URLs</span>
+      <span class="ui-chip" style="background:rgba(0,0,0,.04); border-color:rgba(0,0,0,.10); color:#5b5b60;">Images</span>
+    </div>
+    <div class="nav-strip mt8" style="background:rgba(255,255,255,.88); border-color:rgba(20,30,48,.14);">
+      <div class="nav-item active" style="background:#007aff; color:#fff; box-shadow:0 0 8px rgba(0,122,255,.3);">History</div>
+      <div class="nav-item" style="color:#5b5b60;">Devices</div>
+      <div class="nav-item" style="color:#5b5b60;">Settings</div>
+    </div>
+  </div>
+
+  <!-- ── Quiet Light ───────────────────────────────────────────────────────── -->
+  <div class="skin-col quiet light-theme" style="background:#f2f2f5;">
+    <div class="skin-header">
+      <span class="skin-badge badge-quiet" style="background:rgba(91,91,96,.10); color:#5b5b60; border-color:rgba(91,91,96,.22);">Quiet</span>
+      <span class="skin-name" style="color:#1d1d1f;">Flat / Hairline · Light</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4);">Background: Flat #F2F2F5</div>
+    <div style="height:48px; background:#f2f2f5; border-radius:6px; border:1px solid rgba(211,211,216,.8); display:flex; align-items:center; padding:0 12px; margin-bottom:8px;">
+      <span style="font-size:10px; color:rgba(29,29,31,.38);">Solid systemGray6 — clean, minimal, no effects</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4);">History list — hairline rows</div>
+    <div style="border-radius:10px; background:#fff; border:1px solid rgba(211,211,216,1); overflow:hidden;">
+      <div class="history-list">
+        <div class="h-row selected" style="background:rgba(0,122,255,.08); border-left:2px solid #007aff; padding-left:10px; border-top:none;">
+          <span class="h-chip" style="background:rgba(0,122,255,.10); color:#007aff; border-radius:6px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">TXT</span>
+          <span class="h-content" style="color:#1d1d1f;">npm install --save-dev @types/react vite</span>
+          <span class="h-pin" style="color:#b06e14;">⚑</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">now</span>
+        </div>
+        <div class="h-row" style="border-top:1px solid rgba(226,226,230,1);">
+          <span class="h-chip" style="background:rgba(20,120,170,.10); color:#147898; border-radius:6px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">URL</span>
+          <span class="h-content" style="color:#1d1d1f;">github.com/rust-lang/rust/issues/131</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">2m</span>
+        </div>
+        <div class="h-row" style="border-top:1px solid rgba(226,226,230,1);">
+          <span class="h-chip" style="background:rgba(128,90,213,.10); color:#805ad5; border-radius:6px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">IMG</span>
+          <span class="h-content" style="color:#1d1d1f;">screenshot-2026-06-20.png</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">18m</span>
+        </div>
+        <div class="h-row" style="border-top:1px solid rgba(226,226,230,1);">
+          <span class="h-chip" style="background:rgba(128,90,213,.10); color:#805ad5; border-radius:6px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">&lt;/&gt;</span>
+          <span class="h-content" style="color:#1d1d1f;">fn encrypt_item(&amp;self, pt: &amp;[u8])…</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">1h</span>
+        </div>
+        <div class="h-row" style="border-top:1px solid rgba(226,226,230,1);">
+          <span class="h-chip" style="background:rgba(0,122,255,.10); color:#007aff; border-radius:6px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">TXT</span>
+          <span class="h-content" style="color:#1d1d1f;">Meeting notes — Q3 2026</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">3h</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Devices card</div>
+    <div style="border-radius:10px; background:#fff; border:1px solid rgba(211,211,216,1); padding:12px;">
+      <div class="device-header">
+        <span class="device-dot" style="width:8px;height:8px;border-radius:50%;background:#28885a;box-shadow:0 0 0 3px rgba(40,136,90,.18); flex-shrink:0;"></span>
+        <span class="device-name" style="color:#1d1d1f;">MacBook Pro 16"</span>
+        <span class="device-badge" style="background:rgba(0,122,255,.10); color:#007aff; border:1px solid rgba(0,122,255,.28); border-radius:20px; font-size:10px; font-weight:600; padding:2px 7px; letter-spacing:.3px; text-transform:uppercase;">This device</span>
+      </div>
+      <div class="device-field" style="color:#5b5b60;"><span style="color:rgba(60,60,67,.55);">Model</span><span>macOS 15.4 · arm64</span></div>
+      <div class="device-field" style="color:#5b5b60;"><span style="color:rgba(60,60,67,.55);">App ver</span><span>0.7.5</span></div>
+      <div class="device-fingerprint" style="color:rgba(60,60,67,.55);">4D:8A:3C:91:F2:07:B6:E5:12:88:4A:C3:77:DA:09:21</div>
+      <div class="device-sync-line" style="color:#28885a;">&#10003; Synced 2m ago</div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Settings panel</div>
+    <div style="border-radius:10px; background:#fff; border:1px solid rgba(211,211,216,1); overflow:hidden;">
+      <div class="settings-tabs" style="border-color:rgba(226,226,230,1);">
+        <div class="s-tab active" style="color:#007aff;">General</div>
+        <div class="s-tab" style="color:#5b5b60;">Display</div>
+        <div class="s-tab" style="color:#5b5b60;">Sync</div>
+      </div>
+      <div class="settings-row" style="border-color:rgba(226,226,230,1);">
+        <div><div style="font-size:13px; color:#1d1d1f;">Launch at login</div><div style="font-size:11px; color:rgba(60,60,67,.55);">Start when you log in</div></div>
+        <div class="s-toggle on" style="background:#007aff;"></div>
+      </div>
+      <div class="settings-row" style="border-color:rgba(226,226,230,1);">
+        <div style="font-size:13px; color:#1d1d1f;">Translucency</div>
+        <div class="s-toggle off"></div>
+      </div>
+      <div class="settings-row" style="border-bottom:none;">
+        <div style="font-size:13px; color:#1d1d1f;">Skin</div>
+        <select class="s-select" style="background:#fff; border-color:rgba(211,211,216,1); color:#1d1d1f;">
+          <option>Classic</option><option selected>Quiet</option><option>Vapor</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Buttons, chips, nav</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" style="background:#007aff; border-color:#007aff; border-radius:7px;">Paste</button>
+      <button class="btn btn-secondary" style="background:rgba(0,0,0,.04); border-color:rgba(211,211,216,1); color:#1d1d1f; border-radius:7px;">Cancel</button>
+      <button class="btn" style="background:rgba(215,40,30,.08); border-color:rgba(215,40,30,.22); color:#d7281e; border-radius:7px;">Delete</button>
+    </div>
+    <div class="chip-row">
+      <span style="padding:3px 10px; border-radius:6px; font-size:11px; font-weight:500; background:rgba(0,122,255,.10); border:1px solid rgba(0,122,255,.3); color:#007aff;">All</span>
+      <span style="padding:3px 10px; border-radius:6px; font-size:11px; font-weight:500; background:rgba(0,0,0,.04); border:1px solid rgba(211,211,216,1); color:#5b5b60;">Text</span>
+      <span style="padding:3px 10px; border-radius:6px; font-size:11px; font-weight:500; background:rgba(0,0,0,.04); border:1px solid rgba(211,211,216,1); color:#5b5b60;">URLs</span>
+      <span style="padding:3px 10px; border-radius:6px; font-size:11px; font-weight:500; background:rgba(0,0,0,.04); border:1px solid rgba(211,211,216,1); color:#5b5b60;">Images</span>
+    </div>
+    <div style="display:flex; gap:2px; padding:4px; border-radius:7px; background:#fff; border:1px solid rgba(211,211,216,1); margin-top:8px;">
+      <div style="padding:5px 10px; border-radius:5px; font-size:11px; font-weight:500; color:#007aff; background:rgba(0,122,255,.10);">History</div>
+      <div style="padding:5px 10px; border-radius:5px; font-size:11px; font-weight:500; color:#5b5b60;">Devices</div>
+      <div style="padding:5px 10px; border-radius:5px; font-size:11px; font-weight:500; color:#5b5b60;">Settings</div>
+    </div>
+  </div>
+
+  <!-- ── Vapor Light ───────────────────────────────────────────────────────── -->
+  <div class="skin-col vapor light-theme" style="background:linear-gradient(135deg, #e0e5f0, #eaeef8 45%, #f5f7fc);">
+    <div class="skin-header">
+      <span class="skin-badge badge-vapor" style="background:rgba(128,90,213,.12); color:#805ad5; border-color:rgba(128,90,213,.28);">Vapor</span>
+      <span class="skin-name" style="color:#1d1d1f;">Refined Glass · Light</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4);">Background: Tint-blob (light)</div>
+    <div style="height:48px; border-radius:12px; overflow:hidden; margin-bottom:8px; background:radial-gradient(circle at 30% 50%, rgba(0,122,255,.14) 0%, transparent 60%), radial-gradient(circle at 80% 30%, rgba(128,90,213,.10) 0%, transparent 50%), linear-gradient(135deg, #e0e5f0, #eaeef8 45%, #f5f7fc); display:flex; align-items:center; padding:0 12px;">
+      <span style="font-size:10px; color:rgba(29,29,31,.5);">Accent-tinted blobs on light canvas</span>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4);">History list — inset rounded rows</div>
+    <div style="border-radius:16px; background:rgba(255,255,255,.70); border:1px solid rgba(20,30,48,.16); overflow:hidden; backdrop-filter:blur(34px) saturate(1.7); -webkit-backdrop-filter:blur(34px) saturate(1.7);">
+      <div style="display:flex; flex-direction:column; gap:3px; padding:4px;">
+        <div class="h-row selected" style="border-radius:10px; background:rgba(0,122,255,.12); border:1px solid rgba(0,122,255,.28); border-left:2px solid #007aff; padding-left:10px;">
+          <span class="h-chip" style="background:rgba(0,122,255,.12); color:#007aff; border-radius:10px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">TXT</span>
+          <span class="h-content" style="color:#1d1d1f;">npm install --save-dev @types/react vite</span>
+          <span class="h-pin" style="color:#b06e14;">⚑</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">now</span>
+        </div>
+        <div class="h-row" style="border-radius:10px; background:rgba(0,122,255,.06); border:1px solid rgba(20,30,48,.10); box-shadow:inset 0 1px 0 rgba(255,255,255,.70);">
+          <span class="h-chip" style="background:rgba(20,120,170,.10); color:#147898; border-radius:10px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">URL</span>
+          <span class="h-content" style="color:#1d1d1f;">github.com/rust-lang/rust/issues/131</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">2m</span>
+        </div>
+        <div class="h-row" style="border-radius:10px; background:rgba(0,122,255,.06); border:1px solid rgba(20,30,48,.10); box-shadow:inset 0 1px 0 rgba(255,255,255,.70);">
+          <span class="h-chip" style="background:rgba(128,90,213,.10); color:#805ad5; border-radius:10px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">IMG</span>
+          <span class="h-content" style="color:#1d1d1f;">screenshot-2026-06-20.png</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">18m</span>
+        </div>
+        <div class="h-row" style="border-radius:10px; background:rgba(0,122,255,.06); border:1px solid rgba(20,30,48,.10); box-shadow:inset 0 1px 0 rgba(255,255,255,.70);">
+          <span class="h-chip" style="background:rgba(128,90,213,.10); color:#805ad5; border-radius:10px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">&lt;/&gt;</span>
+          <span class="h-content" style="color:#1d1d1f;">fn encrypt_item(&amp;self, pt: &amp;[u8])…</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">1h</span>
+        </div>
+        <div class="h-row" style="border-radius:10px; background:rgba(0,122,255,.06); border:1px solid rgba(20,30,48,.10); box-shadow:inset 0 1px 0 rgba(255,255,255,.70);">
+          <span class="h-chip" style="background:rgba(0,122,255,.10); color:#007aff; border-radius:10px; padding:1px 5px; font-size:10px; font-weight:600; text-transform:uppercase;">TXT</span>
+          <span class="h-content" style="color:#1d1d1f;">Meeting notes — Q3 2026</span>
+          <span class="h-time" style="color:rgba(60,60,67,.55);">3h</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Devices card</div>
+    <div style="border-radius:16px; background:rgba(255,255,255,.80); border:1px solid rgba(20,30,48,.16); padding:12px; box-shadow:inset 0 1px 0 rgba(255,255,255,.70); backdrop-filter:blur(34px) saturate(1.7); -webkit-backdrop-filter:blur(34px) saturate(1.7);">
+      <div class="device-header">
+        <span class="device-dot" style="width:8px;height:8px;border-radius:50%;background:#28885a;box-shadow:0 0 0 3px rgba(40,136,90,.18); flex-shrink:0;"></span>
+        <span class="device-name" style="color:#1d1d1f;">MacBook Pro 16"</span>
+        <span class="device-badge" style="background:rgba(0,122,255,.10); color:#007aff; border:1px solid rgba(0,122,255,.28); border-radius:20px; font-size:10px; font-weight:600; padding:2px 7px; text-transform:uppercase;">This device</span>
+      </div>
+      <div class="device-field" style="color:#5b5b60;"><span style="color:rgba(60,60,67,.55);">Model</span><span>macOS 15.4 · arm64</span></div>
+      <div class="device-field" style="color:#5b5b60;"><span style="color:rgba(60,60,67,.55);">App ver</span><span>0.7.5</span></div>
+      <div class="device-fingerprint" style="color:rgba(60,60,67,.55);">4D:8A:3C:91:F2:07:B6:E5:12:88:4A:C3:77:DA:09:21</div>
+      <div class="device-sync-line" style="color:#28885a;">&#10003; Synced 2m ago</div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Settings panel</div>
+    <div style="border-radius:16px; background:rgba(255,255,255,.70); border:1px solid rgba(20,30,48,.16); overflow:hidden; backdrop-filter:blur(34px) saturate(1.7); -webkit-backdrop-filter:blur(34px) saturate(1.7);">
+      <div class="settings-tabs" style="border-color:rgba(20,30,48,.12);">
+        <div class="s-tab active" style="color:#007aff;">General</div>
+        <div class="s-tab" style="color:#5b5b60;">Display</div>
+        <div class="s-tab" style="color:#5b5b60;">Sync</div>
+      </div>
+      <div class="settings-row" style="border-color:rgba(20,30,48,.10);">
+        <div><div style="font-size:13px; color:#1d1d1f;">Launch at login</div><div style="font-size:11px; color:rgba(60,60,67,.55);">Start when you log in</div></div>
+        <div class="s-toggle on" style="background:#007aff;"></div>
+      </div>
+      <div class="settings-row" style="border-color:rgba(20,30,48,.10);">
+        <div style="font-size:13px; color:#1d1d1f;">Translucency</div>
+        <div class="s-toggle on" style="background:#007aff;"></div>
+      </div>
+      <div class="settings-row" style="border-bottom:none;">
+        <div style="font-size:13px; color:#1d1d1f;">Skin</div>
+        <select class="s-select" style="background:rgba(255,255,255,.80); border-color:rgba(20,30,48,.16); color:#1d1d1f; border-radius:12px;">
+          <option>Classic</option><option>Quiet</option><option selected>Vapor</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label" style="color:rgba(29,29,31,.4); margin-top:16px;">Buttons, chips, nav</div>
+    <div class="btn-row">
+      <button class="btn btn-primary" style="background:#007aff; border-color:#007aff; border-radius:12px;">Paste</button>
+      <button class="btn btn-secondary" style="background:rgba(255,255,255,.80); border-color:rgba(20,30,48,.16); color:#1d1d1f; border-radius:12px; box-shadow:inset 0 1px 0 rgba(255,255,255,.70);">Cancel</button>
+      <button class="btn" style="background:rgba(215,40,30,.08); border-color:rgba(215,40,30,.22); color:#d7281e; border-radius:12px;">Delete</button>
+    </div>
+    <div class="chip-row">
+      <span style="padding:3px 10px; border-radius:10px; font-size:11px; font-weight:500; background:rgba(0,122,255,.12); border:1px solid rgba(0,122,255,.3); color:#007aff; box-shadow:inset 0 1px 0 rgba(255,255,255,.70);">All</span>
+      <span style="padding:3px 10px; border-radius:10px; font-size:11px; font-weight:500; background:rgba(255,255,255,.70); border:1px solid rgba(20,30,48,.12); color:#5b5b60;">Text</span>
+      <span style="padding:3px 10px; border-radius:10px; font-size:11px; font-weight:500; background:rgba(255,255,255,.70); border:1px solid rgba(20,30,48,.12); color:#5b5b60;">URLs</span>
+      <span style="padding:3px 10px; border-radius:10px; font-size:11px; font-weight:500; background:rgba(255,255,255,.70); border:1px solid rgba(20,30,48,.12); color:#5b5b60;">Images</span>
+    </div>
+    <div style="display:flex; gap:2px; padding:4px; border-radius:12px; background:rgba(255,255,255,.70); border:1px solid rgba(20,30,48,.16); margin-top:8px;">
+      <div style="padding:5px 10px; border-radius:10px; font-size:11px; font-weight:500; color:#007aff; background:rgba(0,122,255,.12); border:1px solid rgba(0,122,255,.3); box-shadow:0 0 0 2px rgba(0,122,255,.15), inset 0 1px 0 rgba(255,255,255,.70);">History</div>
+      <div style="padding:5px 10px; border-radius:10px; font-size:11px; font-weight:500; color:#5b5b60;">Devices</div>
+      <div style="padding:5px 10px; border-radius:10px; font-size:11px; font-weight:500; color:#5b5b60;">Settings</div>
+    </div>
+  </div>
+
+</div><!-- /showcase-grid light -->
+</div><!-- /light-section -->
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     TOKEN LEGEND
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="legend">
+  <h2>SKIN TOKEN REFERENCE — sourced from index.css §SKIN (CopyPaste-qtcr / W-F3)</h2>
+  <div class="legend-grid">
+
+    <div class="legend-skin">
+      <h3 style="color:#4d8dff;">Classic — Liquid Glass (aurora)</h3>
+      <table class="token-table">
+        <tr><td>--skin-material</td><td>glass</td></tr>
+        <tr><td>--skin-blur</td><td>28px</td></tr>
+        <tr><td>--skin-blur-strong</td><td>40px</td></tr>
+        <tr><td>--skin-sat</td><td>1.45</td></tr>
+        <tr><td>--skin-fill</td><td>0.40</td></tr>
+        <tr><td>--skin-sheen</td><td>0.06 (dark) / 0.45 (light)</td></tr>
+        <tr><td>--skin-tint</td><td>0 (no tint)</td></tr>
+        <tr><td>--skin-elev</td><td>glass-float</td></tr>
+        <tr><td>--skin-shadow-card</td><td>var(--ide-e2)</td></tr>
+        <tr><td>--skin-shadow-float</td><td>var(--ide-e3)</td></tr>
+        <tr><td>--skin-r-ctl</td><td>9px</td></tr>
+        <tr><td>--skin-r-chip</td><td>7px</td></tr>
+        <tr><td>--skin-r-card</td><td>14px</td></tr>
+        <tr><td>--skin-r-modal</td><td>16px</td></tr>
+        <tr><td>--skin-row</td><td>card</td></tr>
+        <tr><td>--skin-row-gap</td><td>0px</td></tr>
+        <tr><td>--skin-nav</td><td>fill+glow</td></tr>
+        <tr><td>--skin-bg</td><td>aurora</td></tr>
+        <tr><td>--skin-glow</td><td>0.62</td></tr>
+        <tr><td>--skin-motion</td><td>1.3 (cinematic)</td></tr>
+        <tr><td>--skin-aurora-scale</td><td>1</td></tr>
+      </table>
+    </div>
+
+    <div class="legend-skin">
+      <h3 style="color:#9da0a8;">Quiet — Flat / Hairline (no blur)</h3>
+      <table class="token-table">
+        <tr><td>--skin-material</td><td>flat</td></tr>
+        <tr><td>--skin-blur</td><td>0px</td></tr>
+        <tr><td>--skin-blur-strong</td><td>0px</td></tr>
+        <tr><td>--skin-sat</td><td>1.0</td></tr>
+        <tr><td>--skin-fill</td><td>1.0 (fully opaque)</td></tr>
+        <tr><td>--skin-sheen</td><td>0</td></tr>
+        <tr><td>--skin-tint</td><td>0</td></tr>
+        <tr><td>--skin-elev</td><td>none</td></tr>
+        <tr><td>--skin-shadow-card</td><td>none</td></tr>
+        <tr><td>--skin-shadow-float</td><td>var(--ide-e1)</td></tr>
+        <tr><td>--skin-r-ctl</td><td>7px</td></tr>
+        <tr><td>--skin-r-chip</td><td>6px</td></tr>
+        <tr><td>--skin-r-card</td><td>10px</td></tr>
+        <tr><td>--skin-r-modal</td><td>12px</td></tr>
+        <tr><td>--skin-row</td><td>line (hairline dividers)</td></tr>
+        <tr><td>--skin-row-gap</td><td>0px</td></tr>
+        <tr><td>--skin-nav</td><td>tint</td></tr>
+        <tr><td>--skin-bg</td><td>flat</td></tr>
+        <tr><td>--skin-glow</td><td>0 (no glow)</td></tr>
+        <tr><td>--skin-motion</td><td>1.0 (balanced)</td></tr>
+        <tr><td>--skin-aurora-scale</td><td>0</td></tr>
+      </table>
+    </div>
+
+    <div class="legend-skin">
+      <h3 style="color:#c678dd;">Vapor — Refined Glass (tint-blob)</h3>
+      <table class="token-table">
+        <tr><td>--skin-material</td><td>glass</td></tr>
+        <tr><td>--skin-blur</td><td>34px</td></tr>
+        <tr><td>--skin-blur-strong</td><td>44px</td></tr>
+        <tr><td>--skin-sat</td><td>1.7</td></tr>
+        <tr><td>--skin-fill</td><td>0.50</td></tr>
+        <tr><td>--skin-sheen</td><td>0.16 (dark) / 0.70 (light)</td></tr>
+        <tr><td>--skin-tint</td><td>0.10 (dark) / 0.18 (light)</td></tr>
+        <tr><td>--skin-elev</td><td>glass-float</td></tr>
+        <tr><td>--skin-shadow-card</td><td>none (sheen provides depth)</td></tr>
+        <tr><td>--skin-shadow-float</td><td>var(--ide-e3)</td></tr>
+        <tr><td>--skin-r-ctl</td><td>12px</td></tr>
+        <tr><td>--skin-r-chip</td><td>10px</td></tr>
+        <tr><td>--skin-r-card</td><td>16px</td></tr>
+        <tr><td>--skin-r-modal</td><td>16px</td></tr>
+        <tr><td>--skin-row</td><td>inset (rounded, gapped)</td></tr>
+        <tr><td>--skin-row-gap</td><td>3px</td></tr>
+        <tr><td>--skin-nav</td><td>glass+ring</td></tr>
+        <tr><td>--skin-bg</td><td>tint-blob</td></tr>
+        <tr><td>--skin-glow</td><td>0.45</td></tr>
+        <tr><td>--skin-motion</td><td>1.0 (balanced)</td></tr>
+        <tr><td>--skin-aurora-scale</td><td>0.72</td></tr>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- Elevation legend -->
+  <div style="margin-top:28px; padding-top:20px; border-top:1px solid rgba(255,255,255,.07);">
+    <h2>Elevation tokens (shared across skins, from §3 Design System)</h2>
+    <div style="display:flex; gap:32px; flex-wrap:wrap; margin-top:12px;">
+      <div>
+        <div style="font-size:11px; font-weight:600; color:rgba(232,234,237,.38); letter-spacing:.5px; margin-bottom:6px;">E0 — no shadow</div>
+        <div style="font-family:monospace; font-size:10px; color:rgba(232,234,237,.5);">none</div>
+      </div>
+      <div>
+        <div style="font-size:11px; font-weight:600; color:rgba(232,234,237,.38); letter-spacing:.5px; margin-bottom:6px;">E1 — cards / quiet float</div>
+        <div style="font-family:monospace; font-size:10px; color:rgba(232,234,237,.5);">0 1px 2px rgba(0,0,0,.40),<br>inset 0 0 0 1px rgba(255,255,255,.04)</div>
+      </div>
+      <div>
+        <div style="font-size:11px; font-weight:600; color:rgba(232,234,237,.38); letter-spacing:.5px; margin-bottom:6px;">E2 — classic card shadow</div>
+        <div style="font-family:monospace; font-size:10px; color:rgba(232,234,237,.5);">0 2px 8px rgba(0,0,0,.45),<br>0 1px 2px rgba(0,0,0,.35)</div>
+      </div>
+      <div>
+        <div style="font-size:11px; font-weight:600; color:rgba(232,234,237,.38); letter-spacing:.5px; margin-bottom:6px;">E3 — popup / float</div>
+        <div style="font-family:monospace; font-size:10px; color:rgba(232,234,237,.5);">0 12px 40px rgba(0,0,0,.55),<br>0 2px 8px rgba(0,0,0,.40),<br>inset 0 1px 0 rgba(255,255,255,.06)</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px; padding-top:16px; border-top:1px solid rgba(255,255,255,.06); font-size:10px; color:rgba(232,234,237,.25);">
+    Generated 2026-06-20 · CopyPaste-xg61 · Token source: crates/copypaste-ui/src/index.css §SKIN (lines 1017–1237) · DESIGN-SYSTEM-v2.md
+  </div>
+</div>
+
+<script>
+function showTheme(mode) {
+  const dark  = document.getElementById('dark-section');
+  const light = document.getElementById('light-section');
+  dark.style.display  = (mode === 'light') ? 'none' : '';
+  light.style.display = (mode === 'dark')  ? 'none' : '';
+  document.querySelectorAll('.controls .ctrl-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+}
+</script>
+
+</body>
+</html>
