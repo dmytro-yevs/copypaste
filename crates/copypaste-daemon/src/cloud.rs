@@ -54,12 +54,22 @@ use copypaste_sync::merge::{remote_wins, RemoteMeta};
 // build_local_item, replace_cloud_item_by_item_id, decode_payload_ct, the file
 // envelope helpers — now lives in `sync_common`; re-import them so this module's
 // call sites and tests are unchanged.
-#[allow(unused_imports)] // some symbols are used only by this module's tests
+//
+// Production imports — all used in non-test code paths.
 use crate::sync_common::{
-    build_local_item, decode_cloud_file_payload, decode_payload_ct, decrypt_item_plaintext,
-    decrypt_item_plaintext_blocking, encode_cloud_file_payload, replace_cloud_item_by_item_id,
-    wrap_and_check_cloud_upload_plaintext, wrap_cloud_upload_plaintext, CLOUD_FILE_HEADER_VERSION,
-    CLOUD_FILE_LEGACY_MIME, CLOUD_FILE_LEGACY_NAME, SYNC_HTTP_TIMEOUT,
+    build_local_item, decode_payload_ct, decrypt_item_plaintext_blocking,
+    replace_cloud_item_by_item_id, wrap_and_check_cloud_upload_plaintext, SYNC_HTTP_TIMEOUT,
+};
+// Test-only imports — only referenced inside `#[cfg(test)]` / `#[cfg(all(test, …))]`
+// modules.  Scoped under `#[cfg(test)]` so the compiler can verify there are no
+// accidental production uses; no `#[allow(unused_imports)]` needed.
+// Note: `decrypt_item_plaintext` (non-blocking) and `wrap_cloud_upload_plaintext`
+// are NOT imported — they were never called even in tests (the call sites use the
+// `_blocking` variant and the `wrap_and_check_*` variant respectively).
+#[cfg(test)]
+use crate::sync_common::{
+    decode_cloud_file_payload, encode_cloud_file_payload, CLOUD_FILE_HEADER_VERSION,
+    CLOUD_FILE_LEGACY_MIME, CLOUD_FILE_LEGACY_NAME,
 };
 
 // Beta W2.3 (arch-1): canonical auth client lives in copypaste-supabase. The

@@ -31,6 +31,10 @@ subtle = { workspace = true }
 # by the reset_database production path (transient placeholder while file handles
 # are released). This is intentional — see ipc.rs reset_database for rationale.
 copypaste-core = { path = "../copypaste-core", features = ["test-helpers"] }
+# CopyPaste-lx6c: wire PII scrubber into the tracing sinks so sensitive values
+# (emails, IPs, tokens, home paths) are redacted before reaching log files.
+# CopyPaste-9fb6: also used for opt-in error reporting at recoverable-error sites.
+copypaste-telemetry = { path = "../copypaste-telemetry" }
 # CopyPaste-merc: shared IPC wire types — SyncBadgeState + compute_sync_badge_state
 # so the daemon computes badge state once and consumers (macOS UI, Android) render
 # the canonical value instead of each re-deriving it from raw fields.
@@ -79,6 +83,10 @@ copypaste-supabase = { path = "../copypaste-supabase", optional = true }
 libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# CopyPaste-q5ab: parse NSFilenamesPboardType binary plist payload (array of
+# absolute POSIX paths). plist is already a transitive dep (via Tauri/Winit);
+# declaring it here makes the version explicit and avoids a semver surprise.
+plist = "1"
 objc2.workspace = true
 objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSDictionary", "NSGeometry"] }
 # NSWorkspace + NSImage + NSBitmapImageRep + NSImageRep + NSGraphicsContext needed for

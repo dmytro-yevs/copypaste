@@ -10,6 +10,12 @@ use copypaste_core::{
     is_sensitive_for_autowipe, prune_to_cap, AppConfig, ClipboardItem, Database, DeviceKeypair,
     AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
+// CopyPaste-9fb6: opt-in error reporting. `reporter` is constructed at startup
+// with `ReportConsent::Disabled` (safe default — no data leaves the device)
+// until a future settings surface exposes the consent toggle. Calling
+// `report_and_log` at recoverable-error sites means the infrastructure is wired
+// and consent-gating is correct, so enabling it later is a one-line change.
+use copypaste_telemetry::{report_and_log, OsTag, ReportConsent, ReportableError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -78,6 +84,22 @@ pub async fn run() -> anyhow::Result<()> {
 /// On macOS the tray icon sets `quit_flag` when the user clicks Quit.
 #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
 pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()> {
+    // CopyPaste-9fb6: initialise the telemetry reporter.  The default is
+    // `Disabled` — no events leave the device until the user opts in via the
+    // settings UI (a future PR).  The reporter is passed into error-handling
+    // sites below so wiring is complete and adding consent is a one-line
+    // change.  When `COPYPASTE_SENTRY_DSN` is not set (OSS builds, CI) this
+    // always returns a `NoopReporter`.
+    let reporter: Box<dyn copypaste_telemetry::ErrorReporter> =
+        match option_env!("COPYPASTE_SENTRY_DSN") {
+            Some(dsn) => copypaste_telemetry::init_with_dsn(ReportConsent::Disabled, dsn)
+                .unwrap_or_else(|e| {
+                    tracing::warn!(error = %e, "telemetry init failed; using no-op reporter");
+                    copypaste_telemetry::init(ReportConsent::Disabled)
+                }),
+            None => copypaste_telemetry::init(ReportConsent::Disabled),
+        };
+
     let config = load_config();
     tracing::info!(
         "poll_interval={}ms storage_quota_bytes={}",
@@ -319,6 +341,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             Ok(Err(e)) => {
                 tracing::warn!(error = %e, "v4 migration sweep failed — writes remain gated until next restart");
+                // CopyPaste-9fb6: report this recoverable failure to the
+                // telemetry backend (no-op while consent is Disabled).
+                report_and_log(
+                    &*reporter,
+                    ReportableError::new(
+                        env!("CARGO_PKG_NAME"),
+                        env!("CARGO_PKG_VERSION"),
+                        "db.v4_migration_sweep_failed",
+                        OsTag::current(),
+                    ),
+                );
             }
             Err(join_err) => {
                 tracing::warn!(error = %join_err, "v4 migration sweep task panicked");
@@ -1043,6 +1076,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             }
             Err(e) => {
                 tracing::warn!("Failed to start P2P subsystem: {e}");
+                // CopyPaste-9fb6: P2P startup failure is recoverable (daemon
+                // continues without sync) but actionable for diagnostics.
+                report_and_log(
+                    &*reporter,
+                    ReportableError::new(
+                        env!("CARGO_PKG_NAME"),
+                        env!("CARGO_PKG_VERSION"),
+                        "p2p.startup_failed",
+                        OsTag::current(),
+                    ),
+                );
                 None
             }
         }
@@ -4268,5 +4312,57 @@ mod tests {
             Some("com.google.chrome"),
             "mtf5: app_bundle_id must be stored even for non-sensitive apps"
         );
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // CopyPaste-9fb6: telemetry wiring smoke tests
+    // ───────────────────────────────────────────────────────────────────────
+
+    /// The Disabled reporter (the production default) must never panic and must
+    /// accept any ReportableError without performing any I/O.
+    #[test]
+    fn telemetry_reporter_disabled_is_noop() {
+        let reporter = copypaste_telemetry::init(ReportConsent::Disabled);
+        // Should not panic and should return Ok.
+        report_and_log(
+            &*reporter,
+            ReportableError::new(
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+                "test.noop_event",
+                OsTag::current(),
+            ),
+        );
+    }
+
+    /// `init_with_dsn` with Disabled consent must return a NoopReporter (no
+    /// network I/O) even when a DSN is supplied.
+    #[test]
+    fn telemetry_init_with_dsn_disabled_returns_noop() {
+        let reporter = copypaste_telemetry::init_with_dsn(
+            ReportConsent::Disabled,
+            "https://public@sentry.example/1",
+        )
+        .expect("disabled init must not fail");
+        report_and_log(
+            &*reporter,
+            ReportableError::new(
+                env!("CARGO_PKG_NAME"),
+                env!("CARGO_PKG_VERSION"),
+                "test.dsn_disabled_noop",
+                OsTag::current(),
+            ),
+        );
+    }
+
+    /// `init_with_dsn` with a garbage DSN and Disabled consent must still
+    /// succeed (the DSN is not parsed until the SDK is initialised, and
+    /// `Disabled` skips initialisation entirely).
+    #[test]
+    fn telemetry_init_with_garbage_dsn_disabled_is_ok() {
+        let reporter =
+            copypaste_telemetry::init_with_dsn(ReportConsent::Disabled, "not-a-dsn-at-all")
+                .expect("garbage DSN + Disabled must succeed (SDK not initialised)");
+        drop(reporter);
     }
 }

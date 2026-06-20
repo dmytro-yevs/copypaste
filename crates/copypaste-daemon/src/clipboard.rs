@@ -497,41 +497,99 @@ impl ClipboardMonitor {
                     // CopyPaste-pbre: reuse the cached file-URL UTI strings.
                     let file_url_type = &*pb_uti::FILE_URL;
                     let filenames_type = &*pb_uti::FILENAMES;
-                    // Prefer the UTI form; fall back to the legacy type.
-                    let url_str: Option<String> = unsafe {
+
+                    // Primary path: `public.file-url` (modern UTI).
+                    // `stringForType` returns the file URL as a string like
+                    // "file:///Users/alice/doc.pdf". We strip the "file://"
+                    // scheme and percent-decode the path.
+                    let file_path_from_url: Option<std::path::PathBuf> = unsafe {
                         pb.stringForType(file_url_type)
                             .map(|s| s.to_string())
-                            .or_else(|| pb.stringForType(filenames_type).map(|s| s.to_string()))
+                            .and_then(|url_str| {
+                                let raw = url_str
+                                    .strip_prefix("file://")
+                                    .unwrap_or(url_str.as_str());
+                                let decoded = percent_decode_path(raw);
+                                let p = std::path::PathBuf::from(&decoded);
+                                if p.is_absolute() {
+                                    Some(p)
+                                } else {
+                                    tracing::debug!(
+                                        url = %url_str,
+                                        "clipboard: public.file-url is not a local absolute path — skipping"
+                                    );
+                                    None
+                                }
+                            })
                     };
-                    if let Some(url_str) = url_str {
-                        // Strip the "file://" scheme and percent-decode the
-                        // path using only std (no extra dependency needed).
-                        let raw_path = url_str.strip_prefix("file://").unwrap_or(url_str.as_str());
-                        let decoded = percent_decode_path(raw_path);
-                        let path = std::path::Path::new(&decoded);
-                        if path.is_absolute() {
-                            let filename = path
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .unwrap_or_else(|| "file".to_string());
-                            // Best-effort MIME from file extension; fall back to
-                            // application/octet-stream for unknown extensions.
-                            let mime = mime_from_path(path);
-                            // Return a FileRef instead of reading the bytes here.
-                            // The actual std::fs::read runs in handle_tick via
-                            // tokio::task::spawn_blocking so this tokio worker
-                            // thread is not blocked on potentially large I/O.
-                            Some((path.to_path_buf(), filename, mime))
+
+                    // Fallback path: `NSFilenamesPboardType` (pre-UTI legacy).
+                    //
+                    // CopyPaste-q5ab: `NSFilenamesPboardType` stores a binary
+                    // plist NSArray of absolute POSIX path strings — NOT a
+                    // "file://…" URL string.  Calling `stringForType` on it
+                    // returns nil (binary plist is not a plain string), so the
+                    // old `stringForType` → strip("file://") fallback silently
+                    // discarded every file copied from Finder or dragged into
+                    // the clipboard.
+                    //
+                    // Fix: use `dataForType` to get the raw plist bytes and
+                    // parse them with the `plist` crate into a `Vec<String>`.
+                    // Take the first path (single-file case; multi-file drag is
+                    // a separate feature).  The plist array contains plain
+                    // absolute POSIX paths — no "file://" scheme, no percent
+                    // encoding — so the path is used directly.
+                    let file_path_from_filenames: Option<std::path::PathBuf> =
+                        if file_path_from_url.is_none() {
+                            let maybe_bytes: Option<Vec<u8>> = unsafe {
+                                pb.dataForType(filenames_type)
+                                    .map(|d| d.bytes().to_vec())
+                            };
+                            maybe_bytes.and_then(|bytes| {
+                                match plist::from_bytes::<Vec<String>>(&bytes) {
+                                    Ok(paths) => {
+                                        // Take the first path that is absolute.
+                                        paths.into_iter().find_map(|s| {
+                                            let p = std::path::PathBuf::from(&s);
+                                            if p.is_absolute() {
+                                                Some(p)
+                                            } else {
+                                                tracing::debug!(
+                                                    path = %s,
+                                                    "clipboard: NSFilenamesPboardType path is not absolute — skipping"
+                                                );
+                                                None
+                                            }
+                                        })
+                                    }
+                                    Err(e) => {
+                                        tracing::debug!(
+                                            error = %e,
+                                            "clipboard: NSFilenamesPboardType plist parse failed — skipping"
+                                        );
+                                        None
+                                    }
+                                }
+                            })
                         } else {
-                            tracing::debug!(
-                                url = %url_str,
-                                "clipboard: file-url is not a local absolute path — skipping"
-                            );
                             None
-                        }
-                    } else {
-                        None
-                    }
+                        };
+
+                    let resolved_path = file_path_from_url.or(file_path_from_filenames);
+                    resolved_path.map(|path| {
+                        let filename = path
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "file".to_string());
+                        // Best-effort MIME from file extension; fall back to
+                        // application/octet-stream for unknown extensions.
+                        let mime = mime_from_path(&path);
+                        // Return a FileRef instead of reading the bytes here.
+                        // The actual std::fs::read runs in handle_tick via
+                        // tokio::task::spawn_blocking so this tokio worker
+                        // thread is not blocked on potentially large I/O.
+                        (path, filename, mime)
+                    })
                 } else {
                     None
                 };
@@ -843,5 +901,59 @@ mod tests {
         };
         assert_eq!(c.content_type(), "file");
         assert_eq!(c.as_bytes(), &[] as &[u8]);
+    }
+
+    /// CopyPaste-q5ab: NSFilenamesPboardType binary plist parsing.
+    ///
+    /// Verifies that a binary plist serialised from a Vec<String> of absolute
+    /// POSIX paths is correctly round-tripped by `plist::from_bytes::<Vec<String>>`,
+    /// which is the codec used in the NSFilenamesPboardType fallback path.
+    ///
+    /// We construct the plist payload using `plist::to_writer_binary` (the same
+    /// encoding Apple uses on macOS) and then parse it back, mimicking exactly
+    /// what the clipboard path does.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn nsfilenames_pboard_type_plist_roundtrip() {
+        // Simulate the binary plist payload that Finder/apps put on
+        // NSFilenamesPboardType: an NSArray of absolute POSIX path strings.
+        let paths: Vec<String> = vec![
+            "/Users/alice/Documents/report.pdf".to_string(),
+            "/Users/alice/Downloads/photo.png".to_string(),
+        ];
+
+        // Encode to binary plist (the format macOS uses on the pasteboard).
+        let mut buf: Vec<u8> = Vec::new();
+        plist::to_writer_binary(&mut buf, &paths).expect("plist encode must not fail");
+
+        // Now parse it the same way the production clipboard path does.
+        let recovered: Vec<String> =
+            plist::from_bytes(&buf).expect("plist decode must not fail");
+
+        assert_eq!(recovered.len(), 2, "should recover both paths");
+        assert_eq!(recovered[0], "/Users/alice/Documents/report.pdf");
+        assert_eq!(recovered[1], "/Users/alice/Downloads/photo.png");
+
+        // Confirm that the first path is treated as absolute (the production
+        // gate).
+        let first = std::path::PathBuf::from(&recovered[0]);
+        assert!(
+            first.is_absolute(),
+            "first recovered path must be absolute: {first:?}"
+        );
+    }
+
+    /// CopyPaste-q5ab: a non-plist payload (e.g. garbage bytes that sometimes
+    /// appear on the pasteboard from third-party apps) must not panic — the
+    /// production path logs a debug message and returns None.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn nsfilenames_pboard_type_malformed_plist_is_silent() {
+        let garbage = b"this is not a plist";
+        let result = plist::from_bytes::<Vec<String>>(garbage);
+        assert!(
+            result.is_err(),
+            "malformed payload must return Err so the production path skips it"
+        );
     }
 }

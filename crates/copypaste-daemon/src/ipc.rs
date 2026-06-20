@@ -1198,9 +1198,11 @@ pub struct IpcServer {
     /// pins. The bytes are retained here — they remain part of the
     /// `IpcServer::new` contract and the device identity is still useful for
     /// future non-pairing surfaces.
-    // Retained for API stability / future use; no current read path. The cert
-    // fingerprint, not this device-key fingerprint, is what pairing advertises.
-    #[allow(dead_code)]
+    // The X25519 device public-key bytes (32 bytes). SHA-256 of this value is
+    // surfaced in the `status` response as `device_key_fingerprint` (hex) so
+    // operators and diagnostic tooling can correlate daemon identity without
+    // reading the Keychain.  NOTE: pairing uses the mTLS cert fingerprint
+    // (`cert_fingerprint`), not this value — they must never be confused.
     device_public_key: Arc<[u8; 32]>,
     /// Readiness gate. While `false`, all data-touching methods return
     /// `IPC_NOT_READY` instead of dispatching. Default `true` for production
@@ -5555,6 +5557,14 @@ impl IpcServer {
                     .lock()
                     .unwrap_or_else(|p| p.into_inner())
                     .clone();
+                // CopyPaste-ruep: surface the X25519 device-key fingerprint
+                // (SHA-256 of the public key bytes, lowercase hex) for operator
+                // diagnostics.  This is informational only and distinct from the
+                // mTLS cert fingerprint that pairing uses.
+                let device_key_fingerprint = {
+                    use sha2::{Digest as _, Sha256};
+                    hex::encode(Sha256::digest(self.device_public_key.as_ref()))
+                };
                 match reason {
                     Some(reason) => Response::ok(
                         req.id,
@@ -5567,6 +5577,7 @@ impl IpcServer {
                             "degraded_reason": reason,
                             "build_version": BUILD_VERSION,
                             "pid": std::process::id(),
+                            "device_key_fingerprint": device_key_fingerprint,
                         }),
                     ),
                     None => Response::ok(
@@ -5579,6 +5590,7 @@ impl IpcServer {
                             "degraded": false,
                             "build_version": BUILD_VERSION,
                             "pid": std::process::id(),
+                            "device_key_fingerprint": device_key_fingerprint,
                         }),
                     ),
                 }
@@ -6053,6 +6065,22 @@ impl IpcServer {
                                         serde_json::Value::Number(ms.into()),
                                     );
                                 }
+                                // CopyPaste-vypo: surface trust status honestly.
+                                // Every record in peers.json completed a PAKE
+                                // handshake (mutual key confirmation), so each
+                                // persisted peer is "verified".  We never store
+                                // unauthenticated (unverified) peers on disk —
+                                // the PAKE session is discarded on failure.
+                                // Hardcoding "Verified" was misleading because it
+                                // implied the label could vary; using the string
+                                // "verified" (lowercase, stable enum value) makes
+                                // the semantics explicit and leaves room for a
+                                // future "unverified" value for in-memory
+                                // discovered-but-not-yet-paired devices.
+                                obj.insert(
+                                    "trust".to_string(),
+                                    serde_json::Value::String("verified".to_string()),
+                                );
                                 // CopyPaste-5lm: never expose the PasswordFile blob
                                 // (encrypted or plaintext) over the IPC wire. The UI
                                 // has no need for this field; stripping it here means
@@ -9880,6 +9908,49 @@ mod tests {
         assert_eq!(p["name"], "Alice");
     }
 
+    /// CopyPaste-vypo: list_peers must include a `trust` field for every peer.
+    /// All persisted peers completed PAKE = "verified".
+    #[tokio::test]
+    async fn list_peers_includes_trust_field() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg-trust");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+
+        let peers_path = cfg_home.join("peers.json");
+        std::fs::create_dir_all(&cfg_home).unwrap();
+        std::fs::write(
+            &peers_path,
+            r#"[{"fingerprint":"11:22:33","name":"Bob","added_at":1700000000}]"#,
+        )
+        .unwrap();
+
+        let sock = dir.path().join("test-trust.sock");
+        start_test_server(&sock).await;
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"tv1\",\"method\":\"list_peers\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+        let peers = resp["data"]["peers"].as_array().unwrap();
+        assert_eq!(peers.len(), 1, "must have one peer");
+        let p = &peers[0];
+        assert_eq!(
+            p["trust"], "verified",
+            "persisted peers must have trust=verified, got: {p}"
+        );
+    }
+
     /// When the credentials are absent (null), the presence flags must be
     /// `false` and no secret key should appear on the wire.
     #[test]
@@ -10268,6 +10339,34 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], true);
         assert_eq!(resp["data"]["status"], "running");
+    }
+
+    /// CopyPaste-ruep: status must include a non-empty device_key_fingerprint
+    /// (SHA-256 of the X25519 public key, lowercase hex, 64 chars).
+    #[tokio::test]
+    async fn status_includes_device_key_fingerprint() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("dkfp.sock");
+        start_test_server(&sock).await;
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"dkfp\",\"method\":\"status\"}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(resp["ok"], true, "status must succeed: {resp}");
+        let fp = resp["data"]["device_key_fingerprint"]
+            .as_str()
+            .expect("device_key_fingerprint must be a string");
+        // SHA-256 of any 32-byte key = 64 lowercase hex chars
+        assert_eq!(fp.len(), 64, "fingerprint must be 64 hex chars, got: {fp}");
+        assert!(
+            fp.chars().all(|c| c.is_ascii_hexdigit()),
+            "fingerprint must be hex, got: {fp}"
+        );
     }
 
     #[tokio::test]
