@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { readLogs, logDirPath } from "../lib/ipc";
+import { readLogs, logDirPath, IpcError } from "../lib/ipc";
 
 const MAX_LINES = 500;
 
@@ -33,6 +33,21 @@ const LEVEL_BORDER: Record<LogLevel, string> = {
   debug: "border-l-transparent",
 };
 
+/**
+ * Redact the absolute log directory path before display (CopyPaste-2b3i).
+ *
+ * Replaces the leading /Users/<username> prefix with ~ so screen recordings,
+ * screenshots, and accessibility APIs never expose the local username.
+ * The full absolute path is still available as the `title` attribute (tooltip).
+ *
+ * Works for any /Users/<name>/... path; non-/Users/ paths are returned as-is
+ * (they don't contain a macOS username).
+ */
+function relativizeLogPath(absPath: string): string {
+  // Match /Users/<any-username>/ and replace the prefix with ~/
+  return absPath.replace(/^\/Users\/[^/]+\//, "~/");
+}
+
 export function LogView() {
   const [content, setContent] = useState<string>("");
   const [logPath, setLogPath] = useState<string>("");
@@ -50,7 +65,15 @@ export function LogView() {
       setLogPath(path);
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Log raw error for diagnostics — never render raw FS paths or IPC strings
+      // in the DOM (CopyPaste-mtvx).
+      // eslint-disable-next-line no-console
+      console.error("[LogView] failed to load logs:", err);
+      if (err instanceof IpcError && err.code === "daemon_offline") {
+        setError("The clipboard daemon is not running. Start it to view logs.");
+      } else {
+        setError("Could not load logs. The daemon may be offline or the log file is unavailable.");
+      }
     } finally {
       setLoading(false);
     }
@@ -91,8 +114,11 @@ export function LogView() {
         <div>
           <h2 className="text-[13px] font-medium text-ide-text">Daemon Logs</h2>
           {logPath && (
+            // title keeps the full absolute path for power-users / clipboard.
+            // Display text is ~-relativized so the username never leaks
+            // in screen recordings or screenshots (CopyPaste-2b3i).
             <p className="mt-0.5 text-[11px] text-ide-faint" title={logPath}>
-              {logPath}
+              {relativizeLogPath(logPath)}
             </p>
           )}
         </div>

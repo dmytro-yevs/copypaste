@@ -1011,7 +1011,11 @@ export function DevicesView({
       if (e instanceof IpcError && e.code === "daemon_offline") {
         setDiscovered([]);
       } else {
-        setDiscoverError(e instanceof Error ? e.message : "Rescan failed");
+        // Log raw error for diagnostics only — never render raw IPC/FS strings
+        // in the DOM (CopyPaste-j5qg).
+        // eslint-disable-next-line no-console
+        console.error("[DevicesView] rescan failed:", e);
+        setDiscoverError("Network scan failed. Check that Wi-Fi is on and the daemon is running.");
       }
     } finally {
       setRescanning(false);
