@@ -102,6 +102,7 @@ import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.skinTokens
+import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -971,23 +972,7 @@ fun DevicesScreen(
     val currentPalette = paletteAurora(LocalPalette.current)
     val scaffoldModifier = when {
         paintAurora -> modifier.auroraCanvas(dark, currentPalette)
-        paintTintBlob -> modifier.drawBehind {
-            // Static soft tint-blob: one large radial gradient centred slightly
-            // upper-left, mirroring the web TINT_BLOB spec (single accent blob,
-            // no animation). Alpha gated by tok.glow (0.45 for Vapor).
-            val diag = kotlin.math.hypot(size.width, size.height)
-            drawRect(
-                brush = Brush.radialGradient(
-                    colorStops = arrayOf(
-                        0.0f to currentPalette.glowA.copy(alpha = tok.glow * 0.55f),
-                        0.65f to currentPalette.glowA.copy(alpha = tok.glow * 0.12f),
-                        1.0f to androidx.compose.ui.graphics.Color.Transparent,
-                    ),
-                    center = Offset(size.width * 0.35f, size.height * 0.28f),
-                    radius = diag * 0.75f,
-                ),
-            )
-        }
+        paintTintBlob -> modifier.tintBlobCanvas(dark, currentPalette, tok.glow)
         else -> modifier
     }
 

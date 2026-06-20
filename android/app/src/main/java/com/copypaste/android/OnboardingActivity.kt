@@ -59,7 +59,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -88,6 +87,7 @@ import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.skinTokens
+import com.copypaste.android.ui.theme.tintBlobCanvas
 import android.content.ClipData
 import android.content.ClipboardManager
 
@@ -406,27 +406,8 @@ fun OnboardingScreen(
             Modifier.auroraCanvas(dark, paletteAurora(palette))
         }
         tok.background == SkinBackground.TINT_BLOB       -> {
-            // VAPOR: static single palette-aware blob centred on canvas.
-            // Use paletteAurora(LocalPalette.current).glowA so the blob color matches
-            // the active palette (mirrors AboutActivity/HistoryActivity — CopyPaste-a8ne).
-            // tok.glow scales the blob alpha so intensity matches the skin spec.
-            val aurora = paletteAurora(palette)
-            val blobAlpha = aurora.glowA.alpha * tok.glow
-            Modifier.drawBehind {
-                // Base canvas fill (palette bg tone)
-                drawRect(c.bg)
-                // Single soft radial blob — palette glowA at tok.glow intensity
-                drawRect(
-                    brush = androidx.compose.ui.graphics.Brush.radialGradient(
-                        colorStops = arrayOf(
-                            0.0f to aurora.glowA.copy(alpha = blobAlpha),
-                            0.7f to Color.Transparent,
-                        ),
-                        center = androidx.compose.ui.geometry.Offset(size.width * 0.5f, size.height * 0.3f),
-                        radius = kotlin.math.hypot(size.width, size.height) * 0.65f,
-                    ),
-                )
-            }
+            // CopyPaste-uya3: use shared tintBlobCanvas from Components.kt.
+            Modifier.tintBlobCanvas(dark, paletteAurora(palette), tok.glow)
         }
         else                                             -> Modifier
     }

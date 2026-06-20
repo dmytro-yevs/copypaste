@@ -45,9 +45,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -67,6 +64,7 @@ import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.skinTokens
+import com.copypaste.android.ui.theme.tintBlobCanvas
 
 /**
  * Standalone "Permissions" screen reachable from Settings.
@@ -248,11 +246,10 @@ fun PermissionsScreen(
     val hasOemScreen = OemAutoStartHelper.hasOemScreen(ctx)
     val oemLabel = OemAutoStartHelper.oemSettingsLabel(ctx)
 
-    // A-C8 / CopyPaste-i1c0: skin-aware background — 3-way when(tok.background).
+    // A-C8 / CopyPaste-i1c0 / CopyPaste-uya3: skin-aware background — 3-way when(tok.background).
     // CLASSIC (AURORA + translucent=ON) → animated aurora canvas; byte-identical to pre-skin.
     // QUIET (FLAT) → solid c.bg; no canvas regardless of translucency pref.
-    // VAPOR (TINT_BLOB + translucent=ON) → drawBehind: base c.bg fill + single soft
-    //   radial accent blob using paletteAurora(palette).glowA scaled by tok.glow.
+    // VAPOR (TINT_BLOB + translucent=ON) → shared tintBlobCanvas (Components.kt).
     val translucent = rememberTranslucency()
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
@@ -267,24 +264,8 @@ fun PermissionsScreen(
             Modifier.auroraCanvas(dark, paletteAurora(palette))
         }
         tok.background == SkinBackground.TINT_BLOB        -> {
-            // VAPOR: paint base fill then one soft radial accent blob scaled by tok.glow.
-            val auroraDef = paletteAurora(palette)
-            val blobAlpha = (auroraDef.glowA.alpha * tok.glow).coerceIn(0f, 1f)
-            Modifier.drawBehind {
-                // Opaque base so glass blur has real colour to sample (PARITY-SPEC §2).
-                drawRect(c.bg)
-                // Single soft radial blob — glowA tint at tok.glow intensity.
-                drawRect(
-                    brush = Brush.radialGradient(
-                        colorStops = arrayOf(
-                            0.0f to auroraDef.glowA.copy(alpha = blobAlpha),
-                            0.65f to Color.Transparent,
-                        ),
-                        center = Offset(size.width * 0.5f, size.height * 0.3f),
-                        radius = kotlin.math.hypot(size.width, size.height) * 0.65f,
-                    ),
-                )
-            }
+            // CopyPaste-uya3: use shared tintBlobCanvas from Components.kt.
+            Modifier.tintBlobCanvas(dark, paletteAurora(palette), tok.glow)
         }
         else                                              -> Modifier
     }

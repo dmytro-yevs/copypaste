@@ -443,6 +443,92 @@ fun Modifier.auroraCanvas(dark: Boolean, auroraDef: AuroraDef? = null): Modifier
     }
 }
 
+// ---------------------------------------------------------------------------
+// CopyPaste-uya3: tintBlobCanvas — shared Vapor TINT_BLOB backdrop modifier.
+//
+// Extracted from the per-screen private copies (HistoryActivity,
+// AboutActivity, DevicesActivity, OnboardingActivity, PairActivity,
+// PermissionsSettingsActivity) into a single canonical implementation here.
+//
+// CANONICAL reference: AboutActivity's inline tintBlobCanvas (A-C3), which
+// was the most complete version:
+//   • Opaque base gradient from glassCanvasBrush(dark, auroraDef) — gives the
+//     glass blur real colour to sample (PARITY-SPEC §2).
+//   • Primary blob — top-left (0.08,0.10), radius 0.90*diag, glowA * glow * 1.4.
+//   • Secondary blob — bottom-right (0.92,0.88), radius 0.80*diag, glowB * glow * 1.4.
+//   • Centre accent — (0.50,0.42), radius 0.30*diag, overlayAccent * glow.
+//
+// The * 1.4 boost lifts the corner blobs above the raw glowA/glowB alpha so the
+// canvas reads as clearly tinted (without it the blobs are too faint). coerceIn
+// clamps the result to [0,1] so high-alpha palettes cannot oversaturate.
+//
+// Apply to a Scaffold modifier; the Scaffold containerColor must be Transparent
+// so this shows through. Call sites always use:
+//   Modifier.tintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
+// ---------------------------------------------------------------------------
+
+/**
+ * Static tint-blob canvas for [SkinBackground.TINT_BLOB] (Vapor skin).
+ *
+ * Draws an opaque base gradient from [auroraDef]'s bg ramp
+ * ([glassCanvasBrush]), then overlays:
+ *   - A primary blob at the top-left ([auroraDef.glowA] × [glow] × 1.4)
+ *   - A secondary blob at the bottom-right ([auroraDef.glowB] × [glow] × 1.4)
+ *   - A subtle centre-accent blob ([auroraDef.overlayAccent] × [glow])
+ *
+ * All alphas are clamped to [0,1]. [glow] is [SkinTokens.glow] (0.45 for
+ * Vapor). [dark] selects the appropriate base-gradient direction.
+ *
+ * This is the single canonical implementation shared across all screens;
+ * do NOT add per-screen private copies. Visual result calibrated to
+ * AboutActivity's inline tintBlobCanvas (A-C3) — use that as the reference.
+ */
+fun Modifier.tintBlobCanvas(
+    dark: Boolean,
+    auroraDef: AuroraDef,
+    glow: Float,
+): Modifier = this.drawBehind {
+    // Opaque base — glass blur needs real colour behind surfaces (PARITY-SPEC §2).
+    drawRect(glassCanvasBrush(dark, auroraDef))
+
+    val diag = kotlin.math.hypot(size.width, size.height)
+
+    // Primary blob — top-left corner, large radius, palette glowA.
+    // 1.4f boost: lifts the blob above the raw palette alpha so the canvas
+    // reads as clearly tinted even on lower-DPI screens.
+    val blobA = auroraDef.glowA.copy(alpha = (auroraDef.glowA.alpha * glow * 1.4f).coerceIn(0f, 1f))
+    drawRect(
+        brush = Brush.radialGradient(
+            colorStops = arrayOf(0.0f to blobA, 0.55f to Color.Transparent),
+            center = Offset(size.width * 0.08f, size.height * 0.10f),
+            radius = diag * 0.90f,
+        ),
+    )
+
+    // Secondary blob — bottom-right corner, slightly smaller, palette glowB.
+    val blobB = auroraDef.glowB.copy(alpha = (auroraDef.glowB.alpha * glow * 1.4f).coerceIn(0f, 1f))
+    drawRect(
+        brush = Brush.radialGradient(
+            colorStops = arrayOf(0.0f to blobB, 0.55f to Color.Transparent),
+            center = Offset(size.width * 0.92f, size.height * 0.88f),
+            radius = diag * 0.80f,
+        ),
+    )
+
+    // Centre accent — subtle overlayAccent warms the middle of the canvas.
+    // No 1.4f boost here — the centre blob is intentionally subtler.
+    val centre = auroraDef.overlayAccent.copy(
+        alpha = (auroraDef.overlayAccent.alpha * glow).coerceIn(0f, 1f),
+    )
+    drawRect(
+        brush = Brush.radialGradient(
+            colorStops = arrayOf(0.0f to centre, 0.65f to Color.Transparent),
+            center = Offset(size.width * 0.50f, size.height * 0.42f),
+            radius = diag * 0.30f,
+        ),
+    )
+}
+
 /**
  * Frosted-glass surface wrapper (styleguide 3-tier recipe). Stacks, bottom→top:
  *   1. a backdrop layer drawing [glassCanvasBrush] with an API-31 RenderEffect

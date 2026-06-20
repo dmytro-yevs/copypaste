@@ -99,6 +99,7 @@ import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.skinTokens
+import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -952,25 +953,7 @@ fun PairScreen(
     val auroraDef = paletteAurora(LocalPalette.current)
     val scaffoldModifier: Modifier = when {
         paintAurora   -> modifier.auroraCanvas(dark, auroraDef)
-        paintTintBlob -> modifier.drawBehind {
-            // CopyPaste-a8ne: Vapor TINT_BLOB — single static radial blob using
-            // palette glowA (not c.accent) so the color tracks the active palette
-            // instead of the theme accent tint. Mirrors AboutActivity pattern.
-            val diag = kotlin.math.hypot(size.width, size.height)
-            val blobColor = auroraDef.glowA.copy(
-                alpha = (auroraDef.glowA.alpha * tok.glow * 1.4f).coerceIn(0f, 1f),
-            )
-            drawRect(
-                brush = Brush.radialGradient(
-                    colorStops = arrayOf(
-                        0.0f to blobColor,
-                        0.55f to androidx.compose.ui.graphics.Color.Transparent,
-                    ),
-                    center = Offset(size.width * 0.35f, size.height * 0.28f),
-                    radius = diag * 0.85f,
-                ),
-            )
-        }
+        paintTintBlob -> modifier.tintBlobCanvas(dark, auroraDef, tok.glow)
         else          -> modifier
     }
     Scaffold(

@@ -45,9 +45,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -55,7 +52,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.copypaste.android.ui.theme.AuroraDef
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
@@ -69,80 +65,13 @@ import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.SkinBackground
 import com.copypaste.android.ui.theme.auroraCanvas
-import com.copypaste.android.ui.theme.glassCanvasBrush
 import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.skinTokens
-
-// ---------------------------------------------------------------------------
-// A-C3: tintBlobCanvas — static two-blob backdrop for the VAPOR skin
-//
-// Unlike auroraCanvas (animated radials covering the full screen), this is a
-// STATIC (no animation) soft bicolor blend using the palette's primary glow
-// colours anchored at opposite corners.  The opaque base gradient is drawn
-// first so the glass blur behind surfaces has real colour to sample
-// (PARITY-SPEC §2 requirement — same as auroraCanvas).
-//
-// [glow] (from SkinTokens.glow) scales blob alpha: Vapor = 0.45,
-// giving a more refined, lower-intensity canvas than Classic's 0.62.
-// ---------------------------------------------------------------------------
-
-/**
- * Static tint-blob canvas for [SkinBackground.TINT_BLOB] (Vapor skin).
- *
- * Draws an opaque base gradient from [auroraDef]'s bg ramp, then overlays
- * two large soft blobs at opposite corners ([auroraDef.glowA] top-left,
- * [auroraDef.glowB] bottom-right) and a small centre accent from
- * [auroraDef.overlayAccent]. All blob alphas are scaled by [glow] so the
- * intensity matches [SkinTokens.glow].
- *
- * Apply to the Scaffold modifier; host must use `containerColor = Transparent`.
- */
-private fun Modifier.tintBlobCanvas(
-    dark: Boolean,
-    auroraDef: AuroraDef,
-    glow: Float,
-): Modifier = this.drawBehind {
-    // Opaque base — glass blur needs real colour behind surfaces (PARITY-SPEC §2).
-    drawRect(glassCanvasBrush(dark, auroraDef))
-
-    val diag = kotlin.math.hypot(size.width, size.height)
-
-    // Primary blob — top-left corner, large radius, palette glowA.
-    val blobA = auroraDef.glowA.copy(alpha = (auroraDef.glowA.alpha * glow * 1.4f).coerceIn(0f, 1f))
-    drawRect(
-        brush = Brush.radialGradient(
-            colorStops = arrayOf(0.0f to blobA, 0.55f to Color.Transparent),
-            center = Offset(size.width * 0.08f, size.height * 0.10f),
-            radius = diag * 0.90f,
-        ),
-    )
-
-    // Secondary blob — bottom-right corner, slightly smaller, palette glowB.
-    val blobB = auroraDef.glowB.copy(alpha = (auroraDef.glowB.alpha * glow * 1.4f).coerceIn(0f, 1f))
-    drawRect(
-        brush = Brush.radialGradient(
-            colorStops = arrayOf(0.0f to blobB, 0.55f to Color.Transparent),
-            center = Offset(size.width * 0.92f, size.height * 0.88f),
-            radius = diag * 0.80f,
-        ),
-    )
-
-    // Centre accent — subtle overlayAccent warms the middle of the canvas.
-    val centre = auroraDef.overlayAccent.copy(
-        alpha = (auroraDef.overlayAccent.alpha * glow).coerceIn(0f, 1f),
-    )
-    drawRect(
-        brush = Brush.radialGradient(
-            colorStops = arrayOf(0.0f to centre, 0.65f to Color.Transparent),
-            center = Offset(size.width * 0.50f, size.height * 0.42f),
-            radius = diag * 0.30f,
-        ),
-    )
-}
 
 /**
  * "About" screen — mirrors the macOS About view

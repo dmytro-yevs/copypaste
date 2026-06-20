@@ -173,6 +173,7 @@ import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import com.copypaste.android.ui.theme.EaseOutExpo
@@ -193,15 +194,12 @@ import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.paletteAurora
 // A-C1: skin axis tokens for screen-level treatment (background, row, nav).
-import com.copypaste.android.ui.theme.AuroraDef
 import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.SkinBackground
 import com.copypaste.android.ui.theme.SkinNavActive
 import com.copypaste.android.ui.theme.SkinRowTreatment
 import com.copypaste.android.ui.theme.SkinTokens
 import com.copypaste.android.ui.theme.skinTokens
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.geometry.Offset as ComposeOffset
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -452,59 +450,6 @@ private const val APP_ICON_CACHE_MAX_BYTES = 2 * 1024 * 1024 // 2 MiB
 private val appIconBitmapCache = object : LruCache<String, Bitmap>(APP_ICON_CACHE_MAX_BYTES) {
     override fun sizeOf(key: String, value: Bitmap): Int =
         value.byteCount.coerceAtLeast(1)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// A-C1: Vapor TINT_BLOB canvas — single static accent-tint blob, no animation.
-//
-// Vapor skin uses a simpler background than Classic: one large centred blob of
-// the palette's primary glow color, scaled by tok.glow (0.45 for Vapor).
-// No motion, no multiple blobs — just the single tint splash over the base
-// canvas gradient. This mirrors the web Vapor bg spec (§4 / skins-implementation-
-// plan.md): "single static accent-tint blob (no motion)".
-//
-// Implemented as a private HistoryActivity-file extension on Modifier so it
-// does not pollute the shared Components.kt / theme module.
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * A-C1 Vapor background: a static single-blob canvas.
- *
- * Draws the base canvas gradient from [auroraDef] and a single centred accent
- * blob at [glowIntensity] opacity. No animation — mirrors the Vapor skin
- * "TINT_BLOB" background spec (static, single blob).
- *
- * [dark] selects the appropriate base gradient (dark/light canvas).
- * [glowIntensity] is tok.glow (0.45 for Vapor); clamped to [0,1].
- */
-private fun Modifier.historyTintBlobCanvas(
-    dark: Boolean,
-    auroraDef: AuroraDef,
-    glowIntensity: Float,
-): Modifier {
-    val intensity = glowIntensity.coerceIn(0f, 1f)
-    return this.drawBehind {
-        // Base canvas gradient (same as auroraCanvas base path).
-        val baseColors = if (dark) {
-            listOf(auroraDef.bg1, auroraDef.bg2, auroraDef.bg0)
-        } else {
-            listOf(auroraDef.bg0, auroraDef.bg2, auroraDef.bg1)
-        }
-        drawRect(Brush.linearGradient(colors = baseColors))
-        // Single centred blob from the palette's primary glow color.
-        val diag = kotlin.math.hypot(size.width, size.height)
-        val blobColor = auroraDef.glowA.copy(alpha = auroraDef.glowA.alpha * intensity)
-        drawRect(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0.0f to blobColor,
-                    0.55f to androidx.compose.ui.graphics.Color.Transparent,
-                ),
-                center = ComposeOffset(size.width * 0.5f, size.height * 0.4f),
-                radius = diag * 0.75f,
-            ),
-        )
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -841,10 +786,9 @@ fun HistoryScreen(
             tok.background == SkinBackground.AURORA       ->
                 modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
             tok.background == SkinBackground.TINT_BLOB    ->
-                // Vapor: static single-blob tint, no animation. Reuse auroraCanvas with a
-                // palette that has only one visible blob (the accent glow) — the full multi-
-                // blob aurora is NOT painted. tok.glow scales the blob intensity.
-                modifier.historyTintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
+                // CopyPaste-uya3: use shared tintBlobCanvas from Components.kt
+                // (canonical AboutActivity calibration: base gradient + glowA + glowB + centre).
+                modifier.tintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
             else                                          -> modifier // FLAT: solid, no canvas
         },
         containerColor = if (translucent) Color.Transparent else c.bg,
