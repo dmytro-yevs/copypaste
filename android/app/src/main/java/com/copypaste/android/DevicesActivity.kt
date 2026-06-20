@@ -796,8 +796,10 @@ fun DevicesScreen(
     //   alpha to anchor the frosted glass panels without animated motion.
     val paintAurora = shouldPaintAurora(tok.background, translucent, paintCanvasBackdrop)
     val paintTintBlob = shouldPaintTintBlob(tok.background, translucent, paintCanvasBackdrop)
+    // Hoist LocalPalette.current out of drawBehind (DrawScope is not composable).
+    val currentPalette = paletteAurora(LocalPalette.current)
     val scaffoldModifier = when {
-        paintAurora -> modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+        paintAurora -> modifier.auroraCanvas(dark, currentPalette)
         paintTintBlob -> modifier.drawBehind {
             // Static soft tint-blob: one large radial gradient centred slightly
             // upper-left, mirroring the web TINT_BLOB spec (single accent blob,
@@ -806,8 +808,8 @@ fun DevicesScreen(
             drawRect(
                 brush = Brush.radialGradient(
                     colorStops = arrayOf(
-                        0.0f to paletteAurora(LocalPalette.current).glowA.copy(alpha = tok.glow * 0.55f),
-                        0.65f to paletteAurora(LocalPalette.current).glowA.copy(alpha = tok.glow * 0.12f),
+                        0.0f to currentPalette.glowA.copy(alpha = tok.glow * 0.55f),
+                        0.65f to currentPalette.glowA.copy(alpha = tok.glow * 0.12f),
                         1.0f to androidx.compose.ui.graphics.Color.Transparent,
                     ),
                     center = Offset(size.width * 0.35f, size.height * 0.28f),
