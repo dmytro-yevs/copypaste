@@ -1014,6 +1014,207 @@ body::after {
   display: flex;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   §SKIN  SKIN AXIS — Classic / Quiet / Vapor  (CopyPaste-qtcr / W-F3)
+   ─────────────────────────────────────────────────────────────────────────
+   Three switchable skins, driven by data-skin="classic|quiet|vapor" on <html>.
+   Default (no attribute or classic) = byte-identical to the legacy look.
+
+   Each block defines the canonical --skin-* token bundle and then BRIDGES
+   the existing consumers (--glass-blur, --glass-saturation, --glass-opacity,
+   --glow-strength) so every component keeps working without edits.
+
+   Quiet / Vapor values sourced from docs/ux/redesign-showcase.html.
+
+   Skin is ORTHOGONAL to palette and theme: every skin works with all 10
+   palettes × light/dark. Skin = structure/material only; no chroma changes.
+
+   The translucency (.no-translucency) and reduced-motion user overrides are
+   layered ON TOP of the skin defaults and keep working unchanged (§3 below).
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Classic (default — frozen, byte-identical to current Liquid Glass) ─── */
+html[data-skin="classic"] {
+  /* Surface material */
+  --skin-material:      glass;
+  --skin-blur:          28px;
+  --skin-sat:           1.45;
+  --skin-fill:          .40;      /* = current --glass-opacity dark */
+  --skin-sheen:         .06;      /* specular sheen alpha on glass surfaces */
+  --skin-tint:          0;        /* no accent tint wash */
+  --skin-elev:          glass-float;
+
+  /* Shadows (named refs to existing elevation tokens) */
+  --skin-shadow-card:   var(--ide-e2);
+  --skin-shadow-float:  var(--ide-e3);
+
+  /* Radius scale (current compact defaults -- radius-lg:18 radius-sm:12) */
+  --skin-r-ctl:         9px;      /* controls / inputs */
+  --skin-r-chip:        7px;      /* chips / tags */
+  --skin-r-card:        14px;     /* cards / panels (≈ radius-sm fallback) */
+  --skin-r-modal:       16px;     /* modals / sheets */
+
+  /* Row treatment */
+  --skin-row:           card;     /* glass card rows */
+  --skin-row-gap:       0px;
+
+  /* Nav active style */
+  --skin-nav:           fill+glow;
+
+  /* Background mode */
+  --skin-bg:            aurora;   /* full aurora canvas (current behaviour) */
+
+  /* Glow / motion */
+  --skin-glow:          .62;      /* maps to current --glow-strength */
+  --skin-motion:        1.3;      /* cinematic scale (speed=0.72 = fast) */
+
+  /* Strong-tier blur (modals/popovers — separate from chrome/card blur) */
+  --skin-blur-strong:   40px;     /* hardcoded 40px in legacy, kept identical */
+
+  /* ── Bridge: map skin vars → existing consumed vars ────────────────────
+     Existing components consume --glass-blur, --glass-saturation,
+     --glass-opacity, --glow-strength directly. Map them here so those
+     consumers keep working with zero component edits. */
+  --glass-blur:          var(--skin-blur);
+  --glass-saturation:    var(--skin-sat);
+  --glass-opacity:       var(--skin-fill);
+  --glow-strength:       var(--skin-glow);
+
+  /* Aurora fully active for classic */
+  --skin-aurora-scale:  1;   /* multiplied into body glow opacity */
+}
+
+/* ── Quiet (flat — hairline rows, no glass, opaque surfaces) ───────────── */
+html[data-skin="quiet"] {
+  /* Surface material — flat, no blur */
+  --skin-material:      flat;
+  --skin-blur:          0px;
+  --skin-sat:           1.0;
+  --skin-fill:          1.0;      /* fully opaque */
+  --skin-sheen:         0;
+  --skin-tint:          0;
+  --skin-elev:          none;
+
+  /* Shadows — none in quiet */
+  --skin-shadow-card:   none;
+  --skin-shadow-float:  var(--ide-e1);
+
+  /* Radius — slightly tighter (showcase: radius=7px, radius-lg=10px) */
+  --skin-r-ctl:         7px;
+  --skin-r-chip:        6px;
+  --skin-r-card:        10px;
+  --skin-r-modal:       12px;
+
+  /* Row treatment — hairline separators, no card gap */
+  --skin-row:           line;
+  --skin-row-gap:       0px;
+
+  /* Nav active style — tinted text only */
+  --skin-nav:           tint;
+
+  /* Background — flat solid (no aurora) */
+  --skin-bg:            flat;
+
+  /* Glow / motion — none, balanced pacing */
+  --skin-glow:          0;
+  --skin-motion:        1.0;
+
+  /* Strong-tier blur — zero (flat skin) */
+  --skin-blur-strong:   0px;
+
+  /* ── Bridge ─────────────────────────────────────────────────────────── */
+  --glass-blur:          var(--skin-blur);
+  --glass-saturation:    var(--skin-sat);
+  --glass-opacity:       var(--skin-fill);
+  --glow-strength:       var(--skin-glow);
+
+  /* Aurora suppressed for quiet — zero opacity multiplier */
+  --skin-aurora-scale:  0;
+}
+
+/* ── Vapor (refined glass — single-hue tint wash, sheen, depth) ────────── */
+html[data-skin="vapor"] {
+  /* Surface material — refined glass, higher blur/sat than classic */
+  --skin-material:      glass;
+  --skin-blur:          34px;     /* showcase: --glass-blur:34px */
+  --skin-sat:           1.7;      /* showcase: --glass-sat:1.7 */
+  --skin-fill:          .50;      /* slightly more transparent than classic */
+  --skin-sheen:         .16;      /* dark sheen (light override below: .70) */
+  --skin-tint:          .10;      /* accent tint wash (.10–.18 per showcase) */
+  --skin-elev:          glass-float;
+
+  /* Shadows — no hard card shadow (sheen provides depth), float keeps e3 */
+  --skin-shadow-card:   none;
+  --skin-shadow-float:  var(--ide-e3);
+
+  /* Radius — slightly larger, polished corners */
+  --skin-r-ctl:         12px;
+  --skin-r-chip:        10px;
+  --skin-r-card:        16px;
+  --skin-r-modal:       16px;
+
+  /* Row treatment — inset rounded rows with small gap */
+  --skin-row:           inset;
+  --skin-row-gap:       3px;
+
+  /* Nav active — glass pill with ring */
+  --skin-nav:           glass+ring;
+
+  /* Background — tint-blob (accent-tinted radial blobs, no rainbow aurora) */
+  --skin-bg:            tint-blob;
+
+  /* Glow / motion — reduced glow, balanced motion */
+  --skin-glow:          .45;
+  --skin-motion:        1.0;
+
+  /* Strong-tier blur — larger than classic for deeper frosted modals */
+  --skin-blur-strong:   44px;
+
+  /* ── Bridge ─────────────────────────────────────────────────────────── */
+  --glass-blur:          var(--skin-blur);
+  --glass-saturation:    var(--skin-sat);
+  --glass-opacity:       var(--skin-fill);
+  --glow-strength:       var(--skin-glow);
+
+  /* Aurora partially active — accent-tint blob replaces full rainbow */
+  --skin-aurora-scale:  .72;
+}
+
+/* Vapor light: sheen is brighter per showcase (.sheen=rgba(255,255,255,.7)) */
+html[data-skin="vapor"][data-theme="light"] {
+  --skin-sheen:         .70;
+  --skin-tint:          .18;    /* slightly stronger tint wash on light surfaces */
+}
+
+/* ── Fallback: no data-skin attribute → classic behaviour ───────────────── */
+/* (The :root already sets --glass-blur:28px / --glass-saturation:1.45 /
+    --glass-opacity:.40 / --glow-strength:.62, so absence of data-skin
+    is byte-identical to classic. This block just adds the skin-* names
+    for components that reference them without needing a JS fallback.) */
+:root:not([data-skin]) {
+  --skin-material:      glass;
+  --skin-blur:          28px;
+  --skin-sat:           1.45;
+  --skin-fill:          .40;
+  --skin-sheen:         .06;
+  --skin-tint:          0;
+  --skin-elev:          glass-float;
+  --skin-shadow-card:   var(--ide-e2);
+  --skin-shadow-float:  var(--ide-e3);
+  --skin-r-ctl:         9px;
+  --skin-r-chip:        7px;
+  --skin-r-card:        14px;
+  --skin-r-modal:       16px;
+  --skin-row:           card;
+  --skin-row-gap:       0px;
+  --skin-nav:           fill+glow;
+  --skin-bg:            aurora;
+  --skin-glow:          .62;
+  --skin-motion:        1.3;
+  --skin-blur-strong:   40px;
+  --skin-aurora-scale:  1;
+}
+
 /* ── §3 Liquid-Glass surface materials ─────────────────────────────────────
    Toggled by prefs.translucency (ON = default).
 
@@ -1037,13 +1238,14 @@ body::after {
 
 /* ── §3 Liquid-Glass surface materials ─────────────────────────────────────
    THREE depth tiers — each a GENUINE frosted material. The backdrop blur
-   now uses --glass-blur / --glass-saturation from the active palette block,
-   so a data-palette switch automatically adjusts the material feel too.
+   now uses --glass-blur / --glass-saturation from the active skin block
+   (bridged to --skin-blur / --skin-sat), so a skin switch automatically
+   adjusts the material feel. Classic = current values verbatim.
 
    Glass blur tier-split:
-     chrome/card tier → var(--glass-blur, 28px)
-     strong tier      → 40px  (heavier frosted glass for modals/popovers)
-   Matches Android GlassTier: GLASS/CARD=28dp, STRONG=40dp. */
+     chrome/card tier → var(--glass-blur, 28px)    = var(--skin-blur)
+     strong tier      → var(--skin-blur-strong)    = 40px classic, 0 quiet, 44px vapor
+   Matches Android GlassTier: GLASS/CARD=28dp, STRONG=40dp (classic). */
 
 .surface-glass,
 .surface-card,
@@ -1058,15 +1260,17 @@ body::after {
 }
 
 .surface-glass-strong {
-  backdrop-filter: blur(40px) saturate(var(--glass-saturation, 1.45));
-  -webkit-backdrop-filter: blur(40px) saturate(var(--glass-saturation, 1.45));
+  /* Refactored from hardcoded blur(40px) → var(--skin-blur-strong, 40px).
+     Classic = 40px (byte-identical), Quiet = 0px (flat), Vapor = 44px (deeper). */
+  backdrop-filter: blur(var(--skin-blur-strong, 40px)) saturate(var(--glass-saturation, 1.45));
+  -webkit-backdrop-filter: blur(var(--skin-blur-strong, 40px)) saturate(var(--glass-saturation, 1.45));
   /* CopyPaste-yvxm: overflow:hidden removed; the modal wrapper already clips via
      its own max-h-[80vh] overflow-hidden Tailwind classes. */
   position: relative;
 }
 
 /* ── Dark glass surfaces — token-driven fill ─────────────────────────────────
-   Fill uses --surface-rgb + --glass-opacity from the active palette.
+   Fill uses --surface-rgb + --glass-opacity from the active skin (via bridge).
    The diagonal sheen is the first gradient layer (no pseudo-element = zero
    z-index pitfalls). Top-edge specular highlight via inset box-shadow. */
 
@@ -1215,6 +1419,54 @@ body::after {
 
 .surface-solid {
   background: var(--ide-panel);
+}
+
+/* ── §SKIN Background overrides by skin mode ────────────────────────────────
+   Classic: aurora canvas (unchanged — no override needed, body rules above apply).
+   Quiet:   flat solid — suppress all aurora radial blobs, show only base gradient.
+   Vapor:   tint-blob — single large accent-tinted radial, no rainbow aurora.
+
+   NOTE: the aurora body rules and body::before/::after are NOT deleted.
+   For Quiet, --skin-aurora-scale:0 already zeros --glow-strength → opacity on
+   body::before/after reaches 0. The body background blobs below are suppressed
+   by overriding body background to a flat gradient for quiet, and to a simpler
+   tint-blob for vapor. Classic sets no override — remains 100% byte-identical.
+
+   Specificity: html[data-skin=...] body uses (0,1,1)+(0,0,1) = (0,1,2), which
+   beats the dark :root body (0,1,1) and ties with :root[data-theme="light"] body
+   (0,2,1) — but is placed AFTER it in the cascade, so wins on order for dark,
+   and the light-skin combos are handled by the combined selectors below. */
+
+/* Quiet dark — flat solid, no aurora */
+html[data-skin="quiet"] body {
+  background: linear-gradient(135deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
+  background-attachment: fixed;
+}
+
+/* Quiet light — flat solid, no aurora */
+html[data-skin="quiet"][data-theme="light"] body {
+  background: linear-gradient(160deg, var(--bg-0, #ECECF3) 0%, var(--bg-1, #E3E3EC) 50%, var(--bg-2, #D9DAE4) 100%);
+  background-attachment: fixed;
+}
+
+/* Vapor dark — single accent tint-blob + base gradient (no rainbow aurora) */
+html[data-skin="vapor"] body {
+  background:
+    /* Single large tint blob centred — accent hue only, not rainbow */
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 65%),
+    /* Smaller glow-a tint top-left */
+    radial-gradient(circle at 6% -18%, color-mix(in srgb, var(--glow-a) 28%, transparent), transparent 50%),
+    linear-gradient(135deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
+  background-attachment: fixed;
+}
+
+/* Vapor light — tint-blob on light canvas */
+html[data-skin="vapor"][data-theme="light"] body {
+  background:
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent, #007aff) 18%, transparent), transparent 65%),
+    radial-gradient(circle at 88% 12%, color-mix(in srgb, var(--accent, #007aff) 14%, transparent), transparent 32%),
+    linear-gradient(160deg, var(--bg-0, #ECECF3) 0%, var(--bg-1, #E3E3EC) 50%, var(--bg-2, #D9DAE4) 100%);
+  background-attachment: fixed;
 }
 
 /* ── §3 Focus ring ────────────────────────────────────────────────────────

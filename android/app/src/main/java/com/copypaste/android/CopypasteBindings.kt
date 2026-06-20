@@ -62,8 +62,14 @@ private const val TAG = "CopypasteBindings"
  * `PeerMeta.device_id` / `generate_device_cert`). Kotlin persists it as
  * `PairedPeer.peerDeviceId` so `OriginDeviceFilter` resolves clipboard item
  * names by UUID. Additive nullable field; old peers surface `null`.
+ * Bumped 17 → 18: `bootstrap_pair_initiator`, `start_discovery`, and
+ * `pair_with_discovered` each gained a trailing `public_ip: String?` param
+ * (WAN address from STUN, for parity with the macOS daemon's public_ip.rs
+ * path). A new `resolve_stun_public_ip() -> String?` function is also exported.
+ * Kotlin generated against ABI 17 calls the pairing functions with wrong arity
+ * and lacks `resolveStunPublicIp`; must be regenerated against ABI 18.
  */
-const val APP_ABI_VERSION: UInt = 17u
+const val APP_ABI_VERSION: UInt = 18u
 
 /** Mirrors `EncryptedBlob` in copypaste_android.udl — uses ByteArray for callers. */
 data class EncryptedBlob(val nonce: ByteArray, val ciphertext: ByteArray) {

@@ -6,6 +6,10 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
+import com.copypaste.android.ui.theme.Skin
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.UUID
@@ -588,6 +592,29 @@ class Settings(context: Context) {
     var paletteName: String
         get() = prefs.getString("palette", "GRAPHITE_MIST") ?: "GRAPHITE_MIST"
         set(v) = prefs.edit().putString("palette", v).apply()
+
+    /**
+     * Active structural skin — governs the visual language (radius scale,
+     * elevation model, row treatment, surface material, motion baseline).
+     *
+     * Stored as the [Skin] enum name string so future skins can be added without
+     * a migration. Unrecognised values (e.g. from a future downgrade) fall back
+     * to [Skin.DEFAULT] (CLASSIC) so the current look is preserved exactly.
+     *
+     * Key: "skin". Default: [Skin.CLASSIC] — byte-identical to today's Liquid
+     * Glass; choosing CLASSIC never changes the visual appearance.
+     *
+     * [rememberSkin] reads this in a @Composable context; [saveScreenSettings]
+     * persists it alongside the other display prefs in the force-stop-safe
+     * synchronous batch write (A-F2).
+     */
+    var skin: Skin
+        get() = when (prefs.getString("skin", Skin.DEFAULT.name)) {
+            Skin.QUIET.name -> Skin.QUIET
+            Skin.VAPOR.name -> Skin.VAPOR
+            else            -> Skin.CLASSIC  // default: CLASSIC preserves today's look
+        }
+        set(v) = prefs.edit().putString("skin", v.name).apply()
 
     /**
      * One-time upgrade migration to the Apple "Liquid Glass" light-first release.
@@ -1442,6 +1469,8 @@ class Settings(context: Context) {
         notifyOnCopy: Boolean,
         soundOnCopy: Boolean,
         logcatCaptureEnabled: Boolean,
+        /** A-F2: structural skin (default [Skin.CLASSIC] = today's Liquid Glass look). */
+        skin: Skin = Skin.DEFAULT,
     ) {
         // Clamp the size/quota knobs through the SAME native clampConfig the macOS
         // daemon uses so a force-stop-safe batch write can never persist a
@@ -1476,6 +1505,7 @@ class Settings(context: Context) {
             .putBoolean("notify_on_copy", notifyOnCopy)
             .putBoolean("sound_on_copy", soundOnCopy)
             .putBoolean("logcat_capture_enabled", logcatCaptureEnabled)
+            .putString("skin", skin.name)  // A-F2: skin axis (default CLASSIC = no visual change)
             .commit() // synchronous: survives an immediate force-stop (SIGKILL)
     }
 
@@ -1852,4 +1882,22 @@ data class P2pIdentity(
         result = 31 * result + keyDer.contentHashCode()
         return result
     }
+}
+
+/**
+ * Reads the persisted [Skin] from SharedPreferences (key "skin", default
+ * [Skin.CLASSIC]). Resolves unknown stored names to [Skin.DEFAULT] defensively.
+ *
+ * Mirrors [com.copypaste.android.ui.theme.rememberPalette] /
+ * [com.copypaste.android.ui.theme.rememberThemeMode] in Theme.kt:
+ * `remember(ctx)` keeps the read stable across recompositions for the activity
+ * lifetime; a skin change recreates the activity, which re-reads it.
+ *
+ * A-F2: provided here (not in Theme.kt) so it lives with the [Settings.skin]
+ * property it wraps, reducing the need for callers to reach into two files.
+ */
+@Composable
+fun rememberSkin(): Skin {
+    val ctx = LocalContext.current
+    return remember(ctx) { Settings(ctx).skin }
 }

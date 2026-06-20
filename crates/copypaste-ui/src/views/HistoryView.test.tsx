@@ -304,7 +304,7 @@ function makeOnlineInvokeForLimit() {
 }
 
 describe("CopyPaste-2b1g: historyDisplayLimit — persistence and HistoryView cap", () => {
-  const PREFS_KEY = "copypaste-ui-prefs-v2";
+  const PREFS_KEY = "copypaste-ui-prefs-v3";
 
   beforeEach(() => {
     invoke.mockReset();

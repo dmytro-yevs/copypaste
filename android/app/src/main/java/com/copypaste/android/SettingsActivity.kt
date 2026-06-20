@@ -102,6 +102,7 @@ import com.copypaste.android.ui.theme.Palette
 import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.paletteIdeColors
+import com.copypaste.android.ui.theme.Skin
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -206,6 +207,9 @@ fun SettingsScreen(
     // §3/P1#9: preview lines per history row (mirrors web niApp, 1–6).
     var previewLines by remember { mutableStateOf(settings.previewLines) }
     var imageQuality by remember { mutableStateOf(settings.imageQuality) }
+    // A-F5: structural skin — immediate-effect pref like palette/theme (writes + recreates on select).
+    // Also threaded into persistAll() so saveScreenSettings() always receives the current skin.
+    var skin by remember { mutableStateOf(settings.skin) }
 
     // ── Storage ──
     var maxTextSizeBytes by remember {
@@ -301,6 +305,10 @@ fun SettingsScreen(
             notifyOnCopy = notifyOnCopy,
             soundOnCopy = soundOnCopy,
             logcatCaptureEnabled = logcatEnabled,
+            // A-F5: pass the draft skin state so the batch write persists it alongside
+            // the other display prefs (skin is also written immediately on select via
+            // settings.skin + recreate(), but the batch write ensures a consistent snapshot).
+            skin = skin,
         )
         settings.maxFileSizeBytes = maxFileSizeBytes
         settings.sensitiveTtlSecs = sensitiveTtlSecs
@@ -500,6 +508,11 @@ fun SettingsScreen(
                         onPreviewLinesChange = { previewLines = it; dirty = true },
                         imageQuality = imageQuality,
                         onImageQualityChange = { imageQuality = it; dirty = true },
+                        // A-F5: skin is an immediate-effect pref (like palette/theme); the picker
+                        // writes directly and recreates, so onSkinChange just keeps the draft state
+                        // consistent for the persistAll() batch write.
+                        skin = skin,
+                        onSkinChange = { skin = it },
                         settings = settings,
                         ctx = ctx,
                     )
@@ -730,6 +743,10 @@ private fun DisplayTab(
     onPreviewLinesChange: (Int) -> Unit,
     imageQuality: Int,
     onImageQualityChange: (Int) -> Unit,
+    // A-F5: structural skin — immediate-effect pref (writes + recreates on select like palette/theme).
+    // onSkinChange updates the draft state in SettingsScreen for the persistAll() batch write.
+    skin: Skin,
+    onSkinChange: (Skin) -> Unit,
     settings: Settings,
     ctx: android.content.Context,
 ) {
@@ -778,6 +795,16 @@ private fun DisplayTab(
                     },
                 )
             }
+            SettingsCardDivider()
+            // ── Skin picker (A-F5) ─────────────────────────────────────────
+            // Mirrors the theme-mode segmented control above. Immediate-effect:
+            // writes settings.skin + recreates (same pattern as palette/theme).
+            SkinPicker(
+                activeSkin = skin,
+                settings = settings,
+                onSkinChange = onSkinChange,
+                ctx = ctx,
+            )
         }
 
         // ── DISPLAY section card ──────────────────────────────────────────
@@ -1537,6 +1564,59 @@ private fun PaletteSwatchItem(
             textAlign = TextAlign.Center,
             maxLines = 2,
             modifier = Modifier.width(52.dp),
+        )
+    }
+}
+
+/**
+ * Skin picker row — a segmented control with one option per [Skin] value.
+ *
+ * A-F5: mirrors the theme-mode segmented control (System / Light / Dark) directly
+ * above it in the APPEARANCE card. Tapping a segment:
+ *  1. Writes [Settings.skin] immediately (not deferred to the Save button — same
+ *     pattern as palette/themeMode which are also immediate-effect prefs).
+ *  2. Calls [onSkinChange] to keep the draft [skin] state in [SettingsScreen]
+ *     consistent so the [persistAll] batch write receives the current selection.
+ *  3. Calls [Activity.recreate] so [CopyPasteTheme] re-reads the new skin from
+ *     SharedPreferences and provides it via [LocalSkin] to all composables.
+ *
+ * Labels are hardcoded strings (no new string resource needed — mirrors how the
+ * theme-mode labels "System"/"Light"/"Dark" are hardcoded inline). If a dedicated
+ * strings.xml entry is desired later, replace the literal list with string resources.
+ */
+@Composable
+private fun SkinPicker(
+    activeSkin: Skin,
+    settings: Settings,
+    onSkinChange: (Skin) -> Unit,
+    ctx: android.content.Context,
+) {
+    val c = LocalIdeColors.current
+    val skins = listOf(Skin.CLASSIC, Skin.QUIET, Skin.VAPOR)
+    // Labels mirror the enum names (Classic/Quiet/Vapor) — consistent with §2 plan.
+    val skinLabels = listOf("Classic", "Quiet", "Vapor")
+    var selectedSkin by remember { mutableStateOf(activeSkin) }
+
+    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(
+            text = "Visual style",
+            style = MaterialTheme.typography.bodyMedium,
+            color = c.dim,
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
+        IdeSegmentedControl(
+            options = skinLabels,
+            selectedIndex = skins.indexOf(selectedSkin).coerceAtLeast(0),
+            onSelect = { idx ->
+                val chosen = skins[idx]
+                selectedSkin = chosen
+                // Immediate write — skin is an appearance pref like palette/themeMode.
+                settings.skin = chosen
+                // Keep the draft state in SettingsScreen in sync for persistAll().
+                onSkinChange(chosen)
+                // Recreate so CopyPasteTheme picks up the new LocalSkin value.
+                (ctx as? android.app.Activity)?.recreate()
+            },
         )
     }
 }

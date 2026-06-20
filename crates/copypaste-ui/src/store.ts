@@ -3,10 +3,21 @@ import { create } from "zustand";
 export type ViewId = "history" | "devices" | "settings" | "about" | "logs";
 
 // ---------------------------------------------------------------------------
+// Skin type — W-F2: shim until W-F1 lands and exports from ./lib/skins
+// TODO: import SkinId from ./lib/skins once W-F1 lands
+// ---------------------------------------------------------------------------
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+export type SkinId = "classic" | "quiet" | "vapor";
+
+// ---------------------------------------------------------------------------
 // UI preferences persisted to localStorage
 // ---------------------------------------------------------------------------
 
-const PREFS_KEY = "copypaste-ui-prefs-v2";
+const PREFS_KEY = "copypaste-ui-prefs-v3";
+// v2 key — introduced with Liquid Glass redesign (skin pref did not exist yet).
+// On upgrade we migrate all v2 fields and inject skin:"classic" for existing users.
+// See loadPrefs() v2→v3 migration block.
+const LEGACY_PREFS_V2_KEY = "copypaste-ui-prefs-v2";
 // Pre-Liquid-Glass key. v1 persisted theme:"dark" as the old default; on upgrade
 // we migrate non-theme fields and DROP the stored theme so the new light-first
 // default applies once (otherwise the stale "dark" overrides it and the user
@@ -97,6 +108,17 @@ export interface UIPrefs {
    * lets users who find the warning redundant disable it (default on = same behaviour).
    */
   showSensitiveWarnings: boolean;
+  /**
+   * Active skin key. Governs the visual language (structure + material) orthogonal
+   * to color palette and theme.  Drives the data-skin attribute on <html>.
+   *   "classic" (default) — byte-identical to today's Liquid Glass look.
+   *   "quiet"             — flat material, no glass blur.
+   *   "vapor"             — refined glass with stronger sheen.
+   * Consuming code: App.tsx sets document.documentElement.setAttribute("data-skin", …).
+   * W-F2: shim type (SkinId) defined locally; replace with import from ./lib/skins
+   * once W-F1 lands.
+   */
+  skin: SkinId;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -118,15 +140,29 @@ const DEFAULT_PREFS: UIPrefs = {
   historyDisplayLimit: 1000,
   // Show the "Sensitive — click to reveal" overlay by default (Android parity).
   showSensitiveWarnings: true,
+  // Classic is the default skin — reproduces today's Liquid Glass look exactly.
+  skin: "classic",
 };
 
 function loadPrefs(): UIPrefs {
   try {
     let raw = localStorage.getItem(PREFS_KEY);
+    // ── Skin-axis upgrade migration (v2 → v3) ─────────────────────────────
+    // If only v2 prefs exist, adopt them and inject skin:"classic" so existing
+    // users get the default skin (Classic = current Liquid Glass look, no change).
+    // Then re-persist under v3 and remove v2.
+    let migratedFromV2 = false;
+    if (!raw) {
+      const v2 = localStorage.getItem(LEGACY_PREFS_V2_KEY);
+      if (v2) {
+        raw = v2;
+        migratedFromV2 = true;
+      }
+    }
     // ── Liquid Glass upgrade migration (v1 → v2) ──────────────────────────
     // If only the legacy v1 prefs exist, adopt them but DROP the persisted
     // theme so the PARITY-SPEC §0 light default applies once.
-    // Then re-persist under v2.
+    // Then re-persist under v3.
     let migratedFromLegacy = false;
     if (!raw) {
       const legacy = localStorage.getItem(LEGACY_PREFS_KEY);
@@ -145,6 +181,13 @@ function loadPrefs(): UIPrefs {
       // (deleting unconditionally would silently override an explicit pick).
       if (parsed.theme === "dark") delete parsed.theme;
       delete parsed.palette;
+    }
+    if (migratedFromV2 || migratedFromLegacy) {
+      // Inject skin:"classic" for users upgrading from v2 (or v1 which also
+      // lacks the field). Classic = current look, so this is a no-op visually.
+      if (parsed.skin === undefined) {
+        parsed.skin = "classic";
+      }
     }
 
     // ── v0.5.3 migration ──────────────────────────────────────────────────
@@ -165,8 +208,13 @@ function loadPrefs(): UIPrefs {
     // ──────────────────────────────────────────────────────────────────────
 
     const merged = { ...DEFAULT_PREFS, ...parsed };
+    if (migratedFromV2) {
+      // Persist under v3 and drop the v2 key so this runs exactly once.
+      savePrefs(merged);
+      try { localStorage.removeItem(LEGACY_PREFS_V2_KEY); } catch { /* ignore */ }
+    }
     if (migratedFromLegacy) {
-      // Persist under v2 and drop the legacy key so this runs exactly once.
+      // Persist under v3 and drop the legacy v1 key so this runs exactly once.
       savePrefs(merged);
       try { localStorage.removeItem(LEGACY_PREFS_KEY); } catch { /* ignore */ }
     }

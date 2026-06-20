@@ -19,6 +19,7 @@ import {
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
 import { PALETTE_KEYS, PALETTES } from "../lib/liquid-tokens";
+import { SKIN_IDS } from "../lib/skins";
 // i2sr (PG-40): shared hybrid last-sync formatter (relative ≤24 h, absolute beyond).
 import { formatSyncTime } from "../lib/time";
 // Step arrays (moved from StepSlider.tsx — StepSlider component deleted in v0.5.3,
@@ -173,10 +174,12 @@ function Panel({ children }: { children: React.ReactNode }) {
   // bottom-borders to the panel's rounded corners without clipping the popover,
   // which floats above the outer div via z-50.
   return (
-    // surface-card = frosted translucent glass: the colourful aurora canvas blurs
-    // THROUGH the panel (backdrop-filter), with the hairline border + specular
-    // top highlight from the .surface-card recipe. No longer an opaque fill.
-    <div className="surface-card rounded-ide-lg shadow-ide-sm">
+    // surface-card = frosted translucent glass: reads --skin-* vars for material,
+    // blur, fill, shadow (--skin-shadow-card) so panels adapt to the active skin.
+    // Classic: e2 shadow + glass; Quiet: no shadow + flat; Vapor: no card shadow + sheen.
+    // shadow-ide-sm removed — surface-card drives the shadow via --skin-shadow-card
+    // so settings panels are skin-aware without a hardcoded override.
+    <div className="surface-card rounded-ide-lg">
       <div className="overflow-hidden rounded-ide-lg">
         {children}
       </div>
@@ -321,7 +324,7 @@ function InfoPopover({ text }: { text: string }) {
     ? ReactDOM.createPortal(
         <div
           ref={popoverRef}
-          className="surface-glass-strong z-[9999] w-56 rounded-ide p-2 text-[11px] text-ide-dim shadow-ide-sm"
+          className="surface-glass-strong z-[9999] w-56 rounded-ide p-2 text-[11px] text-ide-dim"
           style={{
             position: "fixed",
             top: pos.top,
@@ -1710,6 +1713,8 @@ export function SettingsView() {
   function renderDisplay() {
     const activePalette = prefs.palette ?? "graphite-mist";
     const activeDensity = prefs.density ?? "compact";
+    // W-F4: skin picker — read current value from store, set via setPrefs({skin}).
+    const activeSkin = prefs.skin ?? "classic";
 
     return (
       <div className="space-y-2">
@@ -1758,6 +1763,37 @@ export function SettingsView() {
               })}
             </div>
           </div>
+
+          {/* W-F4: Skin picker — Visual style segmented control (Classic / Quiet / Vapor).
+              Mirrors the density/theme segmented control pattern exactly.
+              Labels are Title-Cased skin ids. Updates live via setPrefs({skin}). */}
+          <SettingsRow label="Visual style">
+            <div
+              data-testid="skin-picker"
+              className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5"
+            >
+              {SKIN_IDS.map((id) => {
+                const label = id.charAt(0).toUpperCase() + id.slice(1);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-label={label}
+                    aria-pressed={activeSkin === id}
+                    onClick={() => setPrefs({ skin: id })}
+                    className={[
+                      "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
+                      activeSkin === id
+                        ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
+                        : "text-ide-dim hover:text-ide-text",
+                    ].join(" ")}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </SettingsRow>
 
           {/* Density segmented control — compact / comfortable / spacious */}
           <SettingsRow label="Row density">

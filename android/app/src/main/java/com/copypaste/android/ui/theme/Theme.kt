@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import com.copypaste.android.Settings
 import com.copypaste.android.ThemeMode
+import com.copypaste.android.rememberSkin
 
 // ---------------------------------------------------------------------------
 // CopyPaste theme — **light-first** (PARITY-SPEC §0), matching the Apple macOS
@@ -302,6 +303,7 @@ fun rememberPalette(): Palette {
 fun CopyPasteTheme(
     themeMode: ThemeMode = rememberThemeMode(),
     palette: Palette = rememberPalette(),
+    skin: Skin = rememberSkin(),
     content: @Composable () -> Unit,
 ) {
     // Determine dark/light axis: palette.isDark takes priority when a palette
@@ -358,11 +360,15 @@ fun CopyPasteTheme(
         }
     }
 
-    // Provide all three palette locals alongside the Material colorScheme.
+    // Provide all palette locals and the active skin alongside the Material colorScheme.
+    // LocalSkin carries the structural/material token bundle — orthogonal to color.
+    // A skin change triggers activity recreation (same lifecycle as palette), so
+    // staticCompositionLocalOf in Skin.kt is correct — no incremental recomposition needed.
     CompositionLocalProvider(
         LocalPalette       provides resolvedPalette,
         LocalIdeColors     provides ideColors,
         LocalLiquidTokens  provides liquidTokens,
+        LocalSkin          provides skin,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

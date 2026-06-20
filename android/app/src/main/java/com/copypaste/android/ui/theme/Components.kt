@@ -195,9 +195,16 @@ val GLASS_BLUR_RADIUS = GlassTier.GLASS.blur
  * frosted aurora pops; chained AFTER the blur via [android.graphics.RenderEffect.createChainEffect]
  * on API 31+. The matrix is the standard saturation interpolation around the
  * Rec.601 luma coefficients with s = 1.8.
+ *
+ * [s] is the saturation multiplier — defaults to 1.8 (Classic/current implementation
+ * value). Skin-aware callers pass [SkinTokens.saturation] for non-Classic skins.
+ *
+ * NOTE: Classic uses s=1.8 here even though ClassicSkinTokens.saturation=1.45 — the
+ * 1.8 is the implementation constant that produces the desired visual on Android;
+ * the web value (1.45) maps to a CSS backdrop-filter which operates differently.
+ * Discrepancy logged in bd notes (A-F4).
  */
-private fun saturationRenderEffect(): android.graphics.RenderEffect {
-    val s = 1.8f
+private fun saturationRenderEffect(s: Float = 1.8f): android.graphics.RenderEffect {
     val lumaR = 0.213f
     val lumaG = 0.715f
     val lumaB = 0.072f
@@ -468,26 +475,53 @@ fun LiquidGlassSurface(
     hairline: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    // A-F4: skin-aware material / blur / sheen / tint.
+    val skin = LocalSkin.current
+    val tok = skinTokens(skin)
+    val c = LocalIdeColors.current
+
+    // When the skin's material model is FLAT (Quiet), force non-translucent even if
+    // the user's translucency pref is ON. Translucency is a user override layered ON
+    // TOP of the skin's defaults — a FLAT skin produces opaque surfaces regardless.
+    val effectiveTranslucent = translucent && tok.material == SkinMaterial.GLASS
+
+    // Blur radius: driven by the skin token (Classic=28, Vapor=34); Quiet is FLAT so
+    // blur is irrelevant (effectiveTranslucent=false). Classic uses tier.blur (=28dp
+    // for GLASS tier) which matches tok.glassBlurDp=28 — consistent.
+    val blurRadius = if (skin == Skin.CLASSIC) tier.blur else tok.glassBlurDp
+
+    // Saturation: Classic uses the existing 1.8f implementation constant (web's 1.45
+    // maps differently — discrepancy noted in bd). Non-Classic GLASS skins use tok.saturation.
+    val saturationScale = if (skin == Skin.CLASSIC) 1.8f else tok.saturation
+
     // Per-tier WHITE alpha gradient (light) / flat deep tint (dark) — zd35.
     val fillColor = if (dark) GlassFillDark else GlassFillLight
     val alphaTop = if (dark) tier.darkAlpha else tier.lightAlphaTop
     val alphaBot = if (dark) tier.darkAlpha else tier.lightAlphaBottom
-    // Top sheen: a bright near-white inset highlight — styleguide top specular.
-    val sheen = if (dark) Color.White.copy(alpha = 0.08f) else Color.White.copy(alpha = 0.45f)
+
+    // Sheen: driven by tok.sheen. Classic = 0.06 (token); current implementation used
+    // 0.08f (dark) / 0.45f (light). Prefer current numbers for Classic.
+    // Vapor: sheen = .16 (dark) / .70 (light) per spec; tok.sheen stores .16 as default.
+    val sheenAlpha = when {
+        // Classic path: preserve current hardcoded sheen values.
+        skin == Skin.CLASSIC -> if (dark) 0.08f else 0.45f
+        // Vapor light: spec calls for .70; dark: tok.sheen (.16).
+        skin == Skin.VAPOR   -> if (dark) tok.sheen else 0.70f
+        // Quiet: sheen=0 (token).
+        else                 -> tok.sheen
+    }
+    val sheen = Color.White.copy(alpha = sheenAlpha)
     val specular = if (dark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.75f)
     val rim = glassHairline(dark)
-    // CopyPaste-0fjj: the blur Box no longer draws any local canvas fill — it stays
-    // transparent so android.graphics.RenderEffect samples the real aurora composited
-    // behind it by the parent auroraCanvas modifier. Palette-aware colour is delivered
-    // to the aurora by auroraCanvas(dark, paletteAurora(palette)) at each call site
-    // (HistoryScreen, SettingsScreen, etc.) — not from within LiquidGlassSurface.
-    val blurRadius = tier.blur
+
+    // Tint wash: tok.tintAlpha accent overlay on the glass surface (Classic=0, Vapor=.14).
+    val tintAlpha = tok.tintAlpha
 
     Box(
         modifier = modifier.clip(shape),
         propagateMinConstraints = true,
     ) {
-        if (translucent && supportsGlassBlur) {
+        if (effectiveTranslucent && supportsGlassBlur) {
             // CopyPaste-0fjj: REAL backdrop-blur — this Box draws NOTHING itself
             // (no drawBehind fill) so the RenderEffect samples whatever the compositor
             // has composited behind it (the aurora canvas from auroraCanvas modifier
@@ -502,21 +536,22 @@ fun LiquidGlassSurface(
                             blurRadius.toPx(),
                             android.graphics.Shader.TileMode.CLAMP,
                         )
-                        // skzd: chain saturate(180%) AFTER the blur so the frosted
-                        // aurora keeps its chroma (web `blur(..) saturate(180%)`).
+                        // skzd: chain saturation AFTER the blur so the frosted aurora
+                        // keeps its chroma (web `blur(..) saturate(...)`). Scale driven
+                        // by tok.saturation for non-Classic skins.
                         renderEffect = android.graphics.RenderEffect
-                            .createChainEffect(saturationRenderEffect(), blur)
+                            .createChainEffect(saturationRenderEffect(saturationScale), blur)
                             .asComposeRenderEffect()
                     },
                 // No content, no drawBehind — transparent so blur samples real backdrop.
             )
         }
-        // Per-tier fill + sheen + inset specular line (zd35/1k3i).
+        // Per-tier fill + sheen + inset specular line + tint wash (zd35/1k3i + A-F4 tint).
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .drawBehind {
-                    if (translucent) {
+                    if (effectiveTranslucent) {
                         // Top→bottom white alpha gradient (the 3-tier recipe).
                         drawRect(
                             brush = Brush.verticalGradient(
@@ -526,7 +561,7 @@ fun LiquidGlassSurface(
                                 ),
                             ),
                         )
-                        // Sheen — a thin highlight fading down.
+                        // Sheen — a thin highlight fading down (alpha driven by tok.sheen).
                         drawRect(
                             brush = Brush.verticalGradient(
                                 colors = listOf(sheen, Color.Transparent),
@@ -539,8 +574,13 @@ fun LiquidGlassSurface(
                             topLeft = Offset(0f, 0f),
                             size = androidx.compose.ui.geometry.Size(size.width, 1.dp.toPx()),
                         )
+                        // Accent tint wash (A-F4): tok.tintAlpha > 0 for Vapor (.14).
+                        // Layers a subtle accent-colour overlay on the glass fill.
+                        if (tintAlpha > 0f) {
+                            drawRect(color = c.accent.copy(alpha = tintAlpha))
+                        }
                     } else {
-                        // Pre-glass solid look.
+                        // Pre-glass solid look (FLAT skin or translucency off).
                         drawRect(solid)
                     }
                 },
@@ -551,7 +591,7 @@ fun LiquidGlassSurface(
         // 1k3i: bright .5px white glass rim drawn ON the surface (not an opaque
         // grey Material outline). Only on translucent surfaces; the solid look
         // keeps its caller-supplied border.
-        if (translucent && hairline) {
+        if (effectiveTranslucent && hairline) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
@@ -695,9 +735,18 @@ fun CopyPasteTopBar(
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
 
-    // CopyPaste-6krb: floating shape matching web parity — 14dp radius, 8dp side inset.
-    // Previously was RectangleShape + full-bleed. Now mirrors FloatingTabBar pattern.
-    val headerShape = RoundedCornerShape(14.dp)
+    // A-F4: skin-aware radius and shadow.
+    val skin = LocalSkin.current
+    val tok = skinTokens(skin)
+
+    // Header radius: maps to tok.radiusCard (floating panel, not a modal).
+    // Classic=14dp (token) matches current hardcode — consistent.
+    val headerRadius = tok.radiusCard
+    val headerShape = RoundedCornerShape(headerRadius)
+
+    // Float shadow: shown when translucent AND skin elevation is GLASS_FLOAT.
+    // Quiet (NONE elevation) omits the shadow even when translucency is on.
+    val showHeaderShadow = translucent && tok.elevation == SkinElevation.GLASS_FLOAT
 
     // §2/P0: outer Box carries the horizontal inset padding + float shadow so the header
     // appears to hover above content — the liquid-glass floating feel.
@@ -706,7 +755,7 @@ fun CopyPasteTopBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
-            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.GLASS, radius = 14.dp) else Modifier),
+            .then(if (showHeaderShadow) Modifier.glassFloatShadow(GlassTier.GLASS, radius = headerRadius) else Modifier),
     ) {
         LiquidGlassSurface(
             shape = headerShape,
@@ -787,22 +836,33 @@ fun CopyPasteCard(
     content: @Composable (androidx.compose.foundation.layout.ColumnScope.() -> Unit),
 ) {
     val dark = isDarkTheme()
-    // PG-57: card radius is now 12 dp (--radius-card), aligned with macOS 12 px
-    // (was 14 dp per oha3/5686 — that reference is now superseded by the parity fix).
-    val cardShape = RadiusCard
+
+    // A-F4: skin-aware radius and shadow.
+    val skin = LocalSkin.current
+    val tok = skinTokens(skin)
+
+    // Card radius: tok.radiusCard drives Quiet(10dp) and Vapor(16dp).
+    // Classic: tok.radiusCard=14dp but current code uses 12dp (RadiusCard, PG-57).
+    // Prefer current 12dp for Classic to preserve existing look — discrepancy noted in bd.
+    val cardRadius = if (skin == Skin.CLASSIC) 12.dp else tok.radiusCard
+    val cardShape = RoundedCornerShape(cardRadius)
+
     // Only paint an explicit Material border when the caller overrides `accent`
     // with a SEMANTIC tint; the default outline is superseded by the bright glass
     // rim that LiquidGlassSurface draws (1k3i — no opaque grey 1dp ring).
     val semanticBorder = accent != MaterialTheme.colorScheme.outline
 
+    // Card shadow: tok.shadowCard drives whether a shadow is shown.
+    // NONE (Quiet, Vapor) → no card shadow; E2 (Classic) → CARD tier float shadow.
+    val showCardShadow = translucent && tok.shadowCard == SkinShadowCard.E2
+
     // vk12: drop Material tonal elevation entirely; the soft tinted float shadow
     // is drawn behind the card via glassFloatShadow (CARD tier 0 4px 14px).
-    // Shadow radius tracks RadiusCard (12 dp, PG-57) so the shadow silhouette
-    // matches the card's actual corner clip.
+    // Shadow radius tracks cardRadius so the shadow silhouette matches the corner clip.
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.CARD, 12.dp) else Modifier),
+            .then(if (showCardShadow) Modifier.glassFloatShadow(GlassTier.CARD, cardRadius) else Modifier),
         shape = cardShape,
         colors = CardDefaults.cardColors(
             containerColor = Color.Transparent,
@@ -883,7 +943,20 @@ fun GlassAlertDialog(
 ) {
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
-    val dialogShape = RoundedCornerShape(16.dp)
+
+    // A-F4: skin-aware modal radius and float shadow.
+    val skin = LocalSkin.current
+    val tok = skinTokens(skin)
+
+    // Modal radius: tok.radiusModal (Classic=16, Quiet=12, Vapor=16).
+    // Classic tok.radiusModal=16dp matches current hardcode — consistent.
+    val modalRadius = tok.radiusModal
+    val dialogShape = RoundedCornerShape(modalRadius)
+
+    // Float shadow: shown when translucent AND elevation is GLASS_FLOAT.
+    // Quiet (NONE elevation) uses a lighter shadow; we omit the strong shadow
+    // since tok.elevation=NONE for Quiet (no dramatic float).
+    val showDialogShadow = translucent && tok.elevation == SkinElevation.GLASS_FLOAT
 
     Dialog(
         onDismissRequest = onDismissRequest,
@@ -895,7 +968,7 @@ fun GlassAlertDialog(
         Surface(
             modifier = modifier
                 .widthIn(min = 280.dp, max = 560.dp)
-                .then(if (translucent) Modifier.glassFloatShadow(GlassTier.STRONG, 16.dp) else Modifier),
+                .then(if (showDialogShadow) Modifier.glassFloatShadow(GlassTier.STRONG, modalRadius) else Modifier),
             shape = dialogShape,
             color = Color.Transparent,
             border = if (translucent) null else BorderStroke(1.dp, c.border),
@@ -1514,7 +1587,13 @@ fun CopyPasteButton(
 ) {
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
-    val shape = RadiusControl
+
+    // A-F4: skin-aware control radius.
+    // tok.radiusControl: Classic=9dp (matches RadiusControl), Quiet=7dp, Vapor=12dp.
+    val skin = LocalSkin.current
+    val tok = skinTokens(skin)
+    val shape = RoundedCornerShape(tok.radiusControl)
+
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
 

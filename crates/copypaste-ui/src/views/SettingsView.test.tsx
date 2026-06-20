@@ -437,6 +437,82 @@ describe("P2P toggle triggers daemon restart", () => {
     expect(screen.getByRole("button", { name: /^system$/i })).toBeInTheDocument();
   });
 
+  // ---------------------------------------------------------------------------
+  // W-F4: Skin picker in the Appearance section of the Display tab
+  // ---------------------------------------------------------------------------
+
+  it("§W-F4 Display tab has a skin picker with Classic/Quiet/Vapor options", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const displayTab = await screen.findByText("Display");
+    await act(async () => { fireEvent.click(displayTab); });
+
+    // "Visual style" skin picker must be in the Appearance section
+    expect(screen.getByText(/Visual style/i)).toBeInTheDocument();
+
+    // All three skin buttons must be present (data-testid="skin-picker")
+    expect(document.querySelector('[data-testid="skin-picker"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: /^Classic$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Quiet$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Vapor$/i })).toBeInTheDocument();
+  });
+
+  it("§W-F4 clicking a skin button updates the store (aria-pressed reflects active)", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const displayTab = await screen.findByText("Display");
+    await act(async () => { fireEvent.click(displayTab); });
+
+    // Click "Quiet" skin — it should become pressed
+    const quietBtn = screen.getByRole("button", { name: /^Quiet$/i });
+    await act(async () => { fireEvent.click(quietBtn); });
+
+    // After click Quiet must be aria-pressed="true"
+    expect(quietBtn.getAttribute("aria-pressed")).toBe("true");
+
+    // Classic should no longer be pressed
+    const classicBtn = screen.getByRole("button", { name: /^Classic$/i });
+    expect(classicBtn.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("§W-F4 existing appearance controls still present after adding skin picker", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const displayTab = await screen.findByText("Display");
+    await act(async () => { fireEvent.click(displayTab); });
+
+    // All existing Appearance controls must still be present (zero-feature-loss)
+    expect(document.querySelector('[data-testid="palette-picker"]')).not.toBeNull();
+    expect(screen.getByText(/Row density/i)).toBeInTheDocument();
+    expect(screen.getByText(/Color theme/i)).toBeInTheDocument();
+    expect(screen.getByText(/Translucency/i)).toBeInTheDocument();
+    expect(screen.getByText(/Reduce motion/i)).toBeInTheDocument();
+  });
+
   it("does NOT call restart_daemon when set_config fails", async () => {
     // Make set_config fail so the restart branch is not reached.
     invoke.mockImplementation(

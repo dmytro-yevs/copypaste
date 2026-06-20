@@ -156,6 +156,7 @@ export default function App() {
   const translucency = useUI((s) => s.prefs.translucency);
   const theme = useUI((s) => s.prefs.theme);
   const palette = useUI((s) => s.prefs.palette);
+  const skin = useUI((s) => s.prefs.skin);
   const density = useUI((s) => s.prefs.density);
   const motionReduced = useUI((s) => s.prefs.motionReduced);
   const { Component: View, label } = VIEWS[view];
@@ -246,6 +247,14 @@ export default function App() {
     const p = palette ?? "graphite-mist";
     document.documentElement.setAttribute("data-palette", p);
   }, [palette]);
+
+  // Apply the data-skin attribute whenever the skin pref changes (W-F2).
+  // Each html[data-skin="<id>"] block in index.css (W-F3) defines the
+  // structural / material token bundle for that skin.
+  // Default: "classic" (current Liquid Glass look — no visual change).
+  useEffect(() => {
+    document.documentElement.setAttribute("data-skin", skin ?? "classic");
+  }, [skin]);
 
   // Apply the data-density attribute whenever the pref changes.
   // html[data-density="<v>"] in index.css scales --pad/--gap/--row-h/--radius
