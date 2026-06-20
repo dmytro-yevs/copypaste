@@ -310,6 +310,20 @@ export function PeerRow({
           </span>
         </div>
 
+        {/* mgkr (NG-3): Verified trust badge — all persisted peers completed SAS
+            confirmation before being added to the roster, so the badge is always
+            "Verified". Uses success token tint + skin-aware radius (--skin-r-chip)
+            so it adapts across classic / quiet / vapor skins without hardcoding. */}
+        <span
+          data-testid="trust-badge"
+          style={{ borderRadius: "var(--skin-r-chip)" }}
+          className="mt-1 inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-ide-success/14 text-ide-success border border-ide-success/30"
+        >
+          {/* Tiny filled circle — visual indicator matching the styleguide presence dot */}
+          <span className="inline-block w-1 h-1 rounded-full bg-ide-success" aria-hidden="true" />
+          Verified
+        </span>
+
         {/* Aligned two-column metadata grid — labels line up vertically */}
         <DeviceMetaGrid>
           <MetaRow label="Model" value={peer.model} />

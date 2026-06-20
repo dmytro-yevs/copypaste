@@ -204,6 +204,21 @@ internal fun shouldPaintTintBlob(
 ): Boolean = background == SkinBackground.TINT_BLOB && translucent && paintCanvasBackdrop
 
 /**
+ * CopyPaste-mgkr (NG-3): trust label for a paired peer.
+ *
+ * Every peer in the [PairedPeer] roster completed SAS confirmation before being
+ * added — that step requires both humans to visually verify the Short
+ * Authentication String, proving absence of a man-in-the-middle. All persisted
+ * peers are therefore "Verified" and this helper encodes that contract.
+ *
+ * Returns "Verified" for any non-null [PairedPeer]. Extracted as a pure
+ * function so unit tests can verify the label without the Compose runtime and
+ * so future differentiation (e.g. a Cloud-only peer that was imported without
+ * SAS) can be added here without touching the composable.
+ */
+internal fun trustLabel(peer: PairedPeer): String = "Verified"
+
+/**
  * "Online" recency threshold for the per-peer green dot.
  *
  * A peer that completed a successful P2P sync within the last [ONLINE_WINDOW_MS]
@@ -1404,7 +1419,30 @@ internal fun PeerRow(
             TransportChipLabel(chip = chip)
         }
 
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(6.dp))
+
+        // mgkr (NG-3): Verified trust badge — all persisted peers completed SAS
+        // confirmation before roster insertion. Surface this explicitly via a
+        // green "Verified" chip using success token colours + RadiusChip shape
+        // (4 dp — PARITY-SPEC §4 chip radius) so it adapts across skins without
+        // hard-coding a value. Parity with the web DeviceCard trust badge.
+        Text(
+            text = trustLabel(peer),
+            color = c.success,
+            fontSize = 10.sp,
+            letterSpacing = 0.4.sp,
+            style = MaterialTheme.typography.labelSmall,
+            modifier = Modifier
+                .background(c.success.copy(alpha = 0.14f), RadiusChip)
+                .border(
+                    width = 1.dp,
+                    color = c.success.copy(alpha = 0.30f),
+                    shape = RadiusChip,
+                )
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+
+        Spacer(Modifier.height(8.dp))
 
         // ── Two-column aligned table ─────────────────────────────────────
         // Label column is [META_LABEL_WIDTH] wide; value column takes the
