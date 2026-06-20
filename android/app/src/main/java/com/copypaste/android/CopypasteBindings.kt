@@ -1025,6 +1025,100 @@ fun listRevokedPeers(dbPath: String, key: ByteArray): List<RevokedPeerInfo> {
     }
 }
 
+// ── PG-12 (8qcm): Revoke peer + sync-key rotation ─────────────────────────────
+//
+// The mode enum and passphrase validator live here (not in DevicesActivity) so
+// unit tests can exercise them without an Android runtime.
+//
+// SECURITY: the returned new sync-key bytes are SECRET. Callers MUST persist them
+// in AndroidKeystore and zero the ByteArray immediately after. NEVER log the value.
+
+/**
+ * Discriminates between the two revocation paths shown in [DevicesActivity]'s
+ * "Revoke pairing?" dialog (CopyPaste-8qcm):
+ *
+ *  - [AUDIT_ONLY] — classic revoke: write the audit record + remove the peer from
+ *    the local roster.  The peer's cert fingerprint is added to the P2P denylist but
+ *    the cloud sync key is NOT rotated, so a revoked peer that still knows the
+ *    passphrase can keep reading encrypted relay/Supabase items.
+ *
+ *  - [REVOKE_AND_ROTATE] — secure revoke: same as [AUDIT_ONLY] PLUS the cloud sync
+ *    key is rotated to a new user-supplied passphrase via [revokeDeviceAndRotateKey].
+ *    After rotation, a revoked peer can no longer decrypt new items even if it
+ *    retains the old passphrase. Every other trusted device must re-enter the new
+ *    passphrase (or re-pair) to keep syncing.
+ *
+ * Mirrors the macOS `revoke_and_rotate` IPC command (ipc.rs §4882) semantics.
+ */
+enum class RevokeMode { AUDIT_ONLY, REVOKE_AND_ROTATE }
+
+/**
+ * Validate a candidate sync-key rotation passphrase.
+ *
+ * The Rust `derive_sync_key` rejects passphrases shorter than 8 characters
+ * ([uniffi.copypaste_android.CopypasteException.DecryptionFailed]).  This guard lets
+ * the UI disable the "Confirm" button before the FFI call rather than surfacing a
+ * native error string to the user.
+ *
+ * Returns true when [passphrase] is at least 8 characters long.
+ */
+fun isValidRotatePassphrase(passphrase: String): Boolean = passphrase.length >= 8
+
+/**
+ * Revoke a peer AND atomically rotate the cloud sync key to [newPassphrase].
+ *
+ * Delegates to [uniffi.copypaste_android.revokeDeviceAndRotateKey], which:
+ *  1. Derives the new 32-byte sync key from [newPassphrase] via Argon2id BEFORE
+ *     any DB write (so a bad passphrase leaves state unchanged).
+ *  2. Writes the revocation audit record + removes the peer's `devices` row.
+ *  3. Returns the new 32-byte raw sync key.
+ *
+ * The caller MUST:
+ *  - Persist the returned [ByteArray] in AndroidKeystore.
+ *  - Zero the [ByteArray] immediately after persisting.
+ *  - Call [updateP2pListenerPeers] with [fingerprint] in the `revoked` set so the
+ *    mTLS allowlist drops the peer atomically.
+ *  - Re-register with the relay under the new key (relay_inbox_id / relay_public_key_b64
+ *    are now derived from the new key).
+ *
+ * Throws [CopypasteException.DecryptionFailed] when [newPassphrase] is rejected by
+ * the Argon2id KDF (e.g. < 8 chars).
+ * Throws [CopypasteException.DatabaseError] on a native DB write failure.
+ * Throws [IllegalStateException] when the native library is not loaded — callers MUST
+ * catch this and show an error rather than silently proceeding without rotation.
+ *
+ * SECURITY: the returned bytes are SECRET-derived key material. NEVER log them.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun revokeDeviceAndRotateKey(
+    dbPath: String,
+    key: ByteArray,
+    fingerprint: String,
+    name: String,
+    newPassphrase: String,
+): ByteArray {
+    // Fail-closed: do NOT return stub key material. A stub ByteArray(32) would be
+    // silently accepted by callers and corrupt sync state on every other device.
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException(
+            "copypaste_android native library not loaded; revokeDeviceAndRotateKey is unavailable"
+        )
+    }
+    return try {
+        uniffi.copypaste_android.revokeDeviceAndRotateKey(
+            dbPath = dbPath,
+            key = key.toUByteList(),
+            fingerprint = fingerprint,
+            name = name,
+            newPassphrase = newPassphrase,
+        ).toByteArray()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "revokeDeviceAndRotateKey failed") }
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "revokeDeviceAndRotateKey failed")
+    }
+}
+
 // ── P2P sync (ABI-9 signature) ─────────────────────────────────────────────────
 
 /**

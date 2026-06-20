@@ -47,9 +47,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -675,6 +677,12 @@ fun DevicesScreen(
     var revokeTarget by remember { mutableStateOf<PairedPeer?>(null) }
     // Non-null when an async revokeDeviceAudit IO call failed — surfaced to the user.
     var revokeError by remember { mutableStateOf<String?>(null) }
+    // CopyPaste-8qcm: Revoke+rotate state — non-null when the passphrase dialog is open.
+    // Holds the peer selected for revoke+rotate; [revokePassphrase] is the current input.
+    var revokeRotateTarget by remember { mutableStateOf<PairedPeer?>(null) }
+    var revokePassphrase by remember { mutableStateOf("") }
+    // True while the revokeDeviceAndRotateKey FFI call is in-flight.
+    var revokeRotateInFlight by remember { mutableStateOf(false) }
 
     // ── Unpair confirmation ──────────────────────────────────────────────────
     unpairTarget?.let { target ->
@@ -701,67 +709,215 @@ fun DevicesScreen(
         )
     }
 
-    // ── Revoke confirmation ──────────────────────────────────────────────────
+    // ── Revoke confirmation (CopyPaste-8qcm: two-path dialog) ─────────────────
+    // First dialog: presents the user with two revoke options:
+    //   • "Revoke only"        → plain audit + roster removal (RevokeMode.AUDIT_ONLY).
+    //   • "Revoke & rotate key" → opens the passphrase dialog (RevokeMode.REVOKE_AND_ROTATE).
+    //
+    // The "Revoke only" path preserves the atomic CopyPaste-94o4 ordering:
+    //   revokeDeviceAudit (IO) → removePeer only if audit succeeded.
+    //
+    // The "Revoke & rotate key" path defers to [revokeRotateTarget] passphrase dialog below.
     revokeTarget?.let { target ->
-        // §8 glass dialog (audit #10) — appearance only; revoke logic unchanged.
         GlassAlertDialog(
             onDismissRequest = { revokeTarget = null },
             title = { Text("Revoke pairing?") },
             text = {
-                Text(
-                    "${target.displayName()} will no longer connect over P2P, and a " +
-                    "revocation record is kept. But a revoked device that still holds " +
-                    "the shared sync key can keep reading cloud and relay items until " +
-                    "you rotate the sync key. To rotate it, change the Sync Passphrase " +
-                    "in Settings — every device must then re-enter the new passphrase " +
-                    "(or re-pair) to keep syncing."
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "${target.displayName()} will no longer connect over P2P and a " +
+                        "revocation record is kept.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.text,
+                    )
+                    Text(
+                        "A revoked device that still knows the sync passphrase can " +
+                        "keep reading new relay and cloud items. To close that gap, " +
+                        "choose “Revoke & rotate key” below.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.dim,
+                    )
+                }
             },
+            // "Revoke & rotate key" is the primary action (right-side confirm button).
+            // Tapping it closes this dialog and opens the passphrase dialog.
             confirmButton = {
                 TextButton(onClick = {
+                    val t = revokeTarget
                     revokeTarget = null
-                    // CopyPaste-94o4: atomic revoke — write the audit record FIRST
-                    // on the IO dispatcher; only remove the peer from the local
-                    // roster once the DB write succeeds. A mid-write crash or DB
-                    // error no longer leaves asymmetric state (peer gone locally
-                    // but no audit record). On failure the peer is untouched and
-                    // an error dialog is shown so the user can retry.
-                    scope.launch {
-                        val ok = withContext(Dispatchers.IO) {
-                            runCatching {
-                                revokeDeviceAudit(
-                                    dbPath = settings.dbPath,
-                                    key = settings.encryptionKey,
-                                    fingerprint = target.fingerprint,
-                                    name = target.displayName(),
-                                )
-                            }
-                        }.fold(
-                            onSuccess = { true },
-                            onFailure = { e ->
-                                Log.e(
-                                    TAG,
-                                    "revokeDeviceAudit failed for ${target.fingerprint.take(8)}: ${e.message}",
-                                    e,
-                                )
-                                false
-                            },
-                        )
-                        if (ok) {
-                            // Audit record persisted — now safe to remove the peer
-                            // from the local roster (both writes committed).
-                            settings.removePeer(target.fingerprint)
-                            refresh()
-                        } else {
-                            // Audit failed; peer intentionally left intact so the
-                            // user can retry and state remains consistent.
-                            revokeError = "Failed to record revocation. The device was NOT removed — please try again."
-                        }
+                    if (t != null) {
+                        revokePassphrase = ""
+                        revokeRotateTarget = t
                     }
-                }) { Text("Revoke", color = c.danger) }
+                }) {
+                    Text("Revoke & rotate key", color = c.danger)
+                }
             },
             dismissButton = {
-                TextButton(onClick = { revokeTarget = null }) { Text("Cancel") }
+                Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                    // "Revoke only" — left; performs the plain audit+remove path.
+                    TextButton(onClick = {
+                        val t = revokeTarget ?: return@TextButton
+                        revokeTarget = null
+                        // CopyPaste-94o4: atomic revoke — write the audit record FIRST
+                        // on the IO dispatcher; only remove the peer from the local
+                        // roster once the DB write succeeds. A mid-write crash or DB
+                        // error no longer leaves asymmetric state (peer gone locally
+                        // but no audit record). On failure the peer is untouched and
+                        // an error dialog is shown so the user can retry.
+                        scope.launch {
+                            val ok = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    revokeDeviceAudit(
+                                        dbPath = settings.dbPath,
+                                        key = settings.encryptionKey,
+                                        fingerprint = t.fingerprint,
+                                        name = t.displayName(),
+                                    )
+                                }
+                            }.fold(
+                                onSuccess = { true },
+                                onFailure = { e ->
+                                    Log.e(
+                                        TAG,
+                                        "revokeDeviceAudit failed for ${t.fingerprint.take(8)}: ${e.message}",
+                                        e,
+                                    )
+                                    false
+                                },
+                            )
+                            if (ok) {
+                                settings.removePeer(t.fingerprint)
+                                refresh()
+                            } else {
+                                revokeError = "Failed to record revocation. The device was NOT removed — please try again."
+                            }
+                        }
+                    }) { Text("Revoke only", color = c.danger) }
+
+                    TextButton(onClick = { revokeTarget = null }) { Text("Cancel") }
+                }
+            },
+        )
+    }
+
+    // ── Revoke + rotate key passphrase dialog (CopyPaste-8qcm) ─────────────────
+    // Shown after the user selects "Revoke & rotate key" above. The user enters
+    // the new passphrase (min 8 chars); "Confirm" calls revokeDeviceAndRotateKey.
+    //
+    // Security ordering (mirrors macOS revoke_and_rotate semantics):
+    //   1. revokeDeviceAndRotateKey derives the new key from [newPassphrase] via
+    //      Argon2id BEFORE any DB write — a bad passphrase leaves state unchanged.
+    //   2. On success: the new sync key is persisted in Settings, the peer is
+    //      removed from the roster, and updateP2pListenerPeers is called with the
+    //      revoked fingerprint in the denylist.
+    //   3. On failure: the peer is untouched (same CopyPaste-94o4 guarantee).
+    //
+    // The returned new key bytes are NEVER logged (SECURITY: secret material).
+    revokeRotateTarget?.let { target ->
+        GlassAlertDialog(
+            onDismissRequest = {
+                if (!revokeRotateInFlight) {
+                    revokeRotateTarget = null
+                    revokePassphrase = ""
+                }
+            },
+            title = { Text("Set new sync passphrase") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Enter a new passphrase to rotate the sync key. All trusted " +
+                        "devices will need to re-enter this passphrase to keep syncing.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.dim,
+                    )
+                    // Passphrase text field — skin-aware surface colors, password masking.
+                    OutlinedTextField(
+                        value = revokePassphrase,
+                        onValueChange = { revokePassphrase = it },
+                        label = { Text("New passphrase (min 8 chars)") },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        enabled = !revokeRotateInFlight,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    if (!isValidRotatePassphrase(revokePassphrase) && revokePassphrase.isNotEmpty()) {
+                        Text(
+                            "Passphrase must be at least 8 characters.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = c.danger,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = isValidRotatePassphrase(revokePassphrase) && !revokeRotateInFlight,
+                    onClick = {
+                        val t = revokeRotateTarget ?: return@TextButton
+                        val passphrase = revokePassphrase
+                        if (!isValidRotatePassphrase(passphrase)) return@TextButton
+                        revokeRotateInFlight = true
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching {
+                                    // revokeDeviceAndRotateKey: derives new key FIRST
+                                    // (bad passphrase → DecryptionFailed, no DB write),
+                                    // then writes the audit record + removes the peer row.
+                                    // Returns the new 32-byte raw sync key.
+                                    val newKey = revokeDeviceAndRotateKey(
+                                        dbPath = settings.dbPath,
+                                        key = settings.encryptionKey,
+                                        fingerprint = t.fingerprint,
+                                        name = t.displayName(),
+                                        newPassphrase = passphrase,
+                                    )
+                                    newKey
+                                }
+                            }
+                            revokeRotateInFlight = false
+                            result.fold(
+                                onSuccess = { newKeyBytes ->
+                                    // Persist the new passphrase so the next sync re-derives
+                                    // the key identically. NEVER log the passphrase or bytes.
+                                    settings.cloudSyncPassphrase = passphrase
+                                    newKeyBytes.fill(0) // zero raw key bytes after persisting
+                                    // Remove peer from roster (audit record already written by FFI).
+                                    settings.removePeer(t.fingerprint)
+                                    revokeRotateTarget = null
+                                    revokePassphrase = ""
+                                    refresh()
+                                },
+                                onFailure = { e ->
+                                    Log.e(
+                                        TAG,
+                                        "revokeDeviceAndRotateKey failed for ${t.fingerprint.take(8)}: ${e.message}",
+                                        e,
+                                    )
+                                    revokeError = "Revoke + key rotation failed: ${e.message ?: "unknown error"}. " +
+                                        "The device was NOT removed — please try again."
+                                    revokeRotateTarget = null
+                                    revokePassphrase = ""
+                                },
+                            )
+                        }
+                    },
+                ) {
+                    if (revokeRotateInFlight) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Confirm revoke & rotate", color = c.danger)
+                    }
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    enabled = !revokeRotateInFlight,
+                    onClick = {
+                        revokeRotateTarget = null
+                        revokePassphrase = ""
+                    },
+                ) { Text("Cancel") }
             },
         )
     }
