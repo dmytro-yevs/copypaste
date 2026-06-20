@@ -166,8 +166,6 @@ fun AboutScreen(
     val context = LocalContext.current
     val c = LocalIdeColors.current
     val lt = LocalLiquidTokens.current
-    val dark = isDarkTheme()
-    val translucent = rememberTranslucency()
     val reduced = rememberReducedMotion()
     val slowDur = motionDuration(Motion.Slow)
     val baseDur = motionDuration(Motion.Base)

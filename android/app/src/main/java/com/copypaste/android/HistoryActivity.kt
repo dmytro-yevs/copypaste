@@ -568,7 +568,7 @@ fun HistoryScreen(
     var pendingConfirm by rememberSaveable(
         stateSaver = androidx.compose.runtime.saveable.Saver(
             save    = { it?.ordinal },
-            restore = { ord -> ord?.let { ConfirmAction.entries[it] } },
+            restore = { ord -> ConfirmAction.entries.getOrNull(ord) },
         )
     ) { mutableStateOf<ConfirmAction?>(null) }
     var overflowExpanded by rememberSaveable { mutableStateOf(false) }
@@ -1297,12 +1297,11 @@ fun HistoryScreen(
                                 try {
                                     val fileBytes = repository.getFileBytes(id)
                                         ?: return@withContext false to ctx.getString(R.string.file_save_failed)
-                                    val (fileName, mime) = repository.getFileMeta(id)
+                                    val (fileName, _) = repository.getFileMeta(id)
                                     // fr44: sanitize the peer-supplied filename before writing to
                                     // disk — strips path-traversal sequences and shell-special chars.
                                     val rawName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
                                     val safeName = FileSecurityHelper.sanitizeFilename(rawName)
-                                    val mimeType = mime ?: "application/octet-stream"
                                     val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
                                     val file = File(dir, safeName)
                                     file.writeBytes(fileBytes)
@@ -1498,7 +1497,7 @@ fun HistoryScreen(
                         try {
                             val fileBytes = repository.getFileBytes(id)
                                 ?: return@withContext false to ctx.getString(R.string.file_save_failed)
-                            val (fileName, mime) = repository.getFileMeta(id)
+                            val (fileName, _) = repository.getFileMeta(id)
                             // fr44: sanitize peer-supplied filename before writing to disk.
                             val rawName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
                             val safeName = FileSecurityHelper.sanitizeFilename(rawName)
@@ -2295,7 +2294,7 @@ private fun HistoryList(
                         if (fileBytes != null) {
                             val uri = withContext(Dispatchers.IO) {
                                 try {
-                                    val (fileName, mime) = repository.getFileMeta(item.id)
+                                    val (fileName, _) = repository.getFileMeta(item.id)
                                     val safeName = fileName?.takeIf { it.isNotBlank() }
                                         ?: "${item.id}.bin"
                                     val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
@@ -2534,6 +2533,7 @@ private fun HistoryList(
 // ─────────────────────────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalFoundationApi::class)
+@Suppress("UNUSED_PARAMETER") // onSensitiveTap: kept for API parity; reveal is handled inline
 @Composable
 private fun HistoryRow(
     item: ClipboardItem,

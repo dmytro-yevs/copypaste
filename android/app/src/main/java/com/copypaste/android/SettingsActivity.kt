@@ -1320,7 +1320,6 @@ private fun SyncTab(
             syncBackend = syncBackend,
             supabaseUrl = supabaseUrl,
             supabaseAnonKey = supabaseAnonKey,
-            supabaseEmail = supabaseEmail,
             relayUrl = relayUrl,
         )
         Spacer(modifier = Modifier.height(16.dp))
@@ -1344,7 +1343,6 @@ private fun SyncDiagnosticsCard(
     syncBackend: SyncBackend,
     supabaseUrl: String,
     supabaseAnonKey: String,
-    supabaseEmail: String,
     relayUrl: String,
 ) {
     val c = LocalIdeColors.current
