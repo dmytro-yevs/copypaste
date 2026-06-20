@@ -138,9 +138,16 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
     // by `is_credential_value_strong` to suppress FP on benign prose like
     // "secret = foo" / "password: nope" / "// api_key=demo".
     // The capture group around the value lets the validator inspect only the value bytes.
+    //
+    // CopyPaste-2eet: added access_token, client_secret, refresh_token, db_password.
+    // Note: client_secret and db_password were already partially caught via the
+    // `secret` / `password` substring matches (no \b boundary in the alternation),
+    // but explicit names are clearer, more maintainable, and correct if \b anchors
+    // are ever added to the alternation in future. access_token and refresh_token
+    // were genuinely missed and are the primary fix here.
     (
         "generic_password_kv",
-        r"(?i)(?:password|passwd|secret|api_key|apikey|auth_token)\s*[:=]\s*(\S{6,})",
+        r"(?i)(?:password|passwd|secret|api_key|apikey|auth_token|access_token|client_secret|refresh_token|db_password)\s*[:=]\s*(\S{6,})",
         0,
         0.75,
     ),
@@ -188,11 +195,19 @@ pub const RAW_PATTERNS: &[(&str, &str, u8, f32)] = &[
     // (order IDs, product codes, etc.). Still well below the auto-wipe floor.
     ("passport", r"\b[A-Z]{1,2}[0-9]{9}\b", 2, 0.55),
     // ── Infrastructure ────────────────────────────────────────────────────────
+    // CopyPaste-8ys1: ip_with_port was at 0.70 — exactly on the auto-wipe
+    // floor — which caused RFC1918 / private IPs (10.x, 172.16-31.x,
+    // 192.168.x) in config files and Docker-compose snippets to silently
+    // expire. A bare IP:port pair is infrastructure topology, not a secret:
+    // it carries no credential material. Credentialed DB connections are
+    // caught by `db_conn_string` at 0.99 (which requires user:password@host).
+    // Lowered to 0.65 (below the 0.70 floor) so the pattern still surfaces
+    // in the UI / detect() results for awareness but never triggers silent wipe.
     (
         "ip_with_port",
         r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?):\d{2,5}\b",
         3,
-        0.70,
+        0.65,
     ),
     (
         "db_conn_string",
@@ -366,12 +381,15 @@ mod tests {
     #[test]
     fn fp_risk_patterns_below_autowipe_floor() {
         const AUTOWIPE_FLOOR: f32 = 0.70;
+        // CopyPaste-8ys1: ip_with_port added — bare IP:port is infrastructure
+        // topology, not a credential; must not auto-wipe config file content.
         let fp_patterns = [
             "discord_bot_token",
             "twilio_signing_key_sid",
             "iban",
             "ssn_us",
             "generic_bearer",
+            "ip_with_port",
         ];
         for (name, _, _, conf) in RAW_PATTERNS {
             if fp_patterns.contains(name) {

@@ -193,8 +193,9 @@ impl SensitiveDetector {
     /// This is the **correct gate for the auto-wipe / `sensitive_ttl` path**.
     /// Low-confidence patterns (phone_us 0.55, passport 0.55, email 0.60,
     /// IBAN 0.65, SSN 0.65, discord_bot_token 0.65, twilio_signing_key_sid 0.65,
-    /// generic_bearer 0.65) are intentionally excluded so routine phone numbers,
-    /// bank details, or placeholder strings never trigger silent data deletion.
+    /// generic_bearer 0.65, ip_with_port 0.65) are intentionally excluded so
+    /// routine phone numbers, bank details, config IPs, or placeholder strings
+    /// never trigger silent data deletion.
     ///
     /// High-confidence examples that DO trigger (>= 0.70):
     ///   AWS keys (0.99), JWTs (0.95), OpenAI/Anthropic keys, SSH private keys,
@@ -214,7 +215,7 @@ impl SensitiveDetector {
         }
         for &idx in &candidate_indices {
             if pattern_confidence(idx) < AUTOWIPE_CONFIDENCE_FLOOR {
-                continue; // below floor — skip (phone_us 0.55, passport 0.55, email 0.60)
+                continue; // below floor — skip (phone_us 0.55, passport 0.55, email 0.60, ip_with_port 0.65)
             }
             // For generic_password_kv (0.75 >= floor) we still require value strength.
             if pattern_name(idx) == "generic_password_kv" {
@@ -925,6 +926,114 @@ mod tests {
         assert!(
             bearer_hits.iter().all(|m| m.confidence < 0.70),
             "generic_bearer confidence must be below 0.70 auto-wipe floor"
+        );
+    }
+
+    // ── CopyPaste-8ys1: private IP auto-wipe guard ───────────────────────────
+
+    /// RFC1918 IPs with port in config files must NOT auto-wipe.
+    /// ip_with_port confidence is lowered to 0.65 (below the 0.70 floor)
+    /// because bare IP:port pairs are infrastructure topology, not secrets —
+    /// credentialed connections are caught by db_conn_string (0.99).
+    #[test]
+    fn autowipe_does_not_trigger_for_private_ip_10_block() {
+        // 10.0.0.0/8 — common private LAN
+        assert!(
+            !is_sensitive_for_autowipe("db_host=10.0.0.1:5432"),
+            "10.x private IP with port must not trigger auto-wipe"
+        );
+    }
+
+    #[test]
+    fn autowipe_does_not_trigger_for_private_ip_172_block() {
+        // 172.16.0.0/12 — Docker / VPC default range
+        assert!(
+            !is_sensitive_for_autowipe("172.16.0.5:6379"),
+            "172.16.x private IP with port must not trigger auto-wipe"
+        );
+    }
+
+    #[test]
+    fn autowipe_does_not_trigger_for_private_ip_192_168_block() {
+        // 192.168.0.0/16 — home/office network
+        assert!(
+            !is_sensitive_for_autowipe("192.168.1.100:8080"),
+            "192.168.x private IP with port must not trigger auto-wipe"
+        );
+    }
+
+    /// ip_with_port is still detected (just not auto-wiped) so the UI can
+    /// flag infrastructure topology for review.
+    #[test]
+    fn ip_with_port_still_detected_below_autowipe_floor() {
+        let d = SensitiveDetector::new();
+        let hits = d.detect("192.168.1.1:5432");
+        let ip_hits: Vec<_> = hits
+            .iter()
+            .filter(|m| m.pattern_name == "ip_with_port")
+            .collect();
+        assert!(
+            !ip_hits.is_empty(),
+            "ip_with_port must still appear in detect() results"
+        );
+        assert!(
+            ip_hits.iter().all(|m| m.confidence < 0.70),
+            "ip_with_port confidence must be below 0.70 auto-wipe floor"
+        );
+    }
+
+    // ── CopyPaste-2eet: key=value secret patterns ─────────────────────────────
+
+    /// access_token=<strong value> must be detected.
+    #[test]
+    fn detects_access_token_kv() {
+        assert!(
+            detect("access_token=abc123XYZlongvalue99").is_some(),
+            "access_token key=value must be detected"
+        );
+    }
+
+    /// client_secret=<strong value> must be detected.
+    #[test]
+    fn detects_client_secret_kv() {
+        assert!(
+            detect("client_secret=Sup3rS3cr3tV@lue!").is_some(),
+            "client_secret key=value must be detected"
+        );
+    }
+
+    /// refresh_token=<strong value> must be detected.
+    #[test]
+    fn detects_refresh_token_kv() {
+        assert!(
+            detect("refresh_token=rt_abc123XYZlong_value").is_some(),
+            "refresh_token key=value must be detected"
+        );
+    }
+
+    /// db_password=<strong value> must be detected (the `password` substring in
+    /// `db_password` is currently matched by the existing pattern, but the
+    /// explicit key name is now included so the intent is documented and future
+    /// refactors cannot accidentally remove it).
+    #[test]
+    fn detects_db_password_kv() {
+        // db_password matches via the generic_password_kv `password` alternative.
+        assert!(
+            detect("db_password=S3cur3Pass!word").is_some(),
+            "db_password key=value must be detected"
+        );
+    }
+
+    /// Weak values for new keys must still be filtered (FP guard).
+    #[test]
+    fn new_kv_keys_weak_value_not_detected() {
+        assert!(
+            detect("access_token=short").is_none(),
+            "access_token with weak value must not be detected"
+        );
+        assert!(
+            detect("refresh_token=abc").is_none(),
+            "refresh_token with weak value must not be detected"
         );
     }
 
