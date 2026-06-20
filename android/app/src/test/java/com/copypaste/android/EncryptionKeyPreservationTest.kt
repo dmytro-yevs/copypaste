@@ -74,7 +74,7 @@ class EncryptionKeyPreservationTest {
         assertFalse(
             "EncryptionKeyLostException must NOT extend RuntimeException — " +
                 "unchecked exception would let callers silently ignore it",
-            e is RuntimeException,
+            (e as Any) is RuntimeException,
         )
     }
 }
