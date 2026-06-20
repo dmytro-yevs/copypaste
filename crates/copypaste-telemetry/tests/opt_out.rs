@@ -5,7 +5,7 @@
 //! without erroring, and without performing observable I/O.
 
 use copypaste_telemetry::{
-    init, ErrorReporter, NoopReporter, OsTag, ReportConsent, ReportableError,
+    init, report_and_log, ErrorReporter, NoopReporter, OsTag, ReportConsent, ReportableError,
 };
 
 fn sample_event() -> ReportableError {
@@ -40,6 +40,18 @@ fn noop_handles_empty_strings_without_panic() {
     let reporter = NoopReporter::new();
     let evt = ReportableError::new("", "", "", OsTag::Unknown);
     assert!(reporter.report(evt).is_ok());
+}
+
+/// `report_and_log` is the fire-and-forget helper that the daemon call sites
+/// should use. Verify it never panics and returns `()` regardless of the
+/// backend outcome.
+#[test]
+fn report_and_log_with_noop_does_not_panic() {
+    let reporter: Box<dyn ErrorReporter> = init(ReportConsent::Disabled);
+    // Must be callable multiple times without panicking or returning an error.
+    for _ in 0..10 {
+        report_and_log(&*reporter, sample_event());
+    }
 }
 
 #[test]

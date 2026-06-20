@@ -160,6 +160,76 @@ fn non_pii_strings_unchanged() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// CopyPaste-nabu: single-token base64url bearer-token scrubbing
+// ---------------------------------------------------------------------------
+
+/// A realistic 44-char base64url token (pairing / relay bearer).
+///
+/// This is the shape of tokens that `copypaste-daemon` mints for relay auth
+/// (32 random bytes → base64url, no padding → 43–44 chars, alphabet
+/// `[A-Za-z0-9_-]`, no dots).
+const RELAY_BEARER: &str = "VqE2mK9xRsT7nYpL4wBhOuDj8cFaNbXkZeWsRtYuI";
+
+#[test]
+fn high_entropy_base64url_token_is_redacted() {
+    // The token appears bare in an error class string — typical when a relay
+    // 401 includes the offending token for diagnostics.
+    let input = format!("relay auth rejected bearer={RELAY_BEARER}");
+    let out = scrub(&input);
+    assert!(
+        out.contains("<REDACTED-TOKEN>"),
+        "base64url bearer token was not scrubbed, got: {out}"
+    );
+    assert!(
+        !out.contains(RELAY_BEARER),
+        "raw token still present, got: {out}"
+    );
+}
+
+#[test]
+fn high_entropy_base64url_token_scrub_is_idempotent() {
+    // After scrubbing, a second pass must not change anything — the
+    // replacement `<REDACTED-TOKEN>` must not itself match the pattern.
+    let input = format!("token={RELAY_BEARER} expired");
+    let once = scrub(&input);
+    let twice = scrub(&once);
+    assert_eq!(once, twice, "second scrub pass changed output");
+}
+
+#[test]
+fn prose_words_not_scrubbed_as_tokens() {
+    // These strings must NOT be over-redacted by the new base64url-token
+    // rule specifically. The rule requires ≥32 chars AND mixed character
+    // classes (upper + lower + digit), so these cases are safe:
+    //
+    // - Short taxonomy strings — below the 32-char length gate.
+    // - All-lowercase 32+ char strings — fail the "must contain uppercase"
+    //   gate (character-variety guard).
+    // - All-uppercase 32+ char strings — fail the "must contain lowercase"
+    //   gate.
+    //
+    // Note: all-digit and all-hex strings are already caught by the existing
+    // RE_HEX32 / RE_UUID_HEX rules and are intentionally NOT listed here —
+    // those SHOULD be redacted and are tested in `uuid_hex_strings_redacted`.
+    for s in [
+        // Short taxonomy strings with dashes — below 32-char length gate.
+        "keychain.read_failed",
+        "copypaste-daemon",
+        "ipc.parse_error",
+        "0.3.0-dev",
+        // All-lowercase, 34 chars — fails mixed-case requirement of new rule.
+        // (Already not matched by RE_HEX32 since 'z' is not hex.)
+        "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        // All-uppercase, 34 chars — fails mixed-case requirement.
+        "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ",
+        // Prose — spaces separate words into short tokens, none ≥32 chars.
+        "the quick brown fox jumps over the lazy dog",
+    ] {
+        assert_eq!(scrub(s), s, "scrubber over-matched on {s:?}");
+    }
+}
+
 #[test]
 fn custom_pattern_works() {
     let mut s = PiiScrubber::empty();

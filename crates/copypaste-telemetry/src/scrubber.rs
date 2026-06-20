@@ -71,6 +71,19 @@ static RE_JWT: LazyLock<Regex> = LazyLock::new(|| {
         .expect("jwt pattern is valid")
 });
 
+/// Candidate single-token base64url blob: ≥32 chars, alphabet `[A-Za-z0-9_-]`,
+/// no dots (dots would make it a JWT candidate instead).
+///
+/// This regex only *candidates* — the actual replacement is gated on a
+/// character-variety check in `scrub_base64url_tokens` to avoid over-scrubbing
+/// short or all-one-class strings (e.g. version segments, taxonomy identifiers).
+/// We use `\b` on the left so the match cannot start mid-word, and we stop at
+/// any character that is not in the base64url alphabet (no trailing `\b` needed
+/// because the character class itself is the bound).
+static RE_B64URL_CANDIDATE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"\b[A-Za-z0-9_-]{32,}").expect("base64url candidate pattern is valid")
+});
+
 /// IPv4 addresses.
 static RE_IPV4: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\b(?:\d{1,3}\.){3}\d{1,3}\b").expect("ipv4 pattern is valid"));
@@ -110,13 +123,48 @@ struct Pattern {
     replacement: &'static str,
 }
 
+/// A single scrubbing step — either a simple regex substitution or an
+/// entropy-gated transform that inspects each candidate match before deciding
+/// whether to replace it.
+///
+/// The enum is `non_exhaustive` (internal) so future variants can be added
+/// without a breaking change to the `patterns`/`steps` field type.
+#[derive(Debug, Clone)]
+enum ScrubStep {
+    /// Apply `regex::Regex::replace_all` unconditionally with the given
+    /// replacement string.
+    Simple(Pattern),
+    /// Match all candidates with the regex, but only emit the replacement for
+    /// candidates that pass the variety predicate. Candidates that fail keep
+    /// their original text.
+    EntropyCandidateB64Url,
+}
+
+/// Returns `true` when `tok` has at least one uppercase ASCII letter, at least
+/// one lowercase ASCII letter, and at least one ASCII digit — the minimum
+/// character-class variety expected of a machine-generated bearer token.
+///
+/// Pure lowercase or pure uppercase strings (e.g. `copypaste-daemon` or
+/// `AAAA…`) and digit-only strings are rejected so taxonomy identifiers and
+/// semver segments are not scrubbed.
+///
+/// This is intentionally a *necessary* condition, not a full Shannon-entropy
+/// calculation — it is cheap to compute and sufficient to distinguish
+/// `VqE2mK9xRs…` (token) from `zzzzzzzzzzzzzzzz…` (low-entropy placeholder).
+fn has_token_variety(tok: &str) -> bool {
+    let has_upper = tok.bytes().any(|b| b.is_ascii_uppercase());
+    let has_lower = tok.bytes().any(|b| b.is_ascii_lowercase());
+    let has_digit = tok.bytes().any(|b| b.is_ascii_digit());
+    has_upper && has_lower && has_digit
+}
+
 /// PII scrubber. Construct via [`PiiScrubber::default`] to get the built-in
 /// pattern set, then optionally extend with [`PiiScrubber::add_custom`].
 ///
 /// Cheap to share across threads behind an [`std::sync::Arc`].
 #[derive(Debug, Clone)]
 pub struct PiiScrubber {
-    patterns: Vec<Pattern>,
+    steps: Vec<ScrubStep>,
 }
 
 impl PiiScrubber {
@@ -124,9 +172,7 @@ impl PiiScrubber {
     /// that want to verify pass-through behaviour or build a custom set from
     /// scratch.
     pub fn empty() -> Self {
-        Self {
-            patterns: Vec::new(),
-        }
+        Self { steps: Vec::new() }
     }
 
     /// Construct a scrubber preloaded with the built-in pattern set:
@@ -135,14 +181,18 @@ impl PiiScrubber {
     /// 2. Email addresses.
     /// 3. Hex strings ≥32 chars (UUIDs, keys, digests).
     /// 4. JWT-like three-segment tokens.
-    /// 5. IPv4 and IPv6 addresses.
-    /// 6. `/Users/<name>/` and `/home/<name>/` prefixes — replaced with `~/`.
+    /// 5. High-entropy single-token base64url blobs ≥32 chars (bearer tokens).
+    /// 6. IPv4 and IPv6 addresses.
+    /// 7. `/Users/<name>/` and `/home/<name>/` prefixes — replaced with `~/`.
     ///
     /// The order matters and encodes two dependencies:
     /// - URL credentials run before email, because a `user:pass@host`
     ///   authority contains an `@` that the email rule would otherwise eat.
     /// - Email runs before the long-hex rule, so an address whose domain
     ///   label is a long hex string is redacted whole rather than fragmented.
+    /// - The base64url-token step runs after JWT so a three-segment token is
+    ///   caught as a JWT first; the single-token rule would otherwise only
+    ///   redact the first (longest) segment.
     ///
     /// More specific patterns generally run before more general ones (IP,
     /// paths) so they are not partially eaten by a broader rule.
@@ -150,9 +200,9 @@ impl PiiScrubber {
     /// Patterns are conservative and prefer false positives (over-redaction)
     /// to false negatives (PII leakage).
     pub fn with_defaults() -> Self {
-        // Patterns reference the process-lifetime LazyLock statics defined at
+        // Steps reference the process-lifetime LazyLock statics defined at
         // the top of this module; .clone() is a cheap Regex arc-clone.
-        let patterns = vec![
+        let steps = vec![
             // URL credentials: strip the `user:pass@` portion, keep scheme
             // and host so the error class remains debuggable.
             //
@@ -169,10 +219,10 @@ impl PiiScrubber {
             // which would end the authority) greedily up to the *last* `@`
             // before the path: `[^\s/]*@` backtracks to that final `@`,
             // leaving the host intact.
-            Pattern {
+            ScrubStep::Simple(Pattern {
                 re: RE_URL_AUTH.clone(),
                 replacement: "$1<REDACTED-AUTH>@",
-            },
+            }),
             // Email addresses. Conservative local-part character class to
             // avoid eating surrounding punctuation.
             //
@@ -181,34 +231,49 @@ impl PiiScrubber {
             // would otherwise have its domain partially redacted to
             // `<REDACTED-HEX>` first, leaving a dangling local part that the
             // email rule could no longer match — leaking the local part.
-            Pattern {
+            ScrubStep::Simple(Pattern {
                 re: RE_EMAIL.clone(),
                 replacement: "<REDACTED-EMAIL>",
-            },
+            }),
             // Long hex strings: UUIDs (with or without dashes), SHA-256
             // digests, API keys with hex encoding. 32+ hex chars catches
             // MD5 and up. We allow optional dashes inside to match UUIDs.
-            Pattern {
+            ScrubStep::Simple(Pattern {
                 re: RE_UUID_HEX.clone(),
                 replacement: "<REDACTED-HEX>",
-            },
-            Pattern {
+            }),
+            ScrubStep::Simple(Pattern {
                 re: RE_HEX32.clone(),
                 replacement: "<REDACTED-HEX>",
-            },
+            }),
             // JWT-like: three base64url segments separated by '.'. Each
             // segment is at least 20 chars to avoid eating dotted version
             // strings.
-            Pattern {
+            ScrubStep::Simple(Pattern {
                 re: RE_JWT.clone(),
                 replacement: "<REDACTED-JWT>",
-            },
+            }),
+            // Single-token base64url bearer tokens (pairing / relay auth).
+            //
+            // These are 32+-char blobs in the `[A-Za-z0-9_-]` alphabet with
+            // NO dots — which means JWT and hex rules have not matched them.
+            // A daemon bearer token is typically 32 random bytes encoded as
+            // base64url (43–44 chars). The regex candidate is intentionally
+            // broad; the entropy gate (`has_token_variety`) then filters out
+            // low-entropy false positives (all-lowercase, all-uppercase,
+            // short taxonomy identifiers) so normal error strings are not
+            // over-redacted.
+            //
+            // Ordering: runs AFTER JWT so a three-segment JWT is consumed
+            // whole by the JWT rule rather than having its first segment
+            // redacted here.
+            ScrubStep::EntropyCandidateB64Url,
             // IPv4 — four 1-3 digit groups. We do not enforce 0-255 bounds
             // because we'd rather over-match than under-match.
-            Pattern {
+            ScrubStep::Simple(Pattern {
                 re: RE_IPV4.clone(),
                 replacement: "<REDACTED-IP>",
-            },
+            }),
             // IPv6 — we anchor on ASCII non-hex non-colon boundaries
             // rather than `\b` because `:` itself is not a word character —
             // the original `\b::` form matched erratically depending on
@@ -241,10 +306,10 @@ impl PiiScrubber {
             // `adjacent_ipv6_addresses_both_redacted`). Over-redaction of bare
             // colon-delimited tokens is an accepted, fail-safe tradeoff: the
             // scrubber prefers false positives, and telemetry is unwired today.
-            Pattern {
+            ScrubStep::Simple(Pattern {
                 re: RE_IPV6.clone(),
                 replacement: "$1<REDACTED-IP>",
-            },
+            }),
             // Home directory prefixes: macOS `/Users/<name>/…` and Linux
             // `/home/<name>/…`. We collapse to `~/` so the structural part
             // of the path (which is often the useful debugging signal)
@@ -258,23 +323,23 @@ impl PiiScrubber {
             // username containing a space (`/Users/John Doe/file`) cannot
             // leak; stopping at the first `/` ensures we never over-redact
             // the deeper path segments that carry the debugging signal.
-            Pattern {
+            ScrubStep::Simple(Pattern {
                 re: RE_MACOS_HOME.clone(),
                 replacement: "~/",
-            },
-            Pattern {
+            }),
+            ScrubStep::Simple(Pattern {
                 re: RE_LINUX_HOME.clone(),
                 replacement: "~/",
-            },
+            }),
             // Windows home-directory prefix: `C:\Users\<name>\…` → `~/`.
             // Uses RE_WINDOWS_HOME (r#"…"# hash raw string) because the
             // character class contains `"` which would terminate `r"…"` early.
-            Pattern {
+            ScrubStep::Simple(Pattern {
                 re: RE_WINDOWS_HOME.clone(),
                 replacement: "~/",
-            },
+            }),
         ];
-        Self { patterns }
+        Self { steps }
     }
 
     /// Append a custom user-supplied pattern. Returns `Err` (with the
@@ -286,10 +351,10 @@ impl PiiScrubber {
     /// patterns via this method.
     pub fn add_custom(&mut self, regex_src: &str) -> Result<(), String> {
         let re = Regex::new(regex_src).map_err(|e| e.to_string())?;
-        self.patterns.push(Pattern {
+        self.steps.push(ScrubStep::Simple(Pattern {
             re,
             replacement: "<REDACTED-CUSTOM>",
-        });
+        }));
         Ok(())
     }
 
@@ -309,14 +374,35 @@ impl PiiScrubber {
     /// [`Regex::replace_all`]).
     pub fn scrub(&self, input: &str) -> String {
         let normalised: String = input.nfkc().collect();
-        let mut out = std::borrow::Cow::Owned(normalised);
-        for p in &self.patterns {
-            // `replace_all` only allocates when there is at least one
-            // match, so pass-through strings stay cheap.
-            let next = p.re.replace_all(&out, p.replacement);
-            out = std::borrow::Cow::Owned(next.into_owned());
+        let mut out = normalised;
+        for step in &self.steps {
+            out = match step {
+                ScrubStep::Simple(p) => {
+                    // `replace_all` only allocates when there is at least one
+                    // match, so pass-through strings stay cheap.
+                    p.re.replace_all(&out, p.replacement).into_owned()
+                }
+                ScrubStep::EntropyCandidateB64Url => {
+                    // Match every ≥32-char base64url candidate. For each
+                    // match, apply the replacement only if the token passes
+                    // the character-variety gate (has_token_variety).
+                    // Candidates that fail keep their original text, so
+                    // taxonomy identifiers and version segments are not
+                    // over-redacted.
+                    RE_B64URL_CANDIDATE
+                        .replace_all(&out, |caps: &regex::Captures<'_>| {
+                            let m = caps.get(0).expect("full match group 0 always exists");
+                            if has_token_variety(m.as_str()) {
+                                "<REDACTED-TOKEN>".to_owned()
+                            } else {
+                                m.as_str().to_owned()
+                            }
+                        })
+                        .into_owned()
+                }
+            };
         }
-        out.into_owned()
+        out
     }
 }
 

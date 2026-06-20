@@ -51,6 +51,64 @@
 //! anonymization contract enforced at the type level.
 //!
 //! [policy]: https://github.com/dmytro-yevs/copypaste/blob/main/docs/privacy/telemetry-policy.md
+//!
+//! # Daemon wiring guide (CopyPaste-9fb6)
+//!
+//! The three daemon call sites that should adopt this crate when the
+//! follow-up wiring task lands:
+//!
+//! ## 1. Daemon startup — `copypaste-daemon/src/main.rs`
+//!
+//! ```rust,ignore
+//! // Read consent from persisted config (Settings table or config file).
+//! let consent: copypaste_telemetry::ReportConsent = settings.telemetry_consent();
+//!
+//! // DSN is compiled in at build time via an env var; absent in OSS builds.
+//! let reporter: Box<dyn copypaste_telemetry::ErrorReporter> =
+//!     match option_env!("COPYPASTE_SENTRY_DSN") {
+//!         Some(dsn) => copypaste_telemetry::init_with_dsn(consent, dsn)
+//!             .unwrap_or_else(|e| {
+//!                 tracing::warn!("telemetry init failed: {e}");
+//!                 Box::new(copypaste_telemetry::NoopReporter::new())
+//!             }),
+//!         None => copypaste_telemetry::init(consent),
+//!     };
+//!
+//! // Store in AppState / passed to handlers via Arc.
+//! let reporter = std::sync::Arc::new(reporter);
+//! ```
+//!
+//! ## 2. Error reporting at a handler call site
+//!
+//! ```rust,ignore
+//! // Use the fire-and-forget helper — never blocks, never panics.
+//! copypaste_telemetry::report_and_log(
+//!     &*reporter,
+//!     copypaste_telemetry::ReportableError::new(
+//!         env!("CARGO_PKG_NAME"),
+//!         env!("CARGO_PKG_VERSION"),
+//!         "keychain.read_failed",   // stable taxonomy string
+//!         copypaste_telemetry::OsTag::current(),
+//!     ),
+//! );
+//! ```
+//!
+//! ## 3. Consent change at runtime
+//!
+//! ```rust,ignore
+//! // When the user revokes consent, drain queued events and swap the reporter.
+//! if let Some(sentry) = reporter.downcast_ref::<copypaste_telemetry::SentryReporter>() {
+//!     sentry.shutdown_without_flush();
+//! }
+//! *reporter = copypaste_telemetry::init(copypaste_telemetry::ReportConsent::Disabled);
+//! ```
+//!
+//! **Cargo.toml addition for `copypaste-daemon`:**
+//!
+//! ```toml
+//! [dependencies]
+//! copypaste-telemetry = { path = "../copypaste-telemetry" }
+//! ```
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
@@ -311,6 +369,41 @@ pub fn init(consent: ReportConsent) -> Box<dyn ErrorReporter> {
     // need real reporting MUST use init_with_dsn instead.
     let _ = consent;
     Box::new(NoopReporter::new())
+}
+
+/// Submit an event to `reporter` in a fire-and-forget manner, logging any
+/// backend failure with [`tracing::warn`] instead of propagating it.
+///
+/// This is the **recommended call site pattern** for daemon handlers. The
+/// `ErrorReporter` contract guarantees the call never blocks, and
+/// `report_and_log` additionally guarantees it never panics — it swallows
+/// `Err` variants from the backend and emits a `warn`-level trace span.
+///
+/// # Example
+///
+/// ```rust
+/// use copypaste_telemetry::{init, report_and_log, OsTag, ReportConsent, ReportableError};
+///
+/// let reporter = init(ReportConsent::Disabled);
+/// report_and_log(
+///     &*reporter,
+///     ReportableError::new(
+///         env!("CARGO_PKG_NAME"),
+///         env!("CARGO_PKG_VERSION"),
+///         "keychain.read_failed",
+///         OsTag::current(),
+///     ),
+/// );
+/// ```
+pub fn report_and_log(reporter: &dyn ErrorReporter, event: ReportableError) {
+    // The trait contract says `report` never panics and never blocks.
+    // We still explicitly handle `Err` so a degraded backend (e.g. a
+    // misconfigured DSN after SDK init) does not silently swallow errors
+    // — it produces a `warn` trace line that will appear in `RUST_LOG=warn`
+    // output without alarming the user.
+    if let Err(e) = reporter.report(event) {
+        tracing::warn!(error = %e, "telemetry backend error (event dropped)");
+    }
 }
 
 /// Build a reporter for the given consent level, initialising the Sentry
