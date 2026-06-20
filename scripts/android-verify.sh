@@ -130,17 +130,29 @@ fi
 # working tree and index are clean (tracked changes + staged changes). We
 # intentionally include untracked files too — stray generated bindings or
 # build leftovers would make the run non-reproducible.
+#
+# ANDROID_VERIFY_ALLOW_DIRTY=1 bypasses this check when the caller has
+# intentional staged changes (e.g. staged deletions) that do not affect the
+# Android build surface. The caller accepts full responsibility for
+# reproducibility. Do NOT use in automated CI.
 if [[ -n "$(git status --porcelain)" ]]; then
-  step_fail "preflight: git tree is dirty"
-  echo "" >&2
-  echo "  Refusing to run: Android codegen and cross-compiled builds must run" >&2
-  echo "  on a CLEAN tree so regenerated bindings and produced artifacts are" >&2
-  echo "  attributable and the run is reproducible." >&2
-  echo "" >&2
-  echo "  Commit or stash your changes first:" >&2
-  echo "    git status" >&2
-  echo "    git stash --include-untracked   # or commit" >&2
-  exit 2
+  if [[ "${ANDROID_VERIFY_ALLOW_DIRTY:-0}" == "1" ]]; then
+    note "WARNING: dirty tree bypass active (ANDROID_VERIFY_ALLOW_DIRTY=1) — caller accepts reproducibility responsibility."
+  else
+    step_fail "preflight: git tree is dirty"
+    echo "" >&2
+    echo "  Refusing to run: Android codegen and cross-compiled builds must run" >&2
+    echo "  on a CLEAN tree so regenerated bindings and produced artifacts are" >&2
+    echo "  attributable and the run is reproducible." >&2
+    echo "" >&2
+    echo "  Commit or stash your changes first:" >&2
+    echo "    git status" >&2
+    echo "    git stash --include-untracked   # or commit" >&2
+    echo "" >&2
+    echo "  If you have intentional staged changes not touching the Android surface," >&2
+    echo "  you may bypass with: ANDROID_VERIFY_ALLOW_DIRTY=1 scripts/android-verify.sh" >&2
+    exit 2
+  fi
 fi
 
 note "Android toolchain build/test chain — NOT a substitute for real-device testing."
