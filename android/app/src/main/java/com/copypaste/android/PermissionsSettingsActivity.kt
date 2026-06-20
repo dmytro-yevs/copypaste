@@ -45,6 +45,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -55,11 +58,6 @@ import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeBorder
-import com.copypaste.android.ui.theme.IdeDanger
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeSuccess
-import com.copypaste.android.ui.theme.IdeText
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.LocalSkin
@@ -250,24 +248,57 @@ fun PermissionsScreen(
     val hasOemScreen = OemAutoStartHelper.hasOemScreen(ctx)
     val oemLabel = OemAutoStartHelper.oemSettingsLabel(ctx)
 
-    // A-C8: skin-aware background — gate aurora canvas on tok.background.
-    // CLASSIC (AURORA + translucent=ON) → same aurora canvas as before; byte-identical.
-    // QUIET (FLAT) → no aurora; solid c.bg container regardless of translucency pref.
-    // VAPOR (TINT_BLOB) → no animated aurora (TINT_BLOB compositor is future work);
-    //   falls back to solid c.bg container (glow suppressed). Surfaces adapt via Components.kt.
+    // A-C8 / CopyPaste-i1c0: skin-aware background — 3-way when(tok.background).
+    // CLASSIC (AURORA + translucent=ON) → animated aurora canvas; byte-identical to pre-skin.
+    // QUIET (FLAT) → solid c.bg; no canvas regardless of translucency pref.
+    // VAPOR (TINT_BLOB + translucent=ON) → drawBehind: base c.bg fill + single soft
+    //   radial accent blob using paletteAurora(palette).glowA scaled by tok.glow.
     val translucent = rememberTranslucency()
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
     val tok = skinTokens(LocalSkin.current)
-    // Only AURORA background gets the animated aurora canvas. FLAT and TINT_BLOB use solid bg.
-    val paintCanvasAurora = tok.background == SkinBackground.AURORA && translucent
+    val palette = LocalPalette.current
+
+    val scaffoldModifier: Modifier = when {
+        !translucent                                      -> Modifier
+        tok.background == SkinBackground.FLAT             -> Modifier
+        tok.background == SkinBackground.AURORA           -> {
+            // CLASSIC: byte-identical aurora canvas (pre-calibrated blob alphas preserved).
+            Modifier.auroraCanvas(dark, paletteAurora(palette))
+        }
+        tok.background == SkinBackground.TINT_BLOB        -> {
+            // VAPOR: paint base fill then one soft radial accent blob scaled by tok.glow.
+            val auroraDef = paletteAurora(palette)
+            val blobAlpha = (auroraDef.glowA.alpha * tok.glow).coerceIn(0f, 1f)
+            Modifier.drawBehind {
+                // Opaque base so glass blur has real colour to sample (PARITY-SPEC §2).
+                drawRect(c.bg)
+                // Single soft radial blob — glowA tint at tok.glow intensity.
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.0f to auroraDef.glowA.copy(alpha = blobAlpha),
+                            0.65f to Color.Transparent,
+                        ),
+                        center = Offset(size.width * 0.5f, size.height * 0.3f),
+                        radius = kotlin.math.hypot(size.width, size.height) * 0.65f,
+                    ),
+                )
+            }
+        }
+        else                                              -> Modifier
+    }
+    val scaffoldContainerColor: Color = when {
+        !translucent                                      -> c.bg
+        tok.background == SkinBackground.FLAT             -> c.bg
+        tok.background == SkinBackground.AURORA           -> Color.Transparent
+        tok.background == SkinBackground.TINT_BLOB        -> Color.Transparent
+        else                                              -> c.bg
+    }
 
     Scaffold(
-        modifier = if (paintCanvasAurora)
-            Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
-        else
-            Modifier,
-        containerColor = if (paintCanvasAurora) Color.Transparent else c.bg,
+        modifier = scaffoldModifier,
+        containerColor = scaffoldContainerColor,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_permissions),
@@ -375,19 +406,21 @@ private fun BgCaptureStatusCard(
     readLogsGranted: Boolean,
     overlayGranted: Boolean,
 ) {
-    val borderColor = if (readLogsGranted && overlayGranted) IdeSuccess else IdeBorder
+    // CopyPaste-xi8h: use LocalIdeColors so colors adapt to light/dark palettes.
+    val c = LocalIdeColors.current
+    val borderColor = if (readLogsGranted && overlayGranted) c.success else c.border
     CopyPasteCard(accent = borderColor) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
                 text = stringResource(R.string.bg_adb_section_title),
                 style = MaterialTheme.typography.titleMedium,
-                color = IdeText,
+                color = c.text,
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = stringResource(R.string.bg_adb_explainer),
                 style = MaterialTheme.typography.bodyMedium,
-                color = IdeDim,
+                color = c.dim,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -397,7 +430,7 @@ private fun BgCaptureStatusCard(
                     else
                         stringResource(R.string.bg_adb_status_read_logs_no),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (readLogsGranted) IdeSuccess else IdeDim,
+                    color = if (readLogsGranted) c.success else c.dim,
                 )
                 Text(
                     text = if (overlayGranted)
@@ -405,7 +438,7 @@ private fun BgCaptureStatusCard(
                     else
                         stringResource(R.string.bg_adb_status_overlay_no),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (overlayGranted) IdeSuccess else IdeDim,
+                    color = if (overlayGranted) c.success else c.dim,
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -446,6 +479,8 @@ internal fun AdbCommandBlock(
     toastText: String,
 ) {
     val ctx = LocalContext.current
+    // CopyPaste-xi8h: use LocalIdeColors so colors adapt to light/dark palettes.
+    val c = LocalIdeColors.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -454,13 +489,13 @@ internal fun AdbCommandBlock(
         Text(
             text = label,
             style = MaterialTheme.typography.labelSmall,
-            color = IdeDim,
+            color = c.dim,
         )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = command,
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = IdeText,
+            color = c.text,
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
@@ -493,12 +528,14 @@ private fun PermissionStatusCard(
     required: Boolean,
     infoOnly: Boolean = false,
 ) {
+    // CopyPaste-xi8h: use LocalIdeColors so colors adapt to light/dark palettes.
+    val c = LocalIdeColors.current
     // Status-colored hairline border: green = granted, red = missing+required,
     // neutral grey = unknown / optional. Matches the restrained macOS look.
     val borderColor = when {
-        granted == true              -> IdeSuccess
-        granted == false && required -> IdeDanger
-        else                         -> IdeBorder
+        granted == true              -> c.success
+        granted == false && required -> c.danger
+        else                         -> c.border
     }
 
     CopyPasteCard(accent = borderColor) {
@@ -510,19 +547,19 @@ private fun PermissionStatusCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (granted == true) IdeSuccess else IdeDim
+                    tint = if (granted == true) c.success else c.dim
                 )
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = IdeText,
+                    color = c.text,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     Text(
                         text = "required",
                         style = MaterialTheme.typography.labelSmall,
-                        color = IdeDanger
+                        color = c.danger
                     )
                 }
             }
@@ -538,12 +575,12 @@ private fun PermissionStatusCard(
                         imageVector = if (granted) Icons.Filled.CheckCircle
                                       else Icons.Filled.ErrorOutline,
                         contentDescription = null,
-                        tint = if (granted) IdeSuccess else IdeDanger,
+                        tint = if (granted) c.success else c.danger,
                     )
                     Text(
                         text = if (granted) "Granted" else "Not granted",
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) IdeSuccess else IdeDanger,
+                        color = if (granted) c.success else c.danger,
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -552,7 +589,7 @@ private fun PermissionStatusCard(
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
-                color = IdeDim
+                color = c.dim
             )
 
             if (!infoOnly) {
