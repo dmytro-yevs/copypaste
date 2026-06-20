@@ -452,8 +452,4 @@
 
     <!-- History — DeviceFilterRow chip (ojsq) -->
     <string name="device_filter_all">All</string>
-
-    <!-- History — row semantics custom actions (q649) -->
-    <string name="cd_copy">Copy</string>
-    <string name="cd_delete">Delete</string>
 </resources>
