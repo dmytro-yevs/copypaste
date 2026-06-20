@@ -1,5 +1,5 @@
 /**
- * W-C2: ViewShell skin token audit (CopyPaste-un1w)
+ * W-C2: ViewShell skin token audit (CopyPaste-un1w / CopyPaste-aq5w)
  *
  * Verifies that ViewShell's header and content panel use --skin-* CSS variable
  * references for radius and shadow instead of hardcoded tailwind tokens
@@ -10,7 +10,10 @@
  *  - Classic UNCHANGED: surface-glass, card-in, reveal-up are preserved.
  *  - No hardcoded rounded-ide-lg or shadow-ide-sm on ViewShell surfaces.
  *  - Radius driven by --skin-r-card (inline style or Tailwind arbitrary value).
- *  - Shadow driven by --skin-shadow-card (header) / --skin-shadow-float (content).
+ *  - Shadow driven by --skin-shadow-card (header AND content panel).
+ *    CopyPaste-aq5w: content panel uses --skin-shadow-card (=E2 in classic),
+ *    NOT --skin-shadow-float (=E3 in classic), so classic is byte-identical to
+ *    the pre-skin shadow-ide-sm (E2) behaviour.
  *  - All original features (drag region, title, actions slot) preserved.
  */
 
@@ -148,7 +151,7 @@ describe("§W-C2-B  ViewShell — skin-driven radius (--skin-r-card)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §C  Skin-token shadow: --skin-shadow-card / --skin-shadow-float
+// §C  Skin-token shadow: --skin-shadow-card on both header and content panel
 // ---------------------------------------------------------------------------
 describe("§W-C2-C  ViewShell — skin-driven shadow", () => {
   it("header does NOT use hardcoded shadow-ide-sm class", () => {
@@ -181,16 +184,25 @@ describe("§W-C2-C  ViewShell — skin-driven shadow", () => {
     expect(hasSkinShadow).toBe(true);
   });
 
-  it("content panel shadow references --skin-shadow-float (inline style or arbitrary value)", () => {
+  // CopyPaste-aq5w: content panel must use --skin-shadow-card (E2 in classic),
+  // NOT --skin-shadow-float (E3 in classic). This keeps the content panel
+  // byte-identical to the pre-skin shadow-ide-sm (E2) shadow in classic.
+  it("content panel shadow references --skin-shadow-card (NOT --skin-shadow-float)", () => {
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
     const panel = container.querySelector("div.flex-1") as HTMLElement;
     const inlineShadow = panel.style.boxShadow;
     const classStr = panel.className;
-    const hasSkinShadow =
+    const hasSkinCardShadow =
+      (inlineShadow && inlineShadow.includes("--skin-shadow-card")) ||
+      classStr.includes("skin-shadow-card");
+    const hasSkinFloatShadow =
       (inlineShadow && inlineShadow.includes("--skin-shadow-float")) ||
       classStr.includes("skin-shadow-float");
-    expect(hasSkinShadow).toBe(true);
+    // Must use --skin-shadow-card (classic E2 = shadow-ide-sm parity)
+    expect(hasSkinCardShadow).toBe(true);
+    // Must NOT use --skin-shadow-float (classic E3 = regression)
+    expect(hasSkinFloatShadow).toBe(false);
   });
 });

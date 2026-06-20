@@ -73,12 +73,15 @@ export function ViewShell({
         rounded-ide-lg: same 14px radius as the header.
       */}
       {/* §jxbx-7: reveal-up entrance — content panel rises after header settles. */}
-      {/* W-C2: radius uses --skin-r-card; shadow uses --skin-shadow-float (floated panel). */}
+      {/* W-C2: radius uses --skin-r-card; shadow uses --skin-shadow-card.
+          CopyPaste-aq5w: classic --skin-shadow-card = var(--ide-e2) = shadow-ide-sm (E2),
+          so the content panel is byte-identical to pre-skin. quiet/vapor get their card
+          shadow (none) instead of the stronger float shadow (E3). */}
       <div
         className="surface-glass reveal-up min-h-0 flex-1 overflow-auto p-4"
         style={{
           borderRadius: "var(--skin-r-card)",
-          boxShadow: "var(--skin-shadow-float)",
+          boxShadow: "var(--skin-shadow-card)",
         }}
       >
         {children}
