@@ -239,7 +239,8 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
         shadowElevation = shadowElevationDp,
         modifier = Modifier
             .padding(horizontal = 16.dp)
-            .clip(toastShape)
+            // CopyPaste-fiht: .clip(toastShape) removed — Surface(shape=) + LiquidGlassSurface
+            // already clip to the shape; the extra .clip was causing redundant overdraw.
             // CopyPaste-n7ff: announce the toast via a polite live region so the
             // message is read even when focus is elsewhere.
             .semantics { liveRegion = LiveRegionMode.Polite },
