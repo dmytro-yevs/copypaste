@@ -1054,6 +1054,12 @@ pub fn soft_delete_item(
         params![id, lamport_ts, wall_time],
     )?;
     if changed > 0 {
+        // CopyPaste-bhm9: clean any in-flight resumable-upload row BEFORE the
+        // item's content is gone — same defensive cleanup the hard-delete paths
+        // apply (CopyPaste-6fd). Must run inside the same transaction so the
+        // item_id → pending_uploads join still resolves.
+        let id_owned = id.to_string();
+        delete_pending_uploads_for_ids(&tx, std::slice::from_ref(&id_owned))?;
         // Remove from FTS so the tombstone is not returned by search queries.
         tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
     }
@@ -3629,5 +3635,37 @@ mod tests {
                 .unwrap();
             assert_eq!(found, 1, "pinned row {id} must remain");
         }
+    }
+
+    /// CopyPaste-bhm9: `soft_delete_item` (tombstone path) must also clean
+    /// `pending_uploads` so in-flight upload rows don't leak when an item is
+    /// soft-deleted instead of hard-deleted.
+    #[test]
+    fn soft_delete_item_cleans_pending_uploads() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+        insert_pending_upload(&db, &item.item_id);
+        // A second unrelated pending row must survive.
+        insert_pending_upload(&db, "other-item-id");
+        assert_eq!(count_pending(&db), 2);
+
+        let changed = soft_delete_item(&db, &item.id, 9_999, 9_999).unwrap();
+        assert_eq!(changed, 1, "soft_delete_item must affect exactly one row");
+
+        assert_eq!(
+            count_pending(&db),
+            1,
+            "soft_delete_item must remove the pending_uploads row for the deleted item"
+        );
+        let survivor: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM pending_uploads WHERE item_id = 'other-item-id'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(survivor, 1, "unrelated pending_uploads row must survive");
     }
 }
