@@ -44,13 +44,11 @@ class SupabasePollWorker(
         val ctx = applicationContext
         val settings = Settings(ctx)
 
-        if (!settings.syncEnabled || settings.syncBackend != SyncBackend.SUPABASE) {
-            Log.d(TAG, "Supabase sync disabled or backend changed — skipping poll")
-            return Result.success()
-        }
-
-        if (!settings.isSupabaseConfigured) {
-            Log.w(TAG, "Supabase not fully configured — skipping poll")
+        // CopyPaste-26zi: gate on isSupabaseConfigured directly — NOT syncBackend.
+        // The syncBackend enum is a UI hint; the poll must run whenever Supabase is
+        // configured, regardless of which transport the mode enum names as primary.
+        if (!settings.syncEnabled || !settings.isSupabaseConfigured) {
+            Log.d(TAG, "Supabase sync disabled or not configured — skipping poll")
             return Result.success()
         }
 
@@ -222,7 +220,8 @@ class SupabasePollWorker(
          */
         fun syncWithSettings(context: Context) {
             val settings = Settings(context)
-            val shouldRun = settings.syncEnabled && settings.syncBackend == SyncBackend.SUPABASE
+            // CopyPaste-26zi: gate on isSupabaseConfigured directly, not syncBackend.
+            val shouldRun = settings.syncEnabled && settings.isSupabaseConfigured
             schedule(context, enabled = shouldRun)
         }
     }

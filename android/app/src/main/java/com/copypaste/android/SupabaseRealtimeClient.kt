@@ -288,8 +288,10 @@ class SupabaseRealtimeClient(
         connectJob = scope.launch(Dispatchers.IO) {
             Log.i(TAG, "SupabaseRealtimeClient starting")
             while (isActive) {
+                // CopyPaste-26zi: gate on isSupabaseConfigured directly — NOT syncBackend.
+                // The WS push channel should be active whenever Supabase is configured,
+                // regardless of which transport the syncBackend enum names as primary.
                 if (!settings.syncEnabled ||
-                    settings.syncBackend != SyncBackend.SUPABASE ||
                     !settings.isSupabaseConfigured
                 ) {
                     delay(10_000L)

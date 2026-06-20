@@ -99,12 +99,17 @@ object TextKind {
         val tld = domain.substring(dotPos + 1)
         if (tld.isEmpty() || dotPos == 0) return false
 
-        // Validate character sets
+        // Validate character sets using ASCII-only predicates.
+        // Mirrors Rust is_ascii_alphanumeric() — rejects non-ASCII letters/digits
+        // (e.g. accented chars like 'é', 'ü') so the Kotlin fallback and the Rust
+        // FFI agree on all inputs (CopyPaste-7yop).
         val validLocal = local.all { c ->
-            c.isLetterOrDigit() || c == '.' || c == '_' || c == '+' || c == '-'
+            c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' ||
+                c == '.' || c == '_' || c == '+' || c == '-'
         }
         val validDomain = domain.all { c ->
-            c.isLetterOrDigit() || c == '.' || c == '-'
+            c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' ||
+                c == '.' || c == '-'
         }
         return validLocal && validDomain
     }
@@ -124,10 +129,12 @@ object TextKind {
     private fun isPhone(s: String): Boolean {
         val rest = if (s.startsWith('+')) s.substring(1) else s
         if (rest.isEmpty()) return false
-        // All chars must be digits, spaces, dashes, or parens
-        if (!rest.all { c -> c.isDigit() || c == ' ' || c == '-' || c == '(' || c == ')' }) return false
+        // All chars must be ASCII digits, spaces, dashes, or parens.
+        // Mirrors Rust is_ascii_digit() — rejects non-ASCII digits (Arabic-Indic, etc.)
+        // so the Kotlin fallback and the Rust FFI agree on all inputs (CopyPaste-7yop).
+        if (!rest.all { c -> c in '0'..'9' || c == ' ' || c == '-' || c == '(' || c == ')' }) return false
         // Must have at least 7 digits
-        return s.count { it.isDigit() } >= 7
+        return s.count { it in '0'..'9' } >= 7
     }
 
     // ── NUMBER ────────────────────────────────────────────────────────────────
@@ -144,10 +151,12 @@ object TextKind {
         if (withoutSep.isEmpty()) return false
         // At most one decimal point
         if (withoutSep.count { it == '.' } > 1) return false
-        // All remaining chars must be digits or '.'
-        if (!withoutSep.all { c -> c.isDigit() || c == '.' }) return false
+        // All remaining chars must be ASCII digits or '.'.
+        // Mirrors Rust is_ascii_digit() — rejects non-ASCII digits (Arabic-Indic, etc.)
+        // so the Kotlin fallback and the Rust FFI agree on all inputs (CopyPaste-7yop).
+        if (!withoutSep.all { c -> c in '0'..'9' || c == '.' }) return false
         // Must start and end with a digit
-        return withoutSep.first().isDigit() && withoutSep.last().isDigit()
+        return withoutSep.first() in '0'..'9' && withoutSep.last() in '0'..'9'
     }
 
     // ── JSON ──────────────────────────────────────────────────────────────────

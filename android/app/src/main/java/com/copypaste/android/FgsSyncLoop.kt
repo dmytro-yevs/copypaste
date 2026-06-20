@@ -318,8 +318,13 @@ class FgsSyncLoop(
                 //
                 // Skip the network call when sync is disabled/unconfigured, but
                 // still apply the normal interval (treated as an "empty" tick).
+                //
+                // CopyPaste-26zi: gate on isSupabaseConfigured directly — NOT on
+                // syncBackend == SUPABASE. The syncBackend enum is a UI hint for the
+                // settings screen; the Supabase poll should run whenever Supabase is
+                // fully configured, regardless of which backend the enum points to.
+                // macOS daemon runs relay + cloud additively; Android must match.
                 val enabled = settings.syncEnabled &&
-                    settings.syncBackend == SyncBackend.SUPABASE &&
                     settings.isSupabaseConfigured
 
                 val nextDelay: Long

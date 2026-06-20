@@ -1340,7 +1340,8 @@ class ClipboardService : Service() {
             context.applicationContext.getDatabasePath("copypaste.db").absolutePath
 
         /**
-         * Push one freshly-captured local item to the configured cloud backend.
+         * Push one freshly-captured local item to ALL configured cloud transports
+         * additively — mirroring the macOS daemon's fan-out behaviour (CopyPaste-26zi).
          *
          * AB-4: routes by ACTUAL [contentType] — text/image/file — instead of the
          * old text-only path. [payload] is the EXACT byte payload the cloud blob
@@ -1352,6 +1353,13 @@ class ClipboardService : Service() {
          *             so the receiver recovers the original name/MIME (AB-3).
          * The same [payload] is shipped over BOTH the Supabase and relay transports
          * under the row's STABLE [itemId].
+         *
+         * Each transport fires INDEPENDENTLY when its own configuration flag is set
+         * ([Settings.isSupabaseConfigured] / [Settings.isRelayConfigured]). Both may
+         * fire on the same capture — this is the correct additive model. The old
+         * `when (settings.syncBackend)` XOR switch was wrong: it chose ONE transport
+         * based on a deprecated mode enum, silently dropping the other even when both
+         * were fully configured.
          */
         private suspend fun notifySyncManager(
             itemId: String,
@@ -1361,56 +1369,51 @@ class ClipboardService : Service() {
             syncManager: SyncManager,
             lamportTs: Long,
         ) {
-            when (settings.syncBackend) {
-                SyncBackend.SUPABASE -> {
-                    // Supabase path: encrypt with cross-device SyncKey (schema v5),
-                    // push to Supabase PostgREST. Interoperates with macOS daemon.
-                    // STABLE identity: push under the row's persisted [itemId]
-                    // (overrideId) so the cloud item_id matches the local row and
-                    // is reused on every push — the daemon dedups/LWW-merges
-                    // instead of seeing a new item each time (the duplicates bug).
-                    try {
-                        val id = syncManager.pushToSupabase(
-                            plaintext = payload,
-                            contentType = contentType,
-                            overrideId = itemId,
-                            deviceId = settings.deviceId,
-                            lamportTs = lamportTs,
-                        )
-                        if (id != null) {
-                            // CopyPaste-g4ik: guard item id (UUID) in log — stripped from release by R8.
-                            if (BuildConfig.DEBUG) Log.d(TAG, "Supabase push ok: $id ($contentType)")
-                        } else {
-                            Log.w(TAG, "Supabase push returned null (logged above)")
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Supabase push failed: ${e.message}")
+            // CopyPaste-26zi: additive fan-out — each transport fires independently.
+            // macOS daemon fans out to relay AND cloud; Android must do the same.
+
+            // ── Supabase transport ────────────────────────────────────────────
+            // Gate: Supabase is fully configured (url + anonKey + sync key).
+            // Independent of syncBackend enum — the mode setting is for UI only.
+            if (settings.isSupabaseConfigured) {
+                try {
+                    val id = syncManager.pushToSupabase(
+                        plaintext = payload,
+                        contentType = contentType,
+                        overrideId = itemId,
+                        deviceId = settings.deviceId,
+                        lamportTs = lamportTs,
+                    )
+                    if (id != null) {
+                        // CopyPaste-g4ik: guard item id (UUID) in log — stripped from release by R8.
+                        if (BuildConfig.DEBUG) Log.d(TAG, "Supabase push ok: $id ($contentType)")
+                    } else {
+                        Log.w(TAG, "Supabase push returned null (logged above)")
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Supabase push failed: ${e.message}")
                 }
-                SyncBackend.RELAY -> {
-                    // Relay path: encrypt with the cross-device cloud SyncKey via
-                    // cloud_encrypt (item_id bound into the AEAD AAD), wrap as a
-                    // RelayEnvelope, and POST to the derived shared inbox. STABLE
-                    // identity: push under the row's persisted [itemId] so the
-                    // relay item_id matches the local row and is reused on every
-                    // push, mirroring the Supabase branch above. pushToRelay runs
-                    // on Dispatchers.IO internally and zeroes the sync key after use.
-                    try {
-                        val ok = syncManager.pushToRelay(
-                            itemId = itemId,
-                            plaintext = payload,
-                            contentType = contentType,
-                            lamportTs = lamportTs,
-                        )
-                        if (ok) {
-                            // CopyPaste-g4ik: guard itemId (UUID) in log — stripped from release by R8.
-                            if (BuildConfig.DEBUG) Log.d(TAG, "Relay push ok: $itemId ($contentType)")
-                        } else {
-                            Log.w(TAG, "Relay push returned false (logged above)")
-                        }
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Relay push failed: ${e.message}")
+            }
+
+            // ── Relay transport ───────────────────────────────────────────────
+            // Gate: relay URL is non-blank and not loopback.
+            // Independent of Supabase — both may fire on the same capture.
+            if (settings.isRelayConfigured) {
+                try {
+                    val ok = syncManager.pushToRelay(
+                        itemId = itemId,
+                        plaintext = payload,
+                        contentType = contentType,
+                        lamportTs = lamportTs,
+                    )
+                    if (ok) {
+                        // CopyPaste-g4ik: guard itemId (UUID) in log — stripped from release by R8.
+                        if (BuildConfig.DEBUG) Log.d(TAG, "Relay push ok: $itemId ($contentType)")
+                    } else {
+                        Log.w(TAG, "Relay push returned false (logged above)")
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Relay push failed: ${e.message}")
                 }
             }
         }
