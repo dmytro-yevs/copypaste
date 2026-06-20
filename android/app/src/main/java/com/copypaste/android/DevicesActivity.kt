@@ -705,10 +705,12 @@ fun DevicesScreen(
             confirmButton = {
                 TextButton(onClick = {
                     revokeTarget = null
-                    // Forget the PEER locally (never our own p2pIdentity), then
-                    // write a durable audit/revocation record on the IO dispatcher.
-                    settings.removePeer(target.fingerprint)
-                    refresh()
+                    // CopyPaste-94o4: atomic revoke — write the audit record FIRST
+                    // on the IO dispatcher; only remove the peer from the local
+                    // roster once the DB write succeeds. A mid-write crash or DB
+                    // error no longer leaves asymmetric state (peer gone locally
+                    // but no audit record). On failure the peer is untouched and
+                    // an error dialog is shown so the user can retry.
                     scope.launch {
                         val ok = withContext(Dispatchers.IO) {
                             runCatching {
@@ -730,7 +732,16 @@ fun DevicesScreen(
                                 false
                             },
                         )
-                        if (!ok) revokeError = "Failed to record revocation. The peer was unpaired locally."
+                        if (ok) {
+                            // Audit record persisted — now safe to remove the peer
+                            // from the local roster (both writes committed).
+                            settings.removePeer(target.fingerprint)
+                            refresh()
+                        } else {
+                            // Audit failed; peer intentionally left intact so the
+                            // user can retry and state remains consistent.
+                            revokeError = "Failed to record revocation. The device was NOT removed — please try again."
+                        }
                     }
                 }) { Text("Revoke", color = c.danger) }
             },

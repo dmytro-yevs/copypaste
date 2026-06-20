@@ -24,8 +24,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -196,30 +200,50 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
         SyncBadgeState.NetworkOffline    -> stringResource(R.string.cd_status_offline)
         SyncBadgeState.DaemonUnreachable -> stringResource(R.string.cd_status_offline)
     }
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable { showSheet = true }
-            .padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.Start,
-        verticalAlignment = Alignment.CenterVertically,
+
+    // PARITY-SPEC §9: tooltip on the sync badge, mirroring the macOS SyncStatusChip
+    // hover tooltip text (buildTooltip in SyncStatusChip.tsx). Shown on long-press
+    // (standard Material3 PlainTooltip gesture on Android).
+    val tooltipText = buildSyncTooltip(
+        badgeState = badgeState,
+        lastActivityMs = lastActivityMs,
+        count = count,
+    )
+    val tooltipState = rememberTooltipState()
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+        tooltip = {
+            PlainTooltip {
+                Text(tooltipText)
+            }
+        },
+        state = tooltipState,
     ) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                // Pulse scale applied only when connected; static otherwise.
-                .scale(if (connected) pulseScale else 1f)
-                .clip(CircleShape)
-                .background(dotColor)
-                .semantics { contentDescription = statusCd },
-        )
-        val footerLabel = if (count > 0) "CopyPaste · $count devices" else "CopyPaste"
-        Text(
-            text = footerLabel,
-            color = c.faint,
-            fontSize = 10.5.sp,
-            modifier = Modifier.padding(start = 6.dp),
-        )
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .clickable { showSheet = true }
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    // Pulse scale applied only when connected; static otherwise.
+                    .scale(if (connected) pulseScale else 1f)
+                    .clip(CircleShape)
+                    .background(dotColor)
+                    .semantics { contentDescription = statusCd },
+            )
+            val footerLabel = if (count > 0) "CopyPaste · $count devices" else "CopyPaste"
+            Text(
+                text = footerLabel,
+                color = c.faint,
+                fontSize = 10.5.sp,
+                modifier = Modifier.padding(start = 6.dp),
+            )
+        }
     }
 
     // PG-42: metadata bottom sheet — last-sync time (relative), device/peer count,
@@ -515,6 +539,52 @@ internal enum class IpcSyncBadgeState(val wireValue: String) {
 // ---------------------------------------------------------------------------
 // A-C9: Pure-function skin helpers — testable without Compose runtime.
 // ---------------------------------------------------------------------------
+
+/**
+ * Build the tooltip string for the sync status badge (PARITY-SPEC §9).
+ *
+ * Mirrors `buildTooltip` in macOS [SyncStatusChip.tsx]:
+ *  - Offline / daemon-unreachable → "Daemon unreachable"
+ *  - Last sync known → "Last sync: <relative time>"
+ *  - No sync yet → "No sync yet"
+ *  - Device count > 0 → appended "· N device(s)"
+ *  - No devices → appended "· No paired devices"
+ *
+ * Pure function — usable in JVM unit tests (no Compose runtime needed).
+ */
+internal fun buildSyncTooltip(
+    badgeState: SyncBadgeState,
+    lastActivityMs: Long,
+    count: Int,
+    nowMs: Long = System.currentTimeMillis(),
+): String {
+    val parts = mutableListOf<String>()
+
+    when (badgeState) {
+        SyncBadgeState.NetworkOffline,
+        SyncBadgeState.DaemonUnreachable -> parts += "Daemon unreachable"
+        SyncBadgeState.Connected -> {
+            if (lastActivityMs > 0L) {
+                val elapsed = (nowMs - lastActivityMs) / 1_000L
+                val rel = when {
+                    elapsed < 60      -> "${elapsed}s ago"
+                    elapsed < 3_600   -> "${elapsed / 60}m ago"
+                    elapsed < 86_400  -> "${elapsed / 3_600}h ago"
+                    else              -> DateFormat.getDateTimeInstance(
+                        DateFormat.SHORT, DateFormat.SHORT
+                    ).format(Date(lastActivityMs))
+                }
+                parts += "Last sync: $rel"
+            } else {
+                parts += "No sync yet"
+            }
+        }
+    }
+
+    parts += if (count > 0) "$count device${if (count != 1) "s" else ""}" else "No paired devices"
+
+    return parts.joinToString(" · ")
+}
 
 /**
  * Returns `true` when the sync-status bottom sheet should use a transparent
