@@ -447,8 +447,7 @@ mod tests {
         axum::Router::new()
             .route(
                 "/devices",
-                axum::routing::post(crate::routes::devices::register)
-                    .get(list_devices_handler),
+                axum::routing::post(crate::routes::devices::register).get(list_devices_handler),
             )
             .with_state(state)
             .layer(axum::Extension(RelayConfig::default()))
@@ -551,8 +550,7 @@ mod tests {
         );
 
         // Wrong bearer → 401.
-        let (status, _) =
-            call_get_devices(state, Some("deadbeefdeadbeefdeadbeefdeadbeef")).await;
+        let (status, _) = call_get_devices(state, Some("deadbeefdeadbeefdeadbeefdeadbeef")).await;
         assert_eq!(
             status,
             StatusCode::UNAUTHORIZED,
