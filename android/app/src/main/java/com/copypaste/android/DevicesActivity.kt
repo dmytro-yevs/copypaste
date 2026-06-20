@@ -282,6 +282,27 @@ object DevicesOnlineState {
      */
     val lastActivityMs: StateFlow<Long> = _lastActivityMs.asStateFlow()
 
+    /**
+     * CopyPaste-lwnz: true while a sync operation (cloud poll or P2P dial) is
+     * actively in flight inside [FgsSyncLoop]. Consumed by [SyncStatusBadge] to
+     * drive the SYNCING badge state (green with distinct label) so the badge is
+     * no longer a dead state. Set via [setSyncing]; cleared automatically when
+     * the operation completes.
+     *
+     * Thread-safe: [MutableStateFlow.value] assignments are atomic.
+     */
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    /**
+     * Called by [FgsSyncLoop] immediately before starting a sync operation and
+     * again (with [active]=false) when the operation finishes (success or error).
+     * Safe to call from any thread.
+     */
+    fun setSyncing(active: Boolean) {
+        _isSyncing.value = active
+    }
+
     internal fun publish(count: Int, maxLastSyncMs: Long = 0L) {
         _onlineCount.value = count
         if (maxLastSyncMs > _lastActivityMs.value) {
@@ -1963,7 +1984,10 @@ private fun DiscoveredPeerRow(
     val c = LocalIdeColors.current
     // v1 peers (no bootstrap port) cannot do SAS pairing → disable Pair.
     val pairable = peer.bport != null
-    val ip = peer.ipAddrs.firstOrNull()
+    // CopyPaste-cnmw: show ALL discovered IPs (macOS merges/shows all) instead of
+    // only firstOrNull(). When multiple interfaces advertise the peer we join them
+    // with ", " so the user can see every reachable address.
+    val ips = peer.ipAddrs
 
     // Row content only — the enclosing CopyPasteCard provides the glass surface
     // (PARITY-SPEC §8 grouped inset list).
@@ -1985,10 +2009,15 @@ private fun DiscoveredPeerRow(
                     style = MaterialTheme.typography.titleSmall,
                 )
                 Spacer(Modifier.height(4.dp))
-                // Fingerprint omitted; IP shown as an aligned table row matching
-                // the layout of OwnDeviceRow and PeerRow.
+                // CopyPaste-cnmw: show all IPs joined, matching macOS parity.
+                // Each IP shown on its own MetaRow so long multi-IP lists wrap cleanly.
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ip?.let { MetaRow(label = "Local IP", value = it) }
+                    if (ips.isNotEmpty()) {
+                        MetaRow(
+                            label = stringResource(R.string.meta_label_local_ip),
+                            value = ips.joinToString(", "),
+                        )
+                    }
                 }
             }
             // CopyPaste-jkbo: replaced raw M3 Button with CopyPasteButton(PRIMARY).
@@ -2014,6 +2043,49 @@ private fun DiscoveredPeerRow(
 // ─────────────────────────────────────────────────────────────────────────────
 // SAS pairing modal (port of macOS DevicesView SasPairingModal)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * CopyPaste-3vpq: peer metadata card shown inside the SAS dialog while
+ * [status.state] == "awaiting_sas". Mirrors the macOS SasPairingModal which
+ * displays the peer's model, OS, and IP so the user can verify they are pairing
+ * with the right device before comparing the Short Authentication String.
+ *
+ * Only rows with non-null/non-blank values are rendered — early handshake polls
+ * may not have received metadata yet (peerModel==null), so the card degrades
+ * gracefully and is invisible when no fields are known.
+ */
+@Composable
+private fun SasPeerMetadataCard(status: PairStatus) {
+    val c = LocalIdeColors.current
+    // Pre-resolve string resources outside buildList (stringResource is @Composable;
+    // it cannot be called inside a non-@Composable lambda like buildList).
+    val labelModel = stringResource(R.string.meta_label_model)
+    val labelOs = stringResource(R.string.meta_label_os)
+    val labelLocalIp = stringResource(R.string.meta_label_local_ip)
+    val labelPublicIp = stringResource(R.string.meta_label_public_ip)
+
+    // Collect the non-blank field pairs we have.
+    val fields = buildList {
+        status.peerModel?.takeIf { it.isNotBlank() }?.let { add(labelModel to it) }
+        status.peerOs?.takeIf { it.isNotBlank() }?.let { add(labelOs to it) }
+        status.peerLocalIp?.takeIf { it.isNotBlank() }?.let { add(labelLocalIp to it) }
+        status.peerPublicIp?.takeIf { it.isNotBlank() }?.let { add(labelPublicIp to it) }
+    }
+    // Nothing to show yet — the card is silent (not even a placeholder).
+    if (fields.isEmpty()) return
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(c.elevated, RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        fields.forEach { (label, value) ->
+            MetaRow(label = label, value = value)
+        }
+    }
+}
 
 /**
  * Modal that drives a discovery-initiated SAS pairing to completion.
@@ -2319,8 +2391,12 @@ private fun SasPairingDialog(
                         )
                     }
                     status.state == "awaiting_sas" && status.sas != null -> {
+                        // CopyPaste-3vpq: peer metadata card — macOS shows model/OS/IP during
+                        // awaiting_sas. Rendered before the SAS prompt so the user can verify
+                        // they are pairing with the right device before confirming the code.
+                        SasPeerMetadataCard(status = status)
                         Text(
-                            "Confirm this code matches the one shown on the other device.",
+                            stringResource(R.string.sas_confirm_prompt),
                             color = c.dim,
                             style = MaterialTheme.typography.bodySmall,
                         )
@@ -2359,6 +2435,9 @@ private fun SasPairingDialog(
                         }
                     }
                     status.state == "awaiting_sas" -> {
+                        // CopyPaste-3vpq: show peer metadata even while waiting for the
+                        // peer to accept — same macOS parity, displayed above the spinner.
+                        SasPeerMetadataCard(status = status)
                         // Accepted locally; waiting for the peer to also accept.
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -2366,7 +2445,7 @@ private fun SasPairingDialog(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
-                                "Waiting for the other device…",
+                                stringResource(R.string.sas_waiting_other),
                                 color = c.dim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )
@@ -2380,7 +2459,7 @@ private fun SasPairingDialog(
                         ) {
                             CircularProgressIndicator(modifier = Modifier.size(18.dp))
                             Text(
-                                "Connecting…",
+                                stringResource(R.string.sas_connecting),
                                 color = c.dim,
                                 style = MaterialTheme.typography.bodyMedium,
                             )

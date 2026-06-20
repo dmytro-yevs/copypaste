@@ -136,6 +136,11 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // PG-11: most-recent peer sync timestamp; used for the recency gate.
     val lastActivityMs by DevicesOnlineState.lastActivityMs.collectAsState()
 
+    // CopyPaste-lwnz: true while FgsSyncLoop has a poll or P2P dial in flight.
+    // When true the badge state is forced to Connected (SYNCING maps to green in
+    // IpcSyncBadgeState.toSyncBadgeState) so the dot actually moves during sync.
+    val isSyncing by DevicesOnlineState.isSyncing.collectAsState()
+
     // Fallback: count configured sync targets when DevicesScreen hasn't run yet.
     var configuredCount by remember { mutableIntStateOf(0) }
 
@@ -167,12 +172,20 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // DevicesOnlineState (the primary signal, updated by FgsSyncLoop + DevicesScreen)
     // mirrors IPC/daemon reachability on macOS — if sync hasn't worked recently the
     // badge shows DANGER regardless of OS network state.
-    val badgeState = resolveSyncBadgeState(
-        liveOnlineCount = count,
-        lastActivityMs = lastActivityMs,
-        recentSyncMs = RECENT_SYNC_MS,
-        hasInternet = hasInternet,
-    )
+    //
+    // CopyPaste-lwnz: when a sync is actively in flight, short-circuit to Connected
+    // (green) so the badge reflects real work rather than staying in the Idle or
+    // stale-count state. This drives the SYNCING branch that previously had no path.
+    val badgeState = if (isSyncing) {
+        SyncBadgeState.Connected
+    } else {
+        resolveSyncBadgeState(
+            liveOnlineCount = count,
+            lastActivityMs = lastActivityMs,
+            recentSyncMs = RECENT_SYNC_MS,
+            hasInternet = hasInternet,
+        )
+    }
 
     val connected = badgeState is SyncBadgeState.Connected
     // CopyPaste-5qbe: Idle is grey (c.faint), matching macOS "idle" grey dot.

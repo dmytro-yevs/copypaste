@@ -331,11 +331,23 @@ class FgsSyncLoop(
                         consecutiveEmpty = consecutiveEmpty,
                     )
                 } else {
+                    // CopyPaste-lwnz: signal an active sync so SyncStatusBadge
+                    // can show the SYNCING state while this call is in-flight.
+                    // finally{} guarantees the flag is cleared on every exit
+                    // path: normal return, transient exception, or cancellation.
+                    DevicesOnlineState.setSyncing(true)
+                    var pollError: Exception? = null
                     val newCount = try {
                         poll()
                     } catch (e: CancellationException) {
-                        throw e // let coroutine cancel normally
+                        throw e // let coroutine cancel normally; finally clears flag
                     } catch (e: Exception) {
+                        pollError = e
+                        0 // dummy; handled below after finally clears the flag
+                    } finally {
+                        DevicesOnlineState.setSyncing(false)
+                    }
+                    if (pollError != null) {
                         // M6: real exponential backoff. The old code did an
                         // unconditional 30 s delay HERE and *then* delayed the
                         // full interval at the top of the next loop (double
@@ -343,7 +355,7 @@ class FgsSyncLoop(
                         // backoff. Now a single backoff governs the next wait.
                         consecutiveFailures++
                         val backoff = backoffMs(consecutiveFailures)
-                        Log.w(TAG, "Poll failed (#$consecutiveFailures): ${e.message} — backing off ${backoff}ms")
+                        Log.w(TAG, "Poll failed (#$consecutiveFailures): ${pollError.message} — backing off ${backoff}ms")
                         delay(backoff)
                         if (!isActive) break
                         continue // re-poll immediately after the backoff sleep
@@ -369,7 +381,13 @@ class FgsSyncLoop(
                 // off to the idle interval. We sleep out `nextDelay` in P2P-dial
                 // chunks: dial, sleep one chunk, repeat, until the poll is due
                 // again. Failures are logged, never fatal.
-                dialPairedPeer()
+                // CopyPaste-lwnz: gate the SYNCING badge around the P2P dial too.
+                DevicesOnlineState.setSyncing(true)
+                try {
+                    dialPairedPeer()
+                } finally {
+                    DevicesOnlineState.setSyncing(false)
+                }
                 if (!isActive) break
 
                 var remaining = nextDelay
@@ -381,7 +399,12 @@ class FgsSyncLoop(
                     // Re-dial on each chunk boundary that is not the final poll
                     // tick (the post-poll dial above already covers tick zero).
                     if (remaining > 0) {
-                        dialPairedPeer()
+                        DevicesOnlineState.setSyncing(true)
+                        try {
+                            dialPairedPeer()
+                        } finally {
+                            DevicesOnlineState.setSyncing(false)
+                        }
                     }
                 }
                 if (!isActive) break
