@@ -157,9 +157,18 @@ class ClipboardService : Service() {
             return@OnPrimaryClipChangedListener
         }
 
+        // CopyPaste-x8a8: resolve the foreground package so dispatchClipData can
+        // check it against Settings.excludedAppBundleIds. Uses
+        // ActivityManager.getRunningAppProcesses() filtered to IMPORTANCE_FOREGROUND —
+        // the only process-level API available to third-party apps on API 26+ without
+        // special permissions. The pkgList[0] of the foreground process is the app
+        // that currently has the clipboard focus. May be null when the AM list is
+        // empty or unavailable; dispatchClipData skips the exclusion check in that case.
+        val sourcePackage: String? = resolveSourcePackage(this@ClipboardService)
+
         // BUG 1 fix: delegate to the shared MIME-dispatch helper so the
         // foreground-service path and the background-overlay path are identical.
-        dispatchClipData(clip, this@ClipboardService, settings, repository, syncManager, scope)
+        dispatchClipData(clip, this@ClipboardService, settings, repository, syncManager, scope, sourcePackage)
     }
 
     override fun onCreate() {
@@ -837,6 +846,13 @@ class ClipboardService : Service() {
          * implementations diverged. This function is the ONE canonical dispatch;
          * both call sites delegate here.
          *
+         * CopyPaste-x8a8: [sourcePackage] is the package ID of the foreground app that
+         * set this clipboard item (obtained via [resolveSourcePackage]). When non-null
+         * and present in [Settings.excludedAppBundleIds], the clip is silently dropped
+         * so clipboard events from excluded apps are never captured. When null (unable
+         * to determine the source — e.g. on older APIs), capture proceeds normally to
+         * avoid false-negative suppressions.
+         *
          * Launches the appropriate capture coroutine on [scope] and returns
          * immediately (fire-and-forget on the caller's SupervisorJob scope).
          * The caller is responsible for cancelling [scope] after all coroutines
@@ -849,7 +865,21 @@ class ClipboardService : Service() {
             repository: ClipboardRepository,
             syncManager: SyncManager,
             scope: kotlinx.coroutines.CoroutineScope,
+            // CopyPaste-x8a8: optional source-package for exclusion-list enforcement.
+            // Null means "source unknown — do not suppress" (safe default).
+            sourcePackage: String? = null,
         ) {
+            // CopyPaste-x8a8: enforce the excludedAppBundleIds exclusion list.
+            // Only suppress when we have a confirmed source package AND it appears
+            // in the list — never suppress when the source is unknown.
+            if (sourcePackage != null) {
+                val excluded = settings.excludedAppBundleIds
+                if (excluded.any { it.equals(sourcePackage, ignoreCase = false) }) {
+                    Log.d(TAG, "dispatchClipData: source app '$sourcePackage' is excluded — skipping capture")
+                    return
+                }
+            }
+
             // Phase 1: image — check all MIME types; first image/* wins.
             val imageMime = (0 until clip.description.mimeTypeCount)
                 .map { clip.description.getMimeType(it) }
@@ -1043,15 +1073,15 @@ class ClipboardService : Service() {
                 return
             }
 
-            // BUG 3 fix: apply sensitive guard to image URIs. Use the URI string
-            // as a proxy; a sensitive screenshot URI (e.g. from a password manager
-            // sharing an image) will often embed identifiable path segments.
-            val uriStr = uri.toString()
-            val sensitive = try { isSensitive(uriStr) } catch (_: UnsatisfiedLinkError) { false }
-            if (sensitive) {
-                Log.d(TAG, "captureImageClip: sensitive URI detected — skipping capture")
-                return
-            }
+            // CopyPaste-iqhr: do NOT apply an early isSensitive(uri) drop here.
+            // URI-path sensitivity checks are unreliable — the URI path (e.g.
+            // "content://media/external/images/1234") does not carry secret content,
+            // only a pointer to it.  More importantly, the text path (captureClip)
+            // explicitly STORES sensitive items with is_sensitive=true + TTL rather
+            // than dropping them, so dropping in the image path broke cross-device
+            // parity and silently suppressed captures the user's TTL setting was
+            // supposed to govern. Route through storeItem as the sensitive_capture_decision
+            // — the repository and native storeClipboardItem handle is_sensitive correctly.
 
             // CopyPaste-lk5m: bounds-only pre-decode to reject decompression bombs
             // BEFORE allocating the full Bitmap. inJustDecodeBounds reads only the
@@ -1228,15 +1258,15 @@ class ClipboardService : Service() {
                 return
             }
 
-            // BUG 3 fix: apply sensitive guard to file URIs. The URI path often
-            // contains the filename; isSensitive can detect credential-bearing
-            // filenames (e.g. "passwords.csv", "private_key.pem").
-            val uriStr = uri.toString()
-            val sensitiveUri = try { isSensitive(uriStr) } catch (_: UnsatisfiedLinkError) { false }
-            if (sensitiveUri) {
-                Log.d(TAG, "captureFileClip: sensitive URI detected — skipping capture")
-                return
-            }
+            // CopyPaste-iqhr: do NOT apply an early isSensitive(uri) drop here.
+            // File URIs contain a path/content handle, not the file's plaintext
+            // content — the filename heuristic (e.g. "passwords.csv") is unreliable
+            // and drops legitimate captures (a file named "old_passwords_migrated.csv"
+            // would be dropped even though it contains no secrets). The text path
+            // (captureClip) proves the right pattern: route through storeItem and let
+            // the repository / native storeClipboardItem make the sensitive_capture_decision.
+            // The item will be stored with is_sensitive=true + TTL if the CONTENT
+            // is sensitive, not based on a URI-path heuristic.
 
             // Read raw bytes from the content provider, capped at MAX_FILE_CAPTURE_BYTES.
             // CopyPaste-lk5m: readBytesCapped aborts early once the cap is exceeded so a
@@ -1649,6 +1679,37 @@ class ClipboardService : Service() {
             // across year boundaries.
             return cal.get(Calendar.YEAR) * 1000 + cal.get(Calendar.DAY_OF_YEAR)
         }
+
+        /**
+         * CopyPaste-x8a8: resolve the package name of the currently foregrounded app.
+         *
+         * Uses [ActivityManager.getRunningAppProcesses] filtered to
+         * [ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND]. This is the
+         * only reliable, permission-free way to identify the source of a clipboard
+         * change on API 26+ — we call it IMMEDIATELY in the [OnPrimaryClipChangedListener]
+         * callback (main thread, synchronous) while the foreground app has not yet
+         * changed. The first package in the foreground process's [pkgList] is the app
+         * that set the clipboard.
+         *
+         * Returns null when the ActivityManager list is empty, unavailable, or an
+         * exception is thrown. A null return causes [dispatchClipData] to SKIP the
+         * exclusion check (safe default: do not suppress when source is unknown).
+         *
+         * Known limitation: on some OEM ROMs the foreground process list may already
+         * have advanced by the time the callback fires. This is a best-effort heuristic;
+         * the exclusion feature will still work correctly for the common case.
+         */
+        fun resolveSourcePackage(context: Context): String? =
+            try {
+                val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+                am?.runningAppProcesses
+                    ?.firstOrNull { it.importance == android.app.ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND }
+                    ?.pkgList
+                    ?.firstOrNull()
+            } catch (e: Exception) {
+                Log.d(TAG, "resolveSourcePackage: failed (${e.javaClass.simpleName}: ${e.message})")
+                null
+            }
 
         /**
          * Build the foreground-service notification. Visible state:

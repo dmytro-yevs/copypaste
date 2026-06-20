@@ -57,6 +57,19 @@ enum class ThemeMode {
     }
 }
 
+/**
+ * CopyPaste-gkgp: thrown by [Settings.loadOrCreateKey] when the AndroidKeyStore
+ * KEK can no longer unwrap the persisted encryption key (e.g. after a factory
+ * reset, keystore wipe, or device restore to a different device).
+ *
+ * The caller (UI / service bootstrap) MUST surface a hard error and MUST NOT
+ * silently generate a new key — doing so destroys all existing history.
+ *
+ * Not a RuntimeException: callers are required to catch and handle it explicitly.
+ */
+class EncryptionKeyLostException(message: String, cause: Throwable? = null) :
+    Exception(message, cause)
+
 class Settings(context: Context) {
     private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences = context.getSharedPreferences("copypaste", Context.MODE_PRIVATE)
@@ -996,29 +1009,53 @@ class Settings(context: Context) {
      * Unwrap (or migrate/generate) the 32-byte encryption key. Callers go through
      * the cached [encryptionKey] accessor; this does the actual keystore work and
      * is invoked at most once per process under [keyCacheLock].
+     *
+     * CopyPaste-gkgp: if a wrapped key ALREADY EXISTS but cannot be unwrapped
+     * (e.g. the user cleared the AndroidKeyStore, or a backup was restored to a
+     * different device), we THROW [EncryptionKeyLostException] instead of silently
+     * generating a new key. Regenerating a new key would make all existing
+     * ciphertexts unreadable — effectively destroying the user's entire clipboard
+     * history without any warning. The caller (service bootstrap / encryptionKey
+     * accessor) must surface a degraded-state error and MUST NOT overwrite the
+     * persisted wrapped key blob.
+     *
+     * Only when NO wrapped key exists at all (first run, or after the user
+     * explicitly wiped app data) do we create a fresh key.
+     *
+     * @throws EncryptionKeyLostException when a wrapped key exists but cannot
+     *   be decrypted by the current KeyStore. Callers must NOT catch and swallow
+     *   this; they must surface a hard error.
      */
+    @Throws(EncryptionKeyLostException::class)
     private fun loadOrCreateKey(): ByteArray {
         run {
-            // Already migrated → unwrap and return.
+            // CopyPaste-gkgp: already migrated path — unwrap and return.
+            // If unwrap fails, STOP: the existing key blob is still in prefs
+            // and throwing preserves it for a potential future recovery path
+            // (e.g. the user re-pairs the device and regains keystore access).
             val wrappedB64 = prefs.getString(KEY_WRAPPED_KEY_B64, null)
             val ivB64 = prefs.getString(KEY_WRAPPED_KEY_IV_B64, null)
             if (wrappedB64 != null && ivB64 != null) {
-                runCatching {
-                    return unwrapKey(
+                return try {
+                    unwrapKey(
                         wrapped = Base64.decode(wrappedB64, Base64.DEFAULT),
                         iv = Base64.decode(ivB64, Base64.DEFAULT)
                     )
-                }.onFailure { e ->
-                    // KEK lost (e.g. user cleared keystore, or backup/restore
-                    // to a different device). Best we can do is regenerate;
-                    // already-stored ciphertexts will become unreadable, but
-                    // the alternative (return random key silently or crash)
-                    // is worse.
-                    Log.w(TAG, "Failed to unwrap encryption key (${e.javaClass.simpleName}); regenerating", e)
-                    prefs.edit()
-                        .remove(KEY_WRAPPED_KEY_B64)
-                        .remove(KEY_WRAPPED_KEY_IV_B64)
-                        .apply()
+                } catch (e: Exception) {
+                    // DO NOT delete the wrapped key blob — it is the only handle
+                    // to the existing ciphertexts. Throwing gives the caller a
+                    // chance to surface a "History unavailable" degraded state.
+                    Log.e(
+                        TAG,
+                        "CopyPaste-gkgp: CRITICAL — encryption key unwrap failed " +
+                            "(${e.javaClass.simpleName}). History is locked; " +
+                            "NOT regenerating key to preserve existing data.",
+                        e,
+                    )
+                    throw EncryptionKeyLostException(
+                        "Encryption key unwrap failed (${e.javaClass.simpleName}): ${e.message}",
+                        e,
+                    )
                 }
             }
 
@@ -1031,6 +1068,7 @@ class Settings(context: Context) {
                 Log.i(TAG, "Migrating plain encryption key into AndroidKeyStore wrap")
                 Base64.decode(legacyPlain, Base64.DEFAULT)
             } else {
+                // True first run — no key of any kind exists.
                 ByteArray(32).also { SecureRandom().nextBytes(it) }
             }
 
