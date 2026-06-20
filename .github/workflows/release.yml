@@ -3,6 +3,9 @@
 #          PR9 Android APK: adds Gradle assembleRelease after cargo-ndk .so build
 #          C-P1-3 Android build/publish BLOCKING; C-P1-4 release-signed APK;
 #          C-P0-2 Android version derived from the git tag (monotonic versionCode)
+#          CopyPaste-8n7b: android-validate job gates both publish jobs; publish-macos
+#          now requires build-android+android-validate so GH release is not created
+#          before all builds and Android lint/unit-tests pass.
 #
 # Triggered on tag push matching v*.*.* (or workflow_dispatch).
 # Builds macOS arm64 DMG via W1.4 release scripts (build-dmg-ci.sh, verify-checksum.sh).
@@ -402,13 +405,78 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Per-platform publish: each platform independent so one failure
-  # does not block the other from shipping. softprops/action-gh-release
-  # is idempotent — both jobs append to the same release.
+  # CopyPaste-8n7b: Android Kotlin/resource validation gate.
+  # Runs Android lint + JVM unit tests (no native .so needed — Robolectric stubs
+  # Android runtime). Must pass before either publish job runs, ensuring broken
+  # Kotlin sources / resources are caught before the GH release is created.
+  # Mirrors the android-unit-test job in ci-android-build.yml but runs as part
+  # of the release pipeline so it gates the tag, not just PR merges.
+  android-validate:
+    name: Android Kotlin/resource validation (lint + unit tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-validate-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties', 'android/**/libs.versions.toml') }}
+          restore-keys: gradle-validate-${{ runner.os }}-
+
+      - name: Android lint
+        working-directory: android
+        # -x buildCargoNdk: skip Rust .so build — lint analyses Kotlin/XML sources only.
+        # Lint catches resource mismatches, missing string keys, broken layouts, etc.
+        run: ./gradlew :app:lint -x buildCargoNdk
+
+      - name: JVM unit tests
+        working-directory: android
+        # Pure Kotlin/Java tests (Robolectric) — no emulator required.
+        # Mirrors android-unit-test in ci-android-build.yml.
+        run: ./gradlew :app:test -x buildCargoNdk
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-lint-report-release
+          path: android/app/build/reports/lint-results*.html
+          retention-days: 7
+          if-no-files-found: warn
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-unit-test-results-release
+          path: android/app/build/reports/tests/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # CopyPaste-8n7b: both publish jobs now depend on ALL build jobs AND android-validate,
+  # so the GH release is never created/updated until every binary build has succeeded
+  # and Android Kotlin/resource validation has passed. softprops/action-gh-release is
+  # idempotent — both jobs append to the same release object.
   publish-macos:
     name: Publish macOS Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-macos]
+    needs: [build-macos, build-android, android-validate]
     runs-on: ubuntu-latest
     env:
       INPUT_VERSION: ${{ inputs.version }}
@@ -479,10 +547,12 @@ jobs:
   # or failed Android artifact fails the run (continue-on-error removed,
   # fail_on_unmatched_files:true below). publish-macos is a separate job, so the
   # macOS DMG publish is unaffected by an Android publish failure.
+  # CopyPaste-8n7b: android-validate added as required dependency so APK is never
+  # published if Kotlin/resource validation fails.
   publish-android:
     name: Publish Android Release
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [build-android]
+    needs: [build-android, android-validate]
     runs-on: ubuntu-latest
     env:
       INPUT_VERSION: ${{ inputs.version }}
