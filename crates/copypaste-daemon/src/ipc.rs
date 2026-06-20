@@ -3519,7 +3519,15 @@ impl IpcServer {
             "search" => {
                 let query = match req.params.get("query").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => return Response::err(req.id, "missing param: query"),
+                    // CopyPaste-kfe9: tag with ERR_CODE_INVALID_ARGUMENT so
+                    // machine clients can classify the error (follow-up of 8u2b).
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: query",
+                        )
+                    }
                 };
                 // Clamp to MAX_PAGE like `list` / `history_page` so an oversized
                 // `limit` cannot make `search_items` allocate/scan unbounded rows.
@@ -3564,7 +3572,11 @@ impl IpcServer {
                             .collect();
                         Response::ok(req.id, serde_json::json!({"items": json_items}))
                     }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    // CopyPaste-kfe9: tag with ERR_CODE_INTERNAL_ERROR so clients
+                    // get a machine-readable code (follow-up of 8u2b).
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3665,12 +3677,24 @@ impl IpcServer {
                             ERR_CODE_AUTH_FAILED,
                             format!("paste decrypt failed: {msg}"),
                         ),
-                        Err(PasteboardError::Other(msg)) => {
-                            Response::err(req.id, format!("pasteboard write failed: {msg}"))
-                        }
+                        // CopyPaste-kfe9: tag pasteboard-write failures with
+                        // ERR_CODE_INTERNAL_ERROR for machine-readable classification.
+                        Err(PasteboardError::Other(msg)) => Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("pasteboard write failed: {msg}"),
+                        ),
                     },
-                    Ok(Ok(None)) => Response::err(req.id, format!("item not found: {id}")),
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    // CopyPaste-kfe9: not_found so clients can distinguish
+                    // "item missing" from other internal errors (follow-up of 8u2b).
+                    Ok(Ok(None)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_NOT_FOUND,
+                        format!("item not found: {id}"),
+                    ),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3778,10 +3802,22 @@ impl IpcServer {
                 // Pin an item (remove expiry so it's never auto-deleted)
                 let id = match req.params.get("id").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => return Response::err(req.id, "missing param: id"),
+                    // CopyPaste-kfe9: tag with ERR_CODE_INVALID_ARGUMENT so
+                    // machine clients can classify the error (follow-up of 8u2b).
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
                 };
                 if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err(req.id, "invalid param: id must be a valid UUID");
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
                 }
                 let db_arc = self.db.clone();
                 let id_for_task = id.clone();
@@ -3802,7 +3838,11 @@ impl IpcServer {
                         }
                         Response::ok(req.id, serde_json::json!({"pinned": true, "id": id}))
                     }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    // CopyPaste-kfe9: tag DB errors with ERR_CODE_INTERNAL_ERROR
+                    // for machine-readable classification (follow-up of 8u2b).
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -11720,13 +11760,19 @@ mod tests {
         let password = "correct-horse-j8dr";
 
         // Use real cert fingerprints so the binder computation is symmetric.
-        let fp_a = call(&sock_a, r#"{"id":"j1","method":"get_own_fingerprint","params":{}}"#)
-            .await["data"]["fingerprint"]
+        let fp_a = call(
+            &sock_a,
+            r#"{"id":"j1","method":"get_own_fingerprint","params":{}}"#,
+        )
+        .await["data"]["fingerprint"]
             .as_str()
             .expect("fp_a")
             .to_string();
-        let fp_b = call(&sock_b, r#"{"id":"j2","method":"get_own_fingerprint","params":{}}"#)
-            .await["data"]["fingerprint"]
+        let fp_b = call(
+            &sock_b,
+            r#"{"id":"j2","method":"get_own_fingerprint","params":{}}"#,
+        )
+        .await["data"]["fingerprint"]
             .as_str()
             .expect("fp_b")
             .to_string();
@@ -11814,8 +11860,11 @@ mod tests {
         // cert-binder computation uses the correct values and the mandatory
         // initiator_confirm_b64 can be verified. (Old code used a static fake
         // fp_a which caused binder mismatch and was masked by the optional tag.)
-        let fp_a = call(&sock_a, r#"{"id":"qr_fpa","method":"get_own_fingerprint","params":{}}"#)
-            .await["data"]["fingerprint"]
+        let fp_a = call(
+            &sock_a,
+            r#"{"id":"qr_fpa","method":"get_own_fingerprint","params":{}}"#,
+        )
+        .await["data"]["fingerprint"]
             .as_str()
             .expect("server A must return own fingerprint")
             .to_string();
@@ -15119,5 +15168,74 @@ mod tests {
 
         // Ensure permits are held for the assertion (not optimised away).
         drop(permits);
+    }
+
+    /// CopyPaste-kfe9: legacy IPC arms (search / copy / paste / pin) must
+    /// return a machine-readable `error_code` on failure, not a bare untyped
+    /// error string.  This is the follow-up to CopyPaste-8u2b which wired
+    /// `error_code` onto the `delete` arm but left the others unchanged.
+    #[tokio::test]
+    async fn legacy_ipc_arms_return_error_code_on_failure() {
+        let server = bare_server();
+
+        // -- search: missing required `query` param → invalid_argument ---------
+        let resp = server
+            .dispatch(r#"{"id":"s1","method":"search","params":{}}"#)
+            .await;
+        assert!(!resp.ok, "search without query must fail");
+        assert_eq!(
+            resp.error_code,
+            Some("invalid_argument"),
+            "search/missing-query must carry error_code=invalid_argument, got: {resp:?}"
+        );
+
+        // -- pin: missing required `id` param → invalid_argument ---------------
+        let resp = server
+            .dispatch(r#"{"id":"p1","method":"pin","params":{}}"#)
+            .await;
+        assert!(!resp.ok, "pin without id must fail");
+        assert_eq!(
+            resp.error_code,
+            Some("invalid_argument"),
+            "pin/missing-id must carry error_code=invalid_argument, got: {resp:?}"
+        );
+
+        // -- pin: non-UUID `id` → invalid_argument -----------------------------
+        let resp = server
+            .dispatch(r#"{"id":"p2","method":"pin","params":{"id":"not-a-uuid"}}"#)
+            .await;
+        assert!(!resp.ok, "pin with bad UUID must fail");
+        assert_eq!(
+            resp.error_code,
+            Some("invalid_argument"),
+            "pin/bad-uuid must carry error_code=invalid_argument, got: {resp:?}"
+        );
+
+        // -- copy: item not found → not_found ----------------------------------
+        let missing_uuid = "00000000-0000-0000-0000-000000000000";
+        let resp = server
+            .dispatch(&format!(
+                r#"{{"id":"c1","method":"copy","params":{{"id":"{missing_uuid}"}}}}"#
+            ))
+            .await;
+        assert!(!resp.ok, "copy of non-existent item must fail");
+        assert_eq!(
+            resp.error_code,
+            Some("not_found"),
+            "copy/not-found must carry error_code=not_found, got: {resp:?}"
+        );
+
+        // -- paste: item not found → not_found ---------------------------------
+        let resp = server
+            .dispatch(&format!(
+                r#"{{"id":"p3","method":"paste","params":{{"id":"{missing_uuid}"}}}}"#
+            ))
+            .await;
+        assert!(!resp.ok, "paste of non-existent item must fail");
+        assert_eq!(
+            resp.error_code,
+            Some("not_found"),
+            "paste/not-found must carry error_code=not_found, got: {resp:?}"
+        );
     }
 }
