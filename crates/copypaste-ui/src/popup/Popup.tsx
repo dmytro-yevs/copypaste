@@ -498,11 +498,11 @@ export function Popup() {
       // rgba(19,20,26,0.82) so the popup is a real glass material on BOTH themes.
       className="surface-glass-strong popup-enter flex flex-col h-screen overflow-hidden"
       style={{
-        // W-C5: use skin token so quiet/vapor get their canonical radius.
-        // Classic = 16px (--skin-r-modal), Quiet = 12px, Vapor = 16px.
-        // The previous hardcoded 14px was between classic and quiet — replaced
-        // with the token so each skin renders its designed modal corner radius.
-        borderRadius: "var(--skin-r-modal)",
+        // CopyPaste-7rns: use --skin-r-card so classic = 14px (byte-identical
+        // to the pre-skin hardcoded value). --skin-r-modal gave classic 16px
+        // which broke byte-identity. Token values by skin:
+        //   classic = 14px, quiet = 10px, vapor = 16px.
+        borderRadius: "var(--skin-r-card)",
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -950,11 +950,15 @@ const PopupRow = React.memo(function PopupRow({
           <span
             // Theme-aware subtle pill (was hardcoded white fill/border, invisible
             // on light): reuse the .keycap surface tokens which adapt per theme.
-            className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5 rounded-ide-sm"
+            // CopyPaste-kp6f: borderRadius via skin token (--skin-r-chip) as
+            // inline style — not the static rounded-ide-sm Tailwind class — so
+            // quiet/vapor get their canonical chip corner radius.
+            className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5"
             style={{
               color: "var(--ide-ghost)",
               background: "var(--ide-hover)",
               border: "1px solid var(--ide-divider)",
+              borderRadius: "var(--skin-r-chip)",
             }}
             title={item.app_bundle_id ?? undefined}
           >

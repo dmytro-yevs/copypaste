@@ -182,7 +182,7 @@ describe("W-C5: Popup syncs data-skin to <html>", () => {
   });
 });
 
-describe("W-C5: Popup root uses var(--skin-r-modal) for borderRadius", () => {
+describe("W-C5 / CopyPaste-7rns: Popup root uses var(--skin-r-card) for borderRadius", () => {
   beforeEach(() => {
     invoke.mockReset();
     localStorage.clear();
@@ -193,7 +193,7 @@ describe("W-C5: Popup root uses var(--skin-r-modal) for borderRadius", () => {
     document.documentElement.removeAttribute("data-skin");
   });
 
-  it("popup root div has borderRadius: var(--skin-r-modal)", async () => {
+  it("popup root div has borderRadius: var(--skin-r-card)", async () => {
     // Default prefs (classic skin).
     mockEmptyHistory();
 
@@ -204,10 +204,11 @@ describe("W-C5: Popup root uses var(--skin-r-modal) for borderRadius", () => {
     const popupRoot = container.querySelector("[data-popup-root]") as HTMLElement | null;
     expect(popupRoot).not.toBeNull();
 
-    // The borderRadius must reference the skin token, not a hardcoded px value.
+    // CopyPaste-7rns: must use --skin-r-card (classic=14px, pre-skin byte-identical),
+    // NOT --skin-r-modal (which gives classic=16px, breaking byte-identity).
     // In jsdom, CSS variables are not resolved but the inline style value should
-    // contain "var(--skin-r-modal)".
+    // contain "var(--skin-r-card)".
     const radius = popupRoot!.style.borderRadius;
-    expect(radius).toBe("var(--skin-r-modal)");
+    expect(radius).toBe("var(--skin-r-card)");
   });
 });
