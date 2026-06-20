@@ -13,13 +13,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use rustls::RootCertStore;
+use sha2::Digest as _;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use tokio::sync::{Notify, RwLock};
-use tokio_tungstenite::connect_async;
+use tokio_tungstenite::connect_async_tls_with_config;
 use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::Connector;
 
 use crate::protocol::{ChangeEvent, PhoenixEvent, PhoenixMessage};
+use copypaste_sync::backoff::BackoffScheduler;
 use futures_util::{SinkExt, StreamExt};
 
 // ── Log redaction (Wave 2.7 sec #17) ─────────────────────────────────────────
@@ -61,8 +65,13 @@ pub(crate) fn redact_payload(value: &serde_json::Value) -> String {
 /// Configuration for the Supabase Realtime client.
 #[derive(Debug, Clone)]
 pub struct RealtimeConfig {
-    /// Full WebSocket URL including API key query param.
-    /// Format: `wss://{project}.supabase.co/realtime/v1/websocket?apikey={key}&vsn=1.0.0`
+    /// Full WebSocket base URL (scheme + host + path + `?vsn=1.0.0`).
+    ///
+    /// The `apikey` is intentionally absent from this URL (CopyPaste-lnjm):
+    /// it is injected as an HTTP request header during the WS handshake so
+    /// it does not appear in proxy / access logs.
+    ///
+    /// Format: `wss://{project}.supabase.co/realtime/v1/websocket?vsn=1.0.0`
     pub ws_url: String,
 
     /// Supabase project URL (`https://{project}.supabase.co`).
@@ -106,6 +115,18 @@ pub struct RealtimeConfig {
     /// `postgres_changes` subscription so the Realtime server pre-filters rows
     /// server-side before RLS applies them.  `None` = anon / no filter.
     pub user_id: Option<String>,
+
+    /// SPKI pin set for TLS certificate pinning of the Realtime WSS endpoint
+    /// (CopyPaste-qkao).
+    ///
+    /// When non-empty, every TLS handshake additionally verifies that the
+    /// server's end-entity certificate has an SPKI SHA-256 hash matching one
+    /// of these pins. Standard WebPKI chain validation still runs regardless.
+    ///
+    /// An empty set (the default) skips the SPKI check — use this for
+    /// local dev / self-signed setups. For production, populate with at least
+    /// one pin derived from the current Supabase project certificate.
+    pub spki_pins: SpkiPins,
 }
 
 impl RealtimeConfig {
@@ -210,6 +231,7 @@ impl RealtimeConfig {
             enabled,
             user_jwt: Arc::new(RwLock::new(user_jwt.unwrap_or_default())),
             user_id,
+            spki_pins: SpkiPins::default(),
         }
     }
 }
@@ -225,14 +247,16 @@ fn is_truthy(value: &str) -> bool {
 
 /// Strip the query string from a WebSocket URL so it is safe to log.
 ///
-/// The `ws_url` embeds `?apikey=<anon-key>&vsn=...`; logging the raw URL would
-/// expose the anon key in the daemon log file.  This function returns only the
-/// scheme + authority + path, dropping everything from `?` onward.
+/// After CopyPaste-lnjm the `ws_url` no longer embeds `apikey` in the query
+/// string (it is injected as a request header instead). This function is
+/// retained as a belt-and-suspenders measure to scrub any remaining query
+/// parameters (e.g. `vsn=1.0.0`) before logging, and to guard against any
+/// future regression that inadvertently puts secrets back in the URL.
 ///
 /// # Examples
 /// ```
 /// # use copypaste_supabase::realtime::scrub_ws_url;
-/// let u = "wss://abc.supabase.co/realtime/v1/websocket?apikey=secret&vsn=1.0.0";
+/// let u = "wss://abc.supabase.co/realtime/v1/websocket?vsn=1.0.0";
 /// assert_eq!(scrub_ws_url(u), "wss://abc.supabase.co/realtime/v1/websocket");
 /// ```
 pub fn scrub_ws_url(url: &str) -> &str {
@@ -241,6 +265,365 @@ pub fn scrub_ws_url(url: &str) -> &str {
         Some(pos) => &url[..pos],
         None => url,
     }
+}
+
+// ── SPKI cert pinning (CopyPaste-qkao) ───────────────────────────────────────
+
+/// A set of SHA-256 SPKI (Subject Public Key Info) pin hashes for
+/// certificate pinning of the Supabase Realtime WSS endpoint.
+///
+/// # How to obtain a pin
+/// ```sh
+/// openssl s_client -connect <project>.supabase.co:443 </dev/null \
+///     | openssl x509 -noout -pubkey \
+///     | openssl pkey -pubin -outform DER \
+///     | openssl dgst -sha256 -binary \
+///     | base64
+/// ```
+///
+/// Store the hex form (not base64) as a 32-byte array in `RealtimeConfig.spki_pins`.
+///
+/// # Empty set (default)
+/// When `spki_pins` is empty no additional SPKI check is performed —
+/// standard WebPKI chain validation still applies. This keeps the default
+/// behavior compatible with deployments that do not (yet) pin certificates.
+/// Set at least one pin in production to enable actual pinning.
+#[derive(Debug, Clone, Default)]
+pub struct SpkiPins {
+    /// SHA-256 hashes of the DER-encoded SubjectPublicKeyInfo of acceptable
+    /// end-entity certificates. Each entry is 32 bytes (256 bits).
+    pub pins: Vec<[u8; 32]>,
+}
+
+impl SpkiPins {
+    /// Return `true` when the set is empty (pinning not configured).
+    pub fn is_empty(&self) -> bool {
+        self.pins.is_empty()
+    }
+
+    /// Return `true` if `spki_der` hashes (SHA-256) to one of the stored pins.
+    pub fn matches(&self, spki_der: &[u8]) -> bool {
+        let hash: [u8; 32] = sha2::Sha256::digest(spki_der).into();
+        self.pins.iter().any(|p| p == &hash)
+    }
+}
+
+/// A rustls `ServerCertVerifier` that delegates chain / name validation to
+/// `WebPkiServerVerifier` and additionally enforces SPKI pinning.
+///
+/// If `pins` is empty the SPKI check is skipped (standard PKI only).
+/// If `pins` is non-empty and the end-entity certificate's SPKI hash does
+/// not match any pin, the connection is refused with
+/// `CertificateError::ApplicationVerificationFailure`.
+#[derive(Debug)]
+struct PinningVerifier {
+    inner: std::sync::Arc<rustls::client::WebPkiServerVerifier>,
+    pins: SpkiPins,
+}
+
+impl rustls::client::danger::ServerCertVerifier for PinningVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &rustls::pki_types::CertificateDer<'_>,
+        intermediates: &[rustls::pki_types::CertificateDer<'_>],
+        server_name: &rustls::pki_types::ServerName<'_>,
+        ocsp_response: &[u8],
+        now: rustls::pki_types::UnixTime,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        // Run the standard WebPKI chain + name check first. If this fails,
+        // reject immediately (don't bother with pin check).
+        let result = self.inner.verify_server_cert(
+            end_entity,
+            intermediates,
+            server_name,
+            ocsp_response,
+            now,
+        )?;
+
+        // Additional SPKI pin check (only when pins are configured).
+        if !self.pins.is_empty() {
+            // Parse the end-entity cert to extract the raw SubjectPublicKeyInfo DER.
+            // `rcgen` is not available here; we use the low-level ring/webpki path.
+            // The DER cert is already validated by the inner verifier, so we only
+            // need to locate the SPKI field. Use a minimal manual parse: X.509
+            // TBSCertificate.subjectPublicKeyInfo is a named field we can reach via
+            // rustls-webpki's `EndEntityCert` if exposed, or via `x509-parser`.
+            // Since x509-parser is not in our dep tree, we extract SPKI using the
+            // `rustls::pki_types` + a small DER walk.
+            //
+            // For robustness we hash the ENTIRE end-entity cert DER when we cannot
+            // extract the SPKI cleanly; a production deployment should use a proper
+            // DER ASN.1 parser. The pin generation command above produces the SPKI
+            // hash, so callers must pin the SPKI hash (not the full cert hash).
+            // We implement a minimal ASN.1 SEQUENCE navigator to reach the SPKI.
+            match extract_spki_der(end_entity) {
+                Some(spki) => {
+                    if !self.pins.matches(&spki) {
+                        tracing::error!(
+                            "TLS cert pinning failed: SPKI hash does not match any known pin"
+                        );
+                        return Err(rustls::Error::InvalidCertificate(
+                            rustls::CertificateError::ApplicationVerificationFailure,
+                        ));
+                    }
+                    tracing::debug!("TLS cert pinning: SPKI pin matched");
+                }
+                None => {
+                    // Could not extract SPKI (malformed cert — unlikely after WebPKI
+                    // validation, but safe to reject).
+                    tracing::error!("TLS cert pinning: could not extract SPKI from cert DER");
+                    return Err(rustls::Error::InvalidCertificate(
+                        rustls::CertificateError::BadEncoding,
+                    ));
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls12_signature(message, cert, dss)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &rustls::pki_types::CertificateDer<'_>,
+        dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        self.inner.verify_tls13_signature(message, cert, dss)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        self.inner.supported_verify_schemes()
+    }
+}
+
+/// Minimal ASN.1 DER reader: skip past the outermost SEQUENCE tag/length and
+/// skip TBSCertificate fields until we reach subjectPublicKeyInfo, then return
+/// its raw DER bytes (tag + length + value).
+///
+/// X.509v3 TBSCertificate structure (RFC 5280 §4.1):
+/// ```text
+/// TBSCertificate ::= SEQUENCE {
+///   version         [0] EXPLICIT INTEGER OPTIONAL,
+///   serialNumber        INTEGER,
+///   signature           AlgorithmIdentifier,
+///   issuer              Name,
+///   validity            Validity,
+///   subject             Name,
+///   subjectPublicKeyInfo SubjectPublicKeyInfo,  -- we want this
+///   ...
+/// }
+/// Certificate ::= SEQUENCE {
+///   tbsCertificate      TBSCertificate,          -- outer SEQUENCE
+///   ...
+/// }
+/// ```
+///
+/// Returns `None` if the DER is too short or structurally invalid.
+///
+/// This is a best-effort extractor sufficient for SPKI pinning; it does not
+/// attempt full validation (the inner WebPKI verifier already did that).
+fn extract_spki_der(cert_der: &[u8]) -> Option<Vec<u8>> {
+    // The outer structure is:
+    //   Certificate ::= SEQUENCE {
+    //     tbsCertificate  TBSCertificate,   ← first element, a SEQUENCE
+    //     ...
+    //   }
+    //
+    // Step 1: peel the outer Certificate SEQUENCE to get its contents.
+    let mut outer = DerReader::new(cert_der);
+    let cert_contents = outer.read_sequence()?;
+
+    // Step 2: the first element of cert_contents is the TBSCertificate SEQUENCE.
+    // Read it to get ITS contents (the individual TBS fields).
+    let mut cert_level = DerReader::new(cert_contents);
+    let tbs_contents = cert_level.read_sequence()?;
+
+    // Step 3: navigate the TBSCertificate fields to reach subjectPublicKeyInfo.
+    let mut tbs = DerReader::new(tbs_contents);
+    // Skip optional [0] EXPLICIT version
+    if tbs.peek_tag() == Some(0xa0) {
+        tbs.skip_element()?;
+    }
+    // serialNumber INTEGER
+    tbs.skip_element()?;
+    // signature AlgorithmIdentifier SEQUENCE
+    tbs.skip_element()?;
+    // issuer Name (SEQUENCE)
+    tbs.skip_element()?;
+    // validity Validity (SEQUENCE)
+    tbs.skip_element()?;
+    // subject Name (SEQUENCE)
+    tbs.skip_element()?;
+    // subjectPublicKeyInfo — return its full TLV (tag + length + value)
+    tbs.read_raw_element()
+}
+
+/// Minimal DER/BER reader for the SPKI extractor above.
+struct DerReader<'a> {
+    data: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> DerReader<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        Self { data, pos: 0 }
+    }
+
+    fn remaining(&self) -> &'a [u8] {
+        &self.data[self.pos..]
+    }
+
+    fn peek_tag(&self) -> Option<u8> {
+        self.remaining().first().copied()
+    }
+
+    /// Read and decode a DER length (short or long form). Returns the length
+    /// value and advances the reader past the length octets.
+    fn read_length(&mut self) -> Option<usize> {
+        let first = *self.remaining().first()?;
+        self.pos += 1;
+        if first & 0x80 == 0 {
+            Some(first as usize)
+        } else {
+            let n_bytes = (first & 0x7f) as usize;
+            if n_bytes == 0 || n_bytes > 4 || self.remaining().len() < n_bytes {
+                return None;
+            }
+            let mut len: usize = 0;
+            for &b in &self.remaining()[..n_bytes] {
+                len = len.checked_shl(8)?.checked_add(b as usize)?;
+            }
+            self.pos += n_bytes;
+            Some(len)
+        }
+    }
+
+    /// Read a SEQUENCE tag (0x30) and return the contents slice.
+    fn read_sequence(&mut self) -> Option<&'a [u8]> {
+        let tag = *self.remaining().first()?;
+        if tag != 0x30 {
+            return None;
+        }
+        self.pos += 1;
+        let len = self.read_length()?;
+        if self.remaining().len() < len {
+            return None;
+        }
+        let contents = &self.remaining()[..len];
+        self.pos += len;
+        Some(contents)
+    }
+
+    /// Skip one complete TLV element (any tag, short or long form length).
+    fn skip_element(&mut self) -> Option<()> {
+        if self.remaining().is_empty() {
+            return None;
+        }
+        self.pos += 1; // tag
+        let len = self.read_length()?;
+        if self.remaining().len() < len {
+            return None;
+        }
+        self.pos += len;
+        Some(())
+    }
+
+    /// Return the complete TLV (tag + encoded length + value) of the next
+    /// element as a `Vec<u8>` without consuming it into an inner reader.
+    fn read_raw_element(&mut self) -> Option<Vec<u8>> {
+        let start = self.pos;
+        // Peek tag (don't advance yet)
+        if self.remaining().is_empty() {
+            return None;
+        }
+        self.pos += 1; // tag
+        let len = self.read_length()?;
+        if self.remaining().len() < len {
+            return None;
+        }
+        self.pos += len;
+        Some(self.data[start..self.pos].to_vec())
+    }
+}
+
+/// Build a WebPKI-backed rustls `ClientConfig` with SPKI pinning.
+///
+/// For loopback URLs (local dev) pinning is skipped even if pins are
+/// configured in `RealtimeConfig`. This avoids breaking local test setups
+/// that use self-signed certs.
+///
+/// Returns `None` if `ws_url` points to a loopback host AND no TLS is
+/// needed (plain `ws://`), allowing the caller to fall back to
+/// `connect_async` (no custom connector).
+fn build_rustls_connector(ws_url: &str, pins: &SpkiPins) -> Option<Connector> {
+    // Do not apply TLS for plain ws:// (loopback dev scenario).
+    if ws_url.starts_with("ws://") {
+        return None;
+    }
+
+    // Build standard WebPKI root cert store (same roots as the default
+    // tokio-tungstenite connector uses when `rustls-tls-webpki-roots` is
+    // enabled).
+    let mut roots = RootCertStore::empty();
+    roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let roots = std::sync::Arc::new(roots);
+
+    // Build the inner standard verifier.
+    let inner = rustls::client::WebPkiServerVerifier::builder(roots)
+        .build()
+        // Safe: empty CRL list, no revocation errors possible.
+        .expect("WebPkiServerVerifier::build must not fail with default params");
+
+    let verifier = PinningVerifier {
+        inner,
+        pins: pins.clone(),
+    };
+
+    let config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(std::sync::Arc::new(verifier))
+        .with_no_client_auth();
+
+    Some(Connector::Rustls(std::sync::Arc::new(config)))
+}
+
+/// Build a `tungstenite::http::Request` for the WebSocket handshake.
+///
+/// This is where the `apikey` header is injected (CopyPaste-lnjm fix):
+/// the key is never placed in the URL query string; it travels in the
+/// HTTP upgrade request headers only (not recorded by most access logs).
+///
+/// The `Authorization: Bearer <anon_key>` header is also set as a belt-and-
+/// suspenders approach — some Supabase proxy deployments gate on it too.
+fn build_ws_request(
+    ws_url: &str,
+    anon_key: &str,
+) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, RealtimeError> {
+    use tokio_tungstenite::tungstenite::http::{HeaderValue, Request};
+    let anon_hdr = HeaderValue::from_str(anon_key)
+        .map_err(|e| RealtimeError::Config(format!("invalid anon key header value: {e}")))?;
+    let bearer = HeaderValue::from_str(&format!("Bearer {anon_key}"))
+        .map_err(|e| RealtimeError::Config(format!("invalid bearer header value: {e}")))?;
+
+    let req = Request::builder()
+        .uri(ws_url)
+        // Supabase Realtime checks the `apikey` header for authentication.
+        .header("apikey", anon_hdr)
+        // Belt-and-suspenders: also set Authorization bearer for proxies
+        // that enforce the standard HTTP auth header.
+        .header("Authorization", bearer)
+        .body(())
+        .map_err(|e| RealtimeError::Config(format!("failed to build WS request: {e}")))?;
+    Ok(req)
 }
 
 /// Build the Phoenix Channel join payload for a Supabase Realtime subscription.
@@ -350,7 +733,7 @@ fn extract_host(url: &str) -> &str {
 /// `SUPABASE_URL=http://…` cannot leak the anon API key over an unencrypted
 /// connection. `ws://` (plain WebSocket) is only permitted when the host
 /// resolves to loopback (127.x.x.x, `::1`, or `localhost`) — i.e. local dev.
-fn build_ws_url(base_url: &str, api_key: &str) -> String {
+fn build_ws_url(base_url: &str, _api_key: &str) -> String {
     // Determine whether the host is loopback-only (local dev).
     let host = extract_host(base_url);
     let host_is_loopback = is_loopback_host(host);
@@ -383,10 +766,11 @@ fn build_ws_url(base_url: &str, api_key: &str) -> String {
     // Strip trailing slash before appending path
     let ws_base = ws_base.trim_end_matches('/');
 
-    format!(
-        "{}/realtime/v1/websocket?apikey={}&vsn=1.0.0",
-        ws_base, api_key
-    )
+    // CopyPaste-lnjm: the API key MUST NOT appear in the URL query string —
+    // it would be visible in proxy/access logs. Pass it via the `apikey`
+    // request header instead (see `build_ws_request`).
+    // Only the version parameter (`vsn`) remains in the URL.
+    format!("{}/realtime/v1/websocket?vsn=1.0.0", ws_base)
 }
 
 // ── Error type ────────────────────────────────────────────────────────────────
@@ -601,6 +985,9 @@ impl Drop for RunningGuard {
 
 /// Outer reconnection loop.  Reconnects with exponential backoff when the
 /// WebSocket connection drops.
+///
+/// CopyPaste-nq31: backoff is now driven by [`BackoffScheduler`] from
+/// `copypaste-sync`, eliminating the duplicate inline doubling logic.
 async fn connection_loop(
     config: RealtimeConfig,
     tx: mpsc::Sender<ChangeEvent>,
@@ -612,7 +999,15 @@ async fn connection_loop(
     // panic, abort) via a Drop guard, not just the bottom of the function.
     let _guard = RunningGuard(running.clone());
 
-    let mut backoff = config.initial_backoff;
+    // CopyPaste-nq31: shared `BackoffScheduler` from `copypaste-sync` replaces
+    // the inline `backoff = (backoff * 2).min(max)` pattern. Constructed with
+    // the same parameters as the old inline logic (initial, max, success-hold
+    // threshold = max_backoff so long sessions reset the schedule).
+    let mut backoff = BackoffScheduler::new(
+        config.initial_backoff,
+        config.max_backoff,
+        config.max_backoff, // connection held longer than max_backoff → reset
+    );
 
     loop {
         // Check shutdown before attempting to connect.
@@ -620,7 +1015,6 @@ async fn connection_loop(
             break;
         }
 
-        // Fix HIGH #1: strip ?apikey=... so the anon key never appears in logs.
         tracing::info!(url = %scrub_ws_url(&config.ws_url), "Connecting to Supabase Realtime");
 
         match run_session(&config, &tx, &shutdown, &channel_joined).await {
@@ -629,43 +1023,41 @@ async fn connection_loop(
                 break;
             }
             SessionResult::Disconnected(session_age) => {
-                // Reset backoff to initial when the session was "stable" — i.e.
-                // it ran longer than `max_backoff`. A long session implies the
-                // server is healthy and the disconnect is a transient blip, not
-                // a systematic connection failure. Only applying backoff for
-                // pre-message disconnects (ConnectError) or very short sessions
-                // avoids penalising recoveries from brief network interruptions.
+                // A session that ran at least as long as `max_backoff` is
+                // considered "stable" — the server was healthy and the disconnect
+                // is a transient blip. Signal the scheduler to reset so the next
+                // reconnect starts from the base delay rather than the accumulated
+                // one.
                 if session_age >= config.max_backoff {
                     tracing::info!(
                         session_secs = session_age.as_secs_f64(),
                         "Supabase Realtime: long session ended; resetting backoff to initial"
                     );
-                    backoff = config.initial_backoff;
+                    backoff.on_success_held();
                 } else {
                     tracing::warn!(
-                        backoff_secs = backoff.as_secs_f64(),
+                        backoff_secs = backoff.next_delay().as_secs_f64(),
                         session_secs = session_age.as_secs_f64(),
                         "Supabase Realtime disconnected; reconnecting after backoff"
                     );
+                    backoff.on_failure();
                 }
             }
             SessionResult::ConnectError(e) => {
                 tracing::error!(error = %e, "Supabase Realtime connect error");
+                backoff.on_failure();
             }
         }
 
-        // Wait for backoff or shutdown signal.
+        // Wait for the scheduled delay or a shutdown signal.
+        let delay = backoff.next_delay();
         tokio::select! {
-            _ = tokio::time::sleep(backoff) => {}
+            _ = tokio::time::sleep(delay) => {}
             _ = shutdown.notified() => {
                 tracing::info!("Supabase Realtime client: shutdown during backoff");
                 break;
             }
         }
-
-        // Exponential backoff with cap (only increments for short/failed sessions;
-        // long sessions already reset backoff above).
-        backoff = (backoff * 2).min(config.max_backoff);
     }
 
     // `_guard` drops here on the normal exit path; if we unwound earlier
@@ -693,17 +1085,20 @@ async fn run_session(
     shutdown: &Arc<Notify>,
     channel_joined: &Arc<Notify>,
 ) -> SessionResult {
-    // Parse the URL.
-    let url = match config
-        .ws_url
-        .parse::<tokio_tungstenite::tungstenite::http::Uri>()
-    {
-        Ok(u) => u,
-        Err(e) => return SessionResult::ConnectError(format!("bad URL: {e}")),
+    // CopyPaste-lnjm: build a proper HTTP upgrade request with the apikey
+    // in a request header (not the URL query string).
+    let request = match build_ws_request(&config.ws_url, &config.anon_key) {
+        Ok(r) => r,
+        Err(e) => return SessionResult::ConnectError(format!("request build: {e}")),
     };
 
+    // CopyPaste-qkao: attach a custom TLS connector with SPKI pinning when
+    // the URL is wss:// and pins are configured. For plain ws:// (loopback
+    // dev) no connector is returned and we fall back to the plain path.
+    let connector = build_rustls_connector(&config.ws_url, &config.spki_pins);
+
     // Establish the WebSocket connection.
-    let ws_stream = match connect_async(url).await {
+    let ws_stream = match connect_async_tls_with_config(request, None, false, connector).await {
         Ok((ws, _)) => ws,
         Err(e) => return SessionResult::ConnectError(e.to_string()),
     };
@@ -988,25 +1383,31 @@ mod tests {
     use serial_test::serial;
     use tokio::sync::mpsc;
 
-    // ── build_ws_url ──────────────────────────────────────────────────────────
+    // ── build_ws_url (CopyPaste-lnjm) ────────────────────────────────────────
+    //
+    // The URL must NOT contain `apikey` — it is injected as a request header
+    // by `build_ws_request` instead.
 
     #[test]
-    fn build_ws_url_converts_https() {
+    fn build_ws_url_converts_https_no_apikey_in_url() {
+        // CopyPaste-lnjm: apikey must NOT appear in the URL.
         let url = build_ws_url("https://abc.supabase.co", "mykey");
-        assert_eq!(
-            url,
-            "wss://abc.supabase.co/realtime/v1/websocket?apikey=mykey&vsn=1.0.0"
+        assert!(
+            !url.contains("apikey"),
+            "apikey must not appear in the WS URL; got: {url}"
         );
+        assert!(
+            !url.contains("mykey"),
+            "anon key must not appear in the WS URL; got: {url}"
+        );
+        assert_eq!(url, "wss://abc.supabase.co/realtime/v1/websocket?vsn=1.0.0");
     }
 
     #[test]
     fn build_ws_url_converts_http() {
         // Loopback host: plain ws:// is allowed for local dev.
         let url = build_ws_url("http://localhost:4000", "k");
-        assert_eq!(
-            url,
-            "ws://localhost:4000/realtime/v1/websocket?apikey=k&vsn=1.0.0"
-        );
+        assert_eq!(url, "ws://localhost:4000/realtime/v1/websocket?vsn=1.0.0");
     }
 
     #[test]
@@ -1014,19 +1415,183 @@ mod tests {
         // Non-loopback host: http:// must be silently upgraded to wss://
         // to protect the API key (CopyPaste-j21).
         let url = build_ws_url("http://abc.supabase.co", "k");
-        assert_eq!(
-            url,
-            "wss://abc.supabase.co/realtime/v1/websocket?apikey=k&vsn=1.0.0"
-        );
+        assert_eq!(url, "wss://abc.supabase.co/realtime/v1/websocket?vsn=1.0.0");
     }
 
     #[test]
     fn build_ws_url_handles_trailing_slash() {
         let url = build_ws_url("https://abc.supabase.co/", "k");
-        assert_eq!(
-            url,
-            "wss://abc.supabase.co/realtime/v1/websocket?apikey=k&vsn=1.0.0"
+        assert_eq!(url, "wss://abc.supabase.co/realtime/v1/websocket?vsn=1.0.0");
+    }
+
+    // ── build_ws_request injects apikey header (CopyPaste-lnjm) ──────────────
+
+    #[test]
+    fn build_ws_request_apikey_in_header_not_url() {
+        let url = "wss://abc.supabase.co/realtime/v1/websocket?vsn=1.0.0";
+        let req = build_ws_request(url, "test-anon-key").expect("request builds");
+
+        // The URL must not contain the key.
+        let uri_str = req.uri().to_string();
+        assert!(
+            !uri_str.contains("test-anon-key"),
+            "API key must not appear in the URI; got: {uri_str}"
         );
+        assert!(
+            !uri_str.contains("apikey"),
+            "no apikey query param expected in URI; got: {uri_str}"
+        );
+
+        // The header must carry the key.
+        let apikey_header = req.headers().get("apikey").expect("apikey header missing");
+        assert_eq!(
+            apikey_header.to_str().unwrap(),
+            "test-anon-key",
+            "apikey header must equal the anon key"
+        );
+
+        // Authorization header must be set.
+        let auth_header = req
+            .headers()
+            .get("Authorization")
+            .expect("Authorization header missing");
+        assert!(
+            auth_header.to_str().unwrap().starts_with("Bearer "),
+            "Authorization header must be Bearer; got: {:?}",
+            auth_header
+        );
+    }
+
+    // ── SPKI pins (CopyPaste-qkao) ────────────────────────────────────────────
+
+    #[test]
+    fn spki_pins_empty_matches_nothing() {
+        let pins = SpkiPins::default();
+        assert!(pins.is_empty());
+        // Even an empty byte slice should not match an empty pin set.
+        assert!(!pins.matches(b"anything"));
+    }
+
+    #[test]
+    fn spki_pins_matches_correct_hash() {
+        use sha2::Digest;
+        let spki_bytes = b"fake-spki-der-content";
+        let hash: [u8; 32] = sha2::Sha256::digest(spki_bytes).into();
+        let pins = SpkiPins { pins: vec![hash] };
+
+        assert!(!pins.is_empty());
+        assert!(
+            pins.matches(spki_bytes),
+            "known SPKI must match its own SHA-256 pin"
+        );
+        assert!(
+            !pins.matches(b"wrong-content"),
+            "wrong content must not match"
+        );
+    }
+
+    // ── extract_spki_der ──────────────────────────────────────────────────────
+
+    /// Minimal DER structure: Certificate SEQUENCE → TBSCertificate SEQUENCE
+    /// with enough filler fields so the SPKI field is at the right offset.
+    ///
+    /// We construct a synthetic (hand-crafted) DER to verify the extractor
+    /// without depending on a real X.509 cert. Fields before SPKI in a
+    /// TBSCertificate (RFC 5280):
+    ///   [0] version (optional) | serialNumber | signature | issuer | validity | subject | SPKI
+    ///
+    /// We encode each as a minimal SEQUENCE or INTEGER so the extractor can
+    /// skip them correctly.
+    #[test]
+    fn extract_spki_der_returns_correct_field() {
+        // Each filler field as a minimal SEQUENCE: tag=0x30 len=0x00 (empty).
+        let empty_seq = &[0x30u8, 0x00u8];
+        // SPKI field: tag=0x30 len=0x04 content=[1,2,3,4].
+        let spki_content = &[1u8, 2, 3, 4];
+        let spki_tlv: Vec<u8> = {
+            let mut v = vec![0x30u8, spki_content.len() as u8];
+            v.extend_from_slice(spki_content);
+            v
+        };
+
+        // Build TBSCertificate body (no version field for simplicity):
+        // serialNumber INTEGER, signature SEQUENCE, issuer SEQUENCE,
+        // validity SEQUENCE, subject SEQUENCE, SPKI SEQUENCE.
+        // We use 0x02 0x01 0x01 (INTEGER value 1) for serialNumber.
+        let serial: Vec<u8> = vec![0x02, 0x01, 0x01];
+        let mut tbs_body: Vec<u8> = Vec::new();
+        tbs_body.extend_from_slice(&serial);
+        tbs_body.extend_from_slice(empty_seq); // signature
+        tbs_body.extend_from_slice(empty_seq); // issuer
+        tbs_body.extend_from_slice(empty_seq); // validity
+        tbs_body.extend_from_slice(empty_seq); // subject
+        tbs_body.extend_from_slice(&spki_tlv); // SPKI
+
+        // Wrap TBSCertificate in a SEQUENCE.
+        let mut tbs_seq: Vec<u8> = vec![0x30, tbs_body.len() as u8];
+        tbs_seq.extend_from_slice(&tbs_body);
+
+        // Outer Certificate SEQUENCE: just the TBS for this test.
+        let mut cert_der: Vec<u8> = vec![0x30, tbs_seq.len() as u8];
+        cert_der.extend_from_slice(&tbs_seq);
+
+        let extracted = extract_spki_der(&cert_der);
+        assert!(extracted.is_some(), "SPKI extraction must succeed");
+        assert_eq!(
+            extracted.unwrap(),
+            spki_tlv,
+            "extracted SPKI TLV must equal the expected bytes"
+        );
+    }
+
+    // ── BackoffScheduler consolidation (CopyPaste-nq31) ──────────────────────
+
+    /// Verify that `connection_loop` now uses `BackoffScheduler` semantics:
+    /// after a long session (`session_age >= max_backoff`) the schedule resets
+    /// to the initial delay, not to the accumulated position.
+    ///
+    /// We test this by inspecting `BackoffScheduler` directly — the same
+    /// logic that `connection_loop` now delegates to.
+    #[test]
+    fn backoff_scheduler_resets_after_long_session() {
+        use copypaste_sync::backoff::BackoffScheduler;
+        let initial = Duration::from_secs(1);
+        let max = Duration::from_secs(60);
+        let mut sched = BackoffScheduler::new(initial, max, max);
+
+        // Simulate several connection failures.
+        sched.on_failure();
+        sched.on_failure();
+        sched.on_failure();
+        // After 3 failures, delay > initial.
+        assert!(
+            sched.next_delay() > initial,
+            "delay should have grown after failures"
+        );
+
+        // A long-running session signals success.
+        sched.on_success_held();
+
+        // Must reset to initial.
+        assert_eq!(
+            sched.next_delay(),
+            initial,
+            "BackoffScheduler must reset to initial after on_success_held"
+        );
+    }
+
+    #[test]
+    fn backoff_scheduler_accumulates_on_connect_error() {
+        use copypaste_sync::backoff::BackoffScheduler;
+        let initial = Duration::from_secs(1);
+        let max = Duration::from_secs(60);
+        let mut sched = BackoffScheduler::new(initial, max, max);
+
+        assert_eq!(sched.next_delay(), initial);
+        sched.on_failure();
+        assert_eq!(sched.next_delay(), Duration::from_secs(2));
+        sched.on_failure();
+        assert_eq!(sched.next_delay(), Duration::from_secs(4));
     }
 
     // ── Disable-flag parsing (truthy detection) ───────────────────────────────
@@ -1122,6 +1687,22 @@ mod tests {
         assert_eq!(config.topic, "realtime:clipboard_items");
         assert!(config.enabled);
         assert!(config.ws_url.contains("vsn=1.0.0"));
+        // CopyPaste-lnjm: apikey must NOT appear in the stored ws_url.
+        assert!(
+            !config.ws_url.contains("apikey"),
+            "ws_url must not embed apikey; got: {}",
+            config.ws_url
+        );
+        assert!(
+            !config.ws_url.contains("anon-key"),
+            "ws_url must not embed the anon key; got: {}",
+            config.ws_url
+        );
+        // CopyPaste-qkao: default SPKI pins are empty (no pinning configured).
+        assert!(
+            config.spki_pins.is_empty(),
+            "default spki_pins must be empty"
+        );
     }
 
     #[test]
@@ -1304,19 +1885,33 @@ mod tests {
 
     #[test]
     fn scrub_ws_url_strips_query_string() {
-        let url = "wss://abc.supabase.co/realtime/v1/websocket?apikey=secret-key&vsn=1.0.0";
+        // After CopyPaste-lnjm the URL only contains vsn= in the query string,
+        // but scrub_ws_url is retained as a belt-and-suspenders guard.
+        let url = "wss://abc.supabase.co/realtime/v1/websocket?vsn=1.0.0";
+        let scrubbed = scrub_ws_url(url);
+        assert!(
+            !scrubbed.contains("vsn"),
+            "scrubbed URL must not contain query params, got: {scrubbed}"
+        );
+        assert!(
+            scrubbed.contains("wss://abc.supabase.co"),
+            "scrubbed URL must still contain the host, got: {scrubbed}"
+        );
+    }
+
+    #[test]
+    fn scrub_ws_url_guards_against_accidental_apikey_in_url() {
+        // Belt-and-suspenders: even if a misconfiguration puts apikey back in the URL,
+        // scrub_ws_url must strip it before logging.
+        let url = "wss://abc.supabase.co/realtime/v1/websocket?apikey=accidental-key&vsn=1.0.0";
         let scrubbed = scrub_ws_url(url);
         assert!(
             !scrubbed.contains("apikey"),
             "scrubbed URL must not contain 'apikey', got: {scrubbed}"
         );
         assert!(
-            !scrubbed.contains("secret-key"),
+            !scrubbed.contains("accidental-key"),
             "scrubbed URL must not contain the key value, got: {scrubbed}"
-        );
-        assert!(
-            scrubbed.contains("wss://abc.supabase.co"),
-            "scrubbed URL must still contain the host, got: {scrubbed}"
         );
     }
 

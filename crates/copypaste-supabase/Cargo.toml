@@ -18,6 +18,16 @@ reqwest = { workspace = true }
 # Realtime (Phoenix Channel WebSocket)
 tokio-tungstenite = { workspace = true }
 futures-util = "0.3"
+# TLS: rustls for custom cert-pinning verifier (CopyPaste-qkao).
+# Pinned to same family as the workspace; ring provider consistent with p2p.
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std"] }
+# WebPKI root certificates for the default chain verifier used inside the
+# pinning verifier — same version family as tokio-tungstenite's implicit dep.
+webpki-roots = "0.26"
+# SHA-256 SPKI hash computation for cert pinning.
+sha2.workspace = true
+# Shared backoff scheduler (CopyPaste-nq31): consolidate duplicate backoff.
+copypaste-sync = { path = "../copypaste-sync" }
 # Shared
 tokio.workspace = true
 serde.workspace = true
