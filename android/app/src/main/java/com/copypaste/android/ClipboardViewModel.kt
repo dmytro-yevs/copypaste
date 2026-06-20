@@ -48,6 +48,14 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     private val _errors = MutableLiveData<String?>(null)
     val errors: LiveData<String?> = _errors
 
+    /**
+     * CopyPaste-yel4: dedicated error channel for clearAll failures so the UI can
+     * show "Failed to clear history" rather than conflating it with the generic
+     * load-history error slot (which renders as "Failed to load history: …").
+     */
+    private val _clearAllError = MutableLiveData<String?>(null)
+    val clearAllError: LiveData<String?> = _clearAllError
+
     /** Current pagination offset (count of unpinned rows already loaded). */
     private var unpinnedOffset = 0
 
@@ -286,14 +294,24 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.clearAll()
-                // CopyPaste-0qpn: flush the mutation queue so clear tombstones propagate.
-                onMutationSync?.invoke()
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "clearAll failed", e)
-                _errors.postValue(e.message ?: e.javaClass.simpleName)
+                // CopyPaste-yel4: post to the dedicated clearAll error channel so the UI
+                // can render "Failed to clear history" rather than "Failed to load history".
+                _clearAllError.postValue(e.message ?: e.javaClass.simpleName)
+            } finally {
+                // CopyPaste-yel4 + CopyPaste-0qpn: flush the mutation queue in `finally`
+                // so clear tombstones propagate even when the repository operation throws.
+                // Previously this ran only in the try block and was skipped on exception.
+                onMutationSync?.invoke()
             }
         }
+    }
+
+    /** Call from UI after the clearAll error has been displayed. */
+    fun clearClearAllError() {
+        _clearAllError.value = null
     }
 
     fun clearUnpinned() {

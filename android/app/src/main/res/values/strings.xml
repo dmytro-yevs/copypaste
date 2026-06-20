@@ -299,8 +299,15 @@
     <string name="dialog_clear_unpinned_message">This will permanently delete all unpinned clipboard items. Pinned items will be kept.</string>
     <string name="dialog_delete_selected_title">Delete Selected</string>
     <string name="dialog_delete_selected_message">This will permanently delete %1$d selected items. This cannot be undone.</string>
+    <!-- CopyPaste-2ifa: single-item delete confirmation dialog -->
+    <string name="dialog_delete_single_title">Delete Item</string>
+    <string name="dialog_delete_single_message">Delete this clipboard item?</string>
     <string name="dialog_confirm">Delete</string>
     <string name="dialog_cancel">Cancel</string>
+    <!-- CopyPaste-kaf6: undo snackbar for single-item delete -->
+    <string name="snackbar_item_deleted">Item deleted</string>
+    <string name="snackbar_undo">Undo</string>
+    <!-- CopyPaste-yel4: clear-all error uses the existing error_clear_all string resource -->
 
     <!-- Log viewer (in-app) -->
     <string name="log_viewer_button">View Logs</string>

@@ -101,6 +101,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -120,6 +123,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.statusBars
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -265,7 +269,9 @@ class HistoryActivity : ComponentActivity() {
 // Confirmation dialog enum
 // ─────────────────────────────────────────────────────────────────────────────
 
-private enum class ConfirmAction { CLEAR_UNPINNED, CLEAR_ALL, DELETE_SELECTED }
+// CopyPaste-2ifa: DELETE_SINGLE added so tapping the row-level delete button shows a
+// confirmation dialog before deleting a single item (was: immediate delete, no dialog).
+private enum class ConfirmAction { CLEAR_UNPINNED, CLEAR_ALL, DELETE_SELECTED, DELETE_SINGLE }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Relative time helper — §5 tabular-nums timestamps
@@ -474,12 +480,18 @@ fun HistoryScreen(
     val items by viewModel.items.observeAsState(emptyList())
     val loading by viewModel.loading.observeAsState(false)
     val error by viewModel.errors.observeAsState(null)
+    // CopyPaste-yel4: observe the dedicated clearAll error channel.
+    val clearAllError by viewModel.clearAllError.observeAsState(null)
     val totalCount by viewModel.totalCount.observeAsState(0)
     val hasMore by viewModel.hasMore.observeAsState(false)
     // §8 glass toast (replaces Material Snackbar): bottom-center glass surface
     // with a leading semantic dot + slide-up. Driven through GlassToastState the
     // same way SnackbarHostState was (scope.launch { toastState.show(...) }).
     val toastState = remember { GlassToastState() }
+    // CopyPaste-kaf6: SnackbarHostState for the 5-second undo snackbar after
+    // a single-item delete. GlassToast does not support action buttons, so we
+    // use the Material3 Snackbar channel for the UNDO affordance specifically.
+    val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -496,7 +508,10 @@ fun HistoryScreen(
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
     val loadErrorTemplate = stringResource(R.string.error_load_history)
+    val clearAllErrorTemplate = stringResource(R.string.error_clear_all)
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
+    val itemDeletedMsg = stringResource(R.string.snackbar_item_deleted)
+    val undoLabel = stringResource(R.string.snackbar_undo)
 
     // ── In-app file picker (HB-11) ───────────────────────────────────────────
     // Opens the system file picker via ACTION_OPEN_DOCUMENT. On a successful pick
@@ -571,6 +586,9 @@ fun HistoryScreen(
             restore = { ord -> ConfirmAction.entries.getOrNull(ord) },
         )
     ) { mutableStateOf<ConfirmAction?>(null) }
+    // CopyPaste-2ifa: id of the single item whose delete is waiting for confirmation.
+    // Cleared when the dialog is dismissed or after deletion starts.
+    var pendingDeleteId by rememberSaveable { mutableStateOf<String?>(null) }
     var overflowExpanded by rememberSaveable { mutableStateOf(false) }
 
     // ── Reorder mode (pinned items only) ────────────────────────────────────
@@ -745,6 +763,14 @@ fun HistoryScreen(
         viewModel.clearError()
     }
 
+    // CopyPaste-yel4: clearAll errors are surfaced through a dedicated channel so the
+    // message reads "Failed to clear history" instead of the generic load-history text.
+    LaunchedEffect(clearAllError) {
+        val msg = clearAllError ?: return@LaunchedEffect
+        toastState.show(clearAllErrorTemplate.format(msg), GlassToastKind.DANGER)
+        viewModel.clearClearAllError()
+    }
+
     // ── Confirmation dialog ──────────────────────────────────────────────────
     pendingConfirm?.let { action ->
         ConfirmationDialog(
@@ -753,6 +779,8 @@ fun HistoryScreen(
                 ConfirmAction.CLEAR_UNPINNED -> items.count { !it.pinned }
                 ConfirmAction.CLEAR_ALL -> items.size
                 ConfirmAction.DELETE_SELECTED -> selectedIds.size
+                // CopyPaste-2ifa: single-item delete always shows count=1.
+                ConfirmAction.DELETE_SINGLE -> 1
             },
             onConfirm = {
                 pendingConfirm = null
@@ -764,9 +792,43 @@ fun HistoryScreen(
                         selectionMode = false
                         selectedIds = emptySet()
                     }
+                    // CopyPaste-2ifa + CopyPaste-kaf6: confirmed single delete:
+                    // show a 5-second undo Snackbar and only actually delete if
+                    // the user does not tap UNDO within that window.
+                    ConfirmAction.DELETE_SINGLE -> {
+                        val idToDelete = pendingDeleteId
+                        pendingDeleteId = null
+                        if (idToDelete != null) {
+                            // Snackbar runs indefinitely; a parallel coroutine dismisses it
+                            // after 5 seconds so the undo window matches macOS parity exactly.
+                            scope.launch {
+                                val result = snackbarHostState.showSnackbar(
+                                    message = itemDeletedMsg,
+                                    actionLabel = undoLabel,
+                                    duration = androidx.compose.material3.SnackbarDuration.Indefinite,
+                                )
+                                if (result == SnackbarResult.ActionPerformed) {
+                                    // UNDO pressed — do NOT delete.
+                                } else {
+                                    // Dismissed or timed out — commit the delete.
+                                    viewModel.deleteItem(idToDelete)
+                                }
+                            }
+                            // Auto-dismiss the undo window after 5 seconds (macOS parity).
+                            scope.launch {
+                                delay(5_000L)
+                                snackbarHostState.currentSnackbarData?.dismiss()
+                            }
+                        }
+                    }
                 }
             },
-            onDismiss = { pendingConfirm = null },
+            onDismiss = {
+                pendingConfirm = null
+                // CopyPaste-2ifa: if the user cancels the single-delete confirm, clear the
+                // pending id so a stale id does not affect future interactions.
+                if (action == ConfirmAction.DELETE_SINGLE) pendingDeleteId = null
+            },
         )
     }
 
@@ -792,6 +854,10 @@ fun HistoryScreen(
             else                                          -> modifier // FLAT: solid, no canvas
         },
         containerColor = if (translucent) Color.Transparent else c.bg,
+        // CopyPaste-kaf6: SnackbarHost for the 5-second undo affordance after single-item
+        // delete. The GlassToastHost (further below in the Box) handles all other toasts;
+        // this host is solely for the UNDO-capable delete Snackbar.
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (selectionMode) {
                 val bulkCopiedMsg = stringResource(R.string.snackbar_bulk_copied)
@@ -1216,7 +1282,12 @@ fun HistoryScreen(
                     selectionMode = selectionMode,
                     selectedIds = selectedIds,
                     reorderMode = reorderMode,
-                    onDelete = { id -> viewModel.deleteItem(id) },
+                    // CopyPaste-2ifa: route single-item delete through a confirmation dialog
+                    // instead of deleting immediately. Store the id and set the pending action.
+                    onDelete = { id ->
+                        pendingDeleteId = id
+                        pendingConfirm = ConfirmAction.DELETE_SINGLE
+                    },
                     onSetPinned = { id, pinned -> viewModel.setPinned(id, pinned) },
                     onReorderPinned = { id, direction ->
                         val pinnedItems = sortedItems.filter { it.pinned }
@@ -1445,10 +1516,11 @@ fun HistoryScreen(
                 viewModel.setPinned(id, pinned)
             },
             onDelete = {
+                // CopyPaste-2ifa: route preview overlay delete through the same
+                // confirmation dialog as the row delete button.
                 val id = previewItemId ?: return@PreviewOverlay
-                previewItemId = null
-                previewPhase = PreviewPhase.Idle
-                viewModel.deleteItem(id)
+                pendingDeleteId = id
+                pendingConfirm = ConfirmAction.DELETE_SINGLE
             },
             onSaveFile = {
                 val id = previewItemId ?: return@PreviewOverlay
@@ -1682,6 +1754,8 @@ private fun ConfirmationDialog(
         ConfirmAction.CLEAR_UNPINNED -> stringResource(R.string.dialog_clear_unpinned_title)
         ConfirmAction.CLEAR_ALL -> stringResource(R.string.dialog_clear_all_title)
         ConfirmAction.DELETE_SELECTED -> stringResource(R.string.dialog_delete_selected_title)
+        // CopyPaste-2ifa: single-item delete confirmation.
+        ConfirmAction.DELETE_SINGLE -> stringResource(R.string.dialog_delete_single_title)
     }
     val message = when (action) {
         ConfirmAction.CLEAR_UNPINNED ->
@@ -1690,6 +1764,9 @@ private fun ConfirmationDialog(
             stringResource(R.string.dialog_clear_all_message, itemCount)
         ConfirmAction.DELETE_SELECTED ->
             stringResource(R.string.dialog_delete_selected_message, itemCount)
+        // CopyPaste-2ifa: single-item delete uses a concise, non-count message.
+        ConfirmAction.DELETE_SINGLE ->
+            stringResource(R.string.dialog_delete_single_message)
     }
 
     // §8 glass dialog (audit #10): glass card over a dimmed scrim, danger-tinted
