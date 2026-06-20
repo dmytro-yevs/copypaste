@@ -185,10 +185,15 @@ function buildActiveClass(skin: "classic" | "quiet" | "vapor"): string {
       // Vapor: glass surface + accent ring outline, no fill gradient.
       // §2.2 navActive:"glass+ring" — surface-glass adds blur/fill; ring = accent border.
       // ring-1 + ring-ide-accent via Tailwind adds a 1px ring shadow.
+      // CopyPaste-i3ia: text MUST be theme-adaptive, NOT white. surface-glass is a
+      // translucent tint of the panel — near-white on the light theme — so white
+      // text on it is invisible (the active label/icon vanished in vapor+light).
+      // text-ide-text resolves to the readable foreground for the current theme
+      // (dark on light, light on dark), staying legible on the glass in both.
       return [
         "surface-glass",
         "ring-1 ring-ide-accent",
-        "text-white",
+        "text-ide-text",
       ].join(" ");
 
     case "classic":
@@ -211,13 +216,16 @@ function buildActiveClass(skin: "classic" | "quiet" | "vapor"): string {
  *
  *   classic → white (on accent gradient fill)
  *   quiet   → accent text (on tint wash, maintains readability)
- *   vapor   → white (on glass surface with ring)
+ *   vapor   → ide-text (theme-adaptive; on near-white glass in light theme white
+ *             would vanish — see CopyPaste-i3ia)
  */
 function buildActiveIconClass(skin: "classic" | "quiet" | "vapor"): string {
   switch (skin) {
     case "quiet":
       return "text-ide-accent";
     case "vapor":
+      // CopyPaste-i3ia: theme-adaptive — white icon vanished on light-theme glass.
+      return "text-ide-text";
     case "classic":
     default:
       return "text-white";

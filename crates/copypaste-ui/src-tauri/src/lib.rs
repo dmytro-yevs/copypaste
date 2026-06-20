@@ -1070,6 +1070,16 @@ fn toggle_popup(handle: &tauri::AppHandle) {
                     // Wire blur-handler + vibrancy the first time we build.
                     // Infallible: we just built the window above.
                     wire_popup(&w);
+                    // CopyPaste-c27b: the popup is a SEPARATE window from "main"
+                    // (PG-25 only protects main, lib.rs:2182). Exclude the popup
+                    // from screen capture too — clipboard previews shown here must
+                    // not leak into recordings/screenshots. Maps to macOS
+                    // NSWindowSharingNone. Non-fatal: log and continue on failure.
+                    if let Err(e) = w.set_content_protected(true) {
+                        tracing::warn!(
+                            "CopyPaste-c27b: popup set_content_protected(true) failed: {e}"
+                        );
+                    }
                     w
                 }
                 Err(e) => {
