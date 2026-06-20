@@ -8,12 +8,13 @@ copypaste-core          (library — crypto, SQLCipher storage, sensitive detect
   │     ├── copypaste-ipc       (IPC request/response types shared by daemon, CLI, and UI)
   │     ├── copypaste-p2p       (mTLS P2P transport + mDNS-SD discovery)
   │     ├── copypaste-sync      (sync engine — CRDT, Lamport timestamps, protocol types)
+  │     │     └── copypaste-core  (direct dep: crypto + storage used by sync engine)
   │     └── copypaste-supabase  (Supabase cloud sync — opt-in via cloud-sync feature)
   ├── copypaste-cli     (user-facing CLI — no core dep, speaks IPC only)
   └── copypaste-ui      (Tauri v2 + React desktop UI — no core dep, speaks IPC only)
 
 copypaste-relay         (Axum HTTP relay server — standalone, no core dep)
-copypaste-android       (UniFFI FFI crate — cdylib for Android, links copypaste-core)
+copypaste-android       (UniFFI FFI crate — cdylib for Android, links copypaste-core + copypaste-p2p + copypaste-sync)
 copypaste-telemetry     (telemetry, opt-out, PII scrubbing — standalone library)
 copypaste-bench         (Criterion benchmarks — dev tool, links copypaste-core)
 ```
@@ -24,9 +25,12 @@ exclusively through the Unix domain socket owned by `copypaste-daemon`.
 `copypaste-relay` is a self-contained HTTP service; it receives only encrypted blobs and
 has no access to plaintext or device keys.
 
-`copypaste-android` links `copypaste-core` directly (UniFFI cdylib) and exposes a Kotlin
-API for the Android app. `copypaste-telemetry` and `copypaste-bench` have zero internal
-deps (relay, P2P, sync, Supabase are all dep-isolated from each other).
+`copypaste-android` links `copypaste-core`, `copypaste-p2p`, and `copypaste-sync` directly
+(UniFFI cdylib) and exposes a Kotlin API for the Android app — p2p for PAKE pairing and
+mTLS cert generation, sync for the transport-agnostic `SyncEngine::run_session`. `copypaste-sync`
+also depends directly on `copypaste-core` (crypto and storage types used by the sync engine).
+`copypaste-telemetry` and `copypaste-bench` have zero internal deps (relay, P2P, Supabase are
+dep-isolated from each other).
 
 ## Data Flow
 
@@ -146,5 +150,9 @@ WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
   devices without wall-clock trust.
 - **Fan-out at relay**: relay writes each uploaded item into every other registered device's
   inbox immediately; no push notifications needed — devices poll on a configurable interval.
-- **Rust 1.96 MSRV**: several dependencies pinned below their latest versions to stay compatible
-  (`uuid <1.21`, `home =0.5.9`, `clap <4.5.40`, `tempfile <3.14` for dev deps).
+- **Rust 1.96 MSRV**: the following workspace-level pins remain in root `Cargo.toml` (as of
+  2026-06-14): `rustls = "0.23"` / `tokio-rustls = "0.26"` / `rcgen = "0.12"` (pinned together
+  for ring crypto-provider consistency) and `subtle >= 2.5` (lower-bound for constant-time
+  comparison fixes). The upper-bound pins for `uuid`, `clap`, and `home`, and the
+  `tempfile <3.14` dev-dep ceiling, were all removed on 2026-06-14 once MSRV was confirmed
+  at 1.96 (Rust 1.85+ safe).

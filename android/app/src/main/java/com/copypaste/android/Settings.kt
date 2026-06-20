@@ -41,18 +41,19 @@ enum class Density {
 /**
  * App theme mode — mirrors the web's System/Light/Dark theme control.
  *
- * c48e: default changed from LIGHT to DARK (Graphite Mist is the new default
- * palette, which is dark). Light palettes remain accessible via palette picker.
- * The user may pick [SYSTEM] to follow the OS dark/light setting.
+ * PARITY-SPEC §0: default is LIGHT (light-first, matching macOS/web store.ts).
+ * The palette (Graphite Mist, etc.) is an independent CHROMA axis; both dark
+ * and light themes work with any palette. The user may pick [SYSTEM] to follow
+ * the OS dark/light setting, or [DARK] to force the dark palette ramp.
  */
 enum class ThemeMode {
     SYSTEM, // follow OS (isSystemInDarkTheme)
-    LIGHT,  // force light
-    DARK;   // force dark (c48e: default — Graphite Mist is dark)
+    LIGHT,  // force light (PARITY-SPEC §0 default)
+    DARK;   // force dark
 
     companion object {
-        /** c48e: default is DARK (Graphite Mist dark palette). */
-        val DEFAULT = DARK
+        /** PARITY-SPEC §0: light-first — default is LIGHT, matching web store.ts DEFAULT_PREFS. */
+        val DEFAULT = LIGHT
     }
 }
 
@@ -573,7 +574,9 @@ class Settings(context: Context) {
         get() = when (prefs.getString("theme_mode", ThemeMode.DEFAULT.name)) {
             ThemeMode.SYSTEM.name -> ThemeMode.SYSTEM
             ThemeMode.LIGHT.name  -> ThemeMode.LIGHT
-            else -> ThemeMode.DARK  // c48e: default is DARK (Graphite Mist)
+            ThemeMode.DARK.name   -> ThemeMode.DARK
+            // Unknown / absent value: fall back to the PARITY-SPEC §0 default (LIGHT).
+            else -> ThemeMode.DEFAULT
         }
         set(v) = prefs.edit().putString("theme_mode", v.name).apply()
 

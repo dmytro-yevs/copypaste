@@ -63,8 +63,8 @@ export interface UIPrefs {
   translucency: boolean;
   /**
    * UI color theme.
-   *   "dark"   (default) — Graphite Mist dark palette (CopyPaste-52mz new default).
-   *   "light"            — Light palette (cloudSilver / system light look).
+   *   "light"  (default) — Light palette (PARITY-SPEC §0 light-first default).
+   *   "dark"             — Graphite Mist dark palette.
    *   "system"           — follow the OS `prefers-color-scheme` live (App.tsx
    *                        resolves it via matchMedia and re-resolves on change).
    * Applied via <html data-theme="light|dark"> in App.tsx.

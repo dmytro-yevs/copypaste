@@ -256,7 +256,7 @@ private val LightColorScheme = lightColorSchemeFromRamp(LightIdeColors)
 
 /**
  * Reads the persisted [ThemeMode] from SharedPreferences (key "theme_mode",
- * default [ThemeMode.DARK] — dark-first for Graphite Mist per c48e spec).
+ * default [ThemeMode.LIGHT] — PARITY-SPEC §0 light-first, matching web store.ts).
  *
  * `remember(ctx)` so the read is stable across recompositions for the activity
  * lifetime; a Settings change recreates the activity, which re-reads it.
@@ -290,9 +290,8 @@ fun rememberPalette(): Palette {
  * Default palette is [Palette.GRAPHITE_MIST] (dark, cool grey).
  *
  * [themeMode] governs the light/dark axis independently of the palette:
- *   - [ThemeMode.DARK]   → use [palette]'s dark ramp (default)
- *   - [ThemeMode.LIGHT]  → use a light palette (falls back to [LightIdeColors]
- *                          when the chosen palette is a dark one)
+ *   - [ThemeMode.LIGHT]  → use a light palette (PARITY-SPEC §0 default)
+ *   - [ThemeMode.DARK]   → use [palette]'s dark ramp
  *   - [ThemeMode.SYSTEM] → follow OS ([isSystemInDarkTheme])
  *
  * Each palette carries [isDark] so a light-scheme palette selected via [palette]
@@ -306,12 +305,10 @@ fun CopyPasteTheme(
     skin: Skin = rememberSkin(),
     content: @Composable () -> Unit,
 ) {
-    // Determine dark/light axis: palette.isDark takes priority when a palette
-    // inherently belongs to a scheme (all current dark palettes are dark, light are
-    // light). ThemeMode overrides only when palette could serve either axis —
-    // but since the palette enum now carries isDark, we use it directly.
-    // ThemeMode.SYSTEM still follows the OS when the user hasn't picked a specific
-    // non-default palette (default is dark = Graphite Mist).
+    // Determine dark/light axis driven purely by the user's themeMode choice.
+    // PARITY-SPEC §0: default is LIGHT. ThemeMode.SYSTEM follows the OS.
+    // The palette is an independent CHROMA axis — every palette renders in both
+    // dark and light (CopyPaste-s0uf parity).
     // Theme axis (dark/light) is driven purely by the user's themeMode — the
     // palette is an independent CHROMA choice, so EVERY palette works in BOTH
     // dark and light (CopyPaste-s0uf parity). SYSTEM follows the OS.
