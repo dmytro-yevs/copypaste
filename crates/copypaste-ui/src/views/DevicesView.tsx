@@ -351,7 +351,8 @@ function SasPairingModal({
               type="button"
               onClick={handleCopySas}
               title={sasCopied ? "Copied!" : "Click to copy"}
-              className="mx-auto block rounded-ide bg-ide-panel/60 px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text hover:bg-ide-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
+              className="mx-auto block bg-ide-panel/60 px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text hover:bg-ide-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
+              style={{ borderRadius: "var(--skin-r-ctl)" }}
             >
               {status.sas}
               {sasCopied && <span className="ml-2 text-[12px] text-ide-success">✓</span>}
@@ -363,7 +364,7 @@ function SasPairingModal({
             {(status.peer_device_name ??
               status.peer_ip_addrs?.length ??
               status.peer_fingerprint) && (
-              <div className="surface-card mt-3 rounded-ide px-3 py-2">
+              <div className="surface-card mt-3 px-3 py-2" style={{ borderRadius: "var(--skin-r-card)" }}>
                 <MetaRow label="Name" value={status.peer_device_name} />
                 <MetaRow
                   label="Addresses"
@@ -376,14 +377,16 @@ function SasPairingModal({
               <button
                 onClick={() => void handleConfirm(false)}
                 disabled={confirmPending}
-                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
                 Doesn't match
               </button>
               <button
                 onClick={() => void handleConfirm(true)}
                 disabled={confirmPending}
-                className="rounded-ide bg-ide-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+                className="bg-ide-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
                 {confirmPending ? "..." : "Match"}
               </button>
@@ -406,7 +409,8 @@ function SasPairingModal({
             <div className="mt-3 flex justify-end">
               <button
                 onClick={onClose}
-                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
                 Close
               </button>
@@ -429,7 +433,8 @@ function SasPairingModal({
             <div className="mt-3 flex justify-end">
               <button
                 onClick={onClose}
-                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
                 Close
               </button>
@@ -449,7 +454,8 @@ function SasPairingModal({
             <div className="mt-3 flex justify-end">
               <button
                 onClick={onClose}
-                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
                 Close
               </button>
@@ -522,7 +528,8 @@ function DiscoveredRow({
           onClick={() => onPair(device)}
           disabled={!pairable || busy}
           title={pairable ? undefined : "This device does not support secure pairing"}
-          className="shrink-0 rounded-ide bg-ide-accent px-2.5 py-1 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+          className="shrink-0 bg-ide-accent px-2.5 py-1 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ borderRadius: "var(--skin-r-ctl)" }}
         >
           Pair
         </button>
@@ -594,21 +601,24 @@ function RevokeConfirmDialog({
           placeholder="At least 8 characters"
           autoComplete="new-password"
           disabled={revokeBusy}
-          className="mb-3 w-full rounded-ide border border-ide-border bg-ide-panel/60 px-2.5 py-1.5 text-[12px] text-ide-text placeholder:text-ide-faint focus:border-ide-accent/60 focus:outline-none disabled:opacity-40"
+          className="mb-3 w-full border border-ide-border bg-ide-panel/60 px-2.5 py-1.5 text-[12px] text-ide-text placeholder:text-ide-faint focus:border-ide-accent/60 focus:outline-none disabled:opacity-40"
+          style={{ borderRadius: "var(--skin-r-ctl)" }}
         />
 
         <div className="flex items-center justify-end gap-2">
           <button
             onClick={onCancel}
             disabled={revokeBusy}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
             Cancel
           </button>
           <button
             onClick={() => onRevoke(fingerprint)}
             disabled={revokeBusy}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
             Revoke only
           </button>
@@ -621,7 +631,8 @@ function RevokeConfirmDialog({
                 : undefined
             }
             // puf4: solid-danger variant for primary destructive action (Revoke & rotate)
-            className="rounded-ide bg-ide-danger px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:cursor-not-allowed disabled:opacity-40"
+            className="bg-ide-danger px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:cursor-not-allowed disabled:opacity-40"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
             {revokeBusy ? "..." : "Revoke & rotate"}
           </button>
@@ -1186,13 +1197,15 @@ export function DevicesView({
           {/* puf4: solid-danger for primary destructive confirm (Revoke all) */}
           <button
             onClick={() => void handleRevokeAllConfirmed()}
-            className="rounded-ide bg-ide-danger px-2.5 py-1 text-[12px] font-medium text-white hover:bg-ide-danger/85 shadow-ide-xs"
+            className="bg-ide-danger px-2.5 py-1 text-[12px] font-medium text-white hover:bg-ide-danger/85 shadow-ide-xs"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
             Yes
           </button>
           <button
             onClick={() => setRevokeAllConfirm(false)}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+            className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
             No
           </button>
@@ -1201,7 +1214,8 @@ export function DevicesView({
         <button
           onClick={() => setRevokeAllConfirm(true)}
           disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
-          className="rounded-ide border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
+          className="border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ borderRadius: "var(--skin-r-ctl)" }}
         >
           {revokeAllPending ? "Revoking..." : "Revoke all"}
         </button>
@@ -1366,7 +1380,8 @@ export function DevicesView({
           onClick={() => void handleRescan()}
           disabled={rescanning}
           aria-label={rescanning ? "Scanning…" : "Rescan local network"}
-          className="flex items-center gap-1 rounded-ide px-2 py-0.5 text-[11px] font-medium text-ide-accent hover:bg-ide-hover disabled:opacity-50 disabled:cursor-default"
+          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-ide-accent hover:bg-ide-hover disabled:opacity-50 disabled:cursor-default"
+          style={{ borderRadius: "var(--skin-r-ctl)" }}
           title="Rescan the local network for devices"
         >
           {/* RefreshCw from lucide-react; spins while rescanning; reduced-motion: static */}
@@ -1447,8 +1462,8 @@ export function DevicesView({
                 Privacy-first: blurred by default, revealed on click (spec §10).
                 qr-scan: adds an animated scan-line via CSS ::after (styleguide §qr). */}
             <div
-              className="qr-scan relative shrink-0 rounded-ide bg-white p-2 overflow-hidden"
-              style={{ width: 190, height: 190 }}
+              className="qr-scan relative shrink-0 bg-white p-2 overflow-hidden"
+              style={{ width: 190, height: 190, borderRadius: "var(--skin-r-card)" }}
             >
               <div
                 className={[
@@ -1464,7 +1479,8 @@ export function DevicesView({
                 <button
                   type="button"
                   onClick={handleQrReveal}
-                  className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent rounded-ide"
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
+                  style={{ borderRadius: "var(--skin-r-ctl)" }}
                   aria-label="Click to reveal QR code"
                 >
                   <span className="text-[11px] font-medium text-ide-dim select-none">

@@ -520,7 +520,10 @@ export default function App() {
               Raw error (may contain bundle/socket paths) is kept in the console only;
               the DOM shows a generic message to avoid leaking install internals. */}
           {daemonError !== null && (
-            <div className="surface-glass flex shrink-0 items-start gap-3 rounded-ide-lg border border-red-500/40 px-3 py-2 text-[13px] text-red-400">
+            <div
+              className="surface-glass flex shrink-0 items-start gap-3 border border-red-500/40 px-3 py-2 text-[13px] text-red-400"
+              style={{ borderRadius: "var(--skin-r-card)" }}
+            >
               <span className="shrink-0 font-semibold">Background service error:</span>
               <span>The background service failed to start. Please reinstall CopyPaste or restart your Mac.</span>
             </div>
@@ -531,7 +534,8 @@ export default function App() {
           {showMismatchBanner && (
             <div
               data-testid="protocol-mismatch-banner"
-              className="surface-glass flex shrink-0 items-start justify-between gap-3 rounded-ide-lg border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
+              className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
+              style={{ borderRadius: "var(--skin-r-card)" }}
             >
               <span>
                 CopyPaste app and background daemon are on incompatible versions
@@ -541,7 +545,8 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setMismatchDismissed(true)}
-                className="shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                className="shrink-0 border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
                 Dismiss
               </button>
@@ -549,7 +554,10 @@ export default function App() {
           )}
 
           {showStaleBanner && (
-            <div className="surface-glass flex shrink-0 items-start justify-between gap-3 rounded-ide-lg border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning">
+            <div
+              className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
+              style={{ borderRadius: "var(--skin-r-card)" }}
+            >
               <span>
                 CopyPaste was updated but an older background daemon is still
                 running
@@ -566,7 +574,8 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setDismissed(true)}
-                  className="rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                  className="border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                  style={{ borderRadius: "var(--skin-r-ctl)" }}
                 >
                   Dismiss
                 </button>
@@ -576,7 +585,10 @@ export default function App() {
 
           {/* Accessibility permission banner — macOS only, dismissed once granted */}
           {showAxBanner && (
-            <div className="surface-glass flex shrink-0 items-start justify-between gap-3 rounded-ide-lg border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning">
+            <div
+              className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
+              style={{ borderRadius: "var(--skin-r-card)" }}
+            >
               <span>
                 Accessibility permission is required for the global paste shortcut
                 and hotkey capture. Grant it in System Settings to enable these
@@ -586,14 +598,16 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => { void handleOpenAxSettings(); }}
-                  className="rounded-ide border border-ide-warning/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-warning hover:bg-ide-hover"
+                  className="border border-ide-warning/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-warning hover:bg-ide-hover"
+                  style={{ borderRadius: "var(--skin-r-ctl)" }}
                 >
                   Open Settings
                 </button>
                 <button
                   type="button"
                   onClick={() => setAxDismissed(true)}
-                  className="rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                  className="border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
+                  style={{ borderRadius: "var(--skin-r-ctl)" }}
                 >
                   Dismiss
                 </button>
