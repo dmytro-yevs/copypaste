@@ -33,8 +33,17 @@ const HKDF_SALT_V1_BYTES: &[u8] = b"copypaste-v1-salt";
 const HKDF_SALT_V2_CANDIDATE: &[u8] = b"copypaste-v2-salt";
 
 /// Network-key info string format used by `DeviceKeypair::derive_enc_key`.
+///
+/// CopyPaste-lkmy: length-prefix each ID so adversarial device IDs containing
+/// `|` cannot collide across the sender/recipient boundary.
 fn network_info(sender_id: &str, recipient_id: &str) -> String {
-    format!("copypaste-v1|{}|{}", sender_id, recipient_id)
+    format!(
+        "copypaste-v1|{}:{}|{}:{}",
+        sender_id.len(),
+        sender_id,
+        recipient_id.len(),
+        recipient_id
+    )
 }
 
 /// Independently re-derive what `derive_enc_key` would produce under an

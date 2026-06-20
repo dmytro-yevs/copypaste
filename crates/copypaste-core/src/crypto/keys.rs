@@ -129,12 +129,17 @@ pub fn derive_v2(seed: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
 /// `DeviceKeypair` instance API. Identical output to
 /// `DeviceKeypair::local_enc_key()`. **Migration-only** — do NOT use for
 /// new ciphertexts.
-pub fn derive_storage_key_v1(ikm: &[u8; 32]) -> [u8; 32] {
+///
+/// CopyPaste-ddp0: return type changed from `[u8; 32]` (a `Copy` type that
+/// was never zeroized) to `Zeroizing<[u8; 32]>`, matching the zeroize-on-drop
+/// contract of `derive_v2`. The derived key material is now scrubbed from the
+/// heap as soon as the caller drops the returned value.
+pub fn derive_storage_key_v1(ikm: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
     let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), ikm);
     let mut key = [0u8; 32];
     hk.expand(b"copypaste-local-storage-v1", &mut key)
         .expect("HKDF expand: output length 32 is always valid for SHA-256");
-    key
+    zeroize::Zeroizing::new(key)
 }
 
 #[derive(Debug, Error)]
@@ -215,7 +220,21 @@ impl DeviceKeypair {
         // derived enc key is what callers receive; the ikm itself never
         // leaks past this stack frame.
         let raw_secret = self.ecdh_zeroizing(peer_public_bytes);
-        let info = format!("copypaste-v1|{}|{}", sender_id, recipient_id);
+        // CopyPaste-lkmy (v1-only): length-prefix each ID so that adversarial
+        // device IDs containing `|` cannot collide across the sender/recipient
+        // boundary. Without prefixing, sender="a|b"/recipient="c" and
+        // sender="a"/recipient="b|c" both produce the same info string
+        // `copypaste-v1|a|b|c`, yielding identical keys. The format
+        // `{len}:{id}` is unambiguous because `len` is a decimal integer
+        // that cannot itself contain the boundary separator `|`.
+        // This is a v1-only annotation — all NEW encryption uses the v2 family.
+        let info = format!(
+            "copypaste-v1|{}:{}|{}:{}",
+            sender_id.len(),
+            sender_id,
+            recipient_id.len(),
+            recipient_id
+        );
         let hk = Hkdf::<Sha256>::new(Some(HKDF_SALT_V1), raw_secret.as_ref());
         let mut enc_key = [0u8; 32];
         hk.expand(info.as_bytes(), &mut enc_key)
@@ -365,8 +384,9 @@ mod tests {
         // raw is now Zeroizing<[u8;32]>; use as_ref() to get &[u8] for HKDF.
         let alt_hk = Hkdf::<Sha256>::new(Some(b"some-other-salt-vX"), raw.as_ref());
         let mut alt_key = [0u8; 32];
+        // CopyPaste-lkmy: info string now uses length-prefixed format.
         alt_hk
-            .expand(b"copypaste-v1|alice|bob", &mut alt_key)
+            .expand(b"copypaste-v1|5:alice|3:bob", &mut alt_key)
             .unwrap();
         assert_ne!(
             *k1, alt_key,
@@ -390,7 +410,8 @@ mod tests {
         let ikm = [0x33u8; 32];
         let v1 = derive_storage_key_v1(&ikm);
         let v2 = derive_storage_key_v2(&ikm, "pair-abc");
-        assert_ne!(v1, v2, "v1 and v2 HKDF derivations must NOT collide");
+        // v1 is now Zeroizing<[u8;32]>; deref to [u8;32] for comparison with the plain v2 array.
+        assert_ne!(*v1, v2, "v1 and v2 HKDF derivations must NOT collide");
     }
 
     /// Two different `pair_id`s must produce two different v2 keys for the
@@ -483,9 +504,9 @@ mod tests {
         let seed = [0xB2u8; 32];
         let v1 = derive_storage_key_v1(&seed);
         let v2 = derive_v2(&seed);
-        // Deref Zeroizing to [u8;32] for comparison with the v1 plain array.
+        // Both are now Zeroizing<[u8;32]>; deref both to compare the inner arrays.
         assert_ne!(
-            v1, *v2,
+            *v1, *v2,
             "derive_v2 must not collide with derive_storage_key_v1"
         );
     }
@@ -522,7 +543,8 @@ mod tests {
         let secret = kp.secret_key_bytes_zeroizing();
         let instance_key = kp.local_enc_key();
         let free_fn_key = derive_storage_key_v1(&secret);
-        assert_eq!(*instance_key, free_fn_key);
+        // Both are now Zeroizing<[u8;32]>; deref both to compare the inner arrays.
+        assert_eq!(*instance_key, *free_fn_key);
     }
 
     // -------------------------------------------------------------------------
@@ -542,5 +564,82 @@ mod tests {
         let secret: zeroize::Zeroizing<[u8; 32]> = alice.ecdh(&bob.public_key_bytes());
         let bob_secret: zeroize::Zeroizing<[u8; 32]> = bob.ecdh(&alice.public_key_bytes());
         assert_eq!(*secret, *bob_secret, "ECDH shared secret must be symmetric");
+    }
+
+    // -------------------------------------------------------------------------
+    // CopyPaste-ddp0: derive_storage_key_v1 must return Zeroizing<[u8;32]>
+    // -------------------------------------------------------------------------
+
+    /// `derive_storage_key_v1` must return `Zeroizing<[u8; 32]>` so the
+    /// migration-path derived key is scrubbed from the heap when the caller
+    /// drops it — matching the zeroize-on-drop contract of `derive_v2`.
+    /// This test fails to compile if the function still returns a plain `[u8; 32]`.
+    #[test]
+    fn derive_storage_key_v1_returns_zeroizing() {
+        let ikm = [0x77u8; 32];
+        // Explicit type annotation: compile error if return type is [u8; 32].
+        let key: zeroize::Zeroizing<[u8; 32]> = derive_storage_key_v1(&ikm);
+        // Must still match the v2 path's output length (32 bytes).
+        assert_eq!(key.len(), 32);
+    }
+
+    /// v1 and v2 zeroizing return types must be parity: both return
+    /// `Zeroizing<[u8; 32]>` so callers get identical zeroize-on-drop
+    /// guarantees regardless of which path is used.
+    #[test]
+    fn derive_v1_and_v2_zeroize_return_parity() {
+        let seed = [0x88u8; 32];
+        // Both bindings require Zeroizing<[u8;32]> — compile error if either
+        // function returns a plain array.
+        let v1: zeroize::Zeroizing<[u8; 32]> = derive_storage_key_v1(&seed);
+        let v2: zeroize::Zeroizing<[u8; 32]> = derive_v2(&seed);
+        // They must differ (domain separation), but both must be Zeroizing.
+        assert_ne!(
+            *v1, *v2,
+            "v1 and v2 must derive different keys from the same seed"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // CopyPaste-lkmy: derive_enc_key v1 info-string must be collision-resistant
+    // -------------------------------------------------------------------------
+
+    /// Demonstrates the collision that existed before length-prefixing: with raw
+    /// `|`-concatenation, sender_id="a|b" + recipient_id="c" produced the same
+    /// info string as sender_id="a" + recipient_id="b|c".
+    ///
+    /// After length-prefixing (`{len}:{id}`), these pairs MUST produce different
+    /// info strings and therefore different derived keys.
+    #[test]
+    fn derive_enc_key_v1_info_string_is_collision_resistant() {
+        let alice = DeviceKeypair::generate();
+        let bob = DeviceKeypair::generate();
+        let bob_pub = bob.public_key_bytes();
+
+        // Adversarial IDs: naïve concatenation `sender|recipient` is identical
+        // for these two pairs because the separator `|` appears in the id itself.
+        let key_ab = alice.derive_enc_key(&bob_pub, "a|b", "c");
+        let key_a_bc = alice.derive_enc_key(&bob_pub, "a", "b|c");
+
+        assert_ne!(
+            *key_ab, *key_a_bc,
+            "derive_enc_key must NOT collide for ('a|b','c') vs ('a','b|c') — \
+             v1 info strings must be length-prefixed to resist adversarial device IDs"
+        );
+    }
+
+    /// Verify the length-prefixed info string is still deterministic: identical
+    /// IDs must always produce the same key.
+    #[test]
+    fn derive_enc_key_v1_length_prefixed_is_deterministic() {
+        let alice = DeviceKeypair::generate();
+        let bob = DeviceKeypair::generate();
+        let bob_pub = bob.public_key_bytes();
+        let k1 = alice.derive_enc_key(&bob_pub, "device-x", "device-y");
+        let k2 = alice.derive_enc_key(&bob_pub, "device-x", "device-y");
+        assert_eq!(
+            *k1, *k2,
+            "derive_enc_key must be deterministic for identical inputs"
+        );
     }
 }
