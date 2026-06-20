@@ -2,9 +2,10 @@
 
 ## [Unreleased]
 
-Production-audit remediation pass (`o7me`). 0 P0; all 13 P1 and 19 audit-derived P2
-bugs addressed. Rust changes are pending CI compile (`fmt`/`clippy`/`test` on ≥1.96) —
-see `VERIFICATION_REPORT.md`.
+Production-audit remediation pass (`o7me`). 0 P0; all 13 P1 and audit-derived
+P2/P3 bugs addressed. Verified on Rust 1.96: `cargo fmt --all --check` and
+`cargo clippy --workspace --all-targets -D warnings` clean; `cargo test --workspace`
+in final validation.
 
 ### Security & privacy
 - **Sensitive items never leave the device** (`jbao`, P1-1): the relay/cloud/P2P push
