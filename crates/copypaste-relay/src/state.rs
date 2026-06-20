@@ -318,9 +318,11 @@ impl RelayStore {
     // Used by unit/integration tests (`make_store()`) and integration test
     // binaries that `#[path]`-include state.rs. The production binary uses
     // `new_persistent` (via `main.rs`) so this constructor is never called
-    // there. Gated so the production binary omits it and the dead_code lint
-    // is not needed.
+    // in production. When `quota-tiers` is enabled (e.g. `--all-features`)
+    // the method is included but still has no non-test caller — allow suppresses
+    // the dead_code lint while keeping the gating comment accurate.
     #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)] // intentional: test/integration helper, no production caller
     pub fn new(_sync_ttl_secs: u64) -> Self {
         Self::new_with_cap(_sync_ttl_secs, MAX_PUSH_ITEMS_PER_DEVICE)
     }
@@ -334,7 +336,10 @@ impl RelayStore {
     /// compatibility with the existing test call-sites). Production uses
     /// [`Self::new_persistent`], which surfaces open errors as `Result`.
     // Called only from `new` (cfg-gated) and test code; gated alongside `new`.
+    // When `quota-tiers` is enabled (e.g. `--all-features`) the method is
+    // included but still has no non-test caller — allow suppresses dead_code.
     #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)] // intentional: test helper, no production caller
     pub fn new_with_cap(sync_ttl_secs: u64, max_items_per_device: usize) -> Self {
         Self::new_persistent(
             sync_ttl_secs,
@@ -595,9 +600,11 @@ impl RelayStore {
     /// would exceed the device count limit for `tier` *within the device's scope*.
     // Production registration goes through `register_device_scoped` (which
     // supplies the client IP). This unscoped wrapper is used only by tests that
-    // exercise tier-aware quotas without a transport. Gated so the release
-    // binary omits it.
+    // exercise tier-aware quotas without a transport. When `quota-tiers` is
+    // enabled (e.g. --all-features) it is included but has no non-test caller
+    // — allow suppresses dead_code.
     #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)] // intentional: test helper, no production caller
     pub fn register_device_with_tier(
         &mut self,
         device_id: String,
@@ -861,9 +868,11 @@ impl RelayStore {
     ///
     /// Returns `(bearer_token, expires_at_unix)` on success.
     // Production uses `register_device_scoped`; this unscoped form is used by
-    // the test suites that don't drive a real transport. Gated so the release
-    // binary omits it.
+    // the test suites that don't drive a real transport. When `quota-tiers` is
+    // enabled (e.g. --all-features) it is included but has no non-test caller
+    // — allow suppresses dead_code.
     #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)] // intentional: test helper, no production caller
     pub fn register_device(
         &mut self,
         device_id: String,
@@ -1024,8 +1033,11 @@ impl RelayStore {
     //
     // The HTTP `push` handler calls `push_item_decoded` directly (decodes
     // payload before locking the store), so this self-decoding wrapper has no
-    // production caller. Used only by tests; gated so the release binary omits it.
+    // production caller. Used only by tests. When `quota-tiers` is enabled
+    // (e.g. --all-features) it is included but has no non-test caller —
+    // allow suppresses dead_code.
     #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)] // intentional: test helper, no production caller
     pub fn push_item(
         &mut self,
         device_id: &str,
@@ -1463,8 +1475,11 @@ impl RelayStore {
     // -----------------------------------------------------------------------
 
     // Not called from any current route handler (CopyPaste-j21: counts stripped
-    // from unauthenticated endpoints). Gated so the release binary omits it.
+    // from unauthenticated endpoints). When `quota-tiers` is enabled (e.g.
+    // --all-features) it is included but has no non-test caller — allow
+    // suppresses dead_code.
     #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)] // intentional: test helper, no production caller today
     pub fn stats(&self) -> (usize, usize) {
         let total = self.sync_items.values().map(|v| v.len()).sum();
         (self.devices.len(), total)

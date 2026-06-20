@@ -62,10 +62,11 @@ pub enum QuotaViolation {
     //
     // Constructed only by `check_history_quota`, which `push_item` no longer
     // calls: history enforcement is now a silent prune clamped to
-    // `effective_history_cap`. Gated behind `quota-tiers` alongside
-    // `check_history_quota` so the production binary omits this variant,
-    // removing the spurious dead_code lint.
+    // `effective_history_cap`. Gated behind `quota-tiers` so the production
+    // binary omits it; when `quota-tiers` is enabled (e.g. `--all-features`
+    // in CI) it is still only exercised by tests — allow suppresses the lint.
     #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)] // intentional: only constructed by check_history_quota in tests
     HistoryFull { limit: usize },
 }
 
@@ -105,9 +106,11 @@ pub fn check_item_size(
 //
 // No production caller: `push_item` enforces history via a silent prune
 // clamped to `effective_history_cap` rather than rejecting at the tier limit.
-// Gated behind `quota-tiers` (covers test and future wiring) so the
-// production binary omits it and the spurious dead_code lint is removed.
+// Gated behind `quota-tiers` (covers test and future wiring); when the
+// feature is enabled (e.g. --all-features in CI) it is still only called by
+// tests — allow suppresses the dead_code lint.
 #[cfg(any(test, feature = "quota-tiers"))]
+#[allow(dead_code)] // intentional: only called by tests; no production caller today
 pub fn check_history_quota(tier: Tier, current_count: usize) -> Result<(), QuotaViolation> {
     if let Some(limit) = tier.max_history_items() {
         if current_count >= limit {

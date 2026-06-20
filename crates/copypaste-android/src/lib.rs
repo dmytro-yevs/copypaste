@@ -3061,8 +3061,8 @@ fn next_android_lamport_ts() -> i64 {
 ///
 /// `sensitive_ttl_secs`:
 ///   - `None`  → use the default (`SENSITIVE_TTL_SECS = 30 s`). This preserves
-///               the pre-existing behaviour of `add_clipboard_item` callers that
-///               have not yet been updated.
+///     the pre-existing behaviour of `add_clipboard_item` callers that
+///     have not yet been updated.
 ///   - `Some(0)` → auto-wipe disabled (no `expires_at`).
 ///   - `Some(n)` → stamp `expires_at = now_ms + n * 1000`.
 #[cfg(feature = "android-uniffi-live")]
@@ -3748,14 +3748,17 @@ mod tests {
         let n = get_history_count(path.clone(), &key).expect("count");
         assert_eq!(n, 5, "all 5 inserts visible through the reused connection");
 
-        // The (path, key) pair is cached after first use.
+        // The (path, sha256(key)) pair is cached after first use.
+        // P1-8: the cache key carries SHA-256(key), not the raw key bytes —
+        // use key_cache_hash so the assertion matches the actual map key.
         let key_arr: [u8; 32] = key.try_into().expect("test key is 32 bytes");
+        let key_hash = key_cache_hash(&key_arr);
         assert!(
             db_by_path()
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .contains_key(&(path.clone(), key_arr)),
-            "db_(path,key) must be cached after first live call"
+                .contains_key(&(path.clone(), key_hash)),
+            "db_(path,sha256(key)) must be cached after first live call"
         );
     }
 
