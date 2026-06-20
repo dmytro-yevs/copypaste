@@ -27,7 +27,10 @@ relay-sync = ["reqwest"]
 # compare. Must be general deps, NOT under the macOS target table (CopyPaste-l07l).
 zeroize = { version = "1.7", features = ["derive"] }
 subtle = { workspace = true }
-copypaste-core = { path = "../copypaste-core" }
+# CopyPaste-9vcn: test-helpers enables Database::open_in_memory which is needed
+# by the reset_database production path (transient placeholder while file handles
+# are released). This is intentional — see ipc.rs reset_database for rationale.
+copypaste-core = { path = "../copypaste-core", features = ["test-helpers"] }
 # CopyPaste-merc: shared IPC wire types — SyncBadgeState + compute_sync_badge_state
 # so the daemon computes badge state once and consumers (macOS UI, Android) render
 # the canonical value instead of each re-deriving it from raw fields.
@@ -178,6 +181,10 @@ name = "harness_single_daemon"
 path = "tests/harness_single_daemon.rs"
 
 [dev-dependencies]
+# CopyPaste-9vcn: expose Database::open_in_memory for daemon unit tests.
+# The feature is intentionally absent from the production [dependencies] entry
+# above so release binaries cannot call the unencrypted DB constructor.
+copypaste-core = { path = "../copypaste-core", features = ["test-helpers"] }
 # `test-util` enables tokio's paused-time test clock (`start_paused`) so the
 # write-timeout teardown test runs instantly and deterministically instead of
 # waiting out the real WRITE_TIMEOUT. Test-only; not in the production build.

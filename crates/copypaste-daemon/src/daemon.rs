@@ -2009,14 +2009,30 @@ async fn handle_tick(
                 }
             }
         }
-        // 8w6h: `SkippedBatch` is structurally dead here.  The old early-return
-        // path (clipboard.rs §CRITICAL fix) was removed: rapid bursts (changeCount
-        // delta ≥ SKIPPED_BATCH_THRESHOLD) now fall through in `poll()` so the
-        // most-recent pasteboard value is still captured.  NSPasteboard does not
-        // buffer intermediate writes, so any skipped items are irrecoverably lost
-        // regardless — this is an inherent OS-level limitation of the clipboard API.
-        // The enum variant is kept for test coverage and potential future telemetry.
-        Ok(Some(ClipboardContent::SkippedBatch(_))) | Ok(None) => {}
+        // CopyPaste-mdhx: SkippedBatch — implemented, not dead.
+        //
+        // `poll()` no longer returns this variant in the normal fast-path:
+        // the §CRITICAL-fix in clipboard.rs made rapid bursts (changeCount
+        // delta ≥ SKIPPED_BATCH_THRESHOLD) fall through to the content path
+        // so the most-recent pasteboard value is still captured instead of
+        // being discarded.  NSPasteboard does not buffer intermediate writes
+        // and those items are irrecoverably lost regardless — an inherent
+        // OS-level limitation.
+        //
+        // However `SkippedBatch` is a public variant that tests and future
+        // telemetry code can still produce.  We handle it explicitly here
+        // (not merged into `None`) so:
+        //  a) Clippy does not flag it as dead code inside this match.
+        //  b) A future `poll()` that restores `SkippedBatch` emission does
+        //     not silently lose the event — it will be logged immediately.
+        Ok(Some(ClipboardContent::SkippedBatch(missed))) => {
+            tracing::debug!(
+                missed,
+                "clipboard: SkippedBatch({missed}) — {missed} intermediate clipboard \
+                 update(s) were not captured (most-recent item still captured)"
+            );
+        }
+        Ok(None) => {}
         Err(e) => tracing::warn!("clipboard poll error: {e}"),
     }
 }
@@ -2146,7 +2162,7 @@ async fn handle_text(
                     .unwrap_or(0);
                 let new_lamport =
                     copypaste_core::next_lamport_ts(existing_lamport, now_ms);
-                match bump_item_recency(&db_guard, &existing_id, now_ms, new_lamport) {
+                match bump_item_recency(&db_guard, &existing_id, now_ms, new_lamport, None) {
                     Ok(changed) if changed > 0 => {
                         tracing::debug!(
                             existing = %existing_id,

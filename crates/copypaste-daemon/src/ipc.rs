@@ -62,6 +62,18 @@ pub const BUILD_VERSION: &str = match option_env!("COPYPASTE_BUILD_VERSION") {
 /// malicious or buggy client sending an unbounded stream without newlines.
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 
+/// Per-request read timeout (CopyPaste-cce1).
+///
+/// A client that connects and then stalls — either never sending a newline or
+/// drip-feeding bytes — holds one connection slot AND blocks the tokio
+/// `Mutex<Database>` for the entire duration of `dispatch`.  30 s is generous
+/// for any legitimate CLI/UI roundtrip (the slowest observed production request
+/// — a full `history_page(1000)` — completes in < 1 s under load).
+///
+/// When the deadline fires we drop the connection without sending a response;
+/// the client's next read returns EOF, which its retry logic must handle.
+pub const IPC_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Server-side cap on paginated reads (`list`, `history_page`). A client
 /// may request more, but the server silently clamps to this value. Protects
 /// the daemon from accidental or malicious requests that would attempt to
@@ -1151,6 +1163,20 @@ pub struct IpcServer {
     read_pool: Option<Arc<copypaste_core::SqlitePool>>,
     /// Shared private-mode flag. When true, the clipboard monitor skips recording.
     private_mode: Arc<AtomicBool>,
+    /// Monotonically-increasing epoch counter for the private-mode flag.
+    ///
+    /// CopyPaste-48k0: the tray's `spawn_tray_private_mode_resync` helper is a
+    /// one-shot poller — it exits after a stable round-trip and never re-runs.
+    /// After a daemon restart the tray's cached state may be stale (the new
+    /// daemon loaded private-mode from disk but the tray already exited its
+    /// poller).
+    ///
+    /// Fix: expose this counter in the `status` and `get_private_mode` responses
+    /// so any periodic `status` poll (e.g. the UI's health check) can detect that
+    /// private-mode changed and trigger a re-sync.  The counter starts at 0 and
+    /// is incremented on every `set_private_mode` call, making it cheap to compare
+    /// across polls: a changed epoch → re-read `private_mode`.
+    private_mode_epoch: Arc<std::sync::atomic::AtomicU64>,
     /// Stable device UUID loaded (or created) at daemon start via
     /// `load_or_create_device_id`. Stamped on every locally-captured clipboard
     /// item as `origin_device_id`. Returned in `history_page` as `own_device_id`
@@ -1686,6 +1712,7 @@ impl IpcServer {
             db,
             read_pool: None,
             private_mode,
+            private_mode_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             local_device_id: None,
             local_key,
             device_public_key,
@@ -3169,13 +3196,27 @@ impl IpcServer {
             // Bound the read: at most MAX_REQUEST_BYTES + 1 so we can distinguish
             // "exactly the limit" from "exceeded the limit".
             let mut limited = (&mut reader).take((MAX_REQUEST_BYTES as u64) + 1);
-            let n = match limited.read_until(b'\n', &mut buf).await {
-                Ok(n) => n,
-                Err(e) => {
-                    tracing::warn!("ipc read error: {e}");
-                    return Ok(());
-                }
-            };
+            // CopyPaste-cce1: enforce a per-request read deadline so a stalled
+            // client cannot hold its connection slot (and, transitively, the DB
+            // Mutex) indefinitely. When the deadline fires we drop the connection
+            // without sending a response; the client sees EOF on its next read.
+            let n =
+                match tokio::time::timeout(IPC_READ_TIMEOUT, limited.read_until(b'\n', &mut buf))
+                    .await
+                {
+                    Ok(Ok(n)) => n,
+                    Ok(Err(e)) => {
+                        tracing::warn!("ipc read error: {e}");
+                        return Ok(());
+                    }
+                    Err(_elapsed) => {
+                        tracing::warn!(
+                            timeout_secs = IPC_READ_TIMEOUT.as_secs(),
+                            "ipc read timeout: dropping stalled client connection"
+                        );
+                        return Ok(());
+                    }
+                };
 
             // Clean EOF — client closed the socket without sending more data.
             if n == 0 {
@@ -3645,7 +3686,9 @@ impl IpcServer {
                                     .unwrap_or(0);
                                 let new_lamport =
                                     copypaste_core::next_lamport_ts(prev_lamport, now_ms);
-                                bump_item_recency(&db, &item_id_bump, now_ms, new_lamport)
+                                // Pass None: ipc recopy path doesn't know sensitive TTL;
+                                // delete_expired picks up expires_at set at capture time.
+                                bump_item_recency(&db, &item_id_bump, now_ms, new_lamport, None)
                             })
                             .await
                             {
@@ -4047,7 +4090,9 @@ impl IpcServer {
                                     .unwrap_or(0);
                                 let new_lamport =
                                     copypaste_core::next_lamport_ts(prev_lamport, now_ms);
-                                bump_item_recency(&db, &item_id_bump, now_ms, new_lamport)
+                                // Pass None: ipc recopy path doesn't know sensitive TTL;
+                                // delete_expired picks up expires_at set at capture time.
+                                bump_item_recency(&db, &item_id_bump, now_ms, new_lamport, None)
                             })
                             .await
                             {
@@ -5458,19 +5503,41 @@ impl IpcServer {
                     }
                 };
                 self.private_mode.store(enabled, Ordering::Relaxed);
+                // CopyPaste-48k0: increment the epoch counter so any periodic
+                // `status` or `get_private_mode` poll can detect the change
+                // without needing a dedicated subscription.  The tray's one-shot
+                // poller exits after startup; the epoch lets it (or any other
+                // client) re-sync by comparing the epoch value across polls.
+                let epoch = self
+                    .private_mode_epoch
+                    .fetch_add(1, Ordering::Relaxed)
+                    .wrapping_add(1);
                 // Persist so the setting survives a daemon restart (restored by
                 // `daemon::load_private_mode` at startup). Best-effort: the
                 // in-memory atomic above is authoritative for this process.
                 crate::daemon::persist_private_mode(enabled);
-                tracing::info!("private mode set to {enabled}");
-                Response::ok(req.id, serde_json::json!({"private_mode": enabled}))
+                tracing::info!("private mode set to {enabled} (epoch={epoch})");
+                Response::ok(
+                    req.id,
+                    serde_json::json!({"private_mode": enabled, "private_mode_epoch": epoch}),
+                )
             }
             "get_private_mode" => {
                 let enabled = self.private_mode.load(Ordering::Relaxed);
-                Response::ok(req.id, serde_json::json!({"private_mode": enabled}))
+                // CopyPaste-48k0: include the epoch so callers can detect
+                // changes since their last poll without a separate subscription.
+                let epoch = self.private_mode_epoch.load(Ordering::Relaxed);
+                Response::ok(
+                    req.id,
+                    serde_json::json!({"private_mode": enabled, "private_mode_epoch": epoch}),
+                )
             }
             "status" => {
                 let enabled = self.private_mode.load(Ordering::Relaxed);
+                // CopyPaste-48k0: include the epoch in `status` so the UI's
+                // periodic health-check poll can detect private-mode changes
+                // without a dedicated subscription. A changed epoch → re-sync.
+                let epoch = self.private_mode_epoch.load(Ordering::Relaxed);
                 // In degraded startup the daemon is alive and the socket is
                 // bound, but the backing DB is unavailable (e.g. the Keychain
                 // SQLCipher key could not be read after a reinstall). Report
@@ -5494,6 +5561,7 @@ impl IpcServer {
                         serde_json::json!({
                             "status": "degraded",
                             "private_mode": enabled,
+                            "private_mode_epoch": epoch,
                             "ready": false,
                             "degraded": true,
                             "degraded_reason": reason,
@@ -5506,6 +5574,7 @@ impl IpcServer {
                         serde_json::json!({
                             "status": "running",
                             "private_mode": enabled,
+                            "private_mode_epoch": epoch,
                             "ready": self.ready.load(Ordering::Relaxed),
                             "degraded": false,
                             "build_version": BUILD_VERSION,
@@ -8982,6 +9051,26 @@ fn pid_exe_path(pid: u32) -> Option<std::path::PathBuf> {
 /// socket not reachable" symptom seen after a v0.3.4 → v0.4.0 upgrade where an
 /// old daemon died without cleaning up.
 ///
+/// ## Atomicity (CopyPaste-ah1m)
+///
+/// The old implementation had a TOCTOU race between the connect-probe and
+/// the remove→bind steps: two concurrently starting daemons (e.g. a launchd
+/// restart race) could both conclude "socket is stale" and then both try to
+/// `remove_file` + `bind`, leaving one of them holding a listener that is
+/// immediately overwritten by the other.
+///
+/// Fix: before the probe→remove→bind sequence we acquire an **exclusive
+/// `flock(2)`** on an adjacent lockfile (`<socket_path>.lock`).  Because
+/// `flock` is process-wide and the fd is held until this function returns,
+/// at most one concurrent starter can be inside the critical section at any
+/// moment.  The second starter blocks on `flock` and then re-probes an
+/// already-bound socket, correctly detecting the healthy peer.
+///
+/// The lockfile is never deleted (only created).  Because it is distinct from
+/// the socket file itself, a SIGKILL/OOM that leaves the socket behind also
+/// leaves the lockfile behind — both are cleaned up correctly on the next
+/// healthy start (the lock is released implicitly when the fd closes on crash).
+///
 /// Policy (newest binary wins on upgrade):
 ///   * No file present → bind directly.
 ///   * File present, NO live listener → stale file; remove it and bind.
@@ -8996,6 +9085,49 @@ fn pid_exe_path(pid: u32) -> Option<std::path::PathBuf> {
 ///     socket file and bind. This is what lets the freshly-installed binary
 ///     take over without a manual `kill`.
 fn bind_with_stale_cleanup(socket_path: &std::path::Path) -> anyhow::Result<UnixListener> {
+    // CopyPaste-ah1m: serialize the probe→remove→bind sequence with an
+    // exclusive flock on an adjacent lockfile so two concurrently-starting
+    // daemons cannot both conclude "socket is stale" and race on bind.
+    let lock_path = {
+        let mut p = socket_path.as_os_str().to_owned();
+        p.push(".lock");
+        std::path::PathBuf::from(p)
+    };
+    let lock_file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "could not open socket lockfile {}: {e} — check permissions on {}",
+                lock_path.display(),
+                lock_path
+                    .parent()
+                    .unwrap_or(std::path::Path::new("."))
+                    .display()
+            )
+        })?;
+    // Blocking exclusive flock: second concurrent starter waits here until
+    // the first has either succeeded (socket now live → probe will see it) or
+    // failed (socket still absent → second starter may proceed).
+    {
+        use std::os::unix::io::AsRawFd;
+        let fd = lock_file.as_raw_fd();
+        // SAFETY: fd is a valid open file descriptor owned by lock_file.
+        let rc = unsafe { libc::flock(fd, libc::LOCK_EX) };
+        if rc != 0 {
+            let e = std::io::Error::last_os_error();
+            anyhow::bail!(
+                "flock on socket lockfile {} failed: {e}",
+                lock_path.display()
+            );
+        }
+    }
+    // Lock is held; _lock_file keeps the fd open (and flock live) until we
+    // return. Drop order: listener is returned, lock released after.
+    let _lock_file = lock_file;
+
     if socket_path.exists() {
         if is_socket_live(socket_path) {
             let probed = probe_listening_daemon(socket_path).unwrap_or_default();
@@ -15383,6 +15515,110 @@ mod tests {
             resp.error_code,
             Some("not_found"),
             "paste/not-found must carry error_code=not_found, got: {resp:?}"
+        );
+    }
+
+    /// CopyPaste-48k0: `set_private_mode` must increment `private_mode_epoch` on
+    /// every call so that periodic pollers (UI health-check, tray) can detect
+    /// private-mode changes across daemon restarts without a dedicated subscription.
+    #[tokio::test]
+    async fn private_mode_epoch_increments_on_every_set() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let private_mode = Arc::new(AtomicBool::new(false));
+        let server = IpcServer::new(
+            db,
+            private_mode,
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        );
+
+        // Epoch starts at 0.
+        let resp0 = server
+            .dispatch(r#"{"id":"t0","method":"get_private_mode","params":{}}"#)
+            .await;
+        assert!(resp0.ok, "initial get_private_mode must succeed");
+        let data0 = resp0.data.expect("get_private_mode must return data");
+        assert_eq!(
+            data0["private_mode_epoch"],
+            serde_json::json!(0),
+            "epoch must start at 0"
+        );
+
+        // First set → epoch becomes 1.
+        let resp1 = server
+            .dispatch(r#"{"id":"t1","method":"set_private_mode","params":{"enabled":true}}"#)
+            .await;
+        assert!(resp1.ok, "set_private_mode must succeed");
+        let data1 = resp1.data.expect("set_private_mode must return data");
+        assert_eq!(
+            data1["private_mode_epoch"],
+            serde_json::json!(1),
+            "epoch must be 1 after first set"
+        );
+
+        // Second set (same value) → epoch becomes 2.
+        let resp2 = server
+            .dispatch(r#"{"id":"t2","method":"set_private_mode","params":{"enabled":true}}"#)
+            .await;
+        let data2 = resp2.data.expect("set_private_mode must return data");
+        assert_eq!(
+            data2["private_mode_epoch"],
+            serde_json::json!(2),
+            "epoch must increment even when value is unchanged"
+        );
+
+        // get_private_mode must reflect the current epoch.
+        let resp3 = server
+            .dispatch(r#"{"id":"t3","method":"get_private_mode","params":{}}"#)
+            .await;
+        let data3 = resp3.data.expect("get_private_mode must return data");
+        assert_eq!(
+            data3["private_mode_epoch"],
+            serde_json::json!(2),
+            "get_private_mode must return current epoch"
+        );
+
+        // status must also include the epoch.
+        let resp4 = server
+            .dispatch(r#"{"id":"t4","method":"status","params":{}}"#)
+            .await;
+        let data4 = resp4.data.expect("status must return data");
+        assert_eq!(
+            data4["private_mode_epoch"],
+            serde_json::json!(2),
+            "status must return current epoch"
+        );
+    }
+
+    /// CopyPaste-ah1m: `bind_with_stale_cleanup` must create a lockfile next to
+    /// the socket so concurrent startups are serialized through `flock(2)` and
+    /// the probe→remove→bind sequence is atomic.
+    ///
+    /// After a successful bind the `.lock` file must exist (it is never deleted,
+    /// only created/locked). Its presence means a future concurrent starter will
+    /// block on `flock` rather than racing through the stale-check.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn bind_with_stale_cleanup_creates_lockfile() {
+        let dir = tempfile::tempdir().unwrap();
+        let sock = dir.path().join("test-atomic.sock");
+        let lock = dir.path().join("test-atomic.sock.lock");
+
+        // Lockfile must NOT exist before the first call.
+        assert!(
+            !lock.exists(),
+            "lockfile must not exist before bind; got: {lock:?}"
+        );
+
+        // Bind the socket — this should create the lockfile.
+        let listener = super::bind_with_stale_cleanup(&sock)
+            .expect("bind_with_stale_cleanup must succeed on a fresh path");
+        drop(listener);
+
+        // Lockfile must exist now.
+        assert!(
+            lock.exists(),
+            "bind_with_stale_cleanup must create <socket>.lock; not found at {lock:?}"
         );
     }
 }
