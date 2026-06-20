@@ -84,6 +84,111 @@ const REG_LIMIT_MAX_KEYS: usize = 10_000;
 const MAX_TOKENS_PER_DEVICE: usize = 16;
 
 // ---------------------------------------------------------------------------
+// Push retry queue (CopyPaste-k4py)
+// ---------------------------------------------------------------------------
+
+/// Maximum number of pending DB writes queued for retry at any one time.
+///
+/// When the queue is at capacity, new failures are logged at WARN and discarded.
+/// The item remains in the in-memory inbox so live pollers still see it, but
+/// durability is lost for that item — same as the pre-fix behaviour, but only
+/// as a last resort rather than always.
+pub const PUSH_RETRY_QUEUE_CAP: usize = 64;
+
+/// One failed DB write that needs to be replayed by the retry background task.
+///
+/// Captures everything required to re-execute the three SQLite calls that
+/// `push_item_decoded` makes after inserting the item into the in-memory inbox:
+///   1. `Db::insert_item` — insert the new row.
+///   2. `Db::delete_oldest_items` — prune the oldest `pruned_count` rows if the
+///      inbox cap was hit (0 = no pruning needed).
+///   3. `Db::set_next_sync_id` — advance the per-device counter.
+///
+/// Fields are read by `retry::run_push_retry` (called from `main.rs`).
+/// `#[path]`-include test binaries that compile `state.rs` without `retry.rs`
+/// see the struct as unreachable — `#[allow(dead_code)]` mirrors the pattern
+/// already used for `DeviceRecord::public_key_b64` and `DeviceRecord::tier`.
+#[allow(dead_code)]
+#[derive(Debug, Clone)]
+pub struct PendingDbWrite {
+    pub device_id: String,
+    pub item_id: i64,
+    pub content_type: String,
+    /// `Arc<str>` — shared with the in-memory inbox entry so the retry queue
+    /// holds a refcount rather than a full payload copy.
+    pub content_b64: std::sync::Arc<str>,
+    pub wall_time: u64,
+    pub inserted_at_unix: u64,
+    /// How many oldest items were pruned from the inbox cap. 0 = no pruning.
+    pub pruned_count: usize,
+    /// The next per-device sync id to persist after this write.
+    pub next_sync_id: i64,
+    /// How many times this write has been attempted (incremented before each
+    /// retry; 0 on the first enqueue from `push_item_decoded`).
+    pub attempts: u32,
+}
+
+/// Bounded queue of pending DB writes for the relay push retry path.
+///
+/// Stored as a field of [`RelayStore`] so the existing
+/// `std::sync::Mutex<RelayStore>` serialises all access — no second lock needed.
+/// Drained by the background `crate::retry::run_push_retry` task.
+#[derive(Debug)]
+pub struct PushRetryQueue {
+    inner: VecDeque<PendingDbWrite>,
+}
+
+impl PushRetryQueue {
+    /// Create an empty queue.
+    pub fn new() -> Self {
+        Self {
+            inner: VecDeque::new(),
+        }
+    }
+
+    /// Push a write onto the queue.  Returns `false` (and logs WARN) if the
+    /// queue is already at [`PUSH_RETRY_QUEUE_CAP`] — the write is discarded.
+    pub fn enqueue(&mut self, write: PendingDbWrite) -> bool {
+        if self.inner.len() >= PUSH_RETRY_QUEUE_CAP {
+            tracing::warn!(
+                device_id = %write.device_id,
+                item_id = write.item_id,
+                queue_len = self.inner.len(),
+                "CopyPaste-k4py: push retry queue full; discarding item write (durability lost)"
+            );
+            return false;
+        }
+        self.inner.push_back(write);
+        true
+    }
+
+    /// Drain up to `n` entries from the front of the queue into `out`.
+    // Called from `retry::run_push_retry` (via `main.rs`). `#[path]`-include
+    // test binaries that compile `state.rs` without `retry.rs` never call this.
+    #[allow(dead_code)]
+    pub fn drain_front(&mut self, n: usize, out: &mut Vec<PendingDbWrite>) {
+        let take = n.min(self.inner.len());
+        out.extend(self.inner.drain(..take));
+    }
+
+    /// Return the number of pending writes in the queue.
+    // Used in `#[cfg(test)]` only; the production retry task calls `is_empty`.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Return `true` if the queue is empty.
+    // Called from `retry::run_push_retry`. `#[path]`-include test binaries that
+    // compile `state.rs` without `retry.rs` see this as unused; allow mirrors
+    // the pattern for `PendingDbWrite` and `DeviceRecord` fields above.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Domain types
 // ---------------------------------------------------------------------------
 
@@ -278,6 +383,18 @@ pub struct RelayStore {
     /// existing short-critical-section model. See `db.rs` for the full
     /// blocking/feature-unification rationale.
     db: Db,
+
+    /// Bounded queue of DB writes that failed transiently during
+    /// `push_item_decoded` and are waiting to be retried (CopyPaste-k4py).
+    ///
+    /// When a `push_item_decoded` DB write fails, the write parameters are
+    /// serialised into a [`crate::retry::PendingDbWrite`] and enqueued here
+    /// instead of returning `Err`. The HTTP handler then returns 201 (the item
+    /// IS in the in-memory inbox) and the background
+    /// `crate::retry::run_push_retry` task drains this queue, replaying each
+    /// write with exponential backoff. Bounded at
+    /// [`crate::retry::PUSH_RETRY_QUEUE_CAP`] to prevent unbounded growth.
+    pub push_retry_queue: PushRetryQueue,
 }
 
 /// Map a [`Tier`] to its persisted string form.
@@ -374,6 +491,7 @@ impl RelayStore {
             max_items_per_device,
             sync_notifiers: HashMap::new(),
             db,
+            push_retry_queue: PushRetryQueue::new(),
         };
         store.rehydrate_from_db()?;
         Ok(store)
@@ -1185,23 +1303,56 @@ impl RelayStore {
         // R1b write-through (after all in-memory mutations so the persisted
         // state mirrors memory): insert the new item, prune the same oldest
         // items in SQL, and persist the advanced per-device id counter.
-        // Propagated via `?` — this method already returns Result, and a
-        // persistence failure means the durable store would diverge from
-        // memory, so the push must fail (500) rather than silently lose
-        // durability. Ciphertext (`content_b64`) is written verbatim and never
-        // logged.
-        self.db.insert_item(
-            device_id,
-            id,
-            &content_type,
-            &content_b64, // Arc<str> derefs to &str
-            wall_time,
-            inserted_at_unix,
-        )?;
-        if pruned > 0 {
-            self.db.delete_oldest_items(device_id, pruned)?;
+        //
+        // CopyPaste-k4py: transient DB failures no longer propagate as 500.
+        // The item is already in the in-memory inbox (visible to pollers and
+        // SSE streams), so the push has logically succeeded. On a write
+        // failure we enqueue a `PendingDbWrite` and return Ok — the
+        // background `retry::run_push_retry` task will replay the write with
+        // exponential backoff. If the queue is full (persistent outage), the
+        // failure is logged at WARN and the item remains in memory for the
+        // process lifetime but will not survive a restart — same as the
+        // pre-fix behaviour, but only as a last resort rather than always.
+        // Ciphertext (`content_b64`) is written verbatim and never logged.
+        let db_result = self
+            .db
+            .insert_item(
+                device_id,
+                id,
+                &content_type,
+                &content_b64, // Arc<str> derefs to &str
+                wall_time,
+                inserted_at_unix,
+            )
+            .and_then(|()| {
+                if pruned > 0 {
+                    self.db.delete_oldest_items(device_id, pruned)
+                } else {
+                    Ok(())
+                }
+            })
+            .and_then(|()| self.db.set_next_sync_id(device_id, next_counter));
+
+        if let Err(db_err) = db_result {
+            tracing::warn!(
+                device_id,
+                item_id = id,
+                error = %db_err,
+                "CopyPaste-k4py: relay push DB write failed; enqueuing for retry"
+            );
+            self.push_retry_queue.enqueue(PendingDbWrite {
+                device_id: device_id.to_string(),
+                item_id: id,
+                content_type: content_type.clone(),
+                content_b64: std::sync::Arc::clone(&content_b64),
+                wall_time,
+                inserted_at_unix,
+                pruned_count: pruned,
+                next_sync_id: next_counter,
+                attempts: 0,
+            });
+            // Return Ok — item is in memory, retry will durabilise it.
         }
-        self.db.set_next_sync_id(device_id, next_counter)?;
 
         // Increment Prometheus counter — items_total tracks all accepted
         // pushes regardless of later eviction (counter semantics).
@@ -1468,6 +1619,102 @@ impl RelayStore {
             tracing::warn!(error = %e, "relay: failed to prune expired items from store");
         }
         evicted
+    }
+
+    // -----------------------------------------------------------------------
+    // Retry helpers (CopyPaste-k4py)
+    // -----------------------------------------------------------------------
+
+    /// Attempt to insert an inbox item into the DB (called by the retry task).
+    ///
+    /// Uses `OR IGNORE` semantics: if the row already exists (e.g. from a
+    /// previous partially-successful retry), the call is silently a no-op
+    /// rather than an error. Ciphertext is never logged.
+    // Called from `retry::run_push_retry` (via `main.rs`). `#[path]`-include
+    // test binaries that compile `state.rs` without `retry.rs` never call this.
+    #[allow(dead_code)]
+    pub fn db_insert_item_retry(&self, write: &PendingDbWrite) -> Result<(), RelayError> {
+        self.db
+            .insert_item(
+                &write.device_id,
+                write.item_id,
+                &write.content_type,
+                &write.content_b64,
+                write.wall_time,
+                write.inserted_at_unix,
+            )
+            .or_else(|e| {
+                // A UNIQUE constraint violation means the row already exists —
+                // treat as success (idempotent retry). Any other error bubbles.
+                if matches!(
+                    e,
+                    rusqlite::Error::SqliteFailure(
+                        rusqlite::ffi::Error {
+                            code: rusqlite::ErrorCode::ConstraintViolation,
+                            ..
+                        },
+                        _,
+                    )
+                ) {
+                    Ok(())
+                } else {
+                    Err(RelayError::from(e))
+                }
+            })
+    }
+
+    /// Attempt to prune the oldest `count` items from the DB for a device
+    /// (called by the retry task after `db_insert_item_retry` succeeds).
+    ///
+    /// A "no rows deleted" outcome is treated as success — the rows may have
+    /// already been pruned by a TTL sweep or a previous successful partial retry.
+    // Called from `retry::run_push_retry`. See `db_insert_item_retry` for the
+    // dead_code rationale.
+    #[allow(dead_code)]
+    pub fn db_delete_oldest_retry(&self, device_id: &str, count: usize) -> Result<(), RelayError> {
+        self.db
+            .delete_oldest_items(device_id, count)
+            .map_err(RelayError::from)
+    }
+
+    /// Advance the per-device sync-id counter in the DB
+    /// (called by the retry task after the item write succeeds).
+    // Called from `retry::run_push_retry`. See `db_insert_item_retry` for the
+    // dead_code rationale.
+    #[allow(dead_code)]
+    pub fn db_set_next_sync_id_retry(
+        &self,
+        device_id: &str,
+        next_sync_id: i64,
+    ) -> Result<(), RelayError> {
+        self.db
+            .set_next_sync_id(device_id, next_sync_id)
+            .map_err(RelayError::from)
+    }
+
+    /// Test-only helper: delete an item row from the DB by `(device_id, item_id)`.
+    ///
+    /// Used by `retry.rs` tests to simulate "the initial DB write failed" by
+    /// deleting the row that `push_item` just wrote, then seeding the retry queue.
+    /// Only called from `#[cfg(test)]` code in `retry.rs`; path-include test
+    /// binaries that compile `state.rs` without `retry.rs` never invoke it.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn db_delete_item_for_test(&self, device_id: &str, item_id: i64) {
+        self.db
+            .delete_item(device_id, item_id)
+            .expect("test helper: db_delete_item_for_test failed");
+    }
+
+    /// Test-only helper: count inbox rows in the DB for a device.
+    /// Only called from `#[cfg(test)]` code in `retry.rs`; path-include test
+    /// binaries that compile `state.rs` without `retry.rs` never invoke it.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub fn db_item_count_for_test(&self, device_id: &str) -> i64 {
+        self.db
+            .item_count(device_id)
+            .expect("test helper: db_item_count_for_test failed")
     }
 
     // -----------------------------------------------------------------------

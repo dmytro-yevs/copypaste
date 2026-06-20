@@ -15,6 +15,7 @@ mod governor_cleanup;
 mod middleware;
 mod models;
 mod quota;
+mod retry;
 mod routes;
 mod state;
 mod store;
@@ -65,6 +66,18 @@ async fn main() -> anyhow::Result<()> {
     let _evictor = supervise::spawn_supervised("ttl-evictor", move || {
         let s = evictor_state.clone();
         store::run_ttl_evictor(s, evictor_ttl, TTL_EVICTOR_TICK_SECS)
+    });
+
+    // CopyPaste-k4py: retry queue background task. Drains any DB writes that
+    // failed transiently during `push_item_decoded` and replays them with
+    // exponential backoff. Supervised so a panic is logged and the task
+    // restarts. The retry runner holds the store lock only briefly (never
+    // across an `.await`) so it does not block request handlers.
+    let retry_state = state.clone();
+    // Retain the supervisor handle — dropping it would cancel the retry task.
+    let _push_retry = supervise::spawn_supervised("push-retry", move || {
+        let s = retry_state.clone();
+        retry::run_push_retry(s)
     });
 
     let (app, retain_fns) =
