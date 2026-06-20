@@ -411,7 +411,9 @@ fun PairScreen(
     val toastState = remember { GlassToastState() }
     val scope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
-    val errorTemplate = stringResource(R.string.error_pairing)
+    // CopyPaste-jwga: errorMessage now holds a pre-sanitized, user-friendly string
+    // from ErrorMessages.friendly*(). No wrapper template is applied at display time
+    // so raw exception text, paths, and FFI symbols never reach the user.
 
     val expired = qr != null && remainingSeconds <= 0
 
@@ -435,7 +437,8 @@ fun PairScreen(
                 // LaunchedEffect(Unit) below). Reveal persists across payload refreshes,
                 // matching macOS behaviour where reveal is sticky.
             } catch (e: Exception) {
-                errorMessage = e.message ?: e.javaClass.simpleName
+                // CopyPaste-jwga: never surface raw exception text; sanitize centrally.
+                errorMessage = ErrorMessages.friendlyQrError(e)
             } finally {
                 loading = false
             }
@@ -460,7 +463,8 @@ fun PairScreen(
             // after the PAKE bootstrap (SAS confirmation) succeeds.
             pendingProvisioningRaw = contents
         } catch (e: Exception) {
-            errorMessage = e.message ?: "Invalid pairing code"
+            // CopyPaste-jwga: never surface raw exception text to users.
+            errorMessage = ErrorMessages.friendlyPairingError(e)
         }
     }
 
@@ -482,9 +486,8 @@ fun PairScreen(
         try {
             scanLauncher.launch(options)
         } catch (e: Exception) {
-            errorMessage = "Could not open the camera scanner: " +
-                (e.message ?: e.javaClass.simpleName) +
-                ". You can pair by displaying this device's QR instead."
+            // CopyPaste-jwga: never surface raw exception text to users.
+            errorMessage = ErrorMessages.friendlyCameraError(e)
         }
     }
 
@@ -505,11 +508,11 @@ fun PairScreen(
                 NotificationPermissionHelper.launchFirstResolvable(
                     context, NotificationPermissionHelper.appDetailsSettingsIntents(context),
                 )
-                errorMessage = "Camera permission is permanently denied. Enable it in " +
-                    "Settings (just opened), or use the QR display flow on this device instead."
+                // CopyPaste-jwga: use string resource for user-facing message.
+                errorMessage = context.getString(R.string.error_camera_permission_permanent)
             } else {
-                errorMessage = "Camera permission is required to scan a pairing QR code. " +
-                    "Grant it in Settings, or use the QR display flow on this device instead."
+                // CopyPaste-jwga: use string resource for user-facing message.
+                errorMessage = context.getString(R.string.error_camera_permission_denied)
             }
         }
     }
@@ -529,8 +532,8 @@ fun PairScreen(
             NotificationPermissionHelper.launchFirstResolvable(
                 context, NotificationPermissionHelper.appDetailsSettingsIntents(context),
             )
-            errorMessage = "Camera permission is permanently denied. Enable it in " +
-                "Settings (just opened) to scan a pairing QR."
+            // CopyPaste-jwga: use string resource for user-facing message.
+            errorMessage = context.getString(R.string.error_camera_permission_permanent)
             return
         }
         NotificationPermissionHelper.markCameraRequested(context)
@@ -830,7 +833,8 @@ fun PairScreen(
                 // drop the retained raw payload so it cannot leak into a later pairing.
                 pendingProvisioningRaw = null
             } catch (e: Exception) {
-                errorMessage = e.message ?: e.javaClass.simpleName
+                // CopyPaste-jwga: never surface raw exception text to users.
+                errorMessage = ErrorMessages.friendlyPairingError(e)
             } finally {
                 syncing = false
             }
@@ -870,7 +874,8 @@ fun PairScreen(
             qrRevealed = false  // start blurred
             // Initial load complete.
         } catch (e: Exception) {
-            errorMessage = e.message ?: e.javaClass.simpleName
+            // CopyPaste-jwga: never surface raw exception text to users.
+            errorMessage = ErrorMessages.friendlyQrError(e)
         } finally {
             loading = false
         }
@@ -895,7 +900,8 @@ fun PairScreen(
             // Applied inside runPairAndSync once the PAKE bootstrap succeeds.
             pendingProvisioningRaw = payload
         } catch (e: Exception) {
-            errorMessage = e.message ?: "Invalid pairing code"
+            // CopyPaste-jwga: never surface raw exception text to users.
+            errorMessage = ErrorMessages.friendlyPairingError(e)
         } finally {
             onDeepLinkConsumed()
         }
@@ -911,7 +917,9 @@ fun PairScreen(
 
     LaunchedEffect(errorMessage) {
         val msg = errorMessage ?: return@LaunchedEffect
-        toastState.show(errorTemplate.format(msg), GlassToastKind.DANGER)
+        // CopyPaste-jwga: msg is already a sanitized, user-friendly string —
+        // show it directly without a raw-exception-embedding format template.
+        toastState.show(msg, GlassToastKind.DANGER)
         errorMessage = null
     }
 

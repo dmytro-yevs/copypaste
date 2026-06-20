@@ -436,7 +436,15 @@
     <string name="error_revoke_record">Failed to record revocation. The peer was unpaired locally.</string>
 
     <!-- Devices screen — QR error (ojsq) -->
-    <string name="devices_qr_error">QR unavailable: %1$s</string>
+    <!-- CopyPaste-7yno: user-facing QR error; never include raw exception detail. -->
+    <string name="devices_qr_error">QR unavailable — please try again.</string>
+    <!-- CopyPaste-jwga: generic sanitized operation error messages (no internals). -->
+    <string name="error_pairing_generic">Pairing failed. Please check that both devices are on the same network and try again.</string>
+    <string name="error_sync_generic">Sync failed. Please try again.</string>
+    <string name="error_qr_generate">Could not generate pairing code. Please try again.</string>
+    <string name="error_camera_open">Could not open the camera. Please check your camera permissions and try again.</string>
+    <string name="error_camera_permission_denied">Camera access is required to scan a pairing QR. You can grant it in Settings, or display this device\'s QR instead.</string>
+    <string name="error_camera_permission_permanent">Camera access is permanently denied. Open Settings to enable it, or display this device\'s QR instead.</string>
 
     <!-- Settings — Save button (ojsq) -->
     <string name="btn_save">Save</string>

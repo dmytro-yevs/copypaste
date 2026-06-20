@@ -1,9 +1,6 @@
 package com.copypaste.android
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -441,8 +438,8 @@ fun DevicesScreen(
         try {
             scanLauncher.launch(opts)
         } catch (e: Exception) {
-            scanError = "Could not open the camera scanner: " +
-                (e.message ?: e.javaClass.simpleName)
+            // CopyPaste-jwga: never surface raw exception detail to users.
+            scanError = ErrorMessages.friendlyCameraError(e)
         }
     }
 
@@ -452,8 +449,8 @@ fun DevicesScreen(
         if (granted) {
             launchScanner()
         } else {
-            scanError = "Camera permission required to scan a pairing QR. " +
-                "Grant it in Settings → Apps → CopyPaste → Permissions."
+            // CopyPaste-jwga: use sanitized, user-friendly permission message.
+            scanError = ctx.getString(R.string.error_camera_permission_denied)
         }
     }
 
@@ -658,7 +655,8 @@ fun DevicesScreen(
                 pairingPeer = peer
             } catch (e: Exception) {
                 Log.w(TAG, "pairWithDiscovered failed: ${e.message}", e)
-                discoverError = e.message ?: "Failed to start pairing."
+                // CopyPaste-jwga: never surface raw exception detail to users.
+                discoverError = ErrorMessages.friendlyPairingError(e)
                 // HB-8: pairWithDiscovered may have claimed the native SM (via
                 // try_begin) before failing — reset defensively so a retry is not
                 // refused with "a pairing is already in flight".
@@ -1259,8 +1257,13 @@ private fun OwnQrSection(settings: Settings) {
         label = "progressAlpha",
     )
 
-    // Generate (or regenerate) the QR. Deliberately does NOT mutate [qrBlurred]:
-    // blur is a separate, user-owned concern (see the v5a note above).
+    // Generate (or regenerate) the QR.
+    //
+    // CopyPaste-o0yv: re-blur on every refresh (both manual and the 120 s auto-
+    // refresh). A live pairing token is sensitive material — leaving it visible
+    // after the TTL expires and a new token is silently generated would expose
+    // the fresh token to shoulder-surfers when the user has stepped away. The
+    // blur is cleared only by an explicit tap-to-reveal.
     fun generateQr() {
         scope.launch {
             loading = true
@@ -1273,8 +1276,15 @@ private fun OwnQrSection(settings: Settings) {
                 }
                 qr = result
                 qrBitmap = bmp
+                // CopyPaste-o0yv: re-blur after every QR generation so a fresh
+                // pairing token is never automatically exposed without a tap.
+                qrBlurred = true
             } catch (e: Exception) {
-                errorMsg = e.message ?: e.javaClass.simpleName
+                // CopyPaste-7yno / CopyPaste-jwga: log raw detail internally but
+                // never store it in user-visible state — set a boolean sentinel
+                // instead so the UI can show a sanitized fixed string.
+                Log.w("OwnQrSection", "QR generation failed: ${e.javaClass.name}: ${e.message}")
+                errorMsg = ErrorMessages.friendlyQrError(e)
             } finally {
                 loading = false
             }
@@ -1469,9 +1479,12 @@ private fun OwnQrSection(settings: Settings) {
                 }
             }
 
-            errorMsg?.let { msg ->
+            // CopyPaste-7yno: never show the raw exception message (may contain
+            // socket paths or internal detail). errorMsg is set to a pre-sanitized
+            // string from ErrorMessages.friendlyQrError(); display it directly.
+            errorMsg?.let { sanitizedMsg ->
                 Text(
-                    text = "QR unavailable: $msg",
+                    text = sanitizedMsg,
                     style = MaterialTheme.typography.bodySmall,
                     color = c.danger,
                     textAlign = TextAlign.Center,
@@ -2156,7 +2169,8 @@ private fun SasPairingDialog(
             val next = try {
                 withContext(Dispatchers.IO) { pairGetSas() }
             } catch (e: Exception) {
-                error = e.message ?: "Pairing status unavailable"
+                // CopyPaste-jwga: never surface raw exception detail to users.
+                error = ErrorMessages.friendlySasError(e)
                 return@LaunchedEffect
             }
 
@@ -2261,7 +2275,8 @@ private fun SasPairingDialog(
                 // The decision never reached the native side — undo the optimistic
                 // accept flag so a later trailing idle isn't misread as success.
                 localAcceptedRef.value = false
-                error = e.message ?: "Failed to send decision"
+                // CopyPaste-jwga: never surface raw exception detail to users.
+                error = ErrorMessages.friendlySasError(e)
             } finally {
                 confirmPending = false
             }
@@ -2311,21 +2326,19 @@ private fun SasPairingDialog(
                         )
                         // §10 SAS per-digit cells — styleguide .sas: each digit in its
                         // own 38dp-wide centered mono cell, 28sp/600, letterSpacing 1.1sp
-                        // (≈.04em at 28sp), gap 8dp, whole row tap-to-copy.
+                        // (≈.04em at 28sp), gap 8dp.
+                        //
+                        // CopyPaste-quux: the SAS code must NOT be copyable to the system
+                        // clipboard. Copying it opens a sniff window — any other app that
+                        // reads the clipboard during or after pairing gets the active pairing
+                        // token. The row is display-only (no clickable, no long-press copy).
                         val sasFull = status.sas ?: ""
-                        val ctx = LocalContext.current
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 8.dp)
-                                .clickable(onClickLabel = "Copy code") {
-                                    val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
-                                        as ClipboardManager
-                                    cm.setPrimaryClip(ClipData.newPlainText("SAS code", sasFull))
-                                    android.widget.Toast.makeText(ctx, "Code copied", android.widget.Toast.LENGTH_SHORT).show()
-                                },
+                                .padding(vertical = 8.dp),
                         ) {
                             sasFull.forEach { digit ->
                                 Box(
