@@ -287,7 +287,10 @@ mod tests {
 
         assert_eq!(dropped_a, 0, "first two enqueues must not drop");
         assert_eq!(dropped_b, 0, "first two enqueues must not drop");
-        assert_eq!(dropped_c, 1, "third enqueue into full ring must drop 1 (oldest)");
+        assert_eq!(
+            dropped_c, 1,
+            "third enqueue into full ring must drop 1 (oldest)"
+        );
 
         // Lag counter must reflect the single eviction.
         assert_eq!(lag.total_dropped(), 1, "lag counter must record 1 eviction");
@@ -334,7 +337,11 @@ mod tests {
         while let Ok(item) = rx.try_recv() {
             ids.push(item.id);
         }
-        assert_eq!(ids.len(), 5, "all 5 items must reach downstream; got {ids:?}");
+        assert_eq!(
+            ids.len(),
+            5,
+            "all 5 items must reach downstream; got {ids:?}"
+        );
     }
 
     /// Forwarder exits cleanly when the downstream channel is closed (sync_orch
@@ -389,8 +396,15 @@ mod tests {
             count += 1;
         }
 
-        assert_eq!(count, 80, "all 80 items (8 × 10) must be forwarded; got {count}");
-        assert_eq!(lag.total_dropped(), 0, "no items should be dropped with sufficient capacity");
+        assert_eq!(
+            count, 80,
+            "all 80 items (8 × 10) must be forwarded; got {count}"
+        );
+        assert_eq!(
+            lag.total_dropped(),
+            0,
+            "no items should be dropped with sufficient capacity"
+        );
     }
 
     /// The lag counter accumulates across multiple evictions in a single sender.

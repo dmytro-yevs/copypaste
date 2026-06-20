@@ -1,7 +1,0 @@
-{
-  "database": "dolt",
-  "backend": "dolt",
-  "dolt_mode": "embedded",
-  "dolt_database": "CopyPaste",
-  "project_id": "fb3d9f22-5bbc-45a7-a611-888ca142ac51"
-}
