@@ -957,7 +957,8 @@ class ClipboardService : Service() {
                     text = text,
                     sensitiveTtlSecs = settings.sensitiveTtlSecs,
                 )
-                if (nativeId.isNotEmpty()) {
+                // CopyPaste-g4ik: guard UUID in log — stripped from release by R8.
+                if (nativeId.isNotEmpty() && BuildConfig.DEBUG) {
                     Log.d(TAG, "Native insert ok: $nativeId")
                 }
             } catch (e: CopypasteException) {
@@ -1144,13 +1145,21 @@ class ClipboardService : Service() {
             }
 
             repository.storeImageBytes(storedId, pngBytes)
-            Log.d(TAG, "captureImageClip: stored full-res image $storedId (${pngBytes.size} bytes, mime=$mimeType)")
+            // CopyPaste-g4ik: guard storedId (UUID) in log — stripped from release by R8.
+            if (BuildConfig.DEBUG) {
+                Log.d(TAG, "captureImageClip: stored full-res image $storedId (${pngBytes.size} bytes, mime=$mimeType)")
+            }
 
             if (thumbBytes != null) {
                 repository.storeThumbnailBytes(storedId, thumbBytes)
-                Log.d(TAG, "captureImageClip: stored thumbnail $storedId (${thumbBytes.size} bytes)")
+                // CopyPaste-g4ik: guard storedId (UUID) in log.
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "captureImageClip: stored thumbnail $storedId (${thumbBytes.size} bytes)")
+                }
             } else {
-                Log.d(TAG, "captureImageClip: no thumbnail generated for $storedId — history will fall back to full-res")
+                if (BuildConfig.DEBUG) {
+                    Log.d(TAG, "captureImageClip: no thumbnail generated for $storedId — history will fall back to full-res")
+                }
             }
 
             bumpTodayCounter(context)
@@ -1369,7 +1378,8 @@ class ClipboardService : Service() {
                             lamportTs = lamportTs,
                         )
                         if (id != null) {
-                            Log.d(TAG, "Supabase push ok: $id ($contentType)")
+                            // CopyPaste-g4ik: guard item id (UUID) in log — stripped from release by R8.
+                            if (BuildConfig.DEBUG) Log.d(TAG, "Supabase push ok: $id ($contentType)")
                         } else {
                             Log.w(TAG, "Supabase push returned null (logged above)")
                         }
@@ -1393,7 +1403,8 @@ class ClipboardService : Service() {
                             lamportTs = lamportTs,
                         )
                         if (ok) {
-                            Log.d(TAG, "Relay push ok: $itemId ($contentType)")
+                            // CopyPaste-g4ik: guard itemId (UUID) in log — stripped from release by R8.
+                            if (BuildConfig.DEBUG) Log.d(TAG, "Relay push ok: $itemId ($contentType)")
                         } else {
                             Log.w(TAG, "Relay push returned false (logged above)")
                         }

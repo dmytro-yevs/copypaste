@@ -471,4 +471,15 @@
 
     <!-- History — DeviceFilterRow chip (ojsq) -->
     <string name="device_filter_all">All</string>
+
+    <!-- CopyPaste-12f0: Reset database (degraded-DB recovery, macOS parity) -->
+    <string name="setting_reset_db_label">Reset database</string>
+    <string name="setting_reset_db_subtitle">Wipe all clipboard history when the database is damaged (irreversible)</string>
+    <string name="dialog_reset_db_title">Reset database?</string>
+    <string name="dialog_reset_db_body">This will permanently delete ALL clipboard items, including pinned ones. Your sync settings and device pairing are preserved. This cannot be undone.</string>
+    <string name="btn_reset_db">Reset</string>
+
+    <!-- CopyPaste-un29: Sort by device toggle (macOS parity) -->
+    <string name="setting_sort_by_device_title">Group by device</string>
+    <string name="setting_sort_by_device_subtitle">Show items grouped by the device that copied them</string>
 </resources>

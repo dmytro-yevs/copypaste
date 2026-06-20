@@ -600,6 +600,34 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
+     * CopyPaste-12f0: Degraded-DB recovery — wipe the entire clipboard SharedPreferences
+     * store (all items, pinned or not, all indexes, all metadata).
+     *
+     * This is a DESTRUCTIVE operation with no undo, intended as a last resort when the
+     * database is in a state that prevents normal operation (equivalent to macOS's
+     * Settings → Storage → Reset database). The caller MUST show a confirmation dialog
+     * before invoking this.
+     *
+     * Unlike [clearAll] which preserves pinned items and queues sync tombstones, this
+     * wipes the SharedPreferences file entirely and resets all in-memory state. It does
+     * NOT wipe [Settings] — user preferences (encryption key, device id, etc.) are
+     * preserved so the device can continue to participate in sync after recovery.
+     */
+    fun resetDatabase() {
+        synchronized(idsWriteLock) {
+            // Wipe all item data in the repository SharedPreferences file.
+            prefs.edit().clear().apply()
+            // Reset in-memory parse cache so no stale entries linger after the wipe.
+            evictAllParseCache()
+            // Reset dedup state so the first captured item after reset is stored fresh.
+            resetDedupState()
+        }
+        Log.w(TAG, "resetDatabase: clipboard SharedPreferences wiped (recovery action)")
+        // Notify the service that items were deleted so the persistent notification counter resets.
+        ClipboardService.onItemsDeleted(appContext, 0)
+    }
+
+    /**
      * Delete all UNPINNED items (text blobs + image blobs). Pinned items remain.
      * The synced-source-id set is also cleared (re-syncing pinned items is fine).
      */
@@ -1314,6 +1342,19 @@ class ClipboardRepository(context: Context) {
      *
      * PINNED items are counted in total bytes but never evicted.
      */
+
+    /**
+     * CopyPaste-iovc: public entry-point so Settings can retroactively apply the
+     * history cap immediately after the user changes [Settings.maxHistoryItems]
+     * and taps Save — without waiting for the next clipboard capture to call the
+     * private [pruneToLimits] path.
+     *
+     * Delegates to [pruneToLimits] (no new logic; just visibility promotion).
+     */
+    fun applyHistoryCap() {
+        pruneToLimits()
+    }
+
     private fun pruneToLimits() {
         val quotaBytes = settings.storageQuotaBytes.coerceAtLeast(0L)
         // Settings.maxHistoryItems default 1000; coerceAtLeast(1) guards against

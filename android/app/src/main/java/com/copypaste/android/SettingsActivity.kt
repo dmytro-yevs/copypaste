@@ -326,6 +326,9 @@ fun SettingsScreen(
         settings.previewLines = previewLines
         // maxItems: pref-only sentinel (100_000 = Unlimited). No daemon IPC yet.
         settings.maxHistoryItems = maxItems.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        // CopyPaste-iovc: apply the cap immediately so stored/displayed history is
+        // trimmed right away — without waiting for the next clipboard capture.
+        ClipboardRepository(ctx).applyHistoryCap()
         settings.collectPublicIp = collectPublicIp
         settings.pasteAsPlainText = pasteAsPlainText
         settings.excludedAppBundleIds = excludedApps
@@ -579,6 +582,10 @@ fun SettingsScreen(
                             ctx = ctx,
                             onClearHistory = {
                                 scope.launch(Dispatchers.IO) { repository.clearAll() }
+                            },
+                            // CopyPaste-12f0: degraded-DB reset — wipes the whole repository.
+                            onResetDatabase = {
+                                scope.launch(Dispatchers.IO) { repository.resetDatabase() }
                             },
                         )
                     }
@@ -1017,6 +1024,8 @@ private fun StorageTab(
     ctx: android.content.Context,
     // CopyPaste-wuek NG-1: clear-all in Settings (canonical parity with macOS Settings → Storage → Data).
     onClearHistory: () -> Unit,
+    // CopyPaste-12f0: degraded-DB recovery — wipes the entire repository (macOS parity).
+    onResetDatabase: () -> Unit,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         SettingsSectionLabel(stringResource(R.string.section_storage_limits))
@@ -1130,6 +1139,33 @@ private fun StorageTab(
                 },
             )
         }
+        // CopyPaste-12f0: Reset-database dialog (degraded-DB recovery, macOS parity).
+        var showResetDbConfirm by remember { mutableStateOf(false) }
+        if (showResetDbConfirm) {
+            GlassAlertDialog(
+                onDismissRequest = { showResetDbConfirm = false },
+                title = { Text(stringResource(R.string.dialog_reset_db_title)) },
+                text = { Text(stringResource(R.string.dialog_reset_db_body)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showResetDbConfirm = false
+                            onResetDatabase()
+                        },
+                    ) {
+                        Text(
+                            text = stringResource(R.string.btn_reset_db),
+                            color = LocalIdeColors.current.danger,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showResetDbConfirm = false }) {
+                        Text(stringResource(R.string.dialog_cancel))
+                    }
+                },
+            )
+        }
         SettingsSectionLabel(stringResource(R.string.section_data))
         SettingsCard {
             val c = LocalIdeColors.current
@@ -1150,6 +1186,36 @@ private fun StorageTab(
                     variant = ButtonVariant.DANGER,
                 ) {
                     Text(stringResource(R.string.btn_clear_history))
+                }
+            }
+            SettingsCardDivider()
+            // CopyPaste-12f0: Reset database — degraded-DB recovery (macOS parity).
+            // Wipes the entire clipboard store including pinned items. Intended as a
+            // last resort when the DB is corrupted and normal operations fail.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = stringResource(R.string.setting_reset_db_label),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.text,
+                    )
+                    Text(
+                        text = stringResource(R.string.setting_reset_db_subtitle),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.dim,
+                    )
+                }
+                CopyPasteButton(
+                    onClick = { showResetDbConfirm = true },
+                    variant = ButtonVariant.DANGER,
+                ) {
+                    Text(stringResource(R.string.btn_reset_db))
                 }
             }
         }

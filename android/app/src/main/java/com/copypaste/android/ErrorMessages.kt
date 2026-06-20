@@ -70,6 +70,47 @@ object ErrorMessages {
         return "Pairing status unavailable. Please try again."
     }
 
+    /**
+     * CopyPaste-7m6r: Map a general clipboard-operation exception to a user-friendly
+     * message. Use for load-history, delete, pin, clear-all, and similar data
+     * operations so raw exception messages (SQLite class names, file-system paths,
+     * FFI symbols) are never shown directly to the user.
+     *
+     * The raw message is logged at WARN for diagnostic purposes only.
+     */
+    fun friendlyOperationError(e: Throwable): String {
+        Log.w(TAG, "operation error (raw): ${e.javaClass.name}: ${e.message}")
+        return categoriseOperation(e.message)
+    }
+
+    /**
+     * CopyPaste-7m6r: String overload — for callers that already have a raw error
+     * string (e.g. [ClipboardViewModel] which posts [Exception.message] to LiveData).
+     * The raw string is logged at WARN and then sanitised.
+     */
+    fun friendlyOperationError(rawMsg: String?): String {
+        if (rawMsg != null) Log.w(TAG, "operation error (raw): $rawMsg")
+        return categoriseOperation(rawMsg)
+    }
+
+    // ── private helpers ────────────────────────────────────────────────────────
+
+    private fun categoriseOperation(raw: String?): String {
+        if (raw == null) return "Something went wrong. Please try again."
+        val lower = raw.lowercase()
+        return when {
+            lower.containsAny("nospace", "enospc", "no space left", "disk full") ->
+                "Not enough storage space. Free up some space and try again."
+            lower.containsAny("corrupt", "malformed", "cantopen", "notadb", "disk image") ->
+                "The local database appears to be damaged. Try resetting it in Settings → Storage."
+            lower.containsAny("connection", "refused", "timeout", "network", "unreachable", "eof", "broken pipe") ->
+                "A network error occurred. Check your connection and try again."
+            lower.containsAny("decrypt", "crypto", "auth", "key", "signature") ->
+                "Could not decrypt the item. Your encryption key may have changed."
+            else -> "Something went wrong. Please try again."
+        }
+    }
+
     // ── private helpers ────────────────────────────────────────────────────────
 
     /**

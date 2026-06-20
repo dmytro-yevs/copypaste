@@ -507,8 +507,8 @@ fun HistoryScreen(
     // §2/P0: glass pref + theme for the frosted header (LiquidGlassSurface).
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-    val loadErrorTemplate = stringResource(R.string.error_load_history)
-    val clearAllErrorTemplate = stringResource(R.string.error_clear_all)
+    // CopyPaste-7m6r: loadErrorTemplate / clearAllErrorTemplate removed — error strings
+    // are now routed through ErrorMessages.friendlyOperationError (no raw-msg formatting).
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
     val itemDeletedMsg = stringResource(R.string.snackbar_item_deleted)
     val undoLabel = stringResource(R.string.snackbar_undo)
@@ -759,7 +759,9 @@ fun HistoryScreen(
 
     LaunchedEffect(error) {
         val msg = error ?: return@LaunchedEffect
-        toastState.show(loadErrorTemplate.format(msg), GlassToastKind.DANGER)
+        // CopyPaste-7m6r: route raw exception message through ErrorMessages so
+        // internals (SQLite class names, file-system paths) are never shown.
+        toastState.show(ErrorMessages.friendlyOperationError(msg), GlassToastKind.DANGER)
         viewModel.clearError()
     }
 
@@ -767,7 +769,8 @@ fun HistoryScreen(
     // message reads "Failed to clear history" instead of the generic load-history text.
     LaunchedEffect(clearAllError) {
         val msg = clearAllError ?: return@LaunchedEffect
-        toastState.show(clearAllErrorTemplate.format(msg), GlassToastKind.DANGER)
+        // CopyPaste-7m6r: sanitise raw error — do not expose internals in the toast.
+        toastState.show(ErrorMessages.friendlyOperationError(msg), GlassToastKind.DANGER)
         viewModel.clearClearAllError()
     }
 
