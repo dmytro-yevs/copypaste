@@ -88,6 +88,7 @@ import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SearchOff
+import androidx.compose.material.icons.outlined.Devices
 import androidx.compose.material.icons.outlined.SwapVert
 // §7 PARITY-SPEC: one "too large" glyph — the warning triangle (was CloudOff).
 import androidx.compose.material.icons.outlined.WarningAmber
@@ -594,6 +595,11 @@ fun HistoryScreen(
     // ── Reorder mode (pinned items only) ────────────────────────────────────
     var reorderMode by rememberSaveable { mutableStateOf(false) }
 
+    // CopyPaste-un29: Sort / group by device — persisted in Settings so the
+    // user's choice survives process death (like density/theme). Seeded from
+    // prefs once; toggled via the overflow menu and written back immediately.
+    var sortByDevice by rememberSaveable { mutableStateOf(settings.sortByDevice) }
+
     BackHandler(enabled = reorderMode) { reorderMode = false }
 
     // ── Long-press peek preview state ────────────────────────────────────────
@@ -637,10 +643,20 @@ fun HistoryScreen(
         }
     }
 
+    // ── Device identity — needed for sort-by-device and device-filter ───────────
+    // Defined before sortedItems because sortByDevice sort references them.
+    val ownDeviceId = remember { settings.deviceId }
+    val pairedPeers = remember { settings.pairedPeers }
+
     // Sort: pinned first (by user-defined pinnedSortIndex), then unpinned by recency.
     // Pinned items are sorted by pinnedSortIndex (NOT wallTimeMs) so copying a pinned
     // clip does not move it — fixes HW-A15.
-    val sortedItems = remember(items) {
+    //
+    // CopyPaste-un29: when sortByDevice is true, group unpinned items by origin device
+    // (own device first, then peers alphabetically by display name, null-origin last),
+    // then by recency within each device group — mirrors macOS HistoryView device sort.
+    // Pinned items always remain at the top in user-defined order regardless of the sort.
+    val sortedItems = remember(items, sortByDevice, ownDeviceId, pairedPeers) {
         // Defensive de-dup by id BEFORE the list reaches the LazyColumn. The list
         // backing the LazyColumn uses `key = { it.id }`, so a duplicate id throws
         // IllegalArgumentException ("Key … was already used") and crash-loops the
@@ -649,12 +665,34 @@ fun HistoryScreen(
         // synced-source-id seen-set was cleared by clearUnpinned). Collapsing
         // duplicates here guarantees the LazyColumn can never crash regardless of
         // how the backing store drifts; the repository fix below removes the source.
-        items.distinctBy { it.id }
-            .sortedWith(
+        val deduped = items.distinctBy { it.id }
+        if (sortByDevice) {
+            // Group-by-device: pinned section first (user order), then device groups
+            // sorted own-device → peer-alphabetical → unknown. Within each device the
+            // items are sorted by recency (newest first) for macOS parity.
+            deduped.sortedWith(
+                compareByDescending<ClipboardItem> { it.pinned }
+                    .thenBy { if (it.pinned) it.pinnedSortIndex else 0 }
+                    // Own device first (null originDeviceId treated as own/local).
+                    .thenByDescending { item ->
+                        item.originDeviceId == null || item.originDeviceId == ownDeviceId
+                    }
+                    // Peer display name alphabetical for remaining devices.
+                    .thenBy { item ->
+                        item.originDeviceId?.let { id ->
+                            deviceDisplayName(id, ownDeviceId, pairedPeers)
+                        } ?: ""
+                    }
+                    // Recency within each device group.
+                    .thenByDescending { it.wallTimeMs }
+            )
+        } else {
+            deduped.sortedWith(
                 compareByDescending<ClipboardItem> { it.pinned }
                     .thenBy { if (it.pinned) it.pinnedSortIndex else 0 }
                     .thenByDescending { it.wallTimeMs }
             )
+        }
     }
     // ── AB-11: full-content search ───────────────────────────────────────────
     // The snippet-only filter missed any match past the 140-char preview. We now
@@ -707,8 +745,6 @@ fun HistoryScreen(
     // filtered) so the filter chips are stable while typing. Show the chips only
     // when more than one device is present — mirrors macOS HistoryView.
     val originDeviceIds = remember(sortedItems) { distinctOriginDeviceIds(sortedItems) }
-    val ownDeviceId = remember { settings.deviceId }
-    val pairedPeers = remember { settings.pairedPeers }
 
     // Auto-reset device filter when the selected device disappears from the list
     // (e.g. all items from that device were deleted).
@@ -1079,6 +1115,33 @@ fun HistoryScreen(
                                         expanded = overflowExpanded,
                                         onDismissRequest = { overflowExpanded = false },
                                     ) {
+                                        // CopyPaste-un29: "Group by device" toggle — macOS parity.
+                                        // Toggles between device-grouped sort (own device first,
+                                        // then peers alphabetically) and the default recency sort.
+                                        DropdownMenuItem(
+                                            text = {
+                                                Text(
+                                                    stringResource(
+                                                        if (sortByDevice) R.string.action_sort_by_recency
+                                                        else R.string.action_sort_by_device
+                                                    ),
+                                                    color = if (sortByDevice) c.accent else c.text,
+                                                )
+                                            },
+                                            leadingIcon = {
+                                                Icon(
+                                                    Icons.Outlined.Devices,
+                                                    null,
+                                                    tint = if (sortByDevice) c.accent else c.dim,
+                                                )
+                                            },
+                                            onClick = {
+                                                overflowExpanded = false
+                                                sortByDevice = !sortByDevice
+                                                settings.sortByDevice = sortByDevice
+                                            },
+                                        )
+                                        HorizontalDivider(color = c.divider, thickness = 1.dp)
                                         val unpinnedCount = items.count { !it.pinned }
                                         if (unpinnedCount > 0) {
                                             DropdownMenuItem(
@@ -2059,13 +2122,18 @@ private fun chipColorFor(kind: String, c: IdeColors): Color = when (kind) {
 }
 
 /**
- * Pick the canonical chip label for an item: PRIVATE when sensitive, IMAGE/FILE
- * by content-type, otherwise the classified text kind (URL/EMAIL/CODE/…). Pure
- * function so [HistoryRow] can `remember` it per item id instead of recomputing
- * the classification on every recomposition.
+ * Pick the canonical chip label for an item: IMAGE/FILE by content-type, or the
+ * classified text kind (URL/EMAIL/CODE/…) for text. Sensitive items show their
+ * CONTENT-TYPE label (not "PRIVATE") — matching macOS which keeps the kind chip
+ * visible even when the preview is blurred (CopyPaste-1b55 macOS parity).
+ * Pure function so [HistoryRow] can `remember` it per item id instead of
+ * recomputing the classification on every recomposition.
  */
-private fun chipLabelFor(contentType: String, isSensitive: Boolean, snippet: String): String = when {
-    isSensitive                      -> "PRIVATE"
+private fun chipLabelFor(contentType: String, @Suppress("UNUSED_PARAMETER") isSensitive: Boolean, snippet: String): String = when {
+    // CopyPaste-1b55: macOS keeps the content-type chip even for sensitive items.
+    // Android was forcing "PRIVATE" which diverged from macOS. Align by always
+    // deriving the label from content-type/snippet, letting the row's blur/mask
+    // handle the privacy signal instead of the chip label.
     contentTypeIsImage(contentType)  -> "IMAGE"
     contentTypeIsText(contentType)   ->
         if (snippet.isNotBlank()) TextKind.classify(snippet) else "TEXT"

@@ -558,6 +558,17 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putString("density", v.name).apply()
 
     /**
+     * CopyPaste-un29: When true, the history list groups items by their origin device
+     * (own device first, then peers alphabetically) instead of the default
+     * pinned-first/recency sort. Mirrors the macOS HistoryView "Sort by device" toggle.
+     *
+     * Key: "sort_by_device". Default: false (recency sort, the previous behaviour).
+     */
+    var sortByDevice: Boolean
+        get() = prefs.getBoolean("sort_by_device", false)
+        set(v) = prefs.edit().putBoolean("sort_by_device", v).apply()
+
+    /**
      * App theme mode — System / Light / Dark (PARITY-SPEC §0).
      *
      * The app is **light-first**: the default is [ThemeMode.LIGHT], NOT

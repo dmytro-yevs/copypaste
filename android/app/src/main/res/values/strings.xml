@@ -482,4 +482,6 @@
     <!-- CopyPaste-un29: Sort by device toggle (macOS parity) -->
     <string name="setting_sort_by_device_title">Group by device</string>
     <string name="setting_sort_by_device_subtitle">Show items grouped by the device that copied them</string>
+    <string name="action_sort_by_device">Group by device</string>
+    <string name="action_sort_by_recency">Sort by recency</string>
 </resources>
