@@ -57,12 +57,20 @@ function GlassToastItem({
   return (
     // surface-card: glass float over aurora canvas (spec §surface-card)
     // animate-toast-in: slide-up entrance (tailwind keyframes §8)
+    // W-C6: radius and shadow use --skin-* vars so Quiet/Vapor tokens apply
+    //   automatically without touching foundation files. Classic values are
+    //   identical to the former hardcoded values (--skin-r-card=14px,
+    //   --skin-shadow-card=var(--ide-e2)).
     <div
       role="status"
       aria-live="polite"
+      style={{
+        borderRadius: "var(--skin-r-card)",
+        boxShadow: "var(--skin-shadow-card)",
+      }}
       className={[
         "surface-card animate-toast-in",
-        "min-w-[200px] max-w-[340px] rounded-ide-lg px-4 py-2.5 shadow-ide-sm",
+        "min-w-[200px] max-w-[340px] px-4 py-2.5",
         "flex items-center justify-between gap-3",
         KIND_CLS[kind],
       ].join(" ")}

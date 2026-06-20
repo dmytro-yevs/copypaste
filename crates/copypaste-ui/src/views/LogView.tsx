@@ -97,19 +97,22 @@ export function LogView() {
           )}
         </div>
         <div className="flex items-center gap-2">
+          {/* rounded-ide removed; --skin-r-ctl drives radius so Quiet/Vapor adapt. */}
           <button
             onClick={() => {
               setLoading(true);
               void load();
             }}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text"
+            className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
             Refresh
           </button>
           <button
             onClick={handleExport}
             disabled={!content || content === "(no log entries)"}
-            className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text disabled:opacity-40"
+            className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text disabled:opacity-40"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
             Export
           </button>

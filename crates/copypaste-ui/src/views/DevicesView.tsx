@@ -294,8 +294,13 @@ function SasPairingModal({
       aria-modal="true"
       aria-labelledby="sas-modal-title"
     >
-      {/* surface-glass-strong = floating frosted-glass pairing dialog. */}
-      <div ref={modalRef} className="surface-glass-strong w-full max-w-sm rounded-ide-lg p-5 shadow-ide-lg">
+      {/* surface-glass-strong = floating frosted-glass pairing dialog.
+          W-C4: radius and shadow are skin-driven so quiet/vapor skins adapt. */}
+      <div
+        ref={modalRef}
+        className="surface-glass-strong w-full max-w-sm p-5"
+        style={{ borderRadius: "var(--skin-r-modal)", boxShadow: "var(--skin-shadow-float)" }}
+      >
         <p id="sas-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
           {isResponder ? `"${peerName}" wants to pair` : `Pair "${peerName}"`}
         </p>
@@ -562,8 +567,13 @@ function RevokeConfirmDialog({
       aria-modal="true"
       aria-labelledby="revoke-modal-title"
     >
-      {/* surface-glass-strong = floating frosted-glass revoke dialog. */}
-      <div ref={dialogRef} className="surface-glass-strong w-full max-w-sm rounded-ide-lg p-5 shadow-ide-lg">
+      {/* surface-glass-strong = floating frosted-glass revoke dialog.
+          W-C4: radius and shadow are skin-driven so quiet/vapor skins adapt. */}
+      <div
+        ref={dialogRef}
+        className="surface-glass-strong w-full max-w-sm p-5"
+        style={{ borderRadius: "var(--skin-r-modal)", boxShadow: "var(--skin-shadow-float)" }}
+      >
         <p id="revoke-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
           Revoke &ldquo;{name}&rdquo;
         </p>
@@ -1280,8 +1290,12 @@ export function DevicesView({
       </div>
 
       {/* ── Single unified device list (this Mac first, then peers) ── */}
-      {/* surface-card glass: the list container is a frosted layer over the aurora. */}
-      <div className="surface-card flex flex-col divide-y divide-ide-divider rounded-ide">
+      {/* surface-card glass: the list container is a frosted layer over the aurora.
+          W-C4: radius is skin-driven (--skin-r-card) so quiet/vapor skins adapt. */}
+      <div
+        className="surface-card flex flex-col divide-y divide-ide-divider"
+        style={{ borderRadius: "var(--skin-r-card)" }}
+      >
         {/* This device — always first */}
         {ownState.status === "loading" && (
           <div className="px-3 py-2.5">
@@ -1366,7 +1380,11 @@ export function DevicesView({
         </button>
       </div>
       {discovered.length > 0 ? (
-        <div className="surface-card flex flex-col divide-y divide-ide-divider rounded-ide">
+        /* W-C4: radius skin-driven (--skin-r-card) */
+        <div
+          className="surface-card flex flex-col divide-y divide-ide-divider"
+          style={{ borderRadius: "var(--skin-r-card)" }}
+        >
           {discovered.map((device, idx) => (
             <DiscoveredRow
               key={device.device_id}
@@ -1412,8 +1430,12 @@ export function DevicesView({
         <SectionHeader label="Pair a new device" faint />
       </div>
 
-      {/* card-in: glass card entrance (styleguide §device-card) */}
-      <section className="card-in surface-card rounded-ide-lg p-4 space-y-3 shadow-ide-sm">
+      {/* card-in: glass card entrance (styleguide §device-card).
+          W-C4: radius skin-driven; shadow provided by surface-card utility. */}
+      <section
+        className="card-in surface-card p-4 space-y-3"
+        style={{ borderRadius: "var(--skin-r-card)" }}
+      >
         {qrState.status === "loading" && (
           <p className="text-[12px] text-ide-dim animate-pulse">Generating...</p>
         )}

@@ -34,8 +34,10 @@ interface ActionButtonProps {
   size?: "sm" | "md";
 }
 
+// rounded-ide is the Classic fixed radius (9px); replaced with --skin-r-ctl so
+// Quiet (7px) and Vapor (12px) skins adapt without touching this file again.
 const BASE =
-  "inline-flex items-center justify-center rounded-ide transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40";
+  "inline-flex items-center justify-center transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40";
 
 // Size modifiers
 const SIZE_SM = "px-2.5 py-1 text-[12px]";
@@ -78,6 +80,7 @@ export function ActionButton({
       title={title}
       aria-label={ariaLabel}
       className={cls}
+      style={{ borderRadius: "var(--skin-r-ctl)" }}
     >
       {pending ? pendingLabel : children}
     </button>

@@ -94,6 +94,8 @@ export function Popup() {
     // Theme + translucency drive the popup's glass material (mirrors App.tsx).
     theme = "light",
     translucency = true,
+    // W-C5: skin drives the popup's radius/blur/shadow tokens (mirrors App.tsx).
+    skin = "classic",
   } = useUI((s) => s.prefs);
 
   // Apply the persisted theme + translucency to the popup's <html> at runtime.
@@ -111,6 +113,13 @@ export function Popup() {
       document.documentElement.classList.add("no-translucency");
     }
   }, [translucency]);
+
+  // W-C5: sync the active skin to the popup's <html> so that skin-driven CSS
+  // tokens (--skin-r-modal, --skin-blur-strong, etc.) resolve correctly for the
+  // popup window (mirrors the same effect in App.tsx for the main window).
+  useEffect(() => {
+    document.documentElement.setAttribute("data-skin", skin ?? "classic");
+  }, [skin]);
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<HistoryEntry[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -489,7 +498,11 @@ export function Popup() {
       // rgba(19,20,26,0.82) so the popup is a real glass material on BOTH themes.
       className="surface-glass-strong popup-enter flex flex-col h-screen overflow-hidden"
       style={{
-        borderRadius: 14,
+        // W-C5: use skin token so quiet/vapor get their canonical radius.
+        // Classic = 16px (--skin-r-modal), Quiet = 12px, Vapor = 16px.
+        // The previous hardcoded 14px was between classic and quiet — replaced
+        // with the token so each skin renders its designed modal corner radius.
+        borderRadius: "var(--skin-r-modal)",
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {

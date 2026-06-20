@@ -170,8 +170,8 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
   return (
     <span
       ref={mountedRefCallback}
-      className="inline-flex items-center gap-2 rounded border border-ide-divider/60 bg-ide-elevated/60 px-2 py-1"
-      style={{ maxWidth: "100%" }}
+      className="inline-flex items-center gap-2 border border-ide-divider/60 bg-ide-elevated/60 px-2 py-1"
+      style={{ maxWidth: "100%", borderRadius: "var(--skin-r-chip)" }}
     >
       {/* File icon — amber/orange to distinguish from image/text */}
       <FileIcon className="shrink-0 text-ide-warning" />
@@ -208,7 +208,8 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
           title="Open with default app"
           disabled={opening}
           onClick={() => void handleOpen()}
-          className="relative flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+          className="relative flex items-center gap-1 border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
         >
           {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
           <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />
@@ -220,7 +221,8 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
           title="Save As…"
           disabled={saving}
           onClick={() => void handleSaveAs()}
-          className="relative flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+          className="relative flex items-center gap-1 border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
         >
           {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
           <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />
@@ -232,7 +234,8 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
           title="Copy to clipboard"
           disabled={copying}
           onClick={() => void handleCopy()}
-          className="relative flex items-center gap-1 rounded border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+          className="relative flex items-center gap-1 border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
         >
           {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
           <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />

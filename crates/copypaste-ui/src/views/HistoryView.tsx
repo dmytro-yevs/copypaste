@@ -27,7 +27,7 @@ import { applySpanMasking, shouldMask } from "../lib/masking";
 import { formatRelativeTime } from "../lib/time";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
-import { useUI } from "../store";
+import { useUI, type SkinId } from "../store";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 import { FileChip } from "../components/FileChip";
@@ -349,6 +349,14 @@ interface RowProps {
   density: "comfortable" | "compact" | "spacious";
   /** Own device UUID from the HistoryPage envelope — used for device badge. */
   ownDeviceId: string;
+  /**
+   * W-C3: Active skin — governs row treatment (card/line/inset).
+   *   classic  → card-style rows (border-b dividers + cinematic hover lift)
+   *   quiet    → line-style rows (border-b dividers only, no hover lift)
+   *   vapor    → inset-style rows (rounded card per row, no border-b, gap via --skin-row-gap)
+   * Classic is the default; its rendering is byte-identical to the pre-skin look.
+   */
+  skin: SkinId;
   onSelect: () => void;
   onToggleMultiSelect: (e: React.MouseEvent) => void;
   onCopy: () => void;
@@ -401,6 +409,7 @@ const HistoryRow = React.memo(function HistoryRow({
   showSensitiveWarnings,
   density,
   ownDeviceId,
+  skin,
   onSelect,
   onToggleMultiSelect,
   onCopy,
@@ -503,20 +512,51 @@ const HistoryRow = React.memo(function HistoryRow({
         `group relative flex cursor-pointer select-none items-center gap-2 px-3 ${rowPadding} ${rowMinH}`,
         // Liquid-glass entrance stagger — .list-item-in is from index.css (listItemIn keyframe).
         applyStagger ? "list-item-in" : "",
-        "border-b text-[13px]",
-        // Smooth hover lift: translateX(5px)+scale per styleguide §history-item.
-        // transition covers transform + border-color + background (matching SG .28s spring).
-        "transition-[transform,border-color,background] duration-[280ms] ease-out",
-        "hover:[transform:translateX(5px)_scale(1.008)]",
+        "text-[13px]",
+        // W-C3 skin row treatment — three visual languages, orthogonal to palette/theme.
+        // classic: card-style (current Liquid Glass rows — border-b + cinematic hover lift).
+        // quiet:   line-style (flat dividers only; no hover lift — balanced motion profile).
+        // vapor:   inset-style (individual rounded cards; no border-b; gap by list container).
+        skin === "vapor"
+          ? // Vapor inset: each row is a self-contained rounded card with glass surface.
+            // border-radius driven by --skin-r-card (16px vapor). No bottom divider — the
+            // gap between rows (--skin-row-gap) provides separation instead.
+            [
+              "skin-row-inset",
+              "transition-[transform,background] duration-[280ms] ease-out",
+              "hover:[transform:translateX(3px)_scale(1.004)]",
+              "rounded-[var(--skin-r-card,16px)]",
+            ].join(" ")
+          : skin === "quiet"
+          ? // Quiet line: flat dividers, no hover lift (balanced 1.0× motion profile).
+            // Only bg changes on hover — no translateX/scale transform.
+            [
+              "skin-row-line",
+              "border-b",
+              "transition-[border-color,background] duration-[280ms] ease-out",
+            ].join(" ")
+          : // Classic (default): current Liquid Glass look — unchanged.
+            // Smooth hover lift: translateX(5px)+scale per styleguide §history-item.
+            // transition covers transform + border-color + background (matching SG .28s spring).
+            [
+              "border-b",
+              "transition-[transform,border-color,background] duration-[280ms] ease-out",
+              "hover:[transform:translateX(5px)_scale(1.008)]",
+            ].join(" "),
         // §8 copy-flash: success tint for ~90ms after copy. Applied before pinned so
         // the flash is visible (pinned adds bg-ide-warningDim which would cover it).
         copyFlash ? "!bg-ide-success/10" : "",
         // v0.5.3: warningDim tint for pinned rows — border-l-2 gives a clear
         // amber left edge; bg-ide-warningDim (no opacity modifier) at its native
-        // 0.10 alpha is visible without overwhelming. border-b remains divider.
-        // 8qzb: pinned rows use badge-warning (#D9A343) for left edge + tint
+        // 0.10 alpha is visible without overwhelming.
+        // 8qzb: pinned rows use badge-warning (#D9A343) for left edge + tint.
+        // Vapor inset: skip border-b on pinned (inset rows are self-contained cards).
         entry.pinned
-          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10 hover:border-b-ide-accent/35"
+          ? skin === "vapor"
+            ? "border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10"
+            : "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10 hover:border-b-ide-accent/35"
+          : skin === "vapor"
+          ? "" // vapor inset rows have no explicit border-b
           : "border-b border-ide-divider/50 hover:border-b-ide-accent/35",
         multiSelected
           ? "bg-ide-selection text-ide-text"
@@ -788,6 +828,8 @@ const HistoryRow = React.memo(function HistoryRow({
   if (prev.showSensitiveWarnings !== next.showSensitiveWarnings) return false;
   if (prev.density !== next.density) return false;
   if (prev.ownDeviceId !== next.ownDeviceId) return false;
+  // W-C3: skin change requires re-render (row treatment differs per skin).
+  if (prev.skin !== next.skin) return false;
   // Drag state (pinned rows only). Compare structural equality of the
   // dragging/dropIndicator fields; function refs are not compared since they
   // are rebuilt per entry.id and change only when drag/drop state changes.
@@ -1395,7 +1437,7 @@ interface ToastState {
 }
 
 export function HistoryView() {
-  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, showSensitiveWarnings, playSoundOnCopy, notifyOnCopy, density, historyDisplayLimit } =
+  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, showSensitiveWarnings, playSoundOnCopy, notifyOnCopy, density, historyDisplayLimit, skin } =
     useUI((s) => s.prefs);
 
   // M5: historySize removed from prefs; use a fixed initial page size.
@@ -2616,6 +2658,15 @@ export function HistoryView() {
             isBusy={bulkBusy}
           />
         )}
+        {/* W-C3: Vapor inset wrapper — adds row-gap spacing between inset rows.
+            The gap value maps to --skin-row-gap (3px for vapor). Classic/quiet
+            use no wrapper (rows are flush or divided by border-b directly). */}
+        <div
+          className={(skin ?? "classic") === "vapor" ? "skin-list-vapor flex-1 overflow-hidden" : "flex-1 overflow-hidden"}
+          style={(skin ?? "classic") === "vapor"
+            ? { display: "flex", flexDirection: "column", gap: "var(--skin-row-gap, 0px)", padding: "var(--skin-row-gap, 0px)" }
+            : {}}
+        >
         <VirtualList
           // Cap the rendered list to the persisted display-limit preference.
           // Sentinel 100000 means "Unlimited" (effectively uncapped for any realistic history).
@@ -2648,6 +2699,7 @@ export function HistoryView() {
               maskSensitive={maskSensitive}
               showSensitiveWarnings={showSensitiveWarnings ?? true}
               ownDeviceId={ownDeviceId}
+              skin={skin ?? "classic"}
               onSelect={() => {
                 isKeyboardNavRef.current = false;
                 setSelectedId(entry.id);
@@ -2713,6 +2765,7 @@ export function HistoryView() {
             />
           )}
         />
+        </div>
       </div>
     );
   }

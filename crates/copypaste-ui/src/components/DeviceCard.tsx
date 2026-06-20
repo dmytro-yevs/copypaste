@@ -345,19 +345,23 @@ export function PeerRow({
 
       {/* g4ze: Action footer — full-width row below metadata with hairline border-t.
            Both buttons are flex-1 equal width, matching Android's weight(1f) pattern.
-           spec §7: both destructive actions use danger-tint fill (bg-ide-danger/15). */}
+           spec §7: both destructive actions use danger-tint fill (bg-ide-danger/15).
+           W-C7: border-radius uses --skin-r-ctl (9px classic, 7px quiet, 12px vapor)
+           via inline style so the skin axis drives the shape without hardcoding rounded-ide. */}
       <div className="mt-2 flex gap-1.5 border-t border-ide-border/20 pt-2">
         <button
           onClick={() => onUnpair(peer.fingerprint)}
           disabled={isPending}
-          className="flex-1 rounded-ide bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ borderRadius: "var(--skin-r-ctl)" }}
+          className="flex-1 bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isPending ? "..." : "Unpair"}
         </button>
         <button
           onClick={() => onRevoke(peer.fingerprint)}
           disabled={isPending}
-          className="flex-1 rounded-ide bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ borderRadius: "var(--skin-r-ctl)" }}
+          className="flex-1 bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isPending ? "..." : "Revoke"}
         </button>

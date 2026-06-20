@@ -83,7 +83,12 @@ export function AboutView() {
             bg-ide-elevated is kept so the existing token assertion in
             AboutView.test.tsx still finds it; .surface-card overrides the opaque
             fill at paint time. */}
-        <div className="surface-card card-in flex w-full max-w-sm flex-col gap-0 overflow-hidden rounded-ide-lg bg-ide-elevated shadow-ide-sm">
+        {/* rounded-ide-lg (fixed 14px) → --skin-r-card; shadow-ide-sm (fixed e2) → --skin-shadow-card
+            so Quiet (10px/none) and Vapor (16px/none+sheen) render correctly. */}
+        <div
+          className="surface-card card-in flex w-full max-w-sm flex-col gap-0 overflow-hidden bg-ide-elevated"
+          style={{ borderRadius: "var(--skin-r-card)", boxShadow: "var(--skin-shadow-card)" }}
+        >
 
           {/* Identity — .reveal-up staggers the heading after the card enters */}
           <div className="reveal-up flex flex-col items-center gap-1 border-b border-ide-divider px-8 py-6 text-center">

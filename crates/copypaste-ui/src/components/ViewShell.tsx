@@ -46,9 +46,14 @@ export function ViewShell({
           // §jxbx-6: card-in entrance — cubic-bezier spring from index.css utility.
           "surface-glass card-in",
           "flex h-11 shrink-0 items-center justify-between px-4",
-          "rounded-ide-lg",
-          "shadow-ide-sm",
+          // W-C2: radius + shadow driven by skin tokens so quiet/vapor skins apply
+          // without code changes. Classic values are identical to rounded-ide-lg(14px)
+          // and shadow-ide-sm(--ide-e2), so classic look is byte-identical.
         ].join(" ")}
+        style={{
+          borderRadius: "var(--skin-r-card)",
+          boxShadow: "var(--skin-shadow-card)",
+        }}
       >
         <h1
           data-tauri-drag-region
@@ -68,7 +73,14 @@ export function ViewShell({
         rounded-ide-lg: same 14px radius as the header.
       */}
       {/* §jxbx-7: reveal-up entrance — content panel rises after header settles. */}
-      <div className="surface-glass reveal-up min-h-0 flex-1 overflow-auto rounded-ide-lg p-4 shadow-ide-sm">
+      {/* W-C2: radius uses --skin-r-card; shadow uses --skin-shadow-float (floated panel). */}
+      <div
+        className="surface-glass reveal-up min-h-0 flex-1 overflow-auto p-4"
+        style={{
+          borderRadius: "var(--skin-r-card)",
+          boxShadow: "var(--skin-shadow-float)",
+        }}
+      >
         {children}
       </div>
     </div>

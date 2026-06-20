@@ -92,10 +92,12 @@ describe("AboutView visual structure (JetBrains tokens)", () => {
     expect(elevated).not.toBeNull();
   });
 
-  it("card uses rounded-ide-lg (canonical large-radius token)", () => {
+  it("card uses --skin-r-card for border-radius (skin-aware token)", () => {
+    // W-C8: rounded-ide-lg (fixed 14px) replaced with --skin-r-card so Quiet/Vapor adapt.
+    // The class is gone; the inline style drives radius.
     const { container } = render(<AboutView />);
-    const roundedLg = container.querySelector(".rounded-ide-lg");
-    expect(roundedLg).not.toBeNull();
+    const card = container.querySelector("[style*='--skin-r-card']");
+    expect(card).not.toBeNull();
   });
 
   it("uses border-ide-divider for internal section separators", () => {
