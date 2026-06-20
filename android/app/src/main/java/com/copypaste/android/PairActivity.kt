@@ -943,12 +943,39 @@ fun PairScreen(
 
     Box(Modifier.fillMaxSize()) {
     // 9g57: aurora canvas backdrop — mirrors DevicesScreen pattern.
-    // A-C5: gate by tok.background so CLASSIC keeps aurora, QUIET gets flat, VAPOR gets tint-blob
-    // (tint-blob is not yet rendered here — noted for A-F5; the gate suppresses aurora correctly).
+    // A-C5 / CopyPaste-a8ne: three-way background gate by tok.background:
+    //   CLASSIC (AURORA)   → animated aurora canvas (byte-identical)
+    //   VAPOR   (TINT_BLOB)→ static palette-glowA tint blob (no animation)
+    //   QUIET   (FLAT)     → plain solid c.bg, no canvas
     val paintAurora = translucent && tok.background == SkinBackground.AURORA
+    val paintTintBlob = translucent && tok.background == SkinBackground.TINT_BLOB
+    val auroraDef = paletteAurora(LocalPalette.current)
+    val scaffoldModifier: Modifier = when {
+        paintAurora   -> modifier.auroraCanvas(dark, auroraDef)
+        paintTintBlob -> modifier.drawBehind {
+            // CopyPaste-a8ne: Vapor TINT_BLOB — single static radial blob using
+            // palette glowA (not c.accent) so the color tracks the active palette
+            // instead of the theme accent tint. Mirrors AboutActivity pattern.
+            val diag = kotlin.math.hypot(size.width, size.height)
+            val blobColor = auroraDef.glowA.copy(
+                alpha = (auroraDef.glowA.alpha * tok.glow * 1.4f).coerceIn(0f, 1f),
+            )
+            drawRect(
+                brush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to blobColor,
+                        0.55f to androidx.compose.ui.graphics.Color.Transparent,
+                    ),
+                    center = Offset(size.width * 0.35f, size.height * 0.28f),
+                    radius = diag * 0.85f,
+                ),
+            )
+        }
+        else          -> modifier
+    }
     Scaffold(
-        modifier = if (paintAurora) modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else modifier,
-        containerColor = if (paintAurora) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        modifier = scaffoldModifier,
+        containerColor = if (paintAurora || paintTintBlob) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_pair),

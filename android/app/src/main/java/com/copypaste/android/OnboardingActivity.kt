@@ -406,17 +406,20 @@ fun OnboardingScreen(
             Modifier.auroraCanvas(dark, paletteAurora(palette))
         }
         tok.background == SkinBackground.TINT_BLOB       -> {
-            // VAPOR: static single accent-tinted blob centred on canvas.
+            // VAPOR: static single palette-aware blob centred on canvas.
+            // Use paletteAurora(LocalPalette.current).glowA so the blob color matches
+            // the active palette (mirrors AboutActivity/HistoryActivity — CopyPaste-a8ne).
             // tok.glow scales the blob alpha so intensity matches the skin spec.
-            val blobAlpha = 0.28f * tok.glow
+            val aurora = paletteAurora(palette)
+            val blobAlpha = aurora.glowA.alpha * tok.glow
             Modifier.drawBehind {
                 // Base canvas fill (palette bg tone)
                 drawRect(c.bg)
-                // Single soft radial blob — accent tint at tok.glow intensity
+                // Single soft radial blob — palette glowA at tok.glow intensity
                 drawRect(
                     brush = androidx.compose.ui.graphics.Brush.radialGradient(
                         colorStops = arrayOf(
-                            0.0f to c.accent.copy(alpha = blobAlpha),
+                            0.0f to aurora.glowA.copy(alpha = blobAlpha),
                             0.7f to Color.Transparent,
                         ),
                         center = androidx.compose.ui.geometry.Offset(size.width * 0.5f, size.height * 0.3f),

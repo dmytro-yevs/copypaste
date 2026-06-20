@@ -806,8 +806,8 @@ fun DevicesScreen(
             drawRect(
                 brush = Brush.radialGradient(
                     colorStops = arrayOf(
-                        0.0f to c.accent.copy(alpha = tok.glow * 0.55f),
-                        0.65f to c.accent.copy(alpha = tok.glow * 0.12f),
+                        0.0f to paletteAurora(LocalPalette.current).glowA.copy(alpha = tok.glow * 0.55f),
+                        0.65f to paletteAurora(LocalPalette.current).glowA.copy(alpha = tok.glow * 0.12f),
                         1.0f to androidx.compose.ui.graphics.Color.Transparent,
                     ),
                     center = Offset(size.width * 0.35f, size.height * 0.28f),
