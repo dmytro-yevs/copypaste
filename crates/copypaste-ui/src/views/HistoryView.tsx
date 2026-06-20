@@ -28,6 +28,7 @@ import { formatRelativeTime } from "../lib/time";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
 import { useUI, type SkinId } from "../store";
+import { SKINS } from "../lib/skins";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 import { FileChip } from "../components/FileChip";
@@ -54,7 +55,8 @@ function Toast({ message, kind }: { message: string; kind: ToastKind }) {
         // translate is baked into the toast-in animation start; keep it in
         // final state so the element stays centred after the animation settles.
         transform: "translateX(-50%)",
-        borderRadius: 10,
+        // kp6f: use skin card-radius token instead of hardcoded 10
+        borderRadius: "var(--skin-r-card, 10px)",
         padding: "6px 14px 6px 10px",
         display: "flex",
         alignItems: "center",
@@ -458,6 +460,10 @@ const HistoryRow = React.memo(function HistoryRow({
   // doesn't collapse the row. Mirrors Android heightIn(min = ...).
   const rowMinH = density === "spacious" ? "min-h-[42px]" : density === "compact" ? "min-h-[28px]" : "min-h-[34px]";
 
+  // 10lk: derive rowTreatment from the SKINS registry rather than comparing skin names.
+  // A future 4th theme only needs to set its rowTreatment token here — no component edits needed.
+  const rowTreatment = SKINS[skin ?? "classic"].rowTreatment;
+
   // In selection mode, clicking the row toggles multi-select.
   // Outside selection mode, clicking selects + copies (existing behavior).
   const handleRowClick = (e: React.MouseEvent) => {
@@ -489,12 +495,24 @@ const HistoryRow = React.memo(function HistoryRow({
     : `${kindLabel}: ${preview.slice(0, 80)}`;
 
   // Merge stagger animation with drop-indicator box-shadow.
+  // o2o9: for inset rows, apply rounded card surface via inline style.
+  // VirtualList rows are absolutely positioned, so flex `gap` on the wrapper
+  // is a no-op. Instead apply marginBottom per row for the gap spacing.
   const rowStyle: React.CSSProperties = {
     ...staggerStyle,
     ...(dragHandleProps?.dropIndicator === "above"
       ? { boxShadow: "inset 0 2px 0 0 var(--ide-accent)" }
       : dragHandleProps?.dropIndicator === "below"
       ? { boxShadow: "inset 0 -2px 0 0 var(--ide-accent)" }
+      : {}),
+    ...(rowTreatment === "inset"
+      ? {
+          // Card surface: rounded corners + subtle translucent fill driven by tokens.
+          borderRadius: "var(--skin-r-card, 16px)",
+          // Per-row spacing: marginBottom so absolutely-positioned rows get visual separation.
+          // (flex gap on the absolutely-positioned VirtualList container is a no-op.)
+          marginBottom: "var(--skin-row-gap, 3px)",
+        }
       : {}),
   };
 
@@ -514,28 +532,31 @@ const HistoryRow = React.memo(function HistoryRow({
         applyStagger ? "list-item-in" : "",
         "text-[13px]",
         // W-C3 skin row treatment — three visual languages, orthogonal to palette/theme.
-        // classic: card-style (current Liquid Glass rows — border-b + cinematic hover lift).
-        // quiet:   line-style (flat dividers only; no hover lift — balanced motion profile).
-        // vapor:   inset-style (individual rounded cards; no border-b; gap by list container).
-        skin === "vapor"
-          ? // Vapor inset: each row is a self-contained rounded card with glass surface.
-            // border-radius driven by --skin-r-card (16px vapor). No bottom divider — the
-            // gap between rows (--skin-row-gap) provides separation instead.
+        // 10lk: driven by rowTreatment token (SKINS[skin].rowTreatment), not skin name.
+        // A future 4th theme only needs to set its rowTreatment in skins.ts — no edits here.
+        // card  (classic): border-b dividers + cinematic hover lift.
+        // line  (quiet):   flat dividers only; no hover lift.
+        // inset (vapor):   individual rounded cards; no border-b; per-row margin gap.
+        rowTreatment === "inset"
+          ? // Inset: each row is a self-contained rounded card with glass surface.
+            // border-radius and marginBottom applied via inline rowStyle (o2o9 fix —
+            // VirtualList rows are absolutely positioned, so flex gap is a no-op).
+            // The rounded-[var(--skin-r-card)] Tailwind class is kept as a fallback
+            // for Tailwind-aware CSS inspection; the definitive radius is in rowStyle.
             [
               "skin-row-inset",
               "transition-[transform,background] duration-[280ms] ease-out",
               "hover:[transform:translateX(3px)_scale(1.004)]",
-              "rounded-[var(--skin-r-card,16px)]",
             ].join(" ")
-          : skin === "quiet"
-          ? // Quiet line: flat dividers, no hover lift (balanced 1.0× motion profile).
+          : rowTreatment === "line"
+          ? // Line: flat dividers, no hover lift (balanced 1.0× motion profile).
             // Only bg changes on hover — no translateX/scale transform.
             [
               "skin-row-line",
               "border-b",
               "transition-[border-color,background] duration-[280ms] ease-out",
             ].join(" ")
-          : // Classic (default): current Liquid Glass look — unchanged.
+          : // Card (default / classic): current Liquid Glass look — unchanged.
             // Smooth hover lift: translateX(5px)+scale per styleguide §history-item.
             // transition covers transform + border-color + background (matching SG .28s spring).
             [
@@ -550,13 +571,13 @@ const HistoryRow = React.memo(function HistoryRow({
         // amber left edge; bg-ide-warningDim (no opacity modifier) at its native
         // 0.10 alpha is visible without overwhelming.
         // 8qzb: pinned rows use badge-warning (#D9A343) for left edge + tint.
-        // Vapor inset: skip border-b on pinned (inset rows are self-contained cards).
+        // Inset rows: skip border-b on pinned (inset rows are self-contained cards).
         entry.pinned
-          ? skin === "vapor"
+          ? rowTreatment === "inset"
             ? "border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10"
             : "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10 hover:border-b-ide-accent/35"
-          : skin === "vapor"
-          ? "" // vapor inset rows have no explicit border-b
+          : rowTreatment === "inset"
+          ? "" // inset rows have no explicit border-b — spacing is via marginBottom in rowStyle
           : "border-b border-ide-divider/50 hover:border-b-ide-accent/35",
         multiSelected
           ? "bg-ide-selection text-ide-text"
@@ -918,8 +939,10 @@ function BulkActionBar({
       <span className="text-ide-divider">|</span>
 
       {/* Select-all toggle */}
+      {/* kp6f: borderRadius uses var(--skin-r-ctl) inline instead of rounded-ide class */}
       <button
-        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
         onClick={allSelected ? onClearSelection : onSelectAll}
         disabled={isBusy}
       >
@@ -928,7 +951,8 @@ function BulkActionBar({
 
       {/* Bulk actions */}
       <button
-        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
         onClick={onBulkCopy}
         disabled={isBusy}
         title="Copy selected items (concatenated with newlines)"
@@ -936,21 +960,24 @@ function BulkActionBar({
         Copy
       </button>
       <button
-        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
         onClick={onBulkPin}
         disabled={isBusy}
       >
         Pin
       </button>
       <button
-        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
+        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
         onClick={onBulkUnpin}
         disabled={isBusy}
       >
         Unpin
       </button>
       <button
-        className="rounded-ide border border-ide-danger/40 bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-danger hover:bg-ide-hover disabled:opacity-50"
+        className="border border-ide-danger/40 bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-danger hover:bg-ide-hover disabled:opacity-50"
+        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
         onClick={onBulkDelete}
         disabled={isBusy}
       >
@@ -962,7 +989,8 @@ function BulkActionBar({
 
       {/* Clear selection */}
       <button
-        className="rounded-ide border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover disabled:opacity-50"
+        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover disabled:opacity-50"
+        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
         onClick={onClearSelection}
         disabled={isBusy}
         title="Clear selection (Escape)"
@@ -1391,13 +1419,15 @@ function VirtualList({
         {/* §8 selection glide: a single absolutely-positioned layer that animates
             its top/height to the selected row(s). Rendered before the rows so it
             sits behind them; rows carry no selection background of their own. */}
+        {/* kp6f: rounded-ide removed from glide div; borderRadius via inline style using card token */}
         {glideStyle && (
           <div
             aria-hidden
-            className="pointer-events-none absolute left-0 right-0 rounded-ide bg-ide-selection motion-reduce:transition-none"
+            className="pointer-events-none absolute left-0 right-0 bg-ide-selection motion-reduce:transition-none"
             style={{
               top: glideStyle.top,
               height: glideStyle.height,
+              borderRadius: "var(--skin-r-card, 14px)",
               transition:
                 "top 130ms cubic-bezier(.2,0,0,1), height 130ms cubic-bezier(.2,0,0,1)",
             }}
@@ -2443,24 +2473,28 @@ export function HistoryView() {
         aria-label="Add file to clipboard history"
         tabIndex={-1}
       />
+      {/* kp6f: borderRadius uses var(--skin-r-ctl) inline instead of rounded-ide class */}
       <button
         type="button"
         title="Add file to clipboard history"
         aria-label="Add file"
         onClick={() => fileInputRef.current?.click()}
-        className="flex h-7 w-7 items-center justify-center rounded-ide border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text"
+        className="flex h-7 w-7 items-center justify-center border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text"
+        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
       >
         {/* Paperclip / attach icon */}
         <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M13.5 7.5 7 14a4.243 4.243 0 0 1-6-6l7-7a2.828 2.828 0 1 1 4 4L5.5 12A1.414 1.414 0 0 1 3.5 10L9 4.5" />
         </svg>
       </button>
-      {/* Device filter dropdown — only shown when more than one device is present */}
+      {/* Device filter dropdown — only shown when more than one device is present.
+          kp6f: borderRadius via var(--skin-r-ctl) inline instead of rounded-ide. */}
       {knownDeviceIds.length > 1 && (
         <select
           value={deviceFilter}
           onChange={(e) => setDeviceFilter(e.target.value)}
-          className="h-7 rounded-ide border border-ide-border bg-ide-elevated px-1.5 text-[11px] text-ide-text hover:bg-ide-hover cursor-pointer"
+          className="h-7 border border-ide-border bg-ide-elevated px-1.5 text-[11px] text-ide-text hover:bg-ide-hover cursor-pointer"
+          style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
           aria-label="Filter by device"
           title="Filter by origin device"
         >
@@ -2481,11 +2515,13 @@ export function HistoryView() {
           aria-label={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           onClick={() => setSortMode((m) => (m === "recency" ? "device" : "recency"))}
           className={[
-            "flex h-7 items-center gap-1 rounded-ide border px-2 text-[11px]",
+            // kp6f: removed rounded-ide; borderRadius applied via inline style
+            "flex h-7 items-center gap-1 border px-2 text-[11px]",
             sortMode === "device"
               ? "border-ide-accent/60 bg-ide-accent/10 text-ide-accent"
               : "border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text",
           ].join(" ")}
+          style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
         >
           {/* Simple sort icon — two lines of different widths */}
           <svg viewBox="0 0 14 12" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
@@ -2516,12 +2552,14 @@ export function HistoryView() {
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Filter…"
         className={[
-          "h-7 w-44 rounded-ide px-2 text-[12px]",
+          // kp6f: removed rounded-ide; borderRadius via inline style
+          "h-7 w-44 px-2 text-[12px]",
           "border border-ide-border bg-ide-elevated/80 text-ide-text placeholder:text-ide-faint",
           "transition-[border-color,box-shadow] duration-200 ease-out",
           "focus:outline-none focus:border-ide-accent/60",
           "focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--ide-accent)_18%,transparent)]",
         ].join(" ")}
+        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
       />
     </>
   );
@@ -2658,13 +2696,15 @@ export function HistoryView() {
             isBusy={bulkBusy}
           />
         )}
-        {/* W-C3: Vapor inset wrapper — adds row-gap spacing between inset rows.
-            The gap value maps to --skin-row-gap (3px for vapor). Classic/quiet
-            use no wrapper (rows are flush or divided by border-b directly). */}
+        {/* W-C3 / 10lk: Inset wrapper — adds padding around the VirtualList for inset rows.
+            Driven by rowTreatment token (not skin name) so a future skin with rowTreatment="inset"
+            gets the wrapper automatically. Per-row vertical gap is applied as marginBottom on each
+            row (o2o9 fix: flex gap on this wrapper is a no-op because VirtualList rows are
+            absolutely positioned). Classic/quiet (card/line) use no wrapper padding. */}
         <div
-          className={(skin ?? "classic") === "vapor" ? "skin-list-vapor flex-1 overflow-hidden" : "flex-1 overflow-hidden"}
-          style={(skin ?? "classic") === "vapor"
-            ? { display: "flex", flexDirection: "column", gap: "var(--skin-row-gap, 0px)", padding: "var(--skin-row-gap, 0px)" }
+          className={SKINS[skin ?? "classic"].rowTreatment === "inset" ? "skin-list-vapor flex-1 overflow-hidden" : "flex-1 overflow-hidden"}
+          style={SKINS[skin ?? "classic"].rowTreatment === "inset"
+            ? { padding: "var(--skin-row-gap, 0px)" }
             : {}}
         >
         <VirtualList
@@ -2808,7 +2848,8 @@ export function HistoryView() {
           aria-live="polite"
           style={{
             transform: "translateX(-50%)",
-            borderRadius: 10,
+            // kp6f: use skin card-radius token instead of hardcoded 10
+            borderRadius: "var(--skin-r-card, 10px)",
             padding: "6px 14px 6px 10px",
             display: "flex",
             alignItems: "center",
