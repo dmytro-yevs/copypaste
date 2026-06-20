@@ -633,12 +633,16 @@ fn build_ws_request(
 /// authenticates the channel with the caller's RLS identity.  An empty string
 /// disables per-user RLS (anonymous / anon-key-only access).
 ///
-/// # Row filter (P1 audit fix)
-/// When `user_id` is `Some`, a `"filter": "user_id=eq.{user_id}"` clause is
-/// added to the `postgres_changes` subscription.  Without it, the Realtime
-/// server delivers every row it can *see* before RLS is applied at the
-/// channel level, leaking cross-user rows into the event stream on permissive
-/// deployments.  Pass `None` only for anon-scoped / single-user setups.
+/// # Row filter (CopyPaste-nr2y — mandatory, defense-in-depth)
+/// The `user_id` filter `"user_id=eq.{user_id}"` is **always** included in the
+/// `postgres_changes` subscription.  Omitting it would mean the Realtime server
+/// could deliver cross-user rows into the event stream before server-side RLS
+/// applies them, leaking data on permissive or misconfigured deployments.
+///
+/// A missing `user_id` is therefore a **hard error** at the call site — callers
+/// must obtain the GoTrue user UUID before establishing the Realtime connection.
+/// See `run_session` which returns `SessionResult::ConnectError` when
+/// `config.user_id` is `None`.
 ///
 /// # Event filter
 /// Registers `event: "*"` so INSERT, UPDATE **and** DELETE changes are all
@@ -657,25 +661,16 @@ fn build_ws_request(
 ///   }
 /// }
 /// ```
-pub(crate) fn build_join_payload(user_jwt: &str, user_id: Option<&str>) -> serde_json::Value {
-    let filter_entry: serde_json::Value = if let Some(uid) = user_id {
-        serde_json::json!({
-            "event": "*",
-            "schema": "public",
-            "table": "clipboard_items",
-            "filter": format!("user_id=eq.{uid}")
-        })
-    } else {
-        serde_json::json!({
-            "event": "*",
-            "schema": "public",
-            "table": "clipboard_items"
-        })
-    };
+pub(crate) fn build_join_payload(user_jwt: &str, user_id: &str) -> serde_json::Value {
     serde_json::json!({
         "config": {
             "access_token": user_jwt,
-            "postgres_changes": [filter_entry]
+            "postgres_changes": [{
+                "event": "*",
+                "schema": "public",
+                "table": "clipboard_items",
+                "filter": format!("user_id=eq.{user_id}")
+            }]
         }
     })
 }
@@ -1117,8 +1112,23 @@ async fn run_session(
     //
     // Fix MED #3: build_join_payload registers event:"*" (INSERT + UPDATE +
     // DELETE) instead of INSERT-only, so cross-device UPDATE/DELETE are delivered.
+    //
+    // CopyPaste-nr2y (defense-in-depth): a missing user_id is a hard error —
+    // we must never silently subscribe without the row filter and rely solely on
+    // server-side RLS. Fail the session here; the connection_loop will back off
+    // and retry once the caller has populated `config.user_id`.
+    let user_id = match config.user_id.as_deref() {
+        Some(uid) => uid,
+        None => {
+            return SessionResult::ConnectError(
+                "user_id is required for the Realtime row filter (CopyPaste-nr2y): \
+                 set RealtimeConfig::user_id to the GoTrue user UUID before connecting"
+                    .into(),
+            )
+        }
+    };
     let current_jwt = config.user_jwt.read().await.clone();
-    let join_payload = build_join_payload(&current_jwt, config.user_id.as_deref());
+    let join_payload = build_join_payload(&current_jwt, user_id);
     let join_msg = PhoenixMessage {
         join_ref: Some("1".to_owned()),
         msg_ref: Some("1".to_owned()),
@@ -1927,7 +1937,9 @@ mod tests {
     #[test]
     fn build_join_payload_includes_bearer_token() {
         let jwt = "my.jwt.token";
-        let payload = build_join_payload(jwt, None);
+        let uid = "550e8400-e29b-41d4-a716-446655440000";
+        // CopyPaste-nr2y: user_id is now mandatory — pass a real UUID.
+        let payload = build_join_payload(jwt, uid);
         // The JWT must appear under config.access_token (Supabase Realtime v2 shape).
         let token_in_payload = payload
             .pointer("/config/access_token")
@@ -1942,7 +1954,9 @@ mod tests {
 
     #[test]
     fn build_join_payload_registers_all_events() {
-        let payload = build_join_payload("tok", None);
+        let uid = "550e8400-e29b-41d4-a716-446655440000";
+        // CopyPaste-nr2y: user_id is now mandatory — pass a real UUID.
+        let payload = build_join_payload("tok", uid);
         let payload_str = serde_json::to_string(&payload).unwrap();
         // event:"*" means INSERT + UPDATE + DELETE are all delivered.
         assert!(
@@ -1955,26 +1969,31 @@ mod tests {
         );
     }
 
+    /// CopyPaste-nr2y: the user_id filter is always mandatory.
+    /// build_join_payload always includes "user_id=eq.<uuid>" — a missing user_id
+    /// is rejected at the run_session level (hard error, not silently omitted).
     #[test]
-    fn build_join_payload_with_user_id_adds_filter() {
+    fn build_join_payload_always_includes_mandatory_user_id_filter() {
         let uid = "550e8400-e29b-41d4-a716-446655440000";
-        let payload = build_join_payload("tok", Some(uid));
+        let payload = build_join_payload("tok", uid);
         let payload_str = serde_json::to_string(&payload).unwrap();
-        // Filter clause must be present.
+        // Filter clause must always be present (defense-in-depth).
         assert!(
             payload_str.contains("user_id=eq."),
-            "join payload must contain user_id filter, got: {payload_str}"
+            "join payload must always contain user_id filter; got: {payload_str}"
         );
         assert!(
             payload_str.contains(uid),
-            "join payload must embed the user UUID in the filter, got: {payload_str}"
+            "join payload must embed the user UUID in the filter; got: {payload_str}"
         );
-        // Without user_id, no filter key.
-        let no_uid = build_join_payload("tok", None);
-        let no_uid_str = serde_json::to_string(&no_uid).unwrap();
-        assert!(
-            !no_uid_str.contains("filter"),
-            "join payload without user_id must not include a filter key, got: {no_uid_str}"
+        // Verify the filter is under the postgres_changes entry.
+        let filter = payload
+            .pointer("/config/postgres_changes/0/filter")
+            .and_then(|v| v.as_str());
+        assert_eq!(
+            filter,
+            Some("user_id=eq.550e8400-e29b-41d4-a716-446655440000"),
+            "filter must be at /config/postgres_changes/0/filter; got: {payload_str}"
         );
     }
 
