@@ -64,6 +64,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
@@ -103,6 +106,9 @@ import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.paletteIdeColors
 import com.copypaste.android.ui.theme.Skin
+import com.copypaste.android.ui.theme.SkinBackground
+import com.copypaste.android.ui.theme.LocalSkin
+import com.copypaste.android.ui.theme.skinTokens
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -330,6 +336,9 @@ fun SettingsScreen(
 
     // §1 aurora canvas backdrop — reacts live to the Display→Translucency toggle.
     val dark = isDarkTheme()
+    // CopyPaste-y94e: gate background canvas by skin so Vapor gets tint-blob and
+    // Quiet stays plain — mirrors DevicesScreen/AboutActivity three-way pattern.
+    val tok = skinTokens(LocalSkin.current)
 
     // ── Discard-changes confirmation dialog ──
     if (showDiscardDialog) {
@@ -376,11 +385,36 @@ fun SettingsScreen(
         onSaved()
     }
 
+    // CopyPaste-y94e: three-way background canvas driven by tok.background:
+    //   AURORA  (Classic) → animated aurora canvas (byte-identical to previous behaviour).
+    //   TINT_BLOB (Vapor) → static radial accent blob painted via drawBehind.
+    //   FLAT    (Quiet)   → no canvas; containerColor stays opaque c.bg.
+    val paintAurora   = tok.background == SkinBackground.AURORA    && translucency && paintCanvasBackdrop
+    val paintTintBlob = tok.background == SkinBackground.TINT_BLOB && translucency && paintCanvasBackdrop
+    val scaffoldModifier = when {
+        paintAurora -> modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+        paintTintBlob -> modifier.drawBehind {
+            val diag = kotlin.math.hypot(size.width, size.height)
+            drawRect(
+                brush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to c.accent.copy(alpha = tok.glow * 0.55f),
+                        0.65f to c.accent.copy(alpha = tok.glow * 0.12f),
+                        1.0f to androidx.compose.ui.graphics.Color.Transparent,
+                    ),
+                    center = Offset(size.width * 0.35f, size.height * 0.28f),
+                    radius = diag * 0.75f,
+                ),
+            )
+        }
+        else -> modifier
+    }
     Scaffold(
         // CopyPaste-7em1/1a61: pass paletteAurora so Settings screen uses the active palette's
         // aurora blobs instead of the hardcoded legacy aurora (matches HistoryActivity pattern).
-        modifier = if (translucency && paintCanvasBackdrop) modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else modifier,
-        containerColor = if (translucency) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        // CopyPaste-y94e: replaced inline ternary with three-way scaffoldModifier (skin-gated).
+        modifier = scaffoldModifier,
+        containerColor = if (translucency && tok.background != SkinBackground.FLAT) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_settings),
@@ -1701,24 +1735,30 @@ private fun IdeSegmentedControl(
     modifier: Modifier = Modifier,
 ) {
     val c = LocalIdeColors.current
-    // Outer container: mute@.18 fill + 0.5dp hairline border (RadiusControl = 9dp outer).
+    // CopyPaste-fiht: use skin-token corner radius so Quiet=7dp and Vapor=12dp
+    // replace the hardcoded 9dp (Classic only). tok.radiusControl is 9/7/12 per skin.
+    val tok = skinTokens(LocalSkin.current)
+    val outerShape = RoundedCornerShape(tok.radiusControl)
+    // Inner pill: outer radius - 2dp padding (mirrors web control's border-radius shrink).
+    val innerShape = RoundedCornerShape((tok.radiusControl - 2.dp).coerceAtLeast(0.dp))
+    // Outer container: mute@.18 fill + 0.5dp hairline border.
     // 2dp inner padding matches the web control's p-0.5 padding.
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .background(color = c.mute.copy(alpha = 0.18f), shape = RadiusControl)
-            .border(width = 0.5.dp, color = c.border, shape = RadiusControl)
+            .background(color = c.mute.copy(alpha = 0.18f), shape = outerShape)
+            .border(width = 0.5.dp, color = c.border, shape = outerShape)
             .padding(2.dp),
     ) {
         options.forEachIndexed { index, label ->
             val isSelected = index == selectedIndex
-            // Inner pill: 7dp radius (RadiusControl 9dp - 2dp padding = ~7dp per §4).
+            // Inner pill: tok.radiusControl - 2dp (skin-adaptive, per §4 shrink rule).
             // Selected → c.elevated fill; unselected → transparent over the track.
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .weight(1f)
-                    .clip(RoundedCornerShape(7.dp))
+                    .clip(innerShape)
                     .then(
                         if (isSelected) Modifier.background(c.elevated) else Modifier
                     )
