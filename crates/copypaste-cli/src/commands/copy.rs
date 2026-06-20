@@ -1,8 +1,25 @@
 use crate::commands::common::format_unix_ms;
 use crate::ipc::IpcClient;
 use anyhow::{anyhow, bail, Result};
-use copypaste_ipc::{METHOD_COPY, METHOD_LIST, METHOD_SEARCH};
+// CopyPaste-abg1: use the current IPC method names.
+// METHOD_COPY_ITEM is the up-to-date verb (returns richer response with
+// decrypted text). METHOD_COPY is the legacy alias; kept in copypaste-ipc
+// for back-compat but must not be used by new CLI code.
+use copypaste_ipc::methods::METHOD_COPY_ITEM;
+use copypaste_ipc::{METHOD_LIST, METHOD_SEARCH};
 use std::path::Path;
+
+/// Exit code used when the `copy` command is invoked with no mode.
+///
+/// CopyPaste-nmr0: must be distinct from every other CLI exit code:
+///   0 = success
+///   1 = runtime error (daemon failure, IPC error)
+///   2 = user aborted (`clear` confirmation declined — [`crate::commands::clear::ABORT_EXIT_CODE`])
+///   3 = bad usage (this constant)
+///
+/// Using 3 here prevents scripts from confusing "user said no to clear" (2)
+/// with "copy was invoked incorrectly" (3).
+pub const USAGE_EXIT_CODE: i32 = 3;
 
 /// Run the `copy` command.
 ///
@@ -40,11 +57,15 @@ pub fn run(
             eprintln!("copypaste copy: specify INDEX, --id <UUID>, --search <QUERY>, or --list");
             eprintln!("  copypaste copy 1          # copy most recent item");
             eprintln!("  copypaste copy --list     # show numbered history");
-            // CopyPaste-liaz: process::exit(2) is safe here — no Zeroizing<…>
-            // or secret material is live in this scope. Exit code 2 (distinct
-            // from 1=error) signals "bad usage" to shell callers; returning Err
-            // would lose the distinct code because main.rs always exits 1.
-            std::process::exit(2);
+            // CopyPaste-liaz: process::exit is safe here — no Zeroizing<…>
+            // or secret material is live in this scope.
+            //
+            // CopyPaste-nmr0: exit code 3 (USAGE_EXIT_CODE) is distinct from:
+            //   1 = generic runtime error (main.rs)
+            //   2 = clear abort (clear::ABORT_EXIT_CODE)
+            // Returning Err would lose the distinct code because main.rs always
+            // exits 1 on any Err.
+            std::process::exit(USAGE_EXIT_CODE);
         }
 
         // Unreachable: clap enforces conflicts_with_all
@@ -145,26 +166,31 @@ pub fn cmd_copy_by_search(socket_path: &Path, query: &str, limit: u64) -> Result
     cmd_copy_by_id(socket_path, uuid)
 }
 
-/// Send `copy` IPC for a known UUID.
+/// Send `copy_item` IPC for a known UUID.
+///
+/// CopyPaste-abg1: switched from the legacy `METHOD_COPY` to the current
+/// `METHOD_COPY_ITEM` verb. The response shape is richer (includes
+/// `decrypted_text`) but the CLI only needs `ok`; we forward the id to
+/// stdout unchanged.
 pub fn cmd_copy_by_id(socket_path: &Path, id: &str) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
         &IpcClient::next_id(),
-        METHOD_COPY,
+        METHOD_COPY_ITEM,
         serde_json::json!({"id": id}),
     );
     let resp = client.call(&req)?;
 
     if resp.ok {
         // Print id to stdout (pipe-friendly)
-        println!("{}", id);
-        eprintln!("Copied: {}", id);
+        println!("{id}");
+        eprintln!("Copied: {id}");
         Ok(())
     } else {
         let err = resp.error.as_deref().unwrap_or("unknown error");
         if err.contains("unknown method") {
             return Err(anyhow!(
-                "copy: daemon does not yet support this command (requires Phase 2a+)"
+                "copy: daemon does not support copy_item — update the daemon to v0.6+"
             ));
         }
         bail!("{err}");
@@ -213,6 +239,22 @@ mod tests {
         // Compile-time signature check — the complex fn-pointer type is intentional here.
         #[allow(clippy::type_complexity)]
         let _: fn(&Path, Option<u64>, Option<&str>, Option<&str>, bool, u64) -> Result<()> = run;
+    }
+
+    /// CopyPaste-nmr0: USAGE_EXIT_CODE must be distinct from every other
+    /// documented CLI exit code so scripts can branch on each case.
+    ///
+    /// Exit code table:
+    ///   0 = success
+    ///   1 = runtime error (daemon failure / IPC error, emitted by main.rs)
+    ///   2 = user aborted clear prompt (clear::ABORT_EXIT_CODE)
+    ///   3 = copy invoked with no mode (USAGE_EXIT_CODE, this constant)
+    #[test]
+    fn usage_exit_code_is_distinct_from_all_other_codes() {
+        use crate::commands::clear::ABORT_EXIT_CODE;
+        assert_ne!(USAGE_EXIT_CODE, 0, "must not be success");
+        assert_ne!(USAGE_EXIT_CODE, 1, "must not be generic error");
+        assert_ne!(USAGE_EXIT_CODE, ABORT_EXIT_CODE, "must not collide with clear abort");
     }
 
     // ── Unit: index validation ──────────────────────────────────────────
@@ -408,5 +450,46 @@ mod tests {
         );
         let items = fetch_history(&sock, 50).unwrap();
         assert!(items.is_empty());
+    }
+
+    /// CopyPaste-abg1: cmd_copy_by_id must send "copy_item" on the wire,
+    /// NOT the legacy "copy" method. We capture the raw request in the mock
+    /// server and assert on the "method" field.
+    #[test]
+    fn cmd_copy_by_id_uses_copy_item_method() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("method_check.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let cap = Arc::clone(&captured);
+
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = String::new();
+                std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut buf)
+                    .unwrap();
+                *cap.lock().unwrap() = Some(buf.trim().to_string());
+                // Send a success response that echoes the request id.
+                let req_id = serde_json::from_str::<serde_json::Value>(buf.trim())
+                    .ok()
+                    .and_then(|v| v["id"].as_str().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "1".to_string());
+                let resp = format!(r#"{{"id":"{req_id}","ok":true,"data":{{"id":"test-uuid","found":true}}}}"#);
+                stream.write_all(resp.as_bytes()).unwrap();
+                stream.write_all(b"\n").unwrap();
+            }
+        });
+
+        let _ = cmd_copy_by_id(&sock, "test-uuid");
+
+        let raw = captured.lock().unwrap().clone().unwrap_or_default();
+        let v: serde_json::Value = serde_json::from_str(&raw).expect("captured request must be JSON");
+        assert_eq!(
+            v["method"].as_str(),
+            Some("copy_item"),
+            "CopyPaste-abg1: must send 'copy_item', not 'copy' — got: {raw}"
+        );
     }
 }

@@ -34,6 +34,12 @@ enum Commands {
     Delete {
         /// Item ID (UUID)
         id: String,
+        /// Skip the interactive confirmation prompt
+        #[arg(long, short)]
+        force: bool,
+        /// Print what would be deleted without actually deleting it
+        #[arg(long)]
+        dry_run: bool,
     },
     /// Search clipboard history
     Search {
@@ -235,7 +241,9 @@ fn main() {
         Commands::List { limit, offset } => commands::list::run(&socket, limit, offset),
         Commands::Status { json } => commands::status::run(&socket, json),
         Commands::Count => commands::count::run(&socket),
-        Commands::Delete { id } => commands::delete::run(&socket, &id),
+        Commands::Delete { id, force, dry_run } => {
+            commands::delete::run(&socket, &id, force, dry_run)
+        }
         Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
         Commands::Copy {
             index,
