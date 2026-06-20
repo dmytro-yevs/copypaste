@@ -970,6 +970,155 @@ class SyncManager(
         SyncContext(client = client, syncKey = syncKeyBytes, bearer = bearer)
     }
 
+    // ── Outbound mutation queue producer (CopyPaste-0qpn) ────────────────────
+
+    /**
+     * Drain the [OutboundMutationQueue] and push each pending mutation over every
+     * configured transport (relay, Supabase).
+     *
+     * ## What this fixes
+     *
+     * UI mutations (pin/unpin/reorder/delete/bulk-delete/clear) previously only
+     * wrote local SharedPreferences. No sync producer fired for them, so peers
+     * never received the changes. This producer pushes each queued mutation as
+     * a tombstone (OP_DELETE/OP_BULK_DELETE/OP_CLEAR) or a pin-state envelope
+     * (OP_PIN/OP_UNPIN/OP_REORDER) to every active transport.
+     *
+     * ## Tombstones
+     *
+     * Delete operations push a tombstone envelope: `deleted=true`, `ct_b64=""`,
+     * with the bumped `lamport_ts`. Receivers apply it via their existing
+     * `applyInboundTombstoneWithLww` path (relay SSE + Supabase poll + P2P).
+     *
+     * ## Pin mutations
+     *
+     * Pin/reorder push a live item envelope whose `pinned` and `pin_order` fields
+     * carry the authoritative state. We cannot re-encrypt the payload here (no
+     * decryption key in the SyncManager), so we read the existing cloud-encrypted
+     * form by re-using [pushToRelay] / [pushToSupabase] with a sentinel that
+     * pushes a zero-byte plaintext when `pinned=true` but signals only metadata.
+     *
+     * Design choice: for pin-only mutations we push a relay/Supabase tombstone
+     * with `deleted=false`, `pinned=<state>`, `pin_order=<order>`, and an
+     * EMPTY ct_b64. Receivers check `deleted` first; a non-deleted envelope with
+     * empty ct_b64 is treated as a pin-metadata-only update — the receiver's
+     * `applyAuthoritativePinState` handles this without overwriting the item body.
+     *
+     * Supabase does not have a direct "update pin" column path from this layer yet
+     * (the SupabaseClient.push only creates rows). For the Supabase path we skip
+     * pin-only mutations — the NEXT fresh-capture push will carry the updated pin
+     * state as part of a full push. Tombstones (deletes) ARE pushed to Supabase
+     * via the `deleted=true` Supabase row update path (not yet implemented here —
+     * see note below). For now, tombstones push to relay; Supabase support for
+     * UI-mutation tombstones is the remaining gap.
+     *
+     * ## Per-transport behaviour
+     *
+     * | Op         | Relay | Supabase |
+     * |------------|-------|----------|
+     * | DELETE     | yes   | gap†     |
+     * | BULK_DELETE| yes   | gap†     |
+     * | CLEAR      | yes   | gap†     |
+     * | PIN        | yes   | gap†     |
+     * | UNPIN      | yes   | gap†     |
+     * | REORDER    | yes   | gap†     |
+     *
+     * † Supabase tombstone/pin-update push requires a new SupabaseClient.pushTombstone
+     * method (not yet implemented). Relay covers the majority of the use case.
+     *
+     * ## Idempotency
+     *
+     * Records are removed from the queue only after a successful push. A failed
+     * push leaves the record in the queue for retry on the next drain call.
+     * Receivers dedup via LWW on item_id + lamport_ts.
+     *
+     * @param context        Android context for [OutboundMutationQueue] access.
+     * @param repository     Used only to resolve the current pin state for validation.
+     * @return               Number of records successfully delivered.
+     */
+    @Suppress("UNUSED_PARAMETER") // repository reserved for future Supabase tombstone push
+    suspend fun drainOutboundMutationQueue(
+        context: android.content.Context,
+        repository: ClipboardRepository,
+    ): Int = withContext(Dispatchers.IO) {
+        val s = settings ?: run {
+            Log.w(TAG, "drainOutboundMutationQueue: no Settings instance provided")
+            return@withContext 0
+        }
+
+        val pending = OutboundMutationQueue.peekQueue(context)
+        if (pending.isEmpty()) return@withContext 0
+
+        Log.d(TAG, "drainOutboundMutationQueue: draining ${pending.size} pending mutation(s)")
+
+        val delivered = mutableSetOf<Pair<String, Long>>()
+
+        for (rec in pending) {
+            val isDelete = rec.op == OutboundMutationQueue.OP_DELETE ||
+                rec.op == OutboundMutationQueue.OP_BULK_DELETE ||
+                rec.op == OutboundMutationQueue.OP_CLEAR
+            // isPinOp reserved for the future Supabase pin-update transport.
+            @Suppress("UNUSED_VARIABLE")
+            val isPinOp = rec.op == OutboundMutationQueue.OP_PIN ||
+                rec.op == OutboundMutationQueue.OP_UNPIN ||
+                rec.op == OutboundMutationQueue.OP_REORDER
+
+            var pushed = false
+
+            // ── Relay transport ──────────────────────────────────────────────
+            if (s.isRelayConfigured) {
+                try {
+                    val relayOk = pushToRelay(
+                        itemId = rec.itemId,
+                        // Tombstones and pin-only ops carry empty plaintext.
+                        plaintext = ByteArray(0),
+                        contentType = "text",
+                        lamportTs = rec.lamportTs,
+                        deleted = isDelete,
+                        pinned = rec.pinned,
+                        pinOrder = rec.pinOrder,
+                    )
+                    if (relayOk) {
+                        pushed = true
+                        Log.d(
+                            TAG,
+                            "drainOutboundMutationQueue: relay ok ${rec.op} " +
+                                "itemId=${rec.itemId.take(8)}… lamport=${rec.lamportTs}",
+                        )
+                    } else {
+                        Log.w(
+                            TAG,
+                            "drainOutboundMutationQueue: relay push failed for ${rec.op} " +
+                                "itemId=${rec.itemId.take(8)}…",
+                        )
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "drainOutboundMutationQueue: relay exception for ${rec.op}: ${e.message}")
+                }
+            }
+
+            // ── Supabase transport (tombstones only via existing delete path) ──
+            // Supabase tombstone push is not yet implemented in SupabaseClient
+            // (requires a new pushTombstone API). This is the remaining gap.
+            // Pin-state-only updates also need a new pushPinUpdate API.
+            // TODO(CopyPaste-0qpn): implement SupabaseClient.pushTombstone and wire it here.
+
+            if (pushed) {
+                delivered.add(rec.itemId to rec.lamportTs)
+            }
+        }
+
+        if (delivered.isNotEmpty()) {
+            OutboundMutationQueue.removeRecords(context, delivered)
+        }
+
+        Log.d(
+            TAG,
+            "drainOutboundMutationQueue: pushed ${delivered.size}/${pending.size} records",
+        )
+        delivered.size
+    }
+
     suspend fun pollFromSupabase(
         sinceWallTime: Long = 0L,
         sinceId: String = "",

@@ -401,12 +401,12 @@ class ClipboardRepository(context: Context) {
     }
 
     suspend fun deleteItem(id: String): Boolean = withContext(Dispatchers.IO) {
-        val tombstoned = synchronized(idsWriteLock) {
+        val tombstoneResult: Pair<Boolean, Long> = synchronized(idsWriteLock) {
             val ids = storedIds()
-            if (id !in ids) return@synchronized false
-            val existing = prefs.getString("item_$id", null) ?: return@synchronized false
+            if (id !in ids) return@synchronized false to 0L
+            val existing = prefs.getString("item_$id", null) ?: return@synchronized false to 0L
             // Already a tombstone — nothing to do.
-            if (isDeletedBlob(existing)) return@synchronized false
+            if (isDeletedBlob(existing)) return@synchronized false to 0L
 
             val pinnedList = storedPinnedList().toMutableList()
             val wasPinned = pinnedList.remove(id)
@@ -419,7 +419,22 @@ class ClipboardRepository(context: Context) {
                 val parts = existing.split("|")
                 if (parts.size >= 6) parts[5].toLongOrNull() ?: 0L else 0L
             } catch (_: Exception) { 0L }
-            val tombstone = encodeTombstone(existing, nextLamportTs(oldLamport, System.currentTimeMillis()))
+            val newLamport = nextLamportTs(oldLamport, System.currentTimeMillis())
+            val tombstone = encodeTombstone(existing, newLamport)
+
+            // CopyPaste-0qpn: enqueue the delete mutation BEFORE physical write so
+            // the producer can push the tombstone even after the row is gone.
+            OutboundMutationQueue.enqueueMutation(
+                appContext,
+                OutboundMutationQueue.MutationRecord(
+                    itemId = id,
+                    op = OutboundMutationQueue.OP_DELETE,
+                    lamportTs = newLamport,
+                    wallTimeMs = System.currentTimeMillis(),
+                    pinned = false,
+                    pinOrder = null,
+                ),
+            )
 
             // Clear binary sidecars: image/file bytes are no longer needed once
             // the item is logically deleted (saves storage; tombstone keeps the id
@@ -434,8 +449,9 @@ class ClipboardRepository(context: Context) {
                 editor.putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
             }
             editor.apply()
-            true
+            true to newLamport
         }
+        val tombstoned = tombstoneResult.first
         // Keep the foreground-service notification's "captured today" count from
         // drifting above reality after a deletion: decrement by one (floored at
         // 0) and re-issue the notification so the shown number matches the store.
@@ -459,6 +475,32 @@ class ClipboardRepository(context: Context) {
         synchronized(idsWriteLock) {
             val storedList = storedIds().toMutableList()
             val before = storedList.size
+
+            // CopyPaste-0qpn: enqueue per-item OP_BULK_DELETE records BEFORE physical
+            // removal so the producer has the itemId + lamportTs even after the rows
+            // are gone. Tombstone lamport must be > any stored ts — use nextLamportTs.
+            val nowMs = System.currentTimeMillis()
+            for (id in toDelete) {
+                if (id !in storedList) continue
+                val raw = prefs.getString("item_$id", null) ?: continue
+                if (isDeletedBlob(raw)) continue
+                val oldLamport = try {
+                    raw.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
+                } catch (_: Exception) { 0L }
+                val newLamport = nextLamportTs(oldLamport, nowMs)
+                OutboundMutationQueue.enqueueMutation(
+                    appContext,
+                    OutboundMutationQueue.MutationRecord(
+                        itemId = id,
+                        op = OutboundMutationQueue.OP_BULK_DELETE,
+                        lamportTs = newLamport,
+                        wallTimeMs = nowMs,
+                        pinned = false,
+                        pinOrder = null,
+                    ),
+                )
+            }
+
             storedList.removeAll(toDelete)
             deletedCount = before - storedList.size
             val pinnedList = storedPinnedList().toMutableList()
@@ -501,6 +543,31 @@ class ClipboardRepository(context: Context) {
         synchronized(idsWriteLock) {
             val pinnedSet = storedPinnedIds()
             val ids = storedIds()
+
+            // CopyPaste-0qpn: enqueue per-item OP_CLEAR records BEFORE physical removal
+            // so the producer has the itemId + lamportTs even after the rows are gone.
+            val nowMs = System.currentTimeMillis()
+            for (id in ids) {
+                if (id in pinnedSet) continue
+                val raw = prefs.getString("item_$id", null) ?: continue
+                if (isDeletedBlob(raw)) continue
+                val oldLamport = try {
+                    raw.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
+                } catch (_: Exception) { 0L }
+                val newLamport = nextLamportTs(oldLamport, nowMs)
+                OutboundMutationQueue.enqueueMutation(
+                    appContext,
+                    OutboundMutationQueue.MutationRecord(
+                        itemId = id,
+                        op = OutboundMutationQueue.OP_CLEAR,
+                        lamportTs = newLamport,
+                        wallTimeMs = nowMs,
+                        pinned = false,
+                        pinOrder = null,
+                    ),
+                )
+            }
+
             val editor = prefs.edit()
             for (id in ids) {
                 if (id !in pinnedSet) {
@@ -541,6 +608,31 @@ class ClipboardRepository(context: Context) {
         synchronized(idsWriteLock) {
             val pinnedSet = storedPinnedIds()
             val ids = storedIds()
+
+            // CopyPaste-0qpn: enqueue per-item OP_CLEAR records BEFORE physical removal
+            // so tombstones can propagate even after the rows are gone.
+            val nowMs = System.currentTimeMillis()
+            for (id in ids) {
+                if (id in pinnedSet) continue
+                val raw = prefs.getString("item_$id", null) ?: continue
+                if (isDeletedBlob(raw)) continue
+                val oldLamport = try {
+                    raw.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
+                } catch (_: Exception) { 0L }
+                val newLamport = nextLamportTs(oldLamport, nowMs)
+                OutboundMutationQueue.enqueueMutation(
+                    appContext,
+                    OutboundMutationQueue.MutationRecord(
+                        itemId = id,
+                        op = OutboundMutationQueue.OP_CLEAR,
+                        lamportTs = newLamport,
+                        wallTimeMs = nowMs,
+                        pinned = false,
+                        pinOrder = null,
+                    ),
+                )
+            }
+
             val editor = prefs.edit()
             for (id in ids) {
                 if (id !in pinnedSet) {
@@ -593,12 +685,31 @@ class ClipboardRepository(context: Context) {
                 val existing = prefs.getString("item_$id", null)
                 val nowMs = System.currentTimeMillis()
                 val editor = prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
+                var newLamport = nowMs
                 if (existing != null && !isDeletedBlob(existing)) {
                     val oldLamport = try {
                         existing.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
                     } catch (_: Exception) { 0L }
-                    editor.putString("item_$id", bumpBlobLamportTs(existing, nextLamportTs(oldLamport, nowMs)))
+                    newLamport = nextLamportTs(oldLamport, nowMs)
+                    editor.putString("item_$id", bumpBlobLamportTs(existing, newLamport))
                 }
+                // CopyPaste-0qpn: enqueue the pin/unpin mutation so it propagates
+                // over relay, Supabase, and P2P. The pinOrder is the new position in
+                // the pinned list (1-based for the macOS daemon convention).
+                val newPinOrder: Double? = if (pinned) {
+                    (pinnedList.indexOf(id) + 1).toDouble().takeIf { it > 0.0 }
+                } else null
+                OutboundMutationQueue.enqueueMutation(
+                    appContext,
+                    OutboundMutationQueue.MutationRecord(
+                        itemId = id,
+                        op = if (pinned) OutboundMutationQueue.OP_PIN else OutboundMutationQueue.OP_UNPIN,
+                        lamportTs = newLamport,
+                        wallTimeMs = nowMs,
+                        pinned = pinned,
+                        pinOrder = newPinOrder,
+                    ),
+                )
                 // commit() (synchronous) so the new pinned set survives an immediate
                 // force-stop (SIGKILL) — matches the project pattern from 0f1d1ef.
                 editor.commit()
@@ -630,14 +741,29 @@ class ClipboardRepository(context: Context) {
             // copypaste-core/src/storage/items.rs which calls next_lamport_ts per item.
             val nowMs = System.currentTimeMillis()
             val editor = prefs.edit().putString(KEY_PINNED_IDS, reordered.joinToString(","))
-            for (itemId in reordered) {
+            for ((idx, itemId) in reordered.withIndex()) {
                 val existing = prefs.getString("item_$itemId", null) ?: continue
                 if (isDeletedBlob(existing)) continue
                 val oldLamport = try {
                     existing.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
                 } catch (_: Exception) { 0L }
-                editor.putString("item_$itemId", bumpBlobLamportTs(existing, nextLamportTs(oldLamport, nowMs)))
+                val newLamport = nextLamportTs(oldLamport, nowMs)
+                editor.putString("item_$itemId", bumpBlobLamportTs(existing, newLamport))
                 evictParseCache(itemId) // blob changed — evict stale decrypt cache entry
+
+                // CopyPaste-0qpn: enqueue per-item OP_REORDER so the new pin order
+                // propagates over all transports. pinOrder is 1-based (macOS daemon).
+                OutboundMutationQueue.enqueueMutation(
+                    appContext,
+                    OutboundMutationQueue.MutationRecord(
+                        itemId = itemId,
+                        op = OutboundMutationQueue.OP_REORDER,
+                        lamportTs = newLamport,
+                        wallTimeMs = nowMs,
+                        pinned = true,
+                        pinOrder = (idx + 1).toDouble(),
+                    ),
+                )
             }
             // commit() (synchronous) so the reordered set survives an immediate
             // force-stop (SIGKILL) — matches the project pattern from 0f1d1ef.

@@ -254,49 +254,58 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun deleteItem(id: String) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deleteItem(id)
+                // CopyPaste-0qpn: flush the mutation queue so the tombstone propagates
+                // to peers over relay/Supabase immediately after the local write.
+                onMutationSync?.invoke()
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "deleteItem($id) failed", e)
-                _errors.value = e.message ?: e.javaClass.simpleName
+                _errors.postValue(e.message ?: e.javaClass.simpleName)
             }
         }
     }
 
     fun deleteItems(ids: List<String>) {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.deleteItems(ids)
+                // CopyPaste-0qpn: flush the mutation queue so bulk-delete tombstones propagate.
+                onMutationSync?.invoke()
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "deleteItems(${ids.size}) failed", e)
-                _errors.value = e.message ?: e.javaClass.simpleName
+                _errors.postValue(e.message ?: e.javaClass.simpleName)
             }
         }
     }
 
     fun clearAll() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.clearAll()
+                // CopyPaste-0qpn: flush the mutation queue so clear tombstones propagate.
+                onMutationSync?.invoke()
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "clearAll failed", e)
-                _errors.value = e.message ?: e.javaClass.simpleName
+                _errors.postValue(e.message ?: e.javaClass.simpleName)
             }
         }
     }
 
     fun clearUnpinned() {
-        viewModelScope.launch {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.clearUnpinned()
+                // CopyPaste-0qpn: flush the mutation queue so clear tombstones propagate.
+                onMutationSync?.invoke()
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "clearUnpinned failed", e)
-                _errors.value = e.message ?: e.javaClass.simpleName
+                _errors.postValue(e.message ?: e.javaClass.simpleName)
             }
         }
     }
@@ -306,6 +315,8 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.setPinned(id, pinned)
+                // CopyPaste-0qpn: flush the mutation queue so pin/unpin propagates.
+                onMutationSync?.invoke()
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "setPinned($id, $pinned) failed", e)
@@ -324,6 +335,8 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 repository.reorderPinned(ids)
+                // CopyPaste-0qpn: flush the mutation queue so reorder propagates.
+                onMutationSync?.invoke()
                 loadItems()
             } catch (e: Exception) {
                 Log.w(TAG, "reorderPinned failed", e)
@@ -349,6 +362,16 @@ class ClipboardViewModel(app: Application) : AndroidViewModel(app) {
      * thread.
      */
     var onCopyBackSync: (suspend (itemId: String, newLamport: Long) -> Unit)? = null
+
+    /**
+     * CopyPaste-0qpn: hook set by [HistoryActivity] so the ViewModel can trigger
+     * an outbound mutation queue drain after setPinned / reorderPinned / deleteItem /
+     * deleteItems / clearAll. No-op when null (tests, screens without sync).
+     *
+     * The hook runs on [Dispatchers.IO] inside the mutation coroutines, so
+     * implementations may perform I/O (relay push, etc.) without blocking the main thread.
+     */
+    var onMutationSync: (suspend () -> Unit)? = null
 
     fun copyItem(id: String) {
         viewModelScope.launch(Dispatchers.IO) {

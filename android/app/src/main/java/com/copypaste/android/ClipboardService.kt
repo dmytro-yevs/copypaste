@@ -196,6 +196,16 @@ class ClipboardService : Service() {
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         ensureChannel(this)
         settings.observe(prefsListener)
+
+        // CopyPaste-0qpn: register the mutation drain hook so ClipboardViewModel
+        // can trigger drainOutboundMutationQueue via requestMutationQueueDrain.
+        // Captures references by value (no lambda leaks after onDestroy clears it).
+        val drainSyncManager = syncManager
+        val drainRepo = repository
+        val drainContext: android.content.Context = applicationContext
+        mutationDrainHook = {
+            drainSyncManager.drainOutboundMutationQueue(drainContext, drainRepo)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -695,6 +705,9 @@ class ClipboardService : Service() {
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         settings.stopObserving(prefsListener)
         removeCaptureOverlay()
+        // CopyPaste-0qpn: clear the mutation drain hook so it does not hold a
+        // reference to a destroyed service's scope/resources.
+        mutationDrainHook = null
         scope.cancel()
         super.onDestroy()
     }
@@ -1602,6 +1615,52 @@ class ClipboardService : Service() {
          *  - Body: "<N> items captured today" / "Capture paused..."
          *  - Actions: Pause/Resume (toggle), Open (launch MainActivity)
          */
+        // ── CopyPaste-0qpn: outbound mutation queue drain ────────────────────
+        //
+        // ClipboardViewModel.onMutationSync calls requestMutationQueueDrain so pin/
+        // unpin/reorder/delete/clear propagate over relay + Supabase. The active
+        // service instance registers its scope + resources here at onCreate; the
+        // hook is cleared on onDestroy. Process-wide @Volatile so the hook is visible
+        // to the main-thread ViewModel coroutines.
+
+        /**
+         * Optional hook: set to the active service's drain function at [onCreate],
+         * cleared at [onDestroy]. Callers invoke via [requestMutationQueueDrain].
+         * Null when the FGS is not running (ViewModel falls back to a no-op).
+         */
+        @Volatile
+        private var mutationDrainHook: (suspend () -> Unit)? = null
+
+        /**
+         * Request that the active [ClipboardService] drain [OutboundMutationQueue].
+         *
+         * Called by [ClipboardViewModel.onMutationSync] after every UI mutation.
+         * Safe to call from any thread. No-op when the FGS is not running (the
+         * queue remains durable and will be drained on next service start).
+         *
+         * The actual drain ([SyncManager.drainOutboundMutationQueue]) runs on the
+         * service's IO scope so it cannot block the ViewModel coroutine.
+         */
+        fun requestMutationQueueDrain() {
+            // Cannot call a suspend fun directly here; the hook is a no-arg lambda that
+            // launches the drain on the service's existing IO scope internally.
+            val hook = mutationDrainHook ?: run {
+                Log.d(TAG, "requestMutationQueueDrain: FGS not running — queue persisted for later")
+                return
+            }
+            // The hook itself launches on a dedicated IO scope (non-blocking fire-and-forget).
+            // Using a daemon CoroutineScope (not GlobalScope) so the drain does not keep the
+            // process alive past the service lifecycle. The drain is idempotent and bounded.
+            @Suppress("OPT_IN_USAGE") // explicit opt-in: bounded work, not a long-running coroutine
+            kotlinx.coroutines.MainScope().launch(kotlinx.coroutines.Dispatchers.IO) {
+                try {
+                    hook()
+                } catch (e: Exception) {
+                    Log.w(TAG, "requestMutationQueueDrain: hook failed: ${e.message}")
+                }
+            }
+        }
+
         fun buildNotification(context: Context): Notification {
             ensureChannel(context)
             val settings = Settings(context)

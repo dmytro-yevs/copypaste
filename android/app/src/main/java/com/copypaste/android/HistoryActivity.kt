@@ -238,6 +238,15 @@ class HistoryActivity : ComponentActivity() {
             WindowManager.LayoutParams.FLAG_SECURE,
         )
         enableEdgeToEdge()
+
+        // CopyPaste-0qpn: wire the mutation sync hook so pin/unpin/reorder/delete/clear
+        // operations propagate to peers over relay + Supabase. Delegates to
+        // ClipboardService.requestMutationQueueDrain which fires a drain on the service's
+        // IO scope (non-blocking, fire-and-forget). Hook is a no-op when FGS is not running.
+        viewModel.onMutationSync = {
+            ClipboardService.requestMutationQueueDrain()
+        }
+
         setContent {
             CopyPasteTheme {
                 HistoryScreen(
