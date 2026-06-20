@@ -4030,6 +4030,11 @@ mod tests {
              not silently reset to false (capture ON)"
         );
 
+        // Explicitly release the first lock before acquiring it again for the
+        // second scenario. `std::sync::Mutex` is NOT reentrant — holding `_guard`
+        // while calling `.lock()` below would deadlock the current thread.
+        drop(_guard);
+
         // Also verify the inverse: absent flag file (first-ever run or cleared)
         // correctly defaults to false (capture ON is the correct default for a
         // fresh install, not for a return from private mode).

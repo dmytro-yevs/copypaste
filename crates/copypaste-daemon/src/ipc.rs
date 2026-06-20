@@ -75,6 +75,19 @@ const MAX_PAGE: usize = 1000;
 /// we round-trip today; bumping this requires re-evaluating SQLite blob limits.
 const MAX_IMPORT_ITEM_BYTES: usize = 4 * 1024 * 1024;
 
+/// Maximum number of simultaneously-active IPC connections (CopyPaste-6ot5).
+///
+/// A tokio Semaphore with this many permits is held by the accept loop.
+/// When a new connection arrives, the loop does a non-blocking `try_acquire`
+/// (never blocking the accept path). The `OwnedSemaphorePermit` is moved into
+/// the spawned connection task and dropped when the task completes, so the slot
+/// is reclaimed promptly. Excess connections receive an immediate OS-level close
+/// (the accept loop drops the `UnixStream`) instead of silently queueing forever.
+///
+/// 64 allows generous concurrent tooling (CLI, UI, sync) while bounding
+/// unbounded resource growth from a buggy or hostile client.
+const MAX_CONCURRENT_CONNECTIONS: usize = 64;
+
 /// Error code returned when an IPC method is called before the server's
 /// backing state (database, etc.) has finished initializing. Clients should
 /// back off and retry rather than treat this as a hard failure.
@@ -1412,6 +1425,15 @@ pub struct IpcServer {
     /// trivial clone/replace with no `.await`.
     #[cfg(not(target_os = "macos"))]
     in_memory_cloud_password: Arc<std::sync::Mutex<Option<zeroize::Zeroizing<String>>>>,
+
+    /// Semaphore that bounds the number of simultaneously-active IPC connections
+    /// (CopyPaste-6ot5). Each accepted connection acquires one permit via
+    /// `try_acquire_owned` (non-blocking); the permit is moved into the spawned
+    /// task and dropped on task completion. When all permits are taken, the
+    /// accept loop drops the incoming `UnixStream` immediately rather than
+    /// queueing or blocking. `Arc`-wrapped so it can be shared with the spawned
+    /// connection tasks without lifetime issues.
+    conn_semaphore: Arc<tokio::sync::Semaphore>,
 }
 
 /// Wire-serialisable peer event record returned by `poll_peer_events`.
@@ -1698,6 +1720,8 @@ impl IpcServer {
             // on non-macOS platforms where the Keychain is unavailable.
             #[cfg(not(target_os = "macos"))]
             in_memory_cloud_password: Arc::new(std::sync::Mutex::new(None)),
+            // CopyPaste-6ot5: start with the full connection cap available.
+            conn_semaphore: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CONNECTIONS)),
         }
     }
 
@@ -2093,8 +2117,10 @@ impl IpcServer {
                     }
                 }
                 crate::keychain::signing::KeyBackend::Keychain => {
-                    use security_framework::passwords::set_generic_password;
-                    if let Err(e) = set_generic_password(
+                    // CopyPaste-nkro: use the locked-down write path so the
+                    // cloud-sync key is stored with ThisDeviceOnly + no iCloud
+                    // sync (same hardening as the device key).
+                    if let Err(e) = crate::keychain::set_generic_password_locked_down(
                         crate::keychain::SERVICE,
                         crate::keychain::CLOUD_SYNC_ACCOUNT,
                         &arr[..],
@@ -2157,8 +2183,10 @@ impl IpcServer {
                         }
                     }
                     crate::keychain::signing::KeyBackend::Keychain => {
-                        use security_framework::passwords::set_generic_password;
-                        if let Err(e) = set_generic_password(
+                        // CopyPaste-nkro: use the locked-down write path so the
+                        // cloud-sync key is stored with ThisDeviceOnly + no iCloud
+                        // sync (same hardening as the device key).
+                        if let Err(e) = crate::keychain::set_generic_password_locked_down(
                             crate::keychain::SERVICE,
                             crate::keychain::CLOUD_SYNC_ACCOUNT,
                             new_key.as_bytes(),
@@ -3087,12 +3115,35 @@ impl IpcServer {
                 result = listener.accept() => {
                     match result {
                         Ok((stream, _)) => {
-                            let s = server.clone();
-                            conns.spawn(async move {
-                                if let Err(e) = s.handle_connection(stream).await {
-                                    tracing::warn!("IPC connection error: {e}");
+                            // CopyPaste-6ot5: non-blocking permit acquire.
+                            // `try_acquire_owned` never blocks the accept loop;
+                            // it returns `Err` immediately when all permits are
+                            // taken. The `OwnedSemaphorePermit` is moved into
+                            // the task and dropped on task exit, reclaiming the
+                            // slot for the next connection.
+                            match server.conn_semaphore.clone().try_acquire_owned() {
+                                Ok(permit) => {
+                                    let s = server.clone();
+                                    conns.spawn(async move {
+                                        // Hold the permit for the connection lifetime.
+                                        let _permit = permit;
+                                        if let Err(e) = s.handle_connection(stream).await {
+                                            tracing::warn!("IPC connection error: {e}");
+                                        }
+                                    });
                                 }
-                            });
+                                Err(_) => {
+                                    // All connection slots are taken; drop the
+                                    // stream immediately (client sees a closed
+                                    // connection). This prevents unbounded task
+                                    // accumulation from a buggy or hostile client.
+                                    tracing::warn!(
+                                        "IPC connection rejected: concurrent connection \
+                                         cap ({MAX_CONCURRENT_CONNECTIONS}) reached"
+                                    );
+                                    drop(stream);
+                                }
+                            }
                         }
                         Err(e) => tracing::error!("accept error: {e}"),
                     }
@@ -7090,16 +7141,26 @@ impl IpcServer {
                     }
                 };
 
-                // S3 (CopyPaste-4ca): read the initiator's confirmation tag.
-                // Absent tag is allowed for backward compatibility with pre-S3
-                // initiators: we skip verification in that case but still bind
-                // and return our own responder tag so a post-S3 initiator can
-                // enforce the check on its end in future.
-                let initiator_confirm_b64 = req
+                // CopyPaste-j8dr: the initiator's confirmation tag is now
+                // MANDATORY. An absent tag is rejected with AUTH_FAILED so that
+                // a relay stripping the field, or an older initiator that never
+                // sent one, cannot complete the handshake without mutual
+                // confirmation. This closes the backwards-compatibility escape
+                // hatch that was left open in the original S3 implementation.
+                let initiator_confirm_b64 = match req
                     .params
                     .get("initiator_confirm_b64")
                     .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
+                {
+                    Some(s) => s.to_string(),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_AUTH_FAILED,
+                            "missing initiator_confirm_b64 — confirm tag is required",
+                        )
+                    }
+                };
 
                 // Extract and consume the responder session.
                 let (responder, password_file, peer_fingerprint) = {
@@ -7154,10 +7215,10 @@ impl IpcServer {
                 let binder = Self::pake_cert_binder(&own_fp, &peer_fingerprint);
                 let bound_key = session_key.bind_to_tls_channel(&binder);
 
-                // Verify the initiator's confirmation tag if supplied.
-                if let Some(ref confirm_b64) = initiator_confirm_b64 {
+                // Verify the initiator's confirmation tag (mandatory).
+                {
                     use subtle::ConstantTimeEq as _;
-                    let received = match b64.decode(confirm_b64) {
+                    let received = match b64.decode(&initiator_confirm_b64) {
                         Ok(bytes) => bytes,
                         Err(e) => {
                             return Response::err_with_code(
@@ -9948,7 +10009,15 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false, "version gate must reject: {line}");
-        assert_eq!(resp["error_code"], "invalid_argument");
+        // ADR-007 + P2-ptb8: the version gate must return ERR_CODE_VERSION_MISMATCH
+        // ("version_mismatch") so the CLI can branch deterministically without
+        // parsing the error text. A previous version of this test incorrectly
+        // asserted "invalid_argument"; corrected to match the dispatcher code.
+        assert_eq!(
+            resp["error_code"],
+            crate::protocol::ERR_CODE_VERSION_MISMATCH,
+            "version gate must return ERR_CODE_VERSION_MISMATCH: {resp}"
+        );
         assert_eq!(resp["protocol_version"], CURRENT_PROTOCOL_VERSION);
         assert!(
             resp["error"]
@@ -11619,6 +11688,93 @@ mod tests {
         );
     }
 
+    /// CopyPaste-j8dr: `pair_accept_finish` must REJECT a request that omits
+    /// `initiator_confirm_b64` entirely. The confirm tag is now MANDATORY so an
+    /// older initiator or a relay stripping the field is caught at the responder.
+    #[tokio::test]
+    async fn pair_accept_finish_rejects_absent_initiator_confirm_tag() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+
+        let dir = tempdir().unwrap();
+        let cfg_home = dir.path().join("cfg_j8dr");
+        let _env = EnvGuard::set_all(
+            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &cfg_home,
+        );
+
+        let sock_a = dir.path().join("j8dr-a.sock");
+        let sock_b = dir.path().join("j8dr-b.sock");
+        start_test_server(&sock_a).await;
+        start_test_server(&sock_b).await;
+
+        async fn call(sock: &std::path::Path, body: &str) -> serde_json::Value {
+            let mut stream = UnixStream::connect(sock).await.unwrap();
+            stream.write_all(body.as_bytes()).await.unwrap();
+            stream.write_all(b"\n").await.unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let line = lines.next_line().await.unwrap().unwrap();
+            serde_json::from_str(&line).unwrap()
+        }
+
+        let password = "correct-horse-j8dr";
+
+        // Use real cert fingerprints so the binder computation is symmetric.
+        let fp_a = call(&sock_a, r#"{"id":"j1","method":"get_own_fingerprint","params":{}}"#)
+            .await["data"]["fingerprint"]
+            .as_str()
+            .expect("fp_a")
+            .to_string();
+        let fp_b = call(&sock_b, r#"{"id":"j2","method":"get_own_fingerprint","params":{}}"#)
+            .await["data"]["fingerprint"]
+            .as_str()
+            .expect("fp_b")
+            .to_string();
+
+        // Step 1: A initiates.
+        let body = format!(
+            r#"{{"id":"j3","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{fp_b}","password":"{password}","step":"initiate"}}}}"#
+        );
+        let resp = call(&sock_a, &body).await;
+        assert_eq!(resp["ok"], true, "initiate failed: {resp}");
+        let session_id_a = resp["data"]["session_id"].as_str().unwrap().to_string();
+        let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap().to_string();
+
+        // Step 2: B accepts.
+        let body = format!(
+            r#"{{"id":"j4","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp_a}","password":"{password}"}}}}"#
+        );
+        let resp = call(&sock_b, &body).await;
+        assert_eq!(resp["ok"], true, "pair_accept_password failed: {resp}");
+        let session_id_b = resp["data"]["session_id"].as_str().unwrap().to_string();
+        let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap().to_string();
+
+        // Step 3: A finishes (gets msg3 and initiator_confirm_b64, but we won't use the tag).
+        let body = format!(
+            r#"{{"id":"j5","method":"pair_peer_with_password","params":{{"step":"finish","session_id":"{session_id_a}","message2_b64":"{msg2_b64}","peer_fingerprint":"{fp_b}","password":"{password}"}}}}"#
+        );
+        let resp = call(&sock_a, &body).await;
+        assert_eq!(resp["ok"], true, "initiator finish failed: {resp}");
+        let msg3_b64 = resp["data"]["message3_b64"].as_str().unwrap().to_string();
+
+        // Step 4: B calls pair_accept_finish WITHOUT initiator_confirm_b64.
+        // This MUST be rejected (CopyPaste-j8dr: confirm tag is now mandatory).
+        let body = format!(
+            r#"{{"id":"j6","method":"pair_accept_finish","params":{{"session_id":"{session_id_b}","message3_b64":"{msg3_b64}","peer_fingerprint":"{fp_a}"}}}}"#
+        );
+        let resp = call(&sock_b, &body).await;
+        assert_eq!(
+            resp["ok"], false,
+            "pair_accept_finish without initiator_confirm_b64 must FAIL (confirm tag is mandatory): {resp}"
+        );
+        let code = resp["error_code"].as_str().unwrap_or("");
+        assert_eq!(
+            code,
+            crate::protocol::ERR_CODE_AUTH_FAILED,
+            "absent confirm tag must return AUTH_FAILED, got {code}: {resp}"
+        );
+    }
+
     /// QR pairing end-to-end: device B (displaying) generates a QR, device A
     /// (scanning) decodes it via `copypaste_core::PairingPayload`, derives the
     /// PAKE password from the embedded token, and completes the 4-message
@@ -11654,9 +11810,15 @@ mod tests {
             serde_json::from_str(&line).unwrap()
         }
 
-        // Realistic non-placeholder fingerprints (all-same-byte ones are
-        // filtered as stale test data by the peer store).
-        let fp_a = "a1:b2:c3:d4:e5:f6:07:18:29:3a:4b:5c:6d:7e:8f:90:a1:b2:c3:d4:e5:f6:07:18:29:3a:4b:5c:6d:7e:8f:90";
+        // S3/j8dr: Get the REAL cert fingerprints from both servers so the
+        // cert-binder computation uses the correct values and the mandatory
+        // initiator_confirm_b64 can be verified. (Old code used a static fake
+        // fp_a which caused binder mismatch and was masked by the optional tag.)
+        let fp_a = call(&sock_a, r#"{"id":"qr_fpa","method":"get_own_fingerprint","params":{}}"#)
+            .await["data"]["fingerprint"]
+            .as_str()
+            .expect("server A must return own fingerprint")
+            .to_string();
 
         // Step 0: Device B generates a QR pairing code.
         let resp = call(
@@ -11700,6 +11862,7 @@ mod tests {
         let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap().to_string();
 
         // Step 2: Device B accepts via pair_accept_qr (looks up its stored token).
+        // Use A's REAL cert fingerprint so the cert-binder on both sides agrees.
         let body = format!(
             r#"{{"id":"qr2","method":"pair_accept_qr","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp_a}"}}}}"#
         );
@@ -11708,18 +11871,24 @@ mod tests {
         let session_id_b = resp["data"]["session_id"].as_str().unwrap().to_string();
         let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap().to_string();
 
-        // Step 3: Device A finishes.
+        // Step 3: Device A finishes — also returns initiator_confirm_b64 (S3).
         let body = format!(
             r#"{{"id":"qr3","method":"pair_peer_with_password","params":{{"step":"finish","session_id":"{session_id_a}","message2_b64":"{msg2_b64}","peer_fingerprint":"{fp_b}","password":"{password}"}}}}"#
         );
         let resp = call(&sock_a, &body).await;
         assert_eq!(resp["ok"], true, "initiator finish failed: {resp}");
         let msg3_b64 = resp["data"]["message3_b64"].as_str().unwrap().to_string();
+        // j8dr: extract the mandatory confirm tag from A's finish response.
+        let initiator_confirm_b64 = resp["data"]["initiator_confirm_b64"]
+            .as_str()
+            .expect("initiator finish must return initiator_confirm_b64")
+            .to_string();
 
         // Step 4: Device B finishes — the OPAQUE authenticator must validate,
         // proving both sides agreed on the QR token as the shared secret.
+        // j8dr: include the mandatory initiator_confirm_b64.
         let body = format!(
-            r#"{{"id":"qr4","method":"pair_accept_finish","params":{{"session_id":"{session_id_b}","message3_b64":"{msg3_b64}","peer_fingerprint":"{fp_a}"}}}}"#
+            r#"{{"id":"qr4","method":"pair_accept_finish","params":{{"session_id":"{session_id_b}","message3_b64":"{msg3_b64}","peer_fingerprint":"{fp_a}","initiator_confirm_b64":"{initiator_confirm_b64}"}}}}"#
         );
         let resp = call(&sock_b, &body).await;
         assert_eq!(resp["ok"], true, "responder finish failed: {resp}");
@@ -14875,5 +15044,80 @@ mod tests {
             p2p_enabled_from_config(),
             "p2p_enabled_from_config must return true when config.json stores p2p_enabled=true"
         );
+    }
+
+    // ── CopyPaste-6ot5: connection-cap unit test ──────────────────────────────
+
+    /// Verify the connection-cap semaphore logic without touching real sockets.
+    ///
+    /// The semaphore starts with `MAX_CONCURRENT_CONNECTIONS` permits. When all
+    /// permits are exhausted, `try_acquire_owned` must return `Err` immediately
+    /// (non-blocking); once a permit is dropped the slot is reclaimed and the
+    /// next `try_acquire_owned` succeeds again. This test exercises the pure
+    /// Semaphore behaviour that `serve_on` depends on — avoiding any live-socket
+    /// flood that could introduce a test-suite deadlock.
+    #[test]
+    fn connection_cap_semaphore_exhaustion_returns_err() {
+        // Use a small cap so the test runs without allocating 64 permits.
+        const TEST_CAP: usize = 4;
+        let sem = Arc::new(tokio::sync::Semaphore::new(TEST_CAP));
+
+        // Acquire all permits.
+        let permits: Vec<_> = (0..TEST_CAP)
+            .map(|_| {
+                sem.clone()
+                    .try_acquire_owned()
+                    .expect("permit must be available below cap")
+            })
+            .collect();
+
+        // One more acquire must fail (cap exhausted).
+        assert!(
+            sem.clone().try_acquire_owned().is_err(),
+            "try_acquire_owned must return Err when the connection cap is reached"
+        );
+
+        // Drop one permit — the slot is reclaimed immediately.
+        drop(permits.into_iter().next().unwrap());
+
+        // Now a new acquire succeeds.
+        assert!(
+            sem.clone().try_acquire_owned().is_ok(),
+            "try_acquire_owned must succeed again after a permit is released"
+        );
+    }
+
+    /// Verify that the production `IpcServer` is initialised with a semaphore
+    /// holding exactly `MAX_CONCURRENT_CONNECTIONS` permits and that the cap
+    /// is enforced from the very first connection.
+    #[test]
+    fn ipc_server_connection_cap_is_max_concurrent_connections() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let server = IpcServer::new(
+            db,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        );
+
+        // Drain all permits.
+        let permits: Vec<_> = (0..MAX_CONCURRENT_CONNECTIONS)
+            .map(|_| {
+                server
+                    .conn_semaphore
+                    .clone()
+                    .try_acquire_owned()
+                    .expect("permit must be available within cap")
+            })
+            .collect();
+
+        // The (cap+1)-th acquire must fail.
+        assert!(
+            server.conn_semaphore.clone().try_acquire_owned().is_err(),
+            "IpcServer must enforce MAX_CONCURRENT_CONNECTIONS limit"
+        );
+
+        // Ensure permits are held for the assertion (not optimised away).
+        drop(permits);
     }
 }
