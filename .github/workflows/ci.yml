@@ -91,10 +91,11 @@ jobs:
 
   # Feature-combination coverage (audit zbkm): the default `test` job only
   # exercises default features. This job catches cfg/feature-gated breakage.
-  # --no-default-features is fully tested; --all-features is compile-checked
-  # (cargo check) because some features (cloud-sync/Supabase) need network or
-  # credentials at runtime that headless CI lacks. Upgrade all-features to
-  # `cargo test` if/when those paths gain offline test doubles.
+  # --no-default-features is fully tested; --all-features runs clippy (-D warnings)
+  # so dead_code and other lint warnings in feature-gated paths are caught (CopyPaste-55cw).
+  # cargo test --all-features is deferred: cloud-sync/Supabase paths need network
+  # or credentials at runtime that headless CI lacks. Upgrade to `cargo test` when
+  # those paths gain offline test doubles.
   feature-matrix:
     name: Features (${{ matrix.variant }})
     runs-on: macos-latest
@@ -107,14 +108,15 @@ jobs:
           - variant: no-default-features
             cmd: cargo test --workspace --no-default-features
           - variant: all-features
-            cmd: cargo check --workspace --all-targets --all-features
+            cmd: cargo clippy --workspace --all-features -- -D warnings
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (stable)
+      - name: Install Rust (stable) (with clippy)
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
+          components: clippy
 
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
