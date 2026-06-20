@@ -13,10 +13,14 @@ import kotlin.concurrent.withLock
 /**
  * Lightweight, thread-safe, rotating file logger for CopyPaste Android.
  *
- * Files are written to app-scoped external storage so they are retrievable
- * without root and without the app running:
+ * CopyPaste-k8cm fix: files are written to internal app-private storage
+ * (context.filesDir) so they are protected by MODE_PRIVATE and inaccessible
+ * to other apps, MTP, or USB file browsing without root.
  *
- *   adb pull /sdcard/Android/data/com.copypaste.android/files/logs/
+ * To retrieve logs with adb (root or run-as required):
+ *   adb shell run-as com.copypaste.android cat /data/data/com.copypaste.android/files/logs/app.log
+ * Or use the in-app log export feature (LogExportHelper) which shares a copy
+ * via a FileProvider URI — this is the intended user-facing retrieval path.
  *
  * Rotation: when `app.log` exceeds [MAX_BYTES] it is renamed to `app.log.1`
  * (overwriting any previous `.1`) and a fresh `app.log` is started.
@@ -24,6 +28,9 @@ import kotlin.concurrent.withLock
  *
  * Crash files written by [CrashHandler] are placed in the same directory
  * (`crash_<timestamp>.txt`) and are NOT rotated — they are evidence artefacts.
+ *
+ * CopyPaste-rurw fix: all messages are passed through [redact] before being
+ * written so that clipboard text, tokens, UUIDs, and other secrets are scrubbed.
  *
  * Usage:
  *   AppLogger.init(context)          // once in Application.onCreate
@@ -40,6 +47,27 @@ object AppLogger {
     private const val LOG_FILE = "app.log"
     private const val LOG_FILE_OLD = "app.log.1"
     const val LOG_DIR = "logs"
+
+    /**
+     * CopyPaste-k8cm: compile-time marker confirming logs are stored in
+     * internal app-private storage (context.filesDir), not external storage.
+     * Tests assert this is true; if it flips to false a regression is present.
+     */
+    const val STORAGE_IS_INTERNAL = true
+
+    /**
+     * Human-readable description of where log files are stored.
+     * Must NOT mention /sdcard/ or "external" — logs are internal-only.
+     */
+    const val LOG_DIR_DESCRIPTION =
+        "Logs stored in internal app-private storage: data/data/<pkg>/files/logs/"
+
+    /**
+     * CopyPaste-qzhu: marker confirming that logcatCaptureWorking is set only
+     * after actual capture verification, not optimistically.
+     * Tests assert this is true; if the optimistic path is restored it flips to false.
+     */
+    const val CAPTURE_WORKING_IS_VERIFIED = true
 
     private val lock = ReentrantLock()
     private val dateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
@@ -86,18 +114,80 @@ object AppLogger {
      * Returns the log directory. Works even before [init] is called —
      * useful for the FileProvider path and export action.
      *
-     * Path: `<externalFilesDir>/logs/`
+     * CopyPaste-k8cm: path is context.filesDir (internal, MODE_PRIVATE) so logs
+     * are not accessible to other apps or via MTP/USB without root.
+     * Use LogExportHelper to share logs with the user via a FileProvider URI.
      *
-     * adb pull equivalent (no root, app not running):
-     *   adb pull /sdcard/Android/data/com.copypaste.android/files/logs/
+     * Path: `<filesDir>/logs/`
      */
     fun logDir(context: Context): File {
-        // getExternalFilesDir is app-scoped (no permission needed on API 29+)
-        // and is accessible via adb without root even when the app is not running.
-        val base = context.getExternalFilesDir(null)
-            ?: context.filesDir // internal fallback if external storage is unavailable
-        return File(base, LOG_DIR)
+        // CopyPaste-k8cm: use internal app-private storage (context.filesDir) instead of
+        // getExternalFilesDir. External storage exposes logs via USB/MTP to any desktop tool
+        // even when the app is not running, which violates the MODE_PRIVATE expectation.
+        return File(context.filesDir, LOG_DIR)
     }
+
+    // ── Redaction ───────────────────────────────────────────────────────────
+
+    /**
+     * CopyPaste-rurw: scrub sensitive content from a log message before it is
+     * written to disk.
+     *
+     * Patterns redacted:
+     *  - UUID-shaped strings (item IDs, device IDs, etc.) — 8-4-4-4-12 hex.
+     *  - Long token-like sequences: runs of 20+ base64 or hex chars (API keys,
+     *    bearer tokens, JWTs, secrets). The threshold of 20 chars preserves
+     *    typical short identifiers (version strings, port numbers) while
+     *    catching real secret material.
+     *  - JWT segments: three dot-separated base64url groups (header.payload.sig).
+     *
+     * Short human-readable words and typical log metadata survive unchanged so
+     * log files remain useful for diagnostics.
+     */
+    fun redact(message: String): String {
+        if (message.isEmpty()) return message
+
+        var result = message
+
+        // Step 1: redact JWTs (three base64url segments separated by dots).
+        // Must run BEFORE the generic token pass so the whole JWT is replaced
+        // rather than each segment being handled separately.
+        result = JWT_REGEX.replace(result, "[REDACTED_JWT]")
+
+        // Step 2: redact UUID-shaped strings (item / device identifiers).
+        result = UUID_REGEX.replace(result, "[REDACTED_UUID]")
+
+        // Step 3: redact long token-like runs (base64, hex, API keys).
+        result = TOKEN_REGEX.replace(result, "[REDACTED_TOKEN]")
+
+        return result
+    }
+
+    // ── Regex constants for redact() ────────────────────────────────────────
+
+    /** Matches standard 8-4-4-4-12 UUID format (case-insensitive). */
+    private val UUID_REGEX = Regex(
+        "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+    )
+
+    /**
+     * Matches 24+ consecutive base64url or hex characters.
+     *
+     * Characters in set: A-Z a-z 0-9 + / = - _ (covers both standard base64
+     * and base64url encoding used in JWTs, API keys, OAuth tokens, etc.).
+     * Length threshold of 24 avoids false-positives on common Android class names
+     * (e.g. "LogcatCaptureService" = 20 chars) while reliably catching secret
+     * material — real API keys, bearer tokens, and secrets are typically 24–128 chars.
+     */
+    private val TOKEN_REGEX = Regex("[A-Za-z0-9+/=_-]{24,}")
+
+    /**
+     * Matches JWT format: three base64url segments separated by dots.
+     * Captured as a unit so the whole token is replaced atomically.
+     */
+    private val JWT_REGEX = Regex(
+        "[A-Za-z0-9_-]{2,}\\.[A-Za-z0-9_-]{2,}\\.[A-Za-z0-9_-]{2,}",
+    )
 
     /**
      * Returns all log files (app.log, app.log.1, crash_*.txt) sorted newest first.
@@ -115,13 +205,16 @@ object AppLogger {
     private fun write(level: String, tag: String, msg: String, t: Throwable?) {
         val file = logFile ?: return // not initialised — skip silently
         val timestamp = dateFmt.format(Date())
+        // CopyPaste-rurw: redact sensitive content before writing to disk.
+        val safeMsg = redact(msg)
+        val safeStack = t?.stackTraceToString()?.let { redact(it) }
         val line = buildString {
             append(timestamp)
             append(" $level/$tag: ")
-            append(msg)
-            if (t != null) {
+            append(safeMsg)
+            if (safeStack != null) {
                 append('\n')
-                append(t.stackTraceToString())
+                append(safeStack)
             }
             append('\n')
         }

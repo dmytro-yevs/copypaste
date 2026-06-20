@@ -174,6 +174,12 @@ class ClipboardFloatingActivity : Activity() {
         Log.d(TAG, "getPrimaryClip succeeded via focused overlay — routing to capture pipeline")
 
         val settings = Settings(this)
+        // CopyPaste-qzhu fix: set logcatCaptureWorking=true ONLY here, after getPrimaryClip
+        // returned a non-null clip. This is the first point at which we know the logcat
+        // capture path is actually working on this device. The flag was previously set
+        // optimistically in LogcatCaptureService.onDenialDetected() before the Activity
+        // had run, which produced false WORKING status when every capture was failing.
+        settings.logcatCaptureWorking = true
         val repository = ClipboardRepository(this)
         val relayHttp = RelayClient(settings.relayUrl)
         val syncManager = SyncManager(relayHttp, settings.deviceId, token = "", settings = settings)

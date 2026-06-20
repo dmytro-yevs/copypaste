@@ -227,17 +227,16 @@ class LogcatCaptureService : Service() {
         lastFocusedLaunchMs = now
         AppLogger.i(TAG, "Launching ClipboardFloatingActivity for focused clipboard read")
 
-        // The debounce delay is applied before launching to ensure we catch the clip
-        // AFTER the user's copy action has fully settled in the ClipboardManager.
+        // CopyPaste-qzhu fix: do NOT set logcatCaptureWorking = true here.
+        // The flag must only be set to true when getPrimaryClip() actually returns
+        // a non-null clip inside ClipboardFloatingActivity.onFocusedLayout(). Setting
+        // it optimistically here produced a false WORKING status in the Settings UI
+        // even when every capture attempt failed (canDrawOverlays revoked, scoped
+        // logcat on AOSP 11+, etc.).
+        // ClipboardFloatingActivity.notifyCaptureWorking() is the authoritative setter.
         scope.launch {
             delay(FOCUSABLE_ACTIVITY_DEBOUNCE_MS)
             ClipboardFloatingActivity.launch(this@LogcatCaptureService)
-            // Mark as working optimistically — the Activity will log its own result.
-            // If it finds null, it logs a warning but does not update logcatCaptureWorking
-            // (we don't have a callback from the Activity here). The working flag is only
-            // used for the Settings UI indicator and is updated to true by captureClip
-            // succeeding (indirectly via the notification count bump).
-            settings.logcatCaptureWorking = true
         }
     }
 
