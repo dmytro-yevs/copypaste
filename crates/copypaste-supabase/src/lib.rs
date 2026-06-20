@@ -40,6 +40,7 @@ pub mod error;
 pub mod models;
 pub mod protocol;
 pub mod realtime;
+pub mod rest;
 pub mod store;
 
 // Auth re-exports
@@ -51,3 +52,6 @@ pub use store::{InMemoryStore, SessionStore};
 // Realtime re-exports
 pub use protocol::{ChangeEvent, ChangeType, PhoenixEvent, PhoenixMessage};
 pub use realtime::{ClientHandle, RealtimeClient, RealtimeConfig, RealtimeError};
+
+// REST client re-exports
+pub use rest::{RestClient, RestError, RestResult};
