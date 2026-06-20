@@ -21,6 +21,12 @@
 # These rules are intentionally CONSERVATIVE: correctness of the native crypto
 # path outweighs a few KB of extra retained code.
 
+# CopyPaste-hh3w: Preserve runtime annotations so JNA can read @Structure.FieldOrder
+# on RustBuffer, ForeignBytes, UniffiRustCallStatus, and UniffiForeignFuture* at
+# runtime. Without this R8 strips the annotation attributes and JNA cannot map the
+# native struct layout by field name, causing struct corruption / UnsatisfiedLinkError.
+-keepattributes *Annotation*, AnnotationDefault
+
 # --- JNA core: keep all classes + members (reflection-driven native binding) ---
 -keep class com.sun.jna.** { *; }
 -keep class net.java.dev.jna.** { *; }

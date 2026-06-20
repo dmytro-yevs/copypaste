@@ -7,3 +7,24 @@ local.properties
 # JetBrains Mono are redistributable under the SIL Open Font License 1.1 — see
 # app/src/main/assets/FONT-OFL-NOTICE.txt (res/font/ only permits .ttf/.otf/.xml,
 # so the notice ships as an asset). Do NOT re-ignore *.ttf here.
+
+# ── Keystores / signing credentials (CopyPaste-aebx) ─────────────────────────
+# NEVER commit keystores or signing credentials to version control.
+# *.keystore files (including debug.keystore) are excluded so they cannot be
+# accidentally staged and pushed. Each developer generates their own debug
+# keystore locally — see the note below.
+#
+# To generate a local debug keystore:
+#   keytool -genkey -v \
+#     -keystore android/app/debug.keystore \
+#     -alias androiddebugkey \
+#     -keyalg RSA -keysize 2048 -validity 10000 \
+#     -storepass android -keypass android \
+#     -dname "CN=Android Debug,O=Android,C=US"
+#
+# CI release keystores are supplied via the ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_FILE
+# GitHub secret — never store them in the repo.
+*.keystore
+*.jks
+app/debug.keystore
+app/keystore-beta.jks

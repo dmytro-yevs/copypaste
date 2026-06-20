@@ -25,6 +25,37 @@ import android.util.Log
 
 private const val TAG = "CopypasteBindings"
 
+// ── CopyPaste-8r3p: Unsupported-ABI runtime guard ────────────────────────────
+//
+// abiFilters = ["arm64-v8a"] means libcopypaste_android.so is only packaged for
+// arm64-v8a. On a 32-bit armeabi-v7a (or x86) device Android cannot load the .so,
+// isNativeLibraryLoaded becomes false, and ALL crypto silently stubs — the user sees
+// no error and data is stored unencrypted/inaccessible. This guard lets CopyPasteApp
+// detect that situation at startup and warn clearly (via log + dialog) rather than
+// silently degrading.
+
+/**
+ * The set of CPU ABIs for which libcopypaste_android.so is shipped in this APK.
+ * Matches the `abiFilters` in android/app/build.gradle.kts. Keep in sync when
+ * abiFilters changes (e.g. if x86_64 is added for emulator builds).
+ */
+val SUPPORTED_NATIVE_ABIS: Set<String> = setOf("arm64-v8a")
+
+/**
+ * Returns true if [abi] is one of the ABIs for which the native .so is packaged.
+ *
+ * Use this in [CopyPasteApp.onCreate] to detect 32-bit devices (armeabi-v7a)
+ * that will silently stub all FFI because the .so was not packaged for them:
+ *
+ * ```kotlin
+ * val primaryAbi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: ""
+ * if (!isSupportedAbi(primaryAbi)) {
+ *     Log.e(TAG, "Unsupported ABI '$primaryAbi' — crypto will be unavailable")
+ * }
+ * ```
+ */
+fun isSupportedAbi(abi: String): Boolean = abi in SUPPORTED_NATIVE_ABIS
+
 /**
  * App-side compiled-in UniFFI ABI version. MUST match the `ABI_VERSION` the
  * Rust crate compiles in (`crates/copypaste-android` Step C / ABI-9 FFI merge).
@@ -956,31 +987,40 @@ fun parsePairing(payload: String): uniffi.copypaste_android.ScannedPairing {
  * `.so` is detected at startup instead of producing a confusing crash on a
  * later call whose signature shifted between ABIs.
  *
- * Returns true when the native side accepts our ABI (or when the .so is absent —
- * stub mode is always "compatible" because no FFI calls will be made). Returns
- * false and logs when the native side rejects it; the caller decides how to
- * degrade (we keep running in best-effort mode rather than hard-crashing).
+ * FATAL on mismatch (CopyPaste-fkx7): a `.so`↔Kotlin ABI mismatch causes silent
+ * crypto-data corruption because call signatures diverge without any runtime error.
+ * The app MUST NOT continue in a broken/stub state — throw [IllegalStateException]
+ * immediately so the process terminates with a clear diagnostic message rather than
+ * corrupting data silently.
+ *
+ * Stub mode (`.so` absent) is still allowed: no FFI calls will be made so there is
+ * no ABI surface to mismatch against. Returns normally in stub mode.
+ *
+ * @throws IllegalStateException when the loaded `.so` rejects our [APP_ABI_VERSION].
  */
-fun checkNativeAbiCompatibility(): Boolean {
+fun checkNativeAbiCompatibility() {
     if (!isNativeLibraryLoaded) {
         Log.w(TAG, "checkNativeAbiCompatibility: native library not loaded — stub mode (no ABI check)")
-        return true
+        return
     }
-    return try {
+    try {
         uniffi.copypaste_android.checkCompatibility(APP_ABI_VERSION)
         Log.i(TAG, "Native ABI compatible (app ABI=$APP_ABI_VERSION, native=${uniffi.copypaste_android.uniffiAbiVersion()})")
-        true
     } catch (e: uniffi.copypaste_android.VersionException) {
-        Log.e(
-            TAG,
-            "Native ABI MISMATCH: app ABI=$APP_ABI_VERSION rejected by native lib " +
-                "(native reports ${runCatching { uniffi.copypaste_android.uniffiAbiVersion() }.getOrNull()}): ${e.message}",
-            e,
-        )
-        false
+        val nativeAbi = runCatching { uniffi.copypaste_android.uniffiAbiVersion() }.getOrNull()
+        val msg = "FATAL: Native ABI MISMATCH — app compiled against ABI $APP_ABI_VERSION " +
+            "but loaded .so reports ABI $nativeAbi. " +
+            "Continuing would silently corrupt crypto data. Rebuild the app with a matching .so. " +
+            "Detail: ${e.message}"
+        Log.e(TAG, msg, e)
+        // CopyPaste-fkx7: fail fast — do NOT degrade silently.
+        throw IllegalStateException(msg, e)
     } catch (e: Exception) {
-        Log.e(TAG, "checkNativeAbiCompatibility: unexpected failure: ${e.message}", e)
-        false
+        val msg = "FATAL: checkNativeAbiCompatibility failed unexpectedly: ${e.message}"
+        Log.e(TAG, msg, e)
+        // Treat any unexpected failure as fatal — an unverifiable ABI is as dangerous
+        // as a confirmed mismatch.
+        throw IllegalStateException(msg, e)
     }
 }
 

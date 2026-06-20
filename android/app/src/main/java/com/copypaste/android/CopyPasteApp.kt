@@ -1,6 +1,7 @@
 package com.copypaste.android
 
 import android.app.Application
+import android.os.Build
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,11 +32,31 @@ class CopyPasteApp : Application() {
         AppLogger.init(this)
         CrashHandler.install(this)
 
+        // CopyPaste-8r3p: Log clearly when the device ABI is unsupported so operators
+        // understand why crypto is unavailable, rather than silently running in stub mode.
+        // abiFilters = ["arm64-v8a"] — 32-bit (armeabi-v7a) devices get no .so.
+        val primaryAbi = Build.SUPPORTED_ABIS.firstOrNull() ?: ""
+        if (!isSupportedAbi(primaryAbi)) {
+            // WARN (not fatal): the app still installs on 32-bit devices that somehow
+            // passed the Play Store ABI filter. Fail-fast here would crash on emulators
+            // and CI where the ABI check may be relaxed. The stub-mode guard in each
+            // API function (throw IllegalStateException) prevents plaintext leakage.
+            android.util.Log.e(
+                "CopyPasteApp",
+                "UNSUPPORTED DEVICE ABI: '$primaryAbi' — libcopypaste_android.so is not " +
+                    "packaged for this ABI (supported: $SUPPORTED_NATIVE_ABIS). " +
+                    "All crypto functions will be unavailable. " +
+                    "This device is not a supported target for CopyPaste. " +
+                    "(CopyPaste-8r3p)",
+            )
+        }
+
         // Load native library (no-op if .so is absent — service degrades gracefully)
         runCatching { System.loadLibrary("copypaste_android") }
         // Verify the linked .so speaks the ABI this build was compiled against
-        // (APP_ABI_VERSION). On a mismatch this logs loudly rather than crashing
-        // on a later shifted call signature; stub mode (.so absent) is a no-op.
+        // (APP_ABI_VERSION). CopyPaste-fkx7: on mismatch this throws IllegalStateException
+        // and terminates the process — a mismatched ABI silently corrupts crypto data, so
+        // fail-fast is the only safe behaviour. Stub mode (.so absent) is a no-op.
         checkNativeAbiCompatibility()
         NotificationHelper.createChannels(this)
         // Restore the Supabase background poll worker after a process restart
