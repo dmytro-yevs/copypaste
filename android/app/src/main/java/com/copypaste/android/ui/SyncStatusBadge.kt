@@ -20,7 +20,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
@@ -54,10 +56,13 @@ import com.copypaste.android.DevicesOnlineState
 import com.copypaste.android.R
 import com.copypaste.android.RECENT_SYNC_MS
 import com.copypaste.android.Settings
+import com.copypaste.android.ui.theme.GlassTier
+import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.Skin
 import com.copypaste.android.ui.theme.SkinMaterial
+import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.skinTokens
 import java.text.DateFormat
@@ -260,6 +265,9 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
                 count = count,
                 lastActivityMs = lastActivityMs,
                 settings = settings,
+                // CopyPaste-ohki: pass translucent so SyncStatusSheet can wrap its
+                // Column in LiquidGlassSurface for glass skins. Mirrors GlassAlertDialog.
+                translucent = syncSheetEffectiveTranslucent(skin, translucent),
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             )
             // Bottom spacing so the sheet content clears system gesture bar.
@@ -282,10 +290,20 @@ private fun SyncStatusSheet(
     count: Int,
     lastActivityMs: Long,
     settings: Settings,
+    // CopyPaste-ohki: when true (glass skin + user pref on), the content is wrapped in
+    // LiquidGlassSurface(STRONG) to match the frosted sheet container. When false
+    // (FLAT/Quiet skin or pref off), the plain Column on the opaque container is correct.
+    translucent: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     val c = LocalIdeColors.current
+    val dark = isDarkTheme()
     val nowMs = System.currentTimeMillis()
+
+    // ModalBottomSheet default top-corner radius is 28.dp (Material3 spec).
+    // LiquidGlassSurface clips to this shape so the frosted fill matches the sheet
+    // geometry and the glass rim sits flush with the sheet's rounded top edge.
+    val sheetShape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
 
     // Relative last-sync label matching the DevicesScreen PeerRow format exactly.
     val lastSyncLabel: String = if (lastActivityMs <= 0L) {
@@ -308,6 +326,46 @@ private fun SyncStatusSheet(
     val maskedEmail: String? = settings.supabaseEmail.takeIf { it.isNotBlank() }
         ?.let { maskEmail(it) }
 
+    // CopyPaste-ohki: glass skins (translucent=true) wrap the content in a
+    // LiquidGlassSurface(STRONG) so the frosted fill covers the transparent
+    // sheet container. FLAT/Quiet (translucent=false) leaves the Column on the
+    // opaque c.bg container — same as before. Mirrors GlassAlertDialog.
+    if (translucent) {
+        LiquidGlassSurface(
+            shape = sheetShape,
+            translucent = true,
+            dark = dark,
+            solid = c.bg,
+            modifier = Modifier.fillMaxSize(),
+            tier = syncSheetGlassTier(),
+            hairline = false, // sheet frame already has a rim; no double border
+        ) {
+            SheetContent(
+                count = count,
+                lastSyncLabel = lastSyncLabel,
+                maskedEmail = maskedEmail,
+                modifier = modifier,
+            )
+        }
+    } else {
+        SheetContent(
+            count = count,
+            lastSyncLabel = lastSyncLabel,
+            maskedEmail = maskedEmail,
+            modifier = modifier,
+        )
+    }
+}
+
+/** Inner content rows — extracted so [SyncStatusSheet] can wrap them with or without glass. */
+@Composable
+private fun SheetContent(
+    count: Int,
+    lastSyncLabel: String,
+    maskedEmail: String?,
+    modifier: Modifier = Modifier,
+) {
+    val c = LocalIdeColors.current
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(0.dp)) {
         Text(
             text = "Sync status",
@@ -585,6 +643,18 @@ internal fun buildSyncTooltip(
 
     return parts.joinToString(" · ")
 }
+
+/**
+ * Glass tier used by [SyncStatusSheet] when wrapping in [LiquidGlassSurface] (CopyPaste-ohki).
+ *
+ * Uses [GlassTier.STRONG] — the same tier as [GlassAlertDialog] — because the bottom
+ * sheet is a modal surface: styleguide `.surface-strong` (blur 40dp, light fill flat .92,
+ * dark fill 0.86). This ensures the sheet stands out over the dimmed scrim and text
+ * stays legible, matching the web's modal glass recipe.
+ *
+ * Pure function — usable in JVM unit tests (no Compose runtime needed).
+ */
+internal fun syncSheetGlassTier(): GlassTier = GlassTier.STRONG
 
 /**
  * Returns `true` when the sync-status bottom sheet should use a transparent
