@@ -48,7 +48,8 @@ fn derive_with_salt(
 ) -> [u8; 32] {
     let raw_secret = me.ecdh(peer_public);
     let info = network_info(sender_id, recipient_id);
-    let hk = Hkdf::<Sha256>::new(Some(salt), &raw_secret);
+    // CopyPaste-1qht: ecdh() now returns Zeroizing<[u8;32]>; use as_ref() for HKDF.
+    let hk = Hkdf::<Sha256>::new(Some(salt), raw_secret.as_ref());
     let mut out = [0u8; 32];
     hk.expand(info.as_bytes(), &mut out)
         .expect("HKDF expand 32 bytes always succeeds");

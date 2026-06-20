@@ -176,22 +176,25 @@ impl DeviceKeypair {
         zeroize::Zeroizing::new(self.secret.to_bytes())
     }
 
-    /// Returns the raw 32-byte ECDH shared secret as a plain `[u8; 32]`.
+    /// Returns the raw 32-byte ECDH shared secret wrapped in
+    /// [`zeroize::Zeroizing`] so the copy is scrubbed when the caller drops it.
     ///
-    /// **Security note (audit MED #3):** like [`Self::secret_key_bytes`],
-    /// the return value is unscrubbed `Copy` data. The underlying
-    /// `x25519_dalek::SharedSecret` is `ZeroizeOnDrop`, so the source
-    /// buffer is wiped — but the returned `[u8; 32]` copy persists.
-    /// Prefer [`Self::ecdh_zeroizing`] for new code; this shim is kept
-    /// for cross-crate ABI stability while the migration is in flight.
-    pub fn ecdh(&self, peer_public_bytes: &[u8; 32]) -> [u8; 32] {
+    /// CopyPaste-1qht: the previous implementation returned a plain `[u8;32]`
+    /// (a `Copy` type). Although the underlying `x25519_dalek::SharedSecret` is
+    /// `ZeroizeOnDrop`, the copy returned to the caller was unscrubbed and could
+    /// linger on the stack or heap until overwritten. Changing the return type to
+    /// `Zeroizing<[u8;32]>` ensures the caller's copy is also scrubbed as soon
+    /// as the returned value is dropped.
+    ///
+    /// Call sites that previously used the plain array via `==` or `&` still
+    /// work via `Deref` / `PartialEq` on `Zeroizing<T>`. [`Self::ecdh_zeroizing`]
+    /// is now an alias kept for API symmetry.
+    pub fn ecdh(&self, peer_public_bytes: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
         let peer = PublicKey::from(*peer_public_bytes);
-        let shared = self.secret.diffie_hellman(&peer);
-        // `shared` is dropped at the end of the function — its underlying
-        // bytes are zeroized by SharedSecret's ZeroizeOnDrop impl. Wrap
-        // our copy in Zeroizing too so the intermediate is scrubbed.
-        let buf: zeroize::Zeroizing<[u8; 32]> = zeroize::Zeroizing::new(*shared.as_bytes());
-        *buf
+        // `diffie_hellman` returns a `SharedSecret` which is `ZeroizeOnDrop`.
+        // We wrap our extracted copy in `Zeroizing` so it is scrubbed when
+        // the caller drops the returned value.
+        zeroize::Zeroizing::new(*self.secret.diffie_hellman(&peer).as_bytes())
     }
 
     /// Returns the raw 32-byte ECDH shared secret wrapped in [`zeroize::Zeroizing`].
@@ -307,9 +310,11 @@ mod tests {
     fn ecdh_zeroizing_matches_plain_accessor() {
         let alice = DeviceKeypair::generate();
         let bob = DeviceKeypair::generate();
+        // Both ecdh() and ecdh_zeroizing() now return Zeroizing<[u8;32]>;
+        // deref both to compare the underlying byte arrays.
         let plain = alice.ecdh(&bob.public_key_bytes());
         let zr = alice.ecdh_zeroizing(&bob.public_key_bytes());
-        assert_eq!(plain, *zr);
+        assert_eq!(*plain, *zr);
     }
 
     #[test]
@@ -357,7 +362,8 @@ mod tests {
         // Compute what the key *would* have been with a different salt and
         // assert the actual key differs — proves the salt actually feeds in.
         let raw = kp.ecdh(&peer_bytes);
-        let alt_hk = Hkdf::<Sha256>::new(Some(b"some-other-salt-vX"), &raw);
+        // raw is now Zeroizing<[u8;32]>; use as_ref() to get &[u8] for HKDF.
+        let alt_hk = Hkdf::<Sha256>::new(Some(b"some-other-salt-vX"), raw.as_ref());
         let mut alt_key = [0u8; 32];
         alt_hk
             .expand(b"copypaste-v1|alice|bob", &mut alt_key)
@@ -517,5 +523,24 @@ mod tests {
         let instance_key = kp.local_enc_key();
         let free_fn_key = derive_storage_key_v1(&secret);
         assert_eq!(*instance_key, free_fn_key);
+    }
+
+    // -------------------------------------------------------------------------
+    // CopyPaste-1qht: ecdh() must return Zeroizing<[u8;32]>
+    // -------------------------------------------------------------------------
+
+    /// `ecdh` must return a `Zeroizing<[u8;32]>` so the shared-secret copy is
+    /// scrubbed from the stack when the caller drops it. Assigning the result
+    /// to a `Zeroizing<[u8;32]>` typed binding confirms the return type at
+    /// compile time — this test would fail to compile if `ecdh()` still
+    /// returned a plain `[u8;32]`.
+    #[test]
+    fn ecdh_returns_zeroizing_shared_secret() {
+        let alice = DeviceKeypair::generate();
+        let bob = DeviceKeypair::generate();
+        // Type annotation enforced at compile time: fails if ecdh() returns [u8;32].
+        let secret: zeroize::Zeroizing<[u8; 32]> = alice.ecdh(&bob.public_key_bytes());
+        let bob_secret: zeroize::Zeroizing<[u8; 32]> = bob.ecdh(&alice.public_key_bytes());
+        assert_eq!(*secret, *bob_secret, "ECDH shared secret must be symmetric");
     }
 }
