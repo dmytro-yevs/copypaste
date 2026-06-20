@@ -12,11 +12,13 @@ import org.junit.Test
  * Verifies that:
  * - [SyncBadgeState.Connected] is returned when sync has worked recently (daemon-primary signal).
  * - [SyncBadgeState.NetworkOffline] is returned when OS has no internet.
- * - [SyncBadgeState.DaemonUnreachable] is returned when OS is online but sync has not worked.
+ * - [SyncBadgeState.Idle] is returned when OS is online but sync has not worked recently
+ *   (canonical 5qbe rule: OS-online + stale = grey, not red).
  *
- * These tests confirm the alignment with macOS SyncStatusChip behaviour:
- * the badge should show DANGER when sync is broken regardless of OS network state
- * (not just when Wi-Fi is absent — that was the pre-5qbe bug).
+ * These tests confirm the alignment with macOS SyncStatusChip behaviour post-5qbe:
+ * the badge shows DANGER only when the OS itself has no internet (NetworkOffline) or
+ * when the daemon IPC signals an explicit failure (DaemonUnreachable via IpcSyncBadgeState).
+ * OS-online + no-recent-sync → Idle (grey), not red — mirrors macOS "idle" grey dot.
  */
 class SyncBadgeStateTest {
 
@@ -73,29 +75,30 @@ class SyncBadgeStateTest {
     }
 
     /**
-     * OS is online but no sync has ever occurred → DaemonUnreachable.
-     * This is the key PG-10 fix: Android must NOT show "idle/grey" here — it must
-     * show DANGER (same as macOS when daemon IPC is unresponsive) so the user knows
-     * to check their sync credentials/config.
+     * OS is online but no sync has ever occurred → Idle (grey).
+     * Canonical 5qbe rule: OS-online + stale/no-sync = Idle (grey), not red.
+     * DaemonUnreachable (red) requires an authoritative IPC badge_state of OFFLINE/ERROR.
+     * On a fresh install with sync never attempted, showing red would be a false alarm.
      */
     @Test
-    fun `DaemonUnreachable when OS online but sync never worked`() {
+    fun `Idle when OS online but sync never worked`() {
         val state = resolveSyncBadgeState(
             liveOnlineCount = 0,
             lastActivityMs = 0L,
             recentSyncMs = recentSyncMs,
             hasInternet = true,
         )
-        assertEquals(SyncBadgeState.DaemonUnreachable, state)
+        assertEquals(SyncBadgeState.Idle, state)
     }
 
     /**
-     * Sync worked long ago (> RECENT_SYNC_MS) and OS is online → DaemonUnreachable.
-     * The pre-5qbe bug would have shown grey "idle" here; correct behaviour is DANGER
-     * because we have evidence sync stopped working (same as macOS chip's stale-IPC case).
+     * Sync worked long ago (> RECENT_SYNC_MS) and OS is online → Idle (grey).
+     * Canonical 5qbe rule: OS-online + stale = Idle (grey), not red.
+     * Mirrors macOS chip: badge_state "idle" → grey dot (not DANGER).
+     * A hard failure (auth error, relay down) requires an authoritative IPC signal to show red.
      */
     @Test
-    fun `DaemonUnreachable when last sync is stale and OS online`() {
+    fun `Idle when last sync is stale and OS online`() {
         val nowMs = System.currentTimeMillis()
         val state = resolveSyncBadgeState(
             liveOnlineCount = 0,
@@ -104,15 +107,16 @@ class SyncBadgeStateTest {
             hasInternet = true,
             nowMs = nowMs,
         )
-        assertEquals(SyncBadgeState.DaemonUnreachable, state)
+        assertEquals(SyncBadgeState.Idle, state)
     }
 
     /**
-     * Count > 0 but lastActivityMs is stale → NOT Connected, falls through to DaemonUnreachable
+     * Count > 0 but lastActivityMs is stale → NOT Connected, falls through to Idle
      * (since OS is online). The recency gate must reject stale counts.
+     * Canonical 5qbe rule: stale + OS-online → Idle (grey), not red.
      */
     @Test
-    fun `DaemonUnreachable when count is positive but last activity stale`() {
+    fun `Idle when count is positive but last activity stale`() {
         val nowMs = System.currentTimeMillis()
         val state = resolveSyncBadgeState(
             liveOnlineCount = 3,
@@ -121,15 +125,16 @@ class SyncBadgeStateTest {
             hasInternet = true,
             nowMs = nowMs,
         )
-        assertEquals(SyncBadgeState.DaemonUnreachable, state)
+        assertEquals(SyncBadgeState.Idle, state)
     }
 
     /**
      * Count = 0 (DevicesScreen published real count of 0) but lastActivityMs is recent.
-     * Should NOT be Connected (no peers online), falls through to DaemonUnreachable.
+     * Should NOT be Connected (no peers online), falls through to Idle (grey).
+     * OS is online but no live peers → Idle (not red) per 5qbe canonical rule.
      */
     @Test
-    fun `DaemonUnreachable when count is zero even with recent activity`() {
+    fun `Idle when count is zero even with recent activity`() {
         val nowMs = System.currentTimeMillis()
         val state = resolveSyncBadgeState(
             liveOnlineCount = 0,
@@ -138,10 +143,10 @@ class SyncBadgeStateTest {
             hasInternet = true,
             nowMs = nowMs,
         )
-        assertEquals(SyncBadgeState.DaemonUnreachable, state)
+        assertEquals(SyncBadgeState.Idle, state)
     }
 
-    /** SyncBadgeState.Connected is distinct from both error states. */
+    /** SyncBadgeState.Connected is distinct from both red states and the grey Idle state. */
     @Test
     fun `Connected state is not an error state`() {
         val nowMs = System.currentTimeMillis()
@@ -154,14 +159,21 @@ class SyncBadgeStateTest {
         )
         assertTrue("Connected should not be NetworkOffline", state !is SyncBadgeState.NetworkOffline)
         assertTrue("Connected should not be DaemonUnreachable", state !is SyncBadgeState.DaemonUnreachable)
+        assertTrue("Connected should not be Idle", state !is SyncBadgeState.Idle)
     }
 
-    /** Both error states are distinct from Connected. */
+    /**
+     * OS offline states remain non-Connected, and Idle is distinct from both red states.
+     * (resolveSyncBadgeState never returns DaemonUnreachable — only IpcSyncBadgeState does.)
+     */
     @Test
     fun `Error states are not Connected`() {
+        // OS offline → NetworkOffline (red)
         val offline = resolveSyncBadgeState(0, 0L, recentSyncMs, hasInternet = false)
-        val unreachable = resolveSyncBadgeState(0, 0L, recentSyncMs, hasInternet = true)
+        // OS online, no sync → Idle (grey) — not red, not Connected
+        val idle = resolveSyncBadgeState(0, 0L, recentSyncMs, hasInternet = true)
         assertTrue(offline !is SyncBadgeState.Connected)
-        assertTrue(unreachable !is SyncBadgeState.Connected)
+        assertTrue(idle !is SyncBadgeState.Connected)
+        assertTrue(idle is SyncBadgeState.Idle)
     }
 }

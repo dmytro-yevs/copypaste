@@ -142,12 +142,14 @@ class SyncBadgeParityTest {
     }
 
     @Test
-    fun `NetworkOffline takes priority over stale-sync even with count positive`() {
-        // OS offline is a clear root cause — show that even if peers were recently
-        // seen (unusual case after network drop).
+    fun `NetworkOffline when OS offline and sync is stale`() {
+        // OS offline is a clear root cause when sync has also gone stale.
+        // Note: if sync were RECENT (count > 0 AND within window), Connected wins
+        // even over OS offline (see SyncBadgeStateTest "Connected even when OS offline
+        // if sync was recent"). This test covers the stale-sync + OS-offline case.
         val result = resolveSyncBadgeState(
             liveOnlineCount = 1,
-            lastActivityMs = NOW_MS - RECENT_MS + 1_000L, // recent, but OS is offline
+            lastActivityMs = NOW_MS - RECENT_MS - 60_000L, // stale — outside the window
             recentSyncMs = RECENT_MS,
             hasInternet = false,
             nowMs = NOW_MS,
