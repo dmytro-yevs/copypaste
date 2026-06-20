@@ -1213,6 +1213,8 @@ fun PairScreen(
                                 )
                             }
                             else -> {
+                                // !loading: outer if(qr != null && !loading) guards this
+                                // block — no stale 0s frame (CopyPaste-h59h).
                                 // Only the countdown timer — no redundant static note (HW-A5).
                                 val urgent = remainingSeconds <= PAIR_TOKEN_URGENT_THRESHOLD_SECONDS
                                 Text(
