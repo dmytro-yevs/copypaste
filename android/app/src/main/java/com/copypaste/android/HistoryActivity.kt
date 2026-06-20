@@ -2492,10 +2492,16 @@ private fun HistoryList(
                             // INSET: add horizontal inset margin + rounded card background.
                             // The radius matches tok.radiusCard (Vapor=16dp) for visual harmony.
                             // CARD/LINE: no extra modifier — preserves byte-identical Classic look.
+                            //
+                            // Q7: background alpha derived from tok.fillAlpha so it tracks the
+                            // skin's surface-fill opacity (fillAlpha * 0.76 ≈ 0.38 for Vapor 0.50).
+                            // Q8: horizontal inset = tok.rowGap × (8/3) so the gap between
+                            // the card edge and the list rail scales with the skin's row rhythm
+                            // (Vapor rowGap=3dp → 8dp, future skins auto-scale).
                             if (isInset) Modifier
-                                .padding(horizontal = 8.dp, vertical = 0.dp)
+                                .padding(horizontal = tok.rowGap * (8f / 3f), vertical = 0.dp)
                                 .background(
-                                    color = c.elevated.copy(alpha = 0.38f),
+                                    color = c.elevated.copy(alpha = tok.fillAlpha * 0.76f),
                                     shape = RoundedCornerShape(tok.radiusCard),
                                 )
                             else Modifier
