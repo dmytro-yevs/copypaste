@@ -160,7 +160,9 @@ jobs:
   unused-deps:
     name: unused-deps (cargo-machete)
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # Blocking (CopyPaste-yorm): genuinely unused deps have been removed and
+    # false positives suppressed via [package.metadata.cargo-machete] ignore
+    # lists. `continue-on-error: true` masked all machete hits previously.
     steps:
       - uses: actions/checkout@v4
 
@@ -173,4 +175,8 @@ jobs:
           tool: cargo-machete
 
       - name: cargo machete
+        # Run without --with-metadata to avoid false positives from build-script
+        # deps (tauri-build), platform-conditional deps (rusqlite on Android),
+        # and dev-dep-only crates (tracing-appender, tokio-test, hyper in relay).
+        # The basic scan reliably catches genuinely unused production deps.
         run: cargo machete

@@ -2,8 +2,12 @@ name: fuzz-smoke
 
 # Short coverage-guided fuzz run on every push to main or beta branches and
 # on every PR targeting main. Also runs on manual dispatch.
-# Non-blocking: fuzzing is signal, not a gate. A crash here is loud (job
-# annotation + artifact upload) but does not stop the merge.
+# BLOCKING (CopyPaste-ts7k): a crash in aead_decrypt or ipc_protocol_parse is
+# a real security defect and must stop the merge. The 30-second time limit is
+# long enough to cover the corpus quickly but short enough to not delay CI.
+# The non-blocking posture was an early prototype trade-off; the fuzz targets
+# now have enough regression corpus that false positives from transient OOM or
+# infrastructure noise are not a concern.
 #
 # Previously gated to release/v0.2.0-beta only; promoted to main/PRs so
 # parser and crypto fuzzing runs on every contribution.
@@ -32,7 +36,7 @@ jobs:
   fuzz:
     name: fuzz ${{ matrix.target }}
     runs-on: ubuntu-latest
-    continue-on-error: true
+    # continue-on-error removed (CopyPaste-ts7k): fuzz crashes now block merge.
     strategy:
       fail-fast: false
       matrix:

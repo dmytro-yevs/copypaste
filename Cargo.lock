@@ -1025,17 +1025,21 @@ dependencies = [
 name = "copypaste-supabase"
 version = "0.7.5"
 dependencies = [
+ "copypaste-sync",
  "futures-util",
  "mockito",
  "reqwest 0.12.28",
+ "rustls",
  "serde",
  "serde_json",
  "serial_test",
+ "sha2",
  "thiserror 1.0.69",
  "tokio",
  "tokio-test",
  "tokio-tungstenite",
  "tracing",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -1067,10 +1071,8 @@ dependencies = [
 name = "copypaste-ui"
 version = "0.7.5"
 dependencies = [
- "anyhow",
  "base64 0.22.1",
  "block2 0.6.2",
- "copypaste-ipc",
  "core-foundation 0.10.1",
  "core-graphics",
  "home",

@@ -210,3 +210,11 @@ image = { workspace = true }
 # names to avoid clobbering the user's real device key entry).
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 security-framework.workspace = true
+
+# cargo-machete false-positive suppression (CopyPaste-yorm).
+# `chacha20poly1305` is feature-gated behind `cloud-sync` (optional = true).
+# cargo-machete's basic scan (no --with-metadata) cannot see through feature
+# gates and incorrectly reports it as unused. The dep IS used in cloud.rs when
+# the cloud-sync feature is active.
+[package.metadata.cargo-machete]
+ignored = ["chacha20poly1305"]

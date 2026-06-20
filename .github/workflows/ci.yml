@@ -258,3 +258,77 @@ jobs:
       - name: Build (tsc + vite)
         working-directory: crates/copypaste-ui
         run: pnpm build
+
+  # ESLint for the React/TypeScript frontend (CopyPaste-q3pe).
+  # Separate job so ESLint failures are clearly labelled in PR status checks,
+  # independent of vitest and the tsc/vite build. Warnings are informational
+  # (no --max-warnings flag); only rule violations at error-level block the PR.
+  ui-lint:
+    name: UI ESLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: crates/copypaste-ui/pnpm-lock.yaml
+
+      - name: Install dependencies
+        working-directory: crates/copypaste-ui
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        working-directory: crates/copypaste-ui
+        run: pnpm lint
+
+  # cargo test --workspace --all-features (CopyPaste-h3j2).
+  # The default `test` job runs default features only; the feature-matrix job
+  # runs --all-features under clippy but skips cargo test because the
+  # cloud-sync/Supabase network paths were thought to need credentials.
+  # Closer analysis: the cloud-sync integration tests are behind
+  # `#[cfg(all(test, feature = "cloud-sync"))]` guards and use mockito HTTP
+  # stubs — no live network or credentials required. This job adds the missing
+  # `cargo test --all-features` gate so feature-gated test paths are exercised
+  # on every PR, not just at release.
+  # Runs on ubuntu-latest (faster, cheaper) with the same Tauri deps that the
+  # msrv and ci-matrix jobs already install for Linux builds.
+  test-all-features:
+    name: Test (all-features)
+    runs-on: ubuntu-latest
+    env:
+      COPYPASTE_EPHEMERAL_KEY: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install Tauri Linux system deps (glib/gtk/webkit for copypaste-ui)
+        # copypaste-ui (Tauri 2) pulls glib-sys/gtk/webkit2gtk-4.1 + soup3 via
+        # pkg-config on Linux; without these the build fails with
+        # "system library `glib-2.0` ... not found". Copied from ci-matrix.yml
+        # and msrv job — same dep set, same reason.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
+            libsoup-3.0-dev libayatana-appindicator3-dev
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ubuntu-all-features
+
+      - name: cargo test --workspace --all-features
+        run: cargo test --workspace --all-features
