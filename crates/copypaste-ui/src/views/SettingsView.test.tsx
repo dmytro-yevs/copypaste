@@ -721,3 +721,107 @@ describe("CopyPaste-tk2j: error handling — non-offline IpcError is NOT shown a
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// CopyPaste-wuek (NG-1): Parity — "Clear All" in canonical Settings location
+// Canonical per PARITY-SPEC §8: destructive data operations belong in
+// Settings (Storage tab → Data section), matching the Apple HIG model.
+// Both platforms must expose "Clear clipboard history" in Settings.
+// ---------------------------------------------------------------------------
+
+describe("CopyPaste-wuek NG-1: clear-all in Settings Storage tab (canonical location)", () => {
+  it("Storage tab has a 'Clear clipboard history' row in the Data section", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    // Navigate to the Storage tab — canonical location for destructive data ops.
+    const storageTabBtn = await screen.findByText("Storage");
+    await act(async () => { fireEvent.click(storageTabBtn); });
+
+    // The "Data" section heading must be present.
+    expect(screen.getByText(/^DATA$/i)).toBeInTheDocument();
+
+    // The "Clear clipboard history" row label must be present.
+    expect(screen.getByText(/Clear clipboard history/i)).toBeInTheDocument();
+
+    // The "Clear history…" button must be present and enabled when daemon is ready.
+    const clearBtn = screen.getByRole("button", { name: /Clear history/i });
+    expect(clearBtn).toBeInTheDocument();
+    expect(clearBtn).not.toBeDisabled();
+  });
+
+  it("clicking 'Clear history…' shows a two-step confirmation prompt", async () => {
+    invoke.mockImplementation(makeOnlineInvoke());
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const storageTabBtn = await screen.findByText("Storage");
+    await act(async () => { fireEvent.click(storageTabBtn); });
+
+    // First click shows confirmation prompt ("Delete all history?" + Yes/No).
+    const clearBtn = screen.getByRole("button", { name: /Clear history/i });
+    await act(async () => { fireEvent.click(clearBtn); });
+
+    // Two-step confirm: "Delete all history?" must appear.
+    expect(screen.getByText(/Delete all history\?/i)).toBeInTheDocument();
+    // Yes and No buttons.
+    expect(screen.getByRole("button", { name: /^Yes$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^No$/i })).toBeInTheDocument();
+  });
+
+  it("confirming 'Yes' calls the delete_all IPC", async () => {
+    invoke.mockImplementation((cmd: string, args?: unknown): Promise<unknown> => {
+      if (cmd === "ipc_call") {
+        const method = (args as { method?: string } | undefined)?.method;
+        if (method === "delete_all") {
+          return Promise.resolve({ ok: true, data: { deleted: 5 }, error: null, error_code: null });
+        }
+      }
+      return makeOnlineInvoke()(cmd, args);
+    });
+
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    const storageTabBtn = await screen.findByText("Storage");
+    await act(async () => { fireEvent.click(storageTabBtn); });
+
+    const clearBtn = screen.getByRole("button", { name: /Clear history/i });
+    await act(async () => { fireEvent.click(clearBtn); });
+
+    const yesBtn = screen.getByRole("button", { name: /^Yes$/i });
+    await act(async () => { fireEvent.click(yesBtn); });
+
+    // After confirming, delete_all IPC must have been called.
+    await waitFor(() => {
+      const deleteAllCalls = invoke.mock.calls.filter(
+        ([cmd, args]: [string, unknown]) =>
+          cmd === "ipc_call" &&
+          (args as { method?: string } | undefined)?.method === "delete_all",
+      );
+      expect(deleteAllCalls.length).toBeGreaterThanOrEqual(1);
+    });
+  });
+});

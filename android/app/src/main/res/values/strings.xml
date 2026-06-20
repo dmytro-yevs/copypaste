@@ -100,6 +100,10 @@
     <string name="setting_sensitive_ttl_label">Auto-clear sensitive after</string>
     <!-- §6/§10 max-items slider — pref-only, Unlimited sentinel = 100 000 -->
     <string name="setting_max_items_label">Max history items</string>
+    <!-- CopyPaste-wuek NG-1: clear-all in Settings (canonical location, parity with macOS) -->
+    <string name="section_data">Data</string>
+    <string name="setting_clear_history_label">Clear clipboard history</string>
+    <string name="btn_clear_history">Clear history…</string>
 
     <!-- Settings — Display density toggle (§2/§6/§10) -->
     <string name="setting_density_title">Compact layout</string>

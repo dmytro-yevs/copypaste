@@ -44,8 +44,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import android.app.Activity
@@ -550,25 +553,35 @@ fun SettingsScreen(
                         settings = settings,
                         ctx = ctx,
                     )
-                    TAB_STORAGE -> StorageTab(
-                        maxTextSizeBytes = maxTextSizeBytes,
-                        onMaxTextSizeBytesChange = { maxTextSizeBytes = it; dirty = true },
-                        maxImageSizeBytes = maxImageSizeBytes,
-                        onMaxImageSizeBytesChange = { maxImageSizeBytes = it; dirty = true },
-                        maxFileSizeBytes = maxFileSizeBytes,
-                        onMaxFileSizeBytesChange = { maxFileSizeBytes = it; dirty = true },
-                        storageQuotaBytes = storageQuotaBytes,
-                        onStorageQuotaBytesChange = { storageQuotaBytes = it; dirty = true },
-                        sensitiveTtlSecs = sensitiveTtlSecs,
-                        onSensitiveTtlSecsChange = { sensitiveTtlSecs = it; dirty = true },
-                        maxItems = maxItems,
-                        onMaxItemsChange = { maxItems = it; dirty = true },
-                        excludedApps = excludedApps,
-                        onExcludedAppsChange = { excludedApps = it; dirty = true },
-                        // CopyPaste-hffp: pass live draft density.
-                        density = density,
-                        ctx = ctx,
-                    )
+                    TAB_STORAGE -> {
+                        // CopyPaste-wuek NG-1: clear-all callback — launches on IO dispatcher
+                        // so repository I/O stays off the main thread. Uses a fresh repo
+                        // instance (same pattern as HistoryActivity/ClipboardViewModel.clearAll).
+                        val scope = rememberCoroutineScope()
+                        val repository = remember { ClipboardRepository(ctx) }
+                        StorageTab(
+                            maxTextSizeBytes = maxTextSizeBytes,
+                            onMaxTextSizeBytesChange = { maxTextSizeBytes = it; dirty = true },
+                            maxImageSizeBytes = maxImageSizeBytes,
+                            onMaxImageSizeBytesChange = { maxImageSizeBytes = it; dirty = true },
+                            maxFileSizeBytes = maxFileSizeBytes,
+                            onMaxFileSizeBytesChange = { maxFileSizeBytes = it; dirty = true },
+                            storageQuotaBytes = storageQuotaBytes,
+                            onStorageQuotaBytesChange = { storageQuotaBytes = it; dirty = true },
+                            sensitiveTtlSecs = sensitiveTtlSecs,
+                            onSensitiveTtlSecsChange = { sensitiveTtlSecs = it; dirty = true },
+                            maxItems = maxItems,
+                            onMaxItemsChange = { maxItems = it; dirty = true },
+                            excludedApps = excludedApps,
+                            onExcludedAppsChange = { excludedApps = it; dirty = true },
+                            // CopyPaste-hffp: pass live draft density.
+                            density = density,
+                            ctx = ctx,
+                            onClearHistory = {
+                                scope.launch(Dispatchers.IO) { repository.clearAll() }
+                            },
+                        )
+                    }
                     TAB_SYNC -> SyncTab(
                         syncBackend = syncBackend,
                         onSyncBackendChange = { syncBackend = it; dirty = true },
@@ -1002,6 +1015,8 @@ private fun StorageTab(
     // CopyPaste-hffp: live density from SettingsScreen for density-aware nav rows.
     density: Density,
     ctx: android.content.Context,
+    // CopyPaste-wuek NG-1: clear-all in Settings (canonical parity with macOS Settings → Storage → Data).
+    onClearHistory: () -> Unit,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         SettingsSectionLabel(stringResource(R.string.section_storage_limits))
@@ -1082,6 +1097,61 @@ private fun StorageTab(
                     ctx.startActivity(Intent(ctx, BackgroundCaptureSetupActivity::class.java))
                 }
             )
+        }
+
+        // ── DATA — destructive actions (CopyPaste-wuek NG-1: parity with macOS) ──
+        // Canonical per PARITY-SPEC §8: destructive data operations belong in
+        // Settings, matching the Apple HIG and macOS Settings → Storage → Data.
+        // Android previously only had "Clear All" in the History overflow menu (NG-1);
+        // this section adds it to Settings so both platforms match.
+        var showClearHistoryConfirm by remember { mutableStateOf(false) }
+        if (showClearHistoryConfirm) {
+            GlassAlertDialog(
+                onDismissRequest = { showClearHistoryConfirm = false },
+                title = { Text(stringResource(R.string.dialog_clear_all_title)) },
+                text = { Text(stringResource(R.string.setting_clear_history_label)) },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showClearHistoryConfirm = false
+                            onClearHistory()
+                        },
+                    ) {
+                        Text(
+                            text = stringResource(R.string.dialog_confirm),
+                            color = LocalIdeColors.current.danger,
+                        )
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showClearHistoryConfirm = false }) {
+                        Text(stringResource(R.string.dialog_cancel))
+                    }
+                },
+            )
+        }
+        SettingsSectionLabel(stringResource(R.string.section_data))
+        SettingsCard {
+            val c = LocalIdeColors.current
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = stringResource(R.string.setting_clear_history_label),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.text,
+                )
+                CopyPasteButton(
+                    onClick = { showClearHistoryConfirm = true },
+                    variant = ButtonVariant.DANGER,
+                ) {
+                    Text(stringResource(R.string.btn_clear_history))
+                }
+            }
         }
         Spacer(modifier = Modifier.height(16.dp))
     }
