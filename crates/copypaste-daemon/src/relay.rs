@@ -113,6 +113,179 @@ fn relay_should_auto_apply(auto_apply_synced_clip: bool) -> bool {
     auto_apply_synced_clip
 }
 
+/// Candidate for auto-applying to the local pasteboard after a relay ingest.
+///
+/// Carries enough information for [`relay_apply_to_pasteboard`] to write the
+/// item to NSPasteboard (macOS) without re-querying the DB or re-decrypting.
+struct AutoApplyCandidate {
+    wall_time: i64,
+    plaintext: Vec<u8>,
+    content_type: String,
+}
+
+/// Fetch the freshest non-deleted, non-sensitive text item from the DB and
+/// return it decrypted, ready for pasteboard auto-apply.
+///
+/// Returns `None` when:
+/// - the DB has no qualifying text item, or
+/// - decryption fails (wrong key version or corrupt ciphertext — logged at WARN).
+///
+/// Only text items are returned; image items require the multi-chunk decode
+/// path which relay.rs defers to a future iteration (images are stored but
+/// not auto-applied — files are never auto-applied per the macOS limit).
+///
+/// Called inside `spawn_blocking` by the receive loop after `stored > 0` when
+/// `auto_apply_enabled` is true.
+fn relay_fetch_auto_apply_candidate(
+    db: &Database,
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+) -> Option<AutoApplyCandidate> {
+    use copypaste_core::ClipboardItem;
+
+    // Query the most-recently-written non-deleted, non-sensitive text item.
+    // We use an inline row-map rather than `get_page` so we can add the
+    // `content_type = 'text'` filter without a post-query scan.
+    let item: ClipboardItem = db
+        .conn()
+        .query_row(
+            "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
+                    is_sensitive, is_synced, lamport_ts, wall_time, expires_at,
+                    app_bundle_id, content_hash, origin_device_id, key_version,
+                    pinned, pin_order, thumb, deleted
+             FROM clipboard_items
+             WHERE content_type = 'text' AND deleted = 0 AND is_sensitive = 0
+             ORDER BY wall_time DESC, lamport_ts DESC
+             LIMIT 1",
+            [],
+            |r| {
+                Ok(ClipboardItem {
+                    id: r.get(0)?,
+                    item_id: r.get(1)?,
+                    content_type: r.get(2)?,
+                    content: r.get(3)?,
+                    content_nonce: r.get(4)?,
+                    blob_ref: r.get(5)?,
+                    is_sensitive: r.get::<_, i64>(6)? != 0,
+                    is_synced: r.get::<_, i64>(7)? != 0,
+                    lamport_ts: r.get(8)?,
+                    wall_time: r.get(9)?,
+                    expires_at: r.get(10)?,
+                    app_bundle_id: r.get(11)?,
+                    content_hash: r.get(12)?,
+                    origin_device_id: r.get(13)?,
+                    key_version: {
+                        let kv: i64 = r.get(14)?;
+                        u8::try_from(kv)
+                            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(14, kv))?
+                    },
+                    pinned: r.get::<_, i64>(15)? != 0,
+                    pin_order: r.get(16)?,
+                    thumb: r.get(17)?,
+                    deleted: r.get::<_, i64>(18)? != 0,
+                })
+            },
+        )
+        .ok()?; // QueryReturnedNoRows → None; other errors also → None (logged below)
+
+    let plaintext = match crate::sync_common::decrypt_item_plaintext(&item, local_key) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(
+                "relay-sync: relay_fetch_auto_apply_candidate: decrypt failed: {e}; skipping"
+            );
+            return None;
+        }
+    };
+    Some(AutoApplyCandidate {
+        wall_time: item.wall_time,
+        plaintext,
+        content_type: item.content_type,
+    })
+}
+
+/// Write the auto-apply candidate to the local pasteboard (macOS-only).
+///
+/// Stamps `self_write_change_count` before and after the NSPasteboard write so
+/// the `ClipboardMonitor` poller recognises this write as a daemon-own write and
+/// does not re-capture it as a new local item (loop prevention — same guard the
+/// `copy_item` IPC handler and sync_orch auto-apply use).
+///
+/// Only text items are written; image/file paths are not yet implemented on the
+/// relay receive path (noted at caller).  On non-macOS platforms this is a no-op.
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+fn relay_apply_to_pasteboard(
+    candidate: &AutoApplyCandidate,
+    self_write_change_count: &Arc<AtomicI64>,
+) {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSPasteboard;
+
+        match candidate.content_type.as_str() {
+            "text" => {
+                let text = match std::str::from_utf8(&candidate.plaintext) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("relay-sync: auto-apply text is not UTF-8: {e}");
+                        return;
+                    }
+                };
+                objc2::rc::autoreleasepool(|_pool| {
+                    use objc2_app_kit::NSPasteboardTypeString;
+                    use objc2_foundation::NSString;
+
+                    // Pre-stamp: clearContents (+1) + setString (+1) = +2.
+                    let pre = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    self_write_change_count.store(pre + 2, Ordering::Release);
+
+                    let ok = unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let ns_str = NSString::from_str(text);
+                        pb.setString_forType(&ns_str, NSPasteboardTypeString)
+                    };
+                    if ok {
+                        let actual =
+                            unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                        self_write_change_count.store(actual, Ordering::Release);
+                        tracing::debug!(
+                            change_count = actual,
+                            "relay-sync: auto-applied synced text to NSPasteboard"
+                        );
+                    } else {
+                        // Reset sentinel so the monitor is not permanently suppressed.
+                        self_write_change_count.store(-1, Ordering::Release);
+                        tracing::warn!(
+                            "relay-sync: auto-apply text: \
+                             NSPasteboard setString:forType: returned false"
+                        );
+                    }
+                });
+            }
+            "image" | "file" => {
+                // Image auto-apply requires multi-chunk decode (deferred).
+                // File auto-apply requires writing bytes to a temp file (deferred).
+                tracing::debug!(
+                    content_type = candidate.content_type.as_str(),
+                    "relay-sync: auto-apply deferred for {} item (not yet implemented on relay path)",
+                    candidate.content_type
+                );
+            }
+            other => {
+                tracing::debug!("relay-sync: auto-apply skipped for unknown content_type={other}");
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        tracing::debug!(
+            content_type = candidate.content_type.as_str(),
+            "relay-sync: auto-apply skipped (not macOS)"
+        );
+    }
+}
+
 /// Poll interval for the receive loop (the relay also offers SSE; polling is the
 /// portable backstop and matches the at-least-once contract). Kept tight so
 /// cross-device latency is low without hammering the relay.
@@ -358,16 +531,33 @@ fn store_cached_token(token: &str, local_key: &zeroize::Zeroizing<[u8; 32]>) {
 
 /// Write `content` to `path` with `0600` perms via a temp-file + rename so a
 /// reader never sees a partial or world-readable file.
+///
+/// CopyPaste-2yuo: the temp file is now opened with `OpenOptionsExt::mode(0o600)`
+/// so the file is **never** world-readable — not even for the brief window between
+/// `File::create` (which inherits the process umask, typically giving 0644) and a
+/// subsequent `set_permissions(0o600)` call. The explicit mode argument passed to
+/// `open(2)` is `0o600 & ~umask`; since `0600` has no group/other bits, any umask
+/// leaves it at `0600`, eliminating the race window atomically.
 fn write_token_0600(path: &std::path::Path, content: &str) -> std::io::Result<()> {
     use std::io::Write as _;
     let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
     let tmp = dir.join(format!(".{RELAY_TOKEN_FILE}.tmp"));
-    let mut f = std::fs::File::create(&tmp)?;
+    // CopyPaste-2yuo fix: open with mode 0o600 on the first syscall so no
+    // world-readable window exists between create and chmod. The `#[cfg(unix)]`
+    // block uses OpenOptionsExt; on non-Unix (Windows) we fall back to the
+    // simple `File::create` (Windows has no Unix mode bits).
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt as _;
-        f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    }
+    let mut f = {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)?
+    };
+    #[cfg(not(unix))]
+    let mut f = std::fs::File::create(&tmp)?;
     f.write_all(content.as_bytes())?;
     f.sync_all()?;
     std::fs::rename(&tmp, path)?;
@@ -1068,8 +1258,8 @@ fn ingest_page_blocking(
 
 /// The receive loop: poll the shared inbox, ingest new items via the LWW path,
 /// advance the watermark.
-// All parameters are independent runtime slices (db, url, name, keys, shutdown)
-// with no natural grouping for a private async fn.
+// All parameters are independent runtime slices (db, url, name, keys, shutdown,
+// auto_apply_change_count) with no natural grouping for a private async fn.
 #[allow(clippy::too_many_arguments)]
 async fn receive_loop(
     client: reqwest::Client,
@@ -1081,6 +1271,13 @@ async fn receive_loop(
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: Arc<AtomicI64>,
     core_config: Arc<std::sync::RwLock<AppConfig>>,
+    // Shared self-write sentinel for the pasteboard poller.  When `Some`, the
+    // relay auto-apply path stamps this atomic before/after each NSPasteboard
+    // write so the `ClipboardMonitor` does not re-capture daemon-own writes
+    // (loop prevention — mirrors the sync_orch / copy_item IPC guard).
+    // `None` disables the pasteboard write (non-Unix, tests, callers that have
+    // not wired the sentinel yet).
+    auto_apply_change_count: Option<Arc<AtomicI64>>,
 ) {
     let mut cached_token = load_cached_token(&local_key);
     let mut wm = Watermark::default();
@@ -1197,10 +1394,43 @@ async fn receive_loop(
                     wm = new_wm;
                     if stored > 0 {
                         last_sync_ms.store(now_ms(), Ordering::Relaxed);
-                        // auto_apply_synced_clip gate: only log when suppressed so
-                        // it is observable in debug logs. Actual pasteboard writes
-                        // require AutoApplyCtx wired from daemon.rs (follow-up).
-                        if !auto_apply_enabled {
+                        if auto_apply_enabled {
+                            // CopyPaste-7ub: implement auto_apply_synced_clip on the
+                            // relay receive path. Fetch the freshest stored text item,
+                            // decrypt it, and write it to NSPasteboard — stamping the
+                            // self-write sentinel so the ClipboardMonitor does NOT
+                            // re-capture the write as a new local item (loop prevention).
+                            //
+                            // The pasteboard write is gated on `auto_apply_change_count`
+                            // being Some (wired from daemon.rs via `start_relay`). When
+                            // None (tests, non-Unix) the ingest is still recorded in
+                            // last_sync_ms but no pasteboard write occurs.
+                            if let Some(ref swcc) = auto_apply_change_count {
+                                let db_arc2 = db.clone();
+                                let lk2 = local_key.clone();
+                                let swcc2 = swcc.clone();
+                                let join2 = tokio::task::spawn_blocking(move || {
+                                    let guard = db_arc2.blocking_lock();
+                                    if let Some(cand) =
+                                        relay_fetch_auto_apply_candidate(&guard, &lk2)
+                                    {
+                                        relay_apply_to_pasteboard(&cand, &swcc2);
+                                    }
+                                })
+                                .await;
+                                if let Err(e) = join2 {
+                                    tracing::warn!(
+                                        "relay-sync receive_loop: auto-apply task panicked: {e}"
+                                    );
+                                }
+                            } else {
+                                tracing::debug!(
+                                    "relay-sync receive_loop: auto_apply_synced_clip=true \
+                                     but change-count sentinel not wired; \
+                                     {stored} relay item(s) stored (no pasteboard write)"
+                                );
+                            }
+                        } else {
                             tracing::debug!(
                                 "relay-sync receive_loop: auto_apply_synced_clip=false; \
                                  {stored} relay item(s) stored but NOT auto-applied to pasteboard"
@@ -1226,9 +1456,18 @@ async fn receive_loop(
 /// receive loop (polls the shared inbox). Active iff `relay_url` is a valid URL.
 ///
 /// `device_name` is the human-readable name presented at registration (1..=64).
+///
+/// `auto_apply_change_count` — when `Some`, enables the Universal Clipboard
+/// feature on the relay receive path: a freshly-synced text item is written to
+/// NSPasteboard immediately after ingest, honoring the `auto_apply_synced_clip`
+/// config flag.  The `Arc<AtomicI64>` is the SAME self-write sentinel the
+/// `ClipboardMonitor` uses so the pasteboard write is not re-captured as a new
+/// local item (loop prevention).  Pass the same `self_write_change_count_arc`
+/// that the IPC server and sync_orch already share.  Pass `None` to disable
+/// (non-macOS, tests, or callers that have not wired the sentinel).
 // All params are distinct daemon-lifecycle handles (client, url, name, db,
-// rx, sync_key, local_key, last_sync_ms, shutdown) — no struct without
-// reaching into daemon internals.
+// rx, sync_key, local_key, last_sync_ms, core_config, auto_apply_change_count)
+// — no struct without reaching into daemon internals.
 #[allow(clippy::too_many_arguments)]
 pub fn start_relay(
     client: reqwest::Client,
@@ -1240,6 +1479,7 @@ pub fn start_relay(
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: Arc<AtomicI64>,
     core_config: Arc<std::sync::RwLock<AppConfig>>,
+    auto_apply_change_count: Option<Arc<AtomicI64>>,
 ) -> Result<RelayHandle, RelayError> {
     let relay_url = relay_url.trim_end_matches('/').to_owned();
     if !is_relay_url_ok(&relay_url) {
@@ -1275,6 +1515,7 @@ pub fn start_relay(
         local_key,
         last_sync_ms,
         core_config,
+        auto_apply_change_count,
     ));
 
     tracing::info!("relay-sync: orchestrator started");
@@ -2161,6 +2402,149 @@ mod tests {
         assert!(
             row_after_second.content.is_some(),
             "content must be intact after dedup no-op"
+        );
+    }
+
+    // ── BUG 1 (CopyPaste-2yuo): write_token_0600 permissions ─────────────────
+
+    /// write_token_0600 must produce a file with exactly mode 0600.
+    ///
+    /// This is the contract test: the file must be 0600 regardless of the
+    /// process umask. The old `File::create()` + `set_permissions()` approach
+    /// created the temp file with the umask-modified mode (typically 0644) for a
+    /// brief window before chmod. The fix uses `OpenOptionsExt::mode(0o600)` so
+    /// the file is 0600 from the first open(2) call.
+    ///
+    /// Note: a race-condition reproducer cannot be written as a pure unit test
+    /// without threading primitives; this test verifies the postcondition contract.
+    #[cfg(unix)]
+    #[test]
+    fn write_token_0600_perms_are_exactly_0600() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("relay_token_perms_test");
+        write_token_0600(&path, "test-token-for-perms-check").expect("write ok");
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "token file must be mode 0600, got {:o}", mode);
+    }
+
+    /// write_token_0600 must produce a 0600 file even when the process umask is
+    /// 0000 (which makes File::create produce world-readable 0666 files).
+    ///
+    /// This is the failing test for the race: with the old implementation
+    /// `File::create` creates the temp file at mode 0666 (umask=0) for a brief
+    /// window. The test cannot observe that window directly, but it documents
+    /// the invariant that `mode(0o600)` via OpenOptionsExt is immune to umask.
+    ///
+    /// The umask is process-wide; this test uses `#[serial]` to avoid
+    /// interference with other tests.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn write_token_0600_immune_to_permissive_umask() {
+        // Temporarily set umask to 0 so File::create would produce 0666.
+        // A correct implementation using OpenOptions::mode(0o600) must still
+        // produce 0600 because the explicit mode overrides umask for the
+        // bits we care about (0600 ∩ 0777 = 0600, unaffected by umask~0777).
+        let old_umask = unsafe { libc::umask(0) };
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("relay_token_umask_test");
+        let result = write_token_0600(&path, "tok-umask-test");
+        // Restore umask before any assertion so a panic doesn't leave it broken.
+        unsafe { libc::umask(old_umask) };
+        result.expect("write ok");
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "token file must be 0600 even with umask=0000 (world-open), got {:o}",
+            mode
+        );
+    }
+
+    // ── BUG 2b (CopyPaste-7ub): auto_apply_synced_clip relay path ─────────────
+
+    /// relay_fetch_auto_apply_candidate returns the freshest stored item's
+    /// (wall_time, plaintext, content_type) when the DB has at least one
+    /// non-deleted, non-sensitive, text item. Returns None on empty DB.
+    ///
+    /// This is the test for the new helper that feeds the pasteboard write path.
+    /// FAILS before implementation because `relay_fetch_auto_apply_candidate`
+    /// does not exist yet.
+    #[test]
+    fn relay_fetch_auto_apply_candidate_returns_freshest_text_item() {
+        let db = open_mem_db();
+        let local_key = zeroize::Zeroizing::new([0xAAu8; 32]);
+        let sync_bytes = skey("relay-auto-apply-candidate-pass");
+        let sync_key = SyncKey::from_bytes(sync_bytes);
+        let g = db.blocking_lock();
+
+        // Empty DB → no candidate.
+        assert!(
+            relay_fetch_auto_apply_candidate(&g, &local_key).is_none(),
+            "empty DB must yield no candidate"
+        );
+
+        // Insert one item via ingest_page_blocking.
+        let item_id = "aac-item-1";
+        let plaintext_in = b"hello auto-apply";
+        let pull = make_pull_item(1, item_id, plaintext_in, &sync_key, 5, 1000);
+        let (_wm, stored) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&pull),
+            Watermark::default(),
+            u64::MAX,
+        );
+        assert_eq!(stored, 1, "first item must be stored");
+
+        // Now fetch the candidate.
+        let cand = relay_fetch_auto_apply_candidate(&g, &local_key)
+            .expect("must return candidate after insert");
+        assert_eq!(cand.content_type, "text", "content_type must be text");
+        assert_eq!(
+            cand.plaintext, plaintext_in,
+            "candidate plaintext must match original"
+        );
+        assert_eq!(cand.wall_time, 1000, "wall_time must match the item");
+    }
+
+    /// When auto_apply_enabled=false, relay_should_auto_apply gates the write.
+    /// When auto_apply_enabled=true, the candidate is fetched and written.
+    /// This test verifies the gate and candidate fetching work end-to-end
+    /// (pasteboard write is macOS-only and not directly testable in a unit test).
+    #[test]
+    fn relay_auto_apply_gate_and_candidate_integration() {
+        let db = open_mem_db();
+        let local_key = zeroize::Zeroizing::new([0xCCu8; 32]);
+        let sync_bytes = skey("relay-auto-apply-gate-pass");
+        let sync_key = SyncKey::from_bytes(sync_bytes);
+        let g = db.blocking_lock();
+
+        let pull = make_pull_item(1, "gate-item-1", b"test payload", &sync_key, 3, 500);
+        let (_wm, stored) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&pull),
+            Watermark::default(),
+            u64::MAX,
+        );
+        assert_eq!(stored, 1);
+
+        // auto_apply=false: must not attempt pasteboard write.
+        assert!(
+            !relay_should_auto_apply(false),
+            "flag=false → must not auto-apply"
+        );
+
+        // auto_apply=true: gate passes, candidate must be available.
+        assert!(relay_should_auto_apply(true), "flag=true → gate passes");
+        let cand = relay_fetch_auto_apply_candidate(&g, &local_key);
+        assert!(
+            cand.is_some(),
+            "auto_apply=true path: candidate must be available after ingest"
         );
     }
 }

@@ -1199,6 +1199,17 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 .timeout(crate::sync_common::SYNC_HTTP_TIMEOUT)
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
+            // CopyPaste-7ub: wire the self-write sentinel so relay auto-apply
+            // does not re-capture its own pasteboard writes.  On Unix the
+            // sentinel is shared with the ClipboardMonitor and the IPC
+            // copy_item handler; on non-Unix there is no NSPasteboard so
+            // the sentinel is disabled.
+            #[cfg(unix)]
+            let relay_auto_apply_cc: Option<Arc<std::sync::atomic::AtomicI64>> =
+                Some(self_write_change_count_arc.clone());
+            #[cfg(not(unix))]
+            let relay_auto_apply_cc: Option<Arc<std::sync::atomic::AtomicI64>> = None;
+
             match crate::relay::start_relay(
                 client,
                 relay_url,
@@ -1209,6 +1220,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 local_key_arc.clone(),
                 cloud_last_sync_ms.clone(),
                 core_config_arc.clone(),
+                relay_auto_apply_cc,
             ) {
                 Ok(handle) => {
                     tracing::info!("relay-sync: orchestrator started");
