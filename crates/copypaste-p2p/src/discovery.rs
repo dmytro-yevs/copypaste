@@ -279,7 +279,27 @@ impl DiscoveryService {
         // mDNS socket.
         lock_safe(&self.daemon).replace(daemon.clone());
 
-        let handle = tokio::spawn(async move {
+        // CopyPaste-bp3o: wrap the browse loop in a supervisor task so a panic
+        // inside the inner task is logged at ERROR instead of being silently
+        // swallowed. Without this, a panic in `handle_event` (or in the
+        // recv_async loop) kills the mDNS discovery subsystem with no observable
+        // signal, making the failure invisible to operators.
+        //
+        // The inner task holds the daemon alive (`let _daemon = daemon`). The
+        // outer supervisor awaits the inner join-handle; on panic it logs the
+        // event and exits (no restart — a restart would require re-initialising
+        // the mDNS daemon, which is the caller's responsibility via `start()`).
+        //
+        // Shutdown ordering: `browse_abort` is set to the OUTER supervisor's
+        // abort handle. When aborted, the outer task's cancellation propagates
+        // to the `inner_handle.await` point, but the inner task itself is not
+        // automatically cancelled (tokio task cancellation is not hierarchical).
+        // To ensure the inner task is also stopped, we store the inner abort
+        // handle in the supervisor closure and call `inner_abort.abort()` from
+        // a `Drop` guard before yielding. The existing `shutdown_inner` path
+        // also shuts down the mDNS daemon, which closes the browse channel and
+        // causes the inner loop to exit naturally.
+        let inner_handle = tokio::spawn(async move {
             // Keep the daemon alive for the duration of the task.
             let _daemon = daemon;
 
@@ -305,9 +325,46 @@ impl DiscoveryService {
             }
         });
 
+        // Retain the inner abort handle so the supervisor can explicitly abort
+        // the inner task when the supervisor itself is cancelled. Without this,
+        // aborting the outer task leaves the inner task running detached.
+        let inner_abort = inner_handle.abort_handle();
+
+        let handle = tokio::spawn(async move {
+            // Ensure the inner task is aborted when the supervisor exits for
+            // any reason (normal shutdown, cancellation, or after logging a
+            // panic). The `AbortHandle` is a cheap clone of the inner task's
+            // cancellation handle; calling `.abort()` is idempotent.
+            struct AbortOnDrop(AbortHandle);
+            impl Drop for AbortOnDrop {
+                fn drop(&mut self) {
+                    self.0.abort();
+                }
+            }
+            let _guard = AbortOnDrop(inner_abort);
+
+            match inner_handle.await {
+                Ok(()) => {} // Browse loop exited cleanly (daemon shut down).
+                Err(join_err) if join_err.is_panic() => {
+                    // CopyPaste-bp3o: log the panic so it surfaces in telemetry.
+                    // The browse loop is not restarted here; the caller must call
+                    // `start()` again to re-initialise discovery if needed.
+                    tracing::error!(
+                        "CopyPaste-bp3o: mDNS browse task panicked; \
+                         discovery is disabled until start() is called again"
+                    );
+                }
+                Err(_cancelled) => {
+                    // Cancelled via abort_handle — normal shutdown path.
+                }
+            }
+        });
+
         // Retain an abort handle so `Drop` (and a restart-in-place via
         // `shutdown_inner`) can stop the browse loop. The owned `JoinHandle` is
         // still returned to the caller for awaiting / explicit shutdown.
+        // The abort_handle points to the OUTER supervisor task; the supervisor
+        // in turn aborts the inner browse task via the `AbortOnDrop` guard.
         lock_safe(&self.browse_abort).replace(handle.abort_handle());
 
         Ok(handle)

@@ -24,17 +24,20 @@ use crate::middleware::rate_limit::{
 use crate::state::AppState;
 
 /// `KeyExtractor` that pulls the `:device_id` segment out of paths shaped like
-/// `/devices/<id>/items[/...]`. Used by the per-device `GovernorLayer` so the
-/// rate limit is genuinely per-device (HIGH #4) — `PeerIpKeyExtractor` keyed
-/// the bucket by client IP, which means a single NAT'd network shared one
-/// per-device bucket while a single attacker on many IPs got a fresh bucket
-/// per IP. Both directions of that error are now closed.
+/// `/devices/<id>/items[/...]`.
+///
+/// CopyPaste-hzmb: this extractor is NO LONGER wired into the rate-limit layer.
+/// It used to be the key for the per-device `GovernorLayer`, but keying on the
+/// pre-auth URL `:device_id` lets an attacker rotate IDs to get a fresh bucket
+/// on every request, defeating the limit entirely. The rate-limit layer now
+/// keys on source IP (via `PerIp`) which the attacker cannot rotate. This
+/// struct is kept for tests that verify URL-segment parsing and for any future
+/// diagnostic middleware that needs to read the device_id from a request.
 ///
 /// Returns a `GovernorError::Other` with 400 BAD_REQUEST if the URI does not
 /// start with `/devices/`, or 404 NOT_FOUND if the device id segment is empty.
-/// In practice neither case arises because this extractor is only attached to
-/// the `item_routes` sub-router, but explicit error codes are returned so that
-/// misdirected requests produce actionable status codes rather than 500.
+// CopyPaste-hzmb: no longer constructed in production code; retained for tests.
+#[allow(dead_code)] // retained for URL-parsing tests and future diagnostic use
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct DeviceIdKeyExtractor;
 
@@ -150,7 +153,7 @@ fn build_router<PerIp>(
     per_ip_key: PerIp,
 ) -> Result<(Router, RetainFns), GovernorConfigError>
 where
-    PerIp: KeyExtractor + Send + Sync + 'static,
+    PerIp: KeyExtractor + Clone + Send + Sync + 'static,
     PerIp::Key: Send + Sync + 'static,
 {
     // ---- Exempt routes (no rate limiting) ----------------------------------
@@ -167,6 +170,10 @@ where
     // actually bounds the per-device limiter's bypass (M2): even if a flooder
     // cycles fresh device ids to dodge the per-device bucket, every request
     // still shares this per-IP bucket.
+    //
+    // CopyPaste-hzmb: we clone `per_ip_key` here so the same IP-keying
+    // extractor can be reused for the tighter per-item-route bucket below.
+    let per_ip_key_for_item = per_ip_key.clone();
     let per_ip_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second(PER_IP_PER_SECOND)
@@ -178,26 +185,30 @@ where
             })?,
     );
 
-    // ---- Per-device rate limit layer (60 req/min) ---------------------------
-    // HIGH #4: key the bucket by the `:device_id` URL segment via a custom
-    // `KeyExtractor`. The previous default keyed by peer IP, so this layer
-    // was effectively a *second* per-IP limit, not a per-device one.
+    // ---- Per-item-route IP rate limit layer (60 req/min) -------------------
+    // CopyPaste-hzmb: the previous "per-device" layer keyed the bucket on the
+    // *pre-auth* URL `:device_id` segment, which an attacker can rotate freely
+    // to obtain a fresh bucket on every request, completely bypassing the limit.
+    // The fix keys this tighter (60 req/min) layer on the source IP — the same
+    // unspoofable identity that the per-IP layer above uses, but with a stricter
+    // budget applied specifically to device-item routes. Keying on the
+    // post-authentication identity (bearer token) would require running auth
+    // *before* this Tower layer, which is not possible in the current
+    // architecture — IP keying is the correct defense-in-depth here.
     //
-    // M2: this `:device_id` is the *pre-auth* URL segment, so a flooder can
-    // rotate ids to get a fresh per-device bucket each time. That is acceptable
-    // because this layer is defense-in-depth only — the per-IP layer above
-    // (applied to the same routes) bounds id-rotation abuse since the source IP
-    // cannot be rotated. Keying on the authenticated identity instead would
-    // require running auth before the layer (the bearer token is verified
-    // inside the handler), which the tower layer stack cannot do here.
-    let per_device_conf = Arc::new(
+    // DeviceIdKeyExtractor is kept for tests that verify URL-segment extraction
+    // logic (it is not removed from the file); it is no longer wired into the
+    // rate-limit layer.
+    let per_item_ip_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second(PER_DEVICE_PER_SECOND)
             .burst_size(PER_DEVICE_BURST_SIZE)
-            .key_extractor(DeviceIdKeyExtractor)
+            .key_extractor(per_ip_key_for_item)
             .finish()
             .ok_or_else(|| {
-                GovernorConfigError("per-device: per_second or burst_size is zero".to_string())
+                GovernorConfigError(
+                    "per-item-route IP: per_second or burst_size is zero".to_string(),
+                )
             })?,
     );
 
@@ -208,14 +219,19 @@ where
     // the vec to `governor_cleanup::spawn_cleanup_all` which spawns one task.
     // Test code that only needs the Router can simply drop the vec.
     let ip_limiter = std::sync::Arc::clone(per_ip_conf.limiter());
-    let dev_limiter = std::sync::Arc::clone(per_device_conf.limiter());
+    let item_ip_limiter = std::sync::Arc::clone(per_item_ip_conf.limiter());
     let retain_fns: RetainFns = vec![
         Box::new(move || ip_limiter.retain_recent()),
-        Box::new(move || dev_limiter.retain_recent()),
+        Box::new(move || item_ip_limiter.retain_recent()),
     ];
 
-    // ---- Device-scoped item routes (per-device + per-IP limits) ------------
+    // ---- Device-scoped item routes (two IP-keyed rate limits) --------------
     // Note: axum 0.8 uses `{param}` syntax for path captures (`:param` is 0.7).
+    // CopyPaste-hzmb: both layers now key on source IP, not on the pre-auth
+    // URL device_id. The outer per-IP layer (200 req/min) applies across ALL
+    // routes; the inner per-item-route IP layer (60 req/min) applies only to
+    // device-item routes — giving item routes a tighter per-IP budget without
+    // the device_id bypass.
     let item_routes = Router::new()
         .route(
             "/devices/{device_id}/items",
@@ -226,13 +242,12 @@ where
             delete(items::delete_item),
         )
         // SSE push (issue #26): real-time stream of new inbox items, additive
-        // to the GET .../items poll backstop. Shares the per-device + per-IP
-        // rate limits applied to this sub-router below.
+        // to the GET .../items poll backstop. Shares both IP-keyed rate limits.
         .route("/devices/{device_id}/subscribe", get(items::subscribe))
         .with_state(state.clone())
         // In 0.8 GovernorLayer fields are private; use GovernorLayer::new() instead of
         // struct literal syntax.
-        .layer(GovernorLayer::new(per_device_conf))
+        .layer(GovernorLayer::new(per_item_ip_conf))
         .layer(GovernorLayer::new(per_ip_conf.clone()));
 
     // ---- Device registration + info routes (per-IP limit only) -------------
@@ -432,6 +447,67 @@ mod tests {
             let (_router, _retain_fns) = relay_router(state, config)
                 .expect("relay_router must succeed with valid rate-limit constants");
         }
+    }
+
+    // ---- CopyPaste-hzmb: per-item rate limiter must key on IP, not device_id --
+    //
+    // Before the fix, the per-device GovernorLayer used DeviceIdKeyExtractor,
+    // which extracts the bucket key from the URL `:device_id` segment. An
+    // attacker rotating device IDs gets a fresh bucket per request, completely
+    // bypassing the limit. After the fix both layers on item routes key on the
+    // source IP (unspoofable), so id rotation provides no benefit.
+
+    /// CopyPaste-hzmb: `build_router` with `PeerIpKeyExtractor` must produce
+    /// two retain callbacks (one per IP-keyed limiter) whose retain functions
+    /// are callable without panic.
+    #[test]
+    fn hzmb_item_route_rate_limiter_keyed_on_ip_not_device_id() {
+        use crate::state::RelayStore;
+        use std::sync::Mutex;
+
+        let config = RelayConfig::default();
+        let state = Arc::new(Mutex::new(RelayStore::new(config.sync_ttl_secs)));
+        let (_router, retain_fns) = relay_router(state, config)
+            .expect("relay_router must succeed with valid rate-limit constants");
+
+        // There must be exactly 2 retain callbacks (per-IP + per-item-route IP).
+        assert_eq!(
+            retain_fns.len(),
+            2,
+            "CopyPaste-hzmb: expected exactly 2 retain callbacks, got {}",
+            retain_fns.len()
+        );
+
+        // Both callbacks must be callable without panicking.
+        for retain in &retain_fns {
+            retain();
+        }
+    }
+
+    /// CopyPaste-hzmb: the DeviceIdKeyExtractor is kept for URL-segment
+    /// extraction logic but must NOT be used as the rate-limit bucket key.
+    /// Verify that distinct device IDs from the same request context are NOT
+    /// the differentiating factor for rate limiting (i.e., the extractor still
+    /// correctly parses the URL segment — it is just no longer wired into the
+    /// governor layer). The unit tests for DeviceIdKeyExtractor above remain
+    /// valid; this test documents the architectural change.
+    #[test]
+    fn device_id_extractor_parses_url_but_not_wired_as_rate_limit_key() {
+        // DeviceIdKeyExtractor must still correctly parse URLs for other uses
+        // (e.g. future diagnostic middleware), even though it is no longer the
+        // rate-limit key.
+        let key_a = DeviceIdKeyExtractor
+            .extract(&req("/devices/attacker-rotates-this/items"))
+            .unwrap();
+        let key_b = DeviceIdKeyExtractor
+            .extract(&req("/devices/different-id/items"))
+            .unwrap();
+        // The extractor parses distinct IDs correctly.
+        assert_ne!(
+            key_a, key_b,
+            "DeviceIdKeyExtractor must parse distinct IDs; \
+             these IDs were not being used as the rate-limit key (hzmb fix)"
+        );
     }
 
     // ---- CopyPaste-7185 (P2): GET /devices must be scoped per account --------

@@ -18,6 +18,7 @@ mod quota;
 mod routes;
 mod state;
 mod store;
+mod supervise;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
@@ -52,20 +53,37 @@ async fn main() -> anyhow::Result<()> {
     let state = Arc::new(Mutex::new(relay_store));
 
     // Background TTL evictor — see ADR-009 (in-memory store + periodic prune).
-    let _evictor =
-        store::spawn_ttl_evictor(state.clone(), config.sync_ttl_secs, TTL_EVICTOR_TICK_SECS);
+    //
+    // CopyPaste-bp3o: wrapped in `spawn_supervised` so a panic inside the
+    // evictor task is logged at ERROR and the task restarts automatically.
+    // Previously a panic would silently terminate eviction for the rest of the
+    // process lifetime: items would accumulate past their TTL, device records
+    // would never be reaped, and no operator alert would fire.
+    let evictor_state = state.clone();
+    let evictor_ttl = config.sync_ttl_secs;
+    // Retain the supervisor handle — dropping it would cancel the evictor.
+    let _evictor = supervise::spawn_supervised("ttl-evictor", move || {
+        let s = evictor_state.clone();
+        store::run_ttl_evictor(s, evictor_ttl, TTL_EVICTOR_TICK_SECS)
+    });
 
     let (app, retain_fns) =
         routes::relay_router(state, config.clone()).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     // Background governor cleanup — evict stale per-key rate-limit buckets
-    // every 60 s to bound resident memory (one entry per distinct client IP /
-    // device id accumulates without this).  The handle is kept alive for the
-    // duration of the server; dropping it would cancel the task.
-    let _governor_cleanup = governor_cleanup::spawn_cleanup_all(
-        retain_fns,
-        governor_cleanup::GOVERNOR_CLEANUP_TICK_SECS,
-    );
+    // every 60 s to bound resident memory (one entry per distinct client IP
+    // or device id accumulates without this).
+    //
+    // CopyPaste-bp3o: wrapped in `spawn_supervised` so a panic inside the
+    // cleanup task is logged and the task restarts. The `retain_fns` closures
+    // are wrapped in `Arc` so they can be cheaply shared across restarts.
+    let retain_fns: Arc<routes::RetainFns> = Arc::new(retain_fns);
+    let cleanup_tick = governor_cleanup::GOVERNOR_CLEANUP_TICK_SECS;
+    // Retain the supervisor handle — dropping it would cancel cleanup.
+    let _governor_cleanup = supervise::spawn_supervised("governor-cleanup", move || {
+        let fns = Arc::clone(&retain_fns);
+        governor_cleanup::run_cleanup_all(fns, cleanup_tick)
+    });
 
     let addr = format!("{}:{}", config.bind_addr, config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;

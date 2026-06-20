@@ -31,6 +31,24 @@ use crate::state::{AppState, DEFAULT_PULL_LIMIT, MAX_PULL_LIMIT};
 #[allow(dead_code)]
 const SSE_KEEPALIVE_SECS: u64 = 25;
 
+/// CopyPaste-h7i8: maximum concurrent SSE connections per device.
+///
+/// Each open `GET /devices/:id/subscribe` stream holds one `broadcast::Receiver`
+/// on the device's wake channel. The number of live receivers is the number of
+/// open streams for that device (one producer task per stream, each holding
+/// exactly one receiver). Without this cap, an attacker (or misbehaving client)
+/// can open an unbounded number of simultaneous streams per device, each with
+/// its own producer task and associated resources (tokio task stack, broadcast
+/// receiver, Arc<AppState> clone, mpsc channel). This cap refuses any subscribe
+/// request that would push the per-device concurrent connection count above the
+/// limit, returning HTTP 429 with a descriptive message.
+///
+/// A well-behaved client maintains at most one SSE stream per device; a limit
+/// of 8 is generous enough for legitimate multi-window UIs while bounding the
+/// blast radius of a misbehaving or malicious client.
+#[allow(dead_code)]
+const SSE_MAX_CONNECTIONS_PER_DEVICE: usize = 8;
+
 /// Bound on the mpsc channel feeding the SSE response body. Each slot holds one
 /// pre-rendered `Event`. A slow client that stops reading fills this buffer and
 /// applies backpressure to the producer task (which parks on `send`), rather
@@ -245,10 +263,32 @@ pub async fn subscribe(
     // advance last_seen (an actively-subscribed device must not be reaped), and
     // obtain a wake receiver — all before spawning the producer so an
     // unauthenticated caller never opens a stream.
+    //
+    // CopyPaste-h7i8: enforce the per-device concurrent SSE connection cap
+    // INSIDE the critical section (after auth, before opening the stream) so
+    // the count check and receiver creation are atomic with respect to other
+    // concurrent subscribe calls for the same device.
     let mut rx = {
         let mut store = state.lock().unwrap_or_else(|e| e.into_inner());
         store.verify_token(&device_id, &token)?;
         store.update_last_seen(&device_id);
+
+        // Count live receivers = open SSE streams for this device. The check
+        // is inside the lock so a burst of concurrent subscriptions cannot
+        // race past the limit.
+        let live = store.notifier_receiver_count(&device_id);
+        if live >= SSE_MAX_CONNECTIONS_PER_DEVICE {
+            tracing::warn!(
+                device_id = %device_id,
+                live_connections = live,
+                limit = SSE_MAX_CONNECTIONS_PER_DEVICE,
+                "CopyPaste-h7i8: SSE connection limit reached for device"
+            );
+            return Err(RelayError::TooManyConnections {
+                limit: SSE_MAX_CONNECTIONS_PER_DEVICE,
+            });
+        }
+
         store.subscribe_notifier(&device_id)
     };
 
@@ -259,9 +299,16 @@ pub async fn subscribe(
     // wake), emitting one `item` event per row, and parks on `rx.recv()` between
     // drains. It exits when the SSE body is dropped (client disconnect →
     // `tx.send` errors) or the device's wake channel is closed (device evicted).
+    //
+    // CopyPaste-bp3o: the producer JoinHandle is retained in a monitoring task
+    // instead of being dropped. If the producer panics, the monitor logs the
+    // event at ERROR so it surfaces in production telemetry. The producer is
+    // NOT restarted on panic (it is a per-connection task; the connection is
+    // already dead). The monitor task is lightweight: it blocks only on
+    // producer completion, then exits.
     let producer_state = state.clone();
     let producer_device = device_id.clone();
-    tokio::spawn(async move {
+    let producer_handle = tokio::spawn(async move {
         let mut cursor_wall = params.since;
         let mut cursor_id = params.since_id;
 
@@ -321,6 +368,25 @@ pub async fn subscribe(
                 // `rx` and the cloned `Arc<AppState>`.
                 _ = tx.closed() => return,
             }
+        }
+    });
+
+    // CopyPaste-bp3o: monitor the producer handle. If the producer panics,
+    // the monitor logs it at ERROR. Without this the panic is silently
+    // swallowed — the SSE stream goes dead with no log entry, making the
+    // failure invisible to operators. The monitor task is self-terminating:
+    // it exits as soon as the producer finishes (normal disconnect or panic).
+    // We use a plain `tokio::spawn` here rather than `spawn_oneshot_supervised`
+    // to avoid an extra task layer; the monitor itself contains no logic that
+    // can panic (only an `.await` + match), so supervision of the monitor would
+    // be unnecessary complexity.
+    tokio::spawn(async move {
+        match producer_handle.await {
+            Ok(()) => {} // Producer exited normally (client disconnected).
+            Err(join_err) if join_err.is_panic() => {
+                tracing::error!("CopyPaste-bp3o: SSE producer task panicked");
+            }
+            Err(_) => {} // Cancelled — normal on server shutdown.
         }
     });
 

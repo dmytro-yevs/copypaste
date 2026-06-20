@@ -26,6 +26,7 @@
 //! );
 //! ```
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use tokio::task::JoinHandle;
@@ -35,8 +36,34 @@ use tokio::task::JoinHandle;
 #[cfg(test)]
 use tower_governor::governor::SharedRateLimiter;
 
+use crate::routes::RetainFns;
+
 /// How often to evict stale rate-limit buckets from each governor limiter.
 pub const GOVERNOR_CLEANUP_TICK_SECS: u64 = 60;
+
+/// Inner async loop body for governor cleanup (CopyPaste-bp3o).
+///
+/// Extracted from `spawn_cleanup_all` so that `supervise::spawn_supervised`
+/// can call it as a factory, restarting it on panic. Accepts the retain
+/// callbacks wrapped in `Arc<RetainFns>` so the same closures can be reused
+/// across restarts without cloning the underlying `Box<dyn Fn()>` objects.
+pub async fn run_cleanup_all(retain_fns: Arc<RetainFns>, tick_secs: u64) {
+    let tick = Duration::from_secs(tick_secs.max(1));
+    let mut interval = tokio::time::interval(tick);
+    // Skip the immediate first tick so we do not evict right after startup
+    // (recently-seen clients should keep their buckets for the first window).
+    interval.tick().await;
+    loop {
+        interval.tick().await;
+        for retain in retain_fns.iter() {
+            // retain_recent() drops every keyed bucket whose token count
+            // has already been fully replenished — i.e. the client has
+            // been idle for at least one full replenishment window.  O(n)
+            // over the map size; negligible at 60-s intervals.
+            retain();
+        }
+    }
+}
 
 /// Spawn a single background tokio task that calls every closure in
 /// `retain_fns` every `tick_secs` seconds.
@@ -47,28 +74,19 @@ pub const GOVERNOR_CLEANUP_TICK_SECS: u64 = 60;
 ///
 /// The task runs for the process lifetime.  Drop or abort the returned
 /// `JoinHandle` to stop it on an orderly shutdown.
+///
+/// **Production callers should prefer [`crate::supervise::spawn_supervised`]
+/// with [`run_cleanup_all`]** (CopyPaste-bp3o) so panics are logged and
+/// restarted. This function is retained for test code that wants a plain,
+/// non-supervised handle.
+// No production caller (main.rs now uses run_cleanup_all + spawn_supervised);
+// retained for test code and backward compatibility.
+#[allow(dead_code)]
 pub fn spawn_cleanup_all(
     retain_fns: Vec<Box<dyn Fn() + Send + Sync + 'static>>,
     tick_secs: u64,
 ) -> JoinHandle<()> {
-    let tick = Duration::from_secs(tick_secs.max(1));
-
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(tick);
-        // Skip the immediate first tick so we do not evict right after startup
-        // (recently-seen clients should keep their buckets for the first window).
-        interval.tick().await;
-        loop {
-            interval.tick().await;
-            for retain in &retain_fns {
-                // retain_recent() drops every keyed bucket whose token count
-                // has already been fully replenished — i.e. the client has
-                // been idle for at least one full replenishment window.  O(n)
-                // over the map size; negligible at 60-s intervals.
-                retain();
-            }
-        }
-    })
+    tokio::spawn(run_cleanup_all(Arc::new(retain_fns), tick_secs))
 }
 
 /// Convenience wrapper: spawn a cleanup task for a single typed
