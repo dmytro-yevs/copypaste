@@ -7,6 +7,8 @@ import {
   api,
   ipcErrorMessage,
   isIpcNotReady,
+  IpcError,
+  probeStatus,
   appVersion,
   getPopupShortcut,
   setPopupShortcut,
@@ -633,7 +635,9 @@ function ShortcutCapture({
 // state shows a friendly banner rather than "Daemon not running."
 // Distinct from `offline` so the banner is accurate and the inputs that need a
 // working DB stay disabled.
-type LoadState = "loading" | "ready" | "offline" | "not_ready" | "degraded";
+// tk2j: "error" added to distinguish a generic daemon-side failure (daemon is up
+// but the IPC call failed for another reason) from a genuine offline/degraded state.
+type LoadState = "loading" | "ready" | "offline" | "not_ready" | "degraded" | "error";
 
 export function SettingsView() {
   // Display prefs (localStorage-persisted, no daemon needed).
@@ -834,7 +838,17 @@ export function SettingsView() {
         }
 
         if (pmResult === null && cfg === null) {
-          setLoadState(probe.kind === "degraded" ? "degraded" : "offline");
+          // tk2j: probe.kind tells us WHY the calls failed. Only show "offline"
+          // when the daemon is actually unreachable (status also failed → kind
+          // "offline"). When the daemon answered status but cfg/pm still failed
+          // (kind "ok"), surface a generic error so the user is not misled.
+          if (probe.kind === "degraded") {
+            setLoadState("degraded");
+          } else if (probe.kind === "ok") {
+            setLoadState("error");
+          } else {
+            setLoadState("offline");
+          }
           setSyncStatus(syncSt);
           return;
         }
@@ -921,11 +935,27 @@ export function SettingsView() {
         setLoadState("ready");
       } catch (err) {
         if (cancelled) return;
+        // tk2j: mirror DevicesView — only mark offline when the transport error
+        // explicitly says "daemon_offline". Other IpcErrors mean the daemon IS up
+        // but the call failed (e.g. DB error) — probe status to distinguish.
+        if (err instanceof IpcError && err.code === "daemon_offline") {
+          setLoadState("offline");
+          return;
+        }
         if (isIpcNotReady(err)) {
           setLoadState("not_ready");
-        } else {
-          void err;
+          return;
+        }
+        // Daemon answered but the IPC call failed — probe status to tell a
+        // degraded daemon apart from a generic error. This avoids mislabeling
+        // a DB-degraded daemon as "not running".
+        const probe = await probeStatus();
+        if (probe.kind === "offline") {
           setLoadState("offline");
+        } else if (probe.kind === "degraded") {
+          setLoadState("degraded");
+        } else {
+          setLoadState("error");
         }
       }
     }
@@ -1157,7 +1187,9 @@ export function SettingsView() {
     // jhvl: Only include email/password when the user has typed a non-empty value.
     // Sending null would clear the stored credential; omitting the field preserves it.
     const trimmedEmail = supabaseEmail.trim();
-    const trimmedPassword = supabasePassword;
+    // 3c72: trim whitespace so accidental leading/trailing spaces do not cause
+    // silent auth failures — mirrors the trimmedEmail handling above.
+    const trimmedPassword = supabasePassword.trim();
     const next: AppSettings = {
       p2p_enabled: config.p2p_enabled,
       supabase_url: supabaseUrl.trim() || null,
@@ -2662,6 +2694,26 @@ export function SettingsView() {
               Retry
             </button>
             <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
+          </div>
+        </div>
+      )}
+
+      {/* tk2j: Error banner — daemon is reachable but settings could not be loaded */}
+      {loadState === "error" && (
+        <div className="surface-card mb-4 flex items-center justify-between gap-3 rounded-ide-lg px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs">
+          <span>Failed to load settings — the daemon is running but returned an error.</span>
+          <div className="flex shrink-0 items-center gap-2">
+            <RestartDaemonButton
+              label="Restart daemon"
+              onRestarted={() => setReloadKey((k) => k + 1)}
+            />
+            <button
+              type="button"
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+            >
+              Retry
+            </button>
           </div>
         </div>
       )}

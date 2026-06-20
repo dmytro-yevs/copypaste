@@ -571,3 +571,153 @@ describe("P2P toggle triggers daemon restart", () => {
     expect(restartCalls.length).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// CopyPaste-3c72: BUG 2 — supabasePassword must be trimmed before saving
+// Whitespace around the password causes silent auth failures. Email IS trimmed;
+// password must match.
+// ---------------------------------------------------------------------------
+
+describe("CopyPaste-3c72: supabasePassword is trimmed before saving to config", () => {
+  it("strips leading/trailing whitespace from supabasePassword before calling set_config", async () => {
+    const setConfigCalls: unknown[] = [];
+    invoke.mockImplementation((cmd: string, args?: unknown): Promise<unknown> => {
+      if (cmd === "ipc_call") {
+        const method = (args as { method?: string } | undefined)?.method;
+        if (method === "set_config") {
+          setConfigCalls.push(args);
+          return Promise.resolve({ ok: true, data: null, error: null, error_code: null });
+        }
+        // Delegate everything else to the online mock.
+        return (makeOnlineInvoke())("ipc_call", args) as Promise<unknown>;
+      }
+      if (cmd === "restart_daemon") return Promise.resolve(undefined);
+      if (cmd === "get_popup_shortcut") return Promise.resolve("CmdOrCtrl+Shift+V");
+      if (cmd === "app_version") return Promise.resolve("0.5.5");
+      return Promise.resolve(undefined);
+    });
+
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+
+    // Wait for the component to be ready.
+    await waitFor(() => {
+      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+    });
+
+    // Navigate to the Sync tab to find the password field.
+    const syncTabBtn = await screen.findByText("Sync");
+    await act(async () => { fireEvent.click(syncTabBtn); });
+
+    // Find the password input and type a value with surrounding whitespace.
+    const passwordInput = await screen.findByPlaceholderText(/Password/i);
+    await act(async () => {
+      fireEvent.change(passwordInput, { target: { value: "  secretpass  " } });
+    });
+
+    // Find and click the Save button.
+    const saveBtn = await screen.findByRole("button", { name: /Save/i });
+    await act(async () => { fireEvent.click(saveBtn); });
+
+    // Assert that set_config was called with the trimmed password (no whitespace).
+    await waitFor(() => {
+      expect(setConfigCalls.length).toBeGreaterThan(0);
+    });
+
+    const lastCall = setConfigCalls[setConfigCalls.length - 1] as {
+      method: string;
+      params: { supabase_password?: string };
+    };
+    // The saved password must be trimmed — no leading or trailing whitespace.
+    expect(lastCall.params.supabase_password).toBe("secretpass");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CopyPaste-tk2j: BUG 1 — non-daemon_offline IpcError must NOT show "offline"
+// The early-return and catch block must probe status to distinguish real offline
+// from a generic daemon error. Only "daemon_offline" transport errors warrant
+// the offline banner.
+// ---------------------------------------------------------------------------
+
+describe("CopyPaste-tk2j: error handling — non-offline IpcError is NOT shown as offline", () => {
+  it("shows an error banner (not 'Daemon not running') when get_config fails with a non-daemon_offline error while status is reachable", async () => {
+    // Simulate: daemon is up (status returns ok) but get_config and get_private_mode
+    // return error responses — NOT daemon_offline. The offline banner must NOT appear;
+    // instead an error banner is shown ("Failed to load settings").
+    invoke.mockImplementation((cmd: string, args?: unknown): Promise<unknown> => {
+      if (cmd === "ipc_call") {
+        const method = (args as { method?: string } | undefined)?.method;
+        if (method === "get_config") {
+          // Return a non-daemon_offline error response — daemon is up but cfg read failed.
+          return Promise.resolve({
+            ok: false,
+            data: null,
+            error: "database read error",
+            error_code: "db_error",
+          });
+        }
+        if (method === "get_private_mode") {
+          // Also fail get_private_mode so both required fields are null.
+          return Promise.resolve({
+            ok: false,
+            data: null,
+            error: "pm read error",
+            error_code: "db_error",
+          });
+        }
+        if (method === "status") {
+          return Promise.resolve({
+            ok: true,
+            data: {
+              status: "running",
+              ready: true,
+              degraded: false,
+              degraded_reason: null,
+              build_version: "0.5.5",
+            },
+            error: null,
+            error_code: null,
+          });
+        }
+        // All other IPC methods succeed generically.
+        return Promise.resolve({ ok: true, data: null, error: null, error_code: null });
+      }
+      if (cmd === "get_popup_shortcut") return Promise.resolve("CmdOrCtrl+Shift+V");
+      if (cmd === "app_version") return Promise.resolve("0.5.5");
+      return Promise.resolve(undefined);
+    });
+
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+
+    // The "error" state banner should appear — not the "offline" banner.
+    await waitFor(() => {
+      expect(screen.getByText(/Failed to load settings/i)).toBeInTheDocument();
+    });
+
+    // "Daemon not running" must NOT appear — daemon is reachable.
+    expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
+  });
+
+  it("shows the offline banner only when the IpcError code is daemon_offline", async () => {
+    // When the error is genuinely daemon_offline, the offline banner IS shown.
+    invoke.mockRejectedValue("daemon_offline:/tmp/copypaste.sock");
+
+    render(
+      <ErrorBoundary label="Settings">
+        <SettingsView />
+      </ErrorBoundary>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Daemon not running — clipboard sync paused/i)).toBeInTheDocument();
+    });
+  });
+});
