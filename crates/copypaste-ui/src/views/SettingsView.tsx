@@ -181,8 +181,8 @@ function Panel({ children }: { children: React.ReactNode }) {
     // Classic: e2 shadow + glass; Quiet: no shadow + flat; Vapor: no card shadow + sheen.
     // shadow-ide-sm removed — surface-card drives the shadow via --skin-shadow-card
     // so settings panels are skin-aware without a hardcoded override.
-    <div className="surface-card rounded-ide-lg">
-      <div className="overflow-hidden rounded-ide-lg">
+    <div className="surface-card" style={{ borderRadius: "var(--skin-r-card)" }}>
+      <div className="overflow-hidden" style={{ borderRadius: "var(--skin-r-card)" }}>
         {children}
       </div>
     </div>
@@ -326,13 +326,14 @@ function InfoPopover({ text }: { text: string }) {
     ? ReactDOM.createPortal(
         <div
           ref={popoverRef}
-          className="surface-glass-strong z-[9999] w-56 rounded-ide p-2 text-[11px] text-ide-dim"
+          className="surface-glass-strong z-[9999] w-56 p-2 text-[11px] text-ide-dim"
           style={{
             position: "fixed",
             top: pos.top,
             left: pos.left,
             minWidth: "14rem",
             transform: "translateY(-50%)",
+            borderRadius: "var(--skin-r-ctl)",
           }}
         >
           {text}
@@ -614,13 +615,14 @@ function ShortcutCapture({
       onBlur={() => setCapturing(false)}
       onKeyDown={handleKeyDown}
       className={[
-        "w-48 cursor-pointer rounded-ide border px-2.5 py-1.5 text-[13px] text-ide-text",
+        "w-48 cursor-pointer border px-2.5 py-1.5 text-[13px] text-ide-text",
         // audit P2: bg-ide-bg looked disabled; use the white/elevated control fill.
         "outline-none select-none bg-ide-elevated",
         capturing
           ? "border-ide-accent ring-1 ring-ide-accent"
           : "border-ide-border hover:border-ide-accent",
       ].join(" ")}
+      style={{ borderRadius: "var(--skin-r-ctl)" }}
       title="Click and press a key combination"
     />
   );
@@ -1539,10 +1541,13 @@ export function SettingsView() {
 
 
 
+  // borderRadius is applied via inline style (var(--skin-r-ctl)) on every button using btnCls.
+  // Do NOT add rounded-ide here — use btnStyle instead.
   const btnCls = [
-    "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+    "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
     "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
   ].join(" ");
+  const btnStyle = { borderRadius: "var(--skin-r-ctl)" } as const;
 
   // Inline feedback badge for a limits field.
   function LimitsMsg({ field }: { field: string }) {
@@ -1692,13 +1697,15 @@ export function SettingsView() {
                 }}
                 /* audit P2: was bg-ide-bg (grey canvas) → looked disabled. Match
                    the Sync-tab text inputs: white/near-white elevated fill. */
-                className="flex-1 rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1.5 text-[13px] text-ide-text outline-none focus:border-ide-accent focus:ring-1 focus:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
+                className="flex-1 border border-ide-border bg-ide-elevated px-2.5 py-1.5 text-[13px] text-ide-text outline-none focus:border-ide-accent focus:ring-1 focus:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
               />
               <button
                 type="button"
                 disabled={offline || newExcludedApp.trim() === ""}
                 onClick={() => void addExcludedApp()}
-                className="rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
                 Add
               </button>
@@ -1708,7 +1715,8 @@ export function SettingsView() {
                 {excludedApps.map((bundleId) => (
                   <span
                     key={bundleId}
-                    className="inline-flex items-center gap-1 rounded-ide border border-ide-border bg-ide-bg px-2 py-1 text-[12px] text-ide-dim"
+                    className="inline-flex items-center gap-1 border border-ide-border bg-ide-bg px-2 py-1 text-[12px] text-ide-dim"
+                    style={{ borderRadius: "var(--skin-r-ctl)" }}
                   >
                     {bundleId}
                     <button
@@ -1984,7 +1992,7 @@ export function SettingsView() {
       <div className="space-y-2">
         {/* Status banner */}
         {syncStatus !== null && syncStatus.supabase_configured && (
-          <div className="rounded-ide border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[13px] text-ide-success">
+          <div className="border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[13px] text-ide-success" style={{ borderRadius: "var(--skin-r-ctl)" }}>
             Connected ✓
             {syncStatus.signed_in && syncStatus.email
               ? ` — signed in as ${syncStatus.email}`
@@ -1998,7 +2006,7 @@ export function SettingsView() {
           syncStatus.supabase_configured &&
           syncStatus.signed_in &&
           syncStatus.email && (
-            <div className="surface-card rounded-ide px-3 py-2 text-[13px] text-ide-dim">
+            <div className="surface-card px-3 py-2 text-[13px] text-ide-dim" style={{ borderRadius: "var(--skin-r-ctl)" }}>
               <span className="font-medium text-ide-text">Signed in as {syncStatus.email}</span>
               <span className="ml-1">— All devices must use this same account to sync.</span>
             </div>
@@ -2217,6 +2225,7 @@ export function SettingsView() {
               disabled={offline || testing}
               onClick={() => void handleTestConnection()}
               className={btnCls}
+              style={btnStyle}
             >
               {testing ? "Testing…" : "Test connection"}
             </button>
@@ -2225,6 +2234,7 @@ export function SettingsView() {
               disabled={offline}
               onClick={() => void handleSaveConfig()}
               className={btnCls}
+              style={btnStyle}
             >
               Save
             </button>
@@ -2279,7 +2289,8 @@ export function SettingsView() {
                     pendingShortcut === DEFAULT_POPUP_SHORTCUT
                   }
                   onClick={() => void handleResetShortcut()}
-                  className="flex h-7 w-7 items-center justify-center rounded-ide border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+                  className="flex h-7 w-7 items-center justify-center border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
+                  style={{ borderRadius: "var(--skin-r-ctl)" }}
                 >
                   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                     <path d="M2.5 8a5.5 5.5 0 1 1 1.6 3.9" />
@@ -2291,6 +2302,7 @@ export function SettingsView() {
                   disabled={pendingShortcut === currentShortcut}
                   onClick={() => void handleSaveShortcut()}
                   className={btnCls}
+                  style={btnStyle}
                 >
                   Save
                 </button>
@@ -2512,9 +2524,10 @@ export function SettingsView() {
                     onClick={() => void handleExport()}
                     data-testid="export-button"
                     className={[
-                      "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                      "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
                       "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
                     ].join(" ")}
+                    style={{ borderRadius: "var(--skin-r-ctl)" }}
                   >
                     {exportInProgress ? "Exporting…" : "Export…"}
                   </button>
@@ -2539,10 +2552,11 @@ export function SettingsView() {
                     Tauri plugin needed). */}
                 <label
                   className={[
-                    "cursor-pointer rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+                    "cursor-pointer border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
                     "hover:bg-ide-hover",
                     (offline || importInProgress) ? "pointer-events-none opacity-40" : "",
                   ].join(" ")}
+                  style={{ borderRadius: "var(--skin-r-ctl)" }}
                 >
                   {importInProgress ? "Importing…" : "Import from file…"}
                   <input
@@ -2580,14 +2594,16 @@ export function SettingsView() {
                   <button
                     type="button"
                     onClick={() => void handleDeleteAll()}
-                    className="rounded-ide bg-ide-danger px-2.5 py-1 text-[13px] font-medium text-white hover:bg-ide-danger/85"
+                    className="bg-ide-danger px-2.5 py-1 text-[13px] font-medium text-white hover:bg-ide-danger/85"
+                    style={{ borderRadius: "var(--skin-r-ctl)" }}
                   >
                     Yes
                   </button>
                   <button
                     type="button"
                     onClick={() => setDeleteConfirm(false)}
-                    className="rounded-ide border border-ide-border bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-dim hover:bg-ide-hover"
+                    className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-dim hover:bg-ide-hover"
+                    style={{ borderRadius: "var(--skin-r-ctl)" }}
                   >
                     No
                   </button>
@@ -2598,9 +2614,10 @@ export function SettingsView() {
                   disabled={offline}
                   onClick={() => setDeleteConfirm(true)}
                   className={[
-                    "rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
+                    "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
                     "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
                   ].join(" ")}
+                  style={{ borderRadius: "var(--skin-r-ctl)" }}
                 >
                   Clear history…
                 </button>
@@ -2615,7 +2632,7 @@ export function SettingsView() {
   function renderAdvanced() {
     return (
       <div className="space-y-2">
-        <div className="surface-card rounded-ide px-3 py-3 text-[13px] text-ide-dim">
+        <div className="surface-card px-3 py-3 text-[13px] text-ide-dim" style={{ borderRadius: "var(--skin-r-ctl)" }}>
           Advanced daemon and storage limits will appear here in a future release.
         </div>
       </div>
@@ -2630,7 +2647,7 @@ export function SettingsView() {
     <ViewShell title="Settings">
       {/* Stale-daemon banner */}
       {staleDaemon !== null && (
-        <div className="mb-4 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+        <div className="mb-4 flex items-start justify-between gap-3 border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning" style={{ borderRadius: "var(--skin-r-ctl)" }}>
           <span>
             A previous CopyPaste daemon is still running after an update
             {staleDaemon !== "unknown" ? ` (build ${staleDaemon})` : ""}. Restart
@@ -2642,12 +2659,13 @@ export function SettingsView() {
 
       {/* Not-ready banner (daemon alive but still initialising) */}
       {notReady && (
-        <div className="surface-card mb-4 flex items-center justify-between gap-3 rounded-ide-lg px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs">
+        <div className="surface-card mb-4 flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs" style={{ borderRadius: "var(--skin-r-card)" }}>
           <span>Clipboard service is starting up — settings will be available in a moment.</span>
           <button
             type="button"
             onClick={() => setReloadKey((k) => k + 1)}
-            className="shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+            className="shrink-0 border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+            style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
             Retry
           </button>
@@ -2656,7 +2674,7 @@ export function SettingsView() {
 
       {/* Offline banner */}
       {loadState === "offline" && (
-        <div className="surface-card mb-4 flex items-center justify-between gap-3 rounded-ide-lg px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs">
+        <div className="surface-card mb-4 flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs" style={{ borderRadius: "var(--skin-r-card)" }}>
           <span>Daemon not running — clipboard sync paused.</span>
           <div className="flex shrink-0 items-center gap-2">
             <RestartDaemonButton
@@ -2666,7 +2684,8 @@ export function SettingsView() {
             <button
               type="button"
               onClick={() => setReloadKey((k) => k + 1)}
-              className="shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+              className="shrink-0 border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+              style={{ borderRadius: "var(--skin-r-ctl)" }}
             >
               Retry
             </button>
@@ -2676,7 +2695,7 @@ export function SettingsView() {
 
       {/* Degraded banner */}
       {degraded && (
-        <div className="mb-4 flex items-start justify-between gap-3 rounded-ide border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning">
+        <div className="mb-4 flex items-start justify-between gap-3 border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning" style={{ borderRadius: "var(--skin-r-ctl)" }}>
           <span>
             Clipboard database unavailable
             {degradedReason ? ` (${degradedReason})` : ""} — its key no longer
@@ -2687,9 +2706,10 @@ export function SettingsView() {
               type="button"
               onClick={() => setReloadKey((k) => k + 1)}
               className={[
-                "rounded-ide border border-ide-warning/40 bg-ide-panel px-2.5 py-1 text-[12px] text-ide-warning",
+                "border border-ide-warning/40 bg-ide-panel px-2.5 py-1 text-[12px] text-ide-warning",
                 "hover:bg-ide-hover",
               ].join(" ")}
+              style={{ borderRadius: "var(--skin-r-ctl)" }}
             >
               Retry
             </button>
@@ -2700,7 +2720,7 @@ export function SettingsView() {
 
       {/* tk2j: Error banner — daemon is reachable but settings could not be loaded */}
       {loadState === "error" && (
-        <div className="surface-card mb-4 flex items-center justify-between gap-3 rounded-ide-lg px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs">
+        <div className="surface-card mb-4 flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs" style={{ borderRadius: "var(--skin-r-card)" }}>
           <span>Failed to load settings — the daemon is running but returned an error.</span>
           <div className="flex shrink-0 items-center gap-2">
             <RestartDaemonButton
@@ -2710,7 +2730,8 @@ export function SettingsView() {
             <button
               type="button"
               onClick={() => setReloadKey((k) => k + 1)}
-              className="shrink-0 rounded-ide border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+              className="shrink-0 border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
+              style={{ borderRadius: "var(--skin-r-ctl)" }}
             >
               Retry
             </button>
@@ -2731,7 +2752,7 @@ export function SettingsView() {
         // matching DevicesView/HistoryView patterns (CopyPaste-sk02).
         // audit P2: centered ~620px column so panels aren't stranded on wide windows.
         <div className="mx-auto w-full" style={{ maxWidth: "620px" }}>
-          <div className="surface-card rounded-ide-lg overflow-hidden shadow-ide-sm">
+          <div className="surface-card overflow-hidden shadow-ide-sm" style={{ borderRadius: "var(--skin-r-card)" }}>
             {/* Tab bar header — p-4 horizontal/top padding, no bottom; border-b separates from content */}
             <div className="px-4 pt-4 border-b border-ide-border/30">
               <TabBar active={activeTab} onChange={setActiveTab} />
