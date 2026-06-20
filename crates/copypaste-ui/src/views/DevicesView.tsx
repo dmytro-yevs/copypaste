@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { Briefcase, RefreshCw, Zap, AlertCircle } from "lucide-react";
 import {
   api,
@@ -1191,35 +1192,32 @@ export function DevicesView({
           {globalMsg.text}
         </span>
       )}
-      {revokeAllConfirm ? (
-        <span className="flex items-center gap-1.5 text-[12px]">
-          <span className="text-ide-dim">Revoke all?</span>
-          {/* puf4: solid-danger for primary destructive confirm (Revoke all) */}
-          <button
-            onClick={() => void handleRevokeAllConfirmed()}
-            className="bg-ide-danger px-2.5 py-1 text-[12px] font-medium text-white hover:bg-ide-danger/85 shadow-ide-xs"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
-          >
-            Yes
-          </button>
-          <button
-            onClick={() => setRevokeAllConfirm(false)}
-            className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim hover:bg-ide-raised hover:text-ide-text shadow-ide-xs"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
-          >
-            No
-          </button>
-        </span>
-      ) : (
-        <button
-          onClick={() => setRevokeAllConfirm(true)}
-          disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
-          className="border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ borderRadius: "var(--skin-r-ctl)" }}
-        >
-          {revokeAllPending ? "Revoking..." : "Revoke all"}
-        </button>
-      )}
+      {/* uw45: replaced tiny inline Yes/No with a proper modal confirmation */}
+      <button
+        onClick={() => setRevokeAllConfirm(true)}
+        disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
+        className="border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
+        style={{ borderRadius: "var(--skin-r-ctl)" }}
+      >
+        {revokeAllPending ? "Revoking..." : "Revoke all"}
+      </button>
+      <ConfirmModal
+        open={revokeAllConfirm}
+        title="Revoke all paired devices?"
+        body={
+          <>
+            <p>This will immediately break trust with all paired devices.</p>
+            <p className="mt-1">All devices will need to re-pair before syncing can resume.</p>
+          </>
+        }
+        confirmLabel="Revoke all"
+        busy={revokeAllPending}
+        onConfirm={() => {
+          setRevokeAllConfirm(false);
+          void handleRevokeAllConfirmed();
+        }}
+        onCancel={() => setRevokeAllConfirm(false)}
+      />
     </div>
   );
 

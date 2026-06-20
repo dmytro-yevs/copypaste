@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom";
+import { ConfirmModal } from "../components/ConfirmModal";
 import { emit, listen } from "@tauri-apps/api/event";
 import { Check, X } from "lucide-react";
 import { ViewShell } from "../components/ViewShell";
@@ -716,9 +717,8 @@ export function SettingsView() {
   const limitsMsgTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   // j9xj (PG-30): master sync kill-switch — Android parity. True = sync enabled
-  // (default). False = all transports disabled. Daemon side not yet implemented;
-  // the value is sent via set_config but silently ignored until the daemon adds
-  // AppConfig::sync_enabled. See bd CopyPaste-j9xj and the AppSettings jsdoc.
+  // (default). False = all transports disabled. Daemon implements sync_enabled
+  // in AppConfig (tke7/PG-30); the toggle has full effect.
   const [syncEnabled, setSyncEnabled] = useState(true);
 
   // Sync parity — p2p toggle + wifi-only
@@ -1411,7 +1411,7 @@ export function SettingsView() {
   // -------------------------------------------------------------------------
 
   const handleDeleteAll = useCallback(async () => {
-    setDeleteConfirm(false);
+    // Modal already closed by caller before invoking this.
     try {
       const result = await api.deleteAll();
       setDeleteMsg({
@@ -1570,12 +1570,11 @@ export function SettingsView() {
       <div className="space-y-2">
         <Panel>
           {/* j9xj (PG-30): master sync kill-switch — Android parity.
-              ⚠️ Daemon-side stub: sent via set_config but ignored until
-              AppConfig::sync_enabled is added to copypaste-core (see bd CopyPaste-j9xj).
+              Daemon implements AppConfig::sync_enabled (tke7/PG-30).
               When off, visually gates per-transport switches in the Sync tab. */}
           <SettingsRow label="Enable sync">
             <div className="flex items-center gap-1.5">
-              <InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data is synced to other devices. Matches Android sync_enabled parity. ⚠ Requires a daemon update to take full effect — see bd CopyPaste-j9xj." />
+              <InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />
               <LimitsMsg field="sync_enabled" />
               <Toggle
                 checked={syncEnabled}
@@ -2587,41 +2586,19 @@ export function SettingsView() {
                   {deleteMsg.text}
                 </span>
               )}
-              {deleteConfirm ? (
-                <span className="flex items-center gap-1.5 text-[13px]">
-                  <span className="text-ide-dim">Delete all history?</span>
-                  {/* puf4: solid-danger for primary destructive confirm (Delete all history) */}
-                  <button
-                    type="button"
-                    onClick={() => void handleDeleteAll()}
-                    className="bg-ide-danger px-2.5 py-1 text-[13px] font-medium text-white hover:bg-ide-danger/85"
-                    style={{ borderRadius: "var(--skin-r-ctl)" }}
-                  >
-                    Yes
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDeleteConfirm(false)}
-                    className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[13px] text-ide-dim hover:bg-ide-hover"
-                    style={{ borderRadius: "var(--skin-r-ctl)" }}
-                  >
-                    No
-                  </button>
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  disabled={offline}
-                  onClick={() => setDeleteConfirm(true)}
-                  className={[
-                    "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
-                    "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                  ].join(" ")}
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
-                >
-                  Clear history…
-                </button>
-              )}
+              {/* w6xc: replaced misclick-prone inline Yes/No with a proper modal */}
+              <button
+                type="button"
+                disabled={offline}
+                onClick={() => setDeleteConfirm(true)}
+                className={[
+                  "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
+                  "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
+                ].join(" ")}
+                style={{ borderRadius: "var(--skin-r-ctl)" }}
+              >
+                Clear history…
+              </button>
             </div>
           </SettingsRow>
         </Panel>
@@ -2770,6 +2747,20 @@ export function SettingsView() {
           </div>
         </div>
       )}
+      {/* w6xc: Clear history confirmation modal — replaces misclick-prone
+          inline Yes/No. Uses the shared ConfirmModal so it is consistent
+          with fjvz (bulk delete) and uw45 (revoke all). */}
+      <ConfirmModal
+        open={deleteConfirm}
+        title="Clear all clipboard history?"
+        body="This will permanently delete all clipboard items stored on this device. This cannot be undone."
+        confirmLabel="Clear history"
+        onConfirm={() => {
+          setDeleteConfirm(false);
+          void handleDeleteAll();
+        }}
+        onCancel={() => setDeleteConfirm(false)}
+      />
     </ViewShell>
   );
 }

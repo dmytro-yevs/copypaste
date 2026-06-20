@@ -758,7 +758,9 @@ describe("CopyPaste-wuek NG-1: clear-all in Settings Storage tab (canonical loca
     expect(clearBtn).not.toBeDisabled();
   });
 
-  it("clicking 'Clear history…' shows a two-step confirmation prompt", async () => {
+  it("clicking 'Clear history…' shows a confirmation modal (w6xc: no longer inline Yes/No)", async () => {
+    // w6xc: the inline Yes/No was replaced with a proper ConfirmModal.
+    // Clicking "Clear history…" must open a dialog.
     invoke.mockImplementation(makeOnlineInvoke());
     render(
       <ErrorBoundary label="Settings">
@@ -773,18 +775,22 @@ describe("CopyPaste-wuek NG-1: clear-all in Settings Storage tab (canonical loca
     const storageTabBtn = await screen.findByText("Storage");
     await act(async () => { fireEvent.click(storageTabBtn); });
 
-    // First click shows confirmation prompt ("Delete all history?" + Yes/No).
+    // Click "Clear history…" → modal opens (role="dialog").
     const clearBtn = screen.getByRole("button", { name: /Clear history/i });
     await act(async () => { fireEvent.click(clearBtn); });
 
-    // Two-step confirm: "Delete all history?" must appear.
-    expect(screen.getByText(/Delete all history\?/i)).toBeInTheDocument();
-    // Yes and No buttons.
-    expect(screen.getByRole("button", { name: /^Yes$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^No$/i })).toBeInTheDocument();
+    // A proper dialog must appear.
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    // Modal title confirms the destructive action.
+    expect(screen.getByText(/Clear all clipboard history/i)).toBeInTheDocument();
+    // Modal has Cancel and Clear history buttons (not Yes/No).
+    expect(screen.getByRole("button", { name: /cancel/i })).toBeInTheDocument();
+    // The inline "Yes"/"No" must NOT be present — those were the old pattern.
+    expect(screen.queryByRole("button", { name: /^Yes$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^No$/i })).not.toBeInTheDocument();
   });
 
-  it("confirming 'Yes' calls the delete_all IPC", async () => {
+  it("confirming in the modal calls the delete_all IPC", async () => {
     invoke.mockImplementation((cmd: string, args?: unknown): Promise<unknown> => {
       if (cmd === "ipc_call") {
         const method = (args as { method?: string } | undefined)?.method;
@@ -811,8 +817,9 @@ describe("CopyPaste-wuek NG-1: clear-all in Settings Storage tab (canonical loca
     const clearBtn = screen.getByRole("button", { name: /Clear history/i });
     await act(async () => { fireEvent.click(clearBtn); });
 
-    const yesBtn = screen.getByRole("button", { name: /^Yes$/i });
-    await act(async () => { fireEvent.click(yesBtn); });
+    // Confirm in the modal — the confirm button has the same label as the action.
+    const confirmBtn = screen.getByTestId("confirm-modal-confirm-btn");
+    await act(async () => { fireEvent.click(confirmBtn); });
 
     // After confirming, delete_all IPC must have been called.
     await waitFor(() => {

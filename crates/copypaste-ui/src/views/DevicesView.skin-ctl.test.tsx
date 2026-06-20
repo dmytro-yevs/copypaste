@@ -414,40 +414,38 @@ describe("W5 §13–§15 Actions bar revoke buttons use --skin-r-ctl", () => {
     expectSkinRCtl(btn!, "'Revoke all' button");
   });
 
-  it("'Yes' (revoke all confirm) button uses var(--skin-r-ctl)", async () => {
-    const { container } = render(<DevicesView />);
+  it("'Revoke all' (confirm) button in the modal uses var(--skin-r-ctl) (uw45: modal replaces inline Yes)", async () => {
+    // uw45: inline Yes/No replaced with ConfirmModal — the confirm/cancel buttons
+    // live inside role="dialog". They must still use the skin-r-ctl token.
+    render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
-    // Click "Revoke all" to show the Yes/No confirmation
-    const revokeAllBtn = findButtonByText(container, "Revoke all");
-    expect(revokeAllBtn).not.toBeNull();
-    fireEvent.click(revokeAllBtn!);
+    // Click "Revoke all" → modal opens.
+    const revokeAllBtn = screen.getByRole("button", { name: /revoke all/i });
+    fireEvent.click(revokeAllBtn);
 
-    await waitFor(() => {
-      expect(screen.getByText("Revoke all?")).toBeTruthy();
-    });
+    // Modal must appear.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toBeInTheDocument();
 
-    const yesBtn = findButtonByText(container, "Yes");
-    expect(yesBtn, "'Yes' button must exist").not.toBeNull();
-    expectSkinRCtl(yesBtn!, "Revoke all 'Yes' button");
+    // The confirm button is inside the modal.
+    const confirmBtn = dialog.querySelector("[data-testid='confirm-modal-confirm-btn']") as HTMLElement | null;
+    expect(confirmBtn, "Modal confirm button must exist").not.toBeNull();
+    expectSkinRCtl(confirmBtn!, "Revoke all modal confirm button");
   });
 
-  it("'No' (revoke all cancel) button uses var(--skin-r-ctl)", async () => {
-    const { container } = render(<DevicesView />);
+  it("'Cancel' (revoke all cancel) button in the modal uses var(--skin-r-ctl) (uw45: modal replaces inline No)", async () => {
+    // uw45: inline Yes/No replaced with ConfirmModal — Cancel button must use skin-r-ctl.
+    render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
-    // Click "Revoke all" to show the Yes/No confirmation
-    const revokeAllBtn = findButtonByText(container, "Revoke all");
-    expect(revokeAllBtn).not.toBeNull();
-    fireEvent.click(revokeAllBtn!);
+    const revokeAllBtn = screen.getByRole("button", { name: /revoke all/i });
+    fireEvent.click(revokeAllBtn);
 
-    await waitFor(() => {
-      expect(screen.getByText("Revoke all?")).toBeTruthy();
-    });
-
-    const noBtn = findButtonByText(container, "No");
-    expect(noBtn, "'No' button must exist").not.toBeNull();
-    expectSkinRCtl(noBtn!, "Revoke all 'No' button");
+    const dialog = await screen.findByRole("dialog");
+    const cancelBtn = dialog.querySelector("button:not([data-testid='confirm-modal-confirm-btn'])") as HTMLElement | null;
+    expect(cancelBtn, "Modal cancel button must exist").not.toBeNull();
+    expectSkinRCtl(cancelBtn!, "Revoke all modal cancel button");
   });
 });
 

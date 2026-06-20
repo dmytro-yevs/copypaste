@@ -35,6 +35,7 @@ import { FileChip } from "../components/FileChip";
 import { ContentIcon } from "../components/ContentIcon";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { Star, StarOff } from "lucide-react";
+import { ConfirmModal } from "../components/ConfirmModal";
 
 // ---------------------------------------------------------------------------
 // Toast — §8 slide-up, neutral panel + 6px semantic dot, one at a time
@@ -1518,6 +1519,14 @@ export function HistoryView() {
   // M10: Details modal — entry to preview (null = closed)
   const [previewEntry, setPreviewEntry] = useState<HistoryEntry | null>(null);
 
+  // fjvz: confirmation modal state for bulk delete.
+  // true = modal is open; false = modal is closed.
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
+
+  // xhns: private mode flag — loaded once on mount from the daemon.
+  // When true the empty-state shows a private-mode message, not "Copy something…".
+  const [isPrivateMode, setIsPrivateMode] = useState(false);
+
   // A1: Drag-to-reorder pinned items state
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; position: "above" | "below" } | null>(null);
@@ -1607,6 +1616,17 @@ export function HistoryView() {
         void api.deleteItem(pending.id).catch(() => {});
       }
     };
+  }, []);
+
+  // xhns: load private mode once on mount so the empty state can show the
+  // correct messaging. Best-effort — a failure leaves isPrivateMode=false
+  // (shows default empty state, never a blank/error screen).
+  useEffect(() => {
+    void api.getPrivateMode().then((result) => {
+      setIsPrivateMode(result.private_mode);
+    }).catch(() => {
+      // Non-fatal — keep the default (false).
+    });
   }, []);
 
   // -------------------------------------------------------------------------
@@ -2658,8 +2678,8 @@ export function HistoryView() {
             </svg>
           </span>
         }
-        title="Nothing copied yet"
-        body="Copy something and it will appear here."
+        title={isPrivateMode ? "Private mode is on" : "Nothing copied yet"}
+        body={isPrivateMode ? "Clipboard is not recorded while private mode is active." : "Copy something and it will appear here."}
       />
     );
   } else if (filtered.length === 0) {
@@ -2692,7 +2712,7 @@ export function HistoryView() {
             onBulkCopy={() => void handleBulkCopy()}
             onBulkPin={() => void handleBulkPin(true)}
             onBulkUnpin={() => void handleBulkPin(false)}
-            onBulkDelete={() => void handleBulkDelete()}
+            onBulkDelete={() => setBulkDeleteConfirmOpen(true)}
             isBusy={bulkBusy}
           />
         )}
@@ -2892,6 +2912,21 @@ export function HistoryView() {
       {previewEntry !== null && (
         <DetailsModal entry={previewEntry} maskSensitive={maskSensitive} showSensitiveWarnings={showSensitiveWarnings ?? true} onClose={() => setPreviewEntry(null)} />
       )}
+      {/* fjvz: bulk-delete confirmation modal — requires explicit user consent
+          before mass-deleting selected items. Undo is not available for bulk
+          delete (too many items to hold optimistically), so we confirm first. */}
+      <ConfirmModal
+        open={bulkDeleteConfirmOpen}
+        title={`Delete ${multiSelectedIds.size} item${multiSelectedIds.size === 1 ? "" : "s"}?`}
+        body="This will permanently remove the selected clipboard items. This action cannot be undone."
+        confirmLabel="Delete"
+        busy={bulkBusy}
+        onConfirm={() => {
+          setBulkDeleteConfirmOpen(false);
+          void handleBulkDelete();
+        }}
+        onCancel={() => setBulkDeleteConfirmOpen(false)}
+      />
     </ViewShell>
   );
 }
