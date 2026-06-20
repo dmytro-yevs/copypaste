@@ -68,6 +68,24 @@ data class ClipboardItem(
      * (parity with macOS HistoryView DeviceBadge / device filter).
      */
     val originDeviceId: String? = null,
+    /**
+     * Character ranges (Unicode code-point, half-open `[first, last+1)`) within
+     * [snippet] that contain sensitive sub-strings (e.g. a card number embedded
+     * inside a longer non-sensitive sentence).
+     *
+     * Populated by [ClipboardRepository.parseItem] when [isSensitive] is false but
+     * [detectSensitiveSpans] finds at least one match — matching the macOS
+     * HistoryView partial-span masking path (masking.ts::applySpanMasking).
+     *
+     * EMPTY for fully-sensitive items ([isSensitive] == true): those items receive a
+     * full blur overlay in [HistoryActivity] and do not need per-span masking.
+     *
+     * Not persisted. Re-computed at read time alongside [isSensitive].
+     *
+     * NOTE: [List<IntRange>] is structurally stable for Compose's @Immutable contract
+     * because both the list and IntRange are value types (no identity equality).
+     */
+    val sensitiveSpans: List<IntRange> = emptyList(),
 ) {
     /** True when this item carries an image payload that can be rendered as a thumbnail. */
     val isImage: Boolean get() = contentTypeIsImage(contentType)

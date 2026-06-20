@@ -2717,6 +2717,24 @@ private fun HistoryRow(
         else -> item.snippet
     }
 
+    // CopyPaste-ojsh: partial-span masking for items that are NOT fully sensitive but
+    // contain a sensitive sub-string (e.g. a card number buried in a longer sentence).
+    // Fully-sensitive items already receive full blur via `masked` above. This branch
+    // bullet-replaces only the sensitive character ranges — mirrors macOS masking.ts.
+    // `remember` keys on (snippet, spans, maskSensitive) so re-masking fires only when
+    // the actual content or pref changes, not on every scroll recomposition.
+    // CopyPaste-ojsh: compute span-masked preview once per (item content, maskPref).
+    // `item` is @Immutable data class — structural equality is correct here.
+    // `maskSensitive` is a separate key so toggling the pref refreshes without
+    // requiring a new item to arrive (the item content hasn't changed).
+    val spanMaskedDisplay: String? = remember(item, maskSensitive) {
+        if (!detectedSensitive && maskSensitive && item.sensitiveSpans.isNotEmpty() && item.snippet.isNotBlank()) {
+            applySpanMasking(item.snippet, item.sensitiveSpans)
+        } else {
+            null  // null → use `display` unchanged
+        }
+    }
+
     // CopyPaste-998 (jank): hoist the §6 chip label + color so the classification
     // (TextKind.classify) and the color `when` run once per (item, ramp) instead of
     // every scroll recomposition. Keyed on the inputs that actually change the result.
@@ -3100,8 +3118,12 @@ private fun HistoryRow(
                     } else {
                         // 0lis: CODE/COLOR/NUMBER/PATH/JSON → MonoFontFamily 12sp (parity .preview.mono)
                         val isMonoKind = chipLabel in setOf("CODE", "COLOR", "NUMBER", "PATH", "JSON")
+                        // CopyPaste-ojsh: use span-masked text when available (non-sensitive item
+                        // with sensitive sub-strings). Falls back to `display` when no span masking
+                        // applies (fully-sensitive items, no spans, or masked pref off).
+                        val previewText = spanMaskedDisplay ?: display
                         Text(
-                            text = display,
+                            text = previewText,
                             style = if (isMonoKind) {
                                 TextStyle(
                                     fontFamily = MonoFontFamily,

@@ -1715,6 +1715,20 @@ class ClipboardRepository(context: Context) {
 
         val snippet = if (plaintext == null) UNABLE_TO_PREVIEW else previewFromPlaintext(plaintext)
 
+        // CopyPaste-ojsh: detect sensitive spans for non-fully-sensitive text items.
+        // Fully-sensitive items use full-blur masking in HistoryActivity; they don't
+        // need span masking. Only compute spans when we have plaintext AND the item is
+        // NOT fully sensitive (span masking is the partial-masking path).
+        val sensitiveSpans: List<IntRange> = if (!sensitive && plaintext != null && snippet.isNotBlank()) {
+            try {
+                sensitiveSpanRanges(detectSensitiveSpans(snippet))
+            } catch (_: Exception) {
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+
         // Text payload byte size is the encoded plaintextLen field (parts[2]) — the UTF-8
         // byte length recorded at capture by encodeItem(). Already in hand here, no blob load.
         // Image/file items carry their real bytes under separate prefs keys, so getItems()
@@ -1738,6 +1752,7 @@ class ClipboardRepository(context: Context) {
             snippet = snippet,
             tooLargeToSync = tooLargeToSync,
             originDeviceId = originDeviceId,
+            sensitiveSpans = sensitiveSpans,
         )
     }
 

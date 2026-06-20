@@ -294,6 +294,101 @@ fun isSensitive(text: String): Boolean {
 }
 
 /**
+ * Detect the character ranges within [text] that contain sensitive data (credit card
+ * numbers, IBANs, API keys, etc.), even when the whole item is NOT classified as fully
+ * sensitive (isSensitive == false).
+ *
+ * Returns a list of [uniffi.copypaste_android.SensitiveSpan] records, each with:
+ *   - [start] / [end]: Unicode code-point offsets of the sensitive sub-string.
+ *   - [confidence]: 0.0 – 1.0 confidence score.
+ *   - [patternName]: e.g. "CreditCard", "Iban", "AwsKey".
+ *
+ * Returns an empty list when the native library is unavailable (stub mode) or on error —
+ * never returns partial / fabricated spans. Callers should convert start/end to
+ * [IntRange] via [sensitiveSpanRanges] before use in the UI.
+ *
+ * Mirrors the macOS `detectSensitiveSpans` FFI used by HistoryView.tsx (masking.ts).
+ * Generated fn name: `uniffi.copypaste_android.detectSensitiveSpans(text: String)`.
+ */
+fun detectSensitiveSpans(text: String): List<uniffi.copypaste_android.SensitiveSpan> {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "detectSensitiveSpans: stub — returns empty")
+        return emptyList()
+    }
+    return try {
+        uniffi.copypaste_android.detectSensitiveSpans(text)
+    } catch (e: Exception) {
+        Log.w(TAG, "detectSensitiveSpans: native call failed: ${e.message}")
+        emptyList()
+    }
+}
+
+/**
+ * Convert a list of [uniffi.copypaste_android.SensitiveSpan] (Unicode code-point offsets)
+ * to a list of [IntRange] (code-point index ranges, exclusive end).
+ *
+ * The generated [SensitiveSpan.start] and [SensitiveSpan.end] are `UInt` code-point
+ * positions matching the macOS daemon's output. [IntRange] uses inclusive start and
+ * inclusive last (Kotlin convention), so [end] is stored as `end - 1` here to keep
+ * consistency with how [applySpanMasking] reads ranges via [IntRange.last].
+ *
+ * NOTE: [applySpanMasking] treats the range as exclusive-end (consistent with macOS
+ * `[start, end)` semantics) using `range.first` and `range.last + 1`.
+ */
+fun sensitiveSpanRanges(spans: List<uniffi.copypaste_android.SensitiveSpan>): List<IntRange> =
+    spans.map { span ->
+        val s = span.start.toInt().coerceAtLeast(0)
+        val e = span.end.toInt().coerceAtLeast(s)
+        // Store as IntRange(start, endExclusive - 1) — last = endExclusive - 1.
+        s until e
+    }
+
+/**
+ * Replace every character within [spans] (half-open code-point ranges `[first, last+1)`)
+ * in [text] with a bullet character `•`, preserving all characters outside the spans.
+ *
+ * Mirrors the macOS `masking.ts::applySpanMasking` semantics:
+ *  - Spans are treated as code-point offsets (not UTF-16 units) — correct for text
+ *    containing emoji or other astral characters.
+ *  - Overlapping or adjacent spans are handled by tracking a `cursor` that only
+ *    advances forward (never re-masks already-masked characters).
+ *  - Spans are sorted left-to-right before processing.
+ *  - Spans extending past the end of the text are clamped to text length.
+ *
+ * This is a pure function with no side effects — safe to call on the main thread.
+ *
+ * @param text The source string (preview snippet) to apply masking to.
+ * @param spans List of [IntRange] where each range `r` represents code-point positions
+ *   `[r.first, r.last + 1)` to replace with bullets. Use [sensitiveSpanRanges] to
+ *   convert [uniffi.copypaste_android.SensitiveSpan] records to this form.
+ * @return The masked string; identical to [text] when [spans] is empty.
+ */
+fun applySpanMasking(text: String, spans: List<IntRange>): String {
+    if (spans.isEmpty()) return text
+    // Work on code points (not chars) to handle emoji / astral correctly — mirrors
+    // the macOS `Array.from(text)` approach in masking.ts.
+    val codePoints = text.codePoints().toArray()
+    val len = codePoints.size
+    if (len == 0) return text
+
+    val sorted = spans.sortedBy { it.first }
+    val sb = StringBuilder(len)
+    var cursor = 0
+    for (range in sorted) {
+        val s = range.first.coerceIn(cursor, len)
+        val e = (range.last + 1).coerceIn(s, len)   // convert inclusive→exclusive
+        // Append unmasked prefix
+        for (i in cursor until s) sb.appendCodePoint(codePoints[i])
+        // Append bullets for the masked region
+        repeat(e - s) { sb.append('•') }
+        cursor = e
+    }
+    // Append any remaining suffix
+    for (i in cursor until len) sb.appendCodePoint(codePoints[i])
+    return sb.toString()
+}
+
+/**
  * Returns a string describing the sensitive data kind, or null if not sensitive.
  */
 fun sensitiveKind(text: String): String? {
