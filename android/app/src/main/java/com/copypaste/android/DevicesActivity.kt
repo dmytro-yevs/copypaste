@@ -62,7 +62,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
@@ -85,14 +88,18 @@ import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.LocalLiquidTokens
+import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.SectionLabel
+import com.copypaste.android.ui.theme.SkinBackground
+import com.copypaste.android.ui.theme.SkinRowTreatment
 import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberTranslucency
+import com.copypaste.android.ui.theme.skinTokens
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -160,6 +167,41 @@ internal fun isQrWarning(remainingSeconds: Int): Boolean =
  */
 internal fun shouldPulse(online: Boolean, reducedMotion: Boolean): Boolean =
     online && !reducedMotion
+
+/**
+ * True when the aurora animated canvas should be painted as the screen backdrop.
+ *
+ * Gating rules (A-C2):
+ *  - [background] must be [SkinBackground.AURORA] (Classic only).
+ *  - [translucent] must be true (user pref; same gate as before).
+ *  - [paintCanvasBackdrop] must be true (standalone vs. embedded gate; same as before).
+ *
+ * Classic keeps the SAME condition as before — byte-identical output.
+ * Quiet (FLAT) and Vapor (TINT_BLOB) return false here.
+ *
+ * Extracted so it can be unit-tested without the Compose runtime.
+ */
+internal fun shouldPaintAurora(
+    background: SkinBackground,
+    translucent: Boolean,
+    paintCanvasBackdrop: Boolean,
+): Boolean = background == SkinBackground.AURORA && translucent && paintCanvasBackdrop
+
+/**
+ * True when a static tinted blob should be painted as the screen backdrop.
+ *
+ * Gating rules (A-C2):
+ *  - [background] must be [SkinBackground.TINT_BLOB] (Vapor only).
+ *  - [translucent] must be true (same pref gate as aurora).
+ *  - [paintCanvasBackdrop] must be true (standalone vs. embedded gate).
+ *
+ * Extracted so it can be unit-tested without the Compose runtime.
+ */
+internal fun shouldPaintTintBlob(
+    background: SkinBackground,
+    translucent: Boolean,
+    paintCanvasBackdrop: Boolean,
+): Boolean = background == SkinBackground.TINT_BLOB && translucent && paintCanvasBackdrop
 
 /**
  * "Online" recency threshold for the per-peer green dot.
@@ -349,6 +391,8 @@ fun DevicesScreen(
     // §1 aurora canvas backdrop (glass surfaces frost over real colour).
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
+    // A-C2: skin token bundle drives background mode and row layout.
+    val tok = skinTokens(LocalSkin.current)
 
     // ── Direct camera scan launcher (Deliverable 2) ───────────────────────────
     // The scan button on this screen launches the ZXing scanner directly —
@@ -730,11 +774,45 @@ fun DevicesScreen(
         )
     }
 
+    // A-C2: three-way background canvas gating driven by tok.background.
+    //
+    // CLASSIC (AURORA, glow=.62): animated aurora canvas — same condition as before;
+    //   byte-identical for Classic (shouldPaintAurora reproduces the prior guard exactly).
+    // QUIET (FLAT, glow=0): no canvas — Scaffold uses plain solid c.bg; containerColor
+    //   stays opaque so the FLAT surface reads clean.
+    // VAPOR (TINT_BLOB, glow=.45): static tinted radial blob — a single large
+    //   accent-tinted radial gradient centred on the canvas, painted at glow-modulated
+    //   alpha to anchor the frosted glass panels without animated motion.
+    val paintAurora = shouldPaintAurora(tok.background, translucent, paintCanvasBackdrop)
+    val paintTintBlob = shouldPaintTintBlob(tok.background, translucent, paintCanvasBackdrop)
+    val scaffoldModifier = when {
+        paintAurora -> modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+        paintTintBlob -> modifier.drawBehind {
+            // Static soft tint-blob: one large radial gradient centred slightly
+            // upper-left, mirroring the web TINT_BLOB spec (single accent blob,
+            // no animation). Alpha gated by tok.glow (0.45 for Vapor).
+            val diag = kotlin.math.hypot(size.width, size.height)
+            drawRect(
+                brush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.0f to c.accent.copy(alpha = tok.glow * 0.55f),
+                        0.65f to c.accent.copy(alpha = tok.glow * 0.12f),
+                        1.0f to androidx.compose.ui.graphics.Color.Transparent,
+                    ),
+                    center = Offset(size.width * 0.35f, size.height * 0.28f),
+                    radius = diag * 0.75f,
+                ),
+            )
+        }
+        else -> modifier
+    }
+
     Scaffold(
         // CopyPaste-7em1/1a61: pass the active palette's AuroraDef so light palettes
         // render their soft aurora blobs instead of hardcoded Liquid Blue legacy blobs.
-        modifier = if (translucent && paintCanvasBackdrop) modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else modifier,
-        containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        // A-C2: replaced inline ternary with scaffoldModifier (three-way background gate).
+        modifier = scaffoldModifier,
+        containerColor = if (translucent && tok.background != SkinBackground.FLAT) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_devices),
@@ -845,8 +923,18 @@ fun DevicesScreen(
 
             if (deviceRows.isNotEmpty()) {
                 CopyPasteCard(accent = c.border) {
+                    // A-C2: row separator driven by tok.rowTreatment.
+                    // CARD (Classic): hairline RowDivider — byte-identical.
+                    // LINE (Quiet): same hairline divider — line treatment uses dividers.
+                    // INSET (Vapor): gap spacer (tok.rowGap = 3dp) instead of a divider line.
                     deviceRows.forEachIndexed { index, row ->
-                        if (index > 0) RowDivider()
+                        if (index > 0) {
+                            if (tok.rowTreatment == SkinRowTreatment.INSET && tok.rowGap > 0.dp) {
+                                Spacer(Modifier.height(tok.rowGap))
+                            } else {
+                                RowDivider()
+                            }
+                        }
                         row()
                     }
                 }

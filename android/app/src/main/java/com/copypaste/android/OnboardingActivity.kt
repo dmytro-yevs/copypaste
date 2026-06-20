@@ -59,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -75,15 +76,18 @@ import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.RadiusChip
+import com.copypaste.android.ui.theme.SkinBackground
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
+import com.copypaste.android.ui.theme.skinTokens
 import android.content.ClipData
 import android.content.ClipboardManager
 
@@ -339,6 +343,12 @@ fun OnboardingScreen(
     val slowDur = motionDuration(Motion.Slow)
     val baseDur = motionDuration(Motion.Base)
 
+    // Skin-gated background: read tok.background and tok.glow to decide which
+    // canvas to apply. CLASSIC/VAPOR use translucent + aurora/tint-blob;
+    // QUIET is always opaque solid (tok.background == FLAT).
+    val tok = skinTokens(LocalSkin.current)
+    val palette = LocalPalette.current
+
     // Re-evaluated every recomposition (triggered by refreshTrigger)
     val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -370,9 +380,57 @@ fun OnboardingScreen(
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
 
+    // Determine background canvas based on tok.background (gated by translucency pref).
+    // tok.glow informs the intensity of the canvas; each branch uses it appropriately:
+    //   AURORA (Classic)   → animated aurora canvas; palette blobs are pre-calibrated
+    //   TINT_BLOB (Vapor)  → static accent-tinted single blob scaled by tok.glow
+    //   FLAT (Quiet)       → solid opaque bg, no canvas modifier at all
+    //
+    // CLASSIC is byte-identical: translucent=true + AURORA path reproduces the
+    // existing auroraCanvas(dark, paletteAurora(...)) call exactly.
+    val scaffoldContainerColor = when {
+        !translucent                           -> c.bg
+        tok.background == SkinBackground.FLAT  -> c.bg        // QUIET: solid even if pref is on
+        else                                   -> Color.Transparent
+    }
+    val scaffoldModifier: Modifier = when {
+        !translucent                                     -> Modifier
+        tok.background == SkinBackground.FLAT            -> Modifier
+        tok.background == SkinBackground.AURORA          -> {
+            // CLASSIC is the only skin with AURORA background today. Pass the palette
+            // AuroraDef unscaled so the existing calibrated blob alphas are preserved
+            // byte-for-byte (CLASSIC byte-identical guarantee). Future non-Classic AURORA
+            // skins should supply pre-tuned AuroraDef blobs of their own, so glow
+            // scaling is NOT applied here — the tok.glow token records the design
+            // intent but the blobs carry the actual calibrated alpha values.
+            Modifier.auroraCanvas(dark, paletteAurora(palette))
+        }
+        tok.background == SkinBackground.TINT_BLOB       -> {
+            // VAPOR: static single accent-tinted blob centred on canvas.
+            // tok.glow scales the blob alpha so intensity matches the skin spec.
+            val blobAlpha = 0.28f * tok.glow
+            Modifier.drawBehind {
+                // Base canvas fill (palette bg tone)
+                drawRect(c.bg)
+                // Single soft radial blob — accent tint at tok.glow intensity
+                drawRect(
+                    brush = androidx.compose.ui.graphics.Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.0f to c.accent.copy(alpha = blobAlpha),
+                            0.7f to Color.Transparent,
+                        ),
+                        center = androidx.compose.ui.geometry.Offset(size.width * 0.5f, size.height * 0.3f),
+                        radius = kotlin.math.hypot(size.width, size.height) * 0.65f,
+                    ),
+                )
+            }
+        }
+        else                                             -> Modifier
+    }
+
     Scaffold(
-        containerColor = if (translucent) Color.Transparent else c.bg,
-        modifier = if (translucent) Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else Modifier,
+        containerColor = scaffoldContainerColor,
+        modifier = scaffoldModifier,
         topBar = {
             CopyPasteTopBar(title = "Set up CopyPaste")
         }

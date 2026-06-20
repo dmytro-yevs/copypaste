@@ -60,6 +60,18 @@ import kotlinx.coroutines.launch
  * [WindowManager.addView] or immediately after clearing FLAG_NOT_FOCUSABLE does NOT
  * work — the OS lifts the clipboard restriction only after the window-focus event,
  * which arrives with the next layout pass. Reading early returns null.
+ *
+ * ## Skin axis (A-C7)
+ * This Activity intentionally has **no renderable surface** — it draws a 1×1 transparent
+ * [android.view.View] via [WindowManager], never a Compose tree. Consequently:
+ * - [SkinBackground] token is not applicable: there is no backdrop canvas to gate.
+ * - [SkinRowTreatment] / [SkinTokens.rowGap] tokens are not applicable: there are no
+ *   item rows.
+ * - [LiquidGlassSurface] / [CopyPasteCard] material adaptation (Components.kt) is not
+ *   applicable: no Compose surface is composed here.
+ * All skins therefore produce byte-identical behaviour — Classic is trivially preserved.
+ * Token gaps reported per §3 rule (report rather than add to shared files):
+ *   MISSING_SURFACE_HOOK: no Compose host → background/rowTreatment/rowGap inapplicable.
  */
 class ClipboardFloatingActivity : Activity() {
 

@@ -89,13 +89,16 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.Motion
+import com.copypaste.android.ui.theme.SkinBackground
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
+import com.copypaste.android.ui.theme.skinTokens
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -926,6 +929,8 @@ fun PairScreen(
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
     val reduced = rememberReducedMotion()
+    // A-C5: skin token gate — read once per composition, same pattern as DevicesScreen/SettingsScreen.
+    val tok = skinTokens(LocalSkin.current)
 
     // Entrance alpha for the QR card — fades in on first composition.
     var pairEntered by remember { mutableStateOf(false) }
@@ -938,9 +943,12 @@ fun PairScreen(
 
     Box(Modifier.fillMaxSize()) {
     // 9g57: aurora canvas backdrop — mirrors DevicesScreen pattern.
+    // A-C5: gate by tok.background so CLASSIC keeps aurora, QUIET gets flat, VAPOR gets tint-blob
+    // (tint-blob is not yet rendered here — noted for A-F5; the gate suppresses aurora correctly).
+    val paintAurora = translucent && tok.background == SkinBackground.AURORA
     Scaffold(
-        modifier = if (translucent) modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else modifier,
-        containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        modifier = if (paintAurora) modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current)) else modifier,
+        containerColor = if (paintAurora) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_pair),

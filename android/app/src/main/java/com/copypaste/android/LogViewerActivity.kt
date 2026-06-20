@@ -47,7 +47,15 @@ import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.LocalSkin
+import com.copypaste.android.ui.theme.SkinBackground
+import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.ideTextFieldColors
+import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.rememberTranslucency
+import com.copypaste.android.ui.theme.skinTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -97,6 +105,23 @@ fun LogViewerScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState: LazyListState = rememberLazyListState()
+
+    // ── Skin / background tokens (A-C6) ────────────────────────────────────
+    // Gate the aurora/canvas backdrop by tok.background so CLASSIC gets the
+    // animated aurora, QUIET gets a plain solid background, and VAPOR gets a
+    // tint-blob canvas. CLASSIC must remain byte-identical (always AURORA).
+    val skin = LocalSkin.current
+    val tok = skinTokens(skin)
+    val translucent = rememberTranslucency()
+    val dark = isDarkTheme()
+
+    // Which background variant to draw:
+    //   AURORA    → full palette-aware animated aurora (auroraCanvas modifier)
+    //   TINT_BLOB → static accent-tinted blob; no dedicated Modifier exists yet,
+    //               so we reuse auroraCanvas as the closest available primitive.
+    //               (Missing: dedicated tintBlobCanvas Modifier — noted in bd notes.)
+    //   FLAT      → no canvas — plain c.bg solid fill
+    val paintCanvas = translucent && tok.background != SkinBackground.FLAT
 
     // ── State ──────────────────────────────────────────────────────────────
     var allLines by remember { mutableStateOf<List<String>>(emptyList()) }
@@ -189,7 +214,15 @@ fun LogViewerScreen(onBack: () -> Unit) {
     }
 
     Scaffold(
-        containerColor = c.bg,
+        // A-C6: gate the aurora/canvas backdrop by tok.background.
+        // CLASSIC (AURORA) → animated palette aurora, transparent container.
+        // VAPOR  (TINT_BLOB) → auroraCanvas fallback (dedicated tintBlobCanvas missing),
+        //   transparent container so the canvas shows through glass surfaces.
+        // QUIET  (FLAT) → no canvas, opaque solid c.bg container.
+        modifier = if (paintCanvas)
+            Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+        else Modifier,
+        containerColor = if (paintCanvas) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = "Logs",

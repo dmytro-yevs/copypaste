@@ -45,6 +45,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -54,12 +55,20 @@ import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeBg
 import com.copypaste.android.ui.theme.IdeBorder
 import com.copypaste.android.ui.theme.IdeDanger
 import com.copypaste.android.ui.theme.IdeDim
 import com.copypaste.android.ui.theme.IdeSuccess
 import com.copypaste.android.ui.theme.IdeText
+import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalPalette
+import com.copypaste.android.ui.theme.LocalSkin
+import com.copypaste.android.ui.theme.SkinBackground
+import com.copypaste.android.ui.theme.auroraCanvas
+import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.rememberTranslucency
+import com.copypaste.android.ui.theme.skinTokens
 
 /**
  * Standalone "Permissions" screen reachable from Settings.
@@ -241,8 +250,24 @@ fun PermissionsScreen(
     val hasOemScreen = OemAutoStartHelper.hasOemScreen(ctx)
     val oemLabel = OemAutoStartHelper.oemSettingsLabel(ctx)
 
+    // A-C8: skin-aware background — gate aurora canvas on tok.background.
+    // CLASSIC (AURORA + translucent=ON) → same aurora canvas as before; byte-identical.
+    // QUIET (FLAT) → no aurora; solid c.bg container regardless of translucency pref.
+    // VAPOR (TINT_BLOB) → no animated aurora (TINT_BLOB compositor is future work);
+    //   falls back to solid c.bg container (glow suppressed). Surfaces adapt via Components.kt.
+    val translucent = rememberTranslucency()
+    val c = LocalIdeColors.current
+    val dark = isDarkTheme()
+    val tok = skinTokens(LocalSkin.current)
+    // Only AURORA background gets the animated aurora canvas. FLAT and TINT_BLOB use solid bg.
+    val paintCanvasAurora = tok.background == SkinBackground.AURORA && translucent
+
     Scaffold(
-        containerColor = IdeBg,
+        modifier = if (paintCanvasAurora)
+            Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+        else
+            Modifier,
+        containerColor = if (paintCanvasAurora) Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_permissions),

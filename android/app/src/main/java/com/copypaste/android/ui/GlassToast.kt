@@ -40,11 +40,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.LiquidGlassSurface
+import com.copypaste.android.ui.theme.Skin
+import com.copypaste.android.ui.theme.SkinElevation
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
+import com.copypaste.android.ui.theme.skinTokens
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 
@@ -192,7 +196,13 @@ fun GlassToastHost(
 private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
-    val toastShape = RoundedCornerShape(10.dp)
+
+    // A-C9: skin-aware shape radius and shadow elevation.
+    // glassToastRadiusDp / glassToastShadowElevationDp are pure functions (testable).
+    val skin = LocalSkin.current
+    val toastRadiusDp = glassToastRadiusDp(skin).dp
+    val shadowElevationDp = glassToastShadowElevationDp(skin).dp
+    val toastShape = RoundedCornerShape(toastRadiusDp)
 
     val dotColor: Color = when (data.kind) {
         GlassToastKind.SUCCESS -> c.success
@@ -213,16 +223,20 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
     // §2/P0: the Material Surface stays TRANSPARENT and supplies only the §4
     // shadow + hairline border + shape clip; the real frosted blur + §2 tint
     // comes from LiquidGlassSurface (API-31 RenderEffect blur, flat tint < 31).
+    // LiquidGlassSurface already consumes LocalSkin internally: it gates the glass
+    // blur on tok.material == GLASS and uses tok.glassBlurDp / tok.saturation —
+    // so CLASSIC = current glass look, QUIET = opaque solid, VAPOR = refined glass.
     Surface(
-        // §4 radii: 10dp control/toast radius (matches web toast borderRadius 10).
+        // A-C9: skin-aware radius. CLASSIC frozen at 10dp; QUIET 7dp; VAPOR 12dp.
         shape = toastShape,
         color = Color.Transparent,
         contentColor = c.text,
         // §4: single 1dp hairline border (subtle, like CopyPasteCard).
         // f6x0: danger toasts use danger-tinted border for alert tonization.
         border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
-        // §4 elevation: one subtle e2-equivalent shadow.
-        shadowElevation = 6.dp,
+        // A-C9: skin-aware elevation. GLASS_FLOAT (Classic/Vapor) → 6dp shadow;
+        // NONE (Quiet) → 0dp (flat, no shadow).
+        shadowElevation = shadowElevationDp,
         modifier = Modifier
             .padding(horizontal = 16.dp)
             .clip(toastShape)
@@ -260,4 +274,39 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// A-C9: Pure-function skin helpers — testable without Compose runtime.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the toast shape corner radius (in dp float) for [skin].
+ *
+ * CLASSIC is frozen at 10dp to preserve byte-identical appearance — the
+ * current hardcoded value. Note: CLASSIC's tok.radiusControl is 9dp but the
+ * toast predates skins and was 10dp; the frozen-Classic rule wins here.
+ * QUIET uses tok.radiusControl (7dp). VAPOR uses tok.radiusControl (12dp).
+ *
+ * Pure function — usable in JVM unit tests (no Compose runtime needed).
+ */
+internal fun glassToastRadiusDp(skin: Skin): Float = when (skin) {
+    // Frozen: preserve the pre-skin 10dp value for CLASSIC (byte-identical).
+    Skin.CLASSIC -> 10f
+    // All other skins follow tok.radiusControl directly.
+    else         -> skinTokens(skin).radiusControl.value
+}
+
+/**
+ * Returns the Material Surface shadow elevation (in dp float) for [skin].
+ *
+ * GLASS_FLOAT elevation (Classic, Vapor) → 6dp (the pre-skin hardcoded value).
+ * NONE elevation (Quiet) → 0dp (flat surface, no drop shadow).
+ *
+ * Pure function — usable in JVM unit tests (no Compose runtime needed).
+ */
+internal fun glassToastShadowElevationDp(skin: Skin): Float {
+    val tok = skinTokens(skin)
+    // 6dp mirrors the original hardcoded value; kept for GLASS_FLOAT skins.
+    return if (tok.elevation == SkinElevation.GLASS_FLOAT) 6f else 0f
 }

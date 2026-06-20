@@ -192,6 +192,16 @@ import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.paletteAurora
+// A-C1: skin axis tokens for screen-level treatment (background, row, nav).
+import com.copypaste.android.ui.theme.AuroraDef
+import com.copypaste.android.ui.theme.LocalSkin
+import com.copypaste.android.ui.theme.SkinBackground
+import com.copypaste.android.ui.theme.SkinNavActive
+import com.copypaste.android.ui.theme.SkinRowTreatment
+import com.copypaste.android.ui.theme.SkinTokens
+import com.copypaste.android.ui.theme.skinTokens
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset as ComposeOffset
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -436,6 +446,59 @@ private val appIconBitmapCache = object : LruCache<String, Bitmap>(APP_ICON_CACH
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// A-C1: Vapor TINT_BLOB canvas — single static accent-tint blob, no animation.
+//
+// Vapor skin uses a simpler background than Classic: one large centred blob of
+// the palette's primary glow color, scaled by tok.glow (0.45 for Vapor).
+// No motion, no multiple blobs — just the single tint splash over the base
+// canvas gradient. This mirrors the web Vapor bg spec (§4 / skins-implementation-
+// plan.md): "single static accent-tint blob (no motion)".
+//
+// Implemented as a private HistoryActivity-file extension on Modifier so it
+// does not pollute the shared Components.kt / theme module.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A-C1 Vapor background: a static single-blob canvas.
+ *
+ * Draws the base canvas gradient from [auroraDef] and a single centred accent
+ * blob at [glowIntensity] opacity. No animation — mirrors the Vapor skin
+ * "TINT_BLOB" background spec (static, single blob).
+ *
+ * [dark] selects the appropriate base gradient (dark/light canvas).
+ * [glowIntensity] is tok.glow (0.45 for Vapor); clamped to [0,1].
+ */
+private fun Modifier.historyTintBlobCanvas(
+    dark: Boolean,
+    auroraDef: AuroraDef,
+    glowIntensity: Float,
+): Modifier {
+    val intensity = glowIntensity.coerceIn(0f, 1f)
+    return this.drawBehind {
+        // Base canvas gradient (same as auroraCanvas base path).
+        val baseColors = if (dark) {
+            listOf(auroraDef.bg1, auroraDef.bg2, auroraDef.bg0)
+        } else {
+            listOf(auroraDef.bg0, auroraDef.bg2, auroraDef.bg1)
+        }
+        drawRect(Brush.linearGradient(colors = baseColors))
+        // Single centred blob from the palette's primary glow color.
+        val diag = kotlin.math.hypot(size.width, size.height)
+        val blobColor = auroraDef.glowA.copy(alpha = auroraDef.glowA.alpha * intensity)
+        drawRect(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0.0f to blobColor,
+                    0.55f to androidx.compose.ui.graphics.Color.Transparent,
+                ),
+                center = ComposeOffset(size.width * 0.5f, size.height * 0.4f),
+                radius = diag * 0.75f,
+            ),
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -470,6 +533,8 @@ fun HistoryScreen(
     // reuse for every token below so the chrome (scaffold, top bar, dialogs) themes
     // light/dark in lockstep with CopyPasteTheme.
     val c = LocalIdeColors.current
+    // A-C1: skin tokens for screen-level treatment (background, row, nav).
+    val tok = skinTokens(LocalSkin.current)
     // §8 a11y: skip animated transitions when the user has requested reduced motion
     // (Accessibility → Remove animations, or Developer Options → Animator duration scale = 0).
     val reducedMotion = rememberReducedMotion()
@@ -752,14 +817,27 @@ fun HistoryScreen(
     }
 
     Scaffold(
-        // §1 aurora canvas: when translucent, the coloured radial backdrop is painted
-        // either here (standalone) or by the MainShell (embedded). Either way the
-        // container goes transparent so the aurora shows through the glass surfaces.
-        // §1 palette-aware aurora: pass the per-palette AuroraDef so Graphite Mist
-        // gets its specific cool-blue/steel glow rather than the generic default.
-        modifier = if (translucent && paintCanvasBackdrop)
-            modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
-        else modifier,
+        // A-C1 + §1 aurora canvas: gated by tok.background to support all three skins.
+        //   AURORA    — current full animated aurora (Classic). Painted here when standalone;
+        //               the MainShell paints it when embedded (paintCanvasBackdrop=false).
+        //   FLAT      — plain solid bg, no aurora (Quiet). The FLAT check precedes translucent
+        //               so even with translucency ON the Quiet skin stays solid.
+        //   TINT_BLOB — single static accent-tinted blob (Vapor). Painted via a simplified
+        //               auroraCanvas call using only the palette's primary glow blob.
+        // Classic with paintCanvasBackdrop=false returns the base modifier unchanged —
+        // the MainShell backdrop is already in place. FLAT always returns base modifier.
+        modifier = when {
+            !paintCanvasBackdrop                          -> modifier
+            !translucent                                  -> modifier
+            tok.background == SkinBackground.AURORA       ->
+                modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+            tok.background == SkinBackground.TINT_BLOB    ->
+                // Vapor: static single-blob tint, no animation. Reuse auroraCanvas with a
+                // palette that has only one visible blob (the accent glow) — the full multi-
+                // blob aurora is NOT painted. tok.glow scales the blob intensity.
+                modifier.historyTintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
+            else                                          -> modifier // FLAT: solid, no canvas
+        },
         containerColor = if (translucent) Color.Transparent else c.bg,
         topBar = {
             if (selectionMode) {
@@ -1177,6 +1255,7 @@ fun HistoryScreen(
                 else -> HistoryList(
                     items = deviceFilteredItems,
                     padding = innerPadding,
+                    tok = tok,
                     hasMore = hasMore,
                     onLoadMore = { viewModel.loadMore() },
                     ownDeviceId = ownDeviceId,
@@ -2132,6 +2211,8 @@ private const val ROW_STAGGER_STEP_MS = 20
 private fun HistoryList(
     items: List<ClipboardItem>,
     padding: PaddingValues,
+    /** A-C1: skin tokens for row treatment (CARD/LINE/INSET) and row gap (INSET only). */
+    tok: SkinTokens,
     selectionMode: Boolean,
     selectedIds: Set<String>,
     reorderMode: Boolean = false,
@@ -2340,14 +2421,27 @@ private fun HistoryList(
     // inside itemsIndexed (motionDuration reads LocalLiquidTokens — stable, but
     // calling remember per-item still adds per-item composition state entries).
     val rowEnterDurMs = motionDuration(Motion.Base)
+    // A-C1: row gap driven by tok.rowGap (0 for CARD/LINE, tok.rowGap for INSET).
+    // Classic path: tok.rowGap=0 → Arrangement.spacedBy(0.dp) — byte-identical to pre-skin.
+    val rowGap = tok.rowGap
+    // A-C1: INSET treatment adds horizontal padding to inset the rows inside a recessed look.
+    val isInset = tok.rowTreatment == SkinRowTreatment.INSET
+
     LazyColumn(
         state = listState,
         modifier = Modifier
             .fillMaxSize()
             .background(if (listTranslucent) Color.Transparent else c.bg)
             .padding(padding),
-        contentPadding = PaddingValues(0.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
+        contentPadding = PaddingValues(
+            // A-C1 INSET: add top+bottom content padding equal to rowGap so the first and
+            // last rows are also visually separated from the list edges. CARD/LINE: no padding.
+            top = if (isInset) rowGap else 0.dp,
+            bottom = if (isInset) rowGap else 0.dp,
+        ),
+        // A-C1: row spacing — CARD/LINE=0dp (divider-separated), INSET=tok.rowGap (card-spaced).
+        // Classic: spacedBy(0.dp) — identical to previous Arrangement.spacedBy(0.dp).
+        verticalArrangement = Arrangement.spacedBy(rowGap),
     ) {
         val pinnedCount = items.count { it.pinned }
         itemsIndexed(items, key = { _, item -> item.id }) { index, item ->
@@ -2383,14 +2477,29 @@ private fun HistoryList(
                             initialOffsetX = { -it / 5 },
                         ),
             ) {
+                // A-C1: INSET rows wrap in a horizontally-inset Column with rounded corners
+                // (Vapor inset card look). CARD/LINE rows use the flat Column (byte-identical).
                 Column(
-                    modifier = Modifier.previewPeekGesture(
-                        itemId = item.id,
-                        selectionMode = selectionMode,
-                        onPeeking = onPreviewPeek,
-                        onPinned = onPreviewPin,
-                        onDismissPeek = onPreviewDismiss,
-                    ),
+                    modifier = Modifier
+                        .previewPeekGesture(
+                            itemId = item.id,
+                            selectionMode = selectionMode,
+                            onPeeking = onPreviewPeek,
+                            onPinned = onPreviewPin,
+                            onDismissPeek = onPreviewDismiss,
+                        )
+                        .then(
+                            // INSET: add horizontal inset margin + rounded card background.
+                            // The radius matches tok.radiusCard (Vapor=16dp) for visual harmony.
+                            // CARD/LINE: no extra modifier — preserves byte-identical Classic look.
+                            if (isInset) Modifier
+                                .padding(horizontal = 8.dp, vertical = 0.dp)
+                                .background(
+                                    color = c.elevated.copy(alpha = 0.38f),
+                                    shape = RoundedCornerShape(tok.radiusCard),
+                                )
+                            else Modifier
+                        ),
                 ) {
                     HistoryRow(
                         item = item,
@@ -2422,11 +2531,15 @@ private fun HistoryList(
                         onPreviewPin = onPreviewPin,
                         onPreviewDismiss = onPreviewDismiss,
                     )
-                    // §4: single 1dp hairline (kill the 0.5dp mix) using the divider token.
-                    HorizontalDivider(
-                        color = c.divider,
-                        thickness = 1.dp,
-                    )
+                    // A-C1: divider shown for CARD and LINE treatments; suppressed for INSET
+                    // (spacing between cards replaces the divider line in the Vapor skin).
+                    // Classic (CARD) shows the divider — byte-identical to pre-skin behaviour.
+                    if (tok.rowTreatment != SkinRowTreatment.INSET) {
+                        HorizontalDivider(
+                            color = c.divider,
+                            thickness = 1.dp,
+                        )
+                    }
                 }
             }
         }
@@ -3185,19 +3298,45 @@ private fun DeviceChip(
     onClick: () -> Unit,
 ) {
     val c = LocalIdeColors.current
-    val bg = when {
-        isSelected -> c.accent
-        isOwn      -> c.accentDim
-        else       -> c.elevated
-    }
-    val fg = if (isSelected) c.accentOn else if (isOwn) c.accent else c.dim
+    // A-C1: skin-aware active indicator for the selected device-filter chip.
+    // Reads the skin token once per composition (staticCompositionLocalOf, stable).
+    val tok = skinTokens(LocalSkin.current)
 
-    Box(
-        modifier = Modifier
-            .background(color = bg, shape = RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 4.dp),
-    ) {
+    // Inactive chip bg/fg are the same across all skins (only the ACTIVE indicator varies).
+    val inactiveBg = if (isOwn) c.accentDim else c.elevated
+    val inactiveFg = if (isOwn) c.accent else c.dim
+
+    // Active chip bg/fg and optional ring: driven by tok.navActive.
+    //   FILL_GLOW  — Classic: solid accent fill, accentOn text. No ring.
+    //   TINT       — Quiet: light tinted accent background, accent text. No ring.
+    //   GLASS_RING — Vapor: elevated background + 1dp accent outline ring, accent text.
+    val activeBg = when (tok.navActive) {
+        SkinNavActive.FILL_GLOW  -> c.accent            // Classic: solid accent pill
+        SkinNavActive.TINT       -> c.accentDim          // Quiet: subtle tint, no glow
+        SkinNavActive.GLASS_RING -> c.elevated           // Vapor: elevated surface + ring
+    }
+    val activeFg = when (tok.navActive) {
+        SkinNavActive.FILL_GLOW  -> c.accentOn          // on-accent text
+        SkinNavActive.TINT       -> c.accent             // accent-coloured text on tint
+        SkinNavActive.GLASS_RING -> c.accent             // accent-coloured text on glass
+    }
+    val showRing = isSelected && tok.navActive == SkinNavActive.GLASS_RING
+
+    val bg = if (isSelected) activeBg else inactiveBg
+    val fg = if (isSelected) activeFg else inactiveFg
+
+    val baseModifier = Modifier
+        .background(color = bg, shape = RoundedCornerShape(12.dp))
+        .then(
+            // GLASS_RING: 1dp accent outline ring on the selected chip (Vapor nav spec).
+            // Classic and Quiet do not add a border — Classic is visually byte-identical.
+            if (showRing) Modifier.border(1.dp, c.accent, RoundedCornerShape(12.dp))
+            else Modifier
+        )
+        .clickable(onClick = onClick)
+        .padding(horizontal = 10.dp, vertical = 4.dp)
+
+    Box(modifier = baseModifier) {
         Text(
             text = label,
             style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),

@@ -43,6 +43,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.DevicesOnlineState
@@ -50,6 +51,11 @@ import com.copypaste.android.R
 import com.copypaste.android.RECENT_SYNC_MS
 import com.copypaste.android.Settings
 import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalSkin
+import com.copypaste.android.ui.theme.Skin
+import com.copypaste.android.ui.theme.SkinMaterial
+import com.copypaste.android.ui.theme.rememberTranslucency
+import com.copypaste.android.ui.theme.skinTokens
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
@@ -98,6 +104,18 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val settings = remember { Settings(context) }
     val c = LocalIdeColors.current
+
+    // A-C9: skin-aware sheet container color.
+    // syncSheetEffectiveTranslucent is a pure function (testable without Compose).
+    val skin = LocalSkin.current
+    val translucent = rememberTranslucency()
+    // Transparent when glass skin + user pref on → sheet scrim shows through.
+    // Opaque (c.bg) when FLAT skin (Quiet) or user pref off → solid sheet.
+    val sheetContainerColor = if (syncSheetEffectiveTranslucent(skin, translucent)) {
+        Color.Transparent
+    } else {
+        c.bg
+    }
 
     // Live count from DevicesScreen (IP-correlation + lastSyncMs). Updated
     // every ~1 s while the Devices tab is active. -1 means not yet computed.
@@ -210,7 +228,9 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
         ModalBottomSheet(
             onDismissRequest = { showSheet = false },
             sheetState = sheetState,
-            containerColor = c.bg,
+            // A-C9: skin-aware — transparent for glass skins (LiquidGlassSurface
+            // inside SyncStatusSheet provides the frosted fill); opaque for Quiet.
+            containerColor = sheetContainerColor,
         ) {
             SyncStatusSheet(
                 count = count,
@@ -490,4 +510,25 @@ internal enum class IpcSyncBadgeState(val wireValue: String) {
         OFFLINE, ERROR, IDLE,
         MISCONFIGURED              -> SyncBadgeState.DaemonUnreachable
     }
+}
+
+// ---------------------------------------------------------------------------
+// A-C9: Pure-function skin helpers — testable without Compose runtime.
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns `true` when the sync-status bottom sheet should use a transparent
+ * container (letting the background show through for the glass effect).
+ *
+ * Mirrors the LiquidGlassSurface effectiveTranslucent gate in Components.kt:
+ *   `effectiveTranslucent = userPref && tok.material == SkinMaterial.GLASS`
+ *
+ * FLAT material (Quiet) always returns `false` — the sheet uses an opaque
+ * solid fill ([IdeColors.bg]) regardless of the user's translucency preference.
+ *
+ * Pure function — usable in JVM unit tests (no Compose runtime needed).
+ */
+internal fun syncSheetEffectiveTranslucent(skin: Skin, userPrefTranslucent: Boolean): Boolean {
+    val tok = skinTokens(skin)
+    return userPrefTranslucent && tok.material == SkinMaterial.GLASS
 }
