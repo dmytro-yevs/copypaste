@@ -66,6 +66,7 @@ pub mod backoff;
 pub mod clock;
 pub mod engine;
 pub mod merge;
+pub mod metrics;
 pub mod protocol;
 
 // Convenience re-exports.
@@ -75,4 +76,5 @@ pub use backoff::{
 pub use clock::LamportClock;
 pub use engine::{PeerState, SyncEngine, SyncError, SyncResult};
 pub use merge::{local_to_wire, local_to_wire_owned, resolve, wire_to_local, MergeOutcome};
+pub use metrics::SyncLagCounter;
 pub use protocol::{ControlMsg, Message, PeerFrame, WireItem};

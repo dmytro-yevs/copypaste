@@ -44,11 +44,103 @@ mod b64_opt {
     }
 }
 
+/// Raw helper used by `#[serde(from = "WireItemUnclamped")]` on [`WireItem`].
+///
+/// This struct derives `Deserialize` in the usual way and holds the timestamps
+/// as-received from the network before any sanitisation. The `From` conversion
+/// to `WireItem` calls [`WireItem::clamp_timestamps`], ensuring that negative
+/// `lamport_ts` / `wall_time` values injected by a malicious or buggy peer are
+/// zeroed out at every deserialization site — not just in the engine's ingest
+/// loop (CopyPaste-psx7).
+///
+/// # Why a helper struct instead of a manual visitor?
+///
+/// A hand-written `Deserialize` visitor would need to replicate all 20+ serde
+/// attribute annotations (`#[serde(with = "b64_opt")]`, `#[serde(default = …)]`,
+/// etc.) and maintain them in lockstep with the struct definition — a
+/// maintenance burden with high drift risk.  The `from = …` approach lets serde
+/// codegen handle all field-level attributes automatically; we only add the
+/// post-deserialization clamp in the `From` impl.
+#[derive(Deserialize)]
+struct WireItemUnclamped {
+    id: String,
+    item_id: String,
+    content_type: String,
+    #[serde(with = "b64_opt")]
+    content: Option<Vec<u8>>,
+    #[serde(with = "b64_opt")]
+    content_nonce: Option<Vec<u8>>,
+    blob_ref: Option<String>,
+    is_sensitive: bool,
+    lamport_ts: i64,
+    wall_time: i64,
+    expires_at: Option<i64>,
+    app_bundle_id: Option<String>,
+    origin_device_id: String,
+    // `skip_serializing_if` omitted: this struct is Deserialize-only.
+    #[serde(default)]
+    file_name: Option<String>,
+    #[serde(default)]
+    mime: Option<String>,
+    #[serde(default = "default_key_version")]
+    key_version: u8,
+    #[serde(default)]
+    deleted: bool,
+    #[serde(default)]
+    pinned: bool,
+    #[serde(default)]
+    pin_order: Option<f64>,
+}
+
+impl From<WireItemUnclamped> for WireItem {
+    fn from(raw: WireItemUnclamped) -> Self {
+        // Apply the lower-bound clamp immediately on deserialization so every
+        // ingress path (engine ingest, direct serde_json::from_slice, test
+        // helpers) is protected — not only the engine's explicit call site.
+        // The engine still calls clamp_timestamps() before its upper-bound
+        // check, but that call is now redundant for the lower-bound and serves
+        // as defence-in-depth for any future ingress path that constructs
+        // WireItems from JSON without going through the engine.
+        let mut item = WireItem {
+            id: raw.id,
+            item_id: raw.item_id,
+            content_type: raw.content_type,
+            content: raw.content,
+            content_nonce: raw.content_nonce,
+            blob_ref: raw.blob_ref,
+            is_sensitive: raw.is_sensitive,
+            lamport_ts: raw.lamport_ts,
+            wall_time: raw.wall_time,
+            expires_at: raw.expires_at,
+            app_bundle_id: raw.app_bundle_id,
+            origin_device_id: raw.origin_device_id,
+            file_name: raw.file_name,
+            mime: raw.mime,
+            key_version: raw.key_version,
+            deleted: raw.deleted,
+            pinned: raw.pinned,
+            pin_order: raw.pin_order,
+        };
+        item.clamp_timestamps();
+        item
+    }
+}
+
 /// Serialisable mirror of `ClipboardItem` carried over the wire.
 ///
 /// We define a separate struct (rather than deriving Serialize on the core
 /// type) so the network representation is decoupled from the storage layer.
+///
+/// ## Deserialization safety (CopyPaste-psx7)
+///
+/// `#[serde(from = "WireItemUnclamped")]` routes every deserialization through
+/// [`WireItemUnclamped`] → [`From`] → [`WireItem::clamp_timestamps`], so
+/// negative `lamport_ts` / `wall_time` values from a malicious or buggy peer
+/// are zeroed out at the decode boundary — regardless of which code path
+/// performs the deserialization.  Only [`Serialize`] is derived directly;
+/// [`Deserialize`] is generated via the `from` attribute.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(from = "WireItemUnclamped")]
 pub struct WireItem {
     /// Row primary key (UUID string).
     pub id: String,
@@ -483,5 +575,90 @@ mod tests {
         // Round-trip must still be lossless.
         let decoded: WireItem = serde_json::from_str(&json).expect("must deserialize");
         assert_eq!(decoded, item);
+    }
+
+    // ── CopyPaste-psx7: negative-timestamp clamp at deserialization ───────────
+
+    /// A peer that sends negative `lamport_ts` / `wall_time` must have those
+    /// fields clamped to 0 at the deserialization boundary, before the value
+    /// ever reaches the LWW merge, the Lamport clock, or storage.
+    ///
+    /// Prior to the fix, `#[derive(Deserialize)]` stored the raw negative value;
+    /// the engine's explicit `clamp_timestamps()` call was the only guard —
+    /// leaving every other deserialization site (tests, direct JSON parsing, any
+    /// future ingress path) unprotected.  The `#[serde(from = "WireItemUnclamped")]`
+    /// fix enforces the clamp at decode time regardless of call site (psx7).
+    #[test]
+    fn negative_lamport_ts_clamped_to_zero_on_deserialize() {
+        let json = r#"{
+            "id":"neg-1","item_id":"neg-item","content_type":"text",
+            "content":null,"content_nonce":null,"blob_ref":null,
+            "is_sensitive":false,
+            "lamport_ts":-42,
+            "wall_time":-999,
+            "expires_at":null,"app_bundle_id":null,
+            "origin_device_id":"evil-peer","key_version":2
+        }"#;
+        let item: WireItem = serde_json::from_str(json).expect("must deserialize");
+        assert_eq!(
+            item.lamport_ts, 0,
+            "negative lamport_ts must be clamped to 0 at deserialization (psx7)"
+        );
+        assert_eq!(
+            item.wall_time, 0,
+            "negative wall_time must be clamped to 0 at deserialization (psx7)"
+        );
+    }
+
+    /// Positive (valid) timestamps must not be clamped — the fix must be a
+    /// lower-bound only, not an upper-bound (the upper-bound clamp is the
+    /// engine's job and uses a dynamic ceiling relative to the local clock).
+    #[test]
+    fn positive_timestamps_pass_through_deserialize_unchanged() {
+        let json = r#"{
+            "id":"pos-1","item_id":"pos-item","content_type":"text",
+            "content":null,"content_nonce":null,"blob_ref":null,
+            "is_sensitive":false,
+            "lamport_ts":12345,
+            "wall_time":1700000000000,
+            "expires_at":null,"app_bundle_id":null,
+            "origin_device_id":"good-peer","key_version":2
+        }"#;
+        let item: WireItem = serde_json::from_str(json).expect("must deserialize");
+        assert_eq!(
+            item.lamport_ts, 12345,
+            "positive lamport_ts must not be altered"
+        );
+        assert_eq!(
+            item.wall_time, 1_700_000_000_000,
+            "positive wall_time must not be altered"
+        );
+    }
+
+    /// A `WireItem` embedded in a `Message::Items` frame must also be clamped
+    /// at deserialization — verifying that the `#[serde(untagged)]` on
+    /// `PeerFrame` does not bypass the `WireItemUnclamped` path.
+    #[test]
+    fn negative_timestamps_clamped_in_items_message() {
+        let json = r#"{"type":"ITEMS","items":[{
+            "id":"msg-neg","item_id":"msg-neg-item","content_type":"text",
+            "content":null,"content_nonce":null,"blob_ref":null,
+            "is_sensitive":false,"lamport_ts":-1,"wall_time":-500,
+            "expires_at":null,"app_bundle_id":null,
+            "origin_device_id":"bad-peer","key_version":2
+        }]}"#;
+        let msg: Message = serde_json::from_str(json).expect("must deserialize");
+        if let Message::Items { items } = msg {
+            assert_eq!(
+                items[0].lamport_ts, 0,
+                "lamport_ts inside Message::Items must be clamped at deserialization"
+            );
+            assert_eq!(
+                items[0].wall_time, 0,
+                "wall_time inside Message::Items must be clamped at deserialization"
+            );
+        } else {
+            panic!("expected Message::Items");
+        }
     }
 }
