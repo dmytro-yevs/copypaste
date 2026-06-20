@@ -62,7 +62,13 @@ pub enum SchemaError {
 ///     Migration v12 creates the table (and its index) unconditionally during
 ///     `apply_migrations`, so every properly-initialised DB has the table regardless
 ///     of call order.
-pub const SCHEMA_VERSION: i64 = 12;
+///   * 12 → 13 (CopyPaste-i6pp): purge stale `clipboard_fts` rows for sensitive
+///     items. Before this fix `insert_item_with_fts` and `upsert_fts` did not
+///     guard against `is_sensitive = 1`, so existing databases may contain
+///     plaintext FTS entries for passwords, tokens, or other secrets. This
+///     migration deletes all such rows. The forward-going code paths (`insert_item_with_fts`,
+///     `upsert_fts`, `search_items`) are also patched to prevent new leakage.
+pub const SCHEMA_VERSION: i64 = 13;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -192,6 +198,29 @@ CREATE TABLE IF NOT EXISTS revoked_devices (\n\
 );\n\
 CREATE INDEX IF NOT EXISTS idx_revoked_devices_revoked_at\n\
     ON revoked_devices(revoked_at DESC);\n";
+
+/// v13 step — purge stale `clipboard_fts` rows for sensitive items
+/// (CopyPaste-i6pp).
+///
+/// Prior to this fix, `insert_item_with_fts` and `upsert_fts` did not check
+/// `is_sensitive` before writing to `clipboard_fts`. As a result, existing
+/// databases may contain plaintext secrets (passwords, tokens, credit-card
+/// numbers) in the FTS table, where they would surface as search results to
+/// any caller of `search_items`.
+///
+/// This DELETE is idempotent: on a clean database (no sensitive FTS rows) it
+/// is a no-op. On an upgraded database it removes exactly the rows that leak
+/// sensitive plaintext. The sub-select is a single indexed lookup on `id`
+/// (PRIMARY KEY of `clipboard_items`) — O(n_sensitive) not O(n_total).
+///
+/// After this migration, the forward-going code paths (`insert_item_with_fts`,
+/// `upsert_fts`, `search_items`) enforce the same policy at write and query
+/// time respectively, so no new sensitive FTS rows can be created.
+pub(crate) const V13_PURGE_SENSITIVE_FTS: &str = "\
+DELETE FROM clipboard_fts\n\
+WHERE id IN (\n\
+    SELECT id FROM clipboard_items WHERE is_sensitive = 1\n\
+);\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -368,6 +397,16 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // step idempotent: DBs that already have the table from the old ad-hoc
         // path are unaffected.
         script.push_str(V12_REVOKED_DEVICES_SQL);
+    }
+
+    if current_version < 13 {
+        // Migration v13 (CopyPaste-i6pp): purge stale clipboard_fts rows for
+        // sensitive items. Before this fix, insert_item_with_fts and upsert_fts
+        // did not guard against is_sensitive = 1, leaving plaintext secrets
+        // (passwords, tokens, etc.) in the FTS table where search_items would
+        // return them. This DELETE is idempotent and O(n_sensitive). Forward-
+        // going code paths are patched separately to prevent new leakage.
+        script.push_str(V13_PURGE_SENSITIVE_FTS);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
@@ -926,6 +965,168 @@ mod tests {
 
         // Migration must succeed without error even though the table already exists.
         apply_migrations(&conn).unwrap();
+
+        let uv: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uv, SCHEMA_VERSION);
+    }
+
+    /// CopyPaste-i6pp: migration v13 must delete clipboard_fts rows that
+    /// belong to sensitive items, and leave non-sensitive FTS rows intact.
+    #[test]
+    fn v13_migration_purges_sensitive_fts_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Build a v12 state with clipboard_items + clipboard_fts.
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE clipboard_items ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pin_order REAL DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;\n\
+             CREATE TABLE IF NOT EXISTS migration_state (\
+               key TEXT PRIMARY KEY, key_version_in_progress INTEGER,\
+               last_processed_id INTEGER NOT NULL DEFAULT 0,\
+               started_at INTEGER, completed_at INTEGER);\n\
+             INSERT OR IGNORE INTO migration_state VALUES ('v4-key-version-sweep', 2, 0, 0, 0);\n\
+             CREATE INDEX IF NOT EXISTS idx_clipboard_unpinned_len \
+               ON clipboard_items(LENGTH(COALESCE(content, ''))) WHERE pinned = 0;\n\
+             CREATE TABLE IF NOT EXISTS revoked_devices (\
+               fingerprint TEXT PRIMARY KEY NOT NULL,\
+               name TEXT NOT NULL DEFAULT '',\
+               revoked_at INTEGER NOT NULL);\n\
+             CREATE INDEX IF NOT EXISTS idx_revoked_devices_revoked_at \
+               ON revoked_devices(revoked_at DESC);",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 12;").unwrap();
+
+        // Insert one sensitive and one non-sensitive item.
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, lamport_ts, wall_time, origin_device_id, key_version, pinned, is_sensitive) \
+             VALUES ('id-secret', 'iid-s', 'text', 1, 1000, '', 2, 0, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, lamport_ts, wall_time, origin_device_id, key_version, pinned, is_sensitive) \
+             VALUES ('id-normal', 'iid-n', 'text', 2, 2000, '', 2, 0, 0)",
+            [],
+        )
+        .unwrap();
+
+        // Simulate the pre-fix bug: both items have FTS rows.
+        conn.execute(
+            "INSERT INTO clipboard_fts(id, content_text) VALUES ('id-secret', 'my super secret password')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_fts(id, content_text) VALUES ('id-normal', 'ordinary clipboard text')",
+            [],
+        )
+        .unwrap();
+
+        // Sanity: both FTS rows exist before migration.
+        let before: i64 = conn
+            .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(before, 2, "both FTS rows must exist before v13 migration");
+
+        // Run migration.
+        apply_migrations(&conn).unwrap();
+
+        // Sensitive FTS row must be gone.
+        let secret_fts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = 'id-secret'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            secret_fts, 0,
+            "v13 migration must remove FTS row for sensitive item (CopyPaste-i6pp)"
+        );
+
+        // Non-sensitive FTS row must survive.
+        let normal_fts: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = 'id-normal'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            normal_fts, 1,
+            "v13 migration must preserve FTS row for non-sensitive item"
+        );
+
+        let uv: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uv, SCHEMA_VERSION);
+    }
+
+    /// CopyPaste-i6pp: v13 migration is idempotent — running it on a DB that
+    /// has no sensitive FTS rows must succeed without error.
+    #[test]
+    fn v13_migration_is_noop_when_no_sensitive_fts_rows_exist() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Build a v12 state with only a non-sensitive item.
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE clipboard_items ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pin_order REAL DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;\n\
+             CREATE TABLE IF NOT EXISTS migration_state (\
+               key TEXT PRIMARY KEY, key_version_in_progress INTEGER,\
+               last_processed_id INTEGER NOT NULL DEFAULT 0,\
+               started_at INTEGER, completed_at INTEGER);\n\
+             INSERT OR IGNORE INTO migration_state VALUES ('v4-key-version-sweep', 2, 0, 0, 0);\n\
+             CREATE INDEX IF NOT EXISTS idx_clipboard_unpinned_len \
+               ON clipboard_items(LENGTH(COALESCE(content, ''))) WHERE pinned = 0;\n\
+             CREATE TABLE IF NOT EXISTS revoked_devices (\
+               fingerprint TEXT PRIMARY KEY NOT NULL,\
+               name TEXT NOT NULL DEFAULT '',\
+               revoked_at INTEGER NOT NULL);\n\
+             CREATE INDEX IF NOT EXISTS idx_revoked_devices_revoked_at \
+               ON revoked_devices(revoked_at DESC);",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 12;").unwrap();
+
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, lamport_ts, wall_time, origin_device_id, key_version, pinned, is_sensitive) \
+             VALUES ('id-n', 'iid-n', 'text', 1, 1000, '', 2, 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_fts(id, content_text) VALUES ('id-n', 'hello world')",
+            [],
+        )
+        .unwrap();
+
+        // Must succeed without error.
+        apply_migrations(&conn).unwrap();
+
+        let fts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fts, 1, "non-sensitive FTS row must survive a no-op v13 migration");
 
         let uv: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))

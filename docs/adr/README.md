@@ -19,6 +19,11 @@ original ADR template (see [`ADR-TEMPLATE.md`](./ADR-TEMPLATE.md)).
 | [008](./ADR-008-pake-protocol-choice.md) | PAKE protocol choice | Accepted |
 | [009](./ADR-009-relay-storage-choice.md) | Relay storage choice | Accepted |
 | [010](./ADR-010-codesigning-ad-hoc.md) | Code signing (ad-hoc) | Accepted |
+| [011](./ADR-011-v3-borderline-crates.md) | v0.3 borderline crates | Accepted |
+| [012](./ADR-012-windows-frozen-homebrew-only.md) | Windows frozen (Homebrew-only) | Accepted |
+| [013](./ADR-013-tauri-ui.md) | Tauri v2 + React as UI framework | Accepted |
+| [014](./ADR-014-app-owned-daemon-lifecycle.md) | App-owned daemon lifecycle | Accepted |
+| [015](./ADR-015-fts-sensitive-exclusion.md) | Exclude sensitive items from FTS5 index | Accepted |
 
 > Note: legacy ADR-001..004 use the lowercase `NNN-slug.md` naming. New ADRs
 > follow the `ADR-NNN-slug.md` convention described below. Renaming legacy

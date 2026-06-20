@@ -444,7 +444,15 @@ pub fn insert_item_with_fts(
         return Err(ItemsError::Sqlite(e));
     }
 
-    if !plaintext_for_fts.is_empty() {
+    // CopyPaste-i6pp: never index sensitive items into the FTS table.
+    // Sensitive items contain secrets (passwords, tokens, PII); storing them
+    // as plaintext in clipboard_fts — even under SQLCipher encryption — widens
+    // the attack surface and leaks secrets via search results to any caller
+    // that invokes `search_items`. The guard here is defense-in-depth: callers
+    // (the daemon's `handle_text`) are expected to pass `""` for sensitive
+    // items, but we enforce the policy regardless of what `plaintext_for_fts`
+    // contains so a future caller cannot accidentally index secret content.
+    if !plaintext_for_fts.is_empty() && !item.is_sensitive {
         tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![item.id])?;
         tx.execute(
             "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
@@ -1576,8 +1584,31 @@ fn clamp_preview(text: String, max_bytes: usize) -> String {
 /// (CopyPaste-j9pv): either both succeed (the FTS entry is updated) or neither
 /// does (the old FTS row survives, a stale-text miss at worst, not a
 /// permanently-missing row).
+///
+/// CopyPaste-i6pp: **sensitive items are never indexed**. If `is_sensitive = 1`
+/// in `clipboard_items` for `id`, this function is a no-op and returns `Ok(())`.
+/// This is the second enforcement layer: callers should not pass sensitive
+/// plaintext at all, but this guard ensures a future caller cannot accidentally
+/// put secrets into the FTS table.
 pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsError> {
     let conn = db.conn();
+
+    // CopyPaste-i6pp: refuse to index sensitive items. Look up is_sensitive
+    // directly from clipboard_items; if the row is absent or sensitive, bail
+    // early without touching clipboard_fts.
+    let is_sensitive: Option<i64> = conn
+        .query_row(
+            "SELECT is_sensitive FROM clipboard_items WHERE id = ?1",
+            params![id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    match is_sensitive {
+        Some(1) => return Ok(()), // sensitive — do not index
+        None => return Ok(()),    // row not found — nothing to index
+        _ => {}                   // non-sensitive — proceed
+    }
+
     // `unchecked_transaction` matches the storage-layer convention: the daemon
     // holds the Database behind a Mutex and only hands out `&Connection`, so
     // there is no concurrent borrow to guard against.
@@ -1758,6 +1789,13 @@ pub fn search_items<D: DbRead + ?Sized>(
     // Single JOIN: FTS5 drives rank order; clipboard_items supplies full row data.
     // `fts.id` is the UNINDEXED text UUID column (matches `clipboard_items.id`).
     // `prepare_cached` avoids re-compiling the statement on every call.
+    //
+    // CopyPaste-i6pp (defense-in-depth): `AND ci.is_sensitive = 0` ensures that
+    // even if a stale FTS row exists for a sensitive item (written before this
+    // fix, or via a direct `INSERT INTO clipboard_fts` in tests/tooling), the
+    // item is never surfaced by search. The primary guard is in
+    // `insert_item_with_fts` and `upsert_fts`, which refuse to write sensitive
+    // rows into clipboard_fts at all. This filter is the last line of defence.
     let mut stmt = db.conn().prepare_cached(
         "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
                 ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
@@ -1765,7 +1803,7 @@ pub fn search_items<D: DbRead + ?Sized>(
                 ci.pinned, ci.pin_order, ci.thumb, ci.deleted
          FROM clipboard_fts fts
          JOIN clipboard_items ci ON ci.id = fts.id
-         WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0
+         WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0
          ORDER BY rank
          LIMIT ?2",
     )?;
@@ -4038,4 +4076,114 @@ mod tests {
     // (Compile-time enforcement — no runtime test needed.
     //  The function's #[cfg(test)] gate is verified by the fact that this test
     //  module CAN call it while non-test callers cannot.)
+
+    // --- CopyPaste-i6pp: sensitive items must NOT appear in FTS or search ---
+
+    /// Regression: `insert_item_with_fts` must NOT write a sensitive item's
+    /// plaintext into `clipboard_fts`, even when a non-empty `plaintext_for_fts`
+    /// is supplied.  Callers that detect sensitivity should pass `""` (same
+    /// convention as image items), and the function itself must enforce the
+    /// policy as a final safeguard.
+    #[test]
+    fn sensitive_item_not_indexed_in_fts_by_insert_item_with_fts() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut item = make_item(1);
+        item.is_sensitive = true;
+        let id = item.id.clone();
+
+        // Pass non-empty plaintext: the function must silently discard it
+        // because the item is sensitive.
+        insert_item_with_fts(&db, &item, "super secret password").unwrap();
+
+        let fts_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fts_count, 0,
+            "sensitive item must NOT be present in clipboard_fts (CopyPaste-i6pp)"
+        );
+    }
+
+    /// Regression: `upsert_fts` must refuse to index plaintext for a sensitive
+    /// item. The id is looked up in `clipboard_items` and if `is_sensitive = 1`
+    /// the FTS row must not be written.
+    #[test]
+    fn upsert_fts_rejects_sensitive_item() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut item = make_item(1);
+        item.is_sensitive = true;
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        // upsert_fts must be a no-op for sensitive rows.
+        upsert_fts(&db, &id, "classified payload").unwrap();
+
+        let fts_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fts_count, 0,
+            "upsert_fts must not index plaintext for sensitive items (CopyPaste-i6pp)"
+        );
+    }
+
+    /// Defense-in-depth: `search_items` must never return sensitive items even
+    /// if a stale FTS row was inserted before this fix.
+    #[test]
+    fn search_items_does_not_return_sensitive_items() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Insert a non-sensitive item — must be findable.
+        let normal = make_item(1);
+        let normal_id = normal.id.clone();
+        insert_item(&db, &normal).unwrap();
+        // Manually insert the FTS row (mirrors what the daemon does after decryption).
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
+                params![normal_id, "findme plaintext"],
+            )
+            .unwrap();
+
+        // Insert a sensitive item and — simulating a pre-fix row — manually
+        // force a stale FTS entry for it.
+        let mut sensitive = make_item(2);
+        sensitive.is_sensitive = true;
+        let sensitive_id = sensitive.id.clone();
+        insert_item(&db, &sensitive).unwrap();
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
+                params![sensitive_id, "findme secret"],
+            )
+            .unwrap();
+
+        // Both words appear in FTS, but search_items must only return the non-sensitive hit.
+        let results = search_items(&db, "findme", 10).unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "search must return exactly one result (the non-sensitive item)"
+        );
+        assert_eq!(
+            results[0].id, normal_id,
+            "result must be the non-sensitive item (CopyPaste-i6pp)"
+        );
+        assert!(
+            results.iter().all(|i| !i.is_sensitive),
+            "search_items must never return sensitive items"
+        );
+    }
 }
