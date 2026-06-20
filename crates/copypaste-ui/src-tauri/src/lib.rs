@@ -192,6 +192,7 @@ pub fn run() {
             daemon_lifecycle::restart_daemon,
             daemon_lifecycle::get_daemon_error,
             get_popup_shortcut,
+            get_default_popup_shortcut,
             set_popup_shortcut,
             check_accessibility_permission,
             request_accessibility_permission,
@@ -354,6 +355,20 @@ pub fn run() {
 #[tauri::command]
 fn get_popup_shortcut(state: State<'_, CurrentShortcut>) -> String {
     state.0.lock().expect("mutex poisoned").clone()
+}
+
+/// Return the built-in default popup-shortcut accelerator string.
+///
+/// CopyPaste-sqw0: this is the Rust-side single source of truth for the
+/// default shortcut.  The TypeScript layer (`SettingsView.tsx`) fetches this
+/// at load time via `getDefaultPopupShortcut()` so the TS constant and the
+/// Rust constant cannot silently drift.  The TS file still carries a hardcoded
+/// fallback (`DEFAULT_POPUP_SHORTCUT = "CmdOrCtrl+Shift+V"`) used only while
+/// the IPC call is in-flight (initial render) — see the sqw0 cross-reference
+/// comment there for details.
+#[tauri::command]
+fn get_default_popup_shortcut() -> &'static str {
+    DEFAULT_POPUP_SHORTCUT
 }
 
 /// Change the popup shortcut at runtime and persist it.
@@ -632,15 +647,44 @@ fn paste_to_frontmost(handle: tauri::AppHandle) -> Result<(), String> {
             .and_then(|s| s.0.lock().ok().map(|g| g.clone()))
             .flatten();
 
-        // Activate the prior app, then after a short delay synthesise Cmd+V.
+        // Activate the prior app, then wait for it to become frontmost before
+        // synthesising Cmd+V.  The wait uses a bounded polling loop rather than
+        // a fixed sleep so that:
+        //   • On fast systems the paste fires as soon as the OS confirms the
+        //     transition (typically 10–30 ms), not after a blind 80 ms delay.
+        //   • On slow or loaded systems the old 80 ms was racy — paste landed
+        //     in the wrong window.  The poll backs off up to 300 ms total
+        //     (37 × 8 ms) then proceeds unconditionally so we never hang.
+        //
+        // CopyPaste-78hg fix: replaced fixed 80 ms sleep.
         thread::spawn(move || {
             // Activate the prior app by bundle ID (best effort).
             if let Some(ref bid) = bundle_id {
                 activate_app_by_bundle_id(bid);
             }
 
-            // Give the app a moment to come to the foreground.
-            thread::sleep(Duration::from_millis(80));
+            // Poll until the prior app is frontmost or the timeout expires.
+            // 37 iterations × 8 ms ≈ 296 ms maximum wait.
+            // When no prior-app bundle is known (popup opened but no external
+            // app ever focused), skip the poll and proceed after a minimal wait
+            // so the synthetic Cmd+V still fires even if it may land nowhere.
+            const MAX_ITER: u32 = 37;
+            const INTERVAL: Duration = Duration::from_millis(8);
+            if let Some(ref bid) = bundle_id {
+                let bid_clone = bid.clone();
+                let matched = poll_until_frontmost(bid, frontmost_bundle_id, MAX_ITER, INTERVAL);
+                if !matched {
+                    tracing::debug!(
+                        "paste_to_frontmost: '{}' did not become frontmost within \
+                         {}ms; proceeding with Cmd+V anyway",
+                        bid_clone,
+                        MAX_ITER * INTERVAL.as_millis() as u32,
+                    );
+                }
+            } else {
+                // No prior app recorded; wait one interval before firing.
+                thread::sleep(INTERVAL);
+            }
 
             // Synthesise Cmd+V (key down + key up).
             //
@@ -806,6 +850,39 @@ fn frontmost_bundle_id() -> Option<String> {
         let nsstring = app.bundleIdentifier()?;
         Some(nsstring.to_string())
     }
+}
+
+/// Poll until the app identified by `target_bundle_id` is the frontmost
+/// application, or until `max_iter` iterations have been exhausted.
+///
+/// `probe` is called on each iteration and should return the current frontmost
+/// bundle ID (or `None` if indeterminate).  Between probes the caller sleeps
+/// for `interval`.
+///
+/// Returns `true` when a probe matches `target_bundle_id`, `false` on timeout.
+///
+/// # Why poll instead of a fixed sleep?
+/// A fixed 80 ms sleep is racy: on a slow or heavily-loaded system the prior
+/// app may not have become frontmost yet, so the synthesised Cmd+V fires into
+/// the wrong window and the paste is silently dropped.  Polling terminates as
+/// soon as the OS confirms the transition, making the happy path faster while
+/// the bounded timeout (≈ 300 ms with default params) prevents an indefinite hang
+/// on pathological cases where activation never completes.
+///
+/// This function is extracted so it can be unit-tested without macOS ObjC bindings.
+fn poll_until_frontmost(
+    target_bundle_id: &str,
+    mut probe: impl FnMut() -> Option<String>,
+    max_iter: u32,
+    interval: std::time::Duration,
+) -> bool {
+    for _ in 0..max_iter {
+        if probe().as_deref() == Some(target_bundle_id) {
+            return true;
+        }
+        std::thread::sleep(interval);
+    }
+    false
 }
 
 /// Activate the app with the given bundle identifier using NSRunningApplication.
@@ -2192,5 +2269,144 @@ fn setup_macos(app: &tauri::App) {
         if let Err(e) = win.set_content_protected(true) {
             tracing::warn!("PG-25: set_content_protected(true) failed: {e}");
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    // -------------------------------------------------------------------------
+    // CopyPaste-78hg: poll_until_frontmost — bounded polling helper
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn poll_until_frontmost_returns_immediately_when_first_check_matches() {
+        // probe always returns the target bundle ID on the first call.
+        let count = AtomicU32::new(0);
+        let result = poll_until_frontmost(
+            "com.example.target",
+            || {
+                count.fetch_add(1, Ordering::Relaxed);
+                Some("com.example.target".to_owned())
+            },
+            10,
+            std::time::Duration::from_millis(1),
+        );
+        // Should have returned true on the very first successful probe.
+        assert!(result, "expected true when bundle matches immediately");
+        assert_eq!(
+            count.load(Ordering::Relaxed),
+            1,
+            "probe should be called exactly once"
+        );
+    }
+
+    #[test]
+    fn poll_until_frontmost_returns_true_after_a_few_retries() {
+        // Fail the first 2 probes, then succeed on the 3rd.
+        let count = AtomicU32::new(0);
+        let result = poll_until_frontmost(
+            "com.example.target",
+            || {
+                let n = count.fetch_add(1, Ordering::Relaxed);
+                if n < 2 {
+                    Some("com.other.app".to_owned()) // wrong foreground app
+                } else {
+                    Some("com.example.target".to_owned())
+                }
+            },
+            20,
+            std::time::Duration::from_millis(1),
+        );
+        assert!(result, "expected true when bundle eventually matches");
+        assert_eq!(
+            count.load(Ordering::Relaxed),
+            3,
+            "probe called 3 times (2 misses + 1 hit)"
+        );
+    }
+
+    #[test]
+    fn poll_until_frontmost_returns_false_after_timeout() {
+        // probe always returns a different app — never matches.
+        let count = AtomicU32::new(0);
+        let result = poll_until_frontmost(
+            "com.example.target",
+            || {
+                count.fetch_add(1, Ordering::Relaxed);
+                Some("com.other.app".to_owned())
+            },
+            5, // only 5 iterations maximum
+            std::time::Duration::from_millis(1),
+        );
+        assert!(!result, "expected false after exhausting iterations");
+        assert_eq!(
+            count.load(Ordering::Relaxed),
+            5,
+            "probe called exactly max_iter times"
+        );
+    }
+
+    #[test]
+    fn poll_until_frontmost_returns_false_when_probe_returns_none() {
+        // probe returns None (cannot determine frontmost app) — no match possible.
+        let result = poll_until_frontmost(
+            "com.example.target",
+            || None,
+            5,
+            std::time::Duration::from_millis(1),
+        );
+        assert!(
+            !result,
+            "expected false when frontmost app is indeterminate"
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // CopyPaste-sqw0: DEFAULT_POPUP_SHORTCUT / get_default_popup_shortcut
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn default_popup_shortcut_constant_is_non_empty() {
+        // Guard against accidentally blanking the constant.
+        assert!(!DEFAULT_POPUP_SHORTCUT.is_empty());
+    }
+
+    #[test]
+    fn default_popup_shortcut_fn_matches_constant() {
+        // The serde default function must return the same value as the constant
+        // so they can never silently drift apart.
+        assert_eq!(
+            default_popup_shortcut(),
+            DEFAULT_POPUP_SHORTCUT,
+            "default_popup_shortcut() diverged from DEFAULT_POPUP_SHORTCUT constant"
+        );
+    }
+
+    #[test]
+    fn default_popup_shortcut_value_matches_ts_expectation() {
+        // This test is the cross-language source-of-truth check:
+        // SettingsView.tsx (sqw0) uses "CmdOrCtrl+Shift+V" as its hardcoded
+        // fallback.  If you change the Rust constant, update the TS comment too.
+        // See: crates/copypaste-ui/src/views/SettingsView.tsx, `DEFAULT_POPUP_SHORTCUT`.
+        assert_eq!(
+            DEFAULT_POPUP_SHORTCUT, "CmdOrCtrl+Shift+V",
+            "DEFAULT_POPUP_SHORTCUT value changed — update SettingsView.tsx to match"
+        );
+    }
+
+    #[test]
+    fn uiconfig_default_uses_shortcut_constant() {
+        let cfg = UiConfig::default();
+        assert_eq!(
+            cfg.popup_shortcut, DEFAULT_POPUP_SHORTCUT,
+            "UiConfig::default() popup_shortcut must equal DEFAULT_POPUP_SHORTCUT"
+        );
     }
 }

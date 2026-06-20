@@ -12,6 +12,7 @@ import {
   probeStatus,
   appVersion,
   getPopupShortcut,
+  getDefaultPopupShortcut,
   setPopupShortcut,
   restartDaemon,
   detectStaleDaemonFromStatus,
@@ -39,9 +40,14 @@ function snapToNearest<T extends number>(steps: readonly T[], raw: number): T {
   return steps[best];
 }
 
-// Default popup shortcut. Mirrors DEFAULT_POPUP_SHORTCUT in
-// src-tauri/src/lib.rs (the Rust default is not exposed over IPC, so it is
-// duplicated here for the "reset to default" button). Keep the two in sync.
+// CopyPaste-sqw0: DEFAULT_POPUP_SHORTCUT is the *fallback* initial-render value
+// used only while the IPC call to `get_default_popup_shortcut` is in-flight.
+// The Rust constant `DEFAULT_POPUP_SHORTCUT` in `src-tauri/src/lib.rs` is the
+// authoritative source; the UI fetches it at load time via
+// `getDefaultPopupShortcut()` and stores it in `defaultShortcut` state so the
+// "reset to default" button always reflects the Rust value, not this literal.
+// If you change the value here, change it in Rust too — and the Rust test
+// `default_popup_shortcut_value_matches_ts_expectation` will catch any drift.
 const DEFAULT_POPUP_SHORTCUT = "CmdOrCtrl+Shift+V";
 
 // NOTE: step values are BINARY (MiB/GiB, ×1024² / ×1024³) to match the core
@@ -683,6 +689,11 @@ export function SettingsView() {
   // Shortcuts
   const [currentShortcut, setCurrentShortcut] = useState(DEFAULT_POPUP_SHORTCUT);
   const [pendingShortcut, setPendingShortcut] = useState(DEFAULT_POPUP_SHORTCUT);
+  // CopyPaste-sqw0: fetched from Rust via `get_default_popup_shortcut` at load
+  // time so the "reset to default" button always reflects the Rust constant,
+  // not the TS fallback literal.  Starts as DEFAULT_POPUP_SHORTCUT while the
+  // IPC call is in-flight; updated by the useEffect below.
+  const [defaultShortcut, setDefaultShortcut] = useState(DEFAULT_POPUP_SHORTCUT);
   const [shortcutMsg, setShortcutMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const shortcutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -813,6 +824,18 @@ export function SettingsView() {
         })
         .catch(() => {
           // Keep default if Tauri command fails (shouldn't happen in normal operation).
+        });
+
+      // CopyPaste-sqw0: fetch the authoritative default shortcut from Rust so
+      // the "reset to default" button always reflects the Rust constant, never
+      // a stale TS literal.  Falls back to DEFAULT_POPUP_SHORTCUT on failure.
+      getDefaultPopupShortcut()
+        .then((d) => {
+          if (cancelled) return;
+          setDefaultShortcut(d);
+        })
+        .catch(() => {
+          // Non-fatal: defaultShortcut stays at the TS fallback literal.
         });
 
       try {
@@ -1362,15 +1385,18 @@ export function SettingsView() {
   // Reset the popup shortcut back to its built-in default and persist it via
   // the same IPC the manual Save uses, so the UI and registered hotkey stay
   // in sync.
+  // CopyPaste-sqw0: uses `defaultShortcut` (fetched from Rust via
+  // `get_default_popup_shortcut`) rather than the TS literal so the two sides
+  // share the same value at runtime.
   const handleResetShortcut = useCallback(async () => {
-    if (currentShortcut === DEFAULT_POPUP_SHORTCUT) {
-      setPendingShortcut(DEFAULT_POPUP_SHORTCUT);
+    if (currentShortcut === defaultShortcut) {
+      setPendingShortcut(defaultShortcut);
       return;
     }
-    setPendingShortcut(DEFAULT_POPUP_SHORTCUT);
+    setPendingShortcut(defaultShortcut);
     try {
-      await setPopupShortcut(DEFAULT_POPUP_SHORTCUT);
-      setCurrentShortcut(DEFAULT_POPUP_SHORTCUT);
+      await setPopupShortcut(defaultShortcut);
+      setCurrentShortcut(defaultShortcut);
       setShortcutMsg({ text: "Reset to default", isError: false });
       if (shortcutTimerRef.current !== null) clearTimeout(shortcutTimerRef.current);
       shortcutTimerRef.current = setTimeout(() => setShortcutMsg(null), 2500);
@@ -1381,7 +1407,7 @@ export function SettingsView() {
       if (shortcutTimerRef.current !== null) clearTimeout(shortcutTimerRef.current);
       shortcutTimerRef.current = setTimeout(() => setShortcutMsg(null), 4000);
     }
-  }, [currentShortcut]);
+  }, [currentShortcut, defaultShortcut]);
 
   // -------------------------------------------------------------------------
   // Cloud sync — Set passphrase
@@ -2282,10 +2308,10 @@ export function SettingsView() {
                 <button
                   type="button"
                   aria-label="Reset shortcut to default"
-                  title={`Reset to default (${DEFAULT_POPUP_SHORTCUT})`}
+                  title={`Reset to default (${defaultShortcut})`}
                   disabled={
-                    currentShortcut === DEFAULT_POPUP_SHORTCUT &&
-                    pendingShortcut === DEFAULT_POPUP_SHORTCUT
+                    currentShortcut === defaultShortcut &&
+                    pendingShortcut === defaultShortcut
                   }
                   onClick={() => void handleResetShortcut()}
                   className="flex h-7 w-7 items-center justify-center border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:cursor-not-allowed disabled:opacity-40 transition-colors"

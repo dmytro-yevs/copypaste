@@ -1054,6 +1054,22 @@ export async function getPopupShortcut(): Promise<string> {
 }
 
 /**
+ * Get the built-in default popup shortcut accelerator string from the Rust
+ * layer (currently "CmdOrCtrl+Shift+V").
+ *
+ * CopyPaste-sqw0: this is the authoritative source of the default.  Rust's
+ * `DEFAULT_POPUP_SHORTCUT` constant in `src-tauri/src/lib.rs` is the single
+ * source of truth.  `SettingsView.tsx` fetches this at load time via
+ * `getDefaultPopupShortcut()` and uses it for the "reset to default" button,
+ * so the two sides can never drift silently.
+ *
+ * This calls the Tauri command directly, NOT the daemon IPC socket.
+ */
+export async function getDefaultPopupShortcut(): Promise<string> {
+  return invoke<string>("get_default_popup_shortcut");
+}
+
+/**
  * Set a new popup shortcut accelerator string at runtime and persist it.
  * Throws a plain `Error` with the error message if the accelerator is
  * invalid or already taken by another application.

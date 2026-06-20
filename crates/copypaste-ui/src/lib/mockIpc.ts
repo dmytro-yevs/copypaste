@@ -713,6 +713,11 @@ export async function mockInvoke(
     case "get_popup_shortcut":
       return "CmdOrCtrl+Shift+V";
 
+    // CopyPaste-sqw0: exposes the Rust DEFAULT_POPUP_SHORTCUT constant so TS
+    // never hardcodes it independently.  Must match lib.rs:DEFAULT_POPUP_SHORTCUT.
+    case "get_default_popup_shortcut":
+      return "CmdOrCtrl+Shift+V";
+
     case "set_popup_shortcut":
       return undefined;
 
