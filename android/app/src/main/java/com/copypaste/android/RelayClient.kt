@@ -25,28 +25,32 @@ class RelayClient(private val baseUrl: String) {
     /**
      * Register (or co-register) this device's shared-account inbox with the
      * relay. Matches the daemon's contract (relay.rs): `POST /devices`
-     * `{device_id, device_name, public_key_b64}` → 201 `{auth_token}`.
+     * `{device_id, device_name, public_key_b64, pop_b64}` → 201 `{auth_token}`.
      *
      * [deviceId] MUST be the shared-account inbox id (`relayInboxId(syncKey)`),
      * NOT the per-install device id, so this device shares the daemon's inbox.
-     * [publicKeyBase64] MUST be `relayPublicKeyB64(syncKey)`. A fresh register
-     * always returns 201 with a new independent token, whether or not the inbox
-     * was already co-registered by another device.
+     * [publicKeyBase64] MUST be `relayPublicKeyB64(syncKey)`. [popB64] MUST be
+     * the base64 of `relay_registration_pop(syncKey, deviceId)` — proves the
+     * registrant holds the sync key (fixes CopyPaste-kmcr inbox-theft risk). A
+     * fresh register always returns 201 with a new independent token, whether or
+     * not the inbox was already co-registered by another device.
      *
-     * SECURITY: never logs the inbox id, public key, or token.
+     * SECURITY: never logs the inbox id, public key, PoP, or token.
      */
     suspend fun registerDevice(
         deviceId: String,
         publicKeyBase64: String,
         deviceName: String,
+        popB64: String,
     ): Device? =
         withContext(Dispatchers.IO) {
             try {
-                val body = JSONObject().apply {
-                    put("device_id", deviceId)
-                    put("device_name", deviceName)
-                    put("public_key_b64", publicKeyBase64)
-                }.toString()
+                val body = buildRegisterBody(
+                    deviceId = deviceId,
+                    deviceName = deviceName,
+                    publicKeyBase64 = publicKeyBase64,
+                    popB64 = popB64,
+                )
 
                 val resp = post("/devices", body, null)
                 if (resp.code in 200..201) {
@@ -379,5 +383,29 @@ class RelayClient(private val baseUrl: String) {
             val digest = MessageDigest.getInstance("SHA-256").digest(publicKeyBytes)
             return digest.joinToString("") { "%02x".format(it) }.take(32)
         }
+
+        /**
+         * Build the JSON request body for `POST /devices`, including the
+         * proof-of-possession field (`pop_b64`) required by the relay since
+         * CopyPaste-kmcr. Extracted as a pure function so it can be unit-tested
+         * without a running relay server.
+         *
+         * SECURITY: [popB64] and [publicKeyBase64] are secret-derived — callers
+         * MUST NOT log the returned string.
+         */
+        fun buildRegisterBody(
+            deviceId: String,
+            deviceName: String,
+            publicKeyBase64: String,
+            popB64: String,
+        ): String = JSONObject().apply {
+            put("device_id", deviceId)
+            put("device_name", deviceName)
+            put("public_key_b64", publicKeyBase64)
+            // CopyPaste-kmcr: PoP proves the registrant holds the sync key that
+            // deterministically maps to this inbox id. Relay enforces this field.
+            // SECURITY: never log this field or its value.
+            put("pop_b64", popB64)
+        }.toString()
     }
 }

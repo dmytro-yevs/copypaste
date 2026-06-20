@@ -585,16 +585,20 @@ class SyncManager(
      * from the cross-device sync key so every device (Android + the macOS daemon)
      * co-registers, subscribes to, and pushes to the SAME relay inbox.
      *
-     * - [inboxId]   — `relayInboxId(syncKey)`: the inbox `device_id` (canonical
-     *                 UUID), byte-identical to the daemon's `derive_relay_inbox_id`.
+     * - [inboxId]      — `relayInboxId(syncKey)`: the inbox `device_id` (canonical
+     *                    UUID), byte-identical to the daemon's `derive_relay_inbox_id`.
      * - [publicKeyB64] — `relayPublicKeyB64(syncKey)`: the registration public key.
+     * - [popB64]       — base64 of HMAC-SHA256(syncKey, "relay-registration-pop-v1:" +
+     *                    inboxId); proves the registrant holds the sync key. Sent as
+     *                    `pop_b64` in `POST /devices` (CopyPaste-kmcr fix). NEVER log.
      * - [deviceName]   — human-readable name for the relay device row.
      *
-     * SECURITY: [inboxId] and [publicKeyB64] are secret-derived; never logged.
+     * SECURITY: [inboxId], [publicKeyB64], and [popB64] are secret-derived; never logged.
      */
     data class RelayRegistration(
         val inboxId: String,
         val publicKeyB64: String,
+        val popB64: String,
         val deviceName: String,
     )
 
@@ -619,9 +623,18 @@ class SyncManager(
             return null
         }
         return try {
+            val inboxId = relay_inbox_id(syncKeyBytes)
+            val publicKeyB64 = relay_public_key_b64(syncKeyBytes)
+            // CopyPaste-kmcr: compute HMAC-SHA256 PoP from sync key + inbox id.
+            // relay_registration_pop returns 32 raw bytes; base64-encode for the wire.
+            // SECURITY: do NOT log popBytes or its base64 encoding.
+            val popBytes = relay_registration_pop(syncKeyBytes, inboxId)
+            val popB64 = Base64.encodeToString(popBytes, Base64.NO_WRAP)
+            popBytes.fill(0) // scrub immediately after encoding
             RelayRegistration(
-                inboxId = relay_inbox_id(syncKeyBytes),
-                publicKeyB64 = relay_public_key_b64(syncKeyBytes),
+                inboxId = inboxId,
+                publicKeyB64 = publicKeyB64,
+                popB64 = popB64,
                 deviceName = android.os.Build.MODEL ?: "Android",
             )
         } catch (e: Exception) {
@@ -759,7 +772,14 @@ class SyncManager(
     ): String? {
         val cached = s.relayToken
         if (cached.isNotBlank() && s.relayTokenUrl == relayUrl) return cached
-        val device = client.registerDevice(reg.inboxId, reg.publicKeyB64, reg.deviceName) ?: return null
+        // CopyPaste-kmcr: pass the PoP so the relay can verify the registrant holds
+        // the sync key corresponding to the derived inbox id.
+        val device = client.registerDevice(
+            deviceId = reg.inboxId,
+            publicKeyBase64 = reg.publicKeyB64,
+            deviceName = reg.deviceName,
+            popB64 = reg.popB64,
+        ) ?: return null
         s.relayToken = device.token
         s.relayTokenUrl = relayUrl
         Log.i(TAG, "relay: registered shared inbox, token cached")

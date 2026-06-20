@@ -232,7 +232,14 @@ class RelaySubscriptionClient(
         val cached = settings.relayToken
         if (cached.isNotBlank() && settings.relayTokenUrl == relayUrl) return cached
 
-        val device = client.registerDevice(reg.inboxId, reg.publicKeyB64, reg.deviceName) ?: return null
+        // CopyPaste-kmcr: pass the PoP so the relay can verify the registrant holds
+        // the sync key corresponding to the derived inbox id.
+        val device = client.registerDevice(
+            deviceId = reg.inboxId,
+            publicKeyBase64 = reg.publicKeyB64,
+            deviceName = reg.deviceName,
+            popB64 = reg.popB64,
+        ) ?: return null
         settings.relayToken = device.token
         settings.relayTokenUrl = relayUrl
         Log.i(TAG, "relay SSE: registered shared inbox, token cached")

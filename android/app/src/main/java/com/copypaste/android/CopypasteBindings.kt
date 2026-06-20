@@ -704,6 +704,41 @@ fun relay_public_key_b64(syncKeyBytes: ByteArray): String {
     }
 }
 
+/**
+ * Compute the relay registration Proof-of-Possession (PoP) for [deviceId].
+ *
+ * Returns 32 raw bytes: HMAC-SHA256(syncKeyBytes, "relay-registration-pop-v1:" + deviceId).
+ * The caller MUST base64-encode the result for the wire (`pop_b64`) and MUST NOT log it.
+ *
+ * [deviceId] MUST be the shared-account inbox id returned by [relay_inbox_id], matching
+ * the daemon's convention so the relay can verify the HMAC against the derived inbox id.
+ *
+ * Byte-identical to the macOS daemon's `derive_relay_registration_pop` (relay.rs).
+ * Fixes CopyPaste-kmcr: Android was sending relay registration without PoP, enabling
+ * inbox theft. The relay now enforces a valid PoP on every register call.
+ *
+ * SECURITY: derived from secret key material; MUST NOT be logged.
+ *
+ * Throws [CopypasteException] if [syncKeyBytes] is not 32 bytes (InvalidKeyLength).
+ * Throws [IllegalStateException] if the native library is not loaded.
+ */
+@Throws(CopypasteException::class, IllegalStateException::class)
+fun relay_registration_pop(syncKeyBytes: ByteArray, deviceId: String): ByteArray {
+    if (!isNativeLibraryLoaded) {
+        throw IllegalStateException("copypaste_android native library not loaded; relay_registration_pop is unavailable")
+    }
+    return try {
+        uniffi.copypaste_android.relayRegistrationPop(
+            syncKey = syncKeyBytes.toUByteList(),
+            deviceId = deviceId,
+        ).toByteArray()
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw e.toAppException { CopypasteException.EncryptionFailed(it ?: "relay_registration_pop failed") }
+    } catch (e: Exception) {
+        throw CopypasteException.EncryptionFailed(e.message ?: "relay_registration_pop failed")
+    }
+}
+
 // ── AES-GCM fallback (rare path) ──────────────────────────────────────────────
 // The AES-256-GCM fallback implementation lives in ClipboardRepository
 // (ClipboardRepository.localAesEncrypt). It is invoked only when the native
