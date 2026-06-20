@@ -74,13 +74,16 @@ import kotlinx.coroutines.delay
  * ([SyncStatusChip.tsx]). Renders a small coloured dot plus a count of live
  * online peers.
  *
- * Dot colour (PARITY-SPEC §9 — 3 states):
- *   - DANGER ([IdeColors.danger]) when the device itself is offline (no network).
+ * Dot colour (PARITY-SPEC §9 — CopyPaste-5qbe 4-state display model → 3 colours):
  *   - SUCCESS ([IdeColors.success]) when at least one peer is live-online AND the
  *     most-recent sync is within [RECENT_SYNC_MS] (PG-11 recency gate — mirrors
  *     macOS SyncStatusChip).
  *   - FAINT ([IdeColors.faint]) when online but no peers connected, or when all
- *     peers are stale (last sync > 5 min ago).
+ *     peers are stale (last sync > 5 min ago) — maps to [SyncBadgeState.Idle].
+ *     Previously this incorrectly showed DANGER red; now grey to match macOS idle.
+ *   - DANGER ([IdeColors.danger]) when the device itself is offline (no OS network →
+ *     [SyncBadgeState.NetworkOffline]) OR when an authoritative IPC badge_state of
+ *     OFFLINE/ERROR indicates a hard sync failure ([SyncBadgeState.DaemonUnreachable]).
  *
  * The dot pulses with a 2 s infinite animation when connected (state = success),
  * mirroring the web's `animate-pulse` (PARITY-SPEC §9).
@@ -172,8 +175,10 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     )
 
     val connected = badgeState is SyncBadgeState.Connected
+    // CopyPaste-5qbe: Idle is grey (c.faint), matching macOS "idle" grey dot.
     val dotColor = when (badgeState) {
-        SyncBadgeState.Connected        -> c.success
+        SyncBadgeState.Connected         -> c.success
+        SyncBadgeState.Idle              -> c.faint
         SyncBadgeState.NetworkOffline,
         SyncBadgeState.DaemonUnreachable -> c.danger
     }
@@ -200,8 +205,10 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // at 10.5sp c.faint, gap 6px. Previously was right-aligned COPYPASTE + dot + count.
     // CopyPaste-3nyq: the dot conveys online/offline/idle by COLOUR only — add a
     // text equivalent so screen-reader users get the state (WCAG 1.4.1).
+    // CopyPaste-5qbe: Idle gets cd_status_idle (grey, not offline).
     val statusCd = when (badgeState) {
         SyncBadgeState.Connected         -> stringResource(R.string.cd_status_connected)
+        SyncBadgeState.Idle              -> stringResource(R.string.cd_status_idle)
         SyncBadgeState.NetworkOffline    -> stringResource(R.string.cd_status_offline)
         SyncBadgeState.DaemonUnreachable -> stringResource(R.string.cd_status_offline)
     }
@@ -422,33 +429,46 @@ private fun SheetRow(label: String, value: String) {
 }
 
 /**
- * Three-state sync-badge offline model — parity with macOS SyncStatusChip (PG-10 / 5qbe).
+ * Four-state sync-badge display model — parity with macOS SyncStatusChip (PG-10 / 5qbe).
  *
- * On macOS the badge derives its "offline" condition from the IPC/daemon connection —
- * if the daemon is unreachable the badge shows DANGER even when Wi-Fi is present.
- * Android has no Unix-socket IPC to the daemon; the equivalent signal is whether
- * actual sync connectivity has succeeded recently ([DevicesOnlineState.onlineCount]/
- * [DevicesOnlineState.lastActivityMs]).
+ * CANONICAL RULE (CopyPaste-5qbe): "Offline" (red dot) is determined by daemon/IPC-reported
+ * connectivity. OS-level network (ConnectivityManager) is a SECONDARY signal used ONLY to
+ * distinguish [NetworkOffline] (clear root cause) from [DaemonUnreachable] (sync infra
+ * broken despite OS being online). Both show red. This mirrors the macOS SyncStatusChip which
+ * shows DANGER when the daemon IPC socket call fails even if Wi-Fi is up.
  *
- * - [Connected]        : at least one peer synced recently (same as macOS "daemon live").
- * - [DaemonUnreachable]: OS network is available but no recent sync activity — mirrors
- *                        macOS "daemon not responding" (sync infra unreachable, wrong
- *                        credentials, RLS error, relay misconfigured, etc.).
- * - [NetworkOffline]   : no validated OS internet — the root cause is clear.
+ * [Idle] (grey) is new in CopyPaste-5qbe: it mirrors the macOS "idle" grey dot — the daemon/
+ * sync layer is reachable but no recent activity has occurred (configured but quiescent). Before
+ * this fix Android incorrectly showed red ([DaemonUnreachable]) for this case.
  *
- * The badge uses this ordering: Connected > NetworkOffline > DaemonUnreachable.
- * [DaemonUnreachable] shows the same DANGER red as [NetworkOffline] so the user
- * knows something is wrong even when Wi-Fi is on, matching the macOS behaviour.
+ * Display model (four states → three dot colours):
+ * - [Connected]        : green — sync working; at least one peer exchanged data recently.
+ * - [Idle]             : grey  — sync configured but no recent activity (parity: macOS "idle").
+ * - [DaemonUnreachable]: red   — OS online but sync infra unreachable (bad creds, relay down…).
+ * - [NetworkOffline]   : red   — no validated OS internet; root cause is clear.
+ *
+ * Priority ordering in [resolveSyncBadgeState]: Connected > NetworkOffline > Idle >
+ * DaemonUnreachable (never returned from resolveSyncBadgeState in the fallback path;
+ * only reached via [IpcSyncBadgeState.OFFLINE] / [IpcSyncBadgeState.ERROR]).
  */
 sealed interface SyncBadgeState {
-    /** Sync is working: at least one peer/backend has exchanged data recently. */
+    /** Sync is working: at least one peer/backend has exchanged data recently. Green dot. */
     data object Connected : SyncBadgeState
     /**
-     * OS has internet but no recent sync activity — daemon-equivalent signal says
-     * the sync backend is unreachable (bad credentials, relay down, RLS error, etc.).
+     * Sync is configured but no recent activity — the equivalent of macOS "idle" grey dot
+     * (CopyPaste-5qbe). Not a hard failure: peers may simply be offline or quiescent.
+     * Grey dot — same as [IdeColors.faint].
+     */
+    data object Idle : SyncBadgeState
+    /**
+     * OS has internet but no recent sync activity AND the IPC/daemon signal indicates
+     * a hard failure (bad credentials, relay down, RLS error, etc.). Red dot.
+     * Only reachable via [IpcSyncBadgeState.OFFLINE] / [IpcSyncBadgeState.ERROR].
+     * The [resolveSyncBadgeState] fallback no longer returns this state — it returns
+     * [Idle] for the "OS online, sync stale" case to match macOS behaviour.
      */
     data object DaemonUnreachable : SyncBadgeState
-    /** No validated OS internet connection — root cause is clear. */
+    /** No validated OS internet connection — root cause is clear. Red dot. */
     data object NetworkOffline : SyncBadgeState
 }
 
@@ -470,14 +490,19 @@ private fun hasInternetConnectivity(context: Context): Boolean {
  * Compute the [SyncBadgeState] from the daemon-derived sync signal (primary) and
  * OS network availability (secondary).
  *
- * Priority (PG-10 / 5qbe):
- * 1. If [liveOnlineCount] >= 0 (DevicesScreen has published real P2P state) AND
- *    [lastActivityMs] is within [recentSyncMs] → [SyncBadgeState.Connected].
- * 2. If OS has no internet → [SyncBadgeState.NetworkOffline].
- * 3. Otherwise (OS online but sync not working) → [SyncBadgeState.DaemonUnreachable].
+ * Priority (CopyPaste-5qbe canonical rule):
+ * 1. If [liveOnlineCount] > 0 AND [lastActivityMs] is within [recentSyncMs]
+ *    → [SyncBadgeState.Connected] (green).
+ * 2. If OS has no internet → [SyncBadgeState.NetworkOffline] (red — clear root cause).
+ * 3. Otherwise (OS online, sync stale or count == 0) → [SyncBadgeState.Idle] (grey).
+ *    This matches the macOS SyncStatusChip "idle" state: the daemon is reachable
+ *    but no recent sync round-trip has succeeded — peers may simply be offline.
+ *    Showing grey (not red) avoids false-alarm on a fresh install or while all
+ *    peers are simply powered off.
  *
- * This mirrors the macOS SyncStatusChip which shows DANGER when the daemon IPC
- * is unreachable even if the physical network is up.
+ * Note: [SyncBadgeState.DaemonUnreachable] is NOT returned from this function —
+ * it is only reachable via [IpcSyncBadgeState.OFFLINE] / [IpcSyncBadgeState.ERROR]
+ * when an authoritative IPC badge_state is available.
  */
 internal fun resolveSyncBadgeState(
     liveOnlineCount: Int,
@@ -491,8 +516,11 @@ internal fun resolveSyncBadgeState(
     if (liveOnlineCount > 0 && recentEnough) return SyncBadgeState.Connected
     // Secondary: OS offline is a clear root cause.
     if (!hasInternet) return SyncBadgeState.NetworkOffline
-    // OS is online but sync hasn't worked — treat as daemon-unreachable.
-    return SyncBadgeState.DaemonUnreachable
+    // OS online but sync hasn't worked recently → idle (grey), not red.
+    // Mirrors macOS: IPC reachable but badge_state "idle" → grey dot (not DANGER).
+    // A hard-failure (auth error, relay down) requires an authoritative IPC
+    // badge_state of OFFLINE/ERROR to show red; absence of recent sync alone is not.
+    return SyncBadgeState.Idle
 }
 
 /**
@@ -577,20 +605,19 @@ internal enum class IpcSyncBadgeState(val wireValue: String) {
      * Consumers MUST call this instead of [resolveSyncBadgeState] when the
      * daemon has provided an authoritative [IpcSyncBadgeState].
      *
-     * Mapping rationale:
-     *  - SYNCED / SYNCING → Connected (green): sync is working.
-     *  - OFFLINE / ERROR  → DaemonUnreachable (red): sync is broken; user action needed.
-     *  - IDLE             → DaemonUnreachable (red, secondary): no recent activity even
-     *    though configured — treat as "something may be wrong" to match the existing
-     *    Android model where the non-Connected path shows red. A future iteration can
-     *    add a grey IDLE state to the Android display model for parity with macOS.
-     *  - MISCONFIGURED    → DaemonUnreachable (red): cloud URL set but credentials
-     *    missing; the user must open Settings to fix it.
+     * Mapping rationale (CopyPaste-5qbe canonical rule):
+     *  - SYNCED / SYNCING    → Connected (green): sync is working.
+     *  - IDLE / MISCONFIGURED → Idle (grey): daemon reachable, configured, but no recent
+     *    activity or credentials incomplete. Matches macOS: badge_state "idle"/"misconfigured"
+     *    → grey dot (not red). The cloudMisconfig chip (amber pill) surfaces the misconfig
+     *    separately; the dot itself stays grey to avoid a false-alarm red state.
+     *  - OFFLINE / ERROR     → DaemonUnreachable (red): sync infra unreachable or backend
+     *    returned an explicit error (auth failure, RLS, relay down). User action required.
      */
     fun toSyncBadgeState(): SyncBadgeState = when (this) {
         SYNCED, SYNCING            -> SyncBadgeState.Connected
-        OFFLINE, ERROR, IDLE,
-        MISCONFIGURED              -> SyncBadgeState.DaemonUnreachable
+        IDLE, MISCONFIGURED        -> SyncBadgeState.Idle
+        OFFLINE, ERROR             -> SyncBadgeState.DaemonUnreachable
     }
 }
 
@@ -621,6 +648,10 @@ internal fun buildSyncTooltip(
     when (badgeState) {
         SyncBadgeState.NetworkOffline,
         SyncBadgeState.DaemonUnreachable -> parts += "Daemon unreachable"
+        // CopyPaste-5qbe: Idle shows last-sync time (or "No sync yet"), not "Daemon unreachable".
+        // Mirrors macOS SyncStatusChip buildTooltip: idle/offline-state check is only
+        // for state === "offline"; idle falls through to the lastSyncMs branch.
+        SyncBadgeState.Idle,
         SyncBadgeState.Connected -> {
             if (lastActivityMs > 0L) {
                 val elapsed = (nowMs - lastActivityMs) / 1_000L

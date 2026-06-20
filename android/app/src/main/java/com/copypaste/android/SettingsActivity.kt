@@ -1321,8 +1321,10 @@ private fun SyncDiagnosticsCard(
     }
 
     // Connection-state label + colour — mirrors macOS Settings diagnostics row.
+    // CopyPaste-5qbe: Idle (grey) = configured but no recent sync — not an error.
     val (stateLabel, stateColor) = when (badgeState) {
         SyncBadgeState.Connected         -> "Connected" to c.success
+        SyncBadgeState.Idle              -> "Idle (no recent sync)" to c.faint
         SyncBadgeState.NetworkOffline    -> "Offline (no internet)" to c.danger
         SyncBadgeState.DaemonUnreachable -> "Unreachable (sync not working)" to c.danger
     }
