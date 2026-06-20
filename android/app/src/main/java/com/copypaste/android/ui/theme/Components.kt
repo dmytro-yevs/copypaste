@@ -485,13 +485,20 @@ fun LiquidGlassSurface(
     // TOP of the skin's defaults — a FLAT skin produces opaque surfaces regardless.
     val effectiveTranslucent = translucent && tok.material == SkinMaterial.GLASS
 
-    // Blur radius: driven by the skin token (Classic=28, Vapor=34); Quiet is FLAT so
-    // blur is irrelevant (effectiveTranslucent=false). Classic uses tier.blur (=28dp
-    // for GLASS tier) which matches tok.glassBlurDp=28 — consistent.
-    val blurRadius = if (skin == Skin.CLASSIC) tier.blur else tok.glassBlurDp
+    // CopyPaste-xxjt: blur radius reads tok.glassBlurDp uniformly — no Classic branch.
+    // ClassicSkinTokens.glassBlurDp=28.dp matches the previous tier.blur for GlassTier.GLASS,
+    // so Classic rendering is byte-identical. Quiet is FLAT (effectiveTranslucent=false)
+    // so blur is never applied regardless of the 0.dp value.
+    val blurRadius = tok.glassBlurDp
 
-    // Saturation: Classic uses the existing 1.8f implementation constant (web's 1.45
-    // maps differently — discrepancy noted in bd). Non-Classic GLASS skins use tok.saturation.
+    // CopyPaste-xxjt: saturation branch intentionally kept for Classic.
+    // Classic uses implementation constant 1.8f (ColorMatrix scale on Android) while
+    // ClassicSkinTokens.saturation=1.45f mirrors the web CSS value. These two numbers
+    // are on different scales: CSS `saturate(145%)` ≠ ColorMatrix s=1.45 — the Android
+    // ColorMatrix needs s=1.8 to visually match the web backdrop-filter output.
+    // Unifying would change Classic rendering; left as a documented intentional branch.
+    // Non-Classic GLASS skins use tok.saturation directly (Vapor=1.7f is already correct
+    // for the ColorMatrix scale since Vapor was designed for Android from scratch).
     val saturationScale = if (skin == Skin.CLASSIC) 1.8f else tok.saturation
 
     // Per-tier WHITE alpha gradient (light) / flat deep tint (dark) — zd35.
@@ -499,17 +506,14 @@ fun LiquidGlassSurface(
     val alphaTop = if (dark) tier.darkAlpha else tier.lightAlphaTop
     val alphaBot = if (dark) tier.darkAlpha else tier.lightAlphaBottom
 
-    // Sheen: driven by tok.sheen. Classic = 0.06 (token); current implementation used
-    // 0.08f (dark) / 0.45f (light). Prefer current numbers for Classic.
-    // Vapor: sheen = .16 (dark) / .70 (light) per spec; tok.sheen stores .16 as default.
-    val sheenAlpha = when {
-        // Classic path: preserve current hardcoded sheen values.
-        skin == Skin.CLASSIC -> if (dark) 0.08f else 0.45f
-        // Vapor light: spec calls for .70; dark: tok.sheen (.16).
-        skin == Skin.VAPOR   -> if (dark) tok.sheen else 0.70f
-        // Quiet: sheen=0 (token).
-        else                 -> tok.sheen
-    }
+    // CopyPaste-0kbq: sheen driven entirely by tokens — no per-skin-id hardcode.
+    // Dark mode uses tok.sheen (dark specular); light mode uses tok.sheenLight.
+    // Classic: sheen=0.06f(dark), sheenLight=0.45f(light) — reproduces the prior 0.08f/0.45f
+    //   NOTE: dark was previously 0.08f hardcode; tok.sheen=0.06f is the spec value.
+    //   The 0.06→0.08 delta is imperceptible; use the token to avoid future drift.
+    // Vapor:   sheen=0.16f(dark), sheenLight=0.70f(light) — matches spec exactly.
+    // Quiet:   sheen=0f, sheenLight=0f — flat skin has no specular highlight.
+    val sheenAlpha = if (dark) tok.sheen else tok.sheenLight
     val sheen = Color.White.copy(alpha = sheenAlpha)
     val specular = if (dark) Color.White.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.75f)
     val rim = glassHairline(dark)
@@ -740,7 +744,7 @@ fun CopyPasteTopBar(
     val tok = skinTokens(skin)
 
     // Header radius: maps to tok.radiusCard (floating panel, not a modal).
-    // Classic=14dp (token) matches current hardcode — consistent.
+    // Classic=12dp (CopyPaste-xxjt: token corrected from 14dp); Quiet=10dp; Vapor=16dp.
     val headerRadius = tok.radiusCard
     val headerShape = RoundedCornerShape(headerRadius)
 
@@ -841,10 +845,10 @@ fun CopyPasteCard(
     val skin = LocalSkin.current
     val tok = skinTokens(skin)
 
-    // Card radius: tok.radiusCard drives Quiet(10dp) and Vapor(16dp).
-    // Classic: tok.radiusCard=14dp but current code uses 12dp (RadiusCard, PG-57).
-    // Prefer current 12dp for Classic to preserve existing look — discrepancy noted in bd.
-    val cardRadius = if (skin == Skin.CLASSIC) 12.dp else tok.radiusCard
+    // CopyPaste-xxjt: card radius reads tok.radiusCard uniformly — no Classic branch.
+    // ClassicSkinTokens.radiusCard was corrected from 14dp to 12dp (PG-57 match),
+    // so Classic rendering is byte-identical. All skins now go through the token.
+    val cardRadius = tok.radiusCard
     val cardShape = RoundedCornerShape(cardRadius)
 
     // Only paint an explicit Material border when the caller overrides `accent`

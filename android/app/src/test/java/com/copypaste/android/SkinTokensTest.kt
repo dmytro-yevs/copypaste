@@ -103,13 +103,13 @@ class SkinTokensTest {
     }
 
     @Test
-    fun `Classic radiusCard token is 14dp (Components_kt Classic path uses 12dp for card)`() {
-        // The Classic token says 14dp but Components_kt CopyPasteCard uses 12dp (PG-57,
-        // RadiusCard). The discrepancy is intentional: Components_kt prefers the current
-        // 12dp for Classic to keep byte-identical rendering. This test documents the gap.
+    fun `Classic radiusCard token is 12dp matching current card rendering (CopyPaste-xxjt)`() {
+        // CopyPaste-xxjt: Classic token corrected from 14dp to 12dp to match the
+        // frozen Classic rendering (PG-57, RadiusCard). Components.kt now reads
+        // tok.radiusCard uniformly — no per-skin-id branch needed.
         assertEquals(
-            "Classic radiusCard token is 14dp (Components.kt uses 12dp — discrepancy noted in bd)",
-            14f, skinTokens(Skin.CLASSIC).radiusCard.value, 0.01f,
+            "Classic radiusCard token must be 12dp (byte-identical to pre-skin rendering)",
+            12f, skinTokens(Skin.CLASSIC).radiusCard.value, 0.01f,
         )
     }
 
@@ -431,6 +431,75 @@ class SkinTokensTest {
         Skin.entries.forEach { skin ->
             val tint = skinTokens(skin).tintAlpha
             assertTrue("$skin tintAlpha must be in [0, 1]", tint in 0f..1f)
+        }
+    }
+
+    // ── 7. CopyPaste-0kbq: sheenLight token ───────────────────────────────────
+
+    @Test
+    fun `Classic sheenLight is 0_45 (light specular for Classic surface)`() {
+        // Classic light sheen was hardcoded 0.45f in Components.kt; now a token.
+        assertEquals(0.45f, skinTokens(Skin.CLASSIC).sheenLight, 0.001f)
+    }
+
+    @Test
+    fun `Quiet sheenLight is 0 (flat skin has no sheen)`() {
+        assertEquals(0f, skinTokens(Skin.QUIET).sheenLight, 0.001f)
+    }
+
+    @Test
+    fun `Vapor sheenLight is 0_70 (bright light specular for Vapor surface)`() {
+        // Vapor light sheen was hardcoded 0.70f in Components.kt; now a token.
+        assertEquals(0.70f, skinTokens(Skin.VAPOR).sheenLight, 0.001f)
+    }
+
+    @Test
+    fun `sheenLight is in 0_to_1 range for all skins`() {
+        Skin.entries.forEach { skin ->
+            val sl = skinTokens(skin).sheenLight
+            assertTrue("$skin sheenLight must be in [0, 1]", sl in 0f..1f)
+        }
+    }
+
+    @Test
+    fun `sheenLight is_gte sheen for all skins (light sheen never less than dark sheen)`() {
+        // Design invariant: light sheen is always at least as bright as dark sheen.
+        Skin.entries.forEach { skin ->
+            val tok = skinTokens(skin)
+            assertTrue(
+                "$skin sheenLight (${tok.sheenLight}) must be >= sheen (${tok.sheen})",
+                tok.sheenLight >= tok.sheen,
+            )
+        }
+    }
+
+    // ── 8. CopyPaste-fuxf: glassBlurStrongDp token ────────────────────────────
+
+    @Test
+    fun `Classic glassBlurStrongDp is 40dp (mirrors web glassBlurStrong)`() {
+        // Mirrors GlassTier.STRONG.blur = 40.dp and web glassBlurStrong.
+        assertEquals(40f, skinTokens(Skin.CLASSIC).glassBlurStrongDp.value, 0.01f)
+    }
+
+    @Test
+    fun `Quiet glassBlurStrongDp is 0dp (flat skin has no blur)`() {
+        assertEquals(0f, skinTokens(Skin.QUIET).glassBlurStrongDp.value, 0.01f)
+    }
+
+    @Test
+    fun `Vapor glassBlurStrongDp is 44dp (boosted strong blur for Vapor)`() {
+        assertEquals(44f, skinTokens(Skin.VAPOR).glassBlurStrongDp.value, 0.01f)
+    }
+
+    @Test
+    fun `glassBlurStrongDp is_gte glassBlurDp for all skins (strong blur at least as large as base blur)`() {
+        // Design invariant: strong/floating blur should be at least as large as base blur.
+        Skin.entries.forEach { skin ->
+            val tok = skinTokens(skin)
+            assertTrue(
+                "$skin glassBlurStrongDp (${tok.glassBlurStrongDp}) must be >= glassBlurDp (${tok.glassBlurDp})",
+                tok.glassBlurStrongDp.value >= tok.glassBlurDp.value,
+            )
         }
     }
 }
