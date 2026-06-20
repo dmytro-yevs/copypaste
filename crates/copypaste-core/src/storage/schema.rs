@@ -54,7 +54,15 @@ pub enum SchemaError {
 ///     enumeration (sync catchup). The UI list queries filter `deleted = 0`;
 ///     `get_item_by_item_id` intentionally does NOT filter so the merge layer
 ///     can see tombstones and apply LWW correctly.
-pub const SCHEMA_VERSION: i64 = 11;
+///   * 11 → 12 (CopyPaste-61fu): moved `revoked_devices` audit table creation
+///     from an ad-hoc `CREATE TABLE IF NOT EXISTS` call in `devices::ensure_revoked_devices_table`
+///     into the versioned migration chain. Previously the table was created lazily
+///     at daemon startup via an explicit `ensure_revoked_devices_table` call, which
+///     caused "no such table" panics on any DB that opened without that call first.
+///     Migration v12 creates the table (and its index) unconditionally during
+///     `apply_migrations`, so every properly-initialised DB has the table regardless
+///     of call order.
+pub const SCHEMA_VERSION: i64 = 12;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -162,6 +170,28 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_deleted \
 pub(crate) const V11_INDEX: &str = "\
 CREATE INDEX IF NOT EXISTS idx_clipboard_unpinned_len \
     ON clipboard_items(LENGTH(COALESCE(content, ''))) WHERE pinned = 0;\n";
+
+/// v12 step — create the `revoked_devices` audit table and its timestamp index
+/// (CopyPaste-61fu).
+///
+/// Previously this table was created ad-hoc by `devices::ensure_revoked_devices_table`
+/// outside the migration sequence, which caused "no such table" panics on any DB
+/// that was opened without an explicit call to that helper (e.g. daemons that were
+/// newly upgraded and hadn't reached the post-open `ensure_revoked_devices_table`
+/// call before a `revoke_device` was attempted).
+///
+/// Moving the DDL here guarantees the table exists in every DB that passes through
+/// `apply_migrations`, regardless of which caller path opens it.  `CREATE TABLE IF
+/// NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` keep the step idempotent so DBs that
+/// already have the table (created by the old ad-hoc path) are not affected.
+pub(crate) const V12_REVOKED_DEVICES_SQL: &str = "\
+CREATE TABLE IF NOT EXISTS revoked_devices (\n\
+    fingerprint TEXT PRIMARY KEY NOT NULL,\n\
+    name        TEXT NOT NULL DEFAULT '',\n\
+    revoked_at  INTEGER NOT NULL\n\
+);\n\
+CREATE INDEX IF NOT EXISTS idx_revoked_devices_revoked_at\n\
+    ON revoked_devices(revoked_at DESC);\n";
 
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
@@ -317,6 +347,20 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // size gate computes its SUM index-only instead of full-scanning the
         // table and reading every encrypted BLOB. Index-only, no data change.
         script.push_str(V11_INDEX);
+    }
+
+    if current_version < 12 {
+        // Migration v12 (CopyPaste-61fu): create the `revoked_devices` audit
+        // table inside the versioned migration chain. Previously it was created
+        // ad-hoc by `devices::ensure_revoked_devices_table`, which was called
+        // explicitly at daemon startup — but any code path that invoked
+        // `revoke_device` before that call (or on a DB opened without it) would
+        // panic with "no such table: revoked_devices".
+        //
+        // `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` make this
+        // step idempotent: DBs that already have the table from the old ad-hoc
+        // path are unaffected.
+        script.push_str(V12_REVOKED_DEVICES_SQL);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
@@ -733,6 +777,142 @@ mod tests {
             )
             .unwrap();
         assert_eq!(deleted, 0, "pre-v10 rows must land on deleted=0");
+
+        let uv: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uv, SCHEMA_VERSION);
+    }
+
+    /// CopyPaste-61fu: migration v12 must create the `revoked_devices` table and
+    /// its index as part of the standard migration chain so that the table exists
+    /// on every properly-initialised DB without requiring an explicit
+    /// `ensure_revoked_devices_table` call.
+    #[test]
+    fn fresh_db_has_revoked_devices_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        apply_migrations(&conn).unwrap();
+
+        // Table must exist.
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='table' AND name='revoked_devices'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "revoked_devices table must be created by v12 migration");
+
+        // Index must exist.
+        let idx_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='index' AND name='idx_revoked_devices_revoked_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            idx_count, 1,
+            "idx_revoked_devices_revoked_at must be created by v12 migration"
+        );
+    }
+
+    /// CopyPaste-61fu: a v11 database (no revoked_devices table) upgraded via
+    /// apply_migrations must end up with the table and user_version == SCHEMA_VERSION.
+    #[test]
+    fn v11_to_v12_migration_creates_revoked_devices_table() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Hand-build a v11 state: all v1–v11 changes, no revoked_devices table.
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE clipboard_items ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pin_order REAL DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;\n\
+             CREATE TABLE IF NOT EXISTS migration_state (\
+               key TEXT PRIMARY KEY, key_version_in_progress INTEGER,\
+               last_processed_id INTEGER NOT NULL DEFAULT 0,\
+               started_at INTEGER, completed_at INTEGER);\n\
+             INSERT OR IGNORE INTO migration_state VALUES ('v4-key-version-sweep', 2, 0, 0, 0);\n\
+             CREATE INDEX IF NOT EXISTS idx_clipboard_unpinned_len \
+               ON clipboard_items(LENGTH(COALESCE(content, ''))) WHERE pinned = 0;",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 11;").unwrap();
+
+        // Sanity: table must not exist before migration.
+        let before: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='table' AND name='revoked_devices'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(before, 0, "revoked_devices must not exist before v12 migration");
+
+        // Run the migration.
+        apply_migrations(&conn).unwrap();
+
+        // Table must now exist.
+        let after: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='table' AND name='revoked_devices'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(after, 1, "revoked_devices must be created by v12 migration");
+
+        let uv: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(uv, SCHEMA_VERSION);
+    }
+
+    /// CopyPaste-61fu: a DB that already has the revoked_devices table (created
+    /// by the old ad-hoc path) must survive the v12 migration without error
+    /// (CREATE TABLE IF NOT EXISTS is idempotent).
+    #[test]
+    fn v12_migration_is_idempotent_when_table_already_exists() {
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Build a v11 state that already has revoked_devices (the old ad-hoc path).
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE clipboard_items ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pin_order REAL DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;\n\
+             CREATE TABLE IF NOT EXISTS migration_state (\
+               key TEXT PRIMARY KEY, key_version_in_progress INTEGER,\
+               last_processed_id INTEGER NOT NULL DEFAULT 0,\
+               started_at INTEGER, completed_at INTEGER);\n\
+             INSERT OR IGNORE INTO migration_state VALUES ('v4-key-version-sweep', 2, 0, 0, 0);\n\
+             CREATE INDEX IF NOT EXISTS idx_clipboard_unpinned_len \
+               ON clipboard_items(LENGTH(COALESCE(content, ''))) WHERE pinned = 0;\n\
+             CREATE TABLE IF NOT EXISTS revoked_devices (\
+               fingerprint TEXT PRIMARY KEY NOT NULL,\
+               name TEXT NOT NULL DEFAULT '',\
+               revoked_at INTEGER NOT NULL);\n\
+             CREATE INDEX IF NOT EXISTS idx_revoked_devices_revoked_at \
+               ON revoked_devices(revoked_at DESC);",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 11;").unwrap();
+
+        // Migration must succeed without error even though the table already exists.
+        apply_migrations(&conn).unwrap();
 
         let uv: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))

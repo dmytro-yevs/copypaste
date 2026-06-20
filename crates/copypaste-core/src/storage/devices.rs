@@ -5,15 +5,15 @@
 // operation: the daemon removes the peer from its peers list and records the
 // event in an additive `revoked_devices` audit table.
 //
-// IMPORTANT — schema versioning:
-// The `revoked_devices` table is created via `CREATE TABLE IF NOT EXISTS`
-// rather than a versioned migration so this change does NOT bump
-// `SCHEMA_VERSION`. A parallel worker owns schema.rs (HKDF v2 → v4); to avoid
-// merge conflicts we keep this purely additive. Callers must invoke
-// `ensure_revoked_devices_table` once after opening the database (typically
-// at daemon startup) before calling `revoke_device`. `revoke_device` itself
-// also calls `ensure_revoked_devices_table` defensively so unit tests can
-// skip the explicit init.
+// SCHEMA VERSIONING (CopyPaste-61fu):
+// The `revoked_devices` table is now created by migration v12 in `schema.rs`,
+// inside the numbered migration chain, so it exists on every properly-initialised
+// DB after `apply_migrations` runs (which `Database::open*` always calls).
+//
+// The old ad-hoc `ensure_revoked_devices_table` call at daemon startup is no
+// longer necessary for correctness. The function is retained as a defence-in-depth
+// safety net (it is idempotent: `CREATE TABLE IF NOT EXISTS`) but callers should
+// NOT depend on it — the migration guarantees the table's existence.
 
 use rusqlite::{params, Connection};
 use thiserror::Error;
@@ -24,26 +24,32 @@ pub enum DevicesError {
     Sqlite(#[from] rusqlite::Error),
 }
 
-/// Additive DDL — safe to call repeatedly. Does NOT bump `user_version`.
+/// Defence-in-depth safety net — idempotent DDL for the `revoked_devices` table.
+///
+/// As of schema v12 (CopyPaste-61fu) the `revoked_devices` table is created by
+/// `schema::apply_migrations`, which runs on every `Database::open*` call.
+/// This function is **no longer the primary creation path** and does not need to
+/// be called explicitly.  It is retained only as a safety net so that any code
+/// path that calls it on a pre-v12 database (e.g. tests that bypass `Database`
+/// and use a raw `Connection`) still succeeds rather than panicking.
+///
+/// `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` make this idempotent:
+/// calling it on a v12+ database that already has the table is a no-op.
 ///
 /// Columns:
-///   * `fingerprint` — primary key; the colon-separated hex fingerprint of
-///     the revoked device (matches `peers.json` and the `devices` table).
-///   * `name`        — best-effort human-readable name captured at revoke
-///     time (may be empty if the peer record was already gone).
+///   * `fingerprint` — primary key; colon-separated hex fingerprint of the
+///     revoked device (matches `peers.json` and the `devices` table).
+///   * `name`        — best-effort human-readable name captured at revoke time
+///     (may be empty if the peer record was already gone).
 ///   * `revoked_at`  — unix seconds when the user clicked Revoke.
-///
-/// The v1.0 cryptographic revocation worker will later consume rows from
-/// this table to publish revocation markers to the sync log; until then the
-/// table is consumed only by the local audit/test path.
 pub fn ensure_revoked_devices_table(conn: &Connection) -> Result<(), DevicesError> {
     conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS revoked_devices (
-             fingerprint TEXT PRIMARY KEY NOT NULL,
-             name        TEXT NOT NULL DEFAULT '',
-             revoked_at  INTEGER NOT NULL
-         );
-         CREATE INDEX IF NOT EXISTS idx_revoked_devices_revoked_at
+        "CREATE TABLE IF NOT EXISTS revoked_devices (\
+             fingerprint TEXT PRIMARY KEY NOT NULL,\
+             name        TEXT NOT NULL DEFAULT '',\
+             revoked_at  INTEGER NOT NULL\
+         );\n\
+         CREATE INDEX IF NOT EXISTS idx_revoked_devices_revoked_at \
              ON revoked_devices(revoked_at DESC);",
     )?;
     Ok(())
@@ -51,13 +57,12 @@ pub fn ensure_revoked_devices_table(conn: &Connection) -> Result<(), DevicesErro
 
 /// Record a manual peer revocation event.
 ///
-/// Behavior:
-///   1. Ensures the audit table exists.
-///   2. Deletes the matching row from the `devices` table (if any). The
-///      table is created by the baseline v1 schema; absence is treated as a
-///      no-op so callers that haven't paired the device yet still record
-///      the revocation marker (matches the JSON-backed peer store path).
-///   3. Inserts (or replaces) the `revoked_devices` audit row.
+/// Ensures the audit table exists, then wraps the DELETE (from `devices`)
+/// and INSERT (into `revoked_devices`) in a single SQLite transaction so a
+/// crash between them cannot leave the paired-device row gone without the
+/// matching audit entry — either both writes commit or neither does
+/// (CopyPaste-d7um). Absence of the peer row in `devices` is treated as a
+/// no-op so callers that haven't paired the device yet still record the marker.
 ///
 /// Returns the unix-seconds timestamp written to `revoked_at` so the caller
 /// can echo it back to the UI without a follow-up query.
@@ -68,20 +73,26 @@ pub fn revoke_device(
 ) -> Result<u64, DevicesError> {
     ensure_revoked_devices_table(conn)?;
 
-    // Best-effort delete from the canonical paired-devices table. The table
-    // is part of v1 schema so it always exists; `execute` returns 0 rows
-    // affected when the fingerprint isn't there, which is fine.
-    conn.execute(
-        "DELETE FROM devices WHERE fingerprint = ?1",
-        params![fingerprint],
-    )?;
-
     let revoked_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    conn.execute(
+    // `unchecked_transaction` matches the storage-layer convention: the daemon
+    // holds a `Database` behind a `Mutex` and hands out `&Connection` only, so
+    // there is never a concurrent borrow to guard against (same pattern used by
+    // `revoke_devices` and `insert_item_with_fts`).
+    let tx = conn.unchecked_transaction()?;
+
+    // Best-effort delete from the canonical paired-devices table. The table
+    // is part of v1 schema so it always exists; `execute` returns 0 rows
+    // affected when the fingerprint isn't there, which is fine.
+    tx.execute(
+        "DELETE FROM devices WHERE fingerprint = ?1",
+        params![fingerprint],
+    )?;
+
+    tx.execute(
         "INSERT INTO revoked_devices (fingerprint, name, revoked_at) \
          VALUES (?1, ?2, ?3) \
          ON CONFLICT(fingerprint) DO UPDATE SET \
@@ -90,6 +101,7 @@ pub fn revoke_device(
         params![fingerprint, name, revoked_at as i64],
     )?;
 
+    tx.commit()?;
     Ok(revoked_at)
 }
 
@@ -326,5 +338,49 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].fingerprint, fp);
         assert_eq!(rows[0].name, "");
+    }
+
+    /// CopyPaste-d7um: `revoke_device` must remove the paired-device row AND
+    /// write the audit row atomically.  We can't easily simulate a mid-crash
+    /// state in-process, but we verify the observable all-or-nothing guarantee:
+    /// after a successful call exactly one audit row exists AND the paired row
+    /// is gone, so neither side of the pair can be in limbo.
+    #[test]
+    fn revoke_device_atomic_delete_and_audit() {
+        let db = fresh_db();
+        let fp = "ca:fe:ba:be:00:11:22:33";
+
+        // Seed a paired device row so we exercise both the DELETE and INSERT
+        // arms of the transaction.
+        db.conn()
+            .execute(
+                "INSERT INTO devices (id, name, platform, public_key, fingerprint) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params!["dev-atomic", "Desktop", "macos", "PUBKEY", fp],
+            )
+            .unwrap();
+
+        let ts = revoke_device(db.conn(), fp, "Desktop").unwrap();
+
+        // After commit: paired row must be gone.
+        let device_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM devices WHERE fingerprint = ?1",
+                params![fp],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            device_count, 0,
+            "devices row must be removed as part of the atomic revocation"
+        );
+
+        // After commit: audit row must exist with correct data.
+        let audit = list_revoked_devices(db.conn()).unwrap();
+        assert_eq!(audit.len(), 1, "audit row must be written atomically");
+        assert_eq!(audit[0].fingerprint, fp);
+        assert_eq!(audit[0].name, "Desktop");
+        assert_eq!(audit[0].revoked_at as u64, ts);
     }
 }

@@ -949,6 +949,15 @@ pub fn delete_expired(db: &Database, now_ms: i64) -> Result<usize, ItemsError> {
 /// is skipped entirely.  The query touches only the `is_sensitive` + `pinned`
 /// columns which are covered by the primary-key/clustered index and completes
 /// in O(1) on an empty result.
+///
+/// # Fail-closed security guarantee (CopyPaste-ny0g)
+///
+/// On query error this function returns `true` (not `false`). Returning `false`
+/// on error would silently suppress the TTL sweep, allowing sensitive items to
+/// outlive their configured TTL indefinitely — a silent data-retention violation.
+/// Returning `true` causes an unnecessary `delete_sensitive_expired` call (a
+/// cheap no-op when nothing is actually expired), which is always safe. Prefer
+/// false-positive over false-negative on the security gate.
 pub fn has_sensitive_items(db: &Database) -> bool {
     db.conn()
         .query_row(
@@ -956,7 +965,9 @@ pub fn has_sensitive_items(db: &Database) -> bool {
             [],
             |row| row.get::<_, bool>(0),
         )
-        .unwrap_or(false)
+        // SECURITY: fail-closed — treat a query error as "sensitive items present"
+        // so the caller always runs the TTL sweep. See doc comment above.
+        .unwrap_or(true)
 }
 
 /// Delete sensitive items whose `wall_time` is older than `sensitive_ttl_ms` milliseconds ago.
@@ -1484,14 +1495,25 @@ fn clamp_preview(text: String, max_bytes: usize) -> String {
 /// Insert or replace a plaintext snippet into the FTS5 index.
 /// `plaintext` must already be decrypted by the caller.
 /// Call this once per item after `insert_item`.
+///
+/// FTS5 does not support `ON CONFLICT`, so the canonical upsert pattern is a
+/// DELETE followed by INSERT. The two writes are wrapped in a single transaction
+/// so a crash between them cannot leave the item permanently unsearchable
+/// (CopyPaste-j9pv): either both succeed (the FTS entry is updated) or neither
+/// does (the old FTS row survives, a stale-text miss at worst, not a
+/// permanently-missing row).
 pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsError> {
-    // FTS5 does not support ON CONFLICT; DELETE + INSERT is the correct upsert pattern.
-    db.conn()
-        .execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
-    db.conn().execute(
+    let conn = db.conn();
+    // `unchecked_transaction` matches the storage-layer convention: the daemon
+    // holds the Database behind a Mutex and only hands out `&Connection`, so
+    // there is no concurrent borrow to guard against.
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    tx.execute(
         "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
         params![id, plaintext],
     )?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -2078,6 +2100,46 @@ mod tests {
         assert_eq!(count2, 1);
     }
 
+    /// CopyPaste-j9pv: `upsert_fts` must be atomic — the DELETE and INSERT must
+    /// commit together so a partial write cannot leave an item permanently
+    /// unsearchable.  We verify the all-or-nothing guarantee by asserting that
+    /// after a successful upsert exactly one FTS row exists with the new text.
+    #[test]
+    fn upsert_fts_atomic_replace() {
+        let db = Database::open_in_memory().unwrap();
+        let item = make_item(1);
+        insert_item(&db, &item).unwrap();
+
+        // First upsert seeds the FTS row.
+        upsert_fts(&db, &item.id, "initial content").unwrap();
+
+        // Second upsert must atomically remove the old row and insert the new
+        // one — exactly one row must exist after the call, containing the new text.
+        upsert_fts(&db, &item.id, "replaced content").unwrap();
+
+        let count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![item.id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "exactly one FTS row must exist after atomic upsert");
+
+        // Verify the FTS row reflects the new text (not the old one).
+        let results = search_items(&db, "replaced", 10).unwrap();
+        assert_eq!(results.len(), 1, "FTS must return the updated text");
+
+        // The old text must NOT match.
+        let old_results = search_items(&db, "initial", 10).unwrap();
+        assert_eq!(
+            old_results.len(),
+            0,
+            "old FTS text must be gone after atomic replace"
+        );
+    }
+
     // --- Task 2: delete_fts ---
 
     #[test]
@@ -2271,6 +2333,66 @@ mod tests {
         assert!(
             get_item_by_id(&db, &pinned_id).unwrap().is_some(),
             "pinned+sensitive item must survive the sensitive TTL prune"
+        );
+    }
+
+    /// CopyPaste-ny0g: `has_sensitive_items` must return `true` when the DB is
+    /// healthy and contains an unpinned sensitive row.
+    #[test]
+    fn has_sensitive_items_returns_true_when_sensitive_row_present() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut sensitive = make_item(1);
+        sensitive.is_sensitive = true;
+        sensitive.pinned = false;
+        insert_item(&db, &sensitive).unwrap();
+
+        assert!(
+            has_sensitive_items(&db),
+            "must return true when an unpinned sensitive row exists"
+        );
+    }
+
+    /// CopyPaste-ny0g: `has_sensitive_items` must return `false` when only
+    /// pinned sensitive items exist (pinned items are exempt from TTL sweeps).
+    #[test]
+    fn has_sensitive_items_returns_false_for_pinned_only() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut pinned_sensitive = make_item(1);
+        pinned_sensitive.is_sensitive = true;
+        pinned_sensitive.pinned = true;
+        insert_item(&db, &pinned_sensitive).unwrap();
+
+        assert!(
+            !has_sensitive_items(&db),
+            "pinned sensitive rows must not count — they are exempt from TTL"
+        );
+    }
+
+    /// CopyPaste-ny0g: fail-closed security guarantee — `has_sensitive_items`
+    /// must return `true` (not `false`) when the query errors.
+    ///
+    /// Returning `false` on error causes the TTL sweep to be silently skipped,
+    /// allowing sensitive items to outlive their TTL. Returning `true` is
+    /// conservative (causes an unnecessary sweep attempt) but guarantees the
+    /// TTL sweep path is always invoked, giving `delete_sensitive_expired` a
+    /// chance to enforce the TTL. This is the fail-closed stance: prefer a
+    /// false-positive pre-check over a silently-suppressed sweep.
+    #[test]
+    fn has_sensitive_items_fails_closed_on_db_error() {
+        // Open a valid DB, then destroy the clipboard_items table so the
+        // SELECT EXISTS query fails with "no such table". The function must
+        // return `true` (treat-as-sensitive) rather than `false` (silent skip).
+        let db = Database::open_in_memory().unwrap();
+        db.conn()
+            .execute_batch("DROP TABLE clipboard_items;")
+            .unwrap();
+
+        assert!(
+            has_sensitive_items(&db),
+            "must return true (fail-closed) when the query errors, \
+             to avoid silently skipping the sensitive-item TTL sweep"
         );
     }
 

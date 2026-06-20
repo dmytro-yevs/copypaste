@@ -56,7 +56,10 @@ async fn test_schema_rollback_v5_mid_batch() {
 /// v10: adds deleted column + partial index (soft-delete tombstones).
 /// v11: adds idx_clipboard_unpinned_len partial covering index so the
 ///      prune_to_cap size gate runs index-only (CopyPaste-pvp4).
-const CURRENT_SCHEMA_VERSION: i64 = 11;
+/// v12: creates revoked_devices table + index in migration chain
+///      (CopyPaste-61fu) — previously created ad-hoc, causing "no such table"
+///      panics on DBs that hadn't run ensure_revoked_devices_table first.
+const CURRENT_SCHEMA_VERSION: i64 = 12;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from
@@ -687,4 +690,63 @@ fn migrate_v9_to_v10_adds_deleted_column_defaulting_zero() {
         "row inserted without the deleted flag must backfill as deleted = 0 \
          (the V10_ALTER … DEFAULT 0 live-item sentinel)"
     );
+}
+
+/// v12 (CopyPaste-61fu): `revoked_devices` audit table and its timestamp
+/// index are created by the versioned migration chain, not by the ad-hoc
+/// `ensure_revoked_devices_table` call. Every DB that passes through
+/// `apply_migrations` (which `Database::open*` always calls) must have the
+/// table present, regardless of whether the caller invoked the helper.
+#[test]
+fn migrate_v11_to_v12_creates_revoked_devices_table() {
+    let db = Database::open_in_memory().expect("fresh v12 in-memory DB");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    // The table must exist without an explicit `ensure_revoked_devices_table` call.
+    let table_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type='table' AND name='revoked_devices'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        table_count, 1,
+        "revoked_devices table must be created by v12 migration (not by an ad-hoc call)"
+    );
+
+    // The timestamp index must also exist.
+    let idx_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type='index' AND name='idx_revoked_devices_revoked_at'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        idx_count, 1,
+        "idx_revoked_devices_revoked_at must be created by v12 migration"
+    );
+
+    // The table must accept a revocation row and retrieve it correctly.
+    db.conn()
+        .execute(
+            "INSERT INTO revoked_devices (fingerprint, name, revoked_at) \
+             VALUES ('aa:bb:cc:dd:ee:ff:00:11', 'Test Device', 1700000000)",
+            [],
+        )
+        .unwrap();
+    let name: String = db
+        .conn()
+        .query_row(
+            "SELECT name FROM revoked_devices WHERE fingerprint = 'aa:bb:cc:dd:ee:ff:00:11'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(name, "Test Device", "revoked_devices table must be fully functional after migration");
 }
