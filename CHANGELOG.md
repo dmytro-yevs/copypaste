@@ -2,19 +2,20 @@
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-06-21
+## [0.3.0] - 2026-06-22
 
-Version reset to 0.3.0. This release bundles the full product-completeness,
-quality, and platform-parity audit-remediation campaign: 820 tracked issues
-closed across all crates, including a P0 data-loss fix (encryption key never
-silently regenerated), sensitive items removed from the FTS index, PII-scrubbed
-logging, private-mode capture gating, PAKE-gated pairing, tombstone-safe cloud
-sync, relay/p2p reliability hardening (backoff jitter, device-id validation,
-resumable watermark, durable retry queue, cert-expiry enforcement), daemon-mediated
-DB backup/restore IPC verbs, search field parity + type filter, Android P2P/mTLS
-LAN sync, macOS/Android UX parity, and a full regression-test backfill.
-CI green: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
--D warnings`, `cargo test --workspace`.
+Re-launch of 0.3.0 (the prior 0.3.0 build was withdrawn).
+
+- Restore liquid-glass design — fix invisible glass and design-token drift.
+- Security: sensitive plaintext no longer leaks into the accessibility tree.
+- Data-loss fix: encryption key is never silently regenerated (history preserved).
+- macOS pairing fixes — "device unavailable", stuck "pairing in flight", SAS clipboard leak.
+- Restore Android LAN device discovery; unify peer-dot / sync-badge online thresholds.
+- Android sync badge shows authoritative error (red) on auth failure — parity with macOS.
+- Cloud-sync compiled by default; clipboard import capped to fit the 16 MiB IPC frame.
+- Android: export/import progress feedback; max-history slider reaches the daemon.
+- CI hardened — parity/contrast gate, blocking cargo-deny advisories, Android instrumented/emulator tests.
+- Large internal refactor — split oversized modules (daemon, ipc, relay, cloud, core, Android UI); no behavior change.
 
 ## [0.7.5] - 2026-06-20
 
