@@ -50,7 +50,34 @@ pub const METHOD_DELETE_ALL: &str = "delete_all";
 pub const METHOD_COUNT: &str = "count";
 
 /// Return aggregate statistics about the clipboard database.
+///
+/// This is the CLI diagnostic view. The UI uses [`METHOD_DB_STATS`] instead,
+/// which returns only `{item_count, size_bytes}` for the settings panel.
+/// These two methods are intentionally distinct: `stats` is richer and intended
+/// for human-readable terminal output; `db_stats` is minimal and typed for the
+/// UI's storage summary widget (c4q2.23).
+///
+/// Params: none (empty `{}`).
+/// Response: [`StatsResponse`].
 pub const METHOD_STATS: &str = "stats";
+
+/// Success payload for [`METHOD_STATS`].
+///
+/// All counts are live values from the encrypted database at the time of the
+/// call. The daemon serialises this struct directly, so field names are the
+/// stable wire contract between the daemon and the CLI (c4q2.23 — formerly an
+/// ad-hoc `serde_json::json!({...})` with no typed schema).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct StatsResponse {
+    /// Total number of clipboard items (all rows, including sensitive ones).
+    pub total_items: i64,
+    /// Number of items flagged as sensitive (password / secret patterns).
+    pub sensitive_items: i64,
+    /// IPC/schema version string (not a semver release; currently `"1"`).
+    pub version: String,
+    /// Daemon build version string (`env!("CARGO_PKG_VERSION")`).
+    pub build_version: String,
+}
 
 // ── Daemon health ───────────────────────────────────────────────────────────
 
@@ -560,12 +587,14 @@ pub struct DbStatsResponse {
 ///   current size, but do NOT mutate any data.
 ///
 /// ## Response ([`VacuumResponse`])
-/// - `ok` (`bool`): always `true` on the happy path.
 /// - `size_before` (`u64`): file size in bytes before the operation.
 /// - `size_after` (`u64`): file size in bytes after (same as `size_before` on
 ///   `dry_run`).
 /// - `reclaimed` (`i64`): `size_before - size_after` (negative = file grew,
 ///   e.g. after `REINDEX` on a fragmented DB).
+///
+/// Success is conveyed solely by the outer `Response.ok` envelope field;
+/// the payload carries only meaningful data fields (c4q2.22).
 pub const METHOD_VACUUM: &str = "vacuum";
 
 /// Parameters for the [`METHOD_VACUUM`] method.
@@ -581,10 +610,12 @@ pub struct VacuumRequest {
 }
 
 /// Success payload for the [`METHOD_VACUUM`] method.
+///
+/// The outer `Response.ok` envelope is the authoritative success indicator;
+/// this struct carries only data fields that add information (c4q2.22 —
+/// removed the formerly-redundant `ok: bool` field).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct VacuumResponse {
-    /// Always `true` when the daemon returns `ok` for this method.
-    pub ok: bool,
     /// DB file size in bytes *before* the operation.
     pub size_before: u64,
     /// DB file size in bytes *after* the operation (equals `size_before` on
@@ -626,15 +657,15 @@ pub struct ResetDatabaseRequest {
 /// empty encrypted database with its current key, and brought itself OUT of
 /// degraded mode in-place — so a subsequent `history_page` (or any DB-touching
 /// method) succeeds against the new empty DB without a process restart.
+///
+/// The outer `Response.ok` envelope is the authoritative success indicator.
+/// The former `reset: bool` field (always `true` on success) was removed as
+/// redundant (c4q2.22); callers must check the envelope `ok` field instead.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ResetDatabaseResponse {
-    /// Always `true` when the daemon returns `ok` for this method; present so
-    /// the client can branch on a typed field rather than the bare `ok` flag.
-    pub reset: bool,
     /// `true` when the daemon recovered IN-PLACE (no restart needed): the new
-    /// empty DB is live and `ready` is now `true`. `false` would tell the UI to
-    /// expect the daemon to re-initialise itself; the current implementation
-    /// always recovers in-place, so this is `true` on success.
+    /// empty DB is live and the daemon is now ready. The current implementation
+    /// always recovers in-place, so this is always `true` on success.
     pub ready: bool,
 }
 
@@ -652,9 +683,10 @@ pub struct ResetDatabaseResponse {
 ///   The file must NOT already exist; the daemon refuses to overwrite.
 ///
 /// ## Response ([`DbBackupResponse`])
-/// - `ok` (`bool`): always `true` on success.
 /// - `dest_path` (`String`): the path the backup was written to.
 /// - `size_bytes` (`u64`): size of the backup file in bytes.
+///
+/// (`ok` field removed c4q2.22 — the outer `Response.ok` envelope is authoritative.)
 ///
 /// (CopyPaste-x94p)
 pub const METHOD_DB_BACKUP: &str = "db_backup";
@@ -668,10 +700,12 @@ pub struct DbBackupRequest {
 }
 
 /// Success payload for [`METHOD_DB_BACKUP`].
+///
+/// The outer `Response.ok` envelope is the authoritative success indicator;
+/// the former `ok: bool` field (always `true` on success) was removed as
+/// redundant (c4q2.22).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct DbBackupResponse {
-    /// Always `true` when the daemon returns `ok` for this method.
-    pub ok: bool,
     /// The path the backup was written to (mirrors `DbBackupRequest::dest_path`).
     pub dest_path: String,
     /// Size of the backup file in bytes.
@@ -702,8 +736,9 @@ pub struct DbBackupResponse {
 ///   renaming it aside. Use when disk space is tight.
 ///
 /// ## Response ([`DbRestoreResponse`])
-/// - `ok` (`bool`): always `true` on success.
 /// - `ready` (`bool`): always `true`; the restored DB is live.
+///
+/// (`ok` field removed c4q2.22 — the outer `Response.ok` envelope is authoritative.)
 ///
 /// (CopyPaste-8wbt)
 pub const METHOD_DB_RESTORE: &str = "db_restore";
@@ -722,10 +757,12 @@ pub struct DbRestoreRequest {
 }
 
 /// Success payload for [`METHOD_DB_RESTORE`].
+///
+/// The outer `Response.ok` envelope is the authoritative success indicator;
+/// the former `ok: bool` field (always `true` on success) was removed as
+/// redundant (c4q2.22).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct DbRestoreResponse {
-    /// Always `true` when the daemon returns `ok` for this method.
-    pub ok: bool,
     /// `true` when the restored database is live (no restart needed).
     pub ready: bool,
 }
@@ -935,15 +972,14 @@ mod tests {
         assert!(s.contains("\"confirm\":true"));
     }
 
+    /// c4q2.22: ResetDatabaseResponse no longer has a `reset` field.
     #[test]
     fn reset_response_roundtrip() {
-        let resp = ResetDatabaseResponse {
-            reset: true,
-            ready: true,
-        };
+        let resp = ResetDatabaseResponse { ready: true };
         let s = serde_json::to_string(&resp).unwrap();
         let back: ResetDatabaseResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);
+        assert!(!s.contains("\"reset\""), "c4q2.22: reset field must not appear in wire: {s}");
     }
 
     #[test]
@@ -996,10 +1032,11 @@ mod tests {
         assert_eq!(req, back);
     }
 
+    /// c4q2.22: VacuumResponse no longer has an `ok` field (removed as redundant —
+    /// the outer response envelope's `ok` is the authoritative success indicator).
     #[test]
     fn vacuum_response_roundtrip() {
         let resp = VacuumResponse {
-            ok: true,
             size_before: 2048,
             size_after: 1024,
             reclaimed: 1024,
@@ -1007,6 +1044,7 @@ mod tests {
         let s = serde_json::to_string(&resp).unwrap();
         let back: VacuumResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);
+        assert!(!s.contains("\"ok\""), "c4q2.22: ok field must not appear in wire format: {s}");
     }
 
     // PG-62: verify all previously-missing METHOD_* constants have the correct
@@ -1336,15 +1374,16 @@ mod tests {
 
     #[test]
     fn db_backup_response_roundtrip() {
+        // c4q2.22: ok field removed from DbBackupResponse; success is conveyed
+        // by the outer Response.ok envelope, not a redundant inner field.
         let resp = DbBackupResponse {
-            ok: true,
             dest_path: "/tmp/backup.db.enc".to_string(),
             size_bytes: 4096,
         };
         let s = serde_json::to_string(&resp).unwrap();
         let back: DbBackupResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);
-        assert!(s.contains("\"ok\":true"), "wire: {s}");
+        assert!(!s.contains("\"ok\""), "no redundant ok field on wire: {s}");
         assert!(s.contains("\"size_bytes\":4096"), "wire: {s}");
     }
 
@@ -1374,13 +1413,51 @@ mod tests {
 
     #[test]
     fn db_restore_response_roundtrip() {
-        let resp = DbRestoreResponse {
-            ok: true,
-            ready: true,
-        };
+        // c4q2.22: ok field removed from DbRestoreResponse; success is conveyed
+        // by the outer Response.ok envelope, not a redundant inner field.
+        let resp = DbRestoreResponse { ready: true };
         let s = serde_json::to_string(&resp).unwrap();
         let back: DbRestoreResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);
+        assert!(!s.contains("\"ok\""), "no redundant ok field on wire: {s}");
+        assert!(s.contains("\"ready\":true"), "wire: {s}");
+    }
+
+    // ── c4q2.23: StatsResponse ───────────────────────────────────────────────
+
+    /// c4q2.23: StatsResponse must survive a JSON round-trip with all fields
+    /// intact and must NOT include any field beyond the four declared ones.
+    #[test]
+    fn stats_response_roundtrip() {
+        let resp = StatsResponse {
+            total_items: 42,
+            sensitive_items: 3,
+            version: "1".to_string(),
+            build_version: "0.6.0".to_string(),
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        let back: StatsResponse = serde_json::from_str(&s).unwrap();
+        assert_eq!(resp, back);
+        assert!(s.contains("\"total_items\":42"), "wire: {s}");
+        assert!(s.contains("\"sensitive_items\":3"), "wire: {s}");
+        assert!(s.contains("\"version\":\"1\""), "wire: {s}");
+        assert!(s.contains("\"build_version\":\"0.6.0\""), "wire: {s}");
+    }
+
+    /// Default StatsResponse has all-zero/empty fields.
+    #[test]
+    fn stats_response_default_is_zero() {
+        let resp = StatsResponse::default();
+        assert_eq!(resp.total_items, 0);
+        assert_eq!(resp.sensitive_items, 0);
+        assert_eq!(resp.version, "");
+        assert_eq!(resp.build_version, "");
+    }
+
+    /// METHOD_STATS has the correct wire name.
+    #[test]
+    fn stats_method_has_correct_wire_name() {
+        assert_eq!(METHOD_STATS, "stats");
     }
 
     // ── AppConfig IPC wire type tests (CopyPaste-44rq.13 / c4q2.3) ──────────

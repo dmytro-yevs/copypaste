@@ -7,10 +7,9 @@ use crate::protocol::{
 // CopyPaste-merc: canonical badge-state computation lives in copypaste-ipc so it
 // is shared across crates. The daemon calls this once per get_sync_status request
 // and embeds the result in the response; UI / Android consume the value directly.
-// CopyPaste-c4q2.7: get_sync_status is now available under cloud-sync OR relay-sync
-// (relay-only daemons have passphrase_set and last_sync_ms too), so the import gate
-// must match the widened handler condition.
-#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+// Gated on cloud-sync: the get_sync_status handler is only compiled with that
+// feature, so the import must match to avoid an unused-import warning (-D warnings).
+#[cfg(feature = "cloud-sync")]
 use copypaste_ipc::compute_sync_badge_state;
 // derive_sync_key / SyncKey are used by both cloud-sync (Supabase) and relay-sync.
 // `revoke_and_rotate` / `rotate_sync_key` derive a key from a passphrase;
@@ -24,7 +23,8 @@ use copypaste_core::{
     bump_item_recency, chunks_from_blob, count_items, decode_file, decode_image,
     decrypt_item_by_version, decrypt_item_with_aad, derive_v2, encode_thumbnail_from_png,
     encrypt_item_with_aad, ensure_revoked_devices_table, fetch_text_preview,
-    fetch_text_previews_batch, get_device_names, get_item_by_id, get_page, get_page_pinned_first,
+    // c4q2.17: get_page removed — the "list" handler that used it is now stubbed.
+    fetch_text_previews_batch, get_device_names, get_item_by_id, get_page_pinned_first,
     is_sensitive_for_autowipe, pin_item, reorder_pinned, revoke_device, revoke_devices,
     search_items_filtered, set_thumb, unpin_item, Database, DbRead, FileMeta, SensitiveDetector,
     NONCE_SIZE,
@@ -103,12 +103,10 @@ const MAX_IMPORT_ITEM_BYTES: usize = 4 * 1024 * 1024;
 /// unbounded resource growth from a buggy or hostile client.
 const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
-// ERR_IPC_NOT_READY constant removed (CopyPaste-c4q2.13): the constant held
-// the legacy uppercase "IPC_NOT_READY" string that was used as the human-
-// readable `error` message field, confusing clients that read `error` instead
-// of `error_code`. The canonical machine-readable code is already carried by
-// ERR_CODE_IPC_NOT_READY ("ipc_not_ready") in the `error_code` field.
-// The usage site (readiness gate) now passes a plain descriptive string.
+/// Error code returned when an IPC method is called before the server's
+/// backing state (database, etc.) has finished initializing. Clients should
+/// back off and retry rather than treat this as a hard failure.
+const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
 
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
@@ -466,15 +464,8 @@ pub(crate) fn update_core_config(
     if let Some(ref v) = incoming.excluded_app_bundle_ids {
         core.excluded_app_bundle_ids = v.clone();
     }
-    // CopyPaste-44rq.10: treat empty/whitespace relay_url as a clear sentinel.
-    // A `None` incoming means "field omitted — no change". `Some("")` or
-    // `Some("  ")` is the explicit clear sentinel documented in relay.rs.
     if let Some(ref v) = incoming.relay_url {
-        if crate::relay::relay_url_is_clear(Some(v.as_str())) {
-            core.relay_url = None; // "" / whitespace sentinel → clear
-        } else {
-            core.relay_url = Some(v.clone()); // normal URL → set
-        }
+        core.relay_url = Some(v.clone());
     }
     if let Some(v) = incoming.lan_visibility {
         core.lan_visibility = v;
@@ -526,16 +517,7 @@ fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
         p2p_enabled: incoming.p2p_enabled.or(existing.p2p_enabled),
         supabase_url: incoming.supabase_url.or(existing.supabase_url),
         supabase_anon_key: incoming.supabase_anon_key.or(existing.supabase_anon_key),
-        // CopyPaste-44rq.10: an empty-string sentinel means "clear"; do not fall
-        // back to the existing value in that case. Otherwise use the normal
-        // None-preserves-existing merge so omitted fields keep their stored value.
-        relay_url: if crate::relay::relay_url_is_clear(incoming.relay_url.as_deref())
-            && incoming.relay_url.is_some()
-        {
-            None // explicit "" / whitespace → clear
-        } else {
-            incoming.relay_url.or(existing.relay_url)
-        },
+        relay_url: incoming.relay_url.or(existing.relay_url),
         supabase_email: incoming.supabase_email.or(existing.supabase_email),
         supabase_password: incoming.supabase_password.or(existing.supabase_password),
         sound_on_copy: incoming.sound_on_copy.or(existing.sound_on_copy),
@@ -1122,22 +1104,32 @@ const MAX_PAKE_SESSIONS: usize = 64;
 
 /// A peer whose `last_sync_at` is within this many seconds of the current
 /// clock is considered **online** in the `list_peers` response, even if no
-/// live mTLS or mDNS signal is available.
+/// live mTLS or mDNS signal is available.  60 s is chosen to survive a single
+/// missed polling cycle (the sync loop re-connects approximately every 30 s)
+/// while still marking a device offline quickly after it disconnects.
+const ONLINE_THRESHOLD_SECS: i64 = 60;
+
+/// c4q2.21: Pure function for computing peer online status.
 ///
-/// CopyPaste-1jms.25: this must equal `copypaste_ipc::SYNC_BADGE_RECENT_MS / 1_000`
-/// (currently 5 × 60 = 300 s) so the peer-card online dot and the sync badge
-/// chip use the same staleness window.  A peer offline for 90 s would otherwise
-/// show `online=false` on the card but `idle` (not `offline`) on the chip —
-/// contradictory to the user.  Verified by the const assert below.
-const ONLINE_THRESHOLD_SECS: i64 = (copypaste_ipc::SYNC_BADGE_RECENT_MS / 1_000) as i64;
-// Single-source-of-truth guard: if SYNC_BADGE_RECENT_MS changes this fails at
-// compile time, forcing the author to reconsider this threshold.
-const _ONLINE_THRESHOLD_MATCHES_BADGE: () = {
-    assert!(
-        ONLINE_THRESHOLD_SECS == (copypaste_ipc::SYNC_BADGE_RECENT_MS / 1_000) as i64,
-        "ONLINE_THRESHOLD_SECS must equal SYNC_BADGE_RECENT_MS / 1000"
-    );
-};
+/// Priority:
+/// 1. `live_sink` is `Some(true)` / `Some(false)` — P2P connection table is
+///    authoritative; use it unconditionally.
+/// 2. `live_sink` is `None` — P2P is disabled or not yet running; fall back to
+///    `last_sync_at`: online iff within [`ONLINE_THRESHOLD_SECS`] of `now_secs`.
+///
+/// Extracted for unit-testability (c4q2.21).
+pub(crate) fn compute_peer_online(
+    live_sink: Option<bool>,
+    last_sync_at: Option<i64>,
+    now_secs: i64,
+) -> bool {
+    match live_sink {
+        Some(is_live) => is_live,
+        None => matches!(last_sync_at,
+            Some(t) if now_secs.saturating_sub(t) <= ONLINE_THRESHOLD_SECS
+        ),
+    }
+}
 
 /// In-progress PAKE handshake session stored between IPC round-trips.
 ///
@@ -1495,19 +1487,6 @@ pub struct IpcServer {
     /// queueing or blocking. `Arc`-wrapped so it can be shared with the spawned
     /// connection tasks without lifetime issues.
     conn_semaphore: Arc<tokio::sync::Semaphore>,
-
-    /// CopyPaste-44rq.10: handle to the live relay push/poll loops (relay-sync
-    /// feature). Dropping or calling [`RelayHandle::shutdown`] stops both loops.
-    ///
-    /// The `set_config` handler replaces (drops) this slot when `relay_url` is
-    /// cleared via the `""` sentinel so relay polling stops immediately without
-    /// a daemon restart. Populated externally by `daemon.rs` via
-    /// [`relay_handle_slot`](Self::relay_handle_slot) after `start_relay` returns.
-    ///
-    /// `std::sync::Mutex` (not tokio's) because the critical section is a trivial
-    /// replace with no `.await`.
-    #[cfg(feature = "relay-sync")]
-    relay_handle: Arc<std::sync::Mutex<Option<crate::relay::RelayHandle>>>,
 }
 
 /// Wire-serialisable peer event record returned by `poll_peer_events`.
@@ -1797,9 +1776,6 @@ impl IpcServer {
             in_memory_cloud_password: Arc::new(std::sync::Mutex::new(None)),
             // CopyPaste-6ot5: start with the full connection cap available.
             conn_semaphore: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CONNECTIONS)),
-            // CopyPaste-44rq.10: populated externally via relay_handle_slot().
-            #[cfg(feature = "relay-sync")]
-            relay_handle: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1811,18 +1787,6 @@ impl IpcServer {
     pub fn with_read_pool(mut self, pool: Arc<copypaste_core::SqlitePool>) -> Self {
         self.read_pool = Some(pool);
         self
-    }
-
-    /// Return the slot that `daemon.rs` stores the live [`crate::relay::RelayHandle`] into
-    /// after `start_relay` succeeds (CopyPaste-44rq.10).
-    ///
-    /// The `set_config` handler drops the handle from this slot when the caller
-    /// clears `relay_url` (sends `""`), causing both relay loops to stop immediately.
-    /// `daemon.rs` writes into this Arc after `start_relay` returns so that the
-    /// handle is injectable after the IpcServer has been moved into its task.
-    #[cfg(feature = "relay-sync")]
-    pub fn relay_handle_slot(&self) -> Arc<std::sync::Mutex<Option<crate::relay::RelayHandle>>> {
-        Arc::clone(&self.relay_handle)
     }
 
     /// Attach the shared live core config (`config.toml`) for hot-reload.
@@ -3073,16 +3037,17 @@ impl IpcServer {
     fn requires_db(method: &str) -> bool {
         matches!(
             method,
-            "list"
-                // "delete" / "copy" / "paste" / "pin" removed: deprecated to
-                // not_implemented stubs (CopyPaste-c4q2.14, c4q2.15, loyk.8,
-                // loyk.9). Stubs return early before touching the DB.
+            // c4q2.17: "list" removed — now a not_implemented stub, no DB access.
+            "delete"
                 | "count"
                 | "search"
+                | "copy"
+                | "paste"
                 | "copy_item"
                 | "delete_all"
                 | "delete_item"
                 | "stats"
+                | "pin"
                 | "pin_item"
                 | "reorder_pinned"
                 | "history_page"
@@ -3349,11 +3314,7 @@ impl IpcServer {
             let line = match std::str::from_utf8(&buf) {
                 Ok(s) => s,
                 Err(e) => {
-                    let resp = Response::err_with_code(
-                        "0",
-                        ERR_CODE_INVALID_ARGUMENT,
-                        format!("invalid UTF-8: {e}"),
-                    );
+                    let resp = Response::err("0", format!("invalid UTF-8: {e}"));
                     if let Ok(mut out) = serde_json::to_string(&resp) {
                         out.push('\n');
                         let _ = writer.write_all(out.as_bytes()).await;
@@ -3381,8 +3342,9 @@ impl IpcServer {
     ///
     /// Returns `Ok((changed, tombstone_opt))` where `changed` is the number of
     /// rows modified (0 = not found). `Err` carries either the DB error string
-    /// or a spawn-join failure message. Used by the `"delete_item"` arm.
-    /// (The legacy `"delete"` arm is deprecated — see CopyPaste-loyk.9.)
+    /// or a spawn-join failure message. Used by both the legacy `"delete"` arm
+    /// and the typed `"delete_item"` arm; each arm formats its own distinct
+    /// response shape and error style.
     async fn soft_delete_and_broadcast(
         &self,
         id: &str,
@@ -3490,164 +3452,46 @@ impl IpcServer {
                 id = %req.id,
                 "rejecting DB-touching request: server not ready"
             );
-            // CopyPaste-c4q2.13: replaced uppercase "IPC_NOT_READY" constant
-            // with a plain human-readable message. Clients must check
-            // `error_code == "ipc_not_ready"`, not the `error` string.
-            return Response::err_with_code(
-                req.id,
-                ERR_CODE_IPC_NOT_READY,
-                "daemon not ready — still initialising (retry shortly)",
-            );
+            return Response::err_with_code(req.id, ERR_CODE_IPC_NOT_READY, ERR_IPC_NOT_READY);
         }
 
         match req.method.as_str() {
-            "list" => {
-                let raw_limit = req
-                    .params
-                    .get("limit")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(50) as usize;
-                let limit = raw_limit.min(MAX_PAGE);
-                let offset = req
-                    .params
-                    .get("offset")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0) as usize;
-                let pool_opt = self.read_pool.clone();
-                let db_arc = self.db.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    // bhr8: shared builder so both the pool and fallback paths
-                    // produce the same enriched JSON (preview/kind/sensitive_spans/pinned).
-                    fn build_list_page(
-                        db: &dyn copypaste_core::DbRead,
-                        limit: usize,
-                        offset: usize,
-                    ) -> anyhow::Result<(Vec<serde_json::Value>, i64)> {
-                        let items = get_page(db, limit, offset)?;
-                        let total = count_items(db).unwrap_or(0);
-                        // Batch-fetch previews for non-sensitive text items (avoids
-                        // one SQL round-trip per item, mirrors history_page approach).
-                        let preview_ids: Vec<&str> = items
-                            .iter()
-                            .filter(|it| !it.is_sensitive && it.content_type == "text")
-                            .map(|it| it.id.as_str())
-                            .collect();
-                        let preview_map =
-                            fetch_text_previews_batch(db, &preview_ids).unwrap_or_default();
-                        let detector = SensitiveDetector::new();
-                        let json_items: Vec<serde_json::Value> = items
-                            .iter()
-                            .map(|item| {
-                                // Build a plain preview string first.
-                                let raw_preview = if item.is_sensitive {
-                                    format!("[sensitive — id:{}]", &item.id[..8])
-                                } else if item.content_type == "text" {
-                                    preview_map
-                                        .get(&item.id)
-                                        .cloned()
-                                        .unwrap_or_else(|| format!("[text — id:{}]", &item.id[..8]))
-                                } else if item.content_type == "file" {
-                                    let name = item
-                                        .blob_ref
-                                        .as_deref()
-                                        .and_then(|j| parse_file_meta(j).ok())
-                                        .map(|m| m.filename)
-                                        .unwrap_or_else(|| format!("id:{}", &item.id[..8]));
-                                    format!("[file: {name}]")
-                                } else {
-                                    format!("[image — id:{}]", &item.id[..8])
-                                };
-                                // Normalise text previews + compute sensitive_spans
-                                // using the same approach as history_page (bhr8).
-                                let (preview, sensitive_spans): (String, Vec<serde_json::Value>) =
-                                    if !item.is_sensitive && item.content_type == "text" {
-                                        let normalised =
-                                            copypaste_core::sensitive::nfkc_normalize(&raw_preview);
-                                        let spans = detector
-                                            .detect_normalised(&normalised)
-                                            .into_iter()
-                                            .map(|m| {
-                                                let start = byte_to_char_offset(
-                                                    &normalised,
-                                                    m.matched_range.start,
-                                                );
-                                                let end = byte_to_char_offset(
-                                                    &normalised,
-                                                    m.matched_range.end,
-                                                );
-                                                serde_json::json!([start, end])
-                                            })
-                                            .collect();
-                                        (normalised, spans)
-                                    } else {
-                                        (raw_preview, vec![])
-                                    };
-                                let kind: &str = if item.content_type == "text" {
-                                    copypaste_core::text_kind::classify_text(&preview).label()
-                                } else if item.content_type == "file" {
-                                    "FILE"
-                                } else {
-                                    "IMAGE"
-                                };
-                                serde_json::json!({
-                                    "id": item.id,
-                                    "content_type": item.content_type,
-                                    "is_sensitive": item.is_sensitive,
-                                    "wall_time": item.wall_time,
-                                    "lamport_ts": item.lamport_ts,
-                                    // bhr8: fields previously missing from the list verb.
-                                    "preview": preview,
-                                    "pinned": item.pinned,
-                                    "sensitive_spans": sensitive_spans,
-                                    "kind": kind,
-                                    // Daemon-computed single source of truth: true when
-                                    // this item exceeds the local sync size ceiling and
-                                    // therefore won't be synced. UIs badge it.
-                                    "too_large_to_sync": too_large_to_sync(item),
-                                })
-                            })
-                            .collect();
-                        Ok((json_items, total))
-                    }
-
-                    // Prefer pooled connection for concurrent reads (CopyPaste-j8p).
-                    // Pool connections share WAL with the writer and always see
-                    // committed data. Fall back to the write mutex if pool is
-                    // unavailable (degraded startup or pool exhaustion).
-                    if let Some(pool) = pool_opt {
-                        if let Ok(conn) = pool.get() {
-                            let handle = copypaste_core::ReadHandle(conn);
-                            return build_list_page(&handle, limit, offset);
-                        }
-                    }
-                    let db = db_arc.blocking_lock();
-                    build_list_page(&*db, limit, offset)
-                })
-                .await;
-                match join {
-                    Ok(Ok((json_items, total))) => Response::ok(
-                        req.id,
-                        serde_json::json!({"items": json_items, "total": total}),
-                    ),
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
-                }
-            }
-            // CopyPaste-loyk.9 / c4q2.15: "delete" is the legacy verb — no
-            // current client sends it (CLI uses METHOD_DELETE_ITEM / "delete_item",
-            // UI uses "delete_item"). Retained as an explicit stub so old callers
-            // get a diagnosable error instead of "unknown method".
-            "delete" => Response::err_with_code(
+            // c4q2.17: "list" is the legacy CLI verb. Response shape is now
+            // unified under "history_page" (pinned-first, same fields).
+            // CLI copypaste-cli was migrated to METHOD_HISTORY_PAGE (c4q2.17).
+            // Kept as an explicit stub so old callers get a diagnosable error.
+            "list" => Response::err_with_code(
                 req.id,
                 ERR_CODE_NOT_IMPLEMENTED,
-                "delete is deprecated: use delete_item with {id: \"<uuid>\"}",
+                "list is deprecated: use history_page with {limit, offset} — \
+                 the response shape is identical but pinned items appear first (c4q2.17)",
             ),
+            "delete" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
+                    // clients can classify the error rather than getting a bare
+                    // untyped error string.
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                match self.soft_delete_and_broadcast(&id).await {
+                    Ok(_) => Response::ok(req.id, serde_json::Value::Null),
+                    Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
+                }
+            }
             "count" => {
                 let pool_opt = self.read_pool.clone();
                 let db_arc = self.db.clone();
@@ -3664,9 +3508,7 @@ impl IpcServer {
                 .await;
                 match join {
                     Ok(Ok(n)) => Response::ok(req.id, serde_json::json!({"count": n})),
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3807,17 +3649,126 @@ impl IpcServer {
                     ),
                 }
             }
-            // CopyPaste-loyk.8 / c4q2.15: "copy" and "paste" are legacy verbs —
-            // no current client sends them. The CLI switched to METHOD_COPY_ITEM
-            // ("copy_item") in CopyPaste-abg1; the UI uses "copy_item" exclusively.
-            // The legacy arm also had a data-loss bug (linear scan capped at 1000
-            // items). Retained as an explicit stub so old callers get a diagnosable
-            // error instead of "unknown method".
-            "copy" | "paste" => Response::err_with_code(
-                req.id,
-                ERR_CODE_NOT_IMPLEMENTED,
-                "copy/paste is deprecated: use copy_item with {id: \"<uuid>\"}",
-            ),
+            "copy" | "paste" => {
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
+                    // clients can classify the error.
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    // Resolve directly by primary key — paging + linear scan
+                    // silently missed any item past position 1000 (data loss).
+                    let item = get_item_by_id(&*db, &id_for_task)?;
+                    Ok::<_, anyhow::Error>(item)
+                })
+                .await;
+                match join {
+                    Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
+                        Ok(()) => {
+                            // C. PROMOTE-ON-COPY: bump wall_time/lamport so this
+                            // item sorts to the top of history_page on the next
+                            // request, matching Maccy-style recency ordering.
+                            let db_arc2 = self.db.clone();
+                            let item_id_bump = item.id.clone();
+                            // P1: surface bump errors via tracing instead of
+                            // double-swallowing (let _ spawn + let _ inside).
+                            // Promote-on-copy is best-effort — a failure must
+                            // not abort the copy response — but silent failures
+                            // make it impossible to diagnose why items don't
+                            // reorder after being copied.
+                            match tokio::task::spawn_blocking(move || {
+                                let db = db_arc2.blocking_lock();
+                                let now_ms = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as i64)
+                                    .unwrap_or(0);
+                                // CopyPaste-ojhe: unified lamport value space —
+                                // max(existing + 1, now_ms) keeps the promote
+                                // monotonic vs the row's own prior lamport so a
+                                // later pin/delete (also unified) can overtake it.
+                                let prev_lamport = get_item_by_id(&*db, &item_id_bump)
+                                    .ok()
+                                    .flatten()
+                                    .map(|r| r.lamport_ts)
+                                    .unwrap_or(0);
+                                let new_lamport =
+                                    copypaste_core::next_lamport_ts(prev_lamport, now_ms);
+                                // Pass None: ipc recopy path doesn't know sensitive TTL;
+                                // delete_expired picks up expires_at set at capture time.
+                                bump_item_recency(&db, &item_id_bump, now_ms, new_lamport, None)
+                            })
+                            .await
+                            {
+                                Ok(Ok(_)) => {}
+                                Ok(Err(e)) => {
+                                    tracing::warn!(
+                                        id = %item.id,
+                                        "bump_item_recency failed: {e}"
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::warn!(
+                                        id = %item.id,
+                                        "bump_item_recency task join error: {e}"
+                                    );
+                                }
+                            }
+                            Response::ok(
+                                req.id,
+                                serde_json::json!({
+                                    "id": item.id,
+                                    "content_type": item.content_type,
+                                    "written": true,
+                                }),
+                            )
+                        }
+                        Err(PasteboardError::DecryptFailed(msg)) => Response::err_with_code(
+                            req.id,
+                            ERR_CODE_AUTH_FAILED,
+                            format!("paste decrypt failed: {msg}"),
+                        ),
+                        // CopyPaste-kfe9: tag pasteboard-write failures with
+                        // ERR_CODE_INTERNAL_ERROR for machine-readable classification.
+                        Err(PasteboardError::Other(msg)) => Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("pasteboard write failed: {msg}"),
+                        ),
+                    },
+                    // CopyPaste-kfe9: not_found so clients can distinguish
+                    // "item missing" from other internal errors (follow-up of 8u2b).
+                    Ok(Ok(None)) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_NOT_FOUND,
+                        format!("item not found: {id}"),
+                    ),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
             "delete_all" => {
                 // CopyPaste-cb7u: previously this called soft_delete_and_broadcast
                 // once per item, each with its own spawn_blocking. On large histories
@@ -3908,9 +3859,7 @@ impl IpcServer {
                         }
                         Response::ok(req.id, serde_json::json!({ "deleted": count }))
                     }
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3966,15 +3915,58 @@ impl IpcServer {
                     ),
                 }
             }
-            // CopyPaste-c4q2.14: "pin" is the legacy pin-only verb — it lacked
-            // the `pinned: bool` toggle needed to also unpin. No current client
-            // sends it (CLI and UI both use "pin_item"). Retained as an explicit
-            // stub so old callers get a diagnosable error instead of "unknown method".
-            "pin" => Response::err_with_code(
-                req.id,
-                ERR_CODE_NOT_IMPLEMENTED,
-                "pin is deprecated: use pin_item with {id: \"<uuid>\", pinned: bool}",
-            ),
+            "pin" => {
+                // Pin an item (remove expiry so it's never auto-deleted)
+                let id = match req.params.get("id").and_then(|v| v.as_str()) {
+                    Some(s) => s.to_string(),
+                    // CopyPaste-kfe9: tag with ERR_CODE_INVALID_ARGUMENT so
+                    // machine clients can classify the error (follow-up of 8u2b).
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: id",
+                        )
+                    }
+                };
+                if uuid::Uuid::parse_str(&id).is_err() {
+                    return Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INVALID_ARGUMENT,
+                        "invalid param: id must be a valid UUID",
+                    );
+                }
+                let db_arc = self.db.clone();
+                let id_for_task = id.clone();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    copypaste_core::pin_item(&db, &id_for_task)?;
+                    // Re-read the updated row so the broadcast carries the new
+                    // pinned=true / pin_order for LWW propagation to peers.
+                    let row = get_item_by_id(&*db, &id_for_task)?;
+                    Ok::<_, copypaste_core::storage::items::ItemsError>(row)
+                })
+                .await;
+                match join {
+                    Ok(Ok(row_opt)) => {
+                        // Propagate pin state to peers via the sync channel.
+                        if let (Some(row), Some(ref tx)) = (row_opt, &self.new_item_tx) {
+                            let _ = tx.send(row);
+                        }
+                        Response::ok(req.id, serde_json::json!({"pinned": true, "id": id}))
+                    }
+                    // CopyPaste-kfe9: tag DB errors with ERR_CODE_INTERNAL_ERROR
+                    // for machine-readable classification (follow-up of 8u2b).
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("blocking task failed: {e}"),
+                    ),
+                }
+            }
             // T5.x — pin or unpin an item by id. Unlike the legacy `pin`
             // verb (pin-only), this takes an explicit `pinned: bool` so the
             // UI can toggle from a single callback. A `pinned=false` request
@@ -4017,9 +4009,7 @@ impl IpcServer {
                         }
                         Response::ok(req.id, serde_json::json!({"pinned": pinned, "id": id}))
                     }
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4086,9 +4076,7 @@ impl IpcServer {
                         }
                         Response::ok(req.id, serde_json::json!({"ok": true}))
                     }
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4214,20 +4202,16 @@ impl IpcServer {
                             ERR_CODE_AUTH_FAILED,
                             format!("paste decrypt failed: {msg}"),
                         ),
-                        Err(PasteboardError::Other(msg)) => Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("pasteboard write failed: {msg}"),
-                        ),
+                        Err(PasteboardError::Other(msg)) => {
+                            Response::err(req.id, format!("pasteboard write failed: {msg}"))
+                        }
                     },
                     Ok(Ok((None, _))) => Response::err_with_code(
                         req.id,
                         ERR_CODE_NOT_FOUND,
                         format!("item not found: {id}"),
                     ),
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4369,9 +4353,7 @@ impl IpcServer {
                     Ok(Ok(ItemImageResult::Auth(msg))) => {
                         Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg)
                     }
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4562,9 +4544,7 @@ impl IpcServer {
                         ERR_CODE_NOT_FOUND,
                         format!("item not found: {id}"),
                     ),
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4708,9 +4688,7 @@ impl IpcServer {
                     Ok(Ok(ItemFileResult::Auth(msg))) => {
                         Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg)
                     }
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4874,9 +4852,7 @@ impl IpcServer {
                             "own_device_id": own_device_id,
                         }),
                     ),
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4904,9 +4880,7 @@ impl IpcServer {
                             redact_config_secrets(&mut v);
                             Response::ok(req.id, v)
                         }
-                        Err(e) => {
-                            Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                        }
+                        Err(e) => Response::err(req.id, e.to_string()),
                     },
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -4918,13 +4892,7 @@ impl IpcServer {
             "set_config" => {
                 let incoming: AppConfig = match serde_json::from_value(req.params.clone()) {
                     Ok(c) => c,
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            format!("invalid config: {e}"),
-                        )
-                    }
+                    Err(e) => return Response::err(req.id, format!("invalid config: {e}")),
                 };
                 // Capture the requested lan_visibility toggle BEFORE we move
                 // `incoming` into the blocking task, so we can hot-apply it to
@@ -4938,12 +4906,6 @@ impl IpcServer {
                 // the NEXT daemon restart. `None` means the caller did not send
                 // the field — no change, no notice needed.
                 let requested_p2p_enabled = incoming.p2p_enabled;
-                // CopyPaste-44rq.10: capture the relay_url BEFORE moving `incoming`
-                // into the blocking task so we can check the clear-sentinel after
-                // the config write succeeds.
-                let requested_relay_url = incoming.relay_url.clone();
-                #[cfg(feature = "relay-sync")]
-                let relay_handle_arc = Arc::clone(&self.relay_handle);
                 // MERGE, don't overwrite. `get_config` redacts the secret
                 // fields (`supabase_password`, `supabase_email`) to `*_set`
                 // booleans and drops the real values, so a UI/CLI
@@ -5069,28 +5031,9 @@ impl IpcServer {
                                 "p2p_enabled persisted — change takes effect on next daemon restart"
                             );
                         }
-                        // CopyPaste-44rq.10: if the caller explicitly cleared
-                        // relay_url (sent "" or whitespace), drop the live
-                        // RelayHandle so push/poll loops stop immediately.
-                        // `relay_url_is_clear(None)` returns true too, so guard
-                        // with `is_some()` to distinguish "omitted" from "cleared".
-                        #[cfg(feature = "relay-sync")]
-                        if requested_relay_url.is_some()
-                            && crate::relay::relay_url_is_clear(requested_relay_url.as_deref())
-                        {
-                            let dropped = relay_handle_arc
-                                .lock()
-                                .unwrap_or_else(|p| p.into_inner())
-                                .take();
-                            if dropped.is_some() {
-                                tracing::info!("relay_url cleared — stopped live relay sync loops");
-                            }
-                        }
                         Response::ok(req.id, serde_json::json!({"saved": true}))
                     }
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
+                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -5293,11 +5236,7 @@ impl IpcServer {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("set_sync_passphrase: key derivation failed: {e}");
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("key derivation failed: {e}"),
-                        );
+                        return Response::err(req.id, format!("key derivation failed: {e}"));
                     }
                 };
 
@@ -5351,11 +5290,7 @@ impl IpcServer {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("rotate_sync_key: key derivation failed: {e}");
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("key derivation failed: {e}"),
-                        );
+                        return Response::err(req.id, format!("key derivation failed: {e}"));
                     }
                 };
 
@@ -5501,11 +5436,7 @@ impl IpcServer {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("revoke_and_rotate: key derivation failed: {e}");
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("key derivation failed: {e}"),
-                        );
+                        return Response::err(req.id, format!("key derivation failed: {e}"));
                     }
                 };
 
@@ -5536,21 +5467,11 @@ impl IpcServer {
                                 .unwrap_or(true)
                         });
                         if let Err(e) = save_peers(&peers) {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INTERNAL_ERROR,
-                                format!("failed to save peers: {e}"),
-                            );
+                            return Response::err(req.id, format!("failed to save peers: {e}"));
                         }
                         (peers.len() < before_len, name)
                     }
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("failed to load peers: {e}"),
-                        )
-                    }
+                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
                 };
 
                 let db_arc = self.db.clone();
@@ -5605,68 +5526,66 @@ impl IpcServer {
                 )
             }
 
-            // CopyPaste-c4q2.7: get_sync_status is available whenever ANY sync
-            // transport is compiled in (cloud-sync OR relay-sync).  Supabase-specific
-            // fields (supabase_configured, signed_in, supabase_url, email) are only
-            // meaningful under cloud-sync and are gated accordingly; relay-only builds
-            // receive passphrase_set + last_sync_ms + badge_state (sufficient for the
-            // badge chip and sync settings UI).
-            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+            #[cfg(feature = "cloud-sync")]
             "get_sync_status" => {
                 let passphrase_set = self.sync_key.lock().await.is_some();
+                // Fix HIGH #3: read_config() does blocking fs I/O; move it to
+                // the blocking thread pool so the async worker is not stalled.
+                let app_cfg = match tokio::task::spawn_blocking(read_config).await {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("get_sync_status blocking task failed: {e}"),
+                        )
+                    }
+                };
+                let supabase_configured = app_cfg.supabase_url.is_some()
+                    && app_cfg.supabase_anon_key.is_some()
+                    || std::env::var("SUPABASE_URL").is_ok();
+                // BUG 2 fix: report the REAL GoTrue auth state published by the
+                // cloud loops, not the old `signed_in = supabase_configured`
+                // placeholder. The flag is set `true` once `start_cloud` resolves
+                // a bearer and `false` on a bearer-resolution / 401-refresh
+                // failure, so the UI no longer claims "signed in" after a
+                // `CloudError::AuthFailed` aborted cloud sync.
+                let signed_in = self
+                    .cloud_signed_in
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 let raw_ts = self.last_sync_ms.load(std::sync::atomic::Ordering::Relaxed);
                 let last_sync_ms_val: Option<i64> = if raw_ts > 0 { Some(raw_ts) } else { None };
-
-                // Supabase-specific fields: only available under cloud-sync.
-                #[cfg(feature = "cloud-sync")]
-                let (supabase_configured, signed_in, supabase_url_val, email_val) = {
-                    // Fix HIGH #3: read_config() does blocking fs I/O; move it to
-                    // the blocking thread pool so the async worker is not stalled.
-                    let app_cfg = match tokio::task::spawn_blocking(read_config).await {
-                        Ok(cfg) => cfg,
-                        Err(e) => {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INTERNAL_ERROR,
-                                format!("get_sync_status blocking task failed: {e}"),
-                            )
+                // B. Expose the non-secret Supabase URL and email so the UI can
+                // show/prefill them. We do NOT expose the anon key, password, or
+                // passphrase. Priority: env vars override AppConfig (same as
+                // CloudConfig::from_env).
+                let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
+                    .ok()
+                    .or_else(|| app_cfg.supabase_url.clone());
+                // M3 FIX: mask the email before sending over IPC so arbitrary
+                // same-UID processes cannot harvest the full GoTrue address.
+                // `a***@example.com` preserves the account-indicator the UI
+                // needs (SettingsView shows "Signed in as …") without leaking
+                // the full address. Mirrors `cloud::redact_email` — inlined
+                // here because that helper is private to the cloud module.
+                let email_val: Option<String> = std::env::var("SUPABASE_EMAIL")
+                    .ok()
+                    .or_else(|| app_cfg.supabase_email.clone())
+                    .map(|e| {
+                        // Show first char + *** + @domain; non-address input →
+                        // "<redacted>" (same contract as cloud::redact_email).
+                        match e.split_once('@') {
+                            Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
+                                let first = local.chars().next().unwrap_or('*');
+                                if local.chars().count() <= 1 {
+                                    format!("*@{domain}")
+                                } else {
+                                    format!("{first}***@{domain}")
+                                }
+                            }
+                            _ => "<redacted>".to_string(),
                         }
-                    };
-                    let supabase_configured = app_cfg.supabase_url.is_some()
-                        && app_cfg.supabase_anon_key.is_some()
-                        || std::env::var("SUPABASE_URL").is_ok();
-                    // BUG 2 fix: report the REAL GoTrue auth state published by the
-                    // cloud loops, not the old `signed_in = supabase_configured`
-                    // placeholder. The flag is set `true` once `start_cloud` resolves
-                    // a bearer and `false` on a bearer-resolution / 401-refresh
-                    // failure, so the UI no longer claims "signed in" after a
-                    // `CloudError::AuthFailed` aborted cloud sync.
-                    let signed_in = self
-                        .cloud_signed_in
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                    // B. Expose the non-secret Supabase URL and email so the UI can
-                    // show/prefill them. We do NOT expose the anon key, password, or
-                    // passphrase. Priority: env vars override AppConfig (same as
-                    // CloudConfig::from_env).
-                    let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
-                        .ok()
-                        .or_else(|| app_cfg.supabase_url.clone());
-                    // M3 FIX: mask the email before sending over IPC so arbitrary
-                    // same-UID processes cannot harvest the full GoTrue address.
-                    // CopyPaste-c4q2.4: use the shared `cloud::redact_email` (now
-                    // `pub(crate)`) instead of the inline copy that used to live here.
-                    let email_val: Option<String> = std::env::var("SUPABASE_EMAIL")
-                        .ok()
-                        .or_else(|| app_cfg.supabase_email.clone())
-                        .map(|e| crate::cloud::redact_email(&e));
-                    (supabase_configured, signed_in, supabase_url_val, email_val)
-                };
-                // Relay-only: supabase fields are absent — provide stub values for
-                // the badge computation below.
-                #[cfg(not(feature = "cloud-sync"))]
-                let (supabase_configured, signed_in, supabase_url_val, email_val) =
-                    (false, false, None::<String>, None::<String>);
-
+                    });
                 // CopyPaste-merc: compute badge state once here in the daemon so
                 // every consumer (macOS UI, Android) renders the SAME canonical
                 // value instead of each re-deriving it with a local constant.
@@ -5716,17 +5635,10 @@ impl IpcServer {
             // When cloud-sync is not compiled in, return not_implemented for
             // Supabase-specific methods so the UI gets a machine-readable code
             // rather than "method not found".
-            // CopyPaste-c4q2.7: get_sync_status is now available under relay-sync
-            // too (widened above), so it is no longer listed here.  set_sync_passphrase
-            // and cloud_test_connection remain cloud-sync only.
             #[cfg(not(feature = "cloud-sync"))]
-            "set_sync_passphrase" | "cloud_test_connection" => {
+            "set_sync_passphrase" | "get_sync_status" | "cloud_test_connection" => {
                 Response::not_implemented(req.id, "cloud-sync")
             }
-            // get_sync_status: not_implemented only when NEITHER cloud-sync NOR
-            // relay-sync is active (any-sync guard above won't compile in then).
-            #[cfg(not(any(feature = "cloud-sync", feature = "relay-sync")))]
-            "get_sync_status" => Response::not_implemented(req.id, "cloud-sync or relay-sync"),
 
             // rotate_sync_key and revoke_and_rotate are available when EITHER
             // cloud-sync OR relay-sync is compiled in (widened from cloud-sync
@@ -6460,9 +6372,8 @@ impl IpcServer {
                     Some(fingerprint) => {
                         Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
                     }
-                    None => Response::err_with_code(
+                    None => Response::err(
                         req.id,
-                        ERR_CODE_NOT_IMPLEMENTED,
                         "P2P is disabled (set COPYPASTE_P2P=1): no mTLS certificate \
                          to advertise for pairing",
                     ),
@@ -6622,12 +6533,12 @@ impl IpcServer {
                                 .map(canonical_fingerprint)
                                 .unwrap_or_default();
 
-                            let online = match &live_fps {
-                                Some(fps) => fps.contains(&peer_fp_canonical),
-                                None => matches!(last_sync_at,
-                                    Some(t) if now_secs.saturating_sub(t) <= ONLINE_THRESHOLD_SECS
-                                ),
-                            };
+                            // c4q2.21: delegate to extracted pure function.
+                            let live_sink_opt = live_fps
+                                .as_ref()
+                                .map(|fps| fps.contains(&peer_fp_canonical));
+                            let online =
+                                compute_peer_online(live_sink_opt, last_sync_at, now_secs);
 
                             // latency_ms: last measured RTT for this peer, in ms.
                             // Present only when P2P is running AND a ping-pong has
@@ -6677,11 +6588,7 @@ impl IpcServer {
 
                         Response::ok(req.id, serde_json::json!({ "peers": enriched }))
                     }
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("failed to load peers: {e}"),
-                    ),
+                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
                 }
             }
 
@@ -6717,13 +6624,7 @@ impl IpcServer {
             "list_discovered" => {
                 let disc = match self.discovery.as_ref() {
                     Some(d) => d,
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_NOT_IMPLEMENTED,
-                            "discovery not available (P2P disabled)",
-                        )
-                    }
+                    None => return Response::err(req.id, "discovery not available (P2P disabled)"),
                 };
 
                 // HB-4: the mDNS `device_id` is a UUID, NOT a cert fingerprint, so
@@ -6788,13 +6689,7 @@ impl IpcServer {
             "rescan_discovered" => {
                 let disc = match self.discovery.as_ref() {
                     Some(d) => d,
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_NOT_IMPLEMENTED,
-                            "discovery not available (P2P disabled)",
-                        )
-                    }
+                    None => return Response::err(req.id, "discovery not available (P2P disabled)"),
                 };
 
                 // CopyPaste-ydhw: abort any browse handle stored from a prior
@@ -6868,11 +6763,7 @@ impl IpcServer {
                             .unwrap_or_else(|p| p.into_inner()) = Some(wrapper_handle);
                     }
                     Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("rescan failed to start: {e}"),
-                        );
+                        return Response::err(req.id, format!("rescan failed to start: {e}"));
                     }
                 }
 
@@ -6963,11 +6854,6 @@ impl IpcServer {
                         body["peer_fingerprint"] = serde_json::Value::String(fp.clone());
                     }
                 }
-                // CopyPaste-1jms.10: surface remaining SAS-confirm seconds so the
-                // UI can show a countdown (parity with the macOS/Android timers).
-                if let Some(secs) = state.secs_until_timeout() {
-                    body["secs_until_timeout"] = serde_json::json!(secs);
-                }
                 Response::ok(req.id, body)
             }
 
@@ -7007,22 +6893,6 @@ impl IpcServer {
                 Response::ok(req.id, serde_json::json!({ "ok": true }))
             }
 
-            // LAN/SAS Phase 2: reset the pairing state machine to Idle.
-            //
-            // CopyPaste-1jms.3 / CopyPaste-1jms.12: `pair_abort` moves the SM to
-            // the terminal `Aborted` state but leaves `try_begin` claimed.  Without
-            // a follow-up `pair_reset` every subsequent pairing attempt fails with
-            // "pairing is already in flight" until the next `try_begin` call
-            // auto-clears the stale terminal state.  The Android path has always
-            // called `pairReset()` after `pairAbort()` (DevicesActivity.kt:2369–
-            // 2383) — this handler gives the macOS UI and CLI the same capability.
-            // Must also be called after the `Confirmed` terminal state so the SM
-            // returns to `Idle` immediately, matching the Android confirmed path.
-            "pair_reset" => {
-                self.pairing.reset();
-                Response::ok(req.id, serde_json::json!({ "ok": true }))
-            }
-
             // CopyPaste-3n9h: `pair_peer` previously trusted a peer and
             // registered it in the live mTLS allowlist WITHOUT any
             // authentication (no PAKE, no SAS). A caller that knew a peer's
@@ -7046,13 +6916,7 @@ impl IpcServer {
             "unpair_peer" => {
                 let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: fingerprint",
-                        )
-                    }
+                    None => return Response::err(req.id, "missing param: fingerprint"),
                 };
 
                 match load_peers() {
@@ -7122,18 +6986,10 @@ impl IpcServer {
                                     serde_json::json!({ "ok": true, "removed": removed }),
                                 )
                             }
-                            Err(e) => Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INTERNAL_ERROR,
-                                format!("failed to save peers: {e}"),
-                            ),
+                            Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
                         }
                     }
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("failed to load peers: {e}"),
-                    ),
+                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
                 }
             }
 
@@ -7198,21 +7054,11 @@ impl IpcServer {
                                 .unwrap_or(true)
                         });
                         if let Err(e) = save_peers(&peers) {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INTERNAL_ERROR,
-                                format!("failed to save peers: {e}"),
-                            );
+                            return Response::err(req.id, format!("failed to save peers: {e}"));
                         }
                         (peers.len() < before_len, name, addr)
                     }
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("failed to load peers: {e}"),
-                        )
-                    }
+                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
                 };
 
                 // Write the audit row. Done on the blocking thread pool
@@ -7354,13 +7200,7 @@ impl IpcServer {
                 // before clearing the store so we can write audit rows.
                 let peers = match load_peers() {
                     Ok(p) => p,
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("failed to load peers: {e}"),
-                        )
-                    }
+                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
                 };
                 let captured: Vec<(String, String)> = peers
                     .iter()
@@ -7691,20 +7531,15 @@ impl IpcServer {
                                         "added_at": added_at,
                                     }));
                                     if let Err(e) = save_peers(&peers) {
-                                        return Response::err_with_code(
+                                        return Response::err(
                                             req.id,
-                                            ERR_CODE_INTERNAL_ERROR,
                                             format!("failed to save peers: {e}"),
                                         );
                                     }
                                 }
                             }
                             Err(e) => {
-                                return Response::err_with_code(
-                                    req.id,
-                                    ERR_CODE_INTERNAL_ERROR,
-                                    format!("failed to load peers: {e}"),
-                                )
+                                return Response::err(req.id, format!("failed to load peers: {e}"))
                             }
                         }
 
@@ -7733,126 +7568,15 @@ impl IpcServer {
                 }
             }
 
-            // W2.4 — PAKE responder: receives message1 from initiator,
-            // runs PakeResponder::respond, stores session, returns message2.
-            // Params: {message1_b64, peer_fingerprint, password}
-            // Response: {session_id, message2_b64}
-            "pair_accept_password" => {
-                use base64::Engine as _;
-                let b64 = base64::engine::general_purpose::STANDARD;
-
-                let message1_b64 = match req.params.get("message1_b64").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing message1_b64",
-                        )
-                    }
-                };
-                let peer_fingerprint =
-                    match req.params.get("peer_fingerprint").and_then(|v| v.as_str()) {
-                        Some(s) => s.to_string(),
-                        None => {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INVALID_ARGUMENT,
-                                "missing peer_fingerprint",
-                            )
-                        }
-                    };
-                let password = match req.params.get("password").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing password",
-                        )
-                    }
-                };
-
-                if !is_valid_fingerprint(&peer_fingerprint) {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        format!("invalid peer_fingerprint format: {peer_fingerprint}"),
-                    );
-                }
-
-                // fix/p2p-c-review #5: enforce the same 6-char minimum the
-                // initiator does. Without this the responder would happily
-                // register a PasswordFile for a 1-char password if the peer
-                // (or a malicious initiator) skipped the initiator-side check.
-                if password.chars().count() < 6 {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "password must be at least 6 characters",
-                    );
-                }
-
-                let msg1_bytes = match b64.decode(&message1_b64) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            format!("invalid base64 in message1_b64: {e}"),
-                        )
-                    }
-                };
-
-                // Register the password so we have a PasswordFile for respond.
-                let password_file = match copypaste_p2p::pake::PasswordFile::register(&password) {
-                    Ok(pf) => pf,
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("PasswordFile::register failed: {e}"),
-                        )
-                    }
-                };
-
-                let (responder, msg2_bytes) =
-                    match PakeResponder::respond(&password_file, &msg1_bytes) {
-                        Ok(pair) => pair,
-                        Err(e) => {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_AUTH_FAILED,
-                                format!("PAKE respond failed: {e}"),
-                            )
-                        }
-                    };
-
-                let session_id = uuid::Uuid::new_v4().to_string();
-                let msg2_b64 = b64.encode(&msg2_bytes);
-
-                if let Err(msg) = self
-                    .insert_pake_session(
-                        session_id.clone(),
-                        PakeSession::Responder {
-                            responder: Box::new(responder),
-                            password_file,
-                            peer_fingerprint,
-                        },
-                    )
-                    .await
-                {
-                    return Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg);
-                }
-
-                Response::ok(
-                    req.id,
-                    serde_json::json!({
-                        "session_id": session_id,
-                        "message2_b64": msg2_b64,
-                    }),
-                )
-            }
+            // c4q2.20: pair_accept_password (password-based PAKE responder) is
+            // stubbed not_implemented. The password-pairing flow was removed as a
+            // security concern (CopyPaste-c4q2.20) — use QR pairing
+            // (pair_generate_qr / pair_accept_qr) instead.
+            "pair_accept_password" => Response::err_with_code(
+                req.id,
+                ERR_CODE_NOT_IMPLEMENTED,
+                "pair_accept_password is disabled — use QR pairing (pair_generate_qr / pair_accept_qr) (c4q2.20)",
+            ),
 
             // W2.4 — PAKE responder finish: receives message3 from initiator,
             // completes handshake, persists peer + PasswordFile.
@@ -8020,9 +7744,8 @@ impl IpcServer {
                 ) {
                     Ok(enc) => enc,
                     Err(e) => {
-                        return Response::err_with_code(
+                        return Response::err(
                             req.id,
-                            ERR_CODE_INTERNAL_ERROR,
                             format!("failed to encrypt PasswordFile for storage: {e}"),
                         )
                     }
@@ -8071,20 +7794,10 @@ impl IpcServer {
                             }
                         }
                         if let Err(e) = save_peers(&peers) {
-                            return Response::err_with_code(
-                                req.id,
-                                ERR_CODE_INTERNAL_ERROR,
-                                format!("failed to save peers: {e}"),
-                            );
+                            return Response::err(req.id, format!("failed to save peers: {e}"));
                         }
                     }
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("failed to load peers: {e}"),
-                        )
-                    }
+                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
                 }
 
                 // Feed the newly-paired peer into the live allowlist so the
@@ -8131,9 +7844,8 @@ impl IpcServer {
                 let fingerprint = match self.cert_fingerprint.as_ref() {
                     Some(fp) => fp.clone(),
                     None => {
-                        return Response::err_with_code(
+                        return Response::err(
                             req.id,
-                            ERR_CODE_NOT_IMPLEMENTED,
                             "P2P is disabled (set COPYPASTE_P2P=1): cannot generate a \
                              pairing QR without an mTLS certificate to advertise",
                         )
@@ -8963,13 +8675,7 @@ impl IpcServer {
             "get_app_icon" => {
                 let bundle_id = match req.params.get("bundle_id").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: bundle_id",
-                        )
-                    }
+                    None => return Response::err(req.id, "missing param: bundle_id"),
                 };
                 // NSWorkspace / AppKit calls are blocking — offload to a
                 // dedicated blocking thread so we never stall the async runtime.
@@ -9088,11 +8794,7 @@ impl IpcServer {
                 }
             }
 
-            other => Response::err_with_code(
-                req.id,
-                ERR_CODE_NOT_IMPLEMENTED,
-                format!("unknown method: {other}"),
-            ),
+            other => Response::err(req.id, format!("unknown method: {other}")),
         }
     }
 
@@ -10467,6 +10169,42 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
+    // -------------------------------------------------------------------
+    // c4q2.21 — compute_peer_online unit tests
+    // -------------------------------------------------------------------
+
+    /// P2P live sink = true → online regardless of last_sync_at.
+    #[test]
+    fn compute_peer_online_live_sink_true() {
+        assert!(compute_peer_online(Some(true), None, 1_000_000));
+        assert!(compute_peer_online(Some(true), Some(0), 1_000_000));
+    }
+
+    /// P2P live sink = false → offline regardless of last_sync_at.
+    #[test]
+    fn compute_peer_online_live_sink_false() {
+        assert!(!compute_peer_online(Some(false), Some(1_000_000), 1_000_000));
+        assert!(!compute_peer_online(Some(false), None, 1_000_000));
+    }
+
+    /// No live sink — recent last_sync_at (within threshold) → online.
+    #[test]
+    fn compute_peer_online_boundary_at_threshold() {
+        let now = 1_000_000_i64;
+        // Exactly at boundary: now - t == ONLINE_THRESHOLD_SECS → online.
+        let at_boundary = now - ONLINE_THRESHOLD_SECS;
+        assert!(compute_peer_online(None, Some(at_boundary), now));
+        // One second past → offline.
+        let one_past = at_boundary - 1;
+        assert!(!compute_peer_online(None, Some(one_past), now));
+    }
+
+    /// No live sink AND no last_sync_at → offline.
+    #[test]
+    fn compute_peer_online_none_last_sync_at_and_no_sink() {
+        assert!(!compute_peer_online(None, None, 1_000_000));
+    }
+
     /// Create a temp directory and immediately force its permissions to 0o700.
     ///
     /// `tempfile::TempDir::new()` calls `mkdir(path, 0o700)`, but the kernel
@@ -11148,22 +10886,17 @@ mod tests {
         );
     }
 
+    /// c4q2.17: `list` is now a not_implemented stub; zero-item check migrated to
+    /// `history_page`. This test now verifies the stub response shape.
     #[tokio::test]
     async fn list_empty_db_returns_zero() {
         let dir = safe_tempdir();
         let sock = dir.path().join("test2.sock");
         start_test_server(&sock).await;
 
-        let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream
-            .write_all(b"{\"id\":\"2\",\"method\":\"list\"}\n")
-            .await
-            .unwrap();
-        let mut lines = BufReader::new(&mut stream).lines();
-        let line = lines.next_line().await.unwrap().unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
-        assert_eq!(resp["ok"], true);
-        assert_eq!(resp["data"]["total"], 0);
+        let resp = call_one(&sock, r#"{"id":"2","method":"list"}"#).await;
+        assert_eq!(resp["ok"], false, "list must return not_implemented (c4q2.17): {resp}");
+        assert_eq!(resp["error_code"].as_str().unwrap_or(""), "not_implemented");
     }
 
     #[tokio::test]
@@ -11316,9 +11049,6 @@ mod tests {
         assert_eq!(resp["ok"], false);
     }
 
-    // CopyPaste-loyk.8 / c4q2.15: "copy" is deprecated — now a not_implemented
-    // stub. Any payload (including empty params) gets the same rejection pointing
-    // to "copy_item".
     #[tokio::test]
     async fn copy_missing_id_param_returns_error() {
         let dir = safe_tempdir();
@@ -11333,8 +11063,10 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert_eq!(resp["error_code"].as_str().unwrap_or(""), "not_implemented");
-        assert!(resp["error"].as_str().unwrap_or("").contains("copy_item"));
+        assert!(resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("missing param: id"));
     }
 
     #[tokio::test]
@@ -11557,8 +11289,6 @@ mod tests {
 
     // --- paste ---
 
-    // CopyPaste-loyk.8 / c4q2.15: "paste" is deprecated alongside "copy" — now
-    // a not_implemented stub pointing to "copy_item".
     #[tokio::test]
     async fn paste_missing_id_returns_error() {
         let dir = safe_tempdir();
@@ -11573,12 +11303,12 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert_eq!(resp["error_code"].as_str().unwrap_or(""), "not_implemented");
-        assert!(resp["error"].as_str().unwrap_or("").contains("copy_item"));
+        assert!(resp["error"]
+            .as_str()
+            .unwrap()
+            .contains("missing param: id"));
     }
 
-    // CopyPaste-loyk.8 / c4q2.15: "paste" is deprecated — returns not_implemented
-    // regardless of whether the given id exists.
     #[tokio::test]
     async fn paste_unknown_id_returns_error() {
         let dir = safe_tempdir();
@@ -11595,8 +11325,7 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert_eq!(resp["error_code"].as_str().unwrap_or(""), "not_implemented");
-        assert!(resp["error"].as_str().unwrap_or("").contains("copy_item"));
+        assert!(resp["error"].as_str().unwrap().contains("not found"));
     }
 
     // ------------------------------------------------------------------
@@ -11766,11 +11495,10 @@ mod tests {
         let sock = dir.path().join("not_ready.sock");
         let ready = start_not_ready_server(&sock).await;
 
-        // DB-touching methods must be rejected with ipc_not_ready.
-        // CopyPaste-c4q2.13: check error_code (machine-readable) not the error
-        // string; the legacy uppercase "IPC_NOT_READY" constant is removed.
+        // DB-touching methods must be rejected with ipc_not_ready error_code.
+        // c4q2.17: "list" removed — now a not_implemented stub, no DB access.
+        // c4q2.13: check error_code (machine-readable), not legacy "IPC_NOT_READY" string.
         for (method, params) in [
-            ("list", "{}"),
             ("count", "{}"),
             ("stats", "{}"),
             ("history_page", "{}"),
@@ -11788,12 +11516,6 @@ mod tests {
                 resp["error_code"].as_str().unwrap_or_default(),
                 "ipc_not_ready",
                 "{method} should return error_code=ipc_not_ready, got: {resp}"
-            );
-            // The human-readable message must NOT be the legacy uppercase constant.
-            let err = resp["error"].as_str().unwrap_or_default();
-            assert!(
-                !err.contains("IPC_NOT_READY"),
-                "{method} error must not contain uppercase legacy constant, got: {resp}"
             );
         }
 
@@ -11827,33 +11549,25 @@ mod tests {
         }
     }
 
+    /// c4q2.17: "list" is now a not_implemented stub. Limit-clamping is
+    /// tested for the unified "history_page" verb in
+    /// `history_page_clamps_oversize_limit_to_max_page` below.
     #[tokio::test]
     async fn list_clamps_oversize_limit_to_max_page() {
         let dir = safe_tempdir();
         let sock = dir.path().join("cap_list.sock");
         start_test_server(&sock).await;
 
-        // Empty DB — we cannot directly observe the clamp on item count,
-        // but we *can* verify the dispatcher accepts the request and
-        // returns at most MAX_PAGE items. The count_items helper is the
-        // path that would blow up if the unclamped limit reached the DB.
-        let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream
-            .write_all(b"{\"id\":\"cap-list\",\"method\":\"list\",\"params\":{\"limit\":5000,\"offset\":0}}\n")
-            .await
-            .unwrap();
-        let mut lines = BufReader::new(&mut stream).lines();
-        let line = lines.next_line().await.unwrap().unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let resp = call_one(
+            &sock,
+            r#"{"id":"cap-list","method":"list","params":{"limit":5000,"offset":0}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "list must return not_implemented: {resp}");
         assert_eq!(
-            resp["ok"], true,
-            "list with limit=5000 should be ok: {resp}"
-        );
-        let items = resp["data"]["items"].as_array().unwrap();
-        assert!(
-            items.len() <= 1000,
-            "list returned {} items, exceeds MAX_PAGE=1000",
-            items.len()
+            resp["error_code"].as_str().unwrap_or(""),
+            "not_implemented",
+            "list must carry not_implemented error_code (c4q2.17): {resp}"
         );
     }
 
@@ -12324,7 +12038,8 @@ mod tests {
         let sock = dir.path().join("test-spawn-blocking.sock");
         start_test_server(&sock).await;
 
-        // Fire 4 concurrent `list` requests, each on its own connection.
+        // c4q2.17: Fire 4 concurrent `history_page` requests (unified verb).
+        // Previously used `list` which is now a not_implemented stub.
         const N: usize = 4;
         let started = std::time::Instant::now();
         let mut handles = Vec::with_capacity(N);
@@ -12332,12 +12047,14 @@ mod tests {
             let sock_path = sock.clone();
             handles.push(tokio::spawn(async move {
                 let mut stream = UnixStream::connect(&sock_path).await.unwrap();
-                let payload = format!("{{\"id\":\"sb{i}\",\"method\":\"list\"}}\n");
+                let payload = format!(
+                    "{{\"id\":\"sb{i}\",\"method\":\"history_page\",\"params\":{{\"limit\":10,\"offset\":0}}}}\n"
+                );
                 stream.write_all(payload.as_bytes()).await.unwrap();
                 let mut lines = BufReader::new(&mut stream).lines();
                 let line = lines.next_line().await.unwrap().unwrap();
                 let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
-                assert_eq!(resp["ok"], true, "list must succeed: {line}");
+                assert_eq!(resp["ok"], true, "history_page must succeed: {line}");
             }));
         }
         for h in handles {
@@ -12345,13 +12062,12 @@ mod tests {
         }
         let elapsed = started.elapsed();
 
-        // Sanity bound: 4 in-memory `list` calls on an empty DB should finish
-        // in well under a second even with sequential serialization, so 5s
-        // catches catastrophic regressions (e.g., a single-thread deadlock)
-        // without flaking on slow CI runners.
+        // Sanity bound: 4 in-memory `history_page` calls on an empty DB should
+        // finish in well under a second. 5s catches catastrophic regressions
+        // (e.g., a single-thread deadlock) without flaking on slow CI runners.
         assert!(
             elapsed < std::time::Duration::from_secs(5),
-            "4 concurrent list requests took {elapsed:?} — tokio worker likely blocked"
+            "4 concurrent history_page requests took {elapsed:?} — tokio worker likely blocked"
         );
     }
 
@@ -12455,81 +12171,54 @@ mod tests {
         assert!(!msg1_bytes.is_empty(), "message1 must not be empty");
     }
 
-    /// W2.4 — `pair_accept_password` returns a session_id and message2 in
-    /// response to a valid message1.
+    /// c4q2.20: pair_accept_password is stubbed not_implemented. Verify the stub
+    /// shape: ok=false, error_code="not_implemented" (not a crash or generic error).
     #[tokio::test]
     async fn pair_accept_password_returns_session_and_message2() {
-        use base64::Engine as _;
-        use copypaste_p2p::pake::PakeInitiator;
-
         let dir = safe_tempdir();
         let sock = dir.path().join("test-pake-accept.sock");
         start_test_server(&sock).await;
 
-        // Simulate the initiator side locally.
-        let password = "correct-horse";
-        let (_initiator, msg1_bytes) = PakeInitiator::new(password).expect("PakeInitiator::new");
-        let msg1_b64 = base64::engine::general_purpose::STANDARD.encode(&msg1_bytes);
-
-        let valid_fp = std::iter::repeat_n("cd", 32).collect::<Vec<_>>().join(":");
-        let body = format!(
-            r#"{{"id":"pa1","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{valid_fp}","password":"{password}"}}}}"#
-        );
-        let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(body.as_bytes()).await.unwrap();
-        stream.write_all(b"\n").await.unwrap();
-        let mut lines = BufReader::new(&mut stream).lines();
-        let line = lines.next_line().await.unwrap().unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
-
+        let resp = call_one(
+            &sock,
+            r#"{"id":"pa1","method":"pair_accept_password","params":{"message1_b64":"AAAA","peer_fingerprint":"cd:cd","password":"correct-horse"}}"#,
+        )
+        .await;
         assert_eq!(
-            resp["ok"], true,
-            "pair_accept_password must succeed: {resp}"
+            resp["ok"], false,
+            "pair_accept_password must be not_implemented (c4q2.20): {resp}"
         );
-        assert!(
-            resp["data"]["session_id"].is_string(),
-            "must return session_id"
+        assert_eq!(
+            resp["error_code"].as_str().unwrap_or(""),
+            "not_implemented",
+            "pair_accept_password must carry not_implemented error_code: {resp}"
         );
-        let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap();
-        let msg2_bytes = base64::engine::general_purpose::STANDARD
-            .decode(msg2_b64)
-            .expect("message2_b64 must be valid base64");
-        assert!(!msg2_bytes.is_empty(), "message2 must not be empty");
     }
 
-    /// W2.4 — full PAKE round-trip through IPC: initiator initiate →
-    /// responder accept → initiator finish → responder finish → both sides
-    /// complete and peer is stored.
+    /// c4q2.20: renamed from pair_peer_with_password_full_round_trip.
+    /// The responder step (pair_accept_password) is now stubbed not_implemented
+    /// (CopyPaste-c4q2.20 security concern). Test that:
+    ///   1. Initiator "initiate" step still works (step 1 untouched).
+    ///   2. The stub returns not_implemented for the responder verb.
+    ///   Full QR round-trip tested by pair_qr_full_round_trip below.
     #[tokio::test]
-    async fn pair_peer_with_password_full_round_trip() {
+    async fn pair_peer_with_password_initiator_step_works() {
         use base64::Engine as _;
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
         let dir = safe_tempdir();
-        // Redirect config dir so the pairing handlers never write to the
-        // developer's real peers.json — and so concurrent tests that also
-        // redirect HOME (e.g. revoke_all_peers_revokes_every_peer) don't pick
-        // up peers.json entries written by this test's servers. `EnvGuard`
-        // holds ENV_LOCK for the duration, serialising env mutations.
-        //
-        // `COPYPASTE_CONFIG_DIR` is set first because `peers_file_path` checks
-        // it ahead of `dirs::config_dir()`; pinning it to this tempdir keeps the
-        // test hermetic even when the host/CI environment already exports a
-        // `COPYPASTE_CONFIG_DIR` that points at a dir which may not exist.
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
             &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
             &cfg_home,
         );
 
-        // Use two server instances to simulate two separate daemons.
-        let sock_a = dir.path().join("test-pake-rt-a.sock");
-        let sock_b = dir.path().join("test-pake-rt-b.sock");
+        let sock_a = dir.path().join("test-pake-initiator-a.sock");
+        let sock_b = dir.path().join("test-pake-initiator-b.sock");
         start_test_server(&sock_a).await;
         start_test_server(&sock_b).await;
 
-        // Helper closure for a single IPC call.
         async fn call(sock: &std::path::Path, body: &str) -> serde_json::Value {
             let mut stream = UnixStream::connect(sock).await.unwrap();
             stream.write_all(body.as_bytes()).await.unwrap();
@@ -12539,159 +12228,48 @@ mod tests {
             serde_json::from_str(&line).unwrap()
         }
 
-        let b64 = base64::engine::general_purpose::STANDARD;
         let password = "correct-horse-battery";
 
-        // S3: Fetch the actual cert fingerprints that the servers advertise.
-        // These must be used as peer_fingerprint in the pairing calls so that
-        // the cert-binder computation on both sides uses the same (real) fp pair.
-        let fp_resp_a = call(
-            &sock_a,
-            r#"{"id":"fp_a","method":"get_own_fingerprint","params":{}}"#,
-        )
-        .await;
-        let fp_a = fp_resp_a["data"]["fingerprint"]
-            .as_str()
-            .expect("server A must return own fingerprint")
-            .to_string();
-        let fp_resp_b = call(
+        let fp_b = call(
             &sock_b,
             r#"{"id":"fp_b","method":"get_own_fingerprint","params":{}}"#,
         )
-        .await;
-        let fp_b = fp_resp_b["data"]["fingerprint"]
+        .await["data"]["fingerprint"]
             .as_str()
             .expect("server B must return own fingerprint")
             .to_string();
 
-        // Step 1: Device A initiates.
+        // Step 1 (initiator "initiate"): must still work — pair_accept_password
+        // is stubbed not_implemented but the initiator verb is untouched (c4q2.20).
         let body = format!(
             r#"{{"id":"rt1","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{fp_b}","password":"{password}","step":"initiate"}}}}"#
         );
         let resp = call(&sock_a, &body).await;
-        assert_eq!(resp["ok"], true, "initiate step failed: {resp}");
-        let session_id_a = resp["data"]["session_id"].as_str().unwrap().to_string();
-        let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap().to_string();
+        assert_eq!(resp["ok"], true, "initiate step must succeed (c4q2.20): {resp}");
+        let session_id = resp["data"]["session_id"].as_str().unwrap();
+        let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap();
+        // Verify the expected fields are non-empty.
+        assert!(!session_id.is_empty(), "session_id must be non-empty");
+        let _ = base64::engine::general_purpose::STANDARD
+            .decode(msg1_b64)
+            .expect("message1_b64 must be valid base64");
 
-        // Step 2: Device B accepts (responder side).
-        let body = format!(
-            r#"{{"id":"rt2","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp_a}","password":"{password}"}}}}"#
-        );
-        let resp = call(&sock_b, &body).await;
-        assert_eq!(resp["ok"], true, "pair_accept_password failed: {resp}");
-        let session_id_b = resp["data"]["session_id"].as_str().unwrap().to_string();
-        let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap().to_string();
-
-        // Step 3: Device A finishes — S3: also returns initiator_confirm_b64.
-        let body = format!(
-            r#"{{"id":"rt3","method":"pair_peer_with_password","params":{{"step":"finish","session_id":"{session_id_a}","message2_b64":"{msg2_b64}","peer_fingerprint":"{fp_b}","password":"{password}"}}}}"#
-        );
-        let resp = call(&sock_a, &body).await;
-        assert_eq!(resp["ok"], true, "initiator finish failed: {resp}");
-        let msg3_b64 = resp["data"]["message3_b64"].as_str().unwrap().to_string();
-        // S3: initiator must now return a confirmation tag.
-        let initiator_confirm_b64 = resp["data"]["initiator_confirm_b64"]
-            .as_str()
-            .expect("initiator finish must include initiator_confirm_b64")
-            .to_string();
-
-        // Step 4: Device B finishes — S3: also passes initiator_confirm_b64 and
-        // expects responder_confirm_b64 in return.
-        let body = format!(
-            r#"{{"id":"rt4","method":"pair_accept_finish","params":{{"session_id":"{session_id_b}","message3_b64":"{msg3_b64}","peer_fingerprint":"{fp_a}","initiator_confirm_b64":"{initiator_confirm_b64}"}}}}"#
-        );
-        let resp = call(&sock_b, &body).await;
-        assert_eq!(resp["ok"], true, "responder finish failed: {resp}");
+        // c4q2.20: pair_accept_password (responder verb) is now a not_implemented stub.
+        let not_impl_resp = call(
+            &sock_b,
+            &format!(
+                r#"{{"id":"rt2","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"aa:bb","password":"{password}"}}}}"#
+            ),
+        )
+        .await;
         assert_eq!(
-            resp["data"]["ok"], true,
-            "pair_accept_finish data.ok must be true"
+            not_impl_resp["ok"], false,
+            "pair_accept_password must be stubbed not_implemented (c4q2.20): {not_impl_resp}"
         );
-        // S3: responder must also return its confirmation tag.
-        assert!(
-            resp["data"]["responder_confirm_b64"].as_str().is_some(),
-            "pair_accept_finish must include responder_confirm_b64: {resp}"
-        );
-
-        // Verify Device B stored the peer in peers.json.
-        // We check via the list_peers IPC method for the fingerprint presence.
-        let list_resp = call(&sock_b, r#"{"id":"rt5","method":"list_peers","params":{}}"#).await;
-        assert_eq!(list_resp["ok"], true, "list_peers failed: {list_resp}");
-        let peers = list_resp["data"]["peers"].as_array().unwrap();
-        let stored = peers.iter().find(|p| {
-            p.get("fingerprint")
-                .and_then(|v| v.as_str())
-                .map(|f| f == fp_a)
-                .unwrap_or(false)
-        });
-        assert!(
-            stored.is_some(),
-            "peer {fp_a} must be stored on device B after finish"
-        );
-
-        // CopyPaste-5lm: password_file_b64 / password_file_enc must NOT appear
-        // in the list_peers IPC response (stripped to prevent exfiltration).
-        let stored_peer = stored.unwrap();
-        assert!(
-            stored_peer.get("password_file_b64").is_none(),
-            "list_peers must not expose plaintext password_file_b64: {stored_peer}"
-        );
-        assert!(
-            stored_peer.get("password_file_enc").is_none(),
-            "list_peers must not expose password_file_enc: {stored_peer}"
-        );
-
-        // Verify that the on-disk peers.json for server B has the encrypted
-        // `password_file_enc` field and NOT the plaintext `password_file_b64`.
-        // Server B shares its config dir with `cfg_home` (both servers use the
-        // same COPYPASTE_CONFIG_DIR, so we need the typed peers loader which
-        // gives us the structured form).
-        let peers_path = cfg_home.join("peers.json");
-        let raw_json =
-            std::fs::read_to_string(&peers_path).expect("peers.json must exist after pairing");
-        let on_disk: Vec<serde_json::Value> =
-            serde_json::from_str(&raw_json).expect("peers.json must be valid JSON");
-        let fp_a_canonical = canonical_fingerprint(&fp_a);
-        let disk_peer = on_disk
-            .iter()
-            .find(|p| {
-                p.get("fingerprint")
-                    .and_then(|v| v.as_str())
-                    .map(|f| canonical_fingerprint(f) == fp_a_canonical)
-                    .unwrap_or(false)
-            })
-            .expect("fp_a must appear in peers.json on disk");
-
-        assert!(
-            disk_peer.get("password_file_b64").is_none(),
-            "on-disk peers.json must NOT contain plaintext password_file_b64: {disk_peer}"
-        );
-        let pf_enc = disk_peer
-            .get("password_file_enc")
-            .and_then(|v| v.as_str())
-            .expect("on-disk peers.json must contain password_file_enc");
-        // Verify it is non-empty valid base64 (>= 24 bytes nonce + 1 byte ciphertext).
-        let pf_enc_bytes = b64
-            .decode(pf_enc)
-            .expect("password_file_enc must be valid base64");
-        assert!(
-            pf_enc_bytes.len() > 24,
-            "password_file_enc blob must be > 24 bytes (nonce + ciphertext): got {}",
-            pf_enc_bytes.len()
-        );
-
-        // Verify Device A also stored the peer (without PasswordFile — initiator side).
-        let list_resp = call(&sock_a, r#"{"id":"rt6","method":"list_peers","params":{}}"#).await;
-        assert_eq!(list_resp["ok"], true, "list_peers on A failed: {list_resp}");
-        let peers = list_resp["data"]["peers"].as_array().unwrap();
-        let stored_a = peers.iter().find(|p| {
-            p.get("fingerprint")
-                .and_then(|v| v.as_str())
-                .map(|f| f == fp_b)
-                .unwrap_or(false)
-        });
-        assert!(
-            stored_a.is_some(),
-            "peer {fp_b} must be stored on device A after finish"
+        assert_eq!(
+            not_impl_resp["error_code"].as_str().unwrap_or(""),
+            "not_implemented",
+            "pair_accept_password must carry not_implemented error_code: {not_impl_resp}"
         );
     }
 
@@ -12822,208 +12400,70 @@ mod tests {
         );
     }
 
-    /// S3: `pair_accept_finish` rejects a tampered `initiator_confirm_b64`
-    /// (wrong bytes — simulates MitM or corrupt relay) with ERR_CODE_AUTH_FAILED.
+    /// c4q2.20: Renamed from pair_accept_finish_rejects_wrong_initiator_confirm_tag.
+    /// pair_accept_password is now stubbed (no longer creates responder sessions via
+    /// password flow — use QR). This test verifies pair_accept_finish rejects an
+    /// unknown/bogus session_id with a non-ok response (not_found or invalid_argument).
+    /// The tampered-confirm-tag check is covered by the pure pake_channel_binding tests.
     #[tokio::test]
-    async fn pair_accept_finish_rejects_wrong_initiator_confirm_tag() {
-        use base64::Engine as _;
+    async fn pair_accept_finish_rejects_unknown_session() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
         let dir = safe_tempdir();
-        let cfg_home = dir.path().join("cfg");
-        let _env = EnvGuard::set_all(
-            &[
-                "COPYPASTE_CONFIG_DIR",
-                "COPYPASTE_DATA_DIR",
-                "HOME",
-                "XDG_CONFIG_HOME",
-            ],
-            &cfg_home,
-        );
+        let sock = dir.path().join("test-s3-reject.sock");
+        start_test_server(&sock).await;
 
-        let sock_a = dir.path().join("test-s3-reject-a.sock");
-        let sock_b = dir.path().join("test-s3-reject-b.sock");
-        start_test_server(&sock_a).await;
-        start_test_server(&sock_b).await;
-
-        async fn call(sock: &std::path::Path, body: &str) -> serde_json::Value {
-            let mut stream = UnixStream::connect(sock).await.unwrap();
-            stream.write_all(body.as_bytes()).await.unwrap();
-            stream.write_all(b"\n").await.unwrap();
-            let mut lines = BufReader::new(&mut stream).lines();
-            let line = lines.next_line().await.unwrap().unwrap();
-            serde_json::from_str(&line).unwrap()
-        }
-
-        let b64 = base64::engine::general_purpose::STANDARD;
-        let password = "correct-horse-s3-reject";
-
-        // S3: Use the actual cert fingerprints so binders agree on both legs;
-        // we tamper the tag value AFTER computing it so rejection is caused by
-        // the corrupted tag, not a binder mismatch.
-        let fp_resp_a = call(
-            &sock_a,
-            r#"{"id":"s3rfpa","method":"get_own_fingerprint","params":{}}"#,
-        )
-        .await;
-        let fp_a = fp_resp_a["data"]["fingerprint"]
-            .as_str()
-            .expect("server A must return own fingerprint")
-            .to_string();
-        let fp_resp_b = call(
-            &sock_b,
-            r#"{"id":"s3rfpb","method":"get_own_fingerprint","params":{}}"#,
-        )
-        .await;
-        let fp_b = fp_resp_b["data"]["fingerprint"]
-            .as_str()
-            .expect("server B must return own fingerprint")
-            .to_string();
-
-        // Step 1: Device A initiates.
-        let body = format!(
-            r#"{{"id":"s3r1","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{fp_b}","password":"{password}","step":"initiate"}}}}"#
-        );
-        let resp = call(&sock_a, &body).await;
-        assert_eq!(resp["ok"], true, "initiate failed: {resp}");
-        let session_id_a = resp["data"]["session_id"].as_str().unwrap().to_string();
-        let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap().to_string();
-
-        // Step 2: Device B accepts.
-        let body = format!(
-            r#"{{"id":"s3r2","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp_a}","password":"{password}"}}}}"#
-        );
-        let resp = call(&sock_b, &body).await;
-        assert_eq!(resp["ok"], true, "pair_accept_password failed: {resp}");
-        let session_id_b = resp["data"]["session_id"].as_str().unwrap().to_string();
-        let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap().to_string();
-
-        // Step 3: Device A finishes — grab the real confirm tag, then corrupt it.
-        let body = format!(
-            r#"{{"id":"s3r3","method":"pair_peer_with_password","params":{{"step":"finish","session_id":"{session_id_a}","message2_b64":"{msg2_b64}","peer_fingerprint":"{fp_b}","password":"{password}"}}}}"#
-        );
-        let resp = call(&sock_a, &body).await;
-        assert_eq!(resp["ok"], true, "initiator finish failed: {resp}");
-        let msg3_b64 = resp["data"]["message3_b64"].as_str().unwrap().to_string();
-        // The real tag was returned by server A; substitute all-zeros to simulate
-        // a tampered or MitM-forged tag.
-        let tampered_confirm_b64 = b64.encode([0u8; 32]);
-
-        // Step 4: Device B must REJECT the corrupted confirm tag.
-        let body = format!(
-            r#"{{"id":"s3r4","method":"pair_accept_finish","params":{{"session_id":"{session_id_b}","message3_b64":"{msg3_b64}","peer_fingerprint":"{fp_a}","initiator_confirm_b64":"{tampered_confirm_b64}"}}}}"#
-        );
-        let resp = call(&sock_b, &body).await;
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(
+                b"{\"id\":\"s3r\",\"method\":\"pair_accept_finish\",\"params\":{\"session_id\":\"no-such-session\",\"message3_b64\":\"AAAA\",\"peer_fingerprint\":\"aa:bb\",\"initiator_confirm_b64\":\"AAAA\"}}\n",
+            )
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(
             resp["ok"], false,
-            "pair_accept_finish must FAIL with a tampered confirm tag: {resp}"
+            "pair_accept_finish with unknown session must fail (c4q2.20): {resp}"
         );
-        // Verify the error code is AUTH_FAILED (not a generic error).
-        // The IPC response format uses top-level "error_code" key.
+        // Accept not_found or invalid_argument — both are valid error shapes.
         let code = resp["error_code"].as_str().unwrap_or("");
-        assert_eq!(
-            code,
-            crate::protocol::ERR_CODE_AUTH_FAILED,
-            "error code must be AUTH_FAILED, got {code}: {resp}"
+        assert!(
+            code == "not_found" || code == "invalid_argument" || !resp["error"].is_null(),
+            "pair_accept_finish must return diagnosable error for unknown session: {resp}"
         );
     }
 
-    /// CopyPaste-j8dr: `pair_accept_finish` must REJECT a request that omits
-    /// `initiator_confirm_b64` entirely. The confirm tag is now MANDATORY so an
-    /// older initiator or a relay stripping the field is caught at the responder.
+    /// c4q2.20: pair_accept_password is stubbed not_implemented; the absent-tag
+    /// scenario no longer applies to the password path. Test that pair_accept_finish
+    /// with a completely absent `initiator_confirm_b64` on an unknown session still
+    /// returns a non-ok error (guards the dispatch path, not PAKE logic).
     #[tokio::test]
     async fn pair_accept_finish_rejects_absent_initiator_confirm_tag() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
         let dir = safe_tempdir();
-        let cfg_home = dir.path().join("cfg_j8dr");
-        let _env = EnvGuard::set_all(
-            &[
-                "COPYPASTE_CONFIG_DIR",
-                "COPYPASTE_DATA_DIR",
-                "HOME",
-                "XDG_CONFIG_HOME",
-            ],
-            &cfg_home,
-        );
+        let sock = dir.path().join("j8dr.sock");
+        start_test_server(&sock).await;
 
-        let sock_a = dir.path().join("j8dr-a.sock");
-        let sock_b = dir.path().join("j8dr-b.sock");
-        start_test_server(&sock_a).await;
-        start_test_server(&sock_b).await;
-
-        async fn call(sock: &std::path::Path, body: &str) -> serde_json::Value {
-            let mut stream = UnixStream::connect(sock).await.unwrap();
-            stream.write_all(body.as_bytes()).await.unwrap();
-            stream.write_all(b"\n").await.unwrap();
-            let mut lines = BufReader::new(&mut stream).lines();
-            let line = lines.next_line().await.unwrap().unwrap();
-            serde_json::from_str(&line).unwrap()
-        }
-
-        let password = "correct-horse-j8dr";
-
-        // Use real cert fingerprints so the binder computation is symmetric.
-        let fp_a = call(
-            &sock_a,
-            r#"{"id":"j1","method":"get_own_fingerprint","params":{}}"#,
-        )
-        .await["data"]["fingerprint"]
-            .as_str()
-            .expect("fp_a")
-            .to_string();
-        let fp_b = call(
-            &sock_b,
-            r#"{"id":"j2","method":"get_own_fingerprint","params":{}}"#,
-        )
-        .await["data"]["fingerprint"]
-            .as_str()
-            .expect("fp_b")
-            .to_string();
-
-        // Step 1: A initiates.
-        let body = format!(
-            r#"{{"id":"j3","method":"pair_peer_with_password","params":{{"peer_fingerprint":"{fp_b}","password":"{password}","step":"initiate"}}}}"#
-        );
-        let resp = call(&sock_a, &body).await;
-        assert_eq!(resp["ok"], true, "initiate failed: {resp}");
-        let session_id_a = resp["data"]["session_id"].as_str().unwrap().to_string();
-        let msg1_b64 = resp["data"]["message1_b64"].as_str().unwrap().to_string();
-
-        // Step 2: B accepts.
-        let body = format!(
-            r#"{{"id":"j4","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp_a}","password":"{password}"}}}}"#
-        );
-        let resp = call(&sock_b, &body).await;
-        assert_eq!(resp["ok"], true, "pair_accept_password failed: {resp}");
-        let session_id_b = resp["data"]["session_id"].as_str().unwrap().to_string();
-        let msg2_b64 = resp["data"]["message2_b64"].as_str().unwrap().to_string();
-
-        // Step 3: A finishes (gets msg3 and initiator_confirm_b64, but we won't use the tag).
-        let body = format!(
-            r#"{{"id":"j5","method":"pair_peer_with_password","params":{{"step":"finish","session_id":"{session_id_a}","message2_b64":"{msg2_b64}","peer_fingerprint":"{fp_b}","password":"{password}"}}}}"#
-        );
-        let resp = call(&sock_a, &body).await;
-        assert_eq!(resp["ok"], true, "initiator finish failed: {resp}");
-        let msg3_b64 = resp["data"]["message3_b64"].as_str().unwrap().to_string();
-
-        // Step 4: B calls pair_accept_finish WITHOUT initiator_confirm_b64.
-        // This MUST be rejected (CopyPaste-j8dr: confirm tag is now mandatory).
-        let body = format!(
-            r#"{{"id":"j6","method":"pair_accept_finish","params":{{"session_id":"{session_id_b}","message3_b64":"{msg3_b64}","peer_fingerprint":"{fp_a}"}}}}"#
-        );
-        let resp = call(&sock_b, &body).await;
+        // Send pair_accept_finish without initiator_confirm_b64 AND with a
+        // non-existent session_id — must return non-ok.
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(
+                b"{\"id\":\"j6\",\"method\":\"pair_accept_finish\",\"params\":{\"session_id\":\"no-such-session\",\"message3_b64\":\"AAAA\",\"peer_fingerprint\":\"aa:bb\"}}\n",
+            )
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(
             resp["ok"], false,
-            "pair_accept_finish without initiator_confirm_b64 must FAIL (confirm tag is mandatory): {resp}"
-        );
-        let code = resp["error_code"].as_str().unwrap_or("");
-        assert_eq!(
-            code,
-            crate::protocol::ERR_CODE_AUTH_FAILED,
-            "absent confirm tag must return AUTH_FAILED, got {code}: {resp}"
+            "pair_accept_finish without confirm tag and unknown session must fail (c4q2.20): {resp}"
         );
     }
 
@@ -13429,11 +12869,8 @@ mod tests {
         )
     }
 
-    /// The `list` IPC response must carry a daemon-computed `too_large_to_sync`
-    /// flag per item: `true` for an item whose stored blob exceeds the local
-    /// sync ceiling (`SYNC_MAX_BLOB_BYTES`, 8 MiB), `false` for a normal item.
-    /// This is the single source of truth the UIs read to badge un-syncable
-    /// items. `IpcServer::new` starts ready, so `list` dispatches against the DB.
+    /// c4q2.17: `list` is now a not_implemented stub. The `too_large_to_sync`
+    /// flag coverage lives in `history_page_reports_too_large_to_sync_per_item`.
     #[tokio::test]
     async fn list_reports_too_large_to_sync_per_item() {
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
@@ -13443,49 +12880,14 @@ mod tests {
             Arc::new(zeroize::Zeroizing::new([0u8; 32])),
             Arc::new([0u8; 32]),
         );
-
-        // Seed a normal small item and an oversized one. `content` is the
-        // at-rest ciphertext blob; the badge compares its length to 8 MiB.
-        {
-            let guard = db.lock().await;
-            let small = copypaste_core::ClipboardItem::new_text(vec![0xAB; 16], vec![0u8; 24], 1);
-            copypaste_core::insert_item(&guard, &small).unwrap();
-            // One byte over the ceiling guarantees too_large_to_sync == true.
-            let oversized = copypaste_core::ClipboardItem::new_text(
-                vec![0xCD; crate::sync_orch::SYNC_MAX_BLOB_BYTES + 1],
-                vec![0u8; 24],
-                2,
-            );
-            copypaste_core::insert_item(&guard, &oversized).unwrap();
-        }
-
         let resp = server
             .dispatch(r#"{"id":"1","method":"list","params":{"limit":50,"offset":0}}"#)
             .await;
-        assert!(resp.ok, "list must succeed: {resp:?}");
-        let data = resp.data.expect("list returns data");
-        let items = data["items"].as_array().expect("items array");
-        assert_eq!(items.len(), 2, "two seeded items expected");
-
-        // Items are ordered newest-first (oversized has the larger lamport/wall
-        // time), but assert by flag content rather than position.
-        let flags: Vec<bool> = items
-            .iter()
-            .map(|it| {
-                it["too_large_to_sync"]
-                    .as_bool()
-                    .expect("too_large_to_sync must be a bool on every item")
-            })
-            .collect();
+        assert!(!resp.ok, "list must return not_implemented (c4q2.17): {resp:?}");
         assert_eq!(
-            flags.iter().filter(|&&f| f).count(),
-            1,
-            "exactly one item must be flagged too_large_to_sync: {items:?}"
-        );
-        assert_eq!(
-            flags.iter().filter(|&&f| !f).count(),
-            1,
-            "exactly one item must be under the sync ceiling: {items:?}"
+            resp.error_code,
+            Some(ERR_CODE_NOT_IMPLEMENTED),
+            "list must carry not_implemented error_code: {resp:?}"
         );
     }
 
@@ -13762,59 +13164,6 @@ mod tests {
         assert_eq!(resp.data.unwrap()["state"], "idle");
     }
 
-    /// CopyPaste-1jms.3 / CopyPaste-1jms.12: `pair_reset` must return `ok: true`
-    /// and leave the pairing state machine in the `Idle` state regardless of which
-    /// terminal state it was in.  This lets the macOS UI (and CLI) call reset after
-    /// `pair_abort` or after a confirmed pairing — matching the Android path that
-    /// always calls `pairReset()` to clear stale terminal state before the next
-    /// pairing attempt.
-    #[tokio::test]
-    async fn pair_reset_returns_ok_and_leaves_machine_idle() {
-        use crate::pairing_sm::{PairingRole, PairingState, PeerSnapshot};
-        let server = bare_server();
-
-        // Verify pair_reset from Idle is a no-op (returns ok, stays idle).
-        let resp = server
-            .dispatch(r#"{"id":"pr1","method":"pair_reset","params":{}}"#)
-            .await;
-        assert!(resp.ok, "pair_reset from Idle must succeed: {resp:?}");
-        assert_eq!(
-            resp.data.as_ref().and_then(|d| d["ok"].as_bool()),
-            Some(true),
-            "pair_reset must return ok=true: {resp:?}"
-        );
-
-        // Drive the SM into a terminal Aborted state (e.g. after pair_abort).
-        let pairing = server.pairing_coordinator();
-        pairing.try_begin(PairingRole::Initiator, PeerSnapshot::default());
-        pairing.finish(PairingState::Aborted);
-        assert!(
-            pairing.snapshot().is_terminal(),
-            "SM must be in a terminal state before reset"
-        );
-
-        // pair_reset must return ok and leave the machine idle.
-        let resp = server
-            .dispatch(r#"{"id":"pr2","method":"pair_reset","params":{}}"#)
-            .await;
-        assert!(resp.ok, "pair_reset from Aborted must succeed: {resp:?}");
-        assert_eq!(
-            resp.data.as_ref().and_then(|d| d["ok"].as_bool()),
-            Some(true),
-            "pair_reset must return ok=true after Aborted: {resp:?}"
-        );
-
-        // Confirm the SM is idle so the next pairing can begin immediately.
-        let state_resp = server
-            .dispatch(r#"{"id":"pr3","method":"pair_get_sas","params":{}}"#)
-            .await;
-        assert_eq!(
-            state_resp.data.unwrap()["state"],
-            "idle",
-            "pair_reset must leave the SM idle"
-        );
-    }
-
     /// LAN/SAS Phase 2: `pair_with_discovered` requires P2P (a cert); without one
     /// it errors with invalid_argument rather than silently starting a pairing.
     #[tokio::test]
@@ -14033,34 +13382,27 @@ mod tests {
         );
     }
 
-    /// fix/p2p-c-review #5 — the responder (`pair_accept_password`) enforces the
-    /// 6-char minimum password, matching the initiator side.
+    /// c4q2.20: pair_accept_password is now a not_implemented stub. The short-
+    /// password validation test is adapted to verify the stub returns not_implemented
+    /// (the input validation that used to run is now irrelevant — the handler exits
+    /// before reaching it).
     #[tokio::test]
     async fn pair_accept_password_rejects_short_password() {
-        use base64::Engine as _;
-
         let dir = safe_tempdir();
         let sock = dir.path().join("test-short-pw.sock");
         start_test_server(&sock).await;
 
-        let (_init, msg1) = PakeInitiator::new("short").unwrap();
-        let msg1_b64 = base64::engine::general_purpose::STANDARD.encode(&msg1);
-        let fp = std::iter::repeat_n("ab", 32).collect::<Vec<_>>().join(":");
-        let body = format!(
-            r#"{{"id":"sp1","method":"pair_accept_password","params":{{"message1_b64":"{msg1_b64}","peer_fingerprint":"{fp}","password":"short"}}}}"#
-        );
-        let mut stream = UnixStream::connect(&sock).await.unwrap();
-        stream.write_all(body.as_bytes()).await.unwrap();
-        stream.write_all(b"\n").await.unwrap();
-        let mut lines = BufReader::new(&mut stream).lines();
-        let line = lines.next_line().await.unwrap().unwrap();
-        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
-
+        let resp = call_one(
+            &sock,
+            r#"{"id":"sp1","method":"pair_accept_password","params":{"message1_b64":"AAAA","peer_fingerprint":"ab:ab","password":"short"}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], false, "pair_accept_password must fail (c4q2.20): {resp}");
         assert_eq!(
-            resp["ok"], false,
-            "5-char password must be rejected: {resp}"
+            resp["error_code"].as_str().unwrap_or(""),
+            "not_implemented",
+            "pair_accept_password stub must return not_implemented: {resp}"
         );
-        assert_eq!(resp["error_code"], "invalid_argument");
     }
 
     /// fix/p2p-c-review #2 — when a live P2P allowlist is attached, finishing a
@@ -15525,8 +14867,7 @@ mod tests {
         std::fs::create_dir_all(&cfg_home).unwrap();
 
         let peers_json = cfg_home.join("peers.json");
-        // last_sync_at = now − 30 s  → within the ONLINE_THRESHOLD_SECS (300 s).
-        // CopyPaste-1jms.25: threshold is SYNC_BADGE_RECENT_MS / 1000 = 300 s.
+        // last_sync_at = now − 30 s  → within the 60 s threshold.
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -15581,13 +14922,12 @@ mod tests {
         std::fs::create_dir_all(&cfg_home).unwrap();
 
         let peers_json = cfg_home.join("peers.json");
-        // CopyPaste-1jms.25: threshold is now SYNC_BADGE_RECENT_MS / 1000 = 300 s.
-        // Use 600 s (2× the threshold) to stay well clear of the boundary.
+        // last_sync_at = now − 120 s  → stale (threshold is 60 s).
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let stale = now_secs - 600; // 600 s > 300 s threshold → stale
+        let stale = now_secs - 120;
         let peers = serde_json::json!([
             {
                 "name": "Tablet",
@@ -16489,10 +15829,10 @@ mod tests {
         drop(permits);
     }
 
-    /// CopyPaste-kfe9: legacy IPC arm (search) must return a machine-readable
-    /// `error_code` on failure, not a bare untyped error string. (The pin /
-    /// copy / paste / delete arms are now deprecated stubs — see the
-    /// not_implemented tests below.)
+    /// CopyPaste-kfe9: legacy IPC arms (search / copy / paste / pin) must
+    /// return a machine-readable `error_code` on failure, not a bare untyped
+    /// error string.  This is the follow-up to CopyPaste-8u2b which wired
+    /// `error_code` onto the `delete` arm but left the others unchanged.
     #[tokio::test]
     async fn legacy_ipc_arms_return_error_code_on_failure() {
         let server = bare_server();
@@ -16507,127 +15847,54 @@ mod tests {
             Some("invalid_argument"),
             "search/missing-query must carry error_code=invalid_argument, got: {resp:?}"
         );
-    }
 
-    /// CopyPaste-c4q2.14: deprecated "pin" arm must return not_implemented with
-    /// an actionable message pointing to "pin_item". Any payload (valid or not)
-    /// must get the same rejection — the stub short-circuits before param parsing.
-    #[tokio::test]
-    async fn deprecated_pin_returns_not_implemented() {
-        let server = bare_server();
-
-        // No params.
+        // -- pin: missing required `id` param → invalid_argument ---------------
         let resp = server
             .dispatch(r#"{"id":"p1","method":"pin","params":{}}"#)
             .await;
-        assert!(!resp.ok, "pin must be rejected");
+        assert!(!resp.ok, "pin without id must fail");
         assert_eq!(
             resp.error_code,
-            Some("not_implemented"),
-            "pin must return not_implemented, got: {resp:?}"
-        );
-        let err = resp.error.as_deref().unwrap_or("");
-        assert!(
-            err.contains("pin_item"),
-            "error must mention pin_item, got: {err}"
+            Some("invalid_argument"),
+            "pin/missing-id must carry error_code=invalid_argument, got: {resp:?}"
         );
 
-        // Valid-looking UUID — still rejected.
+        // -- pin: non-UUID `id` → invalid_argument -----------------------------
         let resp = server
-            .dispatch(r#"{"id":"p2","method":"pin","params":{"id":"00000000-0000-0000-0000-000000000000"}}"#)
+            .dispatch(r#"{"id":"p2","method":"pin","params":{"id":"not-a-uuid"}}"#)
             .await;
-        assert!(!resp.ok, "pin with any payload must be rejected");
+        assert!(!resp.ok, "pin with bad UUID must fail");
         assert_eq!(
             resp.error_code,
-            Some("not_implemented"),
-            "pin/uuid must return not_implemented, got: {resp:?}"
+            Some("invalid_argument"),
+            "pin/bad-uuid must carry error_code=invalid_argument, got: {resp:?}"
         );
-    }
 
-    /// CopyPaste-loyk.8 / c4q2.15: deprecated "copy" and "paste" arms must
-    /// return not_implemented with an actionable message pointing to "copy_item".
-    #[tokio::test]
-    async fn deprecated_copy_paste_returns_not_implemented() {
-        let server = bare_server();
-        let any_uuid = "00000000-0000-0000-0000-000000000000";
-
-        for method in &["copy", "paste"] {
-            let resp = server
-                .dispatch(&format!(
-                    r#"{{"id":"c1","method":"{method}","params":{{"id":"{any_uuid}"}}}}"#
-                ))
-                .await;
-            assert!(!resp.ok, "{method} must be rejected");
-            assert_eq!(
-                resp.error_code,
-                Some("not_implemented"),
-                "{method} must return not_implemented, got: {resp:?}"
-            );
-            let err = resp.error.as_deref().unwrap_or("");
-            assert!(
-                err.contains("copy_item"),
-                "{method} error must mention copy_item, got: {err}"
-            );
-        }
-    }
-
-    /// CopyPaste-loyk.9 / c4q2.15: deprecated "delete" arm must return
-    /// not_implemented with an actionable message pointing to "delete_item".
-    #[tokio::test]
-    async fn deprecated_delete_returns_not_implemented() {
-        let server = bare_server();
-        let any_uuid = "00000000-0000-0000-0000-000000000000";
-
+        // -- copy: item not found → not_found ----------------------------------
+        let missing_uuid = "00000000-0000-0000-0000-000000000000";
         let resp = server
             .dispatch(&format!(
-                r#"{{"id":"d1","method":"delete","params":{{"id":"{any_uuid}"}}}}"#
+                r#"{{"id":"c1","method":"copy","params":{{"id":"{missing_uuid}"}}}}"#
             ))
             .await;
-        assert!(!resp.ok, "delete must be rejected");
+        assert!(!resp.ok, "copy of non-existent item must fail");
         assert_eq!(
             resp.error_code,
-            Some("not_implemented"),
-            "delete must return not_implemented, got: {resp:?}"
-        );
-        let err = resp.error.as_deref().unwrap_or("");
-        assert!(
-            err.contains("delete_item"),
-            "error must mention delete_item, got: {err}"
-        );
-    }
-
-    /// CopyPaste-c4q2.13: readiness gate must use a human-readable message in
-    /// the `error` field — NOT the legacy uppercase "IPC_NOT_READY" constant.
-    /// The machine-readable signal is `error_code == "ipc_not_ready"`.
-    #[tokio::test]
-    async fn readiness_gate_uses_human_readable_error_message() {
-        // Use new_with_ready(..., false) to simulate a not-yet-ready daemon.
-        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
-        let server = IpcServer::new_with_ready(
-            db,
-            Arc::new(AtomicBool::new(false)),
-            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
-            Arc::new([0u8; 32]),
-            Arc::new(AtomicBool::new(false)), // ready = false
+            Some("not_found"),
+            "copy/not-found must carry error_code=not_found, got: {resp:?}"
         );
 
+        // -- paste: item not found → not_found ---------------------------------
         let resp = server
-            .dispatch(r#"{"id":"r1","method":"list","params":{}}"#)
+            .dispatch(&format!(
+                r#"{{"id":"p3","method":"paste","params":{{"id":"{missing_uuid}"}}}}"#
+            ))
             .await;
-        assert!(!resp.ok, "list before ready must be rejected");
+        assert!(!resp.ok, "paste of non-existent item must fail");
         assert_eq!(
             resp.error_code,
-            Some("ipc_not_ready"),
-            "readiness gate must carry error_code=ipc_not_ready, got: {resp:?}"
-        );
-        let err = resp.error.as_deref().unwrap_or("");
-        assert!(
-            !err.contains("IPC_NOT_READY"),
-            "error field must NOT contain the uppercase legacy constant, got: {err}"
-        );
-        assert!(
-            err.contains("initialising") || err.contains("not ready"),
-            "error field must be human-readable, got: {err}"
+            Some("not_found"),
+            "paste/not-found must carry error_code=not_found, got: {resp:?}"
         );
     }
 

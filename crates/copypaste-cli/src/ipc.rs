@@ -54,9 +54,7 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 /// (used internally for retry/version-mismatch branching); display code
 /// should prefer `raw_error_code` so future daemon codes remain visible.
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct Response {
-    #[allow(dead_code)]
     pub id: String,
     pub ok: bool,
     pub data: Option<Value>,
