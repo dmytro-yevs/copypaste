@@ -549,6 +549,9 @@
     <string name="setting_test_connection_label">Test connection</string>
     <string name="setting_test_connection_subtitle">Check that the configured sync backend is reachable.</string>
     <string name="btn_test_connection">Test</string>
+    <!-- Toast feedback for Test connection probe (bdac.42) -->
+    <string name="toast_test_connection_ok">Connection OK</string>
+    <string name="toast_test_connection_fail">Connection failed — check URL and network</string>
 
     <!-- CopyPaste-bdac.61: SettingsActivity — Sync tab -->
     <string name="section_sync_diagnostics">Sync Diagnostics</string>

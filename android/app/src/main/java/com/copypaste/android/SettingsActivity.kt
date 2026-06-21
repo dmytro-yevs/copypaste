@@ -705,6 +705,32 @@ fun SettingsScreen(
                         // CopyPaste-dxq2: pass live sync error state.
                         syncError = syncError,
                         syncErrorIsUnauthorized = syncErrorIsUnauthorized,
+                        // CopyPaste-bdac.42: wire test-connection probe (macOS parity).
+                        // Uses RelayClient.health() (GET /health → 200 OK) for the
+                        // relay backend. Relay URL comes from the live draft field so
+                        // the user can test before saving. Supabase health is covered
+                        // by the SyncDiagnosticsCard above; relay is the one without a
+                        // live indicator. Toast shows SUCCESS / DANGER based on the
+                        // HTTP result or network error.
+                        onTestConnection = {
+                            settingsScope.launch(Dispatchers.IO) {
+                                val url = relayUrl.trim().ifBlank { settings.relayUrl }
+                                val ok = runCatching {
+                                    RelayClient(url).health()
+                                }.getOrDefault(false)
+                                if (ok) {
+                                    toastState.show(
+                                        ctx.getString(R.string.toast_test_connection_ok),
+                                        GlassToastKind.SUCCESS,
+                                    )
+                                } else {
+                                    toastState.show(
+                                        ctx.getString(R.string.toast_test_connection_fail),
+                                        GlassToastKind.DANGER,
+                                    )
+                                }
+                            }
+                        },
                     )
                     TAB_NOTIFICATIONS -> NotificationsTab(
                         notifyOnCopy = notifyOnCopy,
