@@ -161,11 +161,11 @@ jobs:
           tool: cargo-audit
 
       - name: cargo audit
-        # --no-fetch uses the advisory-db restored by the cache step above
-        # (keyed on ISO week); on a cache miss we refresh the DB and re-run.
-        # Splitting cache-miss recovery from advisory failure prevents a genuine
-        # advisory hit from being masked by the retry.
-        run: cargo audit --no-fetch || { cargo audit --db-update && cargo audit --no-fetch; }
+        # Plain `cargo audit` fetches/updates the advisory-db into the cached
+        # ~/.cargo/advisory-db (cloning it on a cold cache). The previous
+        # --no-fetch dance failed on an empty cache ("advisory-db/crates: No
+        # such file or directory") because nothing populated the DB first.
+        run: cargo audit
 
   # cargo-deny: license / source / ban / advisory checks on every PR and push
   # to main. Previously gated to the beta branch in ci-matrix.yml; promoted
