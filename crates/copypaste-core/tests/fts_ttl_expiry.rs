@@ -6,7 +6,9 @@
 //! search after expiry" class of bugs: an item whose content was sensitive but
 //! whose TTL has elapsed must be fully invisible, including from FTS queries.
 
-use copypaste_core::{delete_expired, insert_item, search_items, upsert_fts, ClipboardItem, Database};
+use copypaste_core::{
+    delete_expired, insert_item, search_items, upsert_fts, ClipboardItem, Database,
+};
 use tempfile::tempdir;
 
 fn fresh_db() -> (tempfile::TempDir, Database) {
@@ -46,7 +48,10 @@ fn fts_row_removed_when_item_expires_by_ttl() {
     // Trigger TTL expiry with a timestamp far in the future — the item's
     // `expires_at = 1` is less than `now_ms = i64::MAX / 2`, so it should be pruned.
     let pruned = delete_expired(&db, i64::MAX / 2).expect("delete_expired");
-    assert_eq!(pruned, 1, "delete_expired must remove exactly one expired item");
+    assert_eq!(
+        pruned, 1,
+        "delete_expired must remove exactly one expired item"
+    );
 
     // Post-condition: the FTS row must also be gone — the secret is no longer
     // surfaced by search.
@@ -71,7 +76,10 @@ fn pinned_expired_item_fts_row_is_retained() {
     upsert_fts(&db, &id, "pinnedcontent").expect("upsert_fts");
 
     let pruned = delete_expired(&db, i64::MAX / 2).expect("delete_expired");
-    assert_eq!(pruned, 0, "pinned item must not be pruned by delete_expired");
+    assert_eq!(
+        pruned, 0,
+        "pinned item must not be pruned by delete_expired"
+    );
 
     let results = search_items(&db, "pinnedcontent", 10).expect("search");
     assert_eq!(

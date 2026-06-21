@@ -178,13 +178,15 @@ fn five_co_registered_tokens_all_see_pushed_item_xush() {
     }
 
     // Push via the first token.
-    store.push_item(
-        ACCOUNT_INBOX_ID,
-        "text".to_string(),
-        B64.encode(b"hello-5-devices"),
-        2000,
-        10 * 1024 * 1024,
-    ).expect("push");
+    store
+        .push_item(
+            ACCOUNT_INBOX_ID,
+            "text".to_string(),
+            B64.encode(b"hello-5-devices"),
+            2000,
+            10 * 1024 * 1024,
+        )
+        .expect("push");
 
     // Every token must be able to verify and pull.
     for (i, tok) in tokens.iter().enumerate() {
@@ -239,17 +241,29 @@ fn push_to_one_inbox_not_visible_in_others_xush() {
 
     // Push to X's inbox only.
     store
-        .push_item(DEVICE_X, "text".to_string(), B64.encode(b"for-x-only"), 100, 10_000_000)
+        .push_item(
+            DEVICE_X,
+            "text".to_string(),
+            B64.encode(b"for-x-only"),
+            100,
+            10_000_000,
+        )
         .expect("push to X");
 
     // Y's and Z's inboxes must be empty.
     store.verify_token(DEVICE_Y, &tok_y).expect("tok_y valid");
     let y_items = store.pull_items(DEVICE_Y, 0, None, 100).expect("pull Y");
-    assert!(y_items.is_empty(), "device Y inbox must be empty (only X was pushed to)");
+    assert!(
+        y_items.is_empty(),
+        "device Y inbox must be empty (only X was pushed to)"
+    );
 
     store.verify_token(DEVICE_Z, &tok_z).expect("tok_z valid");
     let z_items = store.pull_items(DEVICE_Z, 0, None, 100).expect("pull Z");
-    assert!(z_items.is_empty(), "device Z inbox must be empty (only X was pushed to)");
+    assert!(
+        z_items.is_empty(),
+        "device Z inbox must be empty (only X was pushed to)"
+    );
 
     // X's inbox must have the item.
     store.verify_token(DEVICE_X, &tok_x).expect("tok_x valid");
@@ -264,19 +278,58 @@ fn each_of_three_inboxes_receives_its_own_blob_xush() {
     let mut store = make_store();
 
     let (_tok_x, _) = store
-        .register_device(DEVICE_X.to_string(), "X".to_string(), valid_pub_key(), pop_for(0xDD))
+        .register_device(
+            DEVICE_X.to_string(),
+            "X".to_string(),
+            valid_pub_key(),
+            pop_for(0xDD),
+        )
         .expect("register X");
     let (_tok_y, _) = store
-        .register_device(DEVICE_Y.to_string(), "Y".to_string(), valid_pub_key(), pop_for(0xEE))
+        .register_device(
+            DEVICE_Y.to_string(),
+            "Y".to_string(),
+            valid_pub_key(),
+            pop_for(0xEE),
+        )
         .expect("register Y");
     let (_tok_z, _) = store
-        .register_device(DEVICE_Z.to_string(), "Z".to_string(), valid_pub_key(), pop_for(0xFF))
+        .register_device(
+            DEVICE_Z.to_string(),
+            "Z".to_string(),
+            valid_pub_key(),
+            pop_for(0xFF),
+        )
         .expect("register Z");
 
     // Push a distinct blob to each inbox.
-    store.push_item(DEVICE_X, "text".to_string(), B64.encode(b"blob-x"), 100, 10_000_000).expect("push X");
-    store.push_item(DEVICE_Y, "text".to_string(), B64.encode(b"blob-y"), 200, 10_000_000).expect("push Y");
-    store.push_item(DEVICE_Z, "text".to_string(), B64.encode(b"blob-z"), 300, 10_000_000).expect("push Z");
+    store
+        .push_item(
+            DEVICE_X,
+            "text".to_string(),
+            B64.encode(b"blob-x"),
+            100,
+            10_000_000,
+        )
+        .expect("push X");
+    store
+        .push_item(
+            DEVICE_Y,
+            "text".to_string(),
+            B64.encode(b"blob-y"),
+            200,
+            10_000_000,
+        )
+        .expect("push Y");
+    store
+        .push_item(
+            DEVICE_Z,
+            "text".to_string(),
+            B64.encode(b"blob-z"),
+            300,
+            10_000_000,
+        )
+        .expect("push Z");
 
     let x_items = store.pull_items(DEVICE_X, 0, None, 100).expect("pull X");
     let y_items = store.pull_items(DEVICE_Y, 0, None, 100).expect("pull Y");
@@ -286,7 +339,19 @@ fn each_of_three_inboxes_receives_its_own_blob_xush() {
     assert_eq!(y_items.len(), 1);
     assert_eq!(z_items.len(), 1);
 
-    assert_eq!(x_items[0].content_b64.as_ref(), B64.encode(b"blob-x"), "X sees its blob");
-    assert_eq!(y_items[0].content_b64.as_ref(), B64.encode(b"blob-y"), "Y sees its blob");
-    assert_eq!(z_items[0].content_b64.as_ref(), B64.encode(b"blob-z"), "Z sees its blob");
+    assert_eq!(
+        x_items[0].content_b64.as_ref(),
+        B64.encode(b"blob-x"),
+        "X sees its blob"
+    );
+    assert_eq!(
+        y_items[0].content_b64.as_ref(),
+        B64.encode(b"blob-y"),
+        "Y sees its blob"
+    );
+    assert_eq!(
+        z_items[0].content_b64.as_ref(),
+        B64.encode(b"blob-z"),
+        "Z sees its blob"
+    );
 }

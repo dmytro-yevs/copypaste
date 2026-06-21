@@ -149,7 +149,7 @@ fn parse_time(der: &[u8]) -> Option<u64> {
     let (len, body) = der_decode_length(rest)?;
     let s = std::str::from_utf8(body.get(..len)?).ok()?;
     match tag {
-        0x17 => parse_utc_time(s),       // UTCTime: YYMMDDHHMMSSZ
+        0x17 => parse_utc_time(s),         // UTCTime: YYMMDDHHMMSSZ
         0x18 => parse_generalized_time(s), // GeneralizedTime: YYYYMMDDHHMMSSZ
         _ => None,
     }
@@ -203,10 +203,7 @@ fn parse_generalized_inner(year: u16, rest: &str) -> Option<u64> {
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
     let days_since_epoch = era * 146097 + doe - 719468; // days since 1970-01-01
 
-    let secs = days_since_epoch * 86400
-        + hour as i64 * 3600
-        + min as i64 * 60
-        + sec as i64;
+    let secs = days_since_epoch * 86400 + hour as i64 * 3600 + min as i64 * 60 + sec as i64;
     if secs < 0 {
         return None; // date before Unix epoch
     }
@@ -682,7 +679,10 @@ mod tests {
         assert!(utc_result.is_some(), "UTCTime 300115123045Z must parse");
         // 2024-06-20 00:00:00 UTC as GeneralizedTime.
         let gen_result = parse_generalized_time("20240620000000Z");
-        assert!(gen_result.is_some(), "GeneralizedTime 20240620000000Z must parse");
+        assert!(
+            gen_result.is_some(),
+            "GeneralizedTime 20240620000000Z must parse"
+        );
         // Confirm ordering: 2030 > 2024.
         assert!(
             utc_result.unwrap() > gen_result.unwrap(),

@@ -3677,7 +3677,13 @@ impl IpcServer {
                         .collect();
                     let previews =
                         fetch_text_previews_batch(&*db, &preview_ids).unwrap_or_default();
-                    Ok::<(Vec<copypaste_core::ClipboardItem>, std::collections::HashMap<String, String>), copypaste_core::ItemsError>((items, previews))
+                    Ok::<
+                        (
+                            Vec<copypaste_core::ClipboardItem>,
+                            std::collections::HashMap<String, String>,
+                        ),
+                        copypaste_core::ItemsError,
+                    >((items, previews))
                 })
                 .await;
                 match join {
@@ -3945,9 +3951,7 @@ impl IpcServer {
                             tokio::spawn(async move {
                                 let guard = db_arc2.lock().await;
                                 for id in &ids {
-                                    if let Ok(Some(tombstone)) =
-                                        get_item_by_id(&*guard, id)
-                                    {
+                                    if let Ok(Some(tombstone)) = get_item_by_id(&*guard, id) {
                                         let _ = tx2.send(tombstone);
                                     }
                                 }
@@ -5425,9 +5429,9 @@ impl IpcServer {
                 //     of remaining rows.
                 #[cfg(feature = "cloud-sync")]
                 {
+                    use base64::Engine as _;
                     use copypaste_core::{decrypt_from_cloud, encrypt_for_cloud};
                     use copypaste_supabase::RestClient;
-                    use base64::Engine as _;
 
                     if let Some(old_bytes) = old_key_bytes {
                         match RestClient::from_env() {
@@ -5442,9 +5446,8 @@ impl IpcServer {
                                             let raw = base64::engine::general_purpose::STANDARD
                                                 .decode(old_ct_b64)
                                                 .map_err(|e| format!("base64: {e}"))?;
-                                            let plain =
-                                                decrypt_from_cloud(&old_k, item_id, &raw)
-                                                    .map_err(|e| format!("decrypt: {e}"))?;
+                                            let plain = decrypt_from_cloud(&old_k, item_id, &raw)
+                                                .map_err(|e| format!("decrypt: {e}"))?;
                                             let new_blob =
                                                 encrypt_for_cloud(&new_k, item_id, &plain)
                                                     .map_err(|e| format!("re-encrypt: {e}"))?;
@@ -6130,15 +6133,15 @@ impl IpcServer {
                     // COUNT(*) so the number is consistent with `stats`.
                     let item_count: u64 = db
                         .conn()
-                        .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get::<_, i64>(0))
+                        .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| {
+                            r.get::<_, i64>(0)
+                        })
                         .map(|n| n.max(0) as u64)
                         .unwrap_or(0);
                     // File size from the filesystem — excludes the WAL file so
                     // it matches what a user sees in Finder / du. Returns 0 when
                     // the file doesn't exist yet (fresh install).
-                    let size_bytes: u64 = std::fs::metadata(&db_path)
-                        .map(|m| m.len())
-                        .unwrap_or(0);
+                    let size_bytes: u64 = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
                     (item_count, size_bytes)
                 })
                 .await;
@@ -6164,11 +6167,7 @@ impl IpcServer {
             // already exist (refuses overwrite for safety).
             // ------------------------------------------------------------------
             "db_backup" => {
-                let dest_path = match req
-                    .params
-                    .get("dest_path")
-                    .and_then(|v| v.as_str())
-                {
+                let dest_path = match req.params.get("dest_path").and_then(|v| v.as_str()) {
                     Some(s) if !s.is_empty() => s.to_string(),
                     _ => {
                         return Response::err_with_code(
@@ -6293,11 +6292,7 @@ impl IpcServer {
                     );
                 }
 
-                let src_path = match req
-                    .params
-                    .get("src_path")
-                    .and_then(|v| v.as_str())
-                {
+                let src_path = match req.params.get("src_path").and_then(|v| v.as_str()) {
                     Some(s) if !s.is_empty() => s.to_string(),
                     _ => {
                         return Response::err_with_code(
@@ -6419,9 +6414,7 @@ impl IpcServer {
                     // 6. Ensure the additive audit table exists (matches
                     //    normal startup path).
                     if let Err(e) = ensure_revoked_devices_table(restored.conn()) {
-                        tracing::warn!(
-                            "db_restore: ensure_revoked_devices_table failed: {e}"
-                        );
+                        tracing::warn!("db_restore: ensure_revoked_devices_table failed: {e}");
                     }
 
                     // 7. Swap live handle to the restored DB.
@@ -16374,8 +16367,7 @@ mod tests {
         );
         let resp = call_one(&sock, &body).await;
         assert_eq!(
-            resp["ok"],
-            false,
+            resp["ok"], false,
             "pair_peer must be rejected (unauthenticated pairing is disabled)"
         );
         assert_eq!(
@@ -16410,7 +16402,9 @@ mod tests {
 
         let state = coord.snapshot();
         // Verify the state machine surfaces the fingerprint.
-        let peer_snap = state.peer_snapshot().expect("must have peer snapshot in AwaitingSas");
+        let peer_snap = state
+            .peer_snapshot()
+            .expect("must have peer snapshot in AwaitingSas");
         assert_eq!(
             peer_snap.fingerprint.as_deref(),
             Some("aabbccdd"),
@@ -16473,8 +16467,7 @@ mod tests {
         assert_eq!(
             sentinel_val, expected_after_write,
             "sentinel must stay at our expected count ({}) not the third-party count ({})",
-            expected_after_write,
-            post_stamp_read
+            expected_after_write, post_stamp_read
         );
     }
 
@@ -16518,15 +16511,12 @@ mod tests {
         // Must receive a response (the "request too large" error) rather than
         // a hang. The response may arrive before all bytes are written, so we
         // read with a short timeout.
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(5),
-            lines.next_line(),
-        )
-        .await;
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(5), lines.next_line()).await;
         match result {
             Ok(Ok(Some(line))) => {
-                let v: serde_json::Value = serde_json::from_str(&line)
-                    .expect("response must be valid JSON");
+                let v: serde_json::Value =
+                    serde_json::from_str(&line).expect("response must be valid JSON");
                 assert_eq!(v["ok"], false, "oversized request must return ok=false");
                 let err = v["error"].as_str().unwrap_or("");
                 assert!(
@@ -16589,7 +16579,8 @@ mod tests {
             .dispatch(r#"{"id":"da1","method":"delete_all","params":{}}"#)
             .await;
         assert!(resp.ok, "delete_all must succeed: {resp:?}");
-        let deleted = resp.data
+        let deleted = resp
+            .data
             .as_ref()
             .and_then(|d| d["deleted"].as_u64())
             .expect("delete_all must return {\"deleted\": N}");
@@ -16602,21 +16593,36 @@ mod tests {
             let item_b = copypaste_core::get_item_by_id(&*guard, &id_b).unwrap();
             let item_p = copypaste_core::get_item_by_id(&*guard, &id_pinned).unwrap();
 
-            assert_eq!(item_a.as_ref().map(|i| i.deleted), Some(true),
-                "item A must be tombstoned");
-            assert!(item_a.as_ref().and_then(|i| i.content.as_deref()).is_none(),
-                "item A content must be cleared (tombstone)");
+            assert_eq!(
+                item_a.as_ref().map(|i| i.deleted),
+                Some(true),
+                "item A must be tombstoned"
+            );
+            assert!(
+                item_a.as_ref().and_then(|i| i.content.as_deref()).is_none(),
+                "item A content must be cleared (tombstone)"
+            );
 
-            assert_eq!(item_b.as_ref().map(|i| i.deleted), Some(true),
-                "item B must be tombstoned");
-            assert!(item_b.as_ref().and_then(|i| i.content.as_deref()).is_none(),
-                "item B content must be cleared (tombstone)");
+            assert_eq!(
+                item_b.as_ref().map(|i| i.deleted),
+                Some(true),
+                "item B must be tombstoned"
+            );
+            assert!(
+                item_b.as_ref().and_then(|i| i.content.as_deref()).is_none(),
+                "item B content must be cleared (tombstone)"
+            );
 
             // Pinned item must survive with content intact.
-            assert_eq!(item_p.as_ref().map(|i| i.deleted), Some(false),
-                "pinned item must NOT be deleted");
-            assert!(item_p.as_ref().and_then(|i| i.content.as_deref()).is_some(),
-                "pinned item content must be preserved");
+            assert_eq!(
+                item_p.as_ref().map(|i| i.deleted),
+                Some(false),
+                "pinned item must NOT be deleted"
+            );
+            assert!(
+                item_p.as_ref().and_then(|i| i.content.as_deref()).is_some(),
+                "pinned item content must be preserved"
+            );
         }
     }
 
@@ -16639,9 +16645,7 @@ mod tests {
         start_test_server(&sock).await;
 
         for method in &["cloud_sign_in", "cloud_sign_out"] {
-            let body = format!(
-                r#"{{"id":"c1","method":"{method}","params":{{}}}}"#
-            );
+            let body = format!(r#"{{"id":"c1","method":"{method}","params":{{}}}}"#);
             let resp = call_one(&sock, &body).await;
             assert_eq!(resp["ok"], false, "{method} must return ok=false");
             // Must have an error_code (either not_implemented or invalid_argument
@@ -16705,8 +16709,9 @@ mod tests {
 
         // Decode and verify the new ciphertext decrypts under the NEW key.
         let new_k2 = SyncKey::from_bytes(new_bytes);
-        let new_raw =
-            base64::engine::general_purpose::STANDARD.decode(&new_ct_b64).unwrap();
+        let new_raw = base64::engine::general_purpose::STANDARD
+            .decode(&new_ct_b64)
+            .unwrap();
         let recovered = decrypt_from_cloud(&new_k2, item_id, &new_raw)
             .expect("new ciphertext must decrypt under new key");
         assert_eq!(
@@ -16767,17 +16772,17 @@ mod tests {
         {
             let guard = db.lock().await;
             for _ in 0..3 {
-                let item = copypaste_core::ClipboardItem::new_text(
-                    vec![0xABu8; 16],
-                    vec![0u8; 24],
-                    1,
-                );
+                let item =
+                    copypaste_core::ClipboardItem::new_text(vec![0xABu8; 16], vec![0u8; 24], 1);
                 copypaste_core::insert_item(&guard, &item).unwrap();
             }
         }
 
         let resp = call_one(&sock, r#"{"id":"ds2","method":"db_stats","params":{}}"#).await;
-        assert_eq!(resp["ok"], true, "db_stats must succeed after seeding: {resp}");
+        assert_eq!(
+            resp["ok"], true,
+            "db_stats must succeed after seeding: {resp}"
+        );
         let item_count = resp["data"]["item_count"]
             .as_u64()
             .expect("item_count must be u64");
@@ -16798,11 +16803,7 @@ mod tests {
 
         // Send valid JSON that has an id field but is missing the required
         // `method` field, triggering a serde parse error.
-        let resp = call_one(
-            &sock,
-            r#"{"id":"req-42","not_method":"foo","params":{}}"#,
-        )
-        .await;
+        let resp = call_one(&sock, r#"{"id":"req-42","not_method":"foo","params":{}}"#).await;
         // The response must be an error.
         assert_eq!(resp["ok"], false, "malformed request must fail: {resp}");
         // The id in the response must echo "req-42" (the id from the raw JSON).
@@ -16854,23 +16855,26 @@ mod tests {
             copypaste_core::insert_item(&guard, &img_item).unwrap();
 
             // Text item — must appear in the export.
-            guard.conn().execute(
-                "INSERT INTO clipboard_items \
+            guard
+                .conn()
+                .execute(
+                    "INSERT INTO clipboard_items \
                  (id, item_id, content_type, content, content_nonce, \
                   is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
                  VALUES (?, ?, 'text', ?, ?, 0, 0, 2, 2000000, 2)",
-                rusqlite::params![
-                    uuid::Uuid::new_v4().to_string(),
-                    uuid::Uuid::new_v4().to_string(),
-                    // Zero-key v2 encrypt of "hello".
-                    // We use a raw ciphertext that the zero-key daemon can decrypt;
-                    // since we only care about skipped_non_text count we can test
-                    // with a zero-length ciphertext (decrypt will fail → skipped by
-                    // the decrypt-error path, but image count is independent).
-                    vec![0u8; 1],
-                    vec![0u8; 24],
-                ],
-            ).unwrap();
+                    rusqlite::params![
+                        uuid::Uuid::new_v4().to_string(),
+                        uuid::Uuid::new_v4().to_string(),
+                        // Zero-key v2 encrypt of "hello".
+                        // We use a raw ciphertext that the zero-key daemon can decrypt;
+                        // since we only care about skipped_non_text count we can test
+                        // with a zero-length ciphertext (decrypt will fail → skipped by
+                        // the decrypt-error path, but image count is independent).
+                        vec![0u8; 1],
+                        vec![0u8; 24],
+                    ],
+                )
+                .unwrap();
         }
 
         let resp = call_one(

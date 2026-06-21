@@ -91,7 +91,10 @@ where
                 Err(_cancelled) => {
                     // Task was cancelled — the supervisor is itself being shut
                     // down (its handle was aborted). Exit the loop gracefully.
-                    tracing::debug!(task = name, "supervised task: cancelled; supervisor exiting");
+                    tracing::debug!(
+                        task = name,
+                        "supervised task: cancelled; supervisor exiting"
+                    );
                     return;
                 }
             }

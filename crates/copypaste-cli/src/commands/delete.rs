@@ -144,8 +144,7 @@ mod tests {
                     .ok()
                     .and_then(|v| v["id"].as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| "1".to_string());
-                let resp =
-                    format!(r#"{{"id":"{req_id}","ok":true,"data":{{"deleted":true}}}}"#);
+                let resp = format!(r#"{{"id":"{req_id}","ok":true,"data":{{"deleted":true}}}}"#);
                 stream.write_all(resp.as_bytes()).unwrap();
                 stream.write_all(b"\n").unwrap();
             }

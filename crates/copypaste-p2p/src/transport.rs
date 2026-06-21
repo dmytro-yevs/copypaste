@@ -803,10 +803,7 @@ impl std::fmt::Display for PushError {
 ///
 /// `frame` is any `Bytes`-compatible owned frame (the same payload that
 /// `SinkExt::send` would take on `PeerStream` / `PeerClientStream`).
-pub async fn try_push_frame<S>(
-    sink: &mut S,
-    frame: bytes::Bytes,
-) -> Result<(), PushError>
+pub async fn try_push_frame<S>(sink: &mut S, frame: bytes::Bytes) -> Result<(), PushError>
 where
     S: futures_util::SinkExt<bytes::Bytes, Error = std::io::Error> + Unpin,
 {
@@ -1459,16 +1456,10 @@ mod tests {
         let client_peers = PairedPeers::new();
         client_peers.add(server_fp.clone(), "server-yr00");
 
-        let server_transport = PeerTransport::from_cert(
-            server_cert.cert_der,
-            server_cert.key_der,
-            server_peers,
-        );
-        let client_transport = PeerTransport::from_cert(
-            client_cert.cert_der,
-            client_cert.key_der,
-            client_peers,
-        );
+        let server_transport =
+            PeerTransport::from_cert(server_cert.cert_der, server_cert.key_der, server_peers);
+        let client_transport =
+            PeerTransport::from_cert(client_cert.cert_der, client_cert.key_der, client_peers);
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1551,11 +1542,7 @@ mod tests {
             .expect("first wait() must complete");
 
         // Second wait() must park — no additional permit was stored.
-        let result = tokio::time::timeout(
-            Duration::from_millis(10),
-            notifier.wait(),
-        )
-        .await;
+        let result = tokio::time::timeout(Duration::from_millis(10), notifier.wait()).await;
         assert!(
             result.is_err(),
             "CopyPaste-mip2: burst of notify() calls must collapse to one wakeup"

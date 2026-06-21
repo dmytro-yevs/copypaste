@@ -391,9 +391,7 @@ fn main() {
             force,
             dry_run,
         } => commands::backup::run_restore(&socket, &path, force, dry_run),
-        Commands::ResetDatabase { confirm } => {
-            commands::reset_database::run(&socket, confirm)
-        }
+        Commands::ResetDatabase { confirm } => commands::reset_database::run(&socket, confirm),
         Commands::Device { action } => match action {
             DeviceAction::List => commands::device::run_list(&socket),
             DeviceAction::Revoke { fingerprint, force } => {

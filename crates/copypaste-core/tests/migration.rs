@@ -759,7 +759,10 @@ fn migrate_v11_to_v12_creates_revoked_devices_table() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(name, "Test Device", "revoked_devices table must be fully functional after migration");
+    assert_eq!(
+        name, "Test Device",
+        "revoked_devices table must be fully functional after migration"
+    );
 }
 
 /// v13 (CopyPaste-i6pp): migration purges stale `clipboard_fts` rows for
@@ -918,7 +921,10 @@ fn on_disk_v1_to_current_adds_v5_dedup_indexes() {
         .conn()
         .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(count, 2, "both rows must survive v1→current on-disk migration");
+    assert_eq!(
+        count, 2,
+        "both rows must survive v1→current on-disk migration"
+    );
 }
 
 /// On-disk: v1 plaintext → encrypted → migration adds pinned column (v7).

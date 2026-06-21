@@ -18,9 +18,10 @@ use copypaste_ipc::{Request, Response, ERR_CODE_NOT_FOUND};
 /// JSON `"1"` is a string, not a number.
 #[test]
 fn request_string_id_deserializes() {
-    let wire = r#"{"id":"1","method":"list","params":{"limit":50,"offset":0},"protocol_version":1}"#;
-    let req: Request = serde_json::from_str(wire)
-        .expect("real daemon wire frame must deserialize into Request");
+    let wire =
+        r#"{"id":"1","method":"list","params":{"limit":50,"offset":0},"protocol_version":1}"#;
+    let req: Request =
+        serde_json::from_str(wire).expect("real daemon wire frame must deserialize into Request");
     assert_eq!(req.id, "1", "id must round-trip as string '1'");
     assert_eq!(req.method, "list");
     assert_eq!(req.protocol_version, 1);
@@ -34,10 +35,13 @@ fn request_string_id_deserializes() {
 /// `serde_json::Value` to verify the wire shape without that constraint.
 #[test]
 fn response_string_id_wire_shape() {
-    let wire =
-        r#"{"id":"42","ok":true,"data":{"items":[],"total":0},"protocol_version":1}"#;
+    let wire = r#"{"id":"42","ok":true,"data":{"items":[],"total":0},"protocol_version":1}"#;
     let v: serde_json::Value = serde_json::from_str(wire).expect("parse wire frame");
-    assert_eq!(v["id"].as_str(), Some("42"), "id must be a JSON string on the wire");
+    assert_eq!(
+        v["id"].as_str(),
+        Some("42"),
+        "id must be a JSON string on the wire"
+    );
     assert!(v["id"].as_u64().is_none(), "id must NOT be a JSON number");
     assert_eq!(v["ok"].as_bool(), Some(true));
     assert_eq!(v["protocol_version"].as_u64(), Some(1));
@@ -132,8 +136,7 @@ fn typed_request_matches_daemon_wire_shape() {
     });
 
     // Parse both into Values for order-insensitive comparison.
-    let typed_val: serde_json::Value =
-        serde_json::from_str(&typed_json).expect("parse typed json");
+    let typed_val: serde_json::Value = serde_json::from_str(&typed_json).expect("parse typed json");
     assert_eq!(
         typed_val["id"], daemon_style["id"],
         "id field must be a JSON string in both typed struct and daemon wire"

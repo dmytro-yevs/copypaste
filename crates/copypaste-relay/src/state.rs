@@ -1309,8 +1309,7 @@ impl RelayStore {
             let mut ids_to_prune: Vec<i64> = inbox.iter().map(|it| it.id).collect();
             ids_to_prune.sort_unstable();
             ids_to_prune.truncate(n);
-            let prune_set: std::collections::HashSet<i64> =
-                ids_to_prune.into_iter().collect();
+            let prune_set: std::collections::HashSet<i64> = ids_to_prune.into_iter().collect();
             inbox.retain(|it| !prune_set.contains(&it.id));
             n
         } else {
@@ -2570,11 +2569,7 @@ mod tests {
         // The server assigned id_first=1, id_attacker=2, id_third=3.
         // Eviction by id_ASC must remove id_first (smallest id = earliest arrival).
         // id_attacker and id_third must remain.
-        assert_eq!(
-            remaining.len(),
-            2,
-            "inbox must be at cap after overflow"
-        );
+        assert_eq!(remaining.len(), 2, "inbox must be at cap after overflow");
         assert!(
             !remaining.contains(&id_first),
             "CopyPaste-1uqb: the earliest-arrived item (id={id_first}) must be evicted"
@@ -2995,12 +2990,7 @@ mod tests {
     fn sse_receiver_count_tracks_live_subscriptions() {
         let mut store = make_store();
         store
-            .register_device(
-                device_a_id(),
-                "A".into(),
-                valid_key_b64(),
-                valid_pop_b64(),
-            )
+            .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
             .unwrap();
 
         assert_eq!(
@@ -3069,12 +3059,7 @@ mod tests {
         let last_id_a = {
             let mut store = RelayStore::new_persistent(3600, 500, &db_path).unwrap();
             store
-                .register_device(
-                    device_a_id(),
-                    "A".into(),
-                    valid_key_b64(),
-                    valid_pop_b64(),
-                )
+                .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
                 .unwrap();
             push_text(&mut store, &device_a_id(), 10); // id=1
             push_text(&mut store, &device_a_id(), 20); // id=2
@@ -3089,10 +3074,12 @@ mod tests {
             push_text(&mut store, &device_a_id(), 40) // must be id=4
         };
         assert_eq!(
-            first_id_b, 4,
+            first_id_b,
+            4,
             "CopyPaste-hf40: after restart the first new push must get id={} (continuation), \
              not 1 (restart from scratch); got {}",
-            last_id_a + 1, first_id_b
+            last_id_a + 1,
+            first_id_b
         );
 
         // Clean up.

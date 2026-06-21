@@ -535,7 +535,7 @@ mod tests {
         );
     }
 
-        /// CopyPaste-elk5: the degraded reason must NOT appear in the table output
+    /// CopyPaste-elk5: the degraded reason must NOT appear in the table output
     /// sent to stdout. It is a diagnostic and belongs on stderr. We verify that
     /// the table-output lines constructed by `print_report` for a degraded
     /// report do NOT include a "Degraded:" line (which was previously on stdout).

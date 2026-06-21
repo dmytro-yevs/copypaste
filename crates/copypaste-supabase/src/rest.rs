@@ -702,7 +702,11 @@ mod tests {
             .expect("reencrypt should succeed");
 
         let seen = seen_ids.into_inner().unwrap();
-        assert_eq!(seen.len(), 1, "closure called once (tombstone must be skipped)");
+        assert_eq!(
+            seen.len(),
+            1,
+            "closure called once (tombstone must be skipped)"
+        );
         assert_eq!(
             seen[0], expected_item_id,
             "closure must receive the live row's item_id for AAD binding (CopyPaste-vvsf)"

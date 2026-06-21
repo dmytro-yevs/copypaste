@@ -1263,7 +1263,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                         .build()
                         .expect(
                             "reqwest Client::builder().timeout().build() \
-                             must succeed — platform TLS unavailable"
+                             must succeed — platform TLS unavailable",
                         )
                 });
             // CopyPaste-7ub: wire the self-write sentinel so relay auto-apply

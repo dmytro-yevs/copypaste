@@ -1099,7 +1099,8 @@ mod tests {
     fn db_restore_request_defaults_confirm_false() {
         // An empty params object must parse with confirm = false so a caller who
         // forgets the flag is rejected rather than silently replacing the DB.
-        let req: DbRestoreRequest = serde_json::from_str(r#"{"src_path": "/tmp/b.db.enc"}"#).unwrap();
+        let req: DbRestoreRequest =
+            serde_json::from_str(r#"{"src_path": "/tmp/b.db.enc"}"#).unwrap();
         assert!(!req.confirm, "confirm must default to false");
         assert!(!req.force, "force must default to false");
     }
@@ -1120,7 +1121,10 @@ mod tests {
 
     #[test]
     fn db_restore_response_roundtrip() {
-        let resp = DbRestoreResponse { ok: true, ready: true };
+        let resp = DbRestoreResponse {
+            ok: true,
+            ready: true,
+        };
         let s = serde_json::to_string(&resp).unwrap();
         let back: DbRestoreResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);

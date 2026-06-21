@@ -178,6 +178,14 @@ fn confirm_tag_has_correct_length_ian9() {
     let tag_i = channel_confirmation_tag(&bound_key, ConfirmRole::Initiator);
     let tag_r = channel_confirmation_tag(&bound_key, ConfirmRole::Responder);
 
-    assert_eq!(tag_i.len(), CONFIRM_TAG_LEN, "initiator tag must be CONFIRM_TAG_LEN bytes");
-    assert_eq!(tag_r.len(), CONFIRM_TAG_LEN, "responder tag must be CONFIRM_TAG_LEN bytes");
+    assert_eq!(
+        tag_i.len(),
+        CONFIRM_TAG_LEN,
+        "initiator tag must be CONFIRM_TAG_LEN bytes"
+    );
+    assert_eq!(
+        tag_r.len(),
+        CONFIRM_TAG_LEN,
+        "responder tag must be CONFIRM_TAG_LEN bytes"
+    );
 }

@@ -37,12 +37,8 @@ pub fn run(socket_path: &Path, ids: &[String]) -> Result<()> {
         ));
     }
 
-    let mut client = IpcClient::connect(socket_path).with_context(|| {
-        format!(
-            "daemon is not running (socket: {})",
-            socket_path.display()
-        )
-    })?;
+    let mut client = IpcClient::connect(socket_path)
+        .with_context(|| format!("daemon is not running (socket: {})", socket_path.display()))?;
 
     let req = IpcClient::build_request(
         &IpcClient::next_id(),

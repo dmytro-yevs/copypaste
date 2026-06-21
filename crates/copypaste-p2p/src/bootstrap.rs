@@ -2663,8 +2663,12 @@ mod tests {
         });
 
         let (resp_res, init_res) = tokio::join!(responder_task, initiator_task);
-        let resp = resp_res.expect("responder join").expect("responder pairing");
-        let init = init_res.expect("initiator join").expect("initiator pairing");
+        let resp = resp_res
+            .expect("responder join")
+            .expect("responder pairing");
+        let init = init_res
+            .expect("initiator join")
+            .expect("initiator pairing");
 
         // The fingerprint the responder's confirm callback saw MUST be the
         // initiator's TLS cert fingerprint.

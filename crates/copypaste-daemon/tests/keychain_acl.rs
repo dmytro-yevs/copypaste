@@ -506,9 +506,9 @@ fn this_device_only_protection_mode_constant_exists() {
     // Use std::mem::discriminant or just construct both and compare sizes.
     // The simplest compile-time proof: the variant exists AND is syntactically
     // distinct from `AccessibleWhenUnlocked`.
-    let _ = ProtectionMode::AccessibleWhenUnlocked;  // must also compile
-    // Both variants must be available, and the "ThisDeviceOnly" one must be
-    // distinct — verified by having two separate `let` bindings with different
-    // names, forcing the compiler to resolve them independently.
+    let _ = ProtectionMode::AccessibleWhenUnlocked; // must also compile
+                                                    // Both variants must be available, and the "ThisDeviceOnly" one must be
+                                                    // distinct — verified by having two separate `let` bindings with different
+                                                    // names, forcing the compiler to resolve them independently.
     let _ = mode; // suppress unused-variable warning
 }

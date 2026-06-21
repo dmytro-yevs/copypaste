@@ -85,12 +85,8 @@ fn encode_b64(data: &[u8]) -> String {
 /// Get a media item (image or file) by ID and print its base64 data-URI to
 /// stdout, or save the decoded bytes to `output_path` when provided.
 pub fn run_get(socket_path: &Path, id: &str, output_path: Option<&str>) -> Result<()> {
-    let mut client = IpcClient::connect(socket_path).with_context(|| {
-        format!(
-            "daemon is not running (socket: {})",
-            socket_path.display()
-        )
-    })?;
+    let mut client = IpcClient::connect(socket_path)
+        .with_context(|| format!("daemon is not running (socket: {})", socket_path.display()))?;
 
     // Try image first; fall through to file if that fails.
     let img_req = IpcClient::build_request(
@@ -165,7 +161,8 @@ fn save_or_print_data_uri(data_uri: &str, output_path: Option<&str>, id: &str) -
                 .find(',')
                 .map(|pos| &data_uri[pos + 1..])
                 .ok_or_else(|| anyhow!("unexpected data-URI format from daemon"))?;
-            let bytes = decode_b64(b64).context("failed to decode base64 image payload from daemon")?;
+            let bytes =
+                decode_b64(b64).context("failed to decode base64 image payload from daemon")?;
             std::fs::write(path, &bytes)
                 .with_context(|| format!("failed to write image to {path}"))?;
             eprintln!("Saved item {id} ({} bytes) to {path}", bytes.len());
@@ -203,10 +200,13 @@ mod tests {
         // A URI without a comma separator must return an error WHEN saving to
         // a file (the decode path is only exercised when output_path is Some).
         let tmp_dir = tempfile::tempdir().unwrap();
-        let out_path = tmp_dir.path().join("out.png").to_string_lossy().into_owned();
-        let err =
-            save_or_print_data_uri("data:image/png;base64nOcomma", Some(&out_path), "id1")
-                .unwrap_err();
+        let out_path = tmp_dir
+            .path()
+            .join("out.png")
+            .to_string_lossy()
+            .into_owned();
+        let err = save_or_print_data_uri("data:image/png;base64nOcomma", Some(&out_path), "id1")
+            .unwrap_err();
         assert!(
             err.to_string().contains("data-URI format"),
             "expected format error, got: {err}"

@@ -64,7 +64,7 @@ pub use cert::{fingerprint_of, CertError, SelfSignedCert};
 pub use transport::{
     tls_channel_binder_client, tls_channel_binder_server, try_push_frame, DeviceFingerprint,
     PairedPeers, PeerClientStream, PeerStream, PeerTransport, PushError, PushNotifier,
-    TransportError, TLS_CHANNEL_BINDING_LABEL, PEER_SEND_TIMEOUT,
+    TransportError, PEER_SEND_TIMEOUT, TLS_CHANNEL_BINDING_LABEL,
 };
 
 // Convenient top-level re-exports — mDNS-SD discovery.

@@ -32,7 +32,7 @@ use serde_json::json;
 
 fn build_ping_request() -> Request {
     Request {
-        id: 1,
+        id: "1".to_string(),
         method: "ping".into(),
         params: serde_json::Value::Null,
         protocol_version: PROTOCOL_VERSION,
@@ -40,12 +40,12 @@ fn build_ping_request() -> Request {
 }
 
 fn build_ping_response() -> Response {
-    Response::ok(1, json!({"pong": true}))
+    Response::ok("1".to_string(), json!({"pong": true}))
 }
 
 fn build_history_list_request(limit: u64) -> Request {
     Request {
-        id: 42,
+        id: "42".to_string(),
         method: "list".into(),
         params: json!({"limit": limit, "offset": 0}),
         protocol_version: PROTOCOL_VERSION,
@@ -66,7 +66,7 @@ fn build_history_list_response(rows: usize) -> Response {
             })
         })
         .collect();
-    Response::ok(42, json!({"items": items, "total": rows}))
+    Response::ok("42".to_string(), json!({"items": items, "total": rows}))
 }
 
 fn build_import_request(n: usize) -> Request {
@@ -84,7 +84,7 @@ fn build_import_request(n: usize) -> Request {
         })
         .collect();
     Request {
-        id: 99,
+        id: "99".to_string(),
         method: "import".into(),
         params: json!({"items": items, "dedup": true}),
         protocol_version: PROTOCOL_VERSION,
@@ -92,7 +92,10 @@ fn build_import_request(n: usize) -> Request {
 }
 
 fn build_import_response(inserted: usize, skipped: usize) -> Response {
-    Response::ok(99, json!({"inserted": inserted, "skipped": skipped}))
+    Response::ok(
+        "99".to_string(),
+        json!({"inserted": inserted, "skipped": skipped}),
+    )
 }
 
 // ---------------------------------------------------------------------------

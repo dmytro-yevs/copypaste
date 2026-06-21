@@ -2263,10 +2263,7 @@ async fn standing_pairing_responder_loop(
             };
             async move {
                 // Single active pairing: if the coordinator is busy, reject.
-                if !coordinator.try_begin(
-                    crate::pairing_sm::PairingRole::Responder,
-                    snap.clone(),
-                ) {
+                if !coordinator.try_begin(crate::pairing_sm::PairingRole::Responder, snap.clone()) {
                     tracing::warn!("LAN/SAS: inbound pairing rejected — another pairing active");
                     return false;
                 }

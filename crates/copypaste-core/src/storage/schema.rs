@@ -1126,7 +1126,10 @@ mod tests {
         let fts: i64 = conn
             .query_row("SELECT COUNT(*) FROM clipboard_fts", [], |r| r.get(0))
             .unwrap();
-        assert_eq!(fts, 1, "non-sensitive FTS row must survive a no-op v13 migration");
+        assert_eq!(
+            fts, 1,
+            "non-sensitive FTS row must survive a no-op v13 migration"
+        );
 
         let uv: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))

@@ -112,8 +112,8 @@ pub(crate) fn build_restore_args(backup_path: &str, force: bool, dry_run: bool) 
 ///
 /// (CopyPaste-x94p)
 pub fn run_backup(socket_path: &Path, output: Option<&str>, dry_run: bool) -> Result<()> {
-    use crate::ipc::IpcClient;
     use crate::commands::common::exit_on_err;
+    use crate::ipc::IpcClient;
 
     // Compute a timestamped destination path (Unix epoch seconds — unique
     // enough for a backup filename and does not require chrono/time deps).
@@ -171,8 +171,8 @@ pub fn run_restore(
     force: bool,
     dry_run: bool,
 ) -> Result<()> {
-    use crate::ipc::IpcClient;
     use crate::commands::common::exit_on_err;
+    use crate::ipc::IpcClient;
 
     // Reject paths that look like flags (leading `--`) to prevent accidental
     // argument confusion. A real backup path will never start with `--`.

@@ -2473,7 +2473,11 @@ mod tests {
         assert_eq!(results[0].content_type, "text");
 
         let results_image = search_items_filtered(&db, "shared", 10, Some("image")).unwrap();
-        assert_eq!(results_image.len(), 1, "image filter must find only image items");
+        assert_eq!(
+            results_image.len(),
+            1,
+            "image filter must find only image items"
+        );
         assert_eq!(results_image[0].content_type, "image");
     }
 

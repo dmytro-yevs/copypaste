@@ -539,13 +539,12 @@ impl ClipboardMonitor {
                     // a separate feature).  The plist array contains plain
                     // absolute POSIX paths — no "file://" scheme, no percent
                     // encoding — so the path is used directly.
-                    let file_path_from_filenames: Option<std::path::PathBuf> =
-                        if file_path_from_url.is_none() {
-                            let maybe_bytes: Option<Vec<u8>> = unsafe {
-                                pb.dataForType(filenames_type)
-                                    .map(|d| d.bytes().to_vec())
-                            };
-                            maybe_bytes.and_then(|bytes| {
+                    let file_path_from_filenames: Option<std::path::PathBuf> = if file_path_from_url
+                        .is_none()
+                    {
+                        let maybe_bytes: Option<Vec<u8>> =
+                            unsafe { pb.dataForType(filenames_type).map(|d| d.bytes().to_vec()) };
+                        maybe_bytes.and_then(|bytes| {
                                 match plist::from_bytes::<Vec<String>>(&bytes) {
                                     Ok(paths) => {
                                         // Take the first path that is absolute.
@@ -571,9 +570,9 @@ impl ClipboardMonitor {
                                     }
                                 }
                             })
-                        } else {
-                            None
-                        };
+                    } else {
+                        None
+                    };
 
                     let resolved_path = file_path_from_url.or(file_path_from_filenames);
                     resolved_path.map(|path| {
@@ -927,8 +926,7 @@ mod tests {
         plist::to_writer_binary(&mut buf, &paths).expect("plist encode must not fail");
 
         // Now parse it the same way the production clipboard path does.
-        let recovered: Vec<String> =
-            plist::from_bytes(&buf).expect("plist decode must not fail");
+        let recovered: Vec<String> = plist::from_bytes(&buf).expect("plist decode must not fail");
 
         assert_eq!(recovered.len(), 2, "should recover both paths");
         assert_eq!(recovered[0], "/Users/alice/Documents/report.pdf");

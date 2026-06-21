@@ -141,10 +141,12 @@ mod tests {
         let back: Request = serde_json::from_str(&s).unwrap();
         assert_eq!(req, back);
         // id must be serialised as a JSON string, not a number
-        assert!(s.contains(r#""id":"42""#), "id must be JSON string, got: {s}");
+        assert!(
+            s.contains(r#""id":"42""#),
+            "id must be JSON string, got: {s}"
+        );
         // params default applies when absent on the wire (string id)
-        let minimal: Request =
-            serde_json::from_str(r#"{"id":"7","method":"ping"}"#).unwrap();
+        let minimal: Request = serde_json::from_str(r#"{"id":"7","method":"ping"}"#).unwrap();
         assert_eq!(minimal.id, "7");
         assert_eq!(minimal.method, "ping");
         assert_eq!(minimal.params, serde_json::Value::Null);

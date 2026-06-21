@@ -254,7 +254,10 @@ mod tests {
         use crate::commands::clear::ABORT_EXIT_CODE;
         assert_ne!(USAGE_EXIT_CODE, 0, "must not be success");
         assert_ne!(USAGE_EXIT_CODE, 1, "must not be generic error");
-        assert_ne!(USAGE_EXIT_CODE, ABORT_EXIT_CODE, "must not collide with clear abort");
+        assert_ne!(
+            USAGE_EXIT_CODE, ABORT_EXIT_CODE,
+            "must not collide with clear abort"
+        );
     }
 
     // ── Unit: index validation ──────────────────────────────────────────
@@ -476,7 +479,9 @@ mod tests {
                     .ok()
                     .and_then(|v| v["id"].as_str().map(|s| s.to_string()))
                     .unwrap_or_else(|| "1".to_string());
-                let resp = format!(r#"{{"id":"{req_id}","ok":true,"data":{{"id":"test-uuid","found":true}}}}"#);
+                let resp = format!(
+                    r#"{{"id":"{req_id}","ok":true,"data":{{"id":"test-uuid","found":true}}}}"#
+                );
                 stream.write_all(resp.as_bytes()).unwrap();
                 stream.write_all(b"\n").unwrap();
             }
@@ -485,7 +490,8 @@ mod tests {
         let _ = cmd_copy_by_id(&sock, "test-uuid");
 
         let raw = captured.lock().unwrap().clone().unwrap_or_default();
-        let v: serde_json::Value = serde_json::from_str(&raw).expect("captured request must be JSON");
+        let v: serde_json::Value =
+            serde_json::from_str(&raw).expect("captured request must be JSON");
         assert_eq!(
             v["method"].as_str(),
             Some("copy_item"),

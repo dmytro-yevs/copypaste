@@ -399,7 +399,9 @@ mod tests {
             self.0.lock().unwrap().extend_from_slice(data);
             Ok(data.len())
         }
-        fn flush(&mut self) -> io::Result<()> { Ok(()) }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
     }
 
     // MakeWriter impl that clones the Arc on each call.
@@ -414,10 +416,7 @@ mod tests {
 
     fn make_scrub_writer_into_vec(
         scrubber: Arc<PiiScrubber>,
-    ) -> (
-        impl io::Write,
-        Arc<std::sync::Mutex<Vec<u8>>>,
-    ) {
+    ) -> (impl io::Write, Arc<std::sync::Mutex<Vec<u8>>>) {
         let buf = Arc::new(std::sync::Mutex::new(Vec::<u8>::new()));
         let factory = SharedBufMakeWriterFactory(Arc::clone(&buf));
         let scrub = ScrubMakeWriter::new(factory, scrubber);
@@ -432,7 +431,8 @@ mod tests {
         use std::io::Write as _;
         let scrubber = Arc::new(PiiScrubber::default());
         let (mut w, buf) = make_scrub_writer_into_vec(scrubber);
-        w.write_all(b"error: user alice@example.com failed\n").unwrap();
+        w.write_all(b"error: user alice@example.com failed\n")
+            .unwrap();
         let written = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
         assert!(
             !written.contains("alice@example.com"),

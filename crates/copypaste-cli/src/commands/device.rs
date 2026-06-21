@@ -23,12 +23,8 @@ use crate::ipc::IpcClient;
 
 /// List all currently paired devices (peers).
 pub fn run_list(socket_path: &Path) -> Result<()> {
-    let mut client = IpcClient::connect(socket_path).with_context(|| {
-        format!(
-            "daemon is not running (socket: {})",
-            socket_path.display()
-        )
-    })?;
+    let mut client = IpcClient::connect(socket_path)
+        .with_context(|| format!("daemon is not running (socket: {})", socket_path.display()))?;
 
     let req = IpcClient::build_request(
         &IpcClient::next_id(),
@@ -59,9 +55,7 @@ pub fn run_list(socket_path: &Path) -> Result<()> {
             .as_str()
             .or_else(|| peer["name"].as_str())
             .unwrap_or("(unknown)");
-        let fp = peer["fingerprint"]
-            .as_str()
-            .unwrap_or("?");
+        let fp = peer["fingerprint"].as_str().unwrap_or("?");
         let online = peer["online"].as_bool().unwrap_or(false);
         let status = if online { "online" } else { "offline" };
         println!("{:<20} {:<48} {:<10}", name, fp, status);
@@ -87,12 +81,8 @@ pub fn run_revoke(socket_path: &Path, fingerprint: &str, force: bool) -> Result<
         }
     }
 
-    let mut client = IpcClient::connect(socket_path).with_context(|| {
-        format!(
-            "daemon is not running (socket: {})",
-            socket_path.display()
-        )
-    })?;
+    let mut client = IpcClient::connect(socket_path)
+        .with_context(|| format!("daemon is not running (socket: {})", socket_path.display()))?;
 
     let req = IpcClient::build_request(
         &IpcClient::next_id(),
@@ -132,12 +122,8 @@ pub fn run_revoke_all(socket_path: &Path, force: bool) -> Result<()> {
         }
     }
 
-    let mut client = IpcClient::connect(socket_path).with_context(|| {
-        format!(
-            "daemon is not running (socket: {})",
-            socket_path.display()
-        )
-    })?;
+    let mut client = IpcClient::connect(socket_path)
+        .with_context(|| format!("daemon is not running (socket: {})", socket_path.display()))?;
 
     let req = IpcClient::build_request(
         &IpcClient::next_id(),
