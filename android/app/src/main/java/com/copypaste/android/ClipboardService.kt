@@ -19,7 +19,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
-import android.view.SoundEffectConstants
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.ui.graphics.toArgb
@@ -1553,7 +1552,23 @@ class ClipboardService : Service() {
                 .setTimeoutAfter(2_000L)
                 .setOnlyAlertOnce(true)
                 .build()
-            NotificationManagerCompat.from(context).notify(NOTIF_ID_COPY_EVENT, notification)
+            // POST_NOTIFICATIONS is revocable on API 33+. Guard with explicit
+            // checkSelfPermission so lint is satisfied; also catch SecurityException
+            // as a belt-and-suspenders fallback (notification miss is non-fatal).
+            val canNotify = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                androidx.core.content.ContextCompat.checkSelfPermission(
+                    context, android.Manifest.permission.POST_NOTIFICATIONS,
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+            if (canNotify) {
+                try {
+                    NotificationManagerCompat.from(context).notify(NOTIF_ID_COPY_EVENT, notification)
+                } catch (se: SecurityException) {
+                    Log.w(TAG, "postCopyNotification: permission revoked mid-flight (non-fatal): ${se.message}")
+                }
+            }
         }
 
         /**
@@ -1567,7 +1582,9 @@ class ClipboardService : Service() {
         fun playCopySound(context: Context) {
             try {
                 val am = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                am.playSoundEffect(SoundEffectConstants.CLICK, -1f)
+                // AudioManager.playSoundEffect requires an AudioManager.FX_* constant;
+                // FX_KEY_CLICK is the closest equivalent to a UI tap feedback sound.
+                am.playSoundEffect(AudioManager.FX_KEY_CLICK, -1f)
             } catch (e: Exception) {
                 Log.d(TAG, "playCopySound failed (non-fatal): ${e.message}")
             }

@@ -2,6 +2,7 @@
 
 package com.copypaste.android.ui.theme
 
+import androidx.annotation.RequiresApi
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -220,6 +221,8 @@ val GLASS_BLUR_RADIUS = GlassTier.GLASS.blur
  * the web value (1.45) maps to a CSS backdrop-filter which operates differently.
  * Discrepancy logged in bd notes (A-F4).
  */
+// RenderEffect is API 31+; callers are already gated on supportsGlassBlur (SDK >= S).
+@RequiresApi(android.os.Build.VERSION_CODES.S)
 private fun saturationRenderEffect(s: Float = 1.8f): android.graphics.RenderEffect {
     val lumaR = 0.213f
     val lumaG = 0.715f

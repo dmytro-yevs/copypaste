@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Network: relay server + Supabase -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- SyncStatusBadge offline detection queries ConnectivityManager
@@ -53,7 +54,13 @@
         This permission is NOT requested at runtime and is NOT required for any
         core functionality — it is an opt-in power-user fallback only.
     -->
-    <uses-permission android:name="android.permission.READ_LOGS" />
+    <!-- ProtectedPermissions: READ_LOGS is a system-only permission, but it is
+         declared here solely so that checkSelfPermission returns GRANTED after an
+         ADB developer grant (adb shell pm grant … READ_LOGS). It is never requested
+         at runtime and is not required for any core functionality. -->
+    <uses-permission
+        android:name="android.permission.READ_LOGS"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:name=".CopyPasteApp"
@@ -305,12 +312,18 @@
 
         <!-- WorkManager: Supabase poll worker registered at runtime when backend = SUPABASE.
              ServiceRestartWorker is also registered at runtime by WorkManager. -->
+        <!-- MissingClass: androidx.work.impl.WorkManagerInitializer is an internal
+             WorkManager class that exists at runtime in the work-runtime-ktx AAR.
+             This element uses tools:node="remove" to disable WorkManager's default
+             content-provider auto-initialisation so we can initialise it manually.
+             Lint's MissingClass check is a false positive here — the class is not
+             referenced by our code, only by the manifest merge tool. -->
         <provider
             android:name="androidx.work.impl.WorkManagerInitializer"
             android:authorities="${applicationId}.workmanager-init"
             android:exported="false"
             tools:node="remove"
-            xmlns:tools="http://schemas.android.com/tools" />
+            tools:ignore="MissingClass" />
 
         <!--
             FileProvider for log export (LogExportHelper).

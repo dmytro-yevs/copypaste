@@ -480,8 +480,9 @@ private fun readLogs(context: android.content.Context): LogReadResult {
         byteBudget -= toRead
     }
 
-    // Remove trailing blank lines introduced by String.lines()
-    while (allLines.isNotEmpty() && allLines.last().isBlank()) allLines.removeLast()
+    // Remove trailing blank lines introduced by String.lines().
+    // Use removeAt(size-1) instead of removeLast() — removeLast() is API 35+ on java.util.List.
+    while (allLines.isNotEmpty() && allLines.last().isBlank()) allLines.removeAt(allLines.size - 1)
 
     val sizeDesc = "${formatSize(totalBytes)} across ${files.size} file${if (files.size == 1) "" else "s"}"
     return LogReadResult(allLines, sizeDesc, truncated)

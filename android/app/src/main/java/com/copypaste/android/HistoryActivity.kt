@@ -1471,6 +1471,8 @@ fun HistoryScreen(
                             val repository = ClipboardRepository(ctx)
                             val saved = withContext(Dispatchers.IO) {
                                 try {
+                                    // MediaStore.Downloads requires API 29+; devices below that are unsupported.
+                                    if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return@withContext false
                                     val fileBytes = repository.getFileBytes(id) ?: return@withContext false
                                     val (fileName, mime) = repository.getFileMeta(id)
                                     val rawName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
@@ -1684,6 +1686,8 @@ fun HistoryScreen(
                     val repository = ClipboardRepository(ctx)
                     val saved = withContext(Dispatchers.IO) {
                         try {
+                            // MediaStore.Downloads requires API 29+; devices below that are unsupported.
+                            if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.Q) return@withContext false
                             val fileBytes = repository.getFileBytes(id) ?: return@withContext false
                             val (fileName, mime) = repository.getFileMeta(id)
                             val safeName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
