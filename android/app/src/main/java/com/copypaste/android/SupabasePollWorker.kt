@@ -188,7 +188,7 @@ class SupabasePollWorker(
          *
          * @param enabled When false, cancels any existing worker.
          */
-        fun schedule(context: Context, enabled: Boolean) {
+        fun schedule(context: Context, enabled: Boolean, wifiOnly: Boolean = false) {
             val wm = WorkManager.getInstance(context)
             if (!enabled) {
                 wm.cancelUniqueWork(WORK_NAME)
@@ -196,8 +196,12 @@ class SupabasePollWorker(
                 return
             }
 
+            // CopyPaste-agde: honour Settings.syncOnWifiOnly in WorkManager constraints.
+            // NetworkType.UNMETERED covers Wi-Fi + Ethernet (and excludes cellular).
+            // NetworkType.CONNECTED is the fallback when wifi-only is not required.
+            val networkType = if (wifiOnly) NetworkType.UNMETERED else NetworkType.CONNECTED
             val constraints = Constraints.Builder()
-                .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiredNetworkType(networkType)
                 .build()
 
             val request = PeriodicWorkRequestBuilder<SupabasePollWorker>(
@@ -222,7 +226,8 @@ class SupabasePollWorker(
             val settings = Settings(context)
             // CopyPaste-26zi: gate on isSupabaseConfigured directly, not syncBackend.
             val shouldRun = settings.syncEnabled && settings.isSupabaseConfigured
-            schedule(context, enabled = shouldRun)
+            // CopyPaste-agde: pass syncOnWifiOnly so WorkManager enforces the wifi constraint.
+            schedule(context, enabled = shouldRun, wifiOnly = settings.syncOnWifiOnly)
         }
     }
 }

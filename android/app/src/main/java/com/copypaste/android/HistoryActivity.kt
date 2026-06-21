@@ -460,6 +460,87 @@ private val appIconBitmapCache = object : LruCache<String, Bitmap>(APP_ICON_CACH
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// CopyPaste-9uyk: SourceAppBadge — shared composable for image, file, and text rows
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Renders the source-application icon + label chip for a clipboard item that
+ * has a non-null [sourceApp] (package name / bundle ID).
+ *
+ * Shown on image, file, and text rows so users know at a glance which app
+ * produced the item. Renders nothing when [sourceApp] is null or blank, or when
+ * [sourceAppLabel] cannot derive a human-readable name from the bundle ID.
+ *
+ * Icon loading is lazy (off main thread via [Dispatchers.Default]) and backed by
+ * the process-wide [appIconBitmapCache] LRU, so scroll recompositions avoid
+ * re-decoding Bitmaps.
+ *
+ * @param sourceApp Raw package / bundle id, e.g. "com.google.android.gm". Null → no-op.
+ * @param ctx       Android context for [AppIconHelper]; callers may pass
+ *                  [LocalContext.current] or any live context.
+ * @param colors    Active IDE color ramp for the badge background and text tint.
+ */
+@Composable
+private fun SourceAppBadge(
+    sourceApp: String?,
+    ctx: android.content.Context,
+    colors: IdeColors,
+) {
+    val c = colors
+    sourceAppLabel(sourceApp)?.let { appLabel ->
+        val iconBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
+            initialValue = null,
+            key1 = sourceApp,
+        ) {
+            value = sourceApp?.let { pkg ->
+                withContext(Dispatchers.Default) {
+                    runCatching {
+                        appIconBitmapCache.get(pkg)?.asImageBitmap()
+                            ?: AppIconHelper.getAppIconBase64(ctx, pkg)
+                                ?.let { b64 ->
+                                    val bytes = Base64.decode(b64, Base64.DEFAULT)
+                                    BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                        ?.also { bmp -> appIconBitmapCache.put(pkg, bmp) }
+                                        ?.asImageBitmap()
+                                }
+                    }.getOrElse { t ->
+                        AppLogger.w("SourceAppBadge", "app icon load failed for pkg=$pkg", t)
+                        null
+                    }
+                }
+            }
+        }
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .background(
+                    color = c.elevated.copy(alpha = 0.5f),
+                    shape = RoundedCornerShape(4.dp),
+                )
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+        ) {
+            iconBitmap?.let { iconBmp ->
+                Image(
+                    bitmap = iconBmp,
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .size(14.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                )
+                Spacer(Modifier.width(3.dp))
+            }
+            Text(
+                text = appLabel,
+                style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal),
+                color = c.faint,
+                maxLines = 1,
+            )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Screen
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1430,10 +1511,13 @@ fun HistoryScreen(
                         // fr44: filename is sanitized and dangerous extensions are blocked.
                         scope.launch {
                             val repository = ClipboardRepository(ctx)
-                            val (opened, errorMsg) = withContext(Dispatchers.IO) {
+                            // CopyPaste-ev7z: return safeName from the IO block so the extension
+                            // check uses the SANITIZED name, not the raw peer-supplied filename.
+                            // Triple: (opened, safeName|errorMsg, uriString|"")
+                            val (opened, safeNameOrError, uriStr) = withContext(Dispatchers.IO) {
                                 try {
                                     val fileBytes = repository.getFileBytes(id)
-                                        ?: return@withContext false to ctx.getString(R.string.file_save_failed)
+                                        ?: return@withContext Triple(false, ctx.getString(R.string.file_save_failed), "")
                                     val (fileName, _) = repository.getFileMeta(id)
                                     // fr44: sanitize the peer-supplied filename before writing to
                                     // disk — strips path-traversal sequences and shell-special chars.
@@ -1447,21 +1531,20 @@ fun HistoryScreen(
                                         "${ctx.packageName}.fileprovider",
                                         file,
                                     )
-                                    true to uri.toString()
+                                    Triple(true, safeName, uri.toString())
                                 } catch (e: Exception) {
                                     android.util.Log.w("HistoryActivity", "openFile failed for $id: ${e.message}")
-                                    false to ctx.getString(R.string.file_save_failed)
+                                    Triple(false, ctx.getString(R.string.file_save_failed), "")
                                 }
                             }
                             if (opened) {
-                                // errorMsg holds the URI string on success
-                                val uri = android.net.Uri.parse(errorMsg)
-                                val (rawFileName, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
-                                // fr44: check whether the extension is dangerous before firing
-                                // ACTION_VIEW.  Dangerous types use ACTION_SEND (share chooser) so
-                                // the user consciously picks an app — mirrors the macOS "open -R"
-                                // (reveal-in-Finder) behaviour in copypaste-ui/src-tauri/src/ipc.rs.
-                                val ext = rawFileName?.substringAfterLast('.', "")?.lowercase() ?: ""
+                                // uriStr holds the URI string on success
+                                val uri = android.net.Uri.parse(uriStr)
+                                val (_, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
+                                // CopyPaste-ev7z: extract extension from safeNameOrError (the sanitized
+                                // name) — NOT from rawFileName. Using the raw name allowed a peer to
+                                // bypass the denylist via path-traversal or null-byte tricks.
+                                val ext = safeNameOrError.substringAfterLast('.', "").lowercase()
                                 if (FileSecurityHelper.isDangerousExtension(ext)) {
                                     val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                         type = mime ?: "application/octet-stream"
@@ -1487,7 +1570,7 @@ fun HistoryScreen(
                                     }
                                 }
                             } else {
-                                toastState.show(errorMsg, GlassToastKind.DANGER)
+                                toastState.show(safeNameOrError, GlassToastKind.DANGER)
                             }
                         }
                     },
@@ -1631,10 +1714,12 @@ fun HistoryScreen(
                 // fr44: filename sanitized; dangerous extensions routed to share chooser.
                 scope.launch {
                     val repository = ClipboardRepository(ctx)
-                    val (opened, payload) = withContext(Dispatchers.IO) {
+                    // CopyPaste-ev7z: return safeName from the IO block so the extension
+                    // check uses the SANITIZED name (same fix as the list-row onOpenFile above).
+                    val (opened, safeNameOrError, uriStr) = withContext(Dispatchers.IO) {
                         try {
                             val fileBytes = repository.getFileBytes(id)
-                                ?: return@withContext false to ctx.getString(R.string.file_save_failed)
+                                ?: return@withContext Triple(false, ctx.getString(R.string.file_save_failed), "")
                             val (fileName, _) = repository.getFileMeta(id)
                             // fr44: sanitize peer-supplied filename before writing to disk.
                             val rawName = fileName?.takeIf { it.isNotBlank() } ?: "file_$id.bin"
@@ -1647,17 +1732,17 @@ fun HistoryScreen(
                                 "${ctx.packageName}.fileprovider",
                                 file,
                             )
-                            true to uri.toString()
+                            Triple(true, safeName, uri.toString())
                         } catch (e: Exception) {
                             android.util.Log.w("HistoryActivity", "preview openFile failed for $id: ${e.message}")
-                            false to ctx.getString(R.string.file_save_failed)
+                            Triple(false, ctx.getString(R.string.file_save_failed), "")
                         }
                     }
                     if (opened) {
-                        val uri = android.net.Uri.parse(payload)
-                        val (rawFileName, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
-                        // fr44: block dangerous extensions from direct ACTION_VIEW.
-                        val ext = rawFileName?.substringAfterLast('.', "")?.lowercase() ?: ""
+                        val uri = android.net.Uri.parse(uriStr)
+                        val (_, mime) = withContext(Dispatchers.IO) { repository.getFileMeta(id) }
+                        // CopyPaste-ev7z: use sanitized name (safeNameOrError) for extension check.
+                        val ext = safeNameOrError.substringAfterLast('.', "").lowercase()
                         if (FileSecurityHelper.isDangerousExtension(ext)) {
                             val shareIntent = Intent(Intent.ACTION_SEND).apply {
                                 type = mime ?: "application/octet-stream"
@@ -1682,7 +1767,7 @@ fun HistoryScreen(
                             }
                         }
                     } else {
-                        toastState.show(payload, GlassToastKind.DANGER)
+                        toastState.show(safeNameOrError, GlassToastKind.DANGER)
                     }
                 }
             },
@@ -2390,8 +2475,13 @@ private fun HistoryList(
         { item ->
             scope.launch {
                 val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                // CopyPaste-v0yi: read the setting at call time (settings is captured;
+                // it always reflects the current persisted value). When true, all item
+                // types are downgraded to plain text — the image/file URI branches are
+                // skipped so the pasted content is always human-readable plain text.
+                val forcePlainText = settings.pasteAsPlainText
                 when {
-                    item.isImage -> {
+                    item.isImage && !forcePlainText -> {
                         // Image copy-back: write full-res bytes to a cache file
                         // and expose via FileProvider so the system clipboard
                         // receives a proper content:// URI instead of "[image]".
@@ -2433,7 +2523,7 @@ private fun HistoryList(
                             // else: image bytes unavailable, nothing to copy
                         }
                     }
-                    item.isFile -> {
+                    item.isFile && !forcePlainText -> {
                         // File copy-back: write bytes to a cache file and
                         // expose via FileProvider as a content:// URI.
                         val fileBytes = withContext(Dispatchers.IO) {
@@ -2725,6 +2815,9 @@ private fun HistoryRow(
     // composable; `colors` is the hoisted ramp passed from list scope (no per-row
     // CompositionLocal read — CopyPaste-998).
     val c = colors
+    // CopyPaste-9uyk: hoist ctx at row scope so both image/file and text branches
+    // can resolve the source-app icon without repeating LocalContext.current.
+    val ctx = LocalContext.current
     val detectedSensitive = item.isSensitive
     // §10/P1#10: tap-to-reveal a masked sensitive row. While unrevealed the actual
     // snippet renders BLURRED (web parity: blur + reveal, not a bullet substitution);
@@ -2989,6 +3082,10 @@ private fun HistoryRow(
                     color = c.faint,
                     maxLines = 1,
                 )
+                // CopyPaste-9uyk: source-app icon badge for image rows.
+                // Shows the originating app icon so users know where the image came from.
+                // Mirrors the badge already present on text rows (line 3275+).
+                SourceAppBadge(sourceApp = item.sourceApp, ctx = ctx, colors = c)
                 if (!selectionMode) {
                     Spacer(Modifier.width(4.dp))
                     if (reorderMode && item.pinned) {
@@ -3087,56 +3184,85 @@ private fun HistoryRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                     // gq48 meta caption: timestamp + source on line 2 at 11sp faint
-                    Text(
-                        text = relativeTime(item.wallTimeMs),
-                        style = TextStyle(
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Normal,
-                            fontFeatureSettings = "tnum",
-                        ),
-                        color = c.faint,
-                        maxLines = 1,
-                    )
+                    // CopyPaste-9uyk: source-app badge added after timestamp for file rows.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        Text(
+                            text = relativeTime(item.wallTimeMs),
+                            style = TextStyle(
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Normal,
+                                fontFeatureSettings = "tnum",
+                            ),
+                            color = c.faint,
+                            maxLines = 1,
+                        )
+                        SourceAppBadge(sourceApp = item.sourceApp, ctx = ctx, colors = c)
+                    }
                 }
                 if (!selectionMode) {
                     Spacer(Modifier.width(2.dp))
-                    // Open action — write to cache temp file and open with default app
-                    ScaleIconButton(onClick = onOpenFile) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
-                            contentDescription = stringResource(R.string.cd_open_file),
-                            tint = c.accent,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    // Save action — write bytes to Downloads
-                    ScaleIconButton(onClick = onSaveFile) {
-                        Icon(
-                            imageVector = Icons.Outlined.SaveAlt,
-                            contentDescription = stringResource(R.string.action_save_file),
-                            tint = c.accent,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
-                        Icon(
-                            imageVector = if (item.pinned) Icons.Outlined.Star
-                                          else Icons.Outlined.StarBorder,
-                            contentDescription = if (item.pinned)
-                                stringResource(R.string.action_unpin)
-                            else
-                                stringResource(R.string.action_pin),
-                            tint = if (item.pinned) c.warning else c.dim,
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    ScaleIconButton(onClick = { onDelete(item.id) }) {
-                        Icon(
-                            imageVector = Icons.Outlined.Delete,
-                            contentDescription = stringResource(R.string.cd_delete),
-                            tint = c.danger,
-                            modifier = Modifier.size(16.dp),
-                        )
+                    // CopyPaste-9uyk: reorder arrows for pinned file rows — aligns
+                    // with image + text rows and parity with macOS drag reorder.
+                    if (reorderMode && item.pinned) {
+                        ScaleIconButton(onClick = onMoveUp) {
+                            Icon(
+                                imageVector = Icons.Outlined.KeyboardArrowUp,
+                                contentDescription = stringResource(R.string.action_move_up),
+                                tint = if (pinnedIndex > 0) c.accent else c.dim.copy(alpha = 0.3f),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                        ScaleIconButton(onClick = onMoveDown) {
+                            Icon(
+                                imageVector = Icons.Outlined.KeyboardArrowDown,
+                                contentDescription = stringResource(R.string.action_move_down),
+                                tint = if (pinnedIndex < pinnedCount - 1) c.accent
+                                       else c.dim.copy(alpha = 0.3f),
+                                modifier = Modifier.size(18.dp),
+                            )
+                        }
+                    } else {
+                        // Open action — write to cache temp file and open with default app
+                        ScaleIconButton(onClick = onOpenFile) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
+                                contentDescription = stringResource(R.string.cd_open_file),
+                                tint = c.accent,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        // Save action — write bytes to Downloads
+                        ScaleIconButton(onClick = onSaveFile) {
+                            Icon(
+                                imageVector = Icons.Outlined.SaveAlt,
+                                contentDescription = stringResource(R.string.action_save_file),
+                                tint = c.accent,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        ScaleIconButton(onClick = { onSetPinned(item.id, !item.pinned) }) {
+                            Icon(
+                                imageVector = if (item.pinned) Icons.Outlined.Star
+                                              else Icons.Outlined.StarBorder,
+                                contentDescription = if (item.pinned)
+                                    stringResource(R.string.action_unpin)
+                                else
+                                    stringResource(R.string.action_pin),
+                                tint = if (item.pinned) c.warning else c.dim,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                        ScaleIconButton(onClick = { onDelete(item.id) }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Delete,
+                                contentDescription = stringResource(R.string.cd_delete),
+                                tint = c.danger,
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
                     }
                 }
             }
@@ -3146,7 +3272,6 @@ private fun HistoryRow(
             // 34/28dp — action buttons (48dp ScaleIconButton) were the effective height
             // floor; hiding them in selectionMode caused the row to collapse. The explicit
             // heightIn floor means selection mode no longer changes row height.
-            val ctx = LocalContext.current
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -3259,58 +3384,10 @@ private fun HistoryRow(
                             color = c.faint,
                             maxLines = 1,
                         )
-                        // Source-app icon + label chip
-                        sourceAppLabel(item.sourceApp)?.let { appLabel ->
-                            val iconBitmap by produceState<androidx.compose.ui.graphics.ImageBitmap?>(
-                                initialValue = null,
-                                key1 = item.sourceApp,
-                            ) {
-                                value = item.sourceApp?.let { pkg ->
-                                    withContext(Dispatchers.Default) {
-                                        runCatching {
-                                            appIconBitmapCache.get(pkg)?.asImageBitmap()
-                                                ?: AppIconHelper.getAppIconBase64(ctx, pkg)
-                                                    ?.let { b64 ->
-                                                        val bytes = Base64.decode(b64, Base64.DEFAULT)
-                                                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-                                                            ?.also { bmp -> appIconBitmapCache.put(pkg, bmp) }
-                                                            ?.asImageBitmap()
-                                                    }
-                                        }.getOrElse { t ->
-                                            AppLogger.w("HistoryRow", "app icon load failed for item ${item.id} pkg=$pkg", t)
-                                            null
-                                        }
-                                    }
-                                }
-                            }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .background(
-                                        color = c.elevated.copy(alpha = 0.5f),
-                                        shape = RoundedCornerShape(4.dp),
-                                    )
-                                    .padding(horizontal = 4.dp, vertical = 2.dp),
-                            ) {
-                                iconBitmap?.let { iconBmp ->
-                                    Image(
-                                        bitmap = iconBmp,
-                                        contentDescription = null,
-                                        contentScale = ContentScale.Fit,
-                                        modifier = Modifier
-                                            .size(14.dp)
-                                            .clip(RoundedCornerShape(3.dp)),
-                                    )
-                                    Spacer(Modifier.width(3.dp))
-                                }
-                                Text(
-                                    text = appLabel,
-                                    style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Normal),
-                                    color = c.faint,
-                                    maxLines = 1,
-                                )
-                            }
-                        }
+                        // CopyPaste-9uyk: source-app icon + label chip (text rows).
+                        // Extracted into shared SourceAppBadge composable so the same
+                        // badge appears on image and file rows without code duplication.
+                        SourceAppBadge(sourceApp = item.sourceApp, ctx = ctx, colors = c)
                         // Origin-device badge
                         val originId = item.originDeviceId
                         if (!selectionMode && originId != null && ownDeviceId.isNotBlank()) {

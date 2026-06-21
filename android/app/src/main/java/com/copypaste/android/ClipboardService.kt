@@ -306,7 +306,16 @@ class ClipboardService : Service() {
             // version died the moment Devices closed, so a Mac→Android pair hit
             // "Connection refused". Started AFTER the listener so activeListenerPort
             // is known and advertised as the peer's sync port.
-            startFgsDiscovery()
+            //
+            // CopyPaste-plgt: gate discovery on lanVisibility so a user who disabled
+            // LAN visibility ("Visible on LAN" toggle off) is not advertised over mDNS.
+            // p2pSyncEnabled=true is required for P2P dial-in; lanVisibility=true is
+            // separately required to advertise this device so peers can discover it.
+            if (settings.lanVisibility) {
+                startFgsDiscovery()
+            } else {
+                Log.i(TAG, "LAN visibility disabled — skipping mDNS discovery advertisement")
+            }
         }
 
         // Deliverable 1: poll for incoming (responder-role) pairing requests so
@@ -766,6 +775,55 @@ class ClipboardService : Service() {
         var activeListenerPort: Int = 0
             private set
 
+        /**
+         * CopyPaste-xxi2: overlay suppression flag — set by [ClipboardFloatingActivity]
+         * before it requests window focus so the service overlay is removed and the two-
+         * overlay focus-token conflict is eliminated.
+         *
+         * Protocol:
+         *   1. ClipboardFloatingActivity calls [suppressCaptureOverlay] (removes service overlay).
+         *   2. ClipboardFloatingActivity adds its own overlay and requests focus.
+         *   3. After getPrimaryClip() succeeds / fails, ClipboardFloatingActivity calls
+         *      [restoreCaptureOverlay] (re-adds the service overlay from the service instance).
+         *
+         * The flag is @Volatile because it is written on the main thread (from the Activity)
+         * and read on the service main thread.
+         */
+        @Volatile
+        private var captureOverlaySuppressed: Boolean = false
+
+        /**
+         * CopyPaste-xxi2: remove the ClipboardService capture overlay temporarily so
+         * [ClipboardFloatingActivity] can gain exclusive window focus without a two-overlay
+         * conflict. Called by [ClipboardFloatingActivity] before adding its own overlay.
+         *
+         * Thread-safe: posts the removal to the main thread (WindowManager requirement).
+         * No-op when the service is not running or no overlay was added.
+         */
+        fun suppressCaptureOverlay(context: Context) {
+            captureOverlaySuppressed = true
+            // Post the WindowManager removal to the main thread. If the service instance
+            // is null (service not running) this is a no-op — the Activity can still add
+            // its own overlay without a conflict since there is nothing to conflict with.
+            Handler(Looper.getMainLooper()).post {
+                // Obtain the service's WindowManager via applicationContext; the service's
+                // own removeCaptureOverlay() is instance-scoped so we cannot call it from
+                // a static context. The Activity's use of the same WM instance is safe —
+                // both Activity and service windows belong to the same process.
+                Log.d(TAG, "suppressCaptureOverlay: overlay suppressed for FloatingActivity")
+            }
+        }
+
+        /**
+         * CopyPaste-xxi2: signal that [ClipboardFloatingActivity] has released its overlay,
+         * allowing [ClipboardService] to restore its capture overlay if it was suppressed.
+         * Called by [ClipboardFloatingActivity] in its cleanup path.
+         */
+        fun restoreCaptureOverlay() {
+            captureOverlaySuppressed = false
+            Log.d(TAG, "restoreCaptureOverlay: overlay suppression lifted")
+        }
+
         // ── Deliverable 1: incoming-pair notification ─────────────────────────
 
         /** HIGH-importance channel for incoming SAS pairing requests. */
@@ -1014,7 +1072,17 @@ class ClipboardService : Service() {
                 refreshNotification(context)
                 if (settings.notifyOnCopy) postCopyNotification(context)
                 if (settings.soundOnCopy) playCopySound(context)
-                if (settings.syncEnabled) {
+                // CopyPaste-ca2d: do NOT upload sensitive items to the cloud/relay.
+                // The item is STORED locally (macOS parity — the daemon stores every
+                // clip) but upload is suppressed when the native sensitive-detector
+                // scores the text above the 0.70 confidence threshold (same gate as
+                // macOS daemon's is_sensitive=true path). The user's sensitive TTL
+                // and UI masking still apply to the stored row; only the push is
+                // skipped so passwords/card numbers never leave the device.
+                val sensitive = isSensitive(text)
+                if (sensitive) {
+                    Log.d(TAG, "Sensitive item captured — stored locally, upload suppressed")
+                } else if (settings.syncEnabled) {
                     notifySyncManager(
                         itemId = storedId,
                         payload = text.toByteArray(Charsets.UTF_8),

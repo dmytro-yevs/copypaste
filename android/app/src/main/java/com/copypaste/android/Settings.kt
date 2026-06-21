@@ -424,6 +424,53 @@ class Settings(context: Context) {
         }
     }
 
+    // ── CopyPaste-dxq2: sync error surfacing ─────────────────────────────────
+    //
+    // FgsSyncLoop / SupabasePollWorker write here when a sync pass fails so the
+    // SettingsActivity UI can display the error to the user instead of only
+    // emitting Log.w. The UI reads these on the settingsVersion tick and clears
+    // them on a successful sync pass.
+    //
+    // IMPORTANT: 401 Unauthorized must be stored as a DISTINCT error so the UI
+    // can show a specific "re-enter credentials" prompt instead of a generic error.
+
+    /**
+     * Human-readable message from the last sync error, or empty string when the
+     * last sync was successful (or no sync has run yet).
+     *
+     * Written by [FgsSyncLoop] / [SupabasePollWorker] on failure; cleared on
+     * success. The SettingsActivity polls this via [Settings.lastSyncError] to
+     * surface the error as an inline banner.
+     *
+     * Must NOT contain raw exception stack traces or credentials.
+     */
+    var lastSyncError: String
+        get() = prefs.getString("last_sync_error", "") ?: ""
+        set(v) = prefs.edit().putString("last_sync_error", v).apply()
+
+    /**
+     * True if the last sync error was an HTTP 401 Unauthorized response.
+     *
+     * CopyPaste-dxq2: a 401 must be presented differently from a transient
+     * network error — it indicates invalid/expired credentials and requires
+     * user action (re-enter passphrase or reauthenticate with Supabase), not
+     * just a retry.
+     */
+    var lastSyncErrorIsUnauthorized: Boolean
+        get() = prefs.getBoolean("last_sync_error_is_unauthorized", false)
+        set(v) = prefs.edit().putBoolean("last_sync_error_is_unauthorized", v).apply()
+
+    /**
+     * Clear both sync-error fields atomically. Call after a successful sync pass
+     * so the banner disappears once the error is resolved.
+     */
+    fun clearSyncError() {
+        prefs.edit()
+            .putString("last_sync_error", "")
+            .putBoolean("last_sync_error_is_unauthorized", false)
+            .apply()
+    }
+
     val deviceId: String
         get() {
             // Fast path: key already exists — SharedPreferences reads are process-local
@@ -1933,6 +1980,20 @@ data class P2pIdentity(
         result = 31 * result + certDer.contentHashCode()
         result = 31 * result + keyDer.contentHashCode()
         return result
+    }
+
+    /**
+     * CopyPaste-ah3i: zero the private key material in-place.
+     *
+     * Call this immediately after the keyDer has been wrapped by the
+     * AndroidKeyStore KEK (i.e. after [Settings.p2pIdentity] setter returns)
+     * so that the plaintext private key DER bytes do not linger in heap memory
+     * longer than necessary. Mirrors the UDL secret ByteArray zeroing contract.
+     *
+     * Safe to call multiple times (idempotent: fill with 0 twice is still 0).
+     */
+    fun zeroKeyMaterial() {
+        keyDer.fill(0)
     }
 }
 

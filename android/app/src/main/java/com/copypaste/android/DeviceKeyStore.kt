@@ -35,7 +35,13 @@ class DeviceKeyStore(context: Context) {
     suspend fun getOrCreate(): DeviceCert = withContext(Dispatchers.IO) {
         settings.p2pIdentity?.toDeviceCert() ?: run {
             val cert = generateDeviceCert()
-            settings.p2pIdentity = cert.toP2pIdentity()
+            // CopyPaste-ah3i: convert to P2pIdentity, persist (the setter wraps
+            // keyDer with the AndroidKeyStore KEK), then immediately zero the
+            // plaintext private-key ByteArray so it does not linger on the heap.
+            val identity = cert.toP2pIdentity()
+            settings.p2pIdentity = identity
+            // Zero the keyDer copy now that the wrapped form is stored.
+            identity.zeroKeyMaterial()
             cert
         }
     }

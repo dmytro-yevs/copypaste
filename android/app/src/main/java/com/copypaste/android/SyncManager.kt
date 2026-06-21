@@ -504,6 +504,18 @@ class SyncManager(
             if (plaintext.isEmpty()) {
                 false
             } else {
+                // CopyPaste-vg4r: apply LWW for image items, matching the text path.
+                // Previously storeItem with overrideId used the seen-once seenSourceIds
+                // gate: a re-poll of the same item always returned "" (dedup), even when
+                // the incoming lamportTs was strictly newer (e.g. after a pin mutation).
+                // Fix: check the stored lamportTs first; skip only when the stored version
+                // is already at least as fresh. This mirrors storeItemWithLww for text.
+                val storedLamport = repository.storedLamportTsForItemId(envelope.itemId)
+                val incomingWins = storedLamport == null || envelope.lamportTs > storedLamport
+                if (!incomingWins) {
+                    Log.d(TAG, "relay SSE image: LWW skip id=${envelope.itemId.take(8)} (stored=$storedLamport, incoming=${envelope.lamportTs})")
+                    false
+                } else {
                 val storedId = repository.storeItem(
                     plaintext = "[image]",
                     key = s.encryptionKey,
@@ -521,6 +533,7 @@ class SyncManager(
                 } else {
                     false
                 }
+                }
             }
         } else if (isFile) {
             if (plaintext.isEmpty()) {
@@ -533,6 +546,13 @@ class SyncManager(
                 val fileName = decoded.name.takeIf { it.isNotEmpty() }
                 val fileMime = decoded.mime.takeIf { it.isNotEmpty() }
                 val label = SyncFileHelper.buildFileLabel(fileName)
+                // CopyPaste-vg4r: LWW for file items — same pattern as image branch above.
+                val storedLamport = repository.storedLamportTsForItemId(envelope.itemId)
+                val incomingWins = storedLamport == null || envelope.lamportTs > storedLamport
+                if (!incomingWins) {
+                    Log.d(TAG, "relay SSE file: LWW skip id=${envelope.itemId.take(8)} (stored=$storedLamport, incoming=${envelope.lamportTs})")
+                    false
+                } else {
                 val storedId = repository.storeItem(
                     plaintext = label,
                     key = s.encryptionKey,
@@ -547,6 +567,7 @@ class SyncManager(
                     true
                 } else {
                     false
+                }
                 }
             }
         } else {

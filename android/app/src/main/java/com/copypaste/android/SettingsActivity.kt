@@ -259,6 +259,17 @@ fun SettingsScreen(
     var supabasePassword by remember { mutableStateOf(settings.supabasePassword) }
     var relayUrl by remember { mutableStateOf(settings.relayUrl) }
 
+    // CopyPaste-dxq2: sync error surfacing. Read from SharedPreferences on every
+    // settingsVersion tick so the banner appears/disappears as the sync loop
+    // writes/clears the error. These are NOT draft values — they are live reads
+    // from settings (the sync loop writes them; the UI only reads them).
+    val syncError by remember(settings) {
+        androidx.compose.runtime.derivedStateOf { settings.lastSyncError }
+    }
+    val syncErrorIsUnauthorized by remember(settings) {
+        androidx.compose.runtime.derivedStateOf { settings.lastSyncErrorIsUnauthorized }
+    }
+
     // ── Notifications ──
     var notifyOnCopy by remember { mutableStateOf(settings.notifyOnCopy) }
     var soundOnCopy by remember { mutableStateOf(settings.soundOnCopy) }
@@ -562,6 +573,44 @@ fun SettingsScreen(
                         // instance (same pattern as HistoryActivity/ClipboardViewModel.clearAll).
                         val scope = rememberCoroutineScope()
                         val repository = remember { ClipboardRepository(ctx) }
+
+                        // CopyPaste-8jx8: Export via SAF — user picks a destination file.
+                        val exportLauncher = rememberLauncherForActivityResult(
+                            androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json"),
+                        ) { uri ->
+                            if (uri == null) return@rememberLauncherForActivityResult
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val key = settings.encryptionKey
+                                    val json = repository.exportHistory(key)
+                                    ctx.contentResolver.openOutputStream(uri)?.use { out ->
+                                        out.write(json.toByteArray(Charsets.UTF_8))
+                                    }
+                                    android.util.Log.i("SettingsActivity", "Exported history to $uri")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("SettingsActivity", "Export failed: ${e.message}", e)
+                                }
+                            }
+                        }
+
+                        // CopyPaste-8jx8: Import via SAF — user picks a previously exported JSON.
+                        val importLauncher = rememberLauncherForActivityResult(
+                            androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
+                        ) { uri ->
+                            if (uri == null) return@rememberLauncherForActivityResult
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val json = ctx.contentResolver.openInputStream(uri)?.use { it.bufferedReader().readText() }
+                                        ?: return@launch
+                                    val key = settings.encryptionKey
+                                    val count = repository.importHistory(json, key)
+                                    android.util.Log.i("SettingsActivity", "Imported $count items from $uri")
+                                } catch (e: Exception) {
+                                    android.util.Log.e("SettingsActivity", "Import failed: ${e.message}", e)
+                                }
+                            }
+                        }
+
                         StorageTab(
                             maxTextSizeBytes = maxTextSizeBytes,
                             onMaxTextSizeBytesChange = { maxTextSizeBytes = it; dirty = true },
@@ -586,6 +635,15 @@ fun SettingsScreen(
                             // CopyPaste-12f0: degraded-DB reset — wipes the whole repository.
                             onResetDatabase = {
                                 scope.launch(Dispatchers.IO) { repository.resetDatabase() }
+                            },
+                            // CopyPaste-8jx8: export/import via SAF file picker.
+                            onExportHistory = {
+                                val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+                                    .format(java.util.Date())
+                                exportLauncher.launch("copypaste_history_$ts.json")
+                            },
+                            onImportHistory = {
+                                importLauncher.launch(arrayOf("application/json", "*/*"))
                             },
                         )
                     }
@@ -612,6 +670,9 @@ fun SettingsScreen(
                         onRelayUrlChange = { v -> relayUrl = v; dirty = true },
                         // CopyPaste-hffp: pass live draft density.
                         density = density,
+                        // CopyPaste-dxq2: pass live sync error state.
+                        syncError = syncError,
+                        syncErrorIsUnauthorized = syncErrorIsUnauthorized,
                     )
                     TAB_NOTIFICATIONS -> NotificationsTab(
                         notifyOnCopy = notifyOnCopy,
@@ -1026,6 +1087,10 @@ private fun StorageTab(
     onClearHistory: () -> Unit,
     // CopyPaste-12f0: degraded-DB recovery — wipes the entire repository (macOS parity).
     onResetDatabase: () -> Unit,
+    // CopyPaste-8jx8: export clipboard history as JSON (plaintext) via SAF.
+    onExportHistory: () -> Unit = {},
+    // CopyPaste-8jx8: import clipboard history from a JSON export file via SAF.
+    onImportHistory: () -> Unit = {},
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         SettingsSectionLabel(stringResource(R.string.section_storage_limits))
@@ -1169,6 +1234,64 @@ private fun StorageTab(
         SettingsSectionLabel(stringResource(R.string.section_data))
         SettingsCard {
             val c = LocalIdeColors.current
+            // CopyPaste-8jx8: Export history — produces a JSON file with text items
+            // (non-sensitive only) via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = "Export history",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.text,
+                    )
+                    Text(
+                        text = "Save text items to a JSON file (images and sensitive items excluded)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.dim,
+                    )
+                }
+                CopyPasteButton(
+                    onClick = onExportHistory,
+                    variant = ButtonVariant.PRIMARY,
+                ) {
+                    Text("Export")
+                }
+            }
+            SettingsCardDivider()
+            // CopyPaste-8jx8: Import history — reads a previously exported JSON file
+            // and inserts new items (deduplication by ID, re-encrypted with device key).
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = "Import history",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = c.text,
+                    )
+                    Text(
+                        text = "Load items from a JSON export file",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.dim,
+                    )
+                }
+                CopyPasteButton(
+                    onClick = onImportHistory,
+                    variant = ButtonVariant.PRIMARY,
+                ) {
+                    Text("Import")
+                }
+            }
+            SettingsCardDivider()
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1248,9 +1371,48 @@ private fun SyncTab(
     onRelayUrlChange: (String) -> Unit,
     // CopyPaste-hffp: live density from SettingsScreen for density-aware rows.
     density: Density,
+    // CopyPaste-dxq2: sync error surfacing — written by FgsSyncLoop/SupabasePollWorker.
+    syncError: String = "",
+    syncErrorIsUnauthorized: Boolean = false,
 ) {
     val c = LocalIdeColors.current
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // CopyPaste-dxq2: display sync error banner when the sync loop has written an
+        // error to Settings.lastSyncError. A 401 Unauthorized is shown with a distinct
+        // prompt ("check credentials") instead of the generic retry message.
+        if (syncError.isNotBlank()) {
+            androidx.compose.foundation.layout.Spacer(
+                modifier = Modifier.height(4.dp),
+            )
+            androidx.compose.material3.Card(
+                colors = androidx.compose.material3.CardDefaults.cardColors(
+                    containerColor = if (syncErrorIsUnauthorized)
+                        c.danger.copy(alpha = 0.12f)
+                    else
+                        c.surface,
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = if (syncErrorIsUnauthorized) "Sync: authentication failed" else "Sync error",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = c.danger,
+                    )
+                    Text(
+                        text = if (syncErrorIsUnauthorized)
+                            "$syncError\n\nCheck your passphrase / credentials below and save."
+                        else
+                            syncError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.text,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+        }
         SettingsSectionLabel(stringResource(R.string.section_sync))
         SettingsCard {
             // HW-A9: P2P sync toggle — LAN direct device-to-device sync.

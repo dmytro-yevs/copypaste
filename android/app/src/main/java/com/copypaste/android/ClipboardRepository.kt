@@ -1238,6 +1238,30 @@ class ClipboardRepository(context: Context) {
     fun lastStoredId(): String? = storedIds().lastOrNull()
 
     /**
+     * CopyPaste-vg4r: return the stored lamport_ts for a stable [itemId] (the relay/cloud
+     * item_id, not a local storage id), or null when the item does not exist locally.
+     *
+     * Used by binary ingest paths (image, file) in [SyncManager.ingestRelaySseItem] to
+     * apply LWW ordering without going through [storeItemWithLww] (which is text-only).
+     * The caller compares the incoming lamport_ts against the stored one before
+     * deciding whether to overwrite:
+     *   - incoming > stored → overwrite (new version wins)
+     *   - incoming <= stored → skip (local version is current or newer)
+     *
+     * Thread-safe: reads are protected by the [idsWriteLock] monitor (same lock that
+     * [storeItem] / [storeItemWithLww] hold during their read-decide-write sequences).
+     */
+    fun storedLamportTsForItemId(itemId: String): Long? {
+        val storageId = synchronized(idsWriteLock) {
+            prefs.getString("item_id_ref_$itemId", null)
+        } ?: return null
+        val raw = prefs.getString("item_$storageId", null) ?: return null
+        // Blob format: <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|…
+        // lamportTs is field index 5.
+        return raw.split("|").getOrNull(5)?.toLongOrNull()
+    }
+
+    /**
      * Total number of stored items (pinned + unpinned).
      * Used by the history header count display (parity with macOS).
      * Excludes soft-delete tombstones that remain in KEY_ITEM_IDS to prevent
@@ -2467,4 +2491,129 @@ class ClipboardRepository(context: Context) {
             "relay cloud backend is disabled — use Supabase for cross-device cloud sync"
         )
     }
+
+    // ── CopyPaste-8jx8: Export / Import clipboard history ────────────────────
+    //
+    // Export: produce a JSON file with text items' decrypted snippets and metadata.
+    //   - Only TEXT content_type items are exported (binary image/file payloads are
+    //     omitted — too large and not portable across devices/encryption keys).
+    //   - Sensitive items are skipped to avoid leaking secrets into unencrypted files.
+    //   - Pinned state is preserved so the user can round-trip their pinned clips.
+    //   - Full plaintext is loaded (not just the snippet) so imports preserve content.
+    //
+    // Import: read the export JSON and insert each item that does not yet exist locally
+    //   (deduplication is by item ID). Items are re-encrypted with the current device key.
+    //
+    // Format: JSON object { "version": 1, "exported_at": epochMs, "items": [ ... ] }
+    //   Each item: { "id", "content_type", "snippet", "full_text", "wall_time_ms", "pinned" }
+    //
+    // Security:
+    //   - The export JSON is PLAINTEXT. The caller (SettingsActivity) must use the
+    //     storage-access-framework (SAF / ACTION_CREATE_DOCUMENT) so the user picks
+    //     the destination; never auto-write to external storage without SAF.
+    //   - Import uses the same storeItem() path so the new items are immediately
+    //     encrypted with the device's current key.
+
+    /**
+     * Export all non-sensitive TEXT clipboard items as a JSON string.
+     *
+     * Returns the JSON [String] on success. Image and file items are omitted.
+     * Sensitive items (flagged by [ClipboardItem.isSensitive]) are also omitted
+     * to avoid leaking secrets into plaintext export files.
+     *
+     * [encryptionKey] is needed to decrypt stored ciphertext for the full-text field.
+     * The returned JSON is plaintext — the caller must write it to a user-chosen
+     * location via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
+     */
+    suspend fun exportHistory(encryptionKey: ByteArray): String = withContext(Dispatchers.IO) {
+        // Load all items (no pagination cap) using the existing getItems path which
+        // handles decryption, sensitivity detection, and pinned ordering.
+        val allItems = getItems(key = encryptionKey, limit = Int.MAX_VALUE, offset = 0)
+        val exportedAt = System.currentTimeMillis()
+
+        val arr = org.json.JSONArray()
+        for (item in allItems) {
+            // Only export text items.
+            if (!item.isText) continue
+            // Skip sensitive items.
+            if (item.isSensitive) continue
+
+            val fullText = runCatching { loadFullPlaintext(item.id, encryptionKey) }.getOrNull()
+                ?: item.snippet
+
+            val obj = org.json.JSONObject()
+            obj.put("id", item.id)
+            obj.put("content_type", "text")
+            obj.put("snippet", item.snippet)
+            obj.put("full_text", fullText)
+            obj.put("wall_time_ms", item.wallTimeMs)
+            obj.put("pinned", item.pinned)
+            arr.put(obj)
+        }
+
+        val root = org.json.JSONObject()
+        root.put("version", 1)
+        root.put("exported_at", exportedAt)
+        root.put("items", arr)
+        root.toString(2) // pretty-print with 2-space indent
+    }
+
+    /**
+     * Import items from an export JSON string.
+     *
+     * Parses the export format, skips items whose [id] already exists locally
+     * (idempotent deduplication by ID), and inserts new items via [storeItem].
+     * The items are re-encrypted with the current device [encryptionKey].
+     *
+     * @return The number of items successfully imported.
+     * @throws org.json.JSONException if the JSON is malformed.
+     * @throws IllegalArgumentException if the export version is unsupported.
+     */
+    suspend fun importHistory(json: String, encryptionKey: ByteArray): Int =
+        withContext(Dispatchers.IO) {
+            val root = org.json.JSONObject(json)
+            val version = root.getInt("version")
+            require(version == 1) {
+                "Unsupported export version $version (expected 1)"
+            }
+            val arr = root.getJSONArray("items")
+            val existingIds = storedIds().toHashSet()
+            var imported = 0
+
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val id = obj.getString("id")
+                // Skip if already present locally.
+                if (id in existingIds) continue
+
+                val fullText = obj.optString("full_text").ifBlank {
+                    obj.optString("snippet")
+                }
+                if (fullText.isBlank()) continue
+
+                val wallTimeMs = obj.optLong("wall_time_ms", System.currentTimeMillis())
+                val pinned = obj.optBoolean("pinned", false)
+
+                // Encrypt and store via the standard path.
+                // Use overrideId = id so the stable cross-device item ID is preserved
+                // (allows subsequent syncs to deduplicate correctly via item_id_ref).
+                val stored = storeItem(
+                    plaintext = fullText,
+                    key = encryptionKey,
+                    overrideId = id,
+                    wallTimeMs = wallTimeMs,
+                )
+
+                if (stored.isNotBlank() && pinned) {
+                    // Restore pinned state.
+                    setPinned(stored, true, encryptionKey)
+                }
+
+                if (stored.isNotBlank()) {
+                    imported++
+                    existingIds += stored // track to avoid re-inserting within the loop
+                }
+            }
+            imported
+        }
 }

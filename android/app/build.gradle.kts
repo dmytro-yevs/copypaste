@@ -208,14 +208,28 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            // Sign the release variant with the "release" config when CI supplied
-            // the keystore secrets (see signingConfigs above). When the release
-            // config is ABSENT (forks, local builds, no secrets) fall back to the
-            // committed debug keystore so `assembleRelease` still produces an
-            // installable (debug-signed) APK instead of an unsigned/failed build.
-            // The R8 keep-rules above protect the native crypto path either way.
-            signingConfig = signingConfigs.findByName("release")
-                ?: signingConfigs.getByName("debug")
+            // CopyPaste-56gh: sign the release variant with the "release" config when
+            // CI supplied the keystore secrets. When the config is ABSENT, fail loudly
+            // on CI release-tag runs (GITHUB_REF=refs/tags/*) because a debug-signed
+            // APK is update-incompatible with the production release-signed build and
+            // must NEVER be silently published. On local / fork / non-tag builds the
+            // debug fallback is still allowed — the developer will see it is debug-signed.
+            val githubRef = System.getenv("GITHUB_REF")
+            val isCiRelease = githubRef != null && githubRef.startsWith("refs/tags/")
+            signingConfig = signingConfigs.findByName("release") ?: run {
+                if (isCiRelease) {
+                    throw GradleException(
+                        "CopyPaste-56gh: release keystore is missing on a CI tag build " +
+                            "(GITHUB_REF=$githubRef). Set ANDROID_KEYSTORE_FILE, " +
+                            "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and " +
+                            "ANDROID_KEY_PASSWORD in the GitHub Actions secrets before " +
+                            "cutting a release. A debug-signed APK must NEVER be published.",
+                    )
+                }
+                // Local / fork / non-tag CI build: fall back to debug signing.
+                // This does NOT produce a publishable APK (debug cert).
+                signingConfigs.getByName("debug")
+            }
         }
     }
     compileOptions {

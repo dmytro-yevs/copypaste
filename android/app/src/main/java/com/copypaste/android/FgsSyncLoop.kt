@@ -62,9 +62,11 @@ import kotlinx.coroutines.withContext
  *   doubles each consecutive failure up to RETRY_BACKOFF_MAX_MS (real exponential
  *   backoff, reset to 0 failures on the first success).
  *
- * Note: this class does NOT hold an explicit WakeLock. Foreground services
- * on Android 8+ implicitly prevent CPU sleep while the FGS notification is
- * shown. An explicit partial WakeLock would burn extra battery without benefit.
+ * WakeLock: an explicit PARTIAL_WAKE_LOCK is acquired for the duration of each
+ * [dialPairedPeer] → [syncWithPeer] call (CopyPaste-y4xa). Foreground services
+ * on Android 8+ implicitly prevent CPU sleep via the notification, but OEM schedulers
+ * (Xiaomi MIUI, Oppo ColorOS, Samsung One UI) can suspend the CPU mid-handshake.
+ * The lock is released in a finally block on every exit path.
  */
 class FgsSyncLoop(
     private val settings: Settings,
@@ -324,8 +326,19 @@ class FgsSyncLoop(
                 // settings screen; the Supabase poll should run whenever Supabase is
                 // fully configured, regardless of which backend the enum points to.
                 // macOS daemon runs relay + cloud additively; Android must match.
+                //
+                // CopyPaste-agde: enforce syncOnWifiOnly — when the user enables
+                // "Sync on Wi-Fi only", skip the network call while the device is on
+                // cellular or offline. isOnWifi() checks the active-network transport
+                // via ConnectivityManager; it returns true on Wi-Fi AND Ethernet, but
+                // false on cellular, VPN-only, and unavailable networks.
+                // The guard treats unavailable connectivity as cellular-equivalent
+                // (safe: skip rather than push sensitive data on metered networks).
+                val isWifiRequired = settings.syncOnWifiOnly
+                val isWifi = !isWifiRequired || isOnWifi(context)
                 val enabled = settings.syncEnabled &&
-                    settings.isSupabaseConfigured
+                    settings.isSupabaseConfigured &&
+                    isWifi
 
                 val nextDelay: Long
                 if (!enabled) {
@@ -387,11 +400,15 @@ class FgsSyncLoop(
                 // chunks: dial, sleep one chunk, repeat, until the poll is due
                 // again. Failures are logged, never fatal.
                 // CopyPaste-lwnz: gate the SYNCING badge around the P2P dial too.
+                // CopyPaste-agde: re-check wifi gate before P2P dial — the transport
+                // could change between the poll check above and the dial below.
+                if (isWifi) {
                 DevicesOnlineState.setSyncing(true)
                 try {
                     dialPairedPeer()
                 } finally {
                     DevicesOnlineState.setSyncing(false)
+                }
                 }
                 if (!isActive) break
 
@@ -403,7 +420,7 @@ class FgsSyncLoop(
                     remaining -= chunk
                     // Re-dial on each chunk boundary that is not the final poll
                     // tick (the post-poll dial above already covers tick zero).
-                    if (remaining > 0) {
+                    if (remaining > 0 && isOnWifi(context)) {
                         DevicesOnlineState.setSyncing(true)
                         try {
                             dialPairedPeer()
@@ -774,6 +791,26 @@ class FgsSyncLoop(
                 }
             }
 
+            // CopyPaste-y4xa: acquire a PARTIAL_WAKE_LOCK for the duration of the
+            // mTLS handshake + data exchange. An FGS notification keeps the CPU on
+            // under normal conditions, but OEM schedulers (Xiaomi MIUI, Oppo ColorOS,
+            // Samsung One UI Doze) can suspend the CPU when the screen turns off even
+            // inside a foreground service. A mid-handshake suspend orphans the TLS
+            // connection and causes the next restart to find a failed/stale socket.
+            // The lock is always released in the finally block — no leak risk.
+            //
+            // Tag format follows Android convention: "<package>/ClassName:purpose".
+            // The timeout (60 000 ms) is a safety net only — syncWithPeer should
+            // complete well within 30 s on a LAN; this prevents a hung native thread
+            // from holding the lock indefinitely.
+            val wakeLock = context?.let { ctx ->
+                val pm = ctx.getSystemService(android.content.Context.POWER_SERVICE)
+                    as? android.os.PowerManager
+                pm?.newWakeLock(
+                    android.os.PowerManager.PARTIAL_WAKE_LOCK,
+                    "com.copypaste.android/FgsSyncLoop:p2pDial",
+                )?.apply { acquire(60_000L) }
+            }
             try {
             val result = syncWithPeer(
                 peerAddr = peerAddr,
@@ -876,6 +913,12 @@ class FgsSyncLoop(
                         Log.w(TAG, "Failed to persist post-failure addr for ${peerFingerprint.take(8)}: ${e2.message}")
                     }
                 }
+            } finally {
+                // CopyPaste-y4xa: release the PARTIAL_WAKE_LOCK acquired before
+                // syncWithPeer. The finally block guarantees release on every exit
+                // path: success, exception, and CancellationException (rethrown above
+                // before this finally, but the inner try also has its own cancel path).
+                if (wakeLock?.isHeld == true) wakeLock.release()
             }
         }
     }
@@ -1047,4 +1090,30 @@ class FgsSyncLoop(
 
             stored
         }
+}
+
+/**
+ * CopyPaste-agde: returns true when the device has an active Wi-Fi (or Ethernet)
+ * network connection, false when on cellular or when connectivity is unavailable.
+ *
+ * Used by [FgsSyncLoop.start] to enforce the [Settings.syncOnWifiOnly] preference:
+ * Supabase poll and P2P dials are skipped while on a metered (cellular) connection.
+ *
+ * Null [context] → returns true (no skip) so unit tests and stub mode are unaffected.
+ *
+ * Implementation uses [android.net.ConnectivityManager.getNetworkCapabilities] on
+ * API 23+ (required by our minSdk), which is the only reliable way to query transport
+ * type. The legacy [android.net.ConnectivityManager.activeNetworkInfo] path is
+ * deprecated since API 29 and omitted.
+ */
+internal fun isOnWifi(context: android.content.Context?): Boolean {
+    context ?: return true // no context → don't block (unit-test safe)
+    val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+        as? android.net.ConnectivityManager ?: return false
+    val network = cm.activeNetwork ?: return false
+    val caps = cm.getNetworkCapabilities(network) ?: return false
+    // TRANSPORT_WIFI covers both station and tethered Wi-Fi.
+    // TRANSPORT_ETHERNET covers wired Ethernet (also unmetered — honour it).
+    return caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
+        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET)
 }
