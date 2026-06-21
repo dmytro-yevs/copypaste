@@ -1,0 +1,190 @@
+//! `copypaste device` — list and manage paired devices.
+//!
+//! Exposes the daemon's peer-management IPC verbs (`list_peers`, `revoke_peer`,
+//! `revoke_all_peers`) over a `device` subcommand surface so users can inspect
+//! and remove paired devices from the CLI without opening the macOS UI.
+//!
+//! ## Subcommands
+//!
+//! - `copypaste device list` — show all paired peers (online/offline, last seen)
+//! - `copypaste device revoke <fingerprint>` — revoke a specific peer
+//! - `copypaste device revoke-all` — revoke every paired peer at once
+//!
+//! ## Exit codes
+//! - 0 — operation succeeded
+//! - 1 — daemon not running, IPC error, or daemon returned an error
+
+use anyhow::{anyhow, Context, Result};
+use copypaste_ipc::{METHOD_LIST_PEERS, METHOD_REVOKE_ALL_PEERS, METHOD_REVOKE_PEER};
+use std::path::Path;
+
+use crate::commands::common::exit_on_err;
+use crate::ipc::IpcClient;
+
+/// List all currently paired devices (peers).
+pub fn run_list(socket_path: &Path) -> Result<()> {
+    let mut client = IpcClient::connect(socket_path).with_context(|| {
+        format!(
+            "daemon is not running (socket: {})",
+            socket_path.display()
+        )
+    })?;
+
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_LIST_PEERS,
+        serde_json::json!({}),
+    );
+    let resp = client.call(&req)?;
+    exit_on_err(&resp);
+
+    let data = resp
+        .data
+        .as_ref()
+        .ok_or_else(|| anyhow!("daemon returned no data for list_peers"))?;
+
+    let peers = data["peers"]
+        .as_array()
+        .ok_or_else(|| anyhow!("daemon response missing 'peers' array"))?;
+
+    if peers.is_empty() {
+        println!("No paired devices.");
+        return Ok(());
+    }
+
+    println!("{:<20} {:<48} {:<10}", "Name", "Fingerprint", "Status");
+    println!("{}", "-".repeat(82));
+    for peer in peers {
+        let name = peer["device_name"]
+            .as_str()
+            .or_else(|| peer["name"].as_str())
+            .unwrap_or("(unknown)");
+        let fp = peer["fingerprint"]
+            .as_str()
+            .unwrap_or("?");
+        let online = peer["online"].as_bool().unwrap_or(false);
+        let status = if online { "online" } else { "offline" };
+        println!("{:<20} {:<48} {:<10}", name, fp, status);
+    }
+
+    Ok(())
+}
+
+/// Revoke a single paired peer by fingerprint.
+pub fn run_revoke(socket_path: &Path, fingerprint: &str, force: bool) -> Result<()> {
+    if !force {
+        eprintln!("WARNING: This will remove the paired device with fingerprint:");
+        eprintln!("  {fingerprint}");
+        eprintln!("The device will no longer be able to sync with this one.");
+        eprint!("Type 'yes' to confirm: ");
+
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .context("failed to read confirmation from stdin")?;
+        if input.trim() != "yes" {
+            return Err(anyhow!("aborted: pass --force to skip this prompt"));
+        }
+    }
+
+    let mut client = IpcClient::connect(socket_path).with_context(|| {
+        format!(
+            "daemon is not running (socket: {})",
+            socket_path.display()
+        )
+    })?;
+
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_REVOKE_PEER,
+        serde_json::json!({ "fingerprint": fingerprint }),
+    );
+    let resp = client.call(&req)?;
+    exit_on_err(&resp);
+
+    if let Some(data) = &resp.data {
+        let revoked_at = data["revoked_at"].as_i64().unwrap_or(0);
+        if revoked_at > 0 {
+            println!("Device revoked (revoked_at = {revoked_at}).");
+        } else {
+            println!("Device revoked.");
+        }
+    } else {
+        println!("Device revoked.");
+    }
+
+    Ok(())
+}
+
+/// Revoke all paired peers at once.
+pub fn run_revoke_all(socket_path: &Path, force: bool) -> Result<()> {
+    if !force {
+        eprintln!("WARNING: This will revoke ALL paired devices.");
+        eprintln!("No devices will be able to sync with this one until re-paired.");
+        eprint!("Type 'yes' to confirm: ");
+
+        let mut input = String::new();
+        std::io::stdin()
+            .read_line(&mut input)
+            .context("failed to read confirmation from stdin")?;
+        if input.trim() != "yes" {
+            return Err(anyhow!("aborted: pass --force to skip this prompt"));
+        }
+    }
+
+    let mut client = IpcClient::connect(socket_path).with_context(|| {
+        format!(
+            "daemon is not running (socket: {})",
+            socket_path.display()
+        )
+    })?;
+
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_REVOKE_ALL_PEERS,
+        serde_json::json!({}),
+    );
+    let resp = client.call(&req)?;
+    exit_on_err(&resp);
+
+    let revoked = resp
+        .data
+        .as_ref()
+        .and_then(|d| d["revoked"].as_u64())
+        .unwrap_or(0);
+
+    if revoked == 0 {
+        println!("No paired devices to revoke.");
+    } else {
+        println!("Revoked {revoked} device(s).");
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_list_signature_compiles() {
+        let _: fn(&Path) -> Result<()> = run_list;
+    }
+
+    #[test]
+    fn run_revoke_signature_compiles() {
+        let _: fn(&Path, &str, bool) -> Result<()> = run_revoke;
+    }
+
+    #[test]
+    fn run_revoke_all_signature_compiles() {
+        let _: fn(&Path, bool) -> Result<()> = run_revoke_all;
+    }
+
+    #[test]
+    fn method_constants_have_correct_wire_names() {
+        assert_eq!(METHOD_LIST_PEERS, "list_peers");
+        assert_eq!(METHOD_REVOKE_PEER, "revoke_peer");
+        assert_eq!(METHOD_REVOKE_ALL_PEERS, "revoke_all_peers");
+    }
+}

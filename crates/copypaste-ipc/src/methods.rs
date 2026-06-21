@@ -491,6 +491,29 @@ pub const METHOD_ADD_FILE_ITEM: &str = "add_file_item";
 
 // ── Database maintenance ────────────────────────────────────────────────────
 
+/// Return lightweight storage statistics for the local clipboard database.
+///
+/// Params: none (empty `{}`).
+/// Response: `{ item_count: u64, size_bytes: u64 }`.
+///
+/// - `item_count` — total number of items stored (includes deleted/tombstoned rows).
+/// - `size_bytes` — approximate on-disk size of the main database file in bytes.
+///   Does not include the WAL file; use [`METHOD_VACUUM`] to flush WAL into the main
+///   file before calling this if you need an accurate compacted size.
+///
+/// Used by the macOS UI's settings panel (SettingsView.gq51) to show a storage
+/// usage summary without triggering the heavier `stats` computation.
+pub const METHOD_DB_STATS: &str = "db_stats";
+
+/// Success payload for [`METHOD_DB_STATS`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DbStatsResponse {
+    /// Total number of items in `clipboard_items` (all rows, including tombstones).
+    pub item_count: u64,
+    /// On-disk size of the main database file in bytes (WAL not included).
+    pub size_bytes: u64,
+}
+
 /// Run `VACUUM` (and optionally `REINDEX`) on the encrypted clipboard database.
 ///
 /// The daemon holds the write-lock for the duration and runs the operation on a
@@ -651,6 +674,31 @@ mod tests {
         let s = serde_json::to_string(&resp).unwrap();
         let back: ResetDatabaseResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);
+    }
+
+    #[test]
+    fn db_stats_method_has_correct_wire_name() {
+        assert_eq!(METHOD_DB_STATS, "db_stats");
+    }
+
+    #[test]
+    fn db_stats_response_roundtrip() {
+        let resp = DbStatsResponse {
+            item_count: 42,
+            size_bytes: 1024 * 512,
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        let back: DbStatsResponse = serde_json::from_str(&s).unwrap();
+        assert_eq!(resp, back);
+        assert!(s.contains("\"item_count\":42"), "wire: {s}");
+        assert!(s.contains("\"size_bytes\":"), "wire: {s}");
+    }
+
+    #[test]
+    fn db_stats_response_default_is_zero() {
+        let resp = DbStatsResponse::default();
+        assert_eq!(resp.item_count, 0);
+        assert_eq!(resp.size_bytes, 0);
     }
 
     #[test]

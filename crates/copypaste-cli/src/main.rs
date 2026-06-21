@@ -151,6 +151,23 @@ enum Commands {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Reset the local clipboard database (recovery from degraded mode).
+    ///
+    /// Wipes the encrypted database and recreates a fresh empty one in-place.
+    /// Use this when the daemon is stuck in degraded mode (key mismatch /
+    /// "file is not a database"). The daemon must be running. ALL clipboard
+    /// history is permanently deleted — use 'export' first if you want a
+    /// backup.
+    ///
+    /// Requires explicit confirmation: type 'reset' at the prompt, or pass
+    /// --confirm to skip the prompt (for scripted use).
+    ResetDatabase {
+        /// Skip the interactive confirmation prompt.
+        /// WARNING: bypasses the safety check — clipboard history is
+        /// permanently deleted without confirmation.
+        #[arg(long)]
+        confirm: bool,
+    },
     /// Display a QR code other devices can scan to pair with this one.
     ///
     /// Asks the daemon for a fresh, short-lived pairing token and renders it as
@@ -190,6 +207,22 @@ enum Commands {
     Cloud {
         #[command(subcommand)]
         action: CloudAction,
+    },
+    /// Manage paired devices (list / revoke)
+    Device {
+        #[command(subcommand)]
+        action: DeviceAction,
+    },
+    /// Access media (image/file) clipboard items
+    Media {
+        #[command(subcommand)]
+        action: MediaAction,
+    },
+    /// Reorder pinned clipboard items by providing IDs in the desired order
+    ReorderPinned {
+        /// Pinned item UUIDs in the desired display order (first = top)
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
     },
 }
 
@@ -233,6 +266,45 @@ enum DaemonAction {
     Install,
     /// Stop the daemon and remove the plist from ~/Library/LaunchAgents/
     Uninstall,
+}
+
+#[derive(Subcommand)]
+enum DeviceAction {
+    /// List all paired devices
+    List,
+    /// Revoke a paired device by mTLS fingerprint
+    Revoke {
+        /// mTLS certificate fingerprint of the device to revoke (hex SHA-256)
+        fingerprint: String,
+        /// Skip the interactive confirmation prompt
+        #[arg(long, short)]
+        force: bool,
+    },
+    /// Revoke all paired devices at once
+    RevokeAll {
+        /// Skip the interactive confirmation prompt
+        #[arg(long, short)]
+        force: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum MediaAction {
+    /// Fetch a media (image or file) item by ID and print or save it
+    Get {
+        /// Item UUID
+        id: String,
+        /// Save the decoded bytes to this file path instead of printing to stdout
+        #[arg(long, short)]
+        output: Option<String>,
+    },
+    /// Save a media (image or file) item directly to a file
+    Save {
+        /// Item UUID
+        id: String,
+        /// Destination file path
+        path: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -314,6 +386,23 @@ fn main() {
             force,
             dry_run,
         } => commands::backup::run_restore(&socket, &path, force, dry_run),
+        Commands::ResetDatabase { confirm } => {
+            commands::reset_database::run(&socket, confirm)
+        }
+        Commands::Device { action } => match action {
+            DeviceAction::List => commands::device::run_list(&socket),
+            DeviceAction::Revoke { fingerprint, force } => {
+                commands::device::run_revoke(&socket, &fingerprint, force)
+            }
+            DeviceAction::RevokeAll { force } => commands::device::run_revoke_all(&socket, force),
+        },
+        Commands::Media { action } => match action {
+            MediaAction::Get { id, output } => {
+                commands::media::run_get(&socket, &id, output.as_deref())
+            }
+            MediaAction::Save { id, path } => commands::media::run_save(&socket, &id, &path),
+        },
+        Commands::ReorderPinned { ids } => commands::reorder_pinned::run(&socket, &ids),
         Commands::PairQr { raw } => commands::pair_qr::run(&socket, raw),
         Commands::Vacuum {
             dry_run,

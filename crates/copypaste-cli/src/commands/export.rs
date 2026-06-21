@@ -81,6 +81,19 @@ pub fn run(
         ));
     }
 
+    // CopyPaste-93yr: warn when the daemon skipped non-text items (images,
+    // files) that cannot be round-tripped through the current import path.
+    // The warning goes to stderr so stdout JSON output is not polluted.
+    if let Some(skipped) = data.get("skipped_non_text").and_then(|v| v.as_u64()) {
+        if skipped > 0 {
+            eprintln!(
+                "WARNING: {skipped} non-text item(s) (images/files) were omitted from the \
+                 export because the import path does not support them yet. \
+                 Only text clipboard items are exported."
+            );
+        }
+    }
+
     let json = serde_json::to_string_pretty(&data)?;
 
     match output {

@@ -3040,6 +3040,8 @@ impl IpcServer {
                 // revoke_and_rotate runs the revoke body (audit-row insert),
                 // which needs a ready DB.
                 | "revoke_and_rotate"
+                // db_stats reads item count and file size — needs a ready DB.
+                | "db_stats"
         )
     }
 
@@ -3241,8 +3243,24 @@ impl IpcServer {
                     limit = MAX_REQUEST_BYTES,
                     "ipc request exceeded {MAX_REQUEST_BYTES} bytes; rejecting and closing"
                 );
+                // CopyPaste-cbfl: try to echo the request id from the head of
+                // the truncated buffer so the CLI id-matching guard can still
+                // correlate this error with the request that triggered it.
+                // We probe only the first 4 KiB — enough for any realistic JSON
+                // header, cheap enough to scan synchronously.
+                let echo_id = std::str::from_utf8(&buf[..buf.len().min(4096)])
+                    .ok()
+                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
+                    .and_then(|v| {
+                        v["id"]
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| v["id"].as_i64().map(|n| n.to_string()))
+                            .or_else(|| v["id"].as_u64().map(|n| n.to_string()))
+                    })
+                    .unwrap_or_else(|| "0".to_string());
                 let resp = Response::err_with_code(
-                    "0",
+                    echo_id,
                     "request_too_large",
                     format!(
                         "request too large: IPC request exceeds the {limit_mib} MiB limit. \
@@ -3347,7 +3365,28 @@ impl IpcServer {
     async fn dispatch(&self, line: &str) -> Response {
         let req: Request = match serde_json::from_str(line) {
             Ok(r) => r,
-            Err(e) => return Response::err("?", format!("parse error: {e}")),
+            Err(e) => {
+                // CopyPaste-cbfl: echo the request's id back so the CLI's
+                // id-matching guard doesn't reject this error response.
+                // If the line is valid JSON but not a Request, extract id
+                // from the raw Value. Fall back to "?" only when the line
+                // is not parseable as JSON at all.
+                let echo_id = serde_json::from_str::<serde_json::Value>(line)
+                    .ok()
+                    .and_then(|v| {
+                        v["id"]
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| v["id"].as_i64().map(|n| n.to_string()))
+                            .or_else(|| v["id"].as_u64().map(|n| n.to_string()))
+                    })
+                    .unwrap_or_else(|| "?".to_string());
+                return Response::err_with_code(
+                    echo_id,
+                    ERR_CODE_INVALID_ARGUMENT,
+                    format!("parse error: {e}"),
+                );
+            }
         };
 
         tracing::Span::current().record("method", req.method.as_str());
@@ -6016,6 +6055,47 @@ impl IpcServer {
             }
 
             // ------------------------------------------------------------------
+            // db_stats — lightweight storage summary (CopyPaste-40gl)
+            //
+            // Used by the macOS UI settings panel (SettingsView.gq51) to show
+            // item count and approximate on-disk size without the full `stats`
+            // computation. Returns { item_count, size_bytes }.
+            // ------------------------------------------------------------------
+            "db_stats" => {
+                let db_arc = self.db.clone();
+                let db_path = crate::paths::db_path();
+                let join = tokio::task::spawn_blocking(move || {
+                    let db = db_arc.blocking_lock();
+                    // Count all rows including tombstones — same contract as
+                    // COUNT(*) so the number is consistent with `stats`.
+                    let item_count: u64 = db
+                        .conn()
+                        .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get::<_, i64>(0))
+                        .map(|n| n.max(0) as u64)
+                        .unwrap_or(0);
+                    // File size from the filesystem — excludes the WAL file so
+                    // it matches what a user sees in Finder / du. Returns 0 when
+                    // the file doesn't exist yet (fresh install).
+                    let size_bytes: u64 = std::fs::metadata(&db_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
+                    (item_count, size_bytes)
+                })
+                .await;
+                match join {
+                    Ok((item_count, size_bytes)) => Response::ok(
+                        req.id,
+                        serde_json::json!({ "item_count": item_count, "size_bytes": size_bytes }),
+                    ),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("db_stats blocking task failed: {e}"),
+                    ),
+                }
+            }
+
+            // ------------------------------------------------------------------
             // P2P IPC methods
             // ------------------------------------------------------------------
             "get_own_fingerprint" => {
@@ -8287,6 +8367,9 @@ impl IpcServer {
                     let mut stmt = db.conn().prepare(&sql)?;
                     let b64 = base64::engine::general_purpose::STANDARD;
                     let mut items: Vec<serde_json::Value> = Vec::new();
+                    // CopyPaste-93yr: count non-text items skipped so the CLI
+                    // can warn the user rather than silently dropping them.
+                    let mut skipped_non_text: u64 = 0;
                     let map_row = |row: &rusqlite::Row<'_>| {
                         // key_version can be NULL for genuine v1 rows written
                         // before the column was added.  We read it as Option<i64>
@@ -8323,7 +8406,10 @@ impl IpcServer {
                         // Only export text items — the CLI import path only
                         // accepts content_bytes_b64 (raw bytes), and images are
                         // stored as chunked AEAD blobs that require extra context.
+                        // CopyPaste-93yr: count skipped non-text items so the
+                        // response can include the count and the CLI can warn.
                         if content_type != "text" {
+                            skipped_non_text += 1;
                             continue;
                         }
                         // P2-tj9s: skip sensitive items unless the caller opts in.
@@ -8399,21 +8485,32 @@ impl IpcServer {
                             "is_sensitive": is_sensitive,
                         }));
                     }
-                    Ok::<Vec<serde_json::Value>, anyhow::Error>(items)
+                    // CopyPaste-93yr: return skipped_non_text alongside items
+                    // so the CLI can warn the user.
+                    Ok::<(Vec<serde_json::Value>, u64), anyhow::Error>((items, skipped_non_text))
                 })
                 .await;
                 match join {
-                    Ok(Ok(items)) => {
+                    Ok(Ok((items, skipped_non_text))) => {
                         let count = items.len();
                         // P2-tj9s: audit log — record item COUNT only, never
                         // content. include_sensitive is logged so operators can
                         // detect unusual export calls in the daemon log.
                         tracing::info!(
                             count,
+                            skipped_non_text,
                             include_sensitive,
                             "export: completed (item count only; content not logged)"
                         );
-                        Response::ok(req.id, serde_json::json!({ "items": items }))
+                        Response::ok(
+                            req.id,
+                            serde_json::json!({
+                                "items": items,
+                                // CopyPaste-93yr: non-zero means some image/file
+                                // items were silently skipped; the CLI warns.
+                                "skipped_non_text": skipped_non_text,
+                            }),
+                        )
                     }
                     Ok(Err(e)) => Response::err_with_code(
                         req.id,
@@ -16266,6 +16363,164 @@ mod tests {
         assert!(
             wrong_aad_result.is_err(),
             "wrong item_id AAD must cause authentication failure"
+        );
+    }
+
+    // ── CopyPaste-40gl: db_stats IPC verb ────────────────────────────────────
+
+    /// `db_stats` on an empty database must return `{ item_count: 0, size_bytes }`.
+    /// The `size_bytes` value reflects the on-disk daemon DB (not the in-memory
+    /// DB the test server uses internally), so we only assert the structure and
+    /// the zero item_count.
+    #[tokio::test]
+    async fn db_stats_empty_database_returns_zero_count() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("db_stats_empty.sock");
+        start_test_server(&sock).await;
+
+        let resp = call_one(&sock, r#"{"id":"ds1","method":"db_stats","params":{}}"#).await;
+        assert_eq!(resp["ok"], true, "db_stats must succeed: {resp}");
+        let item_count = resp["data"]["item_count"]
+            .as_u64()
+            .expect("item_count must be u64");
+        assert_eq!(item_count, 0, "empty DB must report 0 items: {resp}");
+        // size_bytes is present and is a u64 (value may be non-zero if the
+        // daemon's own DB file exists on this machine).
+        let _size_bytes = resp["data"]["size_bytes"]
+            .as_u64()
+            .expect("size_bytes must be a u64 field");
+    }
+
+    /// `db_stats` on a DB with items must report the correct count.
+    #[tokio::test]
+    async fn db_stats_reports_correct_item_count() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("db_stats_count.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Seed 3 items directly.
+        {
+            let guard = db.lock().await;
+            for _ in 0..3 {
+                let item = copypaste_core::ClipboardItem::new_text(
+                    vec![0xABu8; 16],
+                    vec![0u8; 24],
+                    1,
+                );
+                copypaste_core::insert_item(&guard, &item).unwrap();
+            }
+        }
+
+        let resp = call_one(&sock, r#"{"id":"ds2","method":"db_stats","params":{}}"#).await;
+        assert_eq!(resp["ok"], true, "db_stats must succeed after seeding: {resp}");
+        let item_count = resp["data"]["item_count"]
+            .as_u64()
+            .expect("item_count must be u64");
+        assert_eq!(item_count, 3, "expected 3 items after seeding: {resp}");
+    }
+
+    // ── CopyPaste-cbfl: parse-error / oversized id echoing ───────────────────
+
+    /// When the daemon cannot parse a request as JSON, the error response's
+    /// `id` must echo back the id from the raw JSON (if extractable) so that
+    /// the CLI's id-matching guard can correlate the error.  When no id is
+    /// extractable the fallback `"?"` is used.
+    #[tokio::test]
+    async fn parse_error_echoes_id_from_raw_json() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("parse_err_id.sock");
+        start_test_server(&sock).await;
+
+        // Send valid JSON that has an id field but is missing the required
+        // `method` field, triggering a serde parse error.
+        let resp = call_one(
+            &sock,
+            r#"{"id":"req-42","not_method":"foo","params":{}}"#,
+        )
+        .await;
+        // The response must be an error.
+        assert_eq!(resp["ok"], false, "malformed request must fail: {resp}");
+        // The id in the response must echo "req-42" (the id from the raw JSON).
+        assert_eq!(
+            resp["id"].as_str(),
+            Some("req-42"),
+            "parse-error response id must echo the request id: {resp}"
+        );
+    }
+
+    /// When the line is pure garbage (not parseable as JSON at all), the
+    /// fallback id `"?"` is used since no id can be extracted.
+    #[tokio::test]
+    async fn parse_error_uses_fallback_id_when_not_valid_json() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("parse_err_fallback.sock");
+        start_test_server(&sock).await;
+
+        let resp = call_one(&sock, "this is not JSON at all!!!").await;
+        assert_eq!(resp["ok"], false, "garbage input must fail: {resp}");
+        assert_eq!(
+            resp["id"].as_str(),
+            Some("?"),
+            "garbage parse-error response must use fallback id '?': {resp}"
+        );
+    }
+
+    // ── CopyPaste-93yr: export warns on skipped non-text items ───────────────
+
+    /// The export response must include `skipped_non_text` that is non-zero
+    /// when image items exist in the database. Text items must still export.
+    #[tokio::test]
+    async fn export_skipped_non_text_count_is_non_zero_for_image_items() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("export_skip_img.sock");
+        let (_pm, db) = start_test_server_returning_db(&sock, false).await;
+
+        // Insert one image item and one text item directly.
+        {
+            let guard = db.lock().await;
+            // Image item — will be skipped during export.
+            // new_image takes (blob, meta_json, lamport_ts, thumb).
+            let img_item = copypaste_core::ClipboardItem::new_image(
+                vec![0xFFu8; 64], // fake encrypted blob bytes
+                "{}".to_string(), // image_meta_json
+                1,
+                None,
+            );
+            copypaste_core::insert_item(&guard, &img_item).unwrap();
+
+            // Text item — must appear in the export.
+            guard.conn().execute(
+                "INSERT INTO clipboard_items \
+                 (id, item_id, content_type, content, content_nonce, \
+                  is_sensitive, is_synced, lamport_ts, wall_time, key_version) \
+                 VALUES (?, ?, 'text', ?, ?, 0, 0, 2, 2000000, 2)",
+                rusqlite::params![
+                    uuid::Uuid::new_v4().to_string(),
+                    uuid::Uuid::new_v4().to_string(),
+                    // Zero-key v2 encrypt of "hello".
+                    // We use a raw ciphertext that the zero-key daemon can decrypt;
+                    // since we only care about skipped_non_text count we can test
+                    // with a zero-length ciphertext (decrypt will fail → skipped by
+                    // the decrypt-error path, but image count is independent).
+                    vec![0u8; 1],
+                    vec![0u8; 24],
+                ],
+            ).unwrap();
+        }
+
+        let resp = call_one(
+            &sock,
+            r#"{"id":"xe1","method":"export","params":{"limit":100}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "export must succeed: {resp}");
+
+        let skipped = resp["data"]["skipped_non_text"]
+            .as_u64()
+            .expect("skipped_non_text must be present in export response");
+        assert_eq!(
+            skipped, 1,
+            "exactly one image item must be counted as skipped: {resp}"
         );
     }
 }
