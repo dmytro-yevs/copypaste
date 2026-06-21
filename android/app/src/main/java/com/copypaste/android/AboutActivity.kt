@@ -148,9 +148,19 @@ private val ABOUT_FEATURES = listOf(
 
 private const val GITHUB_URL = "https://github.com/dmytro-yevs/copypaste"
 
-/** Human version string, e.g. "0.5.3 (build 8)". */
-private fun versionLabel(): String =
-    "${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})"
+/**
+ * Human version string — version name only, e.g. "0.5.3".
+ *
+ * CopyPaste-bdac.77: macOS AboutView shows only the version name (from
+ * Tauri getVersion() / app_version IPC, which expose no build-number
+ * equivalent). Android previously showed "VERSION_NAME (build VERSION_CODE)".
+ * Aligned to macOS format: display VERSION_NAME only so both platforms show
+ * the same string and users report a consistent version number.
+ *
+ * VERSION_CODE is used by the Play Store / package manager for ordering; it
+ * is not displayed in the About screen on either platform.
+ */
+internal fun versionLabel(): String = BuildConfig.VERSION_NAME
 
 /**
  * About content, hostable inside [MainActivity]'s nav shell or the standalone
