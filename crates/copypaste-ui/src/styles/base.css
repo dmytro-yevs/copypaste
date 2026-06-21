@@ -1,0 +1,116 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESET / LAYOUT
+   ══════════════════════════════════════════════════════════════════════════ */
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  /* Liquid-Glass aurora canvas — driven by the active palette's --bg-0/1/2
+     and --glow-a/b/--accent tokens so every palette gets its own colourscape.
+     The colour blobs are large and rich so the frosted glass surfaces have
+     real colour to blur THROUGH. background-attachment:fixed pins the aurora
+     behind all translucent surfaces as the user scrolls within panels.
+
+     Graphite Mist default (dark grey): the base gradient produces a deep
+     cool-grey canvas; the accent/glow blobs add the mist quality. */
+  /* CopyPaste-nqfi: canonical 4-blob AURORA_DARK layout + 2 mid-canvas overlay blobs.
+     Blob positions match AURORA_DARK/AURORA_OVERLAY_DARK in Components.kt:
+       A (6%,-18% → top-left corner)  B (108%,118% → bottom-right corner)
+       C (95%,-12% → top-right)       D (-10%,105% → bottom-left)
+       E overlay (50%,38% accent)     F overlay (30%,60% amber)
+     Note: negative coords become edge-clipped by the fixed viewport, giving
+     large saturated edge glows — this is intentional (matching Android's bleed). */
+  background:
+    /* F — warm overlay mid-left (rendered first = bottom layer); parameterized via
+         --ide-badge-warning so each palette drives its own warm tone (CopyPaste-bdac.33).
+         Default Graphite Mist / Liquid Blue: rgb(217 163 67) = #d9a343 — visually identical. */
+    radial-gradient(circle at 30% 60%, color-mix(in srgb, var(--ide-badge-warning) 16%, transparent), transparent 65%),
+    /* E — accent overlay centre-left */
+    radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 65%),
+    /* D — glowB bottom-left corner */
+    radial-gradient(circle at -10% 105%, color-mix(in srgb, var(--glow-b) 30%, transparent), transparent 50%),
+    /* C — glowA top-right */
+    radial-gradient(circle at 95% -12%, color-mix(in srgb, var(--glow-a) 28%, transparent), transparent 46%),
+    /* B — glowB bottom-right corner */
+    radial-gradient(circle at 108% 118%, color-mix(in srgb, var(--glow-b) 38%, transparent), transparent 50%),
+    /* A — glowA top-left (largest, most prominent) */
+    radial-gradient(circle at 6% -18%, color-mix(in srgb, var(--glow-a) 42%, transparent), transparent 50%),
+    linear-gradient(135deg, var(--bg-0), var(--bg-1) 45%, var(--bg-2));
+  background-attachment: fixed;
+  color: var(--ide-text);
+  /* Bundled Inter leads so rendering is identical across macOS + Android.
+     System fonts trail as safe fallback when the .woff2 drop-in is absent. */
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  user-select: none;
+  /* Stacking context for the aurora glow pseudo-elements */
+  position: relative;
+}
+
+/* ── Aurora glow layers (body::before / ::after) ─────────────────────────────
+   These are fixed, full-bleed glow orbs that animate slowly behind all content.
+   Gated by --motion-opacity so data-motion="calm" dims them and
+   @media (prefers-reduced-motion) stops them entirely via the :root override.
+
+   ::before — upper-right conic aurora ring (spins at 18s * --speed)
+   ::after  — lower-left drift band (oscillates at 12s * --speed) */
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  pointer-events: none;
+  z-index: 0;
+  /* opacity driven by glow-strength × motion-opacity; calm mode dims both */
+  opacity: calc(var(--glow-strength) * var(--motion-opacity));
+  mix-blend-mode: screen;
+  /* [calm] will-change removed — elements are now static, no GPU layer needed */
+}
+
+body::before {
+  width: 960px;
+  height: 960px;
+  right: -320px;
+  top: -300px;
+  border-radius: 999px;
+  background:
+    conic-gradient(from 165deg,
+      transparent,
+      color-mix(in srgb, var(--accent-2) 55%, transparent),
+      transparent,
+      color-mix(in srgb, var(--accent-3) 42%, transparent),
+      transparent);
+  filter: blur(18px);
+  /* [calm] auroraSpin removed — background is now static (no idle animation). */
+  transform: rotate(-14deg) scale(1);
+}
+
+body::after {
+  /* [rgwb] Replaced the travelling light-band (glowDrift sweep) with a static
+     ambient glow blob. The old animated linear-gradient produced a visible moving
+     LINE sweeping the entire layout. Static radial glow gives the colour warmth
+     without any moving artefact. opacity already gated by --glow-strength. */
+  width: 800px;
+  height: 800px;
+  left: -300px;
+  bottom: -300px;
+  border-radius: 999px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 30%, transparent), transparent 70%);
+  filter: blur(60px);
+  transform: none;
+  /* No animation — static ambient glow only */
+}
+
+/* body::before / ::after are now static (no animation) — no reduced-motion
+   override needed. The pseudo-elements simply render their fixed background. */
+
+#root {
+  display: flex;
+}

@@ -1,0 +1,291 @@
+
+/* ── §3 Focus ring ────────────────────────────────────────────────────────
+   Apply .focus-ring to any interactive element. Only shows on keyboard nav. */
+
+.focus-ring:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+[role="option"]:focus-visible,
+[role="tab"]:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: none;
+  box-shadow: var(--ide-focus-ring);
+}
+
+/* ── Text inputs & textareas ─────────────────────────────────────────────── */
+
+input,
+textarea {
+  user-select: text;
+  background: var(--ide-elevated);
+  color: var(--ide-text);
+  border: 1px solid var(--ide-border);
+  /* CopyPaste-i6qj (W3): use skin token so radius follows the active skin. */
+  border-radius: var(--skin-r-ctl, 9px); /* ix8u: styleguide --radius-ctl 9px */
+  outline: none;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              box-shadow   var(--motion-fast) var(--ease-standard);
+}
+
+input:focus,
+textarea:focus {
+  border-color: var(--ide-accent);
+  box-shadow: var(--ide-focus-ring);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--ide-faint);
+}
+
+input:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
+}
+
+/* Search inputs — reset the native cancel/search decoration */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+}
+
+/* ── Select ──────────────────────────────────────────────────────────────── */
+
+select {
+  appearance: none;
+  background: var(--ide-elevated);
+  color: var(--ide-text);
+  border: 1px solid var(--ide-border);
+  /* CopyPaste-i6qj (W3): use skin token so radius follows the active skin. */
+  border-radius: var(--skin-r-ctl, 9px); /* ix8u: styleguide --radius-ctl 9px */
+  padding: 4px 28px 4px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  /* Chevron colour matches new --ide-faint (#82868f). */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2382868f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color var(--motion-fast) var(--ease-standard),
+              box-shadow   var(--motion-fast) var(--ease-standard);
+}
+
+select:focus {
+  border-color: var(--ide-accent);
+  box-shadow: var(--ide-focus-ring);
+}
+
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
+}
+
+/* bdac.21: Light-mode chevron uses --ide-faint light value (#6c6c72) instead of
+   the dark-mode value (#82868f) baked into the default data-URI above. CSS
+   background-image data-URIs cannot reference CSS custom properties directly, so a
+   separate :root[data-theme="light"] override provides the correct encoded colour. */
+:root[data-theme="light"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236c6c72' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C%2Fsvg%3E");
+}
+
+/* ── Checkbox ────────────────────────────────────────────────────────────── */
+
+input[type="checkbox"] {
+  appearance: none;
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid var(--ide-border);
+  border-radius: 3px;
+  background: var(--ide-elevated);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  flex-shrink: 0;
+  transition: background var(--motion-fast) var(--ease-standard),
+              border-color var(--motion-fast) var(--ease-standard),
+              box-shadow   var(--motion-fast) var(--ease-standard);
+  position: relative;
+}
+
+input[type="checkbox"]:checked {
+  background: var(--ide-accent);
+  border-color: var(--ide-accent);
+}
+
+input[type="checkbox"]:checked::after {
+  content: "";
+  display: block;
+  width: 4px;
+  height: 8px;
+  border: 1.5px solid white;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg) translate(-1px, -1px);
+  margin-top: -2px;
+}
+
+input[type="checkbox"]:focus-visible {
+  box-shadow: var(--ide-focus-ring);
+}
+
+input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.40;
+}
+
+/* ── Range slider ────────────────────────────────────────────────────────── */
+
+input[type="range"] {
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 4px;
+  /* HW-M4: accent fill up to --_fill, unfilled portion uses elevated bg.
+     appearance:none disables native accent-color, so we drive it via a gradient. */
+  background: linear-gradient(
+    to right,
+    var(--ide-accent) 0%,
+    var(--ide-accent) var(--_fill, 0%),
+    var(--ide-elevated) var(--_fill, 0%),
+    var(--ide-elevated) 100%
+  );
+  border-radius: 2px;
+  border: 1px solid var(--ide-border);
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  margin-top: -5px;
+  box-shadow: var(--ide-e2);
+  transition: transform var(--motion-instant) var(--ease-standard);
+}
+
+input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+
+input[type="range"]:focus-visible {
+  outline: none;
+}
+
+input[type="range"]:focus-visible::-webkit-slider-thumb {
+  box-shadow: var(--ide-focus-ring), var(--ide-e2);
+}
+
+/* ── no-translucency — applied on <html> when the user disables vibrancy ─── */
+/* All translucent/glass surfaces fall back to solid opaque backgrounds.      */
+
+.no-translucency body {
+  background: var(--ide-bg);
+}
+
+.no-translucency .ide-translucent,
+.no-translucency .surface-glass {
+  background: var(--ide-panel);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Nested glass tiers collapse to solid opaque surfaces too. Cards lift to the
+   elevated token; floating layers (modals/popovers/toasts) match so depth still
+   reads via shadow alone, not translucency. */
+.no-translucency .surface-card {
+  background: var(--ide-elevated);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.no-translucency .surface-glass-strong {
+  background: var(--ide-elevated);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Popup vibrancy (inline style on the root div) is overridden by this rule
+   when translucency is off — the popup JS also reads the pref and skips the
+   inline style, but this CSS fallback is a defensive second layer. */
+.no-translucency [data-popup-root] {
+  background: var(--ide-panel) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* ── Interactive elements — §8 hover 130ms standard ─────────────────────── */
+
+button,
+[role="button"],
+[role="option"],
+[role="tab"],
+[role="switch"] {
+  transition-property: background-color, color, border-color, box-shadow, opacity, transform;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-standard);
+}
+
+/* ── Thin IDE-style scrollbars ───────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid transparent;
+  border-radius: 6px;
+  background-clip: padding-box;
+  transition: background var(--motion-fast) var(--ease-standard);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: padding-box;
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.16);
+  background-clip: padding-box;
+}
+
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.28);
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── Popup: compact single-line rows ─────────────────────────────────────── */
+
+.popup-row {
+  min-height: 34px;
+  line-height: 34px;
+}
+
+/* Image rows: no height cap so the inline minHeight (imageMaxHeight+10) drives size. */
+.popup-row-image {
+  line-height: 34px;
+}
