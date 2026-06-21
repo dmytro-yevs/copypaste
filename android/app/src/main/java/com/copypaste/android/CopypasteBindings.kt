@@ -420,22 +420,6 @@ fun applySpanMasking(text: String, spans: List<IntRange>): String {
 }
 
 /**
- * Returns a string describing the sensitive data kind, or null if not sensitive.
- */
-fun sensitiveKind(text: String): String? {
-    if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "sensitiveKind: stub — returns null")
-        return null
-    }
-    return try {
-        uniffi.copypaste_android.sensitiveKind(text)
-    } catch (e: Exception) {
-        Log.w(TAG, "sensitiveKind: native call failed: ${e.message}")
-        null
-    }
-}
-
-/**
  * Opens an encrypted SQLite database at [path] using the 32-byte [key].
  * Returns an opaque handle (Long). The generated UDL uses u64 (ULong);
  * we return Long for backward-compat with existing callers.
@@ -1282,19 +1266,28 @@ fun syncWithPeer(
     revokedFingerprints: List<String>,
     deviceId: String,
 ): uniffi.copypaste_android.P2pSyncResult {
-    if (!isNativeLibraryLoaded) {
-        throw IllegalStateException("copypaste_android native library not loaded; syncWithPeer is unavailable")
+    // CopyPaste-ah3i: zero the session key at the FFI boundary after Rust has
+    // consumed it (toUByteList() copies into a new List<UByte>). The finally
+    // block also covers the stub-unavailable path so the key bytes never linger
+    // regardless of whether the native library is loaded. Enforces UDL contract:
+    // "caller MUST zero the ByteArrays after the call and never log them."
+    try {
+        if (!isNativeLibraryLoaded) {
+            throw IllegalStateException("copypaste_android native library not loaded; syncWithPeer is unavailable")
+        }
+        return uniffi.copypaste_android.syncWithPeer(
+            peerAddr = peerAddr,
+            peerFingerprint = peerFingerprint,
+            sessionKey = sessionKey.toUByteList(),
+            certDer = certDer,
+            keyDer = keyDer,
+            localItems = localItems,
+            revokedFingerprints = revokedFingerprints,
+            deviceId = deviceId,
+        )
+    } finally {
+        sessionKey.fill(0)
     }
-    return uniffi.copypaste_android.syncWithPeer(
-        peerAddr = peerAddr,
-        peerFingerprint = peerFingerprint,
-        sessionKey = sessionKey.toUByteList(),
-        certDer = certDer,
-        keyDer = keyDer,
-        localItems = localItems,
-        revokedFingerprints = revokedFingerprints,
-        deviceId = deviceId,
-    )
 }
 
 // ── Inbound P2P mTLS listener (ABI-11 surface) ─────────────────────────────────
@@ -1315,6 +1308,10 @@ fun syncWithPeer(
  *
  * Converted to the generated `List<UByte>`-backed type at the FFI boundary by
  * [startP2pListener] / [updateP2pListenerPeers]. NEVER log [sessionKey].
+ *
+ * CopyPaste-ah3i: the FFI wrappers ([startP2pListener], [updateP2pListenerPeers],
+ * [syncWithPeer]) zero [sessionKey] in their `finally` blocks after passing it to
+ * Rust. Callers MUST NOT reuse this object's [sessionKey] after those calls return.
  */
 data class PeerSessionKeyInfo(val fingerprint: String, val sessionKey: ByteArray) {
     override fun equals(other: Any?): Boolean {
@@ -1374,10 +1371,14 @@ fun startP2pListener(
     localItems: List<uniffi.copypaste_android.LocalItem>,
     deviceId: String,
 ): P2pListenerHandleInfo {
-    if (!isNativeLibraryLoaded) {
-        throw IllegalStateException("copypaste_android native library not loaded; startP2pListener is unavailable")
-    }
-    return try {
+    // CopyPaste-ah3i: zero session key ByteArrays after Rust has consumed them
+    // (toGeneratedSessionKeys copies into List<UByte>). The finally block covers
+    // all exit paths including the stub-unavailable throw. Enforces UDL contract:
+    // "caller MUST zero the ByteArrays after the call".
+    try {
+        if (!isNativeLibraryLoaded) {
+            throw IllegalStateException("copypaste_android native library not loaded; startP2pListener is unavailable")
+        }
         val handle = uniffi.copypaste_android.startP2pListener(
             listenPort = listenPort.toUShort(),
             certDer = certDer,
@@ -1388,12 +1389,14 @@ fun startP2pListener(
             localItems = localItems,
             deviceId = deviceId,
         )
-        P2pListenerHandleInfo(
+        return P2pListenerHandleInfo(
             listenerId = handle.listenerId.toLong(),
             actualPort = handle.actualPort.toInt(),
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw e.toAppException { CopypasteException.DatabaseError(it ?: "startP2pListener failed") }
+    } finally {
+        sessionKeys.forEach { it.sessionKey.fill(0) }
     }
 }
 
@@ -1429,8 +1432,11 @@ fun updateP2pListenerPeers(
     revoked: List<String>,
     sessionKeys: List<PeerSessionKeyInfo>,
 ) {
-    if (!isNativeLibraryLoaded) return
+    // CopyPaste-ah3i: zero session key ByteArrays in all exit paths — both the
+    // stub (no-op) path and the live FFI path — so keys never linger in the
+    // caller's list regardless of library state.
     try {
+        if (!isNativeLibraryLoaded) return
         uniffi.copypaste_android.updateP2pListenerPeers(
             listenerId = listenerId.toULong(),
             allowed = allowed,
@@ -1439,6 +1445,8 @@ fun updateP2pListenerPeers(
         )
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw e.toAppException { CopypasteException.DatabaseError(it ?: "updateP2pListenerPeers failed") }
+    } finally {
+        sessionKeys.forEach { it.sessionKey.fill(0) }
     }
 }
 
