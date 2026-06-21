@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { RestartDaemonButton } from "./components/RestartDaemonButton";
 import styles from "./ViewTransition.module.css";
 import { appVersion, detectStaleDaemonFromStatus, api, checkAccessibilityPermission, requestAccessibilityPermission, getDaemonError, setProtocolMismatchHandler, type PairSasStatus } from "./lib/ipc";
+import { AccessibilityBanner } from "./components/AccessibilityBanner";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { startPeerPresencePolling, stopPeerPresencePolling } from "./lib/peerPresence";
@@ -480,7 +481,7 @@ export default function App() {
     };
   }, [axGranted, axDismissed]);
 
-  const showAxBanner = !axGranted && !axDismissed;
+  // showAxBanner removed — AccessibilityBanner component handles its own visibility.
 
   const handleOpenAxSettings = async () => {
     try {
@@ -583,37 +584,15 @@ export default function App() {
             </div>
           )}
 
-          {/* Accessibility permission banner — macOS only, dismissed once granted */}
-          {showAxBanner && (
-            <div
-              className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
-              style={{ borderRadius: "var(--skin-r-card)" }}
-            >
-              <span>
-                Accessibility permission is required for the global paste shortcut
-                and hotkey capture. Grant it in System Settings to enable these
-                features.
-              </span>
-              <div className="flex shrink-0 items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => { void handleOpenAxSettings(); }}
-                  className="border border-ide-warning/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-warning hover:bg-ide-hover"
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
-                >
-                  Open Settings
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAxDismissed(true)}
-                  className="border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
-                >
-                  Dismiss
-                </button>
-              </div>
-            </div>
-          )}
+          {/* Accessibility permission banner — macOS only.
+              CopyPaste-xn95: extracted to AccessibilityBanner so it can show
+              positive "granted" feedback after the user grants permission. */}
+          <AccessibilityBanner
+            axGranted={axGranted}
+            axDismissed={axDismissed}
+            onDismiss={() => setAxDismissed(true)}
+            onOpenSettings={() => { void handleOpenAxSettings(); }}
+          />
 
           <main className="min-h-0 flex-1 overflow-hidden">
             {/* CrossfadeContainer renders the outgoing view (fading out) and

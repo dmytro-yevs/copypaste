@@ -301,7 +301,9 @@ describe("Fix #5: DevicesView does not show own device in peer list", () => {
     expect(screen.getByText("iPhone")).toBeInTheDocument();
 
     // Only ONE Unpair button — for the other device.  Own device must be excluded.
-    const unpairButtons = screen.queryAllByRole("button", { name: /^Unpair$/i });
+    // Note: aria-label is now "Unpair <device-name>" (added by CopyPaste-wv57),
+    // so match the Unpair prefix rather than an exact-text query.
+    const unpairButtons = screen.queryAllByRole("button", { name: /^Unpair\b/i });
     expect(unpairButtons).toHaveLength(1);
   });
 });

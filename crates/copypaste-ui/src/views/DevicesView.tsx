@@ -383,9 +383,12 @@ function SasPairingModal({
               >
                 Doesn't match
               </button>
+              {/* wv57: aria-label so screen readers announce "Codes match" even when
+                  the visible text is replaced by "..." while the confirm is in flight. */}
               <button
                 onClick={() => void handleConfirm(true)}
                 disabled={confirmPending}
+                aria-label="Codes match — confirm pairing"
                 className="bg-ide-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
                 style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
@@ -631,6 +634,9 @@ function RevokeConfirmDialog({
                 ? "Enter a new passphrase (min 8 chars) to rotate"
                 : undefined
             }
+            // wv57: aria-label is always set so screen readers can identify the
+            // action even when the visible text is replaced by "..." when busy.
+            aria-label="Revoke and rotate sync key"
             // puf4: solid-danger variant for primary destructive action (Revoke & rotate)
             className="bg-ide-danger px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ borderRadius: "var(--skin-r-ctl)" }}

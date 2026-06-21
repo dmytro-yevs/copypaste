@@ -731,6 +731,10 @@ export function SettingsView() {
   // (default). False = all transports disabled. Daemon implements sync_enabled
   // in AppConfig (tke7/PG-30); the toggle has full effect.
   const [syncEnabled, setSyncEnabled] = useState(true);
+  // 7set: true when the daemon's get_config response did NOT include sync_enabled.
+  // In that case the toggle has no runtime effect (daemon ignores it) and we show
+  // a warning so the user knows. Reset to false once the daemon sends the field.
+  const [syncEnabledStub, setSyncEnabledStub] = useState(false);
 
   // Sync parity — p2p toggle + wifi-only
   const [syncOnWifiOnly, setSyncOnWifiOnly] = useState(false);
@@ -774,6 +778,8 @@ export function SettingsView() {
   const [importMsg, setImportMsg] = useState<{ text: string; isError: boolean } | null>(null);
   const exportMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const importMsgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // vcnv: pending parsed backup items held until the user confirms the restore modal.
+  const [importPending, setImportPending] = useState<unknown[] | null>(null);
 
   // Global state
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -789,6 +795,20 @@ export function SettingsView() {
   // Private-mode error
   const [privateModeError, setPrivateModeError] = useState<string | null>(null);
   const pmErrTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // CopyPaste-vrur: notification permission denial warning.
+  // Check on mount and whenever notifyOnCopy changes. The Notification API is
+  // available in Tauri's webview; `permission` is "granted" | "denied" | "default".
+  // We only warn when the OS has explicitly denied permission (not "default" — that
+  // means the user hasn't been asked yet, which is fine).
+  const [notifPermDenied, setNotifPermDenied] = useState(false);
+  useEffect(() => {
+    // Guard: Notification API not present in SSR / test environments that don't stub it.
+    const denied =
+      typeof Notification !== "undefined" &&
+      Notification.permission === "denied";
+    setNotifPermDenied(denied);
+  }, [prefs.notifyOnCopy]);
 
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -930,6 +950,9 @@ export function SettingsView() {
         setSyncOnWifiOnly(rawCfg.sync_on_wifi_only ?? false);
         // j9xj (PG-30): hydrate master sync_enabled (daemon may not emit it yet;
         // absent/null → true so existing installs stay in "sync on" state).
+        // 7set: track whether the daemon supports this field so we can warn when absent.
+        const syncEnabledSupported = rawCfg.sync_enabled !== undefined && rawCfg.sync_enabled !== null;
+        setSyncEnabledStub(!syncEnabledSupported);
         setSyncEnabled(rawCfg.sync_enabled ?? true);
 
         // Privacy & capture — these AppConfig fields are not in the AppSettings
@@ -1546,7 +1569,6 @@ export function SettingsView() {
       e.target.value = "";
       if (!file) return;
 
-      setImportInProgress(true);
       setImportMsg(null);
       try {
         // Read the file as text using the browser FileReader API — no fs Tauri
@@ -1576,29 +1598,49 @@ export function SettingsView() {
           return;
         }
 
-        const result = await api.importItems(items);
-        const { inserted, skipped } = result;
-        setImportMsg({
-          text: `Imported ${inserted} item${inserted === 1 ? "" : "s"}${skipped > 0 ? `, ${skipped} skipped (duplicates)` : ""}`,
-          isError: false,
-        });
-        if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
-        importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 5000);
-        // h97m: notify HistoryView (and any other view) to refresh so imported
-        // items appear immediately without waiting for the next poll interval.
-        // Fire-and-forget; failure just means the other view refreshes later.
-        void emit("history-refresh", null).catch(() => {});
+        // vcnv: hold parsed items and show a confirmation modal before touching
+        // the live database. The actual import runs in handleConfirmImport().
+        setImportPending(items);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         setImportMsg({ text: `Import failed: ${msg}`, isError: true });
         if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
         importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 5000);
-      } finally {
-        setImportInProgress(false);
       }
     },
     [importMsgTimerRef],
   );
+
+  // vcnv: perform the actual import after the user confirmed the modal.
+  const handleConfirmImport = useCallback(async () => {
+    const items = importPending;
+    setImportPending(null);
+    if (!items || items.length === 0) return;
+
+    setImportInProgress(true);
+    setImportMsg(null);
+    try {
+      const result = await api.importItems(items);
+      const { inserted, skipped } = result;
+      setImportMsg({
+        text: `Imported ${inserted} item${inserted === 1 ? "" : "s"}${skipped > 0 ? `, ${skipped} skipped (duplicates)` : ""}`,
+        isError: false,
+      });
+      if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
+      importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 5000);
+      // h97m: notify HistoryView (and any other view) to refresh so imported
+      // items appear immediately without waiting for the next poll interval.
+      // Fire-and-forget; failure just means the other view refreshes later.
+      void emit("history-refresh", null).catch(() => {});
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setImportMsg({ text: `Import failed: ${msg}`, isError: true });
+      if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
+      importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 5000);
+    } finally {
+      setImportInProgress(false);
+    }
+  }, [importPending, importMsgTimerRef]);
 
   // -------------------------------------------------------------------------
   // Render helpers
@@ -1644,15 +1686,24 @@ export function SettingsView() {
               Daemon implements AppConfig::sync_enabled (tke7/PG-30).
               When off, visually gates per-transport switches in the Sync tab. */}
           <SettingsRow label="Enable sync">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />
-              <LimitsMsg field="sync_enabled" />
-              <Toggle
-                checked={syncEnabled}
-                onChange={(v) => void handleSyncEnabledToggle(v)}
-                disabled={offline}
-                aria-label="Enable sync"
-              />
+            <div className="flex flex-col items-end gap-1">
+              {/* 7set: warn when daemon doesn't acknowledge sync_enabled so the
+                  user knows the toggle may have no effect on this daemon version. */}
+              {syncEnabledStub && !offline && (
+                <span className="text-[11px] text-ide-warning" role="note">
+                  sync_enabled not supported by daemon — toggle may be ignored until daemon is updated.
+                </span>
+              )}
+              <div className="flex items-center gap-1.5">
+                <InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />
+                <LimitsMsg field="sync_enabled" />
+                <Toggle
+                  checked={syncEnabled}
+                  onChange={(v) => void handleSyncEnabledToggle(v)}
+                  disabled={offline}
+                  aria-label="Enable sync"
+                />
+              </div>
             </div>
           </SettingsRow>
           <SettingsRow label="Private mode">
@@ -1685,19 +1736,29 @@ export function SettingsView() {
             />
           </SettingsRow>
           <SettingsRow label="Show notification on copy">
-            <Toggle
-              checked={prefs.notifyOnCopy}
-              onChange={(v) => {
-                // P0 fix: same guard as sound_on_copy above.
-                setPrefs({ notifyOnCopy: v });
-                if (loadState === "ready") {
-                  void api.setConfig(buildConfigPatch({ notify_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
-                    setPrefs({ notifyOnCopy: !v });
-                  });
-                }
-              }}
-              disabled={offline}
-            />
+            <div className="flex items-center gap-2">
+              {/* vrur: warn when notify is enabled but OS has denied permission.
+                  Shows inline so the user can act without leaving Settings. */}
+              {prefs.notifyOnCopy && notifPermDenied && (
+                <span className="text-[11px] text-ide-warning" role="alert">
+                  OS notification permission denied — notifications won't appear.
+                  Grant access in System Settings → Notifications.
+                </span>
+              )}
+              <Toggle
+                checked={prefs.notifyOnCopy}
+                onChange={(v) => {
+                  // P0 fix: same guard as sound_on_copy above.
+                  setPrefs({ notifyOnCopy: v });
+                  if (loadState === "ready") {
+                    void api.setConfig(buildConfigPatch({ notify_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
+                      setPrefs({ notifyOnCopy: !v });
+                    });
+                  }
+                }}
+                disabled={offline}
+              />
+            </div>
           </SettingsRow>
           <SettingsRow label="Mask sensitive data">
             <Toggle
@@ -2124,15 +2185,30 @@ export function SettingsView() {
             </div>
           </SettingsRow>
           <SettingsRow label="Auto-apply synced clipboard">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="When on, incoming synced items from other devices are automatically written to the local clipboard so it stays up-to-date. When off, synced items are saved to history but never applied to the active clipboard — paste manually from the history list." />
-              <LimitsMsg field="auto_apply_synced_clip" />
-              <Toggle
-                checked={autoApplySyncedClip}
-                onChange={(v) => void handleAutoApplySyncedClipToggle(v)}
-                disabled={offline || !syncEnabled}
-                aria-label="Auto-apply synced clipboard"
-              />
+            <div className="flex flex-col items-end gap-1">
+              {/* wrfv: visible inline notice so the user knows synced clips will
+                  silently overwrite the active clipboard (the actual write is
+                  daemon-side; this is the UI surface for the setting). */}
+              {autoApplySyncedClip && (
+                <span
+                  data-testid="auto-apply-notice"
+                  role="note"
+                  className="text-[11px] text-ide-faint"
+                >
+                  Synced clips will overwrite the active clipboard automatically.
+                  Turn off to keep clipboard intact and paste manually from history.
+                </span>
+              )}
+              <div className="flex items-center gap-1.5">
+                <InfoPopover text="When on, incoming synced items from other devices are automatically written to the local clipboard so it stays up-to-date. When off, synced items are saved to history but never applied to the active clipboard — paste manually from the history list." />
+                <LimitsMsg field="auto_apply_synced_clip" />
+                <Toggle
+                  checked={autoApplySyncedClip}
+                  onChange={(v) => void handleAutoApplySyncedClipToggle(v)}
+                  disabled={offline || !syncEnabled}
+                  aria-label="Auto-apply synced clipboard"
+                />
+              </div>
             </div>
           </SettingsRow>
         </Panel>
@@ -2870,6 +2946,16 @@ export function SettingsView() {
           void handleDeleteAll();
         }}
         onCancel={() => setDeleteConfirm(false)}
+      />
+      {/* vcnv: Restore confirmation modal — prevents accidental replacement of
+          the live database without an explicit user intent signal. */}
+      <ConfirmModal
+        open={importPending !== null}
+        title="Restore clipboard backup?"
+        body={`This will import ${importPending?.length ?? 0} item${(importPending?.length ?? 0) === 1 ? "" : "s"} from the backup file into your clipboard history. Duplicate items will be skipped. Existing items are not deleted.`}
+        confirmLabel="Restore"
+        onConfirm={() => { void handleConfirmImport(); }}
+        onCancel={() => setImportPending(null)}
       />
     </ViewShell>
   );

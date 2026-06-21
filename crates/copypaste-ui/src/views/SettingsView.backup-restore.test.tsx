@@ -283,6 +283,12 @@ describe("85n9 Backup & Restore panel", () => {
       fireEvent.change(fileInput, { target: { files: [file] } });
     });
 
+    // vcnv: a confirmation modal appears before the import — click "Restore" to proceed.
+    const restoreBtn = await screen.findByRole("button", { name: /restore/i });
+    await act(async () => {
+      fireEvent.click(restoreBtn);
+    });
+
     // The daemon import method must have been called with the items array.
     await waitFor(() => {
       const importCalls = invoke.mock.calls.filter(

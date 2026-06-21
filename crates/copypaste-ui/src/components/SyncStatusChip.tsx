@@ -34,8 +34,15 @@ interface SyncInfo {
  */
 const RECENT_SYNC_MS_FALLBACK = 5 * 60 * 1000; // 5 minutes — FALLBACK ONLY
 
-/** Polling interval. 10 s is light enough to be invisible. */
-const POLL_INTERVAL_MS = 10_000;
+/**
+ * Polling interval — 2 s so offline is reflected within one poll cycle.
+ *
+ * CopyPaste-f701: the old 10 s interval caused the chip to show a stale
+ * "connected" (green) for up to 10 s after the daemon went offline.
+ * Exported so tests can assert the upper bound without importing the React
+ * component tree.
+ */
+export const SYNC_POLL_INTERVAL_MS = 2_000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -204,7 +211,7 @@ export function SyncStatusChip() {
     cancelRef.current = false;
     void refresh();
 
-    const id = setInterval(() => { void refresh(); }, POLL_INTERVAL_MS);
+    const id = setInterval(() => { void refresh(); }, SYNC_POLL_INTERVAL_MS);
     return () => {
       cancelRef.current = true;
       clearInterval(id);

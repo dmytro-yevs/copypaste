@@ -363,9 +363,12 @@ export function PeerRow({
            W-C7: border-radius uses --skin-r-ctl (9px classic, 7px quiet, 12px vapor)
            via inline style so the skin axis drives the shape without hardcoding rounded-ide. */}
       <div className="mt-2 flex gap-1.5 border-t border-ide-border/20 pt-2">
+        {/* wv57: aria-label is always set so screen readers can identify the action
+            even when the visible text is replaced by "..." during in-flight ops. */}
         <button
           onClick={() => onUnpair(peer.fingerprint)}
           disabled={isPending}
+          aria-label={`Unpair ${peer.name || peer.fingerprint.slice(0, 8)}`}
           style={{ borderRadius: "var(--skin-r-ctl)" }}
           className="flex-1 bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
         >
@@ -374,6 +377,7 @@ export function PeerRow({
         <button
           onClick={() => onRevoke(peer.fingerprint)}
           disabled={isPending}
+          aria-label={`Revoke ${peer.name || peer.fingerprint.slice(0, 8)}`}
           style={{ borderRadius: "var(--skin-r-ctl)" }}
           className="flex-1 bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
         >
