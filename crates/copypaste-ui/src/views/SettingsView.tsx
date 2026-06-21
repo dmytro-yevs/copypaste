@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import ReactDOM from "react-dom";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { emit, listen } from "@tauri-apps/api/event";
-import { Check, X } from "lucide-react";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
@@ -24,172 +22,37 @@ import {
 } from "../lib/ipc";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
-import { PALETTE_KEYS, PALETTES } from "../lib/liquid-tokens";
-import { SKIN_IDS } from "../lib/skins";
-import { SectionHeader } from "../components/SectionHeader";
-import { SettingsRow } from "../components/SettingsRow";
-import { Toggle } from "../components/Toggle";
-import { Panel } from "../components/Panel";
-import { SliderRow } from "../components/SliderRow";
 // i2sr (PG-40): shared hybrid last-sync formatter (relative ≤24 h, absolute beyond).
-import { formatSyncTime } from "../lib/time";
 // Step arrays (moved from StepSlider.tsx — StepSlider component deleted in v0.5.3,
 // all sliders now use the unified SliderRow component).
 
-/** Return the step value closest to `raw` (by minimum absolute distance). */
-function snapToNearest<T extends number>(steps: readonly T[], raw: number): T {
-  let best = 0;
-  let bestDist = Math.abs(raw - (steps[0] as number));
-  for (let i = 1; i < steps.length; i++) {
-    const d = Math.abs(raw - (steps[i] as number));
-    if (d < bestDist) { bestDist = d; best = i; }
-  }
-  return steps[best];
-}
-
-// CopyPaste-sqw0: DEFAULT_POPUP_SHORTCUT is the *fallback* initial-render value
-// used only while the IPC call to `get_default_popup_shortcut` is in-flight.
-// The Rust constant `DEFAULT_POPUP_SHORTCUT` in `src-tauri/src/lib.rs` is the
-// authoritative source; the UI fetches it at load time via
-// `getDefaultPopupShortcut()` and stores it in `defaultShortcut` state so the
-// "reset to default" button always reflects the Rust value, not this literal.
-// If you change the value here, change it in Rust too — and the Rust test
-// `default_popup_shortcut_value_matches_ts_expectation` will catch any drift.
-const DEFAULT_POPUP_SHORTCUT = "CmdOrCtrl+Shift+V";
-
-// NOTE: step values are BINARY (MiB/GiB, ×1024² / ×1024³) to match the core
-// defaults (DEFAULT_MAX_* below) which are also binary. Using decimal here
-// would make e.g. the 10 MiB default snap to a 10 MB (10_000_000) step and
-// silently persist a ~5% smaller cap — label drift. Labels use "MB"/"GB"
-// (the conventional macOS user-facing unit per Apple HIG — same binary values,
-// SI suffix). Android settings display "MiB/GiB" (IEC) for the same binary
-// values; the suffix convention differs per platform but the underlying bytes
-// are identical. bdac.62: intentional platform convention, not a bug.
-const TEXT_SIZE_STEPS_BYTES = [1,2,5,10,15,25,50,100].map((n) => n * 1024 * 1024) as unknown as readonly number[];
-const TEXT_SIZE_LABELS = ["1 MB","2 MB","5 MB","10 MB","15 MB","25 MB","50 MB","100 MB (max)"] as const;
-
-const IMAGE_SIZE_STEPS_BYTES = [5,10,25,64,128,256,512].map((n) => n * 1024 * 1024) as unknown as readonly number[];
-const IMAGE_SIZE_LABELS = ["5 MB","10 MB","25 MB","64 MB","128 MB","256 MB","512 MB (max)"] as const;
-
-// File-size cap: max is the library hard cap MAX_FILE_BYTES (100 MiB) — the
-// single storable ceiling (mirrors crate::file::MAX_FILE_BYTES). Larger values
-// are clamped back down by the daemon, so advertising "2 GB" was dishonest.
-// The 8 MB step marks the P2P/relay sync ceiling (SYNC_MAX_BLOB_BYTES): files
-// above it are kept locally but skipped for sync (see helper text below).
-const FILE_SIZE_STEPS_BYTES = [8,16,25,50,100].map((n) => n * 1024 * 1024) as unknown as readonly number[];
-const FILE_SIZE_LABELS = ["8 MB","16 MB","25 MB","50 MB","100 MB (max)"] as const;
-
-const QUOTA_STEPS_BYTES = [1,2,5,10,25,50].map((n) => n * 1024 * 1024 * 1024) as unknown as readonly number[];
-const QUOTA_LABELS = ["1 GB","2 GB","5 GB","10 GB","25 GB","50 GB (max)"] as const;
-
-// 3gsk: add 0 (Off) as first step — Android already has this step so users can
-// disable auto-wipe on both platforms. 0 means "never auto-wipe sensitive items".
-const SENSITIVE_TTL_STEPS = [0, 10, 30, 60, 5 * 60, 15 * 60, 60 * 60] as const;
-const SENSITIVE_TTL_LABELS = ["Off","10 s","30 s","1 min","5 min","15 min","1 hour"] as const;
-
-// History display limit slider — controls how many items the UI renders on screen.
-// This is a UI-only preference persisted in localStorage. It does NOT cap daemon
-// storage; the daemon prunes by byte quota (storage_quota_bytes), not item count.
-// Label: "History display limit" so users understand it's a view filter, not retention.
-const MAX_ITEMS_STEPS = [100, 250, 500, 1000, 2500, 5000, 10000, 100000] as const;
-const MAX_ITEMS_LABELS = ["100","250","500","1 000","2 500","5 000","10 000","Unlimited"] as const;
-const DEFAULT_MAX_ITEMS = 1000; // default UI display window
+// Extracted sub-modules (CopyPaste-g06m.14 split)
+import {
+  snapToNearest,
+  DEFAULT_POPUP_SHORTCUT,
+  TEXT_SIZE_STEPS_BYTES,
+  IMAGE_SIZE_STEPS_BYTES,
+  FILE_SIZE_STEPS_BYTES,
+  QUOTA_STEPS_BYTES,
+  SENSITIVE_TTL_STEPS,
+  DEFAULT_MAX_TEXT_BYTES,
+  DEFAULT_MAX_IMAGE_BYTES,
+  DEFAULT_MAX_FILE_BYTES,
+  DEFAULT_STORAGE_QUOTA_BYTES,
+  DEFAULT_IMAGE_QUALITY,
+  DEFAULT_SENSITIVE_TTL_SECS,
+} from "./SettingsView/lib/settingsSliders";
+import { GeneralTab } from "./SettingsView/tabs/GeneralTab";
+import { DisplayTab } from "./SettingsView/tabs/DisplayTab";
+import { SyncTab } from "./SettingsView/tabs/SyncTab";
+import { ShortcutsTab } from "./SettingsView/tabs/ShortcutsTab";
+import { StorageTab, type StorageTabProps } from "./SettingsView/tabs/StorageTab";
 
 // ---------------------------------------------------------------------------
 // Shared layout primitives (Panel imported from ../components/Panel)
 // ---------------------------------------------------------------------------
 
-function StatusRow({ label, ok }: { label: string; ok: boolean }) {
-  return (
-    <div className="flex items-center gap-2 text-[13px] text-ide-dim">
-      <span className="w-[140px] shrink-0">{label}</span>
-      {/* §6.6: replaced ✓/— text chars with Lucide icons (size 14, semantic tint) */}
-      <span className={ok ? "text-ide-success" : "text-ide-faint"}>
-        {ok ? <Check size={14} /> : <span className="text-[13px]">—</span>}
-      </span>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// InfoPopover — collapsible help text behind a ⓘ icon (M8)
-// HW-M3 fix: popover content is rendered via ReactDOM.createPortal to
-// document.body so it can never be clipped by an ancestor overflow-hidden div.
-// Position is computed from the trigger button's getBoundingClientRect.
-// Click outside to close.
-// ---------------------------------------------------------------------------
-
-function InfoPopover({ text }: { text: string }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-
-  // Recompute position from the trigger button each time it opens.
-  const handleToggle = useCallback(() => {
-    if (!open && btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      // Place popover to the right of the icon, vertically centered on it.
-      setPos({
-        top: rect.top + rect.height / 2,
-        left: rect.right + 6,
-      });
-    }
-    setOpen((v) => !v);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      const target = e.target as Node;
-      const outsideBtn = btnRef.current && !btnRef.current.contains(target);
-      const outsidePopover = popoverRef.current && !popoverRef.current.contains(target);
-      if (outsideBtn && outsidePopover) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const popoverEl = open
-    ? ReactDOM.createPortal(
-        <div
-          ref={popoverRef}
-          className="surface-glass-strong z-[9999] w-56 p-2 text-[11px] text-ide-dim"
-          style={{
-            position: "fixed",
-            top: pos.top,
-            left: pos.left,
-            minWidth: "14rem",
-            transform: "translateY(-50%)",
-            borderRadius: "var(--skin-r-ctl)",
-          }}
-        >
-          {text}
-        </div>,
-        document.body
-      )
-    : null;
-
-  return (
-    <div className="inline-flex items-center">
-      <button
-        ref={btnRef}
-        type="button"
-        aria-label="More info"
-        aria-expanded={open}
-        onClick={handleToggle}
-        className="flex h-6 w-6 items-center justify-center rounded-full text-ide-faint hover:text-ide-dim transition-colors"
-      >
-        <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
-          <path d="M8 1a7 7 0 1 0 0 14A7 7 0 0 0 8 1Zm0 3a.9.9 0 1 1 0 1.8A.9.9 0 0 1 8 4Zm-.75 2.75h1.5v4.5h-1.5v-4.5Z" />
-        </svg>
-      </button>
-      {popoverEl}
-    </div>
-  );
-}
+// StatusRow and InfoPopover extracted to SettingsView/components/ (CopyPaste-g06m.14)
 
 // ---------------------------------------------------------------------------
 // Tab bar
@@ -272,190 +135,10 @@ function TabBar({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// formatLastSync extracted to SyncTab.tsx (CopyPaste-g06m.14)
 
-// i2sr (PG-40): delegate to the shared formatSyncTime hybrid formatter so
-// SettingsView and DeviceCard use the same relative/absolute boundary (24 h).
-// Input is ms (SyncStatus.last_sync_ms). Returns "Never" for null/0.
-function formatLastSync(ms: number | null): string {
-  if (ms === null) return "Never";
-  return formatSyncTime(ms, "ms") ?? "Never";
-}
-
-// ---------------------------------------------------------------------------
-// Storage / Limits defaults — MUST mirror copypaste-core
-// (crates/copypaste-core/src/config/defaults.rs). Stepped-slider state is now
-// stored as raw bytes (or item count / seconds) snapped to the nearest step
-// array entry so an existing config always loads cleanly.
-//
-// Core binary defaults (MiB/GiB):
-//   text 10 MiB, image 64 MiB, file 100 MiB, quota 10 GiB
-// Step arrays defined above (moved from the deleted StepSlider.tsx in v0.5.3) cover or exceed each of these.
-const DEFAULT_MAX_TEXT_BYTES = 10 * 1024 * 1024;          // 10 MiB
-const DEFAULT_MAX_IMAGE_BYTES = 64 * 1024 * 1024;          // 64 MiB
-const DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024;          // 100 MiB (= crate::file::MAX_FILE_BYTES, the storable hard cap)
-const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
-const DEFAULT_IMAGE_QUALITY = 100;
-const DEFAULT_SENSITIVE_TTL_SECS = 30;
-
-// ---------------------------------------------------------------------------
-// ShortcutCapture — focus to record a new key combo
-// ---------------------------------------------------------------------------
-
-/** Convert a KeyboardEvent into a Tauri accelerator string like "CmdOrCtrl+Shift+V". */
-function eventToAccelerator(e: React.KeyboardEvent<HTMLInputElement>): string | null {
-  // Ignore bare modifier keydowns (nothing to bind yet).
-  if (["Meta", "Control", "Alt", "Shift"].includes(e.key)) return null;
-
-  const parts: string[] = [];
-  // On macOS Cmd maps to Meta; on other platforms Ctrl maps to CmdOrCtrl.
-  // Tauri accepts "CmdOrCtrl" as a cross-platform alias.
-  if (e.metaKey || e.ctrlKey) parts.push("CmdOrCtrl");
-  if (e.altKey) parts.push("Alt");
-  if (e.shiftKey) parts.push("Shift");
-
-  // Always derive from the PHYSICAL key (e.code), not e.key, so the shortcut
-  // is keyboard-layout-independent (e.g. Cyrillic layouts still record "Q").
-  let key: string;
-  if (e.code.startsWith("Key")) {
-    key = e.code.slice(3); // "KeyQ" → "Q"
-  } else if (e.code.startsWith("Digit")) {
-    key = e.code.slice(5); // "Digit1" → "1"
-  } else {
-    key = e.code || e.key;
-  }
-
-  if (key.length === 1) {
-    key = key.toUpperCase();
-  } else {
-    const keyMap: Record<string, string> = {
-      ArrowUp: "Up",
-      ArrowDown: "Down",
-      ArrowLeft: "Left",
-      ArrowRight: "Right",
-      " ": "Space",
-      Space: "Space",
-      Escape: "Escape",
-      Enter: "Return",
-      Return: "Return",
-      Backspace: "Backspace",
-      Delete: "Delete",
-      Tab: "Tab",
-      Home: "Home",
-      End: "End",
-      PageUp: "PageUp",
-      PageDown: "PageDown",
-      F1: "F1",
-      F2: "F2",
-      F3: "F3",
-      F4: "F4",
-      F5: "F5",
-      F6: "F6",
-      F7: "F7",
-      F8: "F8",
-      F9: "F9",
-      F10: "F10",
-      F11: "F11",
-      F12: "F12",
-    };
-    key = keyMap[key] ?? key;
-  }
-  // Require at least one modifier for a meaningful global shortcut.
-  if (parts.length === 0) return null;
-
-  parts.push(key);
-  return parts.join("+");
-}
-
-/**
- * Render a Tauri accelerator string ("CmdOrCtrl+Shift+V") as Mac keycap symbols
- * ("⌘⇧V"). Modifiers collapse to their glyphs (no "+" separators) to match the
- * native macOS shortcut display. (audit P2)
- */
-function formatAccelerator(accel: string): string {
-  const SYMBOL: Record<string, string> = {
-    CmdOrCtrl: "⌘",
-    Cmd: "⌘",
-    Command: "⌘",
-    Meta: "⌘",
-    Super: "⌘",
-    Ctrl: "⌃",
-    Control: "⌃",
-    Alt: "⌥",
-    Option: "⌥",
-    Shift: "⇧",
-    Return: "↩",
-    Enter: "↩",
-    Backspace: "⌫",
-    Delete: "⌦",
-    Escape: "⎋",
-    Space: "␣",
-    Tab: "⇥",
-    Up: "↑",
-    Down: "↓",
-    Left: "←",
-    Right: "→",
-  };
-  return accel
-    .split("+")
-    .map((part) => SYMBOL[part] ?? part)
-    .join("");
-}
-
-function ShortcutCapture({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (accel: string) => void;
-}) {
-  const [capturing, setCapturing] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      e.preventDefault();
-      e.stopPropagation();
-      if (e.key === "Escape") {
-        setCapturing(false);
-        inputRef.current?.blur();
-        return;
-      }
-      const accel = eventToAccelerator(e);
-      if (accel !== null) {
-        onChange(accel);
-        setCapturing(false);
-        inputRef.current?.blur();
-      }
-    },
-    [onChange]
-  );
-
-  return (
-    <input
-      ref={inputRef}
-      readOnly
-      // audit P2: show Mac keycaps (⌘⇧V) instead of the raw "CmdOrCtrl+Shift+V"
-      // accelerator token. The bound value is still the accelerator string.
-      value={capturing ? "Press a shortcut…" : formatAccelerator(value)}
-      onFocus={() => setCapturing(true)}
-      onBlur={() => setCapturing(false)}
-      onKeyDown={handleKeyDown}
-      className={[
-        "w-48 cursor-pointer border px-2.5 py-1.5 text-[13px] text-ide-text",
-        // audit P2: bg-ide-bg looked disabled; use the white/elevated control fill.
-        "outline-none select-none bg-ide-elevated",
-        capturing
-          ? "border-ide-accent ring-1 ring-ide-accent"
-          : "border-ide-border hover:border-ide-accent",
-      ].join(" ")}
-      style={{ borderRadius: "var(--skin-r-ctl)" }}
-      title="Click and press a key combination"
-    />
-  );
-}
+// Storage / Limits defaults, ShortcutCapture, and related helpers extracted to
+// SettingsView/lib/settingsSliders.ts and SettingsView/components/ (CopyPaste-g06m.14)
 
 // ---------------------------------------------------------------------------
 // Main view
@@ -538,13 +221,7 @@ export function SettingsView() {
   );
   const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY);
   // §6.3: History display limit — read from and written to the persisted UIPrefs store.
-  // Does NOT cap daemon storage; the daemon prunes by byte quota (storage_quota_bytes).
-  // This slider filters how many items the UI renders; daemon may hold more items on disk.
-  // Initialised from prefs.historyDisplayLimit so re-opening Settings shows the saved value.
-  const maxItems = snapToNearest(
-    MAX_ITEMS_STEPS as unknown as readonly number[],
-    prefs.historyDisplayLimit ?? DEFAULT_MAX_ITEMS
-  );
+  // maxItems computed inside StorageTab (CopyPaste-g06m.14 split).
   // Per-field save feedback: key = field name, value = error or "Saved" / null.
   const [limitsMsg, setLimitsMsg] = useState<Record<string, string | null>>({});
   const limitsMsgTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -1512,8 +1189,6 @@ export function SettingsView() {
     "disabled:cursor-not-allowed disabled:opacity-40",
   ].join(" ");
 
-
-
   // borderRadius is applied via inline style (var(--skin-r-ctl)) on every button using btnCls.
   // Do NOT add rounded-ide here — use btnStyle instead.
   const btnCls = [
@@ -1522,834 +1197,88 @@ export function SettingsView() {
   ].join(" ");
   const btnStyle = { borderRadius: "var(--skin-r-ctl)" } as const;
 
-  // Inline feedback badge for a limits field.
-  function LimitsMsg({ field }: { field: string }) {
-    const msg = limitsMsg[field];
-    if (!msg) return null;
-    const isError = msg !== "Saved";
-    return (
-      <span className={`text-[11px] ${isError ? "text-ide-danger" : "text-ide-success"}`}>
-        {msg}
-      </span>
-    );
-  }
-
   // -------------------------------------------------------------------------
-  // Tab content renderers
+  // Tab content renderers — delegated to extracted tab components
   // -------------------------------------------------------------------------
 
   function renderGeneral() {
     return (
-      <div className="space-y-2">
-        {/* bdac.93: sub-group "General" — sync + private mode */}
-        <SectionHeader label="General" />
-        <Panel>
-          {/* j9xj (PG-30): master sync kill-switch — Android parity.
-              Daemon implements AppConfig::sync_enabled (tke7/PG-30).
-              When off, visually gates per-transport switches in the Sync tab. */}
-          <SettingsRow title="Enable sync">
-            <div className="flex flex-col items-end gap-1">
-              {/* 7set: warn when daemon doesn't acknowledge sync_enabled so the
-                  user knows the toggle may have no effect on this daemon version. */}
-              {syncEnabledStub && !offline && (
-                <span className="text-[11px] text-ide-warning" role="note">
-                  Sync control unavailable — please update the CopyPaste background service to enable this setting.
-                </span>
-              )}
-              <div className="flex items-center gap-1.5">
-                <InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />
-                <LimitsMsg field="sync_enabled" />
-                <Toggle
-                  checked={syncEnabled}
-                  onChange={(v) => void handleSyncEnabledToggle(v)}
-                  disabled={offline}
-                  aria-label="Enable sync"
-                />
-              </div>
-            </div>
-          </SettingsRow>
-          <SettingsRow title="Private mode">
-            <div className="flex items-center gap-2">
-              {privateModeError !== null && (
-                <span className="text-[11px] text-ide-danger">{privateModeError}</span>
-              )}
-              {/* bdac.47: InfoPopover added — Private mode had no description */}
-              <InfoPopover text="When on, this device stops recording new clipboard items and suppresses sync for the session. The notification's Pause action is a temporary per-session pause; Private mode persists across restarts." />
-              <Toggle
-                checked={privateMode}
-                onChange={(v) => void handlePrivateMode(v)}
-                disabled={offline}
-              />
-            </div>
-          </SettingsRow>
-        </Panel>
-
-        {/* bdac.93: sub-group "Notifications" — sound + notify-on-copy */}
-        <SectionHeader label="Notifications" />
-        <Panel>
-          <SettingsRow title="Play sound on copy">
-            <Toggle
-              checked={prefs.playSoundOnCopy}
-              onChange={(v) => {
-                // P0 fix: only persist to daemon once settings are fully loaded.
-                // buildConfigPatch reads hydrated slider/toggle state; calling it
-                // before "ready" would push default values over the real config.
-                setPrefs({ playSoundOnCopy: v });
-                if (loadState === "ready") {
-                  void api.setConfig(buildConfigPatch({ sound_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
-                    setPrefs({ playSoundOnCopy: !v });
-                  });
-                }
-              }}
-              disabled={offline}
-            />
-          </SettingsRow>
-          <SettingsRow title="Show notification on copy">
-            <div className="flex items-center gap-2">
-              {/* vrur: warn when notify is enabled but OS has denied permission.
-                  Shows inline so the user can act without leaving Settings. */}
-              {prefs.notifyOnCopy && notifPermDenied && (
-                <span className="text-[11px] text-ide-warning" role="alert">
-                  OS notification permission denied — notifications won't appear.
-                  Grant access in System Settings → Notifications.
-                </span>
-              )}
-              <Toggle
-                checked={prefs.notifyOnCopy}
-                onChange={(v) => {
-                  // P0 fix: same guard as sound_on_copy above.
-                  setPrefs({ notifyOnCopy: v });
-                  if (loadState === "ready") {
-                    void api.setConfig(buildConfigPatch({ notify_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
-                      setPrefs({ notifyOnCopy: !v });
-                    });
-                  }
-                }}
-                disabled={offline}
-              />
-            </div>
-          </SettingsRow>
-        </Panel>
-
-        {/* bdac.93: sub-group "Privacy" — mask sensitive. Named "Privacy" (not
-            "Display") to avoid colliding with the "Display" appearance tab. */}
-        <SectionHeader label="Privacy" />
-        <Panel>
-          <SettingsRow title="Mask sensitive data">
-            <div className="flex items-center gap-1.5">
-              {/* bdac.50: added description for Mask sensitive data row */}
-              <InfoPopover text="Hide preview text for items flagged as sensitive (passwords, credit cards, tokens). Click an item in history to reveal its content." />
-              <Toggle
-                checked={prefs.maskSensitive}
-                onChange={(v) => setPrefs({ maskSensitive: v })}
-              />
-            </div>
-          </SettingsRow>
-        </Panel>
-
-        <SectionHeader
-          label="Capture"
-          hint="Control public-IP lookup, paste formatting, and which apps are never captured."
-        />
-        <Panel>
-          <SettingsRow title="Discover public IP">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Allow a one-off STUN request to learn this device's public IP, shown in the device-info card. No data is sent to analytics." />
-              <Toggle
-                checked={collectPublicIp}
-                onChange={(v) => {
-                  // Mirror sound/notify: persist only once fully loaded, revert on failure.
-                  setCollectPublicIp(v);
-                  if (loadState === "ready") {
-                    void api
-                      .setConfig(buildConfigPatch({ collect_public_ip: v }) as unknown as Parameters<typeof api.setConfig>[0])
-                      .catch(() => setCollectPublicIp(!v));
-                  }
-                }}
-                disabled={offline}
-              />
-            </div>
-          </SettingsRow>
-          {/* CMP-023: paste_as_plain_text is a macOS capture-path concept.
-              Android has no parity yet (no analogous platform hook). */}
-          <SettingsRow title="Paste as plain text">
-            <div className="flex items-center gap-1.5">
-              {/* bdac.95: removed "macOS only; no Android parity" — Android also implements pasteAsPlainText */}
-              <InfoPopover text="Strip rich formatting (RTF/HTML) when pasting — writes plain text only." />
-              <Toggle
-                checked={pasteAsPlainText}
-                onChange={(v) => {
-                  setPasteAsPlainText(v);
-                  if (loadState === "ready") {
-                    void api
-                      .setConfig(buildConfigPatch({ paste_as_plain_text: v }) as unknown as Parameters<typeof api.setConfig>[0])
-                      .catch(() => setPasteAsPlainText(!v));
-                  }
-                }}
-                disabled={offline}
-              />
-            </div>
-          </SettingsRow>
-          {/* CopyPaste-6uy9: allow-screenshots toggle. Tauri-direct (not daemon).
-              Default = OFF (content protection ON = PG-25 behaviour). When enabled
-              the NSWindow.sharingType is set to .readOnly so screenshots & screen
-              recordings can capture CopyPaste windows. */}
-          <SettingsRow title="Allow screenshots / screen recording">
-            <div className="flex flex-col items-end gap-1">
-              {allowScreenshots && (
-                <span className="text-[11px] text-ide-warning" role="note">
-                  Clipboard content may be captured by screenshots and screen recordings.
-                </span>
-              )}
-              {allowScreenshotsError !== null && (
-                <span className="text-[11px] text-ide-danger">{allowScreenshotsError}</span>
-              )}
-              <div className="flex items-center gap-1.5">
-                <InfoPopover text="When off (default), CopyPaste is excluded from screenshots and screen recordings (macOS NSWindowSharingNone / Android FLAG_SECURE). Enable only if you need to record or share your screen while using CopyPaste. The preference is applied immediately to all open windows." />
-                <Toggle
-                  checked={allowScreenshots}
-                  onChange={(v) => void handleAllowScreenshots(v)}
-                  aria-label="Allow screenshots and screen recording"
-                />
-              </div>
-            </div>
-          </SettingsRow>
-          <div className="border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
-            <div className="flex items-center gap-1.5">
-              <span className="text-[13px] text-ide-text">Excluded apps</span>
-              <InfoPopover text="Bundle IDs of apps whose clipboard is never captured, e.g. com.1password.1password (macOS)." />
-            </div>
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                type="text"
-                value={newExcludedApp}
-                placeholder="com.example.app"
-                disabled={offline}
-                onChange={(e) => setNewExcludedApp(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void addExcludedApp();
-                  }
-                }}
-                /* audit P2: was bg-ide-bg (grey canvas) → looked disabled. Match
-                   the Sync-tab text inputs: white/near-white elevated fill. */
-                className="flex-1 border border-ide-border bg-ide-elevated px-2.5 py-1.5 text-[13px] text-ide-text outline-none focus:border-ide-accent focus:ring-1 focus:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
-              />
-              <button
-                type="button"
-                disabled={offline || newExcludedApp.trim() === ""}
-                onClick={() => void addExcludedApp()}
-                className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
-              >
-                Add
-              </button>
-            </div>
-            {excludedApps.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {excludedApps.map((bundleId) => (
-                  <span
-                    key={bundleId}
-                    className="inline-flex items-center gap-1 border border-ide-border bg-ide-bg px-2 py-1 text-[12px] text-ide-dim"
-                    style={{ borderRadius: "var(--skin-r-ctl)" }}
-                  >
-                    {bundleId}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${bundleId}`}
-                      disabled={offline}
-                      onClick={() => void removeExcludedApp(bundleId)}
-                      className="flex h-6 w-6 items-center justify-center text-ide-faint hover:text-ide-danger disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </Panel>
-
-        <SectionHeader label="Background service" />
-        <Panel>
-          <SettingsRow title="Version">
-            <span className="text-[13px] text-ide-text">
-              {offline ? "Not running" : (daemonVersion ?? "unknown")}
-            </span>
-          </SettingsRow>
-          <SettingsRow title="Restart">
-            <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
-          </SettingsRow>
-        </Panel>
-      </div>
+      <GeneralTab
+        offline={offline}
+        loadState={loadState}
+        prefs={prefs}
+        setPrefs={setPrefs}
+        syncEnabled={syncEnabled}
+        syncEnabledStub={syncEnabledStub}
+        privateMode={privateMode}
+        privateModeError={privateModeError}
+        notifPermDenied={notifPermDenied}
+        collectPublicIp={collectPublicIp}
+        setCollectPublicIp={setCollectPublicIp}
+        pasteAsPlainText={pasteAsPlainText}
+        setPasteAsPlainText={setPasteAsPlainText}
+        allowScreenshots={allowScreenshots}
+        allowScreenshotsError={allowScreenshotsError}
+        excludedApps={excludedApps}
+        newExcludedApp={newExcludedApp}
+        setNewExcludedApp={setNewExcludedApp}
+        daemonVersion={daemonVersion}
+        limitsMsg={limitsMsg}
+        buildConfigPatch={buildConfigPatch}
+        handleSyncEnabledToggle={handleSyncEnabledToggle}
+        handlePrivateMode={handlePrivateMode}
+        handleAllowScreenshots={handleAllowScreenshots}
+        addExcludedApp={addExcludedApp}
+        removeExcludedApp={removeExcludedApp}
+        setReloadKey={setReloadKey}
+      />
     );
   }
 
   function renderDisplay() {
-    const activePalette = prefs.palette ?? "graphite-mist";
-    const activeDensity = prefs.density ?? "compact";
-    // W-F4: skin picker — read current value from store, set via setPrefs({skin}).
-    const activeSkin = prefs.skin ?? "classic";
-
-    return (
-      <div className="space-y-2">
-        {/* ── Appearance ──────────────────────────────────────────────────────
-            CopyPaste-hn5v: full palette + density + theme controls.
-            Palette picker re-themes the whole app live via App.tsx
-            data-palette attribute sync (already wired). */}
-        <SectionHeader label="Appearance" />
-        <Panel>
-          {/* Palette picker — grid of 10 swatches */}
-          <div className="border-b border-ide-divider/70 px-3 py-3 last:border-b-0">
-            <div className="mb-2 text-[12px] text-ide-dim">Color palette</div>
-            <div
-              data-testid="palette-picker"
-              className="grid grid-cols-5 gap-2"
-            >
-              {PALETTE_KEYS.map((key) => {
-                const def = PALETTES[key];
-                const isActive = activePalette === key;
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-label={def.name}
-                    aria-pressed={isActive}
-                    title={def.name}
-                    onClick={() => setPrefs({ palette: key })}
-                    className={[
-                      "group relative flex flex-col items-center gap-1 rounded-[8px] p-1.5 transition-all",
-                      isActive
-                        ? "ring-2 ring-ide-accent ring-offset-1 ring-offset-transparent bg-ide-elevated shadow-ide-e1"
-                        : "hover:bg-ide-faint/12",
-                    ].join(" ")}
-                  >
-                    {/* Swatch circle using the palette's accent colour inline */}
-                    <span
-                      className="h-7 w-7 rounded-full shadow-ide-xs"
-                      style={{ background: def.accent }}
-                      aria-hidden="true"
-                    />
-                    <span className="max-w-full truncate text-center text-[10.5px] leading-tight text-ide-dim group-hover:text-ide-text">
-                      {def.name}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* W-F4: Skin picker — Visual style segmented control (Classic / Quiet / Vapor).
-              Mirrors the density/theme segmented control pattern exactly.
-              Labels are Title-Cased skin ids. Updates live via setPrefs({skin}). */}
-          <SettingsRow title="Visual style">
-            <div
-              data-testid="skin-picker"
-              className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5"
-            >
-              {SKIN_IDS.map((id) => {
-                const label = id.charAt(0).toUpperCase() + id.slice(1);
-                return (
-                  <button
-                    key={id}
-                    type="button"
-                    aria-label={label}
-                    aria-pressed={activeSkin === id}
-                    onClick={() => setPrefs({ skin: id })}
-                    className={[
-                      "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
-                      activeSkin === id
-                        ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                        : "text-ide-dim hover:text-ide-text",
-                    ].join(" ")}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </SettingsRow>
-
-          {/* Density segmented control — compact / comfortable / spacious */}
-          <SettingsRow title="Row density">
-            {/* bpax/itsu: styleguide §form-controls segmented control — mute/.18 group bg,
-                selected = white/.90 + e1 shadow, 7px inner radius.
-                itsu: hairline border + mute token (was faint, now mute per spec) */}
-            <div className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5">
-              {(["compact", "comfortable", "spacious"] as const).map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  aria-label={opt}
-                  onClick={() => setPrefs({ density: opt })}
-                  className={[
-                    "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
-                    activeDensity === opt
-                      ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                      : "text-ide-dim hover:text-ide-text",
-                  ].join(" ")}
-                >
-                  {opt.charAt(0).toUpperCase() + opt.slice(1)}
-                </button>
-              ))}
-            </div>
-          </SettingsRow>
-
-          {/* Color theme — matches styleguide §form-controls segmented control */}
-          <SettingsRow title="Color theme">
-            <div className="flex items-center gap-2">
-              <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />
-              {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
-                  Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius.
-                  itsu: hairline border + mute token (was faint, now mute per spec) */}
-              <div className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5">
-                {(["light", "dark", "system"] as const).map((opt) => {
-                  const selected = (prefs.theme ?? "dark") === opt;
-                  return (
-                    <button
-                      key={opt}
-                      type="button"
-                      aria-label={opt}
-                      onClick={() => setPrefs({ theme: opt })}
-                      className={[
-                        "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
-                        selected
-                          ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                          : "text-ide-dim hover:text-ide-text",
-                      ].join(" ")}
-                    >
-                      {opt}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </SettingsRow>
-
-          {/* Translucency — kept here so all visual appearance controls are together */}
-          <SettingsRow title="Translucency">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />
-              <Toggle
-                checked={prefs.translucency ?? true}
-                onChange={(v) => setPrefs({ translucency: v })}
-              />
-            </div>
-          </SettingsRow>
-
-          {/* Reduce motion — switches aurora from cinematic to calm profile.
-              "calm" slows the aurora (--speed: 1.45) and dims it (--motion-opacity: .55).
-              OS prefers-reduced-motion still zeroes the aurora automatically via CSS. */}
-          <SettingsRow title="Reduce motion">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Slow and dim the aurora background animation. The OS 'Reduce Motion' accessibility setting stops it entirely regardless of this toggle." />
-              <Toggle
-                checked={prefs.motionReduced ?? false}
-                onChange={(v) => setPrefs({ motionReduced: v })}
-              />
-            </div>
-          </SettingsRow>
-
-          {/* n9gp (PG-34): sensitive-reveal warning toggle — Android parity.
-              When on (default), a "Sensitive — preview hidden · click to reveal" overlay appears
-              before the blur is lifted. When off, clicking the blur reveals
-              immediately without the extra confirmation step. */}
-          <SettingsRow title="Warn before revealing sensitive">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Show a confirmation overlay before revealing blurred sensitive content. Matches the Android warning sheet behaviour. Turn off if you find the extra step redundant." />
-              <Toggle
-                checked={prefs.showSensitiveWarnings ?? true}
-                onChange={(v) => setPrefs({ showSensitiveWarnings: v })}
-              />
-            </div>
-          </SettingsRow>
-        </Panel>
-
-        <SectionHeader label="History list" />
-        <Panel>
-          {/* M4: split previewLines — main window has its own independent setting */}
-          <SettingsRow title="Preview lines">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Number of text lines shown per clip in the main history window. Independent from the popup setting." />
-              <SliderRow
-                min={1}
-                max={6}
-                step={1}
-                value={prefs.previewLinesApp}
-                onChange={(v) => setPrefs({ previewLinesApp: v })}
-                formatValue={(v) => String(v)}
-              />
-            </div>
-          </SettingsRow>
-          {/* Image preview height controls the thumbnail bounding box in both
-              the history list and the popup. Moved here from "Popup appearance"
-              so users looking for list image sizing find it in the list section. */}
-          <SettingsRow title="Image preview height">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Max height (px) of image thumbnails in the history list and the popup. The image scales to fit within 340 × height, aspect-preserving, never upscaled." />
-              <SliderRow
-                min={1}
-                max={200}
-                step={1}
-                value={prefs.imageMaxHeight}
-                onChange={(v) => setPrefs({ imageMaxHeight: v })}
-                formatValue={(v) => `${v}px`}
-              />
-            </div>
-          </SettingsRow>
-          {/* bdac.91: Group by device — persists the sort mode chosen in the History toolbar.
-              Android parity: Android Settings.kt:627 sortByDevice, default false. */}
-          <SettingsRow title="Group by device">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Group clipboard items by the device they came from, with your device shown first. You can also toggle this from the History toolbar when multiple devices are paired." />
-              <Toggle
-                checked={prefs.sortByDevice ?? false}
-                onChange={(v) => setPrefs({ sortByDevice: v })}
-              />
-            </div>
-          </SettingsRow>
-          {/* M5: historySize removed — history uses lazy pagination now */}
-          {/* M6: previewDelay removed — replaced by explicit Eye preview button */}
-        </Panel>
-
-        <SectionHeader label="Popup appearance" hint="How the popup looks when triggered." />
-        <Panel>
-          {/* M4: popup gets its own independent preview-lines setting */}
-          <SettingsRow title="Preview lines">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Number of text lines shown per clip in the Quick-Paste popup. Independent from the main window setting." />
-              <SliderRow
-                min={1}
-                max={6}
-                step={1}
-                value={prefs.previewLinesPopup}
-                onChange={(v) => setPrefs({ previewLinesPopup: v })}
-                formatValue={(v) => String(v)}
-              />
-            </div>
-          </SettingsRow>
-        </Panel>
-      </div>
-    );
+    return <DisplayTab prefs={prefs} setPrefs={setPrefs} />;
   }
 
   function renderSync() {
     return (
-      <div className="space-y-2">
-        {/* Status banner */}
-        {syncStatus !== null && syncStatus.supabase_configured && (
-          <div className="border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[13px] text-ide-success" style={{ borderRadius: "var(--skin-r-ctl)" }}>
-            Connected ✓
-            {syncStatus.signed_in && syncStatus.email
-              ? ` — signed in as ${syncStatus.email}`
-              : syncStatus.signed_in
-              ? " — signed in"
-              : " — not signed in"}
-            {syncStatus.passphrase_set ? " — passphrase set ✓" : ""}
-          </div>
-        )}
-        {syncStatus !== null &&
-          syncStatus.supabase_configured &&
-          syncStatus.signed_in &&
-          syncStatus.email && (
-            <div className="surface-card px-3 py-2 text-[13px] text-ide-dim" style={{ borderRadius: "var(--skin-r-ctl)" }}>
-              <span className="font-medium text-ide-text">Signed in as {syncStatus.email}</span>
-              <span className="ml-1">— All devices must use this same account to sync.</span>
-            </div>
-          )}
-
-        {/* ── General sync ── */}
-        {/* bdac.78: "Sync on Wi-Fi only" and "Auto-apply synced clipboard" apply
-            to ALL transports (P2P + cloud), not just P2P — moved here from the
-            P2P sub-section to match the canonical grouping:
-              (1) General — wifi-only, auto-apply
-              (2) Sync (LAN) — p2p_enabled, LAN visibility
-              (3) Cloud sync — credentials
-            j9xj (PG-30): per-transport controls are visually disabled when the
-            master syncEnabled kill-switch is off (they still show their state). */}
-        <SectionHeader
-          label="General sync"
-          hint="Applies to all sync transports."
-        />
-        <Panel>
-          <SettingsRow title="Sync on Wi-Fi only">
-            <div className="flex items-center gap-2">
-              <LimitsMsg field="sync_on_wifi_only" />
-              <Toggle
-                checked={syncOnWifiOnly}
-                onChange={(v) => void handleWifiOnlyToggle(v)}
-                disabled={offline || !syncEnabled}
-              />
-            </div>
-          </SettingsRow>
-          <SettingsRow title="Auto-apply synced clipboard">
-            <div className="flex flex-col items-end gap-1">
-              {/* wrfv: visible inline notice so the user knows synced clips will
-                  silently overwrite the active clipboard (the actual write is
-                  daemon-side; this is the UI surface for the setting). */}
-              {autoApplySyncedClip && (
-                <span
-                  data-testid="auto-apply-notice"
-                  role="note"
-                  className="text-[11px] text-ide-faint"
-                >
-                  Synced clips will overwrite the active clipboard automatically.
-                  Turn off to keep clipboard intact and paste manually from history.
-                </span>
-              )}
-              <div className="flex items-center gap-1.5">
-                <InfoPopover text="When on, incoming synced items from other devices are automatically written to the local clipboard so it stays up-to-date. When off, synced items are saved to history but never applied to the active clipboard — paste manually from the history list." />
-                <LimitsMsg field="auto_apply_synced_clip" />
-                <Toggle
-                  checked={autoApplySyncedClip}
-                  onChange={(v) => void handleAutoApplySyncedClipToggle(v)}
-                  disabled={offline || !syncEnabled}
-                  aria-label="Auto-apply synced clipboard"
-                />
-              </div>
-            </div>
-          </SettingsRow>
-        </Panel>
-
-        {/* ── Sync (LAN) ── */}
-        <SectionHeader
-          label="Sync (LAN)"
-          hint="Same network, no account needed."
-        />
-        <Panel>
-          <SettingsRow title="Enable P2P (LAN) sync">
-            <div className="flex items-center gap-2">
-              {/* bdac.44: InfoPopover added — P2P row had no description */}
-              <InfoPopover text="Direct device-to-device sync over your local network. Requires a paired device on the Devices screen. Disable for cloud-only sync." />
-              <LimitsMsg field="p2p_enabled" />
-              <Toggle
-                checked={config.p2p_enabled}
-                onChange={(v) => void handleP2pToggle(v)}
-                disabled={offline || syncRestarting || !syncEnabled}
-                aria-label="P2P sync"
-              />
-            </div>
-          </SettingsRow>
-          <SettingsRow title="Visible on local network">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="When off, this device stops advertising via mDNS-SD and will not appear in the device list on other Macs on the same network. Paired peers with a known address can still connect directly." />
-              <LimitsMsg field="lan_visibility" />
-              <Toggle
-                checked={lanVisibility}
-                onChange={(v) => void handleLanVisibilityToggle(v)}
-                disabled={offline || !syncEnabled}
-                aria-label="LAN visibility"
-              />
-            </div>
-          </SettingsRow>
-        </Panel>
-
-        {/* ── Cloud sync ── */}
-        <SectionHeader
-          label="Cloud sync"
-          hint="Syncs over the internet via your Supabase project."
-        />
-        <Panel>
-          <SettingsRow title="Supabase URL">
-            <input
-              type="url"
-              className={inputCls}
-              placeholder="https://your-project.supabase.co"
-              value={supabaseUrl}
-              onChange={(e) => setSupabaseUrl(e.target.value)}
-              disabled={offline}
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </SettingsRow>
-          {/* bdac.80: standardized to "Anon key" (sentence case, drop redundant "Supabase" prefix — section header already provides context) */}
-          <SettingsRow title="Anon key">
-            <div className="flex flex-col items-end gap-0.5">
-              <input
-                type="password"
-                className={inputCls}
-                placeholder={
-                  syncStatus?.supabase_configured && !supabaseKey
-                    ? "set ✓ (leave blank to keep)"
-                    : "eyJ…"
-                }
-                value={supabaseKey}
-                onChange={(e) => setSupabaseKey(e.target.value)}
-                disabled={offline}
-                autoComplete="off"
-                spellCheck={false}
-              />
-              {syncStatus?.supabase_configured && !supabaseKey && (
-                <span className="text-[11px] text-ide-success">set ✓</span>
-              )}
-            </div>
-          </SettingsRow>
-          {/* jhvl: Supabase GoTrue email + password for email+password sign-in.
-               These are WRITE-ONLY — the daemon never returns them; only the
-               supabase_email_set / supabase_password_set presence flags come back.
-               Inputs are cleared after a successful Save. Password is always masked. */}
-          <SettingsRow title="Supabase email">
-            <div className="flex flex-col items-end gap-0.5">
-              <input
-                type="email"
-                className={inputCls}
-                placeholder={
-                  syncStatus?.supabase_email_set && !supabaseEmail
-                    ? "set ✓ (leave blank to keep)"
-                    : "user@example.com"
-                }
-                value={supabaseEmail}
-                onChange={(e) => setSupabaseEmail(e.target.value)}
-                disabled={offline}
-                autoComplete="username"
-                spellCheck={false}
-              />
-              {syncStatus?.supabase_email_set && !supabaseEmail && (
-                <span className="text-[11px] text-ide-success">set ✓</span>
-              )}
-            </div>
-          </SettingsRow>
-          <SettingsRow title="Supabase password">
-            <div className="flex flex-col items-end gap-0.5">
-              <input
-                type="password"
-                className={inputCls}
-                placeholder={
-                  syncStatus?.supabase_password_set && !supabasePassword
-                    ? "set ✓ (leave blank to keep)"
-                    : "Password"
-                }
-                value={supabasePassword}
-                onChange={(e) => setSupabasePassword(e.target.value)}
-                disabled={offline}
-                autoComplete="current-password"
-                spellCheck={false}
-              />
-              {syncStatus?.supabase_password_set && !supabasePassword && (
-                <span className="text-[11px] text-ide-success">set ✓</span>
-              )}
-            </div>
-          </SettingsRow>
-          <SettingsRow title="Relay URL">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="Optional HTTP relay for store-and-forward sync when devices aren't on the same network. Leave blank to use direct P2P / cloud sync only. Saved with the cloud-sync settings." />
-              <input
-                type="url"
-                className={inputCls}
-                placeholder="https://relay.example.com"
-                value={relayUrl}
-                onChange={(e) => setRelayUrl(e.target.value)}
-                disabled={offline}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-          </SettingsRow>
-          <SettingsRow title="Sync passphrase">
-            <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center gap-1.5">
-                <InfoPopover text="Enter the same passphrase on every device to enable encrypted sync. Click 'Set passphrase' or press Enter to save." />
-                <input
-                  type="password"
-                  className={inputCls}
-                  placeholder="Shared passphrase…"
-                  value={passphrase}
-                  onChange={(e) => setPassphrase(e.target.value)}
-                  disabled={offline}
-                  autoComplete="new-password"
-                  spellCheck={false}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") void handleSetPassphrase();
-                  }}
-                />
-                <button
-                  type="button"
-                  disabled={offline || passphrase.trim() === ""}
-                  onClick={() => void handleSetPassphrase()}
-                  className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
-                >
-                  Set passphrase
-                </button>
-              </div>
-              {passphraseSavedMsg !== null && (
-                <span
-                  className={[
-                    "text-[11px]",
-                    passphraseSavedMsg === "Saved" ? "text-ide-success" : "text-ide-danger",
-                  ].join(" ")}
-                >
-                  {passphraseSavedMsg}
-                </span>
-              )}
-            </div>
-          </SettingsRow>
-          {testMsg !== null && (
-            <div
-              className={[
-                "border-t border-ide-divider px-3 py-2 text-[12px] flex items-center gap-1.5",
-                testMsg.ok ? "text-ide-success" : "text-ide-danger",
-              ].join(" ")}
-            >
-              {/* §6.6: replaced ✓/✗ text chars with Lucide icons (size 14) */}
-              {testMsg.ok ? <Check size={14} /> : <X size={14} />}
-              {testMsg.text}
-            </div>
-          )}
-          <div className="flex items-center justify-end gap-3 border-t border-ide-divider px-3 py-2">
-            {saveError !== null && (
-              <span className="text-[13px] text-ide-danger">{saveError}</span>
-            )}
-            {savedMsg && !saveError && (
-              <span className="text-[13px] text-ide-success">Saved</span>
-            )}
-            <button
-              type="button"
-              disabled={offline || testing}
-              onClick={() => void handleTestConnection()}
-              className={btnCls}
-              style={btnStyle}
-            >
-              {testing ? "Testing…" : "Test connection"}
-            </button>
-            <button
-              type="button"
-              disabled={offline}
-              onClick={() => void handleSaveConfig()}
-              className={btnCls}
-              style={btnStyle}
-            >
-              Save
-            </button>
-          </div>
-        </Panel>
-
-        {/* Sync status detail */}
-        {syncStatus !== null && (
-          <>
-            <SectionHeader label="Status" />
-            <Panel>
-              <div className="px-3 py-2 space-y-1">
-                <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
-                <StatusRow label="Supabase configured" ok={syncStatus.supabase_configured} />
-                <StatusRow label="Signed in" ok={syncStatus.signed_in} />
-                {/* i2sr (PG-40): hybrid relative/absolute format + "Synced " prefix
-                    to match Android parity. Relative when ≤24 h ago; absolute beyond. */}
-                <div className="flex items-center gap-2 text-[13px] text-ide-dim pt-0.5">
-                  <span className="w-[140px] shrink-0">Last sync</span>
-                  <span className="text-ide-text">
-                    {syncStatus.last_sync_ms
-                      ? `Synced ${formatLastSync(syncStatus.last_sync_ms)}`
-                      : "Never"}
-                  </span>
-                </div>
-              </div>
-            </Panel>
-          </>
-        )}
-      </div>
+      <SyncTab
+        offline={offline}
+        syncEnabled={syncEnabled}
+        syncOnWifiOnly={syncOnWifiOnly}
+        autoApplySyncedClip={autoApplySyncedClip}
+        config={config}
+        syncRestarting={syncRestarting}
+        lanVisibility={lanVisibility}
+        supabaseUrl={supabaseUrl}
+        setSupabaseUrl={setSupabaseUrl}
+        supabaseKey={supabaseKey}
+        setSupabaseKey={setSupabaseKey}
+        supabaseEmail={supabaseEmail}
+        setSupabaseEmail={setSupabaseEmail}
+        supabasePassword={supabasePassword}
+        setSupabasePassword={setSupabasePassword}
+        relayUrl={relayUrl}
+        setRelayUrl={setRelayUrl}
+        passphrase={passphrase}
+        setPassphrase={setPassphrase}
+        passphraseSavedMsg={passphraseSavedMsg}
+        testMsg={testMsg}
+        testing={testing}
+        savedMsg={savedMsg}
+        saveError={saveError}
+        syncStatus={syncStatus}
+        limitsMsg={limitsMsg}
+        inputCls={inputCls}
+        btnCls={btnCls}
+        btnStyle={btnStyle}
+        handleWifiOnlyToggle={handleWifiOnlyToggle}
+        handleAutoApplySyncedClipToggle={handleAutoApplySyncedClipToggle}
+        handleP2pToggle={handleP2pToggle}
+        handleLanVisibilityToggle={handleLanVisibilityToggle}
+        handleSetPassphrase={handleSetPassphrase}
+        handleTestConnection={handleTestConnection}
+        handleSaveConfig={handleSaveConfig}
+      />
     );
   }
 
@@ -2359,389 +1288,58 @@ export function SettingsView() {
   // a corresponding settings entry should be added to Android's SettingsActivity.
   function renderShortcuts() {
     return (
-      <div className="space-y-2">
-        <Panel>
-          <SettingsRow title="Open popup">
-            <div className="flex flex-col items-end gap-1">
-              <div className="flex items-center gap-2">
-                <InfoPopover text="Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden." />
-                <ShortcutCapture
-                  value={pendingShortcut}
-                  onChange={setPendingShortcut}
-                />
-                <button
-                  type="button"
-                  aria-label="Reset shortcut to default"
-                  title={`Reset to default (${defaultShortcut})`}
-                  disabled={
-                    currentShortcut === defaultShortcut &&
-                    pendingShortcut === defaultShortcut
-                  }
-                  onClick={() => void handleResetShortcut()}
-                  className="flex h-7 w-7 items-center justify-center border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
-                >
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M2.5 8a5.5 5.5 0 1 1 1.6 3.9" />
-                    <path d="M2.5 12v-3.2h3.2" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  disabled={pendingShortcut === currentShortcut}
-                  onClick={() => void handleSaveShortcut()}
-                  className={btnCls}
-                  style={btnStyle}
-                >
-                  Save
-                </button>
-              </div>
-              {shortcutMsg !== null && (
-                <span
-                  className={[
-                    "text-[11px]",
-                    shortcutMsg.isError ? "text-ide-danger" : "text-ide-success",
-                  ].join(" ")}
-                >
-                  {shortcutMsg.text}
-                </span>
-              )}
-            </div>
-          </SettingsRow>
-        </Panel>
-      </div>
+      <ShortcutsTab
+        pendingShortcut={pendingShortcut}
+        setPendingShortcut={setPendingShortcut}
+        currentShortcut={currentShortcut}
+        defaultShortcut={defaultShortcut}
+        shortcutMsg={shortcutMsg}
+        btnCls={btnCls}
+        btnStyle={btnStyle}
+        handleResetShortcut={handleResetShortcut}
+        handleSaveShortcut={handleSaveShortcut}
+      />
     );
   }
 
   function renderStorage() {
-    // Helper: render a stepped slider row with inline feedback badge.
-    // M9: LimitSliderRow now uses the unified SliderRow (index-based 0…steps.length-1).
-    // onRelease fires only on mouse-up/touch-end to avoid hammering the IPC on drag.
-    function LimitSliderRow<T extends number>({
-      label,
-      description,
-      field,
-      steps,
-      labels,
-      value,
-      onChange,
-      onRelease,
-    }: {
-      label: string;
-      description?: string;
-      field: string;
-      steps: readonly T[];
-      labels: readonly string[];
-      value: T;
-      onChange: (v: T) => void;
-      onRelease: (v: T) => void;
-    }) {
-      const maxIdx = steps.length - 1;
-      const idx = steps.indexOf(value);
-      const safeIdx = idx < 0 ? 0 : idx;
-      return (
-        <SettingsRow title={label} description={description}>
-          <div className="flex items-center gap-2">
-            <SliderRow
-              min={0}
-              max={maxIdx}
-              step={1}
-              value={safeIdx}
-              disabled={offline}
-              // §6.5: pass step count so SliderRow renders a datalist for tick marks
-              tickStepCount={steps.length}
-              onChange={(i) => onChange(steps[Math.min(Math.max(i, 0), maxIdx)] as T)}
-              onRelease={(i) => onRelease(steps[Math.min(Math.max(i, 0), maxIdx)] as T)}
-              formatValue={(i) => labels[Math.min(Math.max(i, 0), maxIdx)] ?? String(i)}
-            />
-            <LimitsMsg field={field} />
-          </div>
-        </SettingsRow>
-      );
-    }
-
     return (
-      <div className="space-y-2">
-        <Panel>
-          <LimitSliderRow
-            label="Max clip text size"
-            field="max_text_size_bytes"
-            steps={TEXT_SIZE_STEPS_BYTES as unknown as readonly number[]}
-            labels={TEXT_SIZE_LABELS}
-            value={maxTextBytes}
-            onChange={(v) => setMaxTextBytes(v)}
-            onRelease={(v) => {
-              // P1 fix: capture prev before optimistic update (onChange already fired);
-              // revert only this field on error, not the full reload.
-              const prev = maxTextBytes;
-              setMaxTextBytes(v);
-              void saveLimitsField("max_text_size_bytes", { max_text_size_bytes: v }, () => setMaxTextBytes(prev));
-            }}
-          />
-          <LimitSliderRow
-            label="Max clip image size"
-            field="max_image_size_bytes"
-            steps={IMAGE_SIZE_STEPS_BYTES as unknown as readonly number[]}
-            labels={IMAGE_SIZE_LABELS}
-            value={maxImageBytes}
-            onChange={(v) => setMaxImageBytes(v)}
-            onRelease={(v) => {
-              const prev = maxImageBytes;
-              setMaxImageBytes(v);
-              void saveLimitsField("max_image_size_bytes", { max_image_size_bytes: v }, () => setMaxImageBytes(prev));
-            }}
-          />
-          <LimitSliderRow
-            label="Max clip file size"
-            field="max_file_size_bytes"
-            steps={FILE_SIZE_STEPS_BYTES as unknown as readonly number[]}
-            labels={FILE_SIZE_LABELS}
-            value={maxFileBytes}
-            onChange={(v) => setMaxFileBytes(v)}
-            onRelease={(v) => {
-              const prev = maxFileBytes;
-              setMaxFileBytes(v);
-              void saveLimitsField("max_file_size_bytes", { max_file_size_bytes: v }, () => setMaxFileBytes(prev));
-            }}
-          />
-          <div className="border-b border-ide-divider/70 px-3 pb-2 text-[11px] text-ide-faint">
-            Files over ~8&nbsp;MB are kept locally but won&apos;t sync over P2P/cloud — they&apos;re skipped with a warning.
-          </div>
-          <LimitSliderRow
-            label="Local storage limit"
-            field="storage_quota_bytes"
-            steps={QUOTA_STEPS_BYTES as unknown as readonly number[]}
-            labels={QUOTA_LABELS}
-            value={quotaBytes}
-            onChange={(v) => setQuotaBytes(v)}
-            onRelease={(v) => {
-              const prev = quotaBytes;
-              setQuotaBytes(v);
-              void saveLimitsField("storage_quota_bytes", { storage_quota_bytes: v }, () => setQuotaBytes(prev));
-            }}
-          />
-          <LimitSliderRow
-            label="Sensitive auto-wipe"
-            field="sensitive_ttl_secs"
-            steps={SENSITIVE_TTL_STEPS as unknown as readonly number[]}
-            labels={SENSITIVE_TTL_LABELS}
-            value={sensitiveTtlSecs}
-            onChange={(v) => setSensitiveTtlSecs(v)}
-            onRelease={(v) => {
-              const prev = sensitiveTtlSecs;
-              setSensitiveTtlSecs(v);
-              void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: v }, () => setSensitiveTtlSecs(prev));
-            }}
-          />
-          {/* ctmv: image_quality is persisted to daemon config via set_config on release.
-              The capture encode path reads this value: quality < 100 → JPEG, 100 → PNG lossless.
-              bdac.68: removed "(1–100)" from label — range shown by the slider control itself */}
-          <SettingsRow
-            title="Image quality"
-            description="Saved to daemon. Values below 100 use JPEG encoding (smaller files); 100 uses lossless PNG."
-          >
-            <div className="flex items-center gap-2">
-              <SliderRow
-                min={1}
-                max={100}
-                step={1}
-                value={imageQuality}
-                onChange={(v) => setImageQuality(v)}
-                onRelease={(v) => {
-                  // Autosave on commit (mouse-up / touch-end / key-up), matching the
-                  // neighbouring limit sliders — no dedicated Save button.
-                  const prev = imageQuality;
-                  void saveLimitsField("image_quality", { image_quality: v }, () => setImageQuality(prev));
-                }}
-                formatValue={(v) => String(v)}
-              />
-              <LimitsMsg field="image_quality" />
-            </div>
-          </SettingsRow>
-          {/* bdac.88: History display limit — UI-only display filter (localStorage / UIPrefs).
-              No daemon IPC: the daemon stores items until the byte quota is reached.
-              This slider filters how many items the UI renders — it does NOT delete items.
-              Sentinel 100000 → "Unlimited". */}
-          <LimitSliderRow
-            label="History display limit"
-            description="Display filter only — does not delete stored items. Daemon stores until byte quota."
-            field="max_items"
-            steps={MAX_ITEMS_STEPS as unknown as readonly number[]}
-            labels={MAX_ITEMS_LABELS}
-            value={maxItems}
-            onChange={(v) => {
-              // Persist live (on every drag tick) so the HistoryView cap updates in real time.
-              setPrefs({ historyDisplayLimit: v });
-            }}
-            onRelease={(v) => {
-              // Persist on commit (mouse-up / key-up) and show inline feedback.
-              setPrefs({ historyDisplayLimit: v });
-              showLimitsMsg("max_items", "Saved", 1500);
-            }}
-          />
-          <div className="border-b border-ide-divider/70 px-3 pb-2 text-[11px] text-ide-faint">
-            Limits items shown in the UI only — the daemon stores more and prunes by the byte quota above.
-          </div>
-        </Panel>
-
-        {/* 85n9: Backup / Restore panel */}
-        <SectionHeader
-          label="Backup & restore"
-          hint="Export your clipboard history as a JSON file, or restore it from a previous backup."
-        />
-        <Panel>
-          {/* Export row */}
-          <div className="border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
-            <div className="flex items-center justify-between gap-3">
-              <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">Export backup</span>
-              <div className="flex flex-col items-end gap-1.5">
-                {/* Include-sensitive checkbox with plaintext warning */}
-                <label className="flex cursor-pointer items-center gap-1.5 text-[12px] text-ide-dim select-none">
-                  <input
-                    type="checkbox"
-                    checked={exportIncludeSensitive}
-                    onChange={(e) => setExportIncludeSensitive(e.target.checked)}
-                    disabled={offline || exportInProgress}
-                    className="h-3.5 w-3.5 accent-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
-                  />
-                  Include sensitive items
-                </label>
-                {exportIncludeSensitive && (
-                  <span className="text-[11px] text-ide-warning">
-                    Warning: sensitive items will be exported as plaintext. Keep the file secure and delete it when done.
-                  </span>
-                )}
-                <div className="flex items-center gap-2">
-                  {exportMsg !== null && (
-                    <span className={`text-[12px] ${exportMsg.isError ? "text-ide-danger" : "text-ide-success"}`}>
-                      {exportMsg.text}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    disabled={offline || exportInProgress}
-                    onClick={() => void handleExport()}
-                    data-testid="export-button"
-                    className={[
-                      "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                      "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                    ].join(" ")}
-                    style={{ borderRadius: "var(--skin-r-ctl)" }}
-                  >
-                    {exportInProgress ? "Exporting…" : "Export…"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Import row — bdac.73: renamed "Restore backup" → "Import history" for parity with Android */}
-          <div className="px-3 py-2">
-            <div className="flex items-center justify-between gap-3">
-              <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">Import history</span>
-              <div className="flex flex-col items-end gap-1">
-                {importMsg !== null && (
-                  <span className={`text-[12px] ${importMsg.isError ? "text-ide-danger" : "text-ide-success"}`}>
-                    {importMsg.text}
-                  </span>
-                )}
-                {/* Invisible file input driven by the visible button below.
-                    accept="application/json" limits the picker to .json files.
-                    The file is read entirely in-browser via FileReader (no fs
-                    Tauri plugin needed). */}
-                <label
-                  className={[
-                    "cursor-pointer border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
-                    "hover:bg-ide-hover",
-                    (offline || importInProgress) ? "pointer-events-none opacity-40" : "",
-                  ].join(" ")}
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
-                >
-                  {importInProgress ? "Importing…" : "Import…"}
-                  <input
-                    type="file"
-                    accept="application/json"
-                    disabled={offline || importInProgress}
-                    onChange={(e) => void handleImportFile(e)}
-                    data-testid="import-file-input"
-                    className="sr-only"
-                  />
-                </label>
-              </div>
-            </div>
-          </div>
-        </Panel>
-
-        <SectionHeader label="Data" />
-        <Panel>
-          {/* gq51: Database stats — shown when the daemon reports them.
-              Falls back gracefully when db_stats is not available (older daemon). */}
-          {dbStats !== null && (
-            <SettingsRow title="Database">
-              <span className="text-[13px] text-ide-dim tabular-nums">
-                {dbStats.item_count} item{dbStats.item_count === 1 ? "" : "s"}
-                {" — "}
-                {dbStats.size_bytes < 1024
-                  ? `${dbStats.size_bytes} B`
-                  : dbStats.size_bytes < 1024 * 1024
-                  ? `${(dbStats.size_bytes / 1024).toFixed(1)} KB`
-                  : `${(dbStats.size_bytes / (1024 * 1024)).toFixed(1)} MB`}
-              </span>
-            </SettingsRow>
-          )}
-          {/* gq51: Vacuum button — compacts the SQLite WAL to reclaim disk space */}
-          <SettingsRow title="Compact database">
-            <div className="flex items-center gap-3">
-              {vacuumMsg !== null && (
-                <span
-                  className={[
-                    "text-[13px]",
-                    vacuumMsg.isError ? "text-ide-danger" : "text-ide-success",
-                  ].join(" ")}
-                >
-                  {vacuumMsg.text}
-                </span>
-              )}
-              <button
-                type="button"
-                disabled={offline || vacuumBusy}
-                onClick={() => void handleVacuum()}
-                className={btnCls}
-                style={btnStyle}
-              >
-                {vacuumBusy ? "Vacuuming…" : "Vacuum"}
-              </button>
-            </div>
-          </SettingsRow>
-          <SettingsRow title="Clear clipboard history">
-            <div className="flex items-center gap-3">
-              {deleteMsg !== null && (
-                <span
-                  className={[
-                    "text-[13px]",
-                    deleteMsg.isError ? "text-ide-danger" : "text-ide-dim",
-                  ].join(" ")}
-                >
-                  {deleteMsg.text}
-                </span>
-              )}
-              {/* w6xc: replaced misclick-prone inline Yes/No with a proper modal */}
-              <button
-                type="button"
-                disabled={offline}
-                onClick={() => setDeleteConfirm(true)}
-                className={[
-                  "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
-                  "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
-                ].join(" ")}
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
-              >
-                Clear history…
-              </button>
-            </div>
-          </SettingsRow>
-        </Panel>
-      </div>
+      <StorageTab
+        offline={offline}
+        prefs={prefs}
+        setPrefs={setPrefs}
+        maxTextBytes={maxTextBytes}
+        setMaxTextBytes={setMaxTextBytes}
+        maxImageBytes={maxImageBytes}
+        setMaxImageBytes={setMaxImageBytes}
+        maxFileBytes={maxFileBytes}
+        setMaxFileBytes={setMaxFileBytes}
+        quotaBytes={quotaBytes}
+        setQuotaBytes={setQuotaBytes}
+        sensitiveTtlSecs={sensitiveTtlSecs}
+        setSensitiveTtlSecs={setSensitiveTtlSecs}
+        imageQuality={imageQuality}
+        setImageQuality={setImageQuality}
+        exportInProgress={exportInProgress}
+        exportMsg={exportMsg}
+        exportIncludeSensitive={exportIncludeSensitive}
+        setExportIncludeSensitive={setExportIncludeSensitive}
+        importInProgress={importInProgress}
+        importMsg={importMsg}
+        dbStats={dbStats}
+        vacuumBusy={vacuumBusy}
+        vacuumMsg={vacuumMsg}
+        deleteMsg={deleteMsg}
+        limitsMsg={limitsMsg}
+        btnCls={btnCls}
+        btnStyle={btnStyle}
+        saveLimitsField={saveLimitsField as StorageTabProps["saveLimitsField"]}
+        showLimitsMsg={showLimitsMsg}
+        handleExport={handleExport}
+        handleImportFile={handleImportFile}
+        handleVacuum={handleVacuum}
+        setDeleteConfirm={setDeleteConfirm}
+      />
     );
   }
 
