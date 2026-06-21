@@ -305,10 +305,10 @@ describe("KindChip canonical content-type → color mapping (TST-1 / CopyPaste-o
     // URL — sky (teal)
     { desc: "url → URL/sky",            contentType: "url",              expectedClass: "text-ide-sky",     expectedLabel: "URL"   },
     { desc: "kind=URL → URL/sky",       contentType: "text", kind: "URL", expectedClass: "text-ide-sky",    expectedLabel: "URL"   },
-    // IMAGE — sky (1hqt token change: image now uses sky not violet)
-    { desc: "image → IMAGE/sky",        contentType: "image",            expectedClass: "text-ide-sky",     expectedLabel: "IMAGE" },
-    { desc: "image/png → IMAGE/sky",    contentType: "image/png",        expectedClass: "text-ide-sky",     expectedLabel: "IMAGE" },
-    { desc: "kind=IMAGE → IMAGE/sky",   contentType: "text", kind: "IMAGE", expectedClass: "text-ide-sky", expectedLabel: "IMAGE" },
+    // IMAGE — violet (1jms.14: PARITY-SPEC §6, distinct from URL=sky; matches Android c.violet)
+    { desc: "image → IMAGE/violet",     contentType: "image",            expectedClass: "text-ide-violet",  expectedLabel: "IMAGE" },
+    { desc: "image/png → IMAGE/violet", contentType: "image/png",        expectedClass: "text-ide-violet",  expectedLabel: "IMAGE" },
+    { desc: "kind=IMAGE → IMAGE/violet",contentType: "text", kind: "IMAGE", expectedClass: "text-ide-violet", expectedLabel: "IMAGE" },
     // EMAIL / PHONE — success (green)
     { desc: "email → EMAIL/success",    contentType: "email",            kind: "EMAIL", expectedClass: "text-ide-success", expectedLabel: "EMAIL" },
     { desc: "phone → PHONE/success",    contentType: "phone",            kind: "PHONE", expectedClass: "text-ide-success", expectedLabel: "PHONE" },
