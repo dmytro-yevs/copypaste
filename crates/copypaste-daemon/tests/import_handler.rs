@@ -188,11 +188,14 @@ async fn import_inserts_new_items() {
     assert_eq!(resp["data"]["inserted"], 3);
     assert_eq!(resp["data"]["skipped"], 0);
 
-    // Sanity: a follow-up `list` should report 3 items in the page total.
-    let list_req =
-        r#"{"id":"l1","method":"list","protocol_version":1,"params":{"limit":10,"offset":0}}"#;
+    // Sanity: a follow-up `history_page` should report 3 items in the page total.
+    // (`list` was deprecated in c4q2.17 — same response shape, pinned items first.)
+    let list_req = r#"{"id":"l1","method":"history_page","protocol_version":1,"params":{"limit":10,"offset":0}}"#;
     let list_resp = roundtrip(&sock, list_req).await;
-    assert_eq!(list_resp["ok"], true, "list must succeed: {list_resp}");
+    assert_eq!(
+        list_resp["ok"], true,
+        "history_page must succeed: {list_resp}"
+    );
     assert_eq!(list_resp["data"]["total"], 3);
 }
 

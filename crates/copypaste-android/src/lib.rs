@@ -1841,8 +1841,11 @@ mod tests {
             let mut map = db_by_path().lock().unwrap_or_else(|e| e.into_inner());
             let cache_key_a = (path.clone(), key_a);
             map.entry(cache_key_a).or_insert_with(|| {
-                copypaste_core::Database::open(std::path::Path::new(&path), &Zeroizing::new(key_a))
-                    .expect("open with key_a")
+                copypaste_core::Database::open(
+                    std::path::Path::new(&path),
+                    &zeroize::Zeroizing::new(key_a),
+                )
+                .expect("open with key_a")
             });
         }
 
