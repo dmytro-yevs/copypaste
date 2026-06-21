@@ -316,6 +316,18 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
         return Err(ItemsError::MigrationInProgress);
     }
     let key_version = validate_key_version(item.key_version)?;
+    // CopyPaste-44rq.49 (SECURITY): never persist a thumbnail for a sensitive item.
+    // A thumbnail is a recognisable, scaled-down preview of the captured image.
+    // Storing it — even encrypted — means that a future UI bug or an AAD mismatch
+    // between thumb_file_id values could expose a visual preview of sensitive
+    // content (e.g. a screenshot from a password-manager screen).
+    // Erring toward NOT storing is the correct policy; the thumb can never be
+    // backfilled for a sensitive item either (see `set_thumb`).
+    let thumb: Option<&[u8]> = if item.is_sensitive {
+        None
+    } else {
+        item.thumb.as_deref()
+    };
     db.conn().execute(
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
@@ -340,7 +352,7 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
             key_version,
             item.pinned as i64,
             item.pin_order,
-            item.thumb,
+            thumb,
             item.deleted as i64,
         ],
     )?;
@@ -396,6 +408,15 @@ pub fn insert_item_with_fts(
         return Err(ItemsError::MigrationInProgress);
     }
     let key_version = validate_key_version(item.key_version)?;
+    // CopyPaste-44rq.49 (SECURITY): same sensitive-thumb suppression as `insert_item`.
+    // Both insert paths must apply the guard so neither can be used to sneak a
+    // thumbnail past the policy (e.g. via a sync-reconstructed item whose caller
+    // sets is_sensitive=true but forgets to clear thumb before calling this function).
+    let thumb: Option<&[u8]> = if item.is_sensitive {
+        None
+    } else {
+        item.thumb.as_deref()
+    };
     let conn = db.conn();
     let tx = conn.unchecked_transaction()?;
     let insert_res = tx.execute(
@@ -422,7 +443,7 @@ pub fn insert_item_with_fts(
             key_version,
             item.pinned as i64,
             item.pin_order,
-            item.thumb,
+            thumb,
             item.deleted as i64,
         ],
     );
@@ -1360,8 +1381,36 @@ pub fn reorder_pinned(db: &Database, ids: &[&str]) -> Result<usize, ItemsError> 
 /// column populated after the fact once a thumbnail is generated. Passing
 /// `None` clears the column back to SQL NULL.
 ///
-/// Returns the number of rows updated (`0` when no row matches `id`).
+/// **Security (CopyPaste-44rq.49):** when `blob` is `Some(_)` this function
+/// first reads `is_sensitive` for the target row inside the same connection.
+/// If the row is sensitive the write is silently suppressed (returns `0`) so
+/// the backfill path cannot be used to sneak a thumbnail in after a
+/// sensitivity upgrade. A `None` (clear) is always allowed — clearing a
+/// thumbnail is never harmful.
+///
+/// Returns the number of rows updated (`0` when no row matches `id` or when
+/// the row is sensitive and a non-None blob was suppressed).
 pub fn set_thumb(db: &Database, id: &str, blob: Option<&[u8]>) -> Result<usize, ItemsError> {
+    // CopyPaste-44rq.49: suppress backfill for sensitive items.
+    // Clearing (blob = None) is safe and always allowed; only non-None blobs
+    // are gated so a future caller can still NULL-out a thumb on a sensitive row.
+    if blob.is_some() {
+        let is_sensitive: Option<i64> = db
+            .conn()
+            .query_row(
+                "SELECT is_sensitive FROM clipboard_items WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()?;
+        // Row not found → 0 rows updated (same semantics as before).
+        // Row is sensitive → suppress write, return 0.
+        match is_sensitive {
+            None => return Ok(0),
+            Some(v) if v != 0 => return Ok(0),
+            _ => {}
+        }
+    }
     let changed = db.conn().execute(
         "UPDATE clipboard_items SET thumb = ?1 WHERE id = ?2",
         params![blob, id],
@@ -2140,6 +2189,94 @@ mod tests {
         // No-op on an unknown id.
         let changed = set_thumb(&db, "00000000-0000-0000-0000-000000000000", Some(&blob)).unwrap();
         assert_eq!(changed, 0);
+    }
+
+    // CopyPaste-44rq.49 — SECURITY: sensitive image items must NEVER have a
+    // thumbnail stored in the database, regardless of what the caller passes.
+
+    #[test]
+    fn sensitive_image_insert_item_suppresses_thumb() {
+        let db = Database::open_in_memory().unwrap();
+        let thumb = vec![0xAAu8, 0xBB, 0xCC];
+        let mut item =
+            ClipboardItem::new_image(vec![0x01, 0x02], "{}".to_string(), 1, Some(thumb.clone()));
+        // Mark as sensitive — the insert path must drop the thumbnail.
+        item.is_sensitive = true;
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        let got = get_item_by_id(&db, &id).unwrap().expect("row must exist");
+        assert!(
+            got.thumb.is_none(),
+            "sensitive image must have NULL thumb after insert_item (got {:?})",
+            got.thumb
+        );
+    }
+
+    #[test]
+    fn sensitive_image_insert_item_with_fts_suppresses_thumb() {
+        let db = Database::open_in_memory().unwrap();
+        let thumb = vec![0xDDu8, 0xEE, 0xFF];
+        let mut item =
+            ClipboardItem::new_image(vec![0x03, 0x04], "{}".to_string(), 2, Some(thumb.clone()));
+        item.is_sensitive = true;
+        let id = item.id.clone();
+        insert_item_with_fts(&db, &item, "").unwrap();
+
+        let got = get_item_by_id(&db, &id).unwrap().expect("row must exist");
+        assert!(
+            got.thumb.is_none(),
+            "sensitive image must have NULL thumb after insert_item_with_fts (got {:?})",
+            got.thumb
+        );
+    }
+
+    #[test]
+    fn non_sensitive_image_insert_retains_thumb() {
+        // Confirm the fix does not break the non-sensitive path.
+        let db = Database::open_in_memory().unwrap();
+        let thumb = vec![0x11u8, 0x22, 0x33];
+        let item =
+            ClipboardItem::new_image(vec![0x05, 0x06], "{}".to_string(), 3, Some(thumb.clone()));
+        assert!(!item.is_sensitive, "factory default must be non-sensitive");
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        let got = get_item_by_id(&db, &id).unwrap().expect("row must exist");
+        assert_eq!(
+            got.thumb.as_deref(),
+            Some(thumb.as_slice()),
+            "non-sensitive image must retain its thumbnail"
+        );
+    }
+
+    #[test]
+    fn set_thumb_suppresses_backfill_for_sensitive_item() {
+        let db = Database::open_in_memory().unwrap();
+        // Insert a sensitive image row with no thumbnail (as required by policy).
+        let mut item = ClipboardItem::new_image(vec![0x07, 0x08], "{}".to_string(), 4, None);
+        item.is_sensitive = true;
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        // Attempt to backfill a thumbnail — must be suppressed.
+        let blob = vec![0xABu8, 0xCD, 0xEF];
+        let changed = set_thumb(&db, &id, Some(&blob)).unwrap();
+        assert_eq!(
+            changed, 0,
+            "set_thumb must not write to a sensitive row (returned {changed})"
+        );
+        assert!(
+            get_item_by_id(&db, &id).unwrap().unwrap().thumb.is_none(),
+            "sensitive row must still have NULL thumb after set_thumb attempt"
+        );
+
+        // Clearing (None) must still be allowed so downstream cleanups work.
+        let changed = set_thumb(&db, &id, None).unwrap();
+        assert_eq!(
+            changed, 1,
+            "set_thumb(None) must still be allowed for sensitive rows (returned {changed})"
+        );
     }
 
     #[test]
