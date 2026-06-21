@@ -31,6 +31,6 @@ cargo run --manifest-path "$CRATE_DIR/Cargo.toml" \
   generate \
   "$CRATE_DIR/uniffi/copypaste_android.udl" \
   --language kotlin \
-  --out-dir "$ANDROID_DIR/app/src/main/java/com/copypaste/android/generated/"
+  --out-dir "$ANDROID_DIR/app/src/main/java/com/copypaste/generated/"
 
 echo "Generated Kotlin bindings"

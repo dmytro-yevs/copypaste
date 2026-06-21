@@ -159,16 +159,16 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
     NEW_CASK_CONTENT="$(cat "$CASK")"
 
     # Overwrite-on-main strategy (no cherry-pick):
-    #   1) Fetch + reset to remote main (avoids detached-HEAD / cherry-pick conflicts).
+    #   1) Fetch + switch to remote main (avoids detached-HEAD / cherry-pick conflicts).
     #   2) Drop the new cask file in — overwriting whatever stale content is there.
     #   3) If no diff → already up to date, exit 0.
     #   4) Commit + push. Retry up to 3 times on push race.
     git fetch origin main
-    # -f: the cask was rewritten in-place above while on the detached tag HEAD,
-    # so the working tree differs from origin/main and a plain checkout aborts
-    # ("local changes would be overwritten"). The new content is preserved in
-    # $NEW_CASK_CONTENT and re-applied below, so discarding the edit here is safe.
-    git checkout -f -B main origin/main
+    # Restore the cask file to its pre-edit state so we can switch branches without
+    # conflicts. The new content is already preserved in $NEW_CASK_CONTENT and will be
+    # re-applied below. We avoid -f (force) so no other working-tree changes are lost.
+    git checkout -- "$CASK"
+    git checkout -B main origin/main
 
     printf '%s\n' "$NEW_CASK_CONTENT" > "$CASK"
     git add "$CASK"
@@ -191,7 +191,10 @@ if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
         fi
         echo "Push rejected (race); retrying (attempt $((PUSH_ATTEMPTS + 1))/${MAX_ATTEMPTS}) ..."
         git fetch origin main
-        git reset --hard origin/main
+        # Restore the cask to a clean state before moving the branch pointer so
+        # no working-tree changes are discarded by a hard reset.
+        git checkout -- "$CASK"
+        git merge --ff-only origin/main
         printf '%s\n' "$NEW_CASK_CONTENT" > "$CASK"
         git add "$CASK"
         if git diff --cached --quiet; then
