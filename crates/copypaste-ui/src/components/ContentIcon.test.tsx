@@ -40,19 +40,19 @@ describe("ContentIcon", () => {
     expect(svg!.className.baseVal).toContain("text-ide-sky");
   });
 
-  it("renders image icon with sky class for 'image'", () => {
+  it("renders image icon with violet class for 'image'", () => {
     const { container } = render(<ContentIcon contentType="image" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
-    // 1hqt: IMAGE uses the sky token (was violet)
-    expect(svg!.className.baseVal).toContain("text-ide-sky");
+    // 1jms.14: IMAGE → violet per PARITY-SPEC §6 (distinct from URL=sky; matches Android c.violet)
+    expect(svg!.className.baseVal).toContain("text-ide-violet");
   });
 
-  it("renders image icon with sky class for 'image/png' (MIME prefix)", () => {
+  it("renders image icon with violet class for 'image/png' (MIME prefix)", () => {
     const { container } = render(<ContentIcon contentType="image/png" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
-    expect(svg!.className.baseVal).toContain("text-ide-sky");
+    expect(svg!.className.baseVal).toContain("text-ide-violet");
   });
 
   it("renders code icon with violet class for 'code'", () => {
@@ -112,10 +112,10 @@ describe("KindChip", () => {
     expect(el.className).toContain("text-ide-sky");
   });
 
-  it("renders IMAGE label with sky class", () => {
+  it("renders IMAGE label with violet class", () => {
     const { getByText } = render(<KindChip contentType="image" />);
     const el = getByText("IMAGE");
-    expect(el.className).toContain("text-ide-sky");
+    expect(el.className).toContain("text-ide-violet");
   });
 
   it("renders CODE label with violet class", () => {
@@ -137,7 +137,7 @@ describe("KindChip", () => {
       <KindChip contentType="text" kind="IMAGE" />
     );
     const el = getByText("IMAGE");
-    expect(el.className).toContain("text-ide-sky");
+    expect(el.className).toContain("text-ide-violet");
   });
 });
 

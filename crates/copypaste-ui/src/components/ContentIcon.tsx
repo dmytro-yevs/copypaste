@@ -96,7 +96,7 @@ export interface ContentIconProps {
  *
  *   text   → <Type>       text-ide-accent
  *   url    → <Link>       text-ide-sky
- *   image  → <Image>      text-ide-sky
+ *   image  → <Image>      text-ide-violet
  *   code   → <Code>       text-ide-violet
  *   email  → <Mail>       text-ide-success
  *   phone  → <Phone>      text-ide-success
@@ -122,11 +122,11 @@ export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
     case "text":
       return <Type {...shared} className="shrink-0 text-ide-accent" />;
     case "url":
-      // 1hqt: URL/IMAGE use sky token (20 120 170 in light, teal in dark)
+      // 1hqt: URL uses sky token (20 120 170 in light, teal in dark)
       return <Link {...shared} className="shrink-0 text-ide-sky" />;
     case "image":
-      // 1hqt: IMAGE uses sky token (same family as URL), not violet
-      return <Image {...shared} className="shrink-0 text-ide-sky" />;
+      // 1jms.14: IMAGE → violet per PARITY-SPEC §6 (distinct from URL=sky; matches Android c.violet)
+      return <Image {...shared} className="shrink-0 text-ide-violet" />;
     case "code":
       return <Code {...shared} className="shrink-0 text-ide-violet" />;
     case "email":
@@ -265,7 +265,8 @@ export function KindChip({ contentType, kind }: KindChipProps) {
   // and keep the semantic text colour; the heavier fill + the AA-darkened
   // danger/faint tokens lift the badge to AA. (The text colour itself is the
   // "one step darker" semantic token, not a lighter decorative tint.)
-  // 1hqt: URL/IMAGE use sky token; lplk: violet is now 128 90 213 (AA-darkened via CSS var)
+  // 1hqt: URL uses sky token; lplk: violet is now 128 90 213 (AA-darkened via CSS var)
+  // 1jms.14: IMAGE → violet per PARITY-SPEC §6 (distinct from URL=sky; matches Android c.violet)
   const colorClass =
     label === "URL"
       ? "text-ide-sky border-ide-sky/45 bg-ide-sky/14"
@@ -276,7 +277,7 @@ export function KindChip({ contentType, kind }: KindChipProps) {
       : label === "JSON" || label === "PRIVATE" || label === "SENSITIVE"
       ? "text-ide-danger border-ide-danger/45 bg-ide-danger/14"
       : label === "IMAGE"
-      ? "text-ide-sky border-ide-sky/45 bg-ide-sky/14"
+      ? "text-ide-violet border-ide-violet/45 bg-ide-violet/14"
       : label === "CODE"
       ? "text-ide-violet border-ide-violet/45 bg-ide-violet/14"
       : label === "FILE"
