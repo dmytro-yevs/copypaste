@@ -60,9 +60,11 @@ All methods are defined in [`crates/copypaste-ipc/src/methods.rs`](../crates/cop
 | `list` | Fetch a paginated list of clipboard items |
 | `history_page` | Fetch one paginated page of history (`{limit, offset}`) → `{items, total, own_device_id}` |
 | `search` | Full-text search over clipboard items |
-| `copy` | Copy a clipboard item back to the system clipboard by id (legacy integer-index form) |
+| `copy` | **Deprecated.** Returns `error_code: "not_implemented"`. Use `copy_item`. |
+| `paste` | **Deprecated.** Returns `error_code: "not_implemented"`. Use `copy_item`. |
 | `copy_item` | Copy a clipboard item back to the system clipboard by stable UUID (`{id}`) |
-| `delete` | Delete a single clipboard item by id (legacy form) |
+| `delete` | **Deprecated.** Returns `error_code: "not_implemented"`. Use `delete_item`. |
+| `pin` | **Deprecated.** Returns `error_code: "not_implemented"`. Use `pin_item`. |
 | `delete_item` | Delete a single clipboard item by stable UUID (`{id}`) |
 | `delete_all` | Delete all clipboard items (clear history) |
 | `count` | Return the total count of stored clipboard items |
@@ -169,6 +171,17 @@ All methods are defined in [`crates/copypaste-ipc/src/methods.rs`](../crates/cop
 ## Backwards compatibility
 
 Older responses may omit `error_code` entirely. The field is **optional on the wire** and serialized via `#[serde(skip_serializing_if = "Option::is_none")]`. Clients MUST tolerate its absence and treat it as "code unknown".
+
+### Deprecated methods
+
+The following legacy method verbs are **still recognised** by the daemon but always respond with `ok: false, error_code: "not_implemented"`. Clients MUST migrate to the replacement before the next major release.
+
+| Deprecated verb | Replacement |
+|---|---|
+| `copy` | `copy_item` |
+| `paste` | `copy_item` |
+| `delete` | `delete_item` |
+| `pin` | `pin_item` |
 
 ## Source of truth
 

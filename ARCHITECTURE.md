@@ -56,8 +56,11 @@ SQLite (WAL mode)  [copypaste-core/storage/]
         ▼
 Unix socket  [macOS: ~/Library/Application Support/CopyPaste/daemon.sock
               Linux: ~/.local/share/copypaste/daemon.sock]
-  JSON-RPC-like: { id, method, params } → { id, ok, data?, error? }
-  Methods: list | count | delete | search | status | copy | export
+  JSON-RPC-like: { id, method, params } → { id, ok, data?, error?, error_code? }
+  Core methods: list | history_page | count | search | status | export
+                copy_item | delete_item | delete_all | pin_item | reorder_pinned
+  (Legacy verbs "copy", "paste", "delete", "pin" are recognised but return
+   error_code="not_implemented" — use the *_item forms above.)
         │
   ┌─────┴──────┐
   ▼            ▼

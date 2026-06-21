@@ -151,6 +151,22 @@ Both platforms use identical base durations and easing names.
 | `motionScale` cinematic | index.css:780 `--speed:.72` | Palette.kt:109 `MotionProfile.Cinematic=1.3f` | `0.72` speed scalar web / `1.3×` Android |
 | Row stagger step | JS `STAGGER_STEP_MS` in views | Android row `animationDelay` | `~18–20ms`, cap 10 rows |
 
+### §A.8 Semantic tokens added post-redesign
+
+These tokens were added during the redesign-fix campaign and were not in the original spec.
+
+| Token | Web (index.css) | Android (Color.kt) | Value / Notes |
+|---|---|---|---|
+| `--ide-scrim` | index.css:243 (`:root` dark) / index.css:361 (light override) | Android: Material's default dialog scrim (no explicit `ide-scrim` token in Color.kt) | Dark `rgba(0,0,0,0.55)`, Light `rgba(0,0,0,0.35)`. All web modal backdrops MUST use `var(--ide-scrim)` — never a hardcoded value. |
+| `--ide-badge-warning` | index.css:129 (`:root` dark) / index.css:305 (light) | Android uses `IdeWarning = #D9A343` (dark) / `LightWarning = #D9A343` (light) | Amber `#D9A343` — used for pinned-row tint and COLOR / NUMBER / PATH chips. Distinct from `--ide-warning` in light theme (`#B06E14`) which is the AA-safe warning text colour. |
+| `--ide-info` (per-palette) | Liquid-blue dark: index.css:473 `rgb(110,155,240)` | Color.kt `IdeInfo = Color(0xFF6E9BF0)` — **matches CSS exactly** | Android and CSS now agree on `#6E9BF0` for the default (liquid-blue) dark info/URL colour. Base `:root` dark info (`#56B6C2`) is overridden per-palette. |
+| `--ide-violet` (per-palette) | Liquid-blue dark: index.css:475 `rgb(158,123,255)` | Color.kt `IdeViolet = Color(0xFF9E7BFF)` — **matches CSS exactly** | Android and CSS agree on `#9E7BFF` for the default (liquid-blue) dark violet/CODE/IMAGE colour. Base `:root` dark violet (`#C678DD`) is overridden per-palette. |
+
+> **Section-label colour note:** Web `SectionHeader.tsx` (line 41) defaults to `text-ide-faint`
+> (the `faint` prop defaults to `true`). Android `SectionLabel` (Components.kt) uses `c.dim`.
+> This is a known web-ahead drift. The §B.1 spec contract says `--ide-dim`; the web component
+> should be audited to confirm whether the faint default is intentional or a regression.
+
 ---
 
 ## §B. Component Cross-Reference
@@ -213,23 +229,25 @@ LIGHT (default):
 | `--ide-divider` | `#E2E2E6` | row separators |
 | `--ide-text` | `#1D1D1F` | labelColor |
 | `--ide-dim` | `#5B5B60` | secondaryLabel |
-| `--ide-faint` | `#8A8A8E` | tertiaryLabel |
+| `--ide-faint` | `#6C6C72` | tertiaryLabel (AA-darkened from Apple `#8A8A8E`; 4.7:1 on panel) |
 | `--ide-ghost` | `rgba(60,60,67,0.55)` | secondary metadata text |
 | `--ide-ghost-deco` | `rgba(60,60,67,0.32)` | 24px+ decorative icons |
-| `--ide-accent` | `#007AFF` | systemBlue |
-| `--ide-accent-hover` | `#0063D1` | |
-| `--ide-danger` | `#FF3B30` | systemRed |
-| `--ide-success` | `#34C759` | systemGreen |
-| `--ide-warning` | `#FF9500` | systemOrange |
-| `--ide-info` | `#32ADE6` | systemTeal/cyan |
-| `--ide-violet` | `#AF52DE` | systemPurple |
+| `--ide-accent` | `#1A5FCC` | systemBlue (AA-darkened; `#007AFF` fails AA on panel) |
+| `--ide-accent-hover` | `#0E4AA8` | |
+| `--ide-danger` | `#D7281E` | systemRed (AA-darkened from `#FF3B30`; 4.6:1 on white) |
+| `--ide-success` | `#28884A` | systemGreen (AA-darkened) |
+| `--ide-warning` | `#B06E14` | systemOrange (AA-darkened); `--ide-badge-warning` = `#D9A343` (amber, for pinned badges) |
+| `--ide-info` | `#1478AA` | URL/IMAGE colour (AA-safe; was `#32ADE6` which fails AA) |
+| `--ide-violet` | `#805AD5` | CODE/IMAGE colour (AA-darkened; was `#AF52DE`) |
+| `--ide-scrim` | `rgba(0,0,0,0.35)` | modal backdrop (light); dark theme = `rgba(0,0,0,0.55)` |
+| `--ide-badge-warning` | `#D9A343` | amber badge fill (pinned / COLOR / NUMBER / PATH chips; same in dark) |
 
 DARK (override) — keep the existing dark ramp (`#13141A` … `#E8EAED`), accent
-`#3D8BFF`, semantic = the slightly-muted dark variants.
+`#4D8DFF` (liquid-blue canonical), info `#56B6C2`, violet `#C678DD`.
 
-- **`IdeFaint` drift fix (P0):** Android currently `#6B6F78` (fails WCAG AA). Set
-  Android faint to **`#82868F`** (dark) / **`#8A8A8E`** (light) and add
-  `IdeGhost` / `IdeGhostDeco` tokens mirroring web.
+- **`IdeFaint` (done):** Android `IdeFaint` updated to `#82868F` (dark) / `LightFaint` = `#6C6C72`
+  (light, WCAG-AA at 4.7:1 on panel). `IdeGhost` / `IdeGhostDeco` tokens added. Drift fix is
+  complete; this item is resolved.
 
 ## 2. Glass material
 
