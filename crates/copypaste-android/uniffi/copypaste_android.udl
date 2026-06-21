@@ -179,6 +179,26 @@ namespace copypaste_android {
   /// Check before any Rust-initiated clipboard capture.
   boolean get_private_mode();
 
+  // ── CopyPaste-1jms.23: Canonical Android sync-badge state ────────────────
+  // Rust implementation of the badge-state priority logic, matching the macOS
+  // daemon's authoritative `badge_state` IPC field. Returns one of:
+  //   "synced", "syncing", "idle", "offline", "error"
+  // Kotlin passes the result to IpcSyncBadgeState.fromIpcString → toSyncBadgeState.
+  // Priority: is_auth_error > is_syncing > recent-synced > offline > idle.
+  // is_auth_error=true always wins — an auth-failed device shows red (DaemonUnreachable)
+  // even if a sync retry is in flight concurrently. Returns "idle" on an impossible panic.
+
+  /// Compute the canonical Android sync-badge state string from raw sync signals.
+  ///
+  /// - `online_count`: number of currently-online peers.
+  /// - `last_activity_ms`: wall-clock ms of last successful sync (0 = never).
+  /// - `recent_sync_ms`: recency window (mirror of Kotlin RECENT_SYNC_MS = 5*60*1000).
+  /// - `has_internet`: OS-validated internet connectivity.
+  /// - `is_auth_error`: true when last attempt hit an auth failure (401/403/RLS).
+  /// - `is_syncing`: true while a sync operation is in-flight.
+  /// - `now_ms`: current wall-clock ms (System.currentTimeMillis()).
+  string compute_android_sync_badge_state(i64 online_count, i64 last_activity_ms, i64 recent_sync_ms, boolean has_internet, boolean is_auth_error, boolean is_syncing, i64 now_ms);
+
   // ── PG-12 (8qcm): Revoke peer + sync-key rotation ───────────────────────
   // macOS `revoke_and_rotate` (ipc.rs:4882) revokes a peer and rotates the cloud
   // sync key in one step. Android was missing the rotation. These exports delegate

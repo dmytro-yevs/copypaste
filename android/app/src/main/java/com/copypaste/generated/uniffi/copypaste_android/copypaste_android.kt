@@ -794,6 +794,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -826,6 +828,8 @@ internal interface UniffiLib : Library {
     fun uniffi_copypaste_android_fn_func_cloud_decrypt(`itemId`: RustBuffer.ByValue,`blob`: RustBuffer.ByValue,`syncKeyBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_cloud_encrypt(`itemId`: RustBuffer.ByValue,`plaintext`: RustBuffer.ByValue,`syncKeyBytes`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_compute_android_sync_badge_state(`onlineCount`: Long,`lastActivityMs`: Long,`recentSyncMs`: Long,`hasInternet`: Byte,`isAuthError`: Byte,`isSyncing`: Byte,`nowMs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_core_version(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1043,6 +1047,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_cloud_encrypt(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_compute_android_sync_badge_state(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_core_version(
     ): Short
     fun uniffi_copypaste_android_checksum_func_decrypt_text(
@@ -1171,6 +1177,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_cloud_encrypt() != 36592.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_compute_android_sync_badge_state() != 59882.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_core_version() != 36895.toShort()) {
@@ -3323,6 +3332,26 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_cloud_encrypt(
         FfiConverterString.lower(`itemId`),FfiConverterSequenceUByte.lower(`plaintext`),FfiConverterSequenceUByte.lower(`syncKeyBytes`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Compute the canonical Android sync-badge state string from raw sync signals.
+         *
+         * - `online_count`: number of currently-online peers.
+         * - `last_activity_ms`: wall-clock ms of last successful sync (0 = never).
+         * - `recent_sync_ms`: recency window (mirror of Kotlin RECENT_SYNC_MS = 5*60*1000).
+         * - `has_internet`: OS-validated internet connectivity.
+         * - `is_auth_error`: true when last attempt hit an auth failure (401/403/RLS).
+         * - `is_syncing`: true while a sync operation is in-flight.
+         * - `now_ms`: current wall-clock ms (System.currentTimeMillis()).
+         */ fun `computeAndroidSyncBadgeState`(`onlineCount`: kotlin.Long, `lastActivityMs`: kotlin.Long, `recentSyncMs`: kotlin.Long, `hasInternet`: kotlin.Boolean, `isAuthError`: kotlin.Boolean, `isSyncing`: kotlin.Boolean, `nowMs`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_compute_android_sync_badge_state(
+        FfiConverterLong.lower(`onlineCount`),FfiConverterLong.lower(`lastActivityMs`),FfiConverterLong.lower(`recentSyncMs`),FfiConverterBoolean.lower(`hasInternet`),FfiConverterBoolean.lower(`isAuthError`),FfiConverterBoolean.lower(`isSyncing`),FfiConverterLong.lower(`nowMs`),_status)
 }
     )
     }

@@ -140,6 +140,33 @@ object DevicesOnlineState {
         _isSyncError.value = error
     }
 
+    /**
+     * CopyPaste-1jms.23: authoritative badge-state string as computed by the Rust
+     * FFI function `compute_android_sync_badge_state`. One of: "synced", "syncing",
+     * "idle", "offline", "error" — or null when no authoritative value has been
+     * published yet (fallback: [SyncStatusBadge] uses [resolveSyncBadgeState]).
+     *
+     * Lifecycle:
+     *  - [FgsSyncLoop] calls [setBadgeState]("error") on every poll/sync error.
+     *  - [FgsSyncLoop] calls [setBadgeState]("synced"/"idle") on every success.
+     *  - [SyncStatusBadge] collects this and, when non-null, routes through
+     *    [IpcSyncBadgeState.fromIpcString] → [toSyncBadgeState], bypassing the
+     *    heuristic. When null (or unknown wire string), falls back to heuristic.
+     *
+     * Thread-safe: [MutableStateFlow.value] assignments are atomic.
+     */
+    private val _badgeState = MutableStateFlow<String?>(null)
+    val badgeState: StateFlow<String?> = _badgeState.asStateFlow()
+
+    /**
+     * Publish an authoritative badge-state wire string.
+     * Call with null to clear (reverts [SyncStatusBadge] to heuristic fallback).
+     * Safe to call from any thread.
+     */
+    fun setBadgeState(raw: String?) {
+        _badgeState.value = raw
+    }
+
     internal fun publish(count: Int, maxLastSyncMs: Long = 0L) {
         _onlineCount.value = count
         if (maxLastSyncMs > _lastActivityMs.value) {

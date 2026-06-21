@@ -120,3 +120,135 @@ pub fn get_private_mode() -> bool {
 pub fn resolve_stun_public_ip() -> Option<String> {
     panic_boundary::catch(stun::resolve_public_ip).unwrap_or(None)
 }
+
+// ---------------------------------------------------------------------------
+// CopyPaste-1jms.23: Canonical Android sync-badge state (Rust parity)
+//
+// The Kotlin `resolveSyncBadgeState` heuristic re-derives badge state from raw
+// signals, but on macOS the daemon returns an authoritative `badge_state` string
+// over IPC. This function is the CANONICAL Rust implementation of that same
+// priority logic so Android can get a daemon-authoritative string from FFI and
+// then surface it via `IpcSyncBadgeState.fromIpcString` → `toSyncBadgeState`.
+//
+// Priority order (matches Kotlin resolveSyncBadgeState + macOS daemon):
+//  1. is_auth_error → "error"        (auth failure = DaemonUnreachable, red)
+//  2. is_syncing    → "syncing"      (in-flight → Connected, green)
+//  3. count > 0 AND recent sync AND has_internet → "synced" (Connected, green)
+//  4. !has_internet → "offline"      (NetworkOffline, red)
+//  5. Otherwise     → "idle"         (grey — no hard error, no recent sync)
+//
+// NOTE: is_auth_error is checked FIRST so an explicit auth failure is never
+// masked by is_syncing (an in-flight retry after an auth error should still
+// surface red, not green). This diverges from the Kotlin fallback heuristic
+// (which has no is_auth_error signal) and is the whole point of this FFI:
+// the daemon knows about auth failures that the heuristic cannot observe.
+// ---------------------------------------------------------------------------
+
+/// Compute the canonical Android sync-badge state string.
+///
+/// Returns one of: `"synced"`, `"syncing"`, `"idle"`, `"offline"`, `"error"`.
+/// These are the same wire values as [`IpcSyncBadgeState`] in Kotlin, so the
+/// caller can pass the result directly to `IpcSyncBadgeState.fromIpcString`.
+///
+/// # Parameters
+/// - `online_count`: number of peers currently online (from DevicesOnlineState).
+/// - `last_activity_ms`: wall-clock ms of most-recent successful sync (0 = never).
+/// - `recent_sync_ms`: recency window in ms (mirrors `RECENT_SYNC_MS = 5 * 60 * 1000`).
+/// - `has_internet`: true when OS reports a validated internet connection.
+/// - `is_auth_error`: true when the last sync attempt hit an auth failure
+///   (HTTP 401/403, bad credentials, RLS error). Takes highest priority — an
+///   auth-failed device MUST show red regardless of other signals.
+/// - `is_syncing`: true while a sync operation is actively in-flight.
+/// - `now_ms`: current wall-clock time in ms (pass `System.currentTimeMillis()`).
+///
+/// Wrapped in `panic_boundary::catch` — no external I/O; cannot panic in practice.
+pub fn compute_android_sync_badge_state(
+    online_count: i64,
+    last_activity_ms: i64,
+    recent_sync_ms: i64,
+    has_internet: bool,
+    is_auth_error: bool,
+    is_syncing: bool,
+    now_ms: i64,
+) -> String {
+    panic_boundary::catch(|| {
+        // 1. Auth error takes absolute priority — even over an in-flight retry.
+        if is_auth_error {
+            return "error".to_string();
+        }
+        // 2. Actively syncing → "syncing" (Connected, green).
+        if is_syncing {
+            return "syncing".to_string();
+        }
+        // 3. Recent successful sync with at least one peer → "synced" (Connected, green).
+        let recent_enough =
+            last_activity_ms > 0 && (now_ms - last_activity_ms) <= recent_sync_ms;
+        if online_count > 0 && recent_enough {
+            return "synced".to_string();
+        }
+        // 4. No validated OS internet → "offline" (NetworkOffline, red).
+        if !has_internet {
+            return "offline".to_string();
+        }
+        // 5. OS online, no auth error, no recent sync → "idle" (grey).
+        "idle".to_string()
+    })
+    // On an impossible panic: return "idle" (grey, non-alarming fallback).
+    .unwrap_or_else(|_| "idle".to_string())
+}
+
+#[cfg(test)]
+mod sync_badge_tests {
+    use super::compute_android_sync_badge_state;
+
+    const RECENT_MS: i64 = 5 * 60 * 1_000; // 5 min
+    const NOW: i64 = 1_000_000_000;
+
+    fn badge(
+        count: i64,
+        last_ms: i64,
+        internet: bool,
+        auth_err: bool,
+        syncing: bool,
+    ) -> String {
+        compute_android_sync_badge_state(count, last_ms, RECENT_MS, internet, auth_err, syncing, NOW)
+    }
+
+    #[test]
+    fn auth_error_returns_error_regardless_of_other_signals() {
+        // Even with a recent sync and internet, auth error wins.
+        assert_eq!("error", badge(1, NOW - 1_000, true, true, false));
+        // Also when syncing concurrently — auth error takes priority over syncing.
+        assert_eq!("error", badge(1, NOW - 1_000, true, true, true));
+        // Also when offline.
+        assert_eq!("error", badge(0, 0, false, true, false));
+    }
+
+    #[test]
+    fn syncing_returns_syncing_when_no_auth_error() {
+        assert_eq!("syncing", badge(0, 0, true, false, true));
+        assert_eq!("syncing", badge(0, 0, false, false, true));
+    }
+
+    #[test]
+    fn synced_when_count_positive_and_recent_sync() {
+        let last = NOW - RECENT_MS + 1_000; // within window
+        assert_eq!("synced", badge(1, last, true, false, false));
+    }
+
+    #[test]
+    fn offline_when_no_internet_and_no_recent_sync() {
+        assert_eq!("offline", badge(0, 0, false, false, false));
+    }
+
+    #[test]
+    fn idle_when_online_but_no_recent_sync() {
+        assert_eq!("idle", badge(0, 0, true, false, false));
+    }
+
+    #[test]
+    fn idle_when_stale_sync_despite_positive_count() {
+        let stale = NOW - RECENT_MS - 1_000; // outside window
+        assert_eq!("idle", badge(1, stale, true, false, false));
+    }
+}

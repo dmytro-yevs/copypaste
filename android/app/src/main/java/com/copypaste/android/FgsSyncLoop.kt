@@ -438,6 +438,10 @@ class FgsSyncLoop(
                         consecutiveFailures++
                         val backoff = backoffMs(consecutiveFailures)
                         Log.w(TAG, "Poll failed (#$consecutiveFailures): ${pollError.message} — backing off ${backoff}ms")
+                        // CopyPaste-1jms.23: publish authoritative "error" state so
+                        // SyncStatusBadge shows red (DaemonUnreachable) immediately
+                        // without waiting for the heuristic to detect stale activity.
+                        DevicesOnlineState.setBadgeState("error")
                         delay(backoff)
                         if (!isActive) break
                         continue // re-poll immediately after the backoff sleep
@@ -448,6 +452,14 @@ class FgsSyncLoop(
                     if (newCount > 0) {
                         Log.d(TAG, "FgsSyncLoop: $newCount new item(s) stored")
                     }
+                    // CopyPaste-1jms.23: publish authoritative badge state on success.
+                    // "synced" when at least one peer is online (count > 0); "idle" when
+                    // no peers are online but the poll itself succeeded (no auth error).
+                    // This makes IpcSyncBadgeState live — SyncStatusBadge will route through
+                    // IpcSyncBadgeState.fromIpcString → toSyncBadgeState instead of the
+                    // heuristic when this value is non-null.
+                    val liveCount = DevicesOnlineState.onlineCount.value
+                    DevicesOnlineState.setBadgeState(if (liveCount > 0) "synced" else "idle")
                     nextDelay = pollIntervalMs(
                         wsConnected = wsClient?.isConnected ?: false,
                         consecutiveEmpty = consecutiveEmpty,

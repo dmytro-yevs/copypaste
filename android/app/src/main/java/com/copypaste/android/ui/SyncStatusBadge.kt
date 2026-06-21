@@ -180,6 +180,13 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // (red dot) via resolveSyncBadgeState — the production path for that state.
     val isSyncError by DevicesOnlineState.isSyncError.collectAsState()
 
+    // CopyPaste-1jms.23: authoritative badge-state wire string published by FgsSyncLoop
+    // via compute_android_sync_badge_state (Rust FFI) on every poll result. When
+    // non-null, this overrides the heuristic (resolveSyncBadgeState) with the canonical
+    // daemon-side logic — making IpcSyncBadgeState LIVE. When null (no poll has run yet),
+    // the fallback heuristic is used unchanged (backwards-compatible).
+    val authoritativeBadgeState by DevicesOnlineState.badgeState.collectAsState()
+
     // Fallback: count configured sync targets when DevicesScreen hasn't run yet.
     var configuredCount by remember { mutableIntStateOf(0) }
 
@@ -217,24 +224,41 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // otherwise fall back to the configured-target count.
     val count = if (liveOnlineCount >= 0) liveOnlineCount else configuredCount
 
-    // PG-10 / 5qbe: resolve badge state using the daemon-derived signal first.
-    // DevicesOnlineState (the primary signal, updated by FgsSyncLoop + DevicesScreen)
-    // mirrors IPC/daemon reachability on macOS — if sync hasn't worked recently the
-    // badge shows DANGER regardless of OS network state.
+    // CopyPaste-1jms.23 / PG-10 / 5qbe: resolve badge state.
     //
-    // CopyPaste-lwnz: when a sync is actively in flight, short-circuit to Connected
-    // (green) so the badge reflects real work rather than staying in the Idle or
-    // stale-count state. This drives the SYNCING branch that previously had no path.
-    val badgeState = if (isSyncing) {
-        SyncBadgeState.Connected
-    } else {
-        resolveSyncBadgeState(
-            liveOnlineCount = count,
-            lastActivityMs = lastActivityMs,
-            recentSyncMs = RECENT_SYNC_MS,
-            hasInternet = hasInternet,
-            isSyncError = isSyncError,
-        )
+    // Priority:
+    //  1. Authoritative state from FgsSyncLoop (Rust FFI compute_android_sync_badge_state):
+    //     when non-null, parse via IpcSyncBadgeState.fromIpcString → toSyncBadgeState.
+    //     An unknown wire string (fromIpcString returns null) falls through to heuristic.
+    //  2. Heuristic fallback (resolveSyncBadgeState): used when no authoritative state
+    //     has been published yet (null), or when the wire string is unrecognised.
+    //
+    // The isSyncing short-circuit is preserved inside the heuristic path only; the
+    // authoritative "syncing" wire value handles it on the Rust side.
+    val badgeState: SyncBadgeState = run {
+        // Check authoritative IPC-style state first.
+        val authoritative = authoritativeBadgeState
+        if (authoritative != null) {
+            val ipcState = IpcSyncBadgeState.fromIpcString(authoritative)
+            if (ipcState != null) {
+                // Known wire value — use the canonical mapping (makes IpcSyncBadgeState LIVE).
+                return@run ipcState.toSyncBadgeState()
+            }
+            // Unknown wire string — fall through to heuristic (future-proof).
+        }
+        // Heuristic path (no authoritative value, or unrecognised wire string).
+        // CopyPaste-lwnz: in-flight sync → Connected (green).
+        if (isSyncing) {
+            SyncBadgeState.Connected
+        } else {
+            resolveSyncBadgeState(
+                liveOnlineCount = count,
+                lastActivityMs = lastActivityMs,
+                recentSyncMs = RECENT_SYNC_MS,
+                hasInternet = hasInternet,
+                isSyncError = isSyncError,
+            )
+        }
     }
 
     val connected = badgeState is SyncBadgeState.Connected

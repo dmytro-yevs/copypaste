@@ -70,7 +70,8 @@ pub use ffi_sensitive::{
     sensitive_expires_at_ms, sensitive_kind, SensitiveCaptureDecision, SensitiveSpan,
 };
 pub use ffi_system::{
-    classify_text_kind, get_private_mode, resolve_stun_public_ip, set_private_mode,
+    classify_text_kind, compute_android_sync_badge_state, get_private_mode,
+    resolve_stun_public_ip, set_private_mode,
 };
 
 // When using UDL-based scaffolding, uniffi::Error and uniffi::Record proc-macro
