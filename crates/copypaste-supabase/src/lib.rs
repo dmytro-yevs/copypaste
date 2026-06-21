@@ -35,6 +35,7 @@
 //! }
 //! ```
 
+pub mod account;
 pub mod auth;
 pub mod error;
 pub mod models;
@@ -42,6 +43,9 @@ pub mod protocol;
 pub mod realtime;
 pub mod rest;
 pub mod store;
+
+// Account-identity re-exports (cross-device mismatch detection)
+pub use account::{detect_account_mismatch, supabase_account_id, supabase_project_ref};
 
 // Auth re-exports
 pub use auth::AuthClient;
