@@ -55,6 +55,9 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 /// should prefer `raw_error_code` so future daemon codes remain visible.
 #[derive(Debug)]
 pub struct Response {
+    // `id` is part of the JSON-RPC protocol shape and is retained for
+    // future response-matching use (e.g. multiplexed IPC). Not read today.
+    #[allow(dead_code)]
     pub id: String,
     pub ok: bool,
     pub data: Option<Value>,
