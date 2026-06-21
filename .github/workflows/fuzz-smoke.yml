@@ -71,12 +71,17 @@ jobs:
           tool: cargo-fuzz
 
       - name: Build fuzz target
-        run: cargo +nightly fuzz build "$FUZZ_TARGET" --fuzz-dir fuzz
+        # Force the gnu host triple. cargo-fuzz otherwise defaults to a musl
+        # target which (a) isn't installed on the runner and (b) cannot link
+        # AddressSanitizer against static musl libc ("sanitizer is incompatible
+        # with statically linked libc"). gnu is the installed host and ASAN-safe.
+        run: cargo +nightly fuzz build "$FUZZ_TARGET" --fuzz-dir fuzz --target x86_64-unknown-linux-gnu
 
       - name: Run fuzz target for 30 s
         run: |
           cargo +nightly fuzz run "$FUZZ_TARGET" \
             --fuzz-dir fuzz \
+            --target x86_64-unknown-linux-gnu \
             -- -max_total_time=30 -print_final_stats=1
 
       - name: Upload crash artifacts (if any)
