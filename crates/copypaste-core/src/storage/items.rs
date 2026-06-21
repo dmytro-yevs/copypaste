@@ -1419,6 +1419,38 @@ pub fn set_thumb(db: &Database, id: &str, blob: Option<&[u8]>) -> Result<usize, 
     Ok(changed)
 }
 
+/// Atomically mark an item as sensitive and remove any existing FTS entry.
+///
+/// Called when a post-insert sensitivity classification determines that an
+/// item previously stored as `is_sensitive = 0` should now be treated as
+/// sensitive. The two writes — `UPDATE clipboard_items SET is_sensitive = 1`
+/// and `DELETE FROM clipboard_fts WHERE id = ?` — are wrapped in a single
+/// `unchecked_transaction` so there is no window where the FTS row survives
+/// a newly-sensitive item.
+///
+/// **Security (CopyPaste-44rq.45):** without this function the only way to
+/// transition sensitivity was to re-insert the item, leaving a stale FTS row
+/// that `search_items` would later suppress via its `AND ci.is_sensitive = 0`
+/// filter. That filter is defense-in-depth; this function is the primary
+/// enforcement layer for the transition-to-sensitive path.
+///
+/// Returns the number of `clipboard_items` rows updated (0 if `id` not found,
+/// 1 on success). The FTS delete always runs inside the same transaction and
+/// is not counted separately (a missing FTS row is not an error).
+pub fn mark_sensitive(db: &Database, id: &str) -> Result<usize, ItemsError> {
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+    let changed = tx.execute(
+        "UPDATE clipboard_items SET is_sensitive = 1 WHERE id = ?1",
+        params![id],
+    )?;
+    // Always purge the FTS entry even if is_sensitive was already 1 —
+    // an earlier partial failure could have left a stale FTS row.
+    tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
+    tx.commit()?;
+    Ok(changed)
+}
+
 /// Prune the oldest unpinned clipboard items so that the total byte size of
 /// all unpinned `content` blobs does not exceed `max_bytes`.
 ///
@@ -4483,5 +4515,99 @@ mod tests {
             results.iter().all(|i| !i.is_sensitive),
             "search_items must never return sensitive items"
         );
+    }
+
+    // --- CopyPaste-44rq.45: mark_sensitive must remove FTS entry atomically ---
+
+    /// A non-sensitive item that was FTS-indexed must NOT be searchable after
+    /// `mark_sensitive` is called.
+    #[test]
+    fn mark_sensitive_removes_fts_entry() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Insert a non-sensitive item with FTS entry.
+        let item = make_item(1);
+        let id = item.id.clone();
+        insert_item_with_fts(&db, &item, "unicorn password payload").unwrap();
+
+        // Confirm it is searchable before the transition.
+        let before = search_items(&db, "unicorn", 10).unwrap();
+        assert_eq!(before.len(), 1, "item must be searchable before mark_sensitive");
+
+        // Transition to sensitive.
+        let changed = mark_sensitive(&db, &id).unwrap();
+        assert_eq!(changed, 1, "mark_sensitive must update 1 row");
+
+        // Confirm it is no longer searchable.
+        let after = search_items(&db, "unicorn", 10).unwrap();
+        assert!(
+            after.is_empty(),
+            "item must NOT be searchable after mark_sensitive (CopyPaste-44rq.45)"
+        );
+
+        // Confirm the FTS row itself is gone (not just filtered by search_items).
+        let fts_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fts_count, 0,
+            "FTS row must be deleted by mark_sensitive, not just filtered"
+        );
+
+        // Confirm the item itself is still in clipboard_items (not deleted).
+        let got = get_item_by_id(&db, &id).unwrap().expect("item must still exist");
+        assert!(got.is_sensitive, "item must have is_sensitive=true after mark_sensitive");
+    }
+
+    /// `mark_sensitive` on an already-sensitive item with a stale FTS row must
+    /// clean up the FTS row (idempotent repair).
+    #[test]
+    fn mark_sensitive_clears_stale_fts_for_already_sensitive_item() {
+        let db = Database::open_in_memory().unwrap();
+
+        let mut item = make_item(2);
+        item.is_sensitive = true;
+        let id = item.id.clone();
+        insert_item(&db, &item).unwrap();
+
+        // Simulate a stale FTS row (e.g., written before this fix was deployed).
+        db.conn()
+            .execute(
+                "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",
+                params![id, "stale secret stale"],
+            )
+            .unwrap();
+
+        // mark_sensitive must clean the stale row even though is_sensitive is already 1.
+        let changed = mark_sensitive(&db, &id).unwrap();
+        // changed may be 0 or 1 depending on whether SQLite counts a no-op UPDATE —
+        // we only assert the FTS row is gone.
+        let _ = changed;
+
+        let fts_count: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            fts_count, 0,
+            "mark_sensitive must delete stale FTS row for already-sensitive item (CopyPaste-44rq.45)"
+        );
+    }
+
+    /// `mark_sensitive` on an unknown id must return 0 and not error.
+    #[test]
+    fn mark_sensitive_unknown_id_is_noop() {
+        let db = Database::open_in_memory().unwrap();
+        let changed = mark_sensitive(&db, "00000000-0000-0000-0000-000000000099").unwrap();
+        assert_eq!(changed, 0, "mark_sensitive on unknown id must return 0");
     }
 }
