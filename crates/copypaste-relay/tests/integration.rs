@@ -30,7 +30,7 @@ mod routes_devices;
 mod routes_health;
 #[path = "../src/routes/items.rs"]
 mod routes_items;
-#[path = "../src/state.rs"]
+#[path = "../src/state/mod.rs"]
 mod state;
 
 use config::RelayConfig;

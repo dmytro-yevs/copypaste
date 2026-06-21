@@ -26,7 +26,7 @@ mod models;
 mod quota;
 #[path = "../src/routes/items.rs"]
 mod routes_items;
-#[path = "../src/state.rs"]
+#[path = "../src/state/mod.rs"]
 mod state;
 
 use std::sync::{Arc, Mutex};
