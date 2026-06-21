@@ -65,381 +65,53 @@
 //! - All HTTP is async (reqwest) — the tokio runtime is never blocked; the only
 //!   blocking work (SQLCipher writes, AEAD) runs in `spawn_blocking`.
 
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 use std::time::Duration;
 
-use base64::Engine as _;
-use serde::{Deserialize, Serialize};
+use copypaste_core::{AppConfig, ClipboardItem, Database, SyncKey};
 use tokio::sync::{Mutex, Notify};
 
-use copypaste_core::{
-    decrypt_from_cloud, decrypt_item_with_aad, derive_relay_inbox_id, derive_relay_public_key,
-    derive_relay_registration_pop, encrypt_for_cloud, encrypt_item_with_aad,
-    exists_item_by_item_id, get_item_by_item_id, insert_item, insert_tombstone, prune_to_cap,
-    soft_delete_item, AppConfig, ClipboardItem, Database, SyncKey, NONCE_SIZE,
-};
-// CopyPaste-ayvs: relay LWW now routes through the SAME total order the P2P and
-// cloud paths use (lamport -> wall_time -> origin_device_id) so all transports
-// converge identically.
-use copypaste_sync::merge::{remote_wins, RemoteMeta};
+// ── Sub-modules ───────────────────────────────────────────────────────────────
 
-use crate::sync_common::{
-    build_local_item, decode_payload_ct, decrypt_item_plaintext, replace_cloud_item_by_item_id,
-    wrap_and_check_cloud_upload_plaintext,
-};
-// `SYNC_HTTP_TIMEOUT` is referenced only by the test client builder; importing it
-// at module scope would be flagged unused in a non-test build under -D warnings.
-#[cfg(test)]
-use crate::sync_common::SYNC_HTTP_TIMEOUT;
+mod pasteboard;
+mod push;
+mod receive;
+mod registration;
+mod token;
+mod types;
+mod watermark;
 
-// ── Settings guards ───────────────────────────────────────────────────────────
+// ── Public re-exports ─────────────────────────────────────────────────────────
 
-/// Returns `true` when the current tick should be skipped due to the Wi-Fi-only
-/// setting being active and the device not being on Wi-Fi.
-///
-/// Pure function — injectable `is_on_wifi_fn` makes this unit-testable without
-/// a real `networksetup` invocation. Mirrors the guard in `cloud.rs`.
-fn relay_should_skip_wifi(sync_on_wifi_only: bool, is_on_wifi: bool) -> bool {
-    sync_on_wifi_only && !is_on_wifi
-}
+pub use types::{RelayError, RelayHandle};
 
-/// Returns `true` when the relay receive path should auto-apply a freshly-synced
-/// item to the local pasteboard, i.e. when `auto_apply_synced_clip` is enabled.
-///
-/// Pure function — testable without a live `AppConfig` instance.
-fn relay_should_auto_apply(auto_apply_synced_clip: bool) -> bool {
-    auto_apply_synced_clip
-}
-
-/// Candidate for auto-applying to the local pasteboard after a relay ingest.
-///
-/// Carries enough information for [`relay_apply_to_pasteboard`] to write the
-/// item to NSPasteboard (macOS) without re-querying the DB or re-decrypting.
-struct AutoApplyCandidate {
-    wall_time: i64,
-    plaintext: Vec<u8>,
-    content_type: String,
-}
-
-/// Fetch the freshest non-deleted, non-sensitive text item from the DB and
-/// return it decrypted, ready for pasteboard auto-apply.
-///
-/// Returns `None` when:
-/// - the DB has no qualifying text item, or
-/// - decryption fails (wrong key version or corrupt ciphertext — logged at WARN).
-///
-/// Only text items are returned; image items require the multi-chunk decode
-/// path which relay.rs defers to a future iteration (images are stored but
-/// not auto-applied — files are never auto-applied per the macOS limit).
-///
-/// Called inside `spawn_blocking` by the receive loop after `stored > 0` when
-/// `auto_apply_enabled` is true.
-fn relay_fetch_auto_apply_candidate(
-    db: &Database,
-    local_key: &zeroize::Zeroizing<[u8; 32]>,
-) -> Option<AutoApplyCandidate> {
-    use copypaste_core::ClipboardItem;
-
-    // Query the most-recently-written non-deleted, non-sensitive text item.
-    // We use an inline row-map rather than `get_page` so we can add the
-    // `content_type = 'text'` filter without a post-query scan.
-    let item: ClipboardItem = db
-        .conn()
-        .query_row(
-            "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                    is_sensitive, is_synced, lamport_ts, wall_time, expires_at,
-                    app_bundle_id, content_hash, origin_device_id, key_version,
-                    pinned, pin_order, thumb, deleted
-             FROM clipboard_items
-             WHERE content_type = 'text' AND deleted = 0 AND is_sensitive = 0
-             ORDER BY wall_time DESC, lamport_ts DESC
-             LIMIT 1",
-            [],
-            |r| {
-                Ok(ClipboardItem {
-                    id: r.get(0)?,
-                    item_id: r.get(1)?,
-                    content_type: r.get(2)?,
-                    content: r.get(3)?,
-                    content_nonce: r.get(4)?,
-                    blob_ref: r.get(5)?,
-                    is_sensitive: r.get::<_, i64>(6)? != 0,
-                    is_synced: r.get::<_, i64>(7)? != 0,
-                    lamport_ts: r.get(8)?,
-                    wall_time: r.get(9)?,
-                    expires_at: r.get(10)?,
-                    app_bundle_id: r.get(11)?,
-                    content_hash: r.get(12)?,
-                    origin_device_id: r.get(13)?,
-                    key_version: {
-                        let kv: i64 = r.get(14)?;
-                        u8::try_from(kv)
-                            .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(14, kv))?
-                    },
-                    pinned: r.get::<_, i64>(15)? != 0,
-                    pin_order: r.get(16)?,
-                    thumb: r.get(17)?,
-                    deleted: r.get::<_, i64>(18)? != 0,
-                })
-            },
-        )
-        .ok()?; // QueryReturnedNoRows → None; other errors also → None (logged below)
-
-    let plaintext = match crate::sync_common::decrypt_item_plaintext(&item, local_key) {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!(
-                "relay-sync: relay_fetch_auto_apply_candidate: decrypt failed: {e}; skipping"
-            );
-            return None;
-        }
-    };
-    Some(AutoApplyCandidate {
-        wall_time: item.wall_time,
-        plaintext,
-        content_type: item.content_type,
-    })
-}
-
-/// Write the auto-apply candidate to the local pasteboard (macOS-only).
-///
-/// Stamps `self_write_change_count` before and after the NSPasteboard write so
-/// the `ClipboardMonitor` poller recognises this write as a daemon-own write and
-/// does not re-capture it as a new local item (loop prevention — same guard the
-/// `copy_item` IPC handler and sync_orch auto-apply use).
-///
-/// Only text items are written; image/file paths are not yet implemented on the
-/// relay receive path (noted at caller).  On non-macOS platforms this is a no-op.
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-fn relay_apply_to_pasteboard(
-    candidate: &AutoApplyCandidate,
-    self_write_change_count: &Arc<AtomicI64>,
-) {
-    #[cfg(target_os = "macos")]
-    {
-        use objc2_app_kit::NSPasteboard;
-
-        match candidate.content_type.as_str() {
-            "text" => {
-                let text = match std::str::from_utf8(&candidate.plaintext) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::warn!("relay-sync: auto-apply text is not UTF-8: {e}");
-                        return;
-                    }
-                };
-                objc2::rc::autoreleasepool(|_pool| {
-                    use objc2_app_kit::NSPasteboardTypeString;
-                    use objc2_foundation::NSString;
-
-                    // Pre-stamp: clearContents (+1) + setString (+1) = +2.
-                    let pre = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                    self_write_change_count.store(pre + 2, Ordering::Release);
-
-                    let ok = unsafe {
-                        let pb = NSPasteboard::generalPasteboard();
-                        pb.clearContents();
-                        let ns_str = NSString::from_str(text);
-                        pb.setString_forType(&ns_str, NSPasteboardTypeString)
-                    };
-                    if ok {
-                        let actual =
-                            unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                        self_write_change_count.store(actual, Ordering::Release);
-                        tracing::debug!(
-                            change_count = actual,
-                            "relay-sync: auto-applied synced text to NSPasteboard"
-                        );
-                    } else {
-                        // Reset sentinel so the monitor is not permanently suppressed.
-                        self_write_change_count.store(-1, Ordering::Release);
-                        tracing::warn!(
-                            "relay-sync: auto-apply text: \
-                             NSPasteboard setString:forType: returned false"
-                        );
-                    }
-                });
-            }
-            "image" | "file" => {
-                // Image auto-apply requires multi-chunk decode (deferred).
-                // File auto-apply requires writing bytes to a temp file (deferred).
-                tracing::debug!(
-                    content_type = candidate.content_type.as_str(),
-                    "relay-sync: auto-apply deferred for {} item (not yet implemented on relay path)",
-                    candidate.content_type
-                );
-            }
-            other => {
-                tracing::debug!("relay-sync: auto-apply skipped for unknown content_type={other}");
-            }
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        tracing::debug!(
-            content_type = candidate.content_type.as_str(),
-            "relay-sync: auto-apply skipped (not macOS)"
-        );
-    }
-}
+// ── Poll-interval constants (shared between push and receive) ─────────────────
 
 /// Minimum poll interval for the receive loop (applied when items are arriving
 /// so cross-device latency stays low). After [`IDLE_EMPTY_POLL_THRESHOLD`]
 /// consecutive empty polls the interval grows linearly up to [`POLL_INTERVAL_MAX`]
 /// (CopyPaste-28br: idle back-off to reduce battery drain and relay load).
-const POLL_INTERVAL: Duration = Duration::from_secs(5);
+pub(super) const POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Number of consecutive empty polls before the interval starts growing.
 /// After this many no-op ticks the daemon clearly has no new items to fetch.
-const IDLE_EMPTY_POLL_THRESHOLD: u32 = 3;
+pub(super) const IDLE_EMPTY_POLL_THRESHOLD: u32 = 3;
 
 /// Step size for each idle back-off increment (60 s per step, so the first
 /// idle step immediately jumps to ≥ 60 s — satisfying the acceptance criterion
 /// of "≥ 60 s after 3 consecutive empty polls"). The interval grows as
 /// `IDLE_POLL_STEP * step_count`, capped at [`POLL_INTERVAL_MAX`].
-const IDLE_POLL_STEP: Duration = Duration::from_secs(60);
+pub(super) const IDLE_POLL_STEP: Duration = Duration::from_secs(60);
 
 /// Maximum idle poll interval (5 minutes). The interval grows linearly in
 /// `IDLE_POLL_STEP`-sized increments up to this cap.  A non-empty response
 /// resets the interval immediately back to `POLL_INTERVAL`.
-const POLL_INTERVAL_MAX: Duration = Duration::from_secs(5 * 60);
+pub(super) const POLL_INTERVAL_MAX: Duration = Duration::from_secs(5 * 60);
 
 /// Max items requested per pull tick. When a batch comes back full we re-poll
 /// immediately (burst drain) rather than waiting a full interval.
-const PULL_LIMIT: usize = 50;
-
-/// Filename of the cached relay auth token inside the app data dir.
-const RELAY_TOKEN_FILE: &str = "relay_token";
-
-// ── Wire envelope ─────────────────────────────────────────────────────────────
-
-/// The decoded `content_b64` envelope. `content_b64` (on the relay wire) is
-/// `base64(JSON(this struct))`; `ct_b64` inside it is
-/// `base64(encrypt_for_cloud(sync_key, item_id, wrapped_plaintext))` — the SAME
-/// blob the Supabase path stores. This is the exact shape the Android SSE
-/// receiver already decodes.
-///
-/// CopyPaste-cm0u / CopyPaste-ayvs / CopyPaste-bfiu: the envelope now also
-/// carries `deleted` / `pinned` / `pin_order` (so deletes and pins propagate
-/// over relay-only topologies) and `wall_time` / `origin_device_id` (so relay
-/// LWW uses the SAME total order as P2P/cloud). All five are
-/// `#[serde(default)]` OPTIONAL-by-omission fields: an envelope written by an
-/// older daemon omits them and decodes to `deleted=false` / `pinned=false` /
-/// `pin_order=None` / `wall_time=0` / `origin_device_id=""` — i.e. exactly the
-/// pre-fix behaviour (a live, unpinned item with no origin tie-break key).
-#[derive(Debug, Serialize, Deserialize)]
-struct RelayEnvelope {
-    item_id: String,
-    lamport_ts: i64,
-    /// Present for live items; a tombstone envelope sets `deleted=true` and
-    /// carries an empty `ct_b64` (the content is NULL — there is nothing to
-    /// decrypt). Defaulted empty so older live envelopes (no field) parse.
-    #[serde(default)]
-    ct_b64: String,
-    /// Soft-delete flag. Omitted (=> false) by older daemons.
-    #[serde(default)]
-    deleted: bool,
-    /// Pin flag. Omitted (=> false) by older daemons.
-    #[serde(default)]
-    pinned: bool,
-    /// Pin sort order. Omitted (=> None) by older daemons.
-    #[serde(default)]
-    pin_order: Option<f64>,
-    /// Wall-clock ms — the second LWW tie-break key. Omitted (=> 0) by older
-    /// daemons, which makes them lose every equal-lamport tie (acceptable: the
-    /// pre-fix relay path had no wall_time tie-break at all).
-    #[serde(default)]
-    wall_time: i64,
-    /// Originating device id — the final LWW tie-break key. Omitted (=> "") by
-    /// older daemons.
-    #[serde(default)]
-    origin_device_id: String,
-}
-
-/// Relay register request body.
-#[derive(Debug, Serialize)]
-struct RegisterBody {
-    device_id: String,
-    device_name: String,
-    public_key_b64: String,
-    /// HMAC-SHA256(sync_key, "relay-registration-pop-v1:" || device_id) base64-encoded.
-    /// Proves the registrant holds the sync key matching the derived inbox id — fixes CopyPaste-n2l.
-    pop_b64: String,
-}
-
-/// Relay register response (we only need the token).
-#[derive(Debug, Deserialize)]
-struct RegisterResp {
-    auth_token: String,
-}
-
-/// Relay push request body.
-#[derive(Debug, Serialize)]
-struct PushBody {
-    content_type: String,
-    content_b64: String,
-    wall_time: u64,
-}
-
-/// One element of the pull response array.
-#[derive(Debug, Deserialize)]
-struct PullItem {
-    id: i64,
-    content_type: String,
-    content_b64: String,
-    wall_time: u64,
-}
-
-// ── Errors ──────────────────────────────────────────────────────────────────
-
-#[derive(Debug, thiserror::Error)]
-pub enum RelayError {
-    /// The configured `relay_url` is not a usable HTTPS (or loopback in tests) URL.
-    #[error("relay_url is not a valid https URL")]
-    InvalidUrl,
-    /// `relay_url` was explicitly cleared (set to `""` sentinel) — relay is disabled.
-    ///
-    /// Returned by [`start_relay`] when the caller passes an empty string, and by
-    /// [`relay_url_is_clear`] so the `set_config` IPC handler can detect the sentinel
-    /// and shut down a running [`RelayHandle`] without needing to know URL internals.
-    #[error("relay_url cleared — relay sync disabled")]
-    Disabled,
-    /// Network / transport failure talking to the relay.
-    #[error("relay request failed: {0}")]
-    Transport(String),
-    /// Relay returned an unexpected non-success status.
-    #[error("relay returned status {0}")]
-    Status(u16),
-    /// Could not resolve the inbox id (no sync key set).
-    #[error("no sync passphrase set — relay sync inactive")]
-    NoSyncKey,
-}
-
-// ── Handle ──────────────────────────────────────────────────────────────────
-
-/// Handle to the running relay orchestrator. Drop (or call [`shutdown`]) to stop
-/// the push and receive loops.
-///
-/// [`shutdown`]: RelayHandle::shutdown
-pub struct RelayHandle {
-    shutdown: Arc<Notify>,
-}
-
-impl RelayHandle {
-    /// Signal both loops to stop. Idempotent.
-    pub fn shutdown(self) {
-        self.shutdown.notify_waiters();
-    }
-}
-
-impl Drop for RelayHandle {
-    fn drop(&mut self) {
-        self.shutdown.notify_waiters();
-    }
-}
+pub(super) const PULL_LIMIT: usize = 50;
 
 // ── relay_url sentinel ───────────────────────────────────────────────────────
 
@@ -495,1141 +167,13 @@ pub fn relay_url_is_clear(url: Option<&str>) -> bool {
     url.is_none_or(|s| s.trim().is_empty())
 }
 
-// ── Token cache (0600 file) ─────────────────────────────────────────────────
+// ── Utility ───────────────────────────────────────────────────────────────────
 
-/// Purpose-binding AAD for the relay token at-rest encryption.
-///
-/// A stable string (not device_id) is used here because the token file is
-/// written before a device_id is in scope at the call site. Binding to this
-/// string still prevents a blob encrypted for a DIFFERENT purpose (e.g. an
-/// item ciphertext) from silently decrypting as a token, and vice-versa.
-const RELAY_TOKEN_AAD: &[u8] = b"copypaste-relay-token-v1";
-
-/// Path to the cached relay token file (sibling of the device-key files).
-fn token_path() -> Option<PathBuf> {
-    crate::paths::try_app_support_dir()
-        .ok()
-        .map(|d| d.join(RELAY_TOKEN_FILE))
-}
-
-/// Encrypt `token` bytes under `local_key` with XChaCha20-Poly1305.
-///
-/// Returns `base64(nonce[24] || ciphertext_with_tag)`.
-///
-/// # Errors
-/// Propagates `EncryptError` from the underlying AEAD layer (e.g. if the
-/// plaintext somehow exceeds the per-message size limit — unlikely for a
-/// short token but handled explicitly rather than unwrapped).
-fn encrypt_relay_token(
-    token: &str,
-    local_key: &zeroize::Zeroizing<[u8; 32]>,
-) -> Result<String, copypaste_core::EncryptError> {
-    let (nonce, ct) = encrypt_item_with_aad(token.as_bytes(), local_key, RELAY_TOKEN_AAD)?;
-    // Concatenate nonce || ciphertext into a single blob for storage.
-    let mut blob = Vec::with_capacity(NONCE_SIZE + ct.len());
-    blob.extend_from_slice(&nonce);
-    blob.extend_from_slice(&ct);
-    Ok(base64::engine::general_purpose::STANDARD.encode(&blob))
-}
-
-/// Decrypt a relay token that was written by [`encrypt_relay_token`].
-///
-/// Returns `Some(token)` on success, `None` if the blob is malformed or the
-/// AEAD tag does not verify (caller should treat the file as absent).
-fn decrypt_relay_token(encoded: &str, local_key: &zeroize::Zeroizing<[u8; 32]>) -> Option<String> {
-    let blob = base64::engine::general_purpose::STANDARD
-        .decode(encoded.trim())
-        .ok()?;
-    if blob.len() < NONCE_SIZE + 1 {
-        // Too short to be a valid nonce || ciphertext blob.
-        return None;
-    }
-    let nonce: [u8; NONCE_SIZE] = blob[..NONCE_SIZE]
-        .try_into()
-        // SAFETY: we just checked blob.len() >= NONCE_SIZE; infallible.
-        .expect("slice is exactly NONCE_SIZE bytes");
-    let ct = &blob[NONCE_SIZE..];
-    let plaintext = decrypt_item_with_aad(ct, &nonce, local_key, RELAY_TOKEN_AAD).ok()?;
-    String::from_utf8(plaintext).ok()
-}
-
-/// Load a previously-cached relay auth token, if any. Never errors hard — a
-/// missing/unreadable token just means "re-register".
-///
-/// **Migration**: if the on-disk blob does not decrypt successfully (legacy
-/// plaintext format, wrong key, or truncated file), the raw content is
-/// returned as-is so the caller can continue using the in-memory token for
-/// this run. On the next successful registration the new encrypted format will
-/// overwrite the file.
-fn load_cached_token(local_key: &zeroize::Zeroizing<[u8; 32]>) -> Option<String> {
-    let path = token_path()?;
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    // Try the encrypted format first. If decryption fails (legacy plaintext or
-    // corrupt file) fall back to the raw content so existing installs continue
-    // to work for this run; the file will be re-encrypted on the next store.
-    if let Some(token) = decrypt_relay_token(trimmed, local_key) {
-        return Some(token);
-    }
-    // Legacy plaintext: return the raw token (best-effort migration). The file
-    // will be overwritten with the encrypted format on the next successful
-    // registration, completing the migration transparently.
-    tracing::debug!(
-        "relay-sync: loaded legacy plaintext token; will re-encrypt on next registration"
-    );
-    Some(trimmed.to_owned())
-}
-
-/// Persist the relay auth token encrypted to a `0600` file. Best-effort: a
-/// failure is logged (without the token) and the token is still used in-memory
-/// for this run.
-fn store_cached_token(token: &str, local_key: &zeroize::Zeroizing<[u8; 32]>) {
-    let Some(path) = token_path() else {
-        tracing::warn!("relay-sync: cannot resolve data dir to cache token");
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let encoded = match encrypt_relay_token(token, local_key) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(error = %e, "relay-sync: failed to encrypt relay token (continuing in-memory)");
-            return;
-        }
-    };
-    if let Err(e) = write_token_0600(&path, &encoded) {
-        tracing::warn!(error = %e, "relay-sync: failed to cache relay token (continuing in-memory)");
-    }
-}
-
-/// Write `content` to `path` with `0600` perms via a temp-file + rename so a
-/// reader never sees a partial or world-readable file.
-///
-/// CopyPaste-2yuo: the temp file is now opened with `OpenOptionsExt::mode(0o600)`
-/// so the file is **never** world-readable — not even for the brief window between
-/// `File::create` (which inherits the process umask, typically giving 0644) and a
-/// subsequent `set_permissions(0o600)` call. The explicit mode argument passed to
-/// `open(2)` is `0o600 & ~umask`; since `0600` has no group/other bits, any umask
-/// leaves it at `0600`, eliminating the race window atomically.
-fn write_token_0600(path: &std::path::Path, content: &str) -> std::io::Result<()> {
-    use std::io::Write as _;
-    let dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-    let tmp = dir.join(format!(".{RELAY_TOKEN_FILE}.tmp"));
-    // CopyPaste-2yuo fix: open with mode 0o600 on the first syscall so no
-    // world-readable window exists between create and chmod. The `#[cfg(unix)]`
-    // block uses OpenOptionsExt; on non-Unix (Windows) we fall back to the
-    // simple `File::create` (Windows has no Unix mode bits).
-    #[cfg(unix)]
-    let mut f = {
-        use std::os::unix::fs::OpenOptionsExt as _;
-        std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?
-    };
-    #[cfg(not(unix))]
-    let mut f = std::fs::File::create(&tmp)?;
-    f.write_all(content.as_bytes())?;
-    f.sync_all()?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
-}
-
-// ── URL validation ────────────────────────────────────────────────────────────
-
-/// Accept `https://...`; in tests also accept loopback `http://` so the mock
-/// relay can be exercised. Mirrors `cloud::is_https_url`'s posture.
-fn is_relay_url_ok(s: &str) -> bool {
-    let lower = s.to_ascii_lowercase();
-    if let Some(rest) = lower.strip_prefix("https://") {
-        return rest
-            .chars()
-            .next()
-            .is_some_and(|c| c != '/' && !c.is_whitespace());
-    }
-    #[cfg(test)]
-    {
-        if let Some(rest) = lower.strip_prefix("http://") {
-            let host = rest.split(['/', ':']).next().unwrap_or_default();
-            return matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1");
-        }
-    }
-    false
-}
-
-// ── Sync-key snapshot helper ────────────────────────────────────────────────
-
-/// Snapshot the live sync-key bytes (the `SyncKey` itself is not `Send` across
-/// some boundaries, and we never hold the lock across an await). Returns `None`
-/// when no passphrase is set.
-async fn snapshot_sync_key(sync_key: &Arc<Mutex<Option<SyncKey>>>) -> Option<[u8; 32]> {
-    let guard = sync_key.lock().await;
-    guard.as_ref().map(|k| *k.as_bytes())
-}
-
-// ── Register ────────────────────────────────────────────────────────────────
-
-/// Register (or co-register) this device's shared-account inbox with the relay
-/// and return a fresh auth token. The inbox id + public key are derived from
-/// `sync_key_bytes` (SECRET-derived — never logged).
-async fn register(
-    client: &reqwest::Client,
-    relay_url: &str,
-    sync_key_bytes: &[u8; 32],
-    device_name: &str,
-) -> Result<String, RelayError> {
-    let inbox_id = derive_relay_inbox_id(sync_key_bytes);
-    let pubkey = derive_relay_public_key(sync_key_bytes);
-    let public_key_b64 = base64::engine::general_purpose::STANDARD.encode(pubkey);
-
-    // Proof-of-possession: HMAC-SHA256(sync_key, prefix || inbox_id).
-    // Proves the registrant holds the sync key corresponding to the derived inbox id.
-    // Fixes CopyPaste-n2l: the relay now rejects registrations without a valid PoP.
-    let pop = derive_relay_registration_pop(sync_key_bytes, &inbox_id);
-    let pop_b64 = base64::engine::general_purpose::STANDARD.encode(pop);
-
-    let body = RegisterBody {
-        device_id: inbox_id,
-        device_name: device_name.to_owned(),
-        public_key_b64,
-        pop_b64,
-    };
-    let url = format!("{relay_url}/devices");
-    let resp = client
-        .post(&url)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| RelayError::Transport(e.to_string()))?;
-    let status = resp.status();
-    // R1a: a fresh register always returns 201 with a new independent token,
-    // whether or not the id was already co-registered by another device.
-    if status.as_u16() != 201 {
-        return Err(RelayError::Status(status.as_u16()));
-    }
-    let parsed: RegisterResp = resp
-        .json()
-        .await
-        .map_err(|e| RelayError::Transport(format!("decode register response: {e}")))?;
-    tracing::info!("relay-sync: registered shared inbox with relay (token cached)");
-    Ok(parsed.auth_token)
-}
-
-/// Ensure we hold a valid token: return the cached one if present, else register
-/// and cache a fresh one.
-async fn ensure_token(
-    client: &reqwest::Client,
-    relay_url: &str,
-    sync_key_bytes: &[u8; 32],
-    device_name: &str,
-    cached: &mut Option<String>,
-    local_key: &zeroize::Zeroizing<[u8; 32]>,
-) -> Result<String, RelayError> {
-    if let Some(t) = cached.as_ref() {
-        return Ok(t.clone());
-    }
-    let token = register(client, relay_url, sync_key_bytes, device_name).await?;
-    store_cached_token(&token, local_key);
-    *cached = Some(token.clone());
-    Ok(token)
-}
-
-// ── Envelope build ────────────────────────────────────────────────────────────
-
-/// Build the relay `content_b64` for one item: encrypt the wrapped plaintext for
-/// the cloud (sync key + item_id AAD), wrap it in the JSON envelope, base64 it.
-///
-/// Returns `Ok(None)` when the item should be skipped (e.g. oversized, decrypt
-/// failure) — never logs plaintext.
-fn build_content_b64(
-    item: &ClipboardItem,
-    local_key: &zeroize::Zeroizing<[u8; 32]>,
-    sync_key: &SyncKey,
-) -> Option<String> {
-    // CopyPaste-cm0u: a tombstone has content = NULL — there is nothing to
-    // decrypt. Emit a delete envelope (empty ct_b64, deleted=true) instead of
-    // calling decrypt_item_plaintext on NULL (which Err'd and dropped the
-    // delete, so deletes never propagated over relay-only topologies).
-    let ct_b64 = if item.deleted {
-        String::new()
-    } else {
-        let plaintext = match decrypt_item_plaintext(item, local_key) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!("relay-sync: decrypt id={} failed: {e}; skipping", item.id);
-                return None;
-            }
-        };
-        let wrapped = match wrap_and_check_cloud_upload_plaintext(item, plaintext) {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::warn!("relay-sync: skip id={}: {e}", item.id);
-                return None;
-            }
-        };
-        let blob = match encrypt_for_cloud(sync_key, &item.item_id, &wrapped) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(
-                    "relay-sync: cloud encrypt id={} failed: {e}; skipping",
-                    item.id
-                );
-                return None;
-            }
-        };
-        base64::engine::general_purpose::STANDARD.encode(&blob)
-    };
-    let envelope = RelayEnvelope {
-        item_id: item.item_id.clone(),
-        lamport_ts: item.lamport_ts,
-        ct_b64,
-        // CopyPaste-cm0u: carry delete + pin state so they propagate over relay.
-        deleted: item.deleted,
-        pinned: item.pinned,
-        pin_order: item.pin_order,
-        // CopyPaste-ayvs: carry the LWW tie-break keys.
-        wall_time: item.wall_time,
-        origin_device_id: item.origin_device_id.clone(),
-    };
-    let json = match serde_json::to_vec(&envelope) {
-        Ok(j) => j,
-        Err(e) => {
-            tracing::warn!(
-                "relay-sync: envelope encode id={} failed: {e}; skipping",
-                item.id
-            );
-            return None;
-        }
-    };
-    Some(base64::engine::general_purpose::STANDARD.encode(json))
-}
-
-// ── Push ──────────────────────────────────────────────────────────────────────
-
-/// Push one item's content to the shared inbox. Returns `Ok(true)` on 201,
-/// `Ok(false)` on 401 (caller should drop the token + re-register), `Err` on a
-/// transient/other failure.
-async fn push_item(
-    client: &reqwest::Client,
-    relay_url: &str,
-    inbox_id: &str,
-    token: &str,
-    content_type: &str,
-    content_b64: String,
-    wall_time: u64,
-) -> Result<bool, RelayError> {
-    let url = format!("{relay_url}/devices/{inbox_id}/items");
-    let body = PushBody {
-        content_type: content_type.to_owned(),
-        content_b64,
-        wall_time,
-    };
-    let resp = client
-        .post(&url)
-        .bearer_auth(token)
-        .json(&body)
-        .send()
-        .await
-        .map_err(|e| RelayError::Transport(e.to_string()))?;
-    let status = resp.status();
-    if status.as_u16() == 201 {
-        return Ok(true);
-    }
-    if status.as_u16() == 401 {
-        return Ok(false);
-    }
-    Err(RelayError::Status(status.as_u16()))
-}
-
-/// The push loop: a 3rd subscriber on `new_item_tx` (alongside cloud + sync_orch).
-// relay_url, device_name, sync_key, local_key, last_sync_ms, and shutdown are
-// independent state slices — no natural grouping into a struct without adding
-// indirection for a private-only function.
-#[allow(clippy::too_many_arguments)]
-async fn push_loop(
-    client: reqwest::Client,
-    relay_url: String,
-    device_name: String,
-    mut rx: tokio::sync::broadcast::Receiver<ClipboardItem>,
-    shutdown: Arc<Notify>,
-    sync_key: Arc<Mutex<Option<SyncKey>>>,
-    local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
-    last_sync_ms: Arc<AtomicI64>,
-    core_config: Arc<std::sync::RwLock<AppConfig>>,
-) {
-    let mut cached_token = load_cached_token(&local_key);
-    let mut warned_no_key = false;
-
-    loop {
-        tokio::select! {
-            biased;
-            _ = shutdown.notified() => {
-                tracing::info!("relay-sync push_loop: shutdown");
-                break;
-            }
-            result = rx.recv() => {
-                let item = match result {
-                    Ok(i) => i,
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
-                    // Lagged: we missed some items under a burst. They will be
-                    // re-fetched by peers via their own poll; nothing to do.
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::warn!("relay-sync push_loop: lagged {n} items");
-                        continue;
-                    }
-                };
-
-                // P1-1: honour the "sensitive items are NEVER uploaded" guarantee
-                // (docs/relay-api.md:105). Drop the item before any crypto work so
-                // ciphertext never enters the relay inbox.
-                if item.is_sensitive {
-                    tracing::debug!(
-                        "relay-sync push_loop: skipping sensitive id={} (never uploaded)",
-                        item.id
-                    );
-                    continue;
-                }
-
-                // tke7 (PG-30): hot-reload master sync gate.  When sync_enabled is
-                // toggled off at runtime, drop outbound items immediately so no data
-                // is uploaded.  The item is not re-queued — the user explicitly
-                // disabled sync.
-                let sync_enabled = core_config
-                    .read()
-                    .map(|g| g.sync_enabled)
-                    .unwrap_or(true);
-                if !sync_enabled {
-                    tracing::debug!(
-                        "relay-sync push_loop: sync_enabled=false; dropping outbound id={}",
-                        item.id
-                    );
-                    continue;
-                }
-
-                // A-SET-2 hot-reload: read sync_on_wifi_only from the live config on
-                // every incoming item so a runtime set_config change takes effect
-                // immediately.  When the guard fires we skip this item; it will be
-                // re-broadcast (or recovered via receive_loop) once Wi-Fi is available.
-                let sync_on_wifi_only = core_config
-                    .read()
-                    .map(|g| g.sync_on_wifi_only)
-                    .unwrap_or(false);
-                if sync_on_wifi_only {
-                    let on_wifi = tokio::task::spawn_blocking(crate::platform::is_on_wifi)
-                        .await
-                        .unwrap_or(true); // fail-open: if check errors, assume Wi-Fi
-                    if relay_should_skip_wifi(sync_on_wifi_only, on_wifi) {
-                        tracing::debug!(
-                            "relay-sync push_loop: sync_on_wifi_only=true and not on Wi-Fi; \
-                             skipping push for id={}",
-                            item.id
-                        );
-                        continue;
-                    }
-                }
-
-                // Snapshot the sync key; skip (one-time warn) if no passphrase set.
-                let key_bytes = match snapshot_sync_key(&sync_key).await {
-                    Some(b) => {
-                        warned_no_key = false;
-                        b
-                    }
-                    None => {
-                        if !warned_no_key {
-                            tracing::warn!(
-                                "relay-sync push_loop: no sync passphrase set — skipping upload"
-                            );
-                            warned_no_key = true;
-                        }
-                        continue;
-                    }
-                };
-
-                let inbox_id = derive_relay_inbox_id(&key_bytes);
-                // CopyPaste-z1xt: `build_content_b64` decrypts the local
-                // ciphertext + re-encrypts for the relay (CPU-bound, possibly
-                // multi-MB) — run it on the blocking thread pool instead of inline
-                // on the async executor. Move `item` into the closure (no clone of
-                // the heavy blob) and get it back so the rest of the loop can use
-                // it. `SyncKey` is reconstructed inside from the Send `[u8; 32]`.
-                let lk = local_key.clone();
-                let (item, content_b64) = match tokio::task::spawn_blocking(move || {
-                    let sk = SyncKey::from_bytes(key_bytes);
-                    let out = build_content_b64(&item, &lk, &sk);
-                    (item, out)
-                })
-                .await
-                {
-                    Ok(pair) => pair,
-                    Err(e) => {
-                        tracing::warn!("relay-sync push_loop: build task failed: {e}; skipping");
-                        continue;
-                    }
-                };
-                let Some(content_b64) = content_b64 else {
-                    continue;
-                };
-                let wall_time = item.wall_time.max(0) as u64;
-
-                // Ensure token, push, and on 401 re-register once.
-                if let Err(e) = push_with_reauth(
-                    &client,
-                    &relay_url,
-                    &inbox_id,
-                    &key_bytes,
-                    &device_name,
-                    &item.content_type,
-                    content_b64,
-                    wall_time,
-                    &mut cached_token,
-                    &local_key,
-                )
-                .await
-                {
-                    tracing::warn!("relay-sync push_loop: push id={} failed: {e}", item.id);
-                } else {
-                    let now_ms = now_ms();
-                    last_sync_ms.store(now_ms, Ordering::Relaxed);
-                }
-            }
-        }
-    }
-}
-
-/// Push with one re-auth retry: ensure a token, push; on 401 drop the token,
-/// re-register, and push once more.
-// The relay protocol binds all of: client, url, inbox_id, sync_key_bytes,
-// device_name/id, local_key, and last_sync_ms. No natural grouping without
-// a new intermediate struct; count is justified by the protocol surface.
-#[allow(clippy::too_many_arguments)]
-async fn push_with_reauth(
-    client: &reqwest::Client,
-    relay_url: &str,
-    inbox_id: &str,
-    sync_key_bytes: &[u8; 32],
-    device_name: &str,
-    content_type: &str,
-    content_b64: String,
-    wall_time: u64,
-    cached_token: &mut Option<String>,
-    local_key: &zeroize::Zeroizing<[u8; 32]>,
-) -> Result<(), RelayError> {
-    let token = ensure_token(
-        client,
-        relay_url,
-        sync_key_bytes,
-        device_name,
-        cached_token,
-        local_key,
-    )
-    .await?;
-    match push_item(
-        client,
-        relay_url,
-        inbox_id,
-        &token,
-        content_type,
-        content_b64.clone(),
-        wall_time,
-    )
-    .await
-    {
-        Ok(true) => Ok(()),
-        Ok(false) => {
-            // 401: token stale. Drop it, re-register, retry once.
-            tracing::info!("relay-sync: push got 401; re-registering and retrying once");
-            *cached_token = None;
-            let token = ensure_token(
-                client,
-                relay_url,
-                sync_key_bytes,
-                device_name,
-                cached_token,
-                local_key,
-            )
-            .await?;
-            match push_item(
-                client,
-                relay_url,
-                inbox_id,
-                &token,
-                content_type,
-                content_b64,
-                wall_time,
-            )
-            .await
-            {
-                Ok(true) => Ok(()),
-                Ok(false) => Err(RelayError::Status(401)),
-                Err(e) => Err(e),
-            }
-        }
-        Err(e) => Err(e),
-    }
-}
-
-// ── Receive ─────────────────────────────────────────────────────────────────
-
-/// `(wall_time, id)` keyset watermark so pagination is deterministic even within
-/// one millisecond and a restart resumes forward.
-///
-/// CopyPaste-hf40 / CopyPaste-1jms.24: persisted to `relay_watermark.json` so
-/// that on daemon restart the receive loop resumes from the last-seen cursor
-/// instead of re-fetching everything from `(0, 0)`.
-#[derive(Clone, Copy, Default, Serialize, Deserialize)]
-struct Watermark {
-    wall: u64,
-    id: i64,
-}
-
-// ── Watermark persistence ────────────────────────────────────────────────────
-
-const RELAY_WATERMARK_FILE: &str = "relay_watermark.json";
-
-/// Path to the persisted relay receive watermark file.
-fn watermark_path() -> Option<PathBuf> {
-    crate::paths::try_app_support_dir()
-        .ok()
-        .map(|d| d.join(RELAY_WATERMARK_FILE))
-}
-
-/// Load the relay watermark from disk. Returns `Watermark::default()` when the
-/// file is absent, unreadable, or malformed — all treated as "start from zero".
-fn load_watermark() -> Watermark {
-    let Some(path) = watermark_path() else {
-        return Watermark::default();
-    };
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(r) => r,
-        // Missing file is the normal first-run case — not a warning.
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Watermark::default(),
-        Err(e) => {
-            tracing::warn!("relay-sync: failed to read watermark file: {e}; starting from zero");
-            return Watermark::default();
-        }
-    };
-    match serde_json::from_str::<Watermark>(&raw) {
-        Ok(wm) => {
-            tracing::debug!(wall = wm.wall, id = wm.id, "relay-sync: loaded persisted watermark");
-            wm
-        }
-        Err(e) => {
-            tracing::warn!("relay-sync: watermark file malformed ({e}); starting from zero");
-            Watermark::default()
-        }
-    }
-}
-
-/// Persist the relay watermark to a `0600` file via atomic rename so a reader
-/// never sees a partial write. Best-effort: failures are logged and the
-/// in-memory watermark continues to be used for this run.
-fn save_watermark(wm: Watermark) {
-    let Some(path) = watermark_path() else {
-        tracing::warn!("relay-sync: cannot resolve data dir to save watermark");
-        return;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let json = match serde_json::to_string(&wm) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("relay-sync: failed to serialise watermark: {e}");
-            return;
-        }
-    };
-    if let Err(e) = write_token_0600(&path, &json) {
-        tracing::warn!("relay-sync: failed to persist watermark: {e}");
-    }
-}
-
-/// Pull one page from the inbox past the watermark. Returns the raw items and
-/// whether a 401 was seen (caller re-registers).
-async fn pull_page(
-    client: &reqwest::Client,
-    relay_url: &str,
-    inbox_id: &str,
-    token: &str,
-    wm: Watermark,
-) -> Result<Vec<PullItem>, RelayError> {
-    let url = format!(
-        "{relay_url}/devices/{inbox_id}/items?since={}&since_id={}&limit={}",
-        wm.wall, wm.id, PULL_LIMIT
-    );
-    let resp = client
-        .get(&url)
-        .bearer_auth(token)
-        .send()
-        .await
-        .map_err(|e| RelayError::Transport(e.to_string()))?;
-    let status = resp.status();
-    if status.as_u16() == 401 {
-        return Err(RelayError::Status(401));
-    }
-    if !status.is_success() {
-        return Err(RelayError::Status(status.as_u16()));
-    }
-    resp.json::<Vec<PullItem>>()
-        .await
-        .map_err(|e| RelayError::Transport(format!("decode pull response: {e}")))
-}
-
-/// Ingest one pulled page into the local DB on a blocking thread (SQLCipher +
-/// AEAD). Returns the advanced watermark and how many rows were stored.
-///
-/// LWW + quota-prune are byte-for-byte the Supabase poll path: dedup on
-/// `item_id`, a strictly-newer remote `lamport_ts` replaces in place (preserving
-/// the local PK + pin state), an older/equal one is skipped (this is also what
-/// makes our OWN pushed rows a no-op when they echo back — self-echo dedup).
-fn ingest_page_blocking(
-    db: &Database,
-    local_key: &zeroize::Zeroizing<[u8; 32]>,
-    sync_key_bytes: &[u8; 32],
-    page: &[PullItem],
-    start: Watermark,
-    storage_quota_bytes: u64,
-) -> (Watermark, u32) {
-    let mut wm = start;
-    let mut stored = 0u32;
-    let sk = SyncKey::from_bytes(*sync_key_bytes);
-
-    for row in page {
-        // Advance the watermark for EVERY readable row (even skipped ones) so the
-        // next page does not re-request them.
-        if (row.wall_time, row.id) > (wm.wall, wm.id) {
-            wm = Watermark {
-                wall: row.wall_time,
-                id: row.id,
-            };
-        }
-
-        // Decode the envelope: base64 → JSON → ct_b64 → ciphertext.
-        let env_bytes = match base64::engine::general_purpose::STANDARD.decode(&row.content_b64) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(
-                    "relay-sync: id={} content_b64 decode failed: {e}; skipping",
-                    row.id
-                );
-                continue;
-            }
-        };
-        let env: RelayEnvelope = match serde_json::from_slice(&env_bytes) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::warn!(
-                    "relay-sync: id={} envelope parse failed: {e}; skipping",
-                    row.id
-                );
-                continue;
-            }
-        };
-        let blob = match decode_payload_ct(&env.ct_b64) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(
-                    "relay-sync: id={} ct_b64 decode failed: {e}; skipping",
-                    row.id
-                );
-                continue;
-            }
-        };
-
-        // LWW dedup on the cross-device item_id.
-        let existing = match get_item_by_item_id(db, &env.item_id) {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("relay-sync: get_item_by_item_id error: {e}; skipping");
-                continue;
-            }
-        };
-        // The envelope's wall_time is authoritative for LWW; fall back to the
-        // relay row's wall_time when an older envelope omitted it (=> 0).
-        let env_wall = if env.wall_time != 0 {
-            env.wall_time
-        } else {
-            row.wall_time as i64
-        };
-        let preserved_pk = if let Some(local) = existing.as_ref() {
-            // CopyPaste-ayvs: same total order as P2P/cloud (lamport ->
-            // wall_time -> origin_device_id) instead of the old bare
-            // `env.lamport_ts <= local -> keep`, which never converged on ties.
-            let wins = remote_wins(
-                local.lamport_ts,
-                local.wall_time,
-                &local.origin_device_id,
-                &RemoteMeta {
-                    lamport_ts: env.lamport_ts,
-                    wall_time: env_wall,
-                    origin_device_id: &env.origin_device_id,
-                },
-            );
-            if !wins {
-                // Local wins LWW — keep it (self-echo no-op + remote-edit loser).
-                continue;
-            }
-            Some(local.id.clone())
-        } else {
-            match exists_item_by_item_id(db, &env.item_id) {
-                Ok(true) => continue,
-                Ok(false) => None,
-                Err(e) => {
-                    tracing::warn!("relay-sync: exists_item_by_item_id error: {e}; skipping");
-                    continue;
-                }
-            }
-        };
-
-        // ── Tombstone fast-path (CopyPaste-cm0u / CopyPaste-bfiu) ─────────────
-        // A delete envelope carries deleted=true and an empty ct_b64 (NULL
-        // content). Apply it via the SAME soft_delete / insert_tombstone path as
-        // P2P and cloud so deletes propagate over relay-only topologies, and a
-        // delete that races ahead of the create still leaves a tombstone the
-        // later create loses LWW against.
-        if env.deleted {
-            if let Some(local_pk) = preserved_pk.as_ref() {
-                match soft_delete_item(db, local_pk, env.lamport_ts, env_wall) {
-                    Ok(n) if n > 0 => {
-                        stored += 1;
-                        tracing::info!("relay-sync: applied tombstone (item known locally)");
-                    }
-                    Ok(_) => {}
-                    Err(e) => tracing::warn!("relay-sync: soft_delete_item failed: {e}"),
-                }
-            } else {
-                match insert_tombstone(
-                    db,
-                    &env.item_id,
-                    &env.item_id,
-                    env.lamport_ts,
-                    env_wall,
-                    &env.origin_device_id,
-                ) {
-                    Ok(_) => {
-                        stored += 1;
-                        tracing::info!(
-                            "relay-sync: inserted tombstone for unknown item \
-                             (delete-before-create)"
-                        );
-                    }
-                    Err(e) => tracing::warn!("relay-sync: insert_tombstone failed: {e}"),
-                }
-            }
-            continue;
-        }
-
-        // Decrypt with the sync key (AAD = item_id + cloud schema v5).
-        let plaintext = match decrypt_from_cloud(&sk, &env.item_id, &blob) {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::warn!(
-                    "relay-sync: decrypt_from_cloud failed for item_id (wrong passphrase or \
-                     tampered blob): {e}; skipping"
-                );
-                continue;
-            }
-        };
-
-        let mut local_item = match build_local_item(
-            // Use the cross-device item_id as the local PK seed when this is a
-            // fresh insert; build_local_item sets `id` from this first arg.
-            &env.item_id,
-            &env.item_id,
-            &row.content_type,
-            &plaintext,
-            env.lamport_ts,
-            env_wall,
-            None,
-            None,
-            // CopyPaste-ayvs: preserve the sender's origin so future tie-breaks
-            // on this device stay deterministic across hops.
-            env.origin_device_id.clone(),
-            local_key,
-        ) {
-            Ok(i) => i,
-            Err(e) => {
-                tracing::warn!("relay-sync: build_local_item failed: {e}; skipping");
-                continue;
-            }
-        };
-
-        // LWW replace preserves the prior local row's PK.
-        if let Some(pk) = preserved_pk.as_ref() {
-            local_item.id = pk.clone();
-        }
-        // CopyPaste-cm0u: the envelope's pin state is authoritative (it travels
-        // with the item now). The pin LWW already won above (this is the
-        // TakeRemote branch), so apply the sender's pinned/pin_order directly.
-        local_item.pinned = env.pinned;
-        local_item.pin_order = env.pin_order;
-
-        let write_res = if preserved_pk.is_some() {
-            replace_cloud_item_by_item_id(db, &local_item)
-        } else {
-            insert_item(db, &local_item).map_err(anyhow::Error::from)
-        };
-        match write_res {
-            Ok(()) => {
-                stored += 1;
-                tracing::info!("relay-sync: ingested remote item (id={})", local_item.id);
-            }
-            Err(e) => tracing::warn!("relay-sync: store failed: {e}"),
-        }
-    }
-
-    // Byte-cap prune after ingest (long-offline backfill safety) — same policy
-    // as the Supabase poll path.
-    if stored > 0 {
-        let max_bytes = storage_quota_bytes.min(i64::MAX as u64) as i64;
-        match prune_to_cap(db, max_bytes) {
-            Ok(0) => {}
-            Ok(n) => tracing::debug!("relay-sync: byte-pruned {n} rows after ingest"),
-            Err(e) => tracing::warn!("relay-sync: prune_to_cap failed: {e}"),
-        }
-    }
-
-    (wm, stored)
-}
-
-/// The receive loop: poll the shared inbox, ingest new items via the LWW path,
-/// advance the watermark.
-// All parameters are independent runtime slices (db, url, name, keys, shutdown,
-// auto_apply_change_count) with no natural grouping for a private async fn.
-#[allow(clippy::too_many_arguments)]
-async fn receive_loop(
-    client: reqwest::Client,
-    relay_url: String,
-    device_name: String,
-    shutdown: Arc<Notify>,
-    db: Arc<Mutex<Database>>,
-    sync_key: Arc<Mutex<Option<SyncKey>>>,
-    local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
-    last_sync_ms: Arc<AtomicI64>,
-    core_config: Arc<std::sync::RwLock<AppConfig>>,
-    // Shared self-write sentinel for the pasteboard poller.  When `Some`, the
-    // relay auto-apply path stamps this atomic before/after each NSPasteboard
-    // write so the `ClipboardMonitor` does not re-capture daemon-own writes
-    // (loop prevention — mirrors the sync_orch / copy_item IPC guard).
-    // `None` disables the pasteboard write (non-Unix, tests, callers that have
-    // not wired the sentinel yet).
-    auto_apply_change_count: Option<Arc<AtomicI64>>,
-) {
-    let mut cached_token = load_cached_token(&local_key);
-    // CopyPaste-hf40 / CopyPaste-1jms.24: load the persisted watermark so a
-    // daemon restart resumes from the last-seen (wall, id) cursor rather than
-    // re-fetching all relay items from (0, 0).
-    let mut wm = load_watermark();
-    let mut warned_no_key = false;
-
-    // CopyPaste-28br: adaptive idle back-off.
-    //
-    // When no items arrive for `IDLE_EMPTY_POLL_THRESHOLD` consecutive polls
-    // the interval grows linearly (POLL_INTERVAL per step) up to
-    // POLL_INTERVAL_MAX, reducing battery drain and relay load during idle
-    // periods. A non-empty pull resets the counter and interval to their
-    // minimum values so latency stays low when items are actually flowing.
-    let mut consecutive_empty: u32 = 0;
-    let mut current_interval = POLL_INTERVAL;
-
-    loop {
-        // Wait an interval, but wake early on shutdown.
-        tokio::select! {
-            biased;
-            _ = shutdown.notified() => {
-                tracing::info!("relay-sync receive_loop: shutdown");
-                break;
-            }
-            _ = tokio::time::sleep(current_interval) => {}
-        }
-
-        let key_bytes = match snapshot_sync_key(&sync_key).await {
-            Some(b) => {
-                warned_no_key = false;
-                b
-            }
-            None => {
-                if !warned_no_key {
-                    tracing::warn!("relay-sync receive_loop: no sync passphrase set — idle");
-                    warned_no_key = true;
-                }
-                continue;
-            }
-        };
-
-        // tke7 (PG-30): hot-reload master sync gate — checked on every poll tick.
-        let sync_enabled = core_config.read().map(|g| g.sync_enabled).unwrap_or(true);
-        if !sync_enabled {
-            tracing::debug!("relay-sync receive_loop: sync_enabled=false; skipping poll this tick");
-            continue;
-        }
-
-        // A-SET-2 hot-reload: check sync_on_wifi_only every tick so a runtime
-        // set_config change takes effect without a daemon restart.  The
-        // is_on_wifi check runs on a blocking thread (networksetup shell
-        // invocation) so it does not stall the async executor.  Mirrors the
-        // identical guard in cloud.rs poll loop.
-        let (sync_on_wifi_only, auto_apply_synced_clip) = core_config
-            .read()
-            .map(|g| (g.sync_on_wifi_only, g.auto_apply_synced_clip))
-            .unwrap_or((false, true));
-        if sync_on_wifi_only {
-            let on_wifi = tokio::task::spawn_blocking(crate::platform::is_on_wifi)
-                .await
-                .unwrap_or(true); // fail-open: assume Wi-Fi if detection errors
-            if relay_should_skip_wifi(sync_on_wifi_only, on_wifi) {
-                tracing::debug!(
-                    "relay-sync receive_loop: sync_on_wifi_only=true and not on Wi-Fi; \
-                     skipping this tick"
-                );
-                continue;
-            }
-        }
-        // Shadow as a local bool so the ingest path can use it without holding
-        // the RwLock guard across await points.
-        let auto_apply_enabled = relay_should_auto_apply(auto_apply_synced_clip);
-
-        let inbox_id = derive_relay_inbox_id(&key_bytes);
-
-        let token = match ensure_token(
-            &client,
-            &relay_url,
-            &key_bytes,
-            &device_name,
-            &mut cached_token,
-            &local_key,
-        )
-        .await
-        {
-            Ok(t) => t,
-            Err(e) => {
-                tracing::warn!("relay-sync receive_loop: register failed: {e}");
-                continue;
-            }
-        };
-
-        // Burst-drain: keep pulling while pages come back full.
-        loop {
-            let page = match pull_page(&client, &relay_url, &inbox_id, &token, wm).await {
-                Ok(p) => p,
-                Err(RelayError::Status(401)) => {
-                    tracing::info!("relay-sync receive_loop: 401; re-registering next tick");
-                    cached_token = None;
-                    break;
-                }
-                Err(e) => {
-                    tracing::warn!("relay-sync receive_loop: pull failed: {e}");
-                    break;
-                }
-            };
-            if page.is_empty() {
-                // CopyPaste-28br: empty poll — advance the idle counter and
-                // grow the interval (linearly in IDLE_POLL_STEP increments,
-                // capped at POLL_INTERVAL_MAX).
-                consecutive_empty = consecutive_empty.saturating_add(1);
-                if consecutive_empty >= IDLE_EMPTY_POLL_THRESHOLD {
-                    // Each idle step adds one IDLE_POLL_STEP (60 s) so the
-                    // first step already meets the ≥ 60 s acceptance criterion.
-                    let steps = consecutive_empty.saturating_sub(IDLE_EMPTY_POLL_THRESHOLD) + 1;
-                    current_interval =
-                        (IDLE_POLL_STEP * steps).min(POLL_INTERVAL_MAX);
-                    tracing::debug!(
-                        consecutive_empty,
-                        current_interval_secs = current_interval.as_secs(),
-                        "relay-sync receive_loop: idle back-off active"
-                    );
-                }
-                break;
-            }
-            let page_len = page.len();
-
-            let quota = core_config
-                .read()
-                .map(|g| g.storage_quota_bytes)
-                .unwrap_or(u64::MAX);
-            let db_arc = db.clone();
-            let local_key_clone = local_key.clone();
-            let join = tokio::task::spawn_blocking(move || {
-                let guard = db_arc.blocking_lock();
-                ingest_page_blocking(&guard, &local_key_clone, &key_bytes, &page, wm, quota)
-            })
-            .await;
-            match join {
-                Ok((new_wm, stored)) => {
-                    let advanced =
-                        new_wm.wall > wm.wall || (new_wm.wall == wm.wall && new_wm.id > wm.id);
-                    wm = new_wm;
-                    if advanced {
-                        // CopyPaste-hf40 / CopyPaste-1jms.24: persist the
-                        // advanced watermark so a daemon restart resumes
-                        // from the last-seen cursor instead of zero.
-                        save_watermark(wm);
-                    }
-                    if stored > 0 {
-                        // CopyPaste-28br: a non-empty batch — reset idle
-                        // back-off so latency stays low while items are flowing.
-                        consecutive_empty = 0;
-                        current_interval = POLL_INTERVAL;
-                        last_sync_ms.store(now_ms(), Ordering::Relaxed);
-                        if auto_apply_enabled {
-                            // CopyPaste-7ub: implement auto_apply_synced_clip on the
-                            // relay receive path. Fetch the freshest stored text item,
-                            // decrypt it, and write it to NSPasteboard — stamping the
-                            // self-write sentinel so the ClipboardMonitor does NOT
-                            // re-capture the write as a new local item (loop prevention).
-                            //
-                            // The pasteboard write is gated on `auto_apply_change_count`
-                            // being Some (wired from daemon.rs via `start_relay`). When
-                            // None (tests, non-Unix) the ingest is still recorded in
-                            // last_sync_ms but no pasteboard write occurs.
-                            if let Some(ref swcc) = auto_apply_change_count {
-                                let db_arc2 = db.clone();
-                                let lk2 = local_key.clone();
-                                let swcc2 = swcc.clone();
-                                let join2 = tokio::task::spawn_blocking(move || {
-                                    let guard = db_arc2.blocking_lock();
-                                    if let Some(cand) =
-                                        relay_fetch_auto_apply_candidate(&guard, &lk2)
-                                    {
-                                        relay_apply_to_pasteboard(&cand, &swcc2);
-                                    }
-                                })
-                                .await;
-                                if let Err(e) = join2 {
-                                    tracing::warn!(
-                                        "relay-sync receive_loop: auto-apply task panicked: {e}"
-                                    );
-                                }
-                            } else {
-                                tracing::debug!(
-                                    "relay-sync receive_loop: auto_apply_synced_clip=true \
-                                     but change-count sentinel not wired; \
-                                     {stored} relay item(s) stored (no pasteboard write)"
-                                );
-                            }
-                        } else {
-                            tracing::debug!(
-                                "relay-sync receive_loop: auto_apply_synced_clip=false; \
-                                 {stored} relay item(s) stored but NOT auto-applied to pasteboard"
-                            );
-                        }
-                    }
-                }
-                Err(e) => {
-                    tracing::warn!("relay-sync receive_loop: ingest task panicked: {e}");
-                    break;
-                }
-            }
-            if page_len < PULL_LIMIT {
-                break;
-            }
-        }
-    }
+pub(super) fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as i64
 }
 
 // ── Public entry point ────────────────────────────────────────────────────────
@@ -1671,7 +215,7 @@ pub fn start_relay(
         return Err(RelayError::Disabled);
     }
     let relay_url = relay_url.trim_end_matches('/').to_owned();
-    if !is_relay_url_ok(&relay_url) {
+    if !registration::is_relay_url_ok(&relay_url) {
         return Err(RelayError::InvalidUrl);
     }
     let shutdown = Arc::new(Notify::new());
@@ -1683,7 +227,7 @@ pub fn start_relay(
         t.chars().take(64).collect::<String>()
     };
 
-    tokio::spawn(push_loop(
+    tokio::spawn(push::push_loop(
         client.clone(),
         relay_url.clone(),
         device_name.clone(),
@@ -1694,7 +238,7 @@ pub fn start_relay(
         last_sync_ms.clone(),
         core_config.clone(),
     ));
-    tokio::spawn(receive_loop(
+    tokio::spawn(receive::receive_loop(
         client,
         relay_url,
         device_name,
@@ -1711,19 +255,28 @@ pub fn start_relay(
     Ok(RelayHandle { shutdown })
 }
 
-fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64
-}
-
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use copypaste_core::{derive_sync_key, ITEM_KEY_VERSION_CURRENT};
+
+    // Pull private symbols used in tests from their new homes.
+    use super::pasteboard::{
+        relay_fetch_auto_apply_candidate, relay_should_auto_apply, relay_should_skip_wifi,
+    };
+    use super::push::build_content_b64;
+    use super::push::push_item;
+    use super::receive::{ingest_page_blocking, pull_page};
+    use super::registration::register;
+    use super::token::{decrypt_relay_token, encrypt_relay_token, RELAY_TOKEN_FILE};
+    use super::types::{PullItem, RelayEnvelope};
+    use super::watermark::{Watermark, RELAY_WATERMARK_FILE};
+
+    // `SYNC_HTTP_TIMEOUT` is referenced only by the test client builder; importing it
+    // at module scope would be flagged unused in a non-test build under -D warnings.
+    use crate::sync_common::SYNC_HTTP_TIMEOUT;
 
     fn skey(p: &str) -> [u8; 32] {
         *derive_sync_key(p).expect("derive").as_bytes()
@@ -1863,6 +416,7 @@ mod tests {
     /// derive_relay_inbox_id determinism (daemon-side sanity; core also tests it).
     #[test]
     fn inbox_id_is_deterministic() {
+        use copypaste_core::derive_relay_inbox_id;
         let k = skey("relay-determinism-pass");
         assert_eq!(derive_relay_inbox_id(&k), derive_relay_inbox_id(&k));
     }
@@ -1872,6 +426,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn register_parses_201_auth_token() {
+        use copypaste_core::derive_relay_inbox_id;
         let k = skey("register-test-pass");
         let inbox = derive_relay_inbox_id(&k);
         let m = mockito::mock("POST", "/devices")
@@ -1893,6 +448,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn push_item_sends_expected_body() {
+        use copypaste_core::derive_relay_inbox_id;
         let k = skey("push-body-pass");
         let inbox = derive_relay_inbox_id(&k);
         let path = format!("/devices/{inbox}/items");
@@ -1924,6 +480,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn push_item_401_signals_reauth() {
+        use copypaste_core::derive_relay_inbox_id;
         let k = skey("push-401-pass");
         let inbox = derive_relay_inbox_id(&k);
         let path = format!("/devices/{inbox}/items");
@@ -1949,6 +506,7 @@ mod tests {
     #[tokio::test]
     #[serial_test::serial]
     async fn pull_page_parses_items() {
+        use copypaste_core::derive_relay_inbox_id;
         let k = skey("pull-page-pass");
         let inbox = derive_relay_inbox_id(&k);
         let path = format!("/devices/{inbox}/items");
@@ -1976,6 +534,10 @@ mod tests {
     /// envelope carries the SAME blob shape the Supabase path produces.
     #[test]
     fn envelope_round_trips_through_cloud_crypto() {
+        use crate::sync_common::decode_payload_ct;
+        use base64::Engine as _;
+        use copypaste_core::decrypt_from_cloud;
+
         let local_key = zeroize::Zeroizing::new([7u8; 32]);
         let sync_key = SyncKey::from_bytes(skey("envelope-roundtrip-pass"));
 
@@ -2002,6 +564,8 @@ mod tests {
     /// the SAME item (self-echo / equal lamport) is a no-op. Watermark advances.
     #[test]
     fn ingest_inserts_then_dedups_with_lww() {
+        use copypaste_core::get_item_by_item_id;
+
         let db = open_mem_db();
         let local_key = zeroize::Zeroizing::new([9u8; 32]);
         let sync_bytes = skey("ingest-lww-pass");
@@ -2102,6 +666,9 @@ mod tests {
     /// Tampered ciphertext → decrypt returns None (not a panic).
     #[test]
     fn token_decrypt_tampered_ciphertext_returns_none() {
+        use base64::Engine as _;
+        use copypaste_core::NONCE_SIZE;
+
         let key = zeroize::Zeroizing::new([0x33u8; 32]);
         let mut blob = base64::engine::general_purpose::STANDARD
             .decode(encrypt_relay_token("my-token", &key).expect("enc"))
@@ -2222,6 +789,9 @@ mod tests {
         lamport_ts: i64,
         wall_time: u64,
     ) -> PullItem {
+        use base64::Engine as _;
+        use copypaste_core::encrypt_for_cloud;
+
         let blob = encrypt_for_cloud(sync_key, item_id, plaintext).expect("cloud encrypt");
         let ct_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
         let env = RelayEnvelope {
@@ -2244,6 +814,8 @@ mod tests {
         env: &RelayEnvelope,
         wall_time: u64,
     ) -> PullItem {
+        use base64::Engine as _;
+
         let content_b64 = base64::engine::general_purpose::STANDARD
             .encode(serde_json::to_vec(env).expect("env json"));
         PullItem {
@@ -2279,6 +851,9 @@ mod tests {
         wall_time: u64,
         pin_order: f64,
     ) -> PullItem {
+        use base64::Engine as _;
+        use copypaste_core::encrypt_for_cloud;
+
         let blob = encrypt_for_cloud(sync_key, item_id, plaintext).expect("cloud encrypt");
         let ct_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
         let env = RelayEnvelope {
@@ -2301,6 +876,8 @@ mod tests {
     /// ingest applies it as a local soft-delete on a previously-live item.
     #[test]
     fn relay_tombstone_round_trip_soft_deletes_local() {
+        use copypaste_core::get_item_by_item_id;
+
         let db = open_mem_db();
         let local_key = zeroize::Zeroizing::new([4u8; 32]);
         let sync_bytes = skey("relay-tombstone-pass");
@@ -2347,6 +924,8 @@ mod tests {
     /// `deleted=true` envelope WITHOUT attempting to decrypt NULL content.
     #[test]
     fn build_content_b64_emits_tombstone_envelope_for_deleted_item() {
+        use base64::Engine as _;
+
         let local_key = zeroize::Zeroizing::new([6u8; 32]);
         let sync_key = SyncKey::from_bytes(skey("relay-build-tomb-pass"));
 
@@ -2370,6 +949,8 @@ mod tests {
     /// Pin state propagates: a pinned envelope ingests as a pinned local row.
     #[test]
     fn relay_pin_round_trip_sets_pinned_local() {
+        use copypaste_core::get_item_by_item_id;
+
         let db = open_mem_db();
         let local_key = zeroize::Zeroizing::new([8u8; 32]);
         let sync_bytes = skey("relay-pin-pass");
@@ -2400,6 +981,8 @@ mod tests {
     /// for both tie-break outcomes (remote-wins and local-wins on device id).
     #[test]
     fn relay_equal_lamport_tie_break_matches_p2p_resolve() {
+        use base64::Engine as _;
+        use copypaste_core::{encrypt_for_cloud, get_item_by_item_id, insert_item};
         use copypaste_sync::merge::{resolve, MergeOutcome};
         use copypaste_sync::protocol::WireItem;
 
@@ -2555,6 +1138,8 @@ mod tests {
 
     #[test]
     fn relay_delete_before_create_does_not_resurrect() {
+        use copypaste_core::get_item_by_item_id;
+
         let db = open_mem_db();
         let local_key = zeroize::Zeroizing::new([3u8; 32]);
         let sync_bytes = skey("relay-dbc-pass");
@@ -2610,6 +1195,8 @@ mod tests {
     /// exactly one row for that `item_id`.
     #[test]
     fn both_transports_deliver_same_item_inserts_exactly_once() {
+        use copypaste_core::get_item_by_item_id;
+
         let db = open_mem_db();
         let local_key = zeroize::Zeroizing::new([0xBBu8; 32]);
         let sync_bytes = skey("dual-transport-dedup-pass");
@@ -2689,6 +1276,8 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn write_token_0600_perms_are_exactly_0600() {
+        use super::token::write_token_0600;
+
         let dir = tempfile::tempdir().expect("tmpdir");
         let path = dir.path().join("relay_token_perms_test");
         write_token_0600(&path, "test-token-for-perms-check").expect("write ok");
@@ -2711,6 +1300,8 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn write_token_0600_immune_to_permissive_umask() {
+        use super::token::write_token_0600;
+
         // Temporarily set umask to 0 so File::create would produce 0666.
         // A correct implementation using OpenOptions::mode(0o600) must still
         // produce 0600 because the explicit mode overrides umask for the
@@ -2957,7 +1548,8 @@ mod tests {
     #[test]
     fn load_watermark_missing_file_returns_default() {
         // Confirm that a non-existent path returns (0, 0) — not a panic.
-        let wm_path = std::path::Path::new("/tmp/copypaste-test-does-not-exist/relay_watermark.json");
+        let wm_path =
+            std::path::Path::new("/tmp/copypaste-test-does-not-exist/relay_watermark.json");
         let raw = std::fs::read_to_string(wm_path);
         assert!(
             raw.is_err(),
@@ -2993,6 +1585,8 @@ mod tests {
     /// `serde_json`, confirming the file format is stable.
     #[test]
     fn save_watermark_writes_valid_json() {
+        use super::token::write_token_0600;
+
         let dir = tempfile::tempdir().expect("tmpdir");
         let wm_path = dir.path().join(RELAY_WATERMARK_FILE);
 
