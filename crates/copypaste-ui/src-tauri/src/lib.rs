@@ -870,6 +870,10 @@ fn frontmost_bundle_id() -> Option<String> {
 /// on pathological cases where activation never completes.
 ///
 /// This function is extracted so it can be unit-tested without macOS ObjC bindings.
+// Only the macOS activation path calls this; on other platforms the sole caller
+// is `#[cfg(target_os = "macos")]`, so gate the fn (plus `test` for the
+// platform-independent unit test) to avoid a dead_code error under -D warnings.
+#[cfg(any(target_os = "macos", test))]
 fn poll_until_frontmost(
     target_bundle_id: &str,
     mut probe: impl FnMut() -> Option<String>,

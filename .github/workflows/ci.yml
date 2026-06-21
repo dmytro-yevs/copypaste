@@ -70,15 +70,6 @@ jobs:
     # Keychain without the ephemeral-key bypass.
     env:
       COPYPASTE_EPHEMERAL_KEY: "1"
-      # CopyPaste-tohs: give the daemon tests an isolated, writable data/cache/
-      # config/log location. Without these the peer-save tests (which only RUN
-      # because COPYPASTE_EPHEMERAL_KEY bypasses the unavailable login Keychain)
-      # fall back to ~/Library/Application Support/CopyPaste and race on the
-      # shared dir -> "failed to save peers: Permission denied (os error 13)".
-      COPYPASTE_DATA_DIR: ${{ runner.temp }}/cp/data
-      COPYPASTE_CACHE_DIR: ${{ runner.temp }}/cp/cache
-      COPYPASTE_CONFIG_DIR: ${{ runner.temp }}/cp/config
-      COPYPASTE_LOG_DIR: ${{ runner.temp }}/cp/log
     steps:
       - uses: actions/checkout@v4
 
@@ -96,10 +87,16 @@ jobs:
         run: cargo build -p copypaste-daemon
 
       - name: Test daemon (includes Keychain tests)
-        # --test-threads=1: many daemon tests mutate process-global env
-        # (COPYPASTE_*/HOME via EnvGuard) and share the data dir + peers file.
-        # Parallel threads race despite TEST_ENV_LOCK because non-guarded tests
-        # read data_dir() concurrently. Serial execution makes them deterministic.
+        # CopyPaste-tohs: isolate the data/cache/config/log dirs to a writable
+        # temp location ($RUNNER_TEMP — runner ctx is only valid in step scope,
+        # not job-level env). --test-threads=1: many daemon tests mutate
+        # process-global env (COPYPASTE_*/HOME via EnvGuard) and share the data
+        # dir + peers file; serial execution makes them deterministic.
+        env:
+          COPYPASTE_DATA_DIR: ${{ runner.temp }}/cp/data
+          COPYPASTE_CACHE_DIR: ${{ runner.temp }}/cp/cache
+          COPYPASTE_CONFIG_DIR: ${{ runner.temp }}/cp/config
+          COPYPASTE_LOG_DIR: ${{ runner.temp }}/cp/log
         run: |
           mkdir -p "$COPYPASTE_DATA_DIR" "$COPYPASTE_CACHE_DIR" "$COPYPASTE_CONFIG_DIR" "$COPYPASTE_LOG_DIR"
           cargo test -p copypaste-daemon -- --test-threads=1 --nocapture
