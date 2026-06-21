@@ -663,7 +663,7 @@ mod tests {
     /// Spin up the shared test runtime once. Tests must not create nested
     /// runtimes when they call `start` (which blocks on the runtime to bind).
     fn test_runtime() -> &'static tokio::runtime::Runtime {
-        crate::runtime().expect("test tokio runtime builds")
+        crate::ffi_pairing::runtime().expect("test tokio runtime builds")
     }
 
     /// A fixed 32-byte PAKE session key both ends agree on (bootstrap output).
