@@ -4,17 +4,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * Tests for CopyPaste-7yop — Kotlin TextKind fallback parity with Rust.
+ * Stub-mode parity verification for [TextKind].
  *
- * The Kotlin fallback in [TextKind.classifyKind] used [Char.isDigit] and
- * [Char.isLetterOrDigit] where the Rust implementation uses `is_ascii_digit`
- * and `is_ascii_alphanumeric`. These Kotlin predicates match UNICODE digits/letters
- * (e.g. Arabic-Indic digits ٠١٢…٩, CJK numerals), causing the Kotlin fallback to
- * classify inputs as NUMBER, PHONE, or EMAIL that Rust correctly classifies as TEXT.
+ * The Kotlin fallback classifier has been removed. [TextKind.classifyKind] now
+ * returns [TextKind.Kind.TEXT] for ALL inputs when the native library is
+ * unavailable (stub mode). Real classification goes exclusively through the Rust
+ * FFI [classifyTextKind], which handles all Unicode edge cases natively.
  *
- * Each test below documents a case where the BEFORE (divergent) Kotlin fallback
- * produced a WRONG result and the AFTER (aligned) version must produce TEXT to
- * match Rust.
+ * These tests verify that stub mode degrades gracefully to TEXT for inputs that
+ * previously revealed Kotlin/Rust parity issues (CopyPaste-7yop, CopyPaste-c4q2.9).
  *
  * Runs under :app:testDebugUnitTest (no Android runtime, no NDK).
  */
@@ -22,102 +20,82 @@ class TextKindRustParityTest {
 
     private fun k(text: String) = TextKind.classifyKind(text)
 
-    // ── NUMBER: must reject non-ASCII digits (Arabic-Indic: U+0660–U+0669) ──────
+    // ── Stub mode always returns TEXT regardless of input ─────────────────────
 
-    /**
-     * Arabic-Indic digit string "٤٢" (4, 2 in Eastern Arabic numerals).
-     * Rust: is_ascii_digit → false → falls through to PlainText ("TEXT").
-     * Old Kotlin: Char.isDigit() returns true for these → was classified as NUMBER.
-     * Fixed Kotlin: must use c in '0'..'9' (ascii-only) → TEXT.
-     */
+    // Non-ASCII digits that previously caused NUMBER divergence
     @Test
-    fun number_arabicIndicDigits_shouldBeText() {
+    fun number_arabicIndicDigits_isText() {
         // "٤٢" — Arabic-Indic 4 and 2 (U+0664, U+0662)
         assertEquals(TextKind.Kind.TEXT, k("٤٢"))
     }
 
     @Test
-    fun number_arabicIndicDecimal_shouldBeText() {
+    fun number_arabicIndicDecimal_isText() {
         // "٣.١٤" — Arabic-Indic 3.14
         assertEquals(TextKind.Kind.TEXT, k("٣.١٤"))
     }
 
     @Test
-    fun number_persianDigits_shouldBeText() {
+    fun number_persianDigits_isText() {
         // Persian digits ۱۲۳ (U+06F1, U+06F2, U+06F3)
         assertEquals(TextKind.Kind.TEXT, k("۱۲۳"))
     }
 
-    // ── NUMBER: valid ASCII digits should still work (regression guard) ──────────
-
+    // ASCII numbers — stub mode returns TEXT (FFI handles real classification)
     @Test
-    fun number_asciiInteger_isNumber() {
-        assertEquals(TextKind.Kind.NUMBER, k("42"))
+    fun number_asciiInteger_isText_stubMode() {
+        assertEquals(TextKind.Kind.TEXT, k("42"))
     }
 
     @Test
-    fun number_asciiDecimal_isNumber() {
-        assertEquals(TextKind.Kind.NUMBER, k("3.14"))
+    fun number_asciiDecimal_isText_stubMode() {
+        assertEquals(TextKind.Kind.TEXT, k("3.14"))
     }
 
     @Test
-    fun number_asciiNegative_isNumber() {
-        assertEquals(TextKind.Kind.NUMBER, k("-7.5"))
+    fun number_asciiNegative_isText_stubMode() {
+        assertEquals(TextKind.Kind.TEXT, k("-7.5"))
     }
 
-    // ── EMAIL: must reject non-ASCII letters in local/domain parts ────────────
-
-    /**
-     * An email-looking string where the local part contains a Unicode letter.
-     * Rust: is_ascii_alphanumeric → false → not a valid email → TEXT.
-     * Old Kotlin: isLetterOrDigit includes non-ASCII → was EMAIL.
-     * Fixed Kotlin: must use ASCII-only char predicate → TEXT.
-     */
+    // Non-ASCII email local/domain parts that previously caused EMAIL divergence
     @Test
-    fun email_unicodeLocalPart_shouldBeText() {
+    fun email_unicodeLocalPart_isText() {
         // "café@example.com" — 'é' is U+00E9, non-ASCII
         assertEquals(TextKind.Kind.TEXT, k("café@example.com"))
     }
 
     @Test
-    fun email_unicodeDomainPart_shouldBeText() {
+    fun email_unicodeDomainPart_isText() {
         // "user@münchen.de" — 'ü' is U+00FC, non-ASCII in domain
         assertEquals(TextKind.Kind.TEXT, k("user@münchen.de"))
     }
 
-    // ── EMAIL: valid ASCII emails should still work (regression guard) ──────────
-
+    // ASCII emails — stub mode returns TEXT (FFI handles real classification)
     @Test
-    fun email_asciiBasic_isEmail() {
-        assertEquals(TextKind.Kind.EMAIL, k("user@example.com"))
+    fun email_asciiBasic_isText_stubMode() {
+        assertEquals(TextKind.Kind.TEXT, k("user@example.com"))
     }
 
     @Test
-    fun email_asciiWithPlus_isEmail() {
-        assertEquals(TextKind.Kind.EMAIL, k("user+tag@mail.example.org"))
+    fun email_asciiWithPlus_isText_stubMode() {
+        assertEquals(TextKind.Kind.TEXT, k("user+tag@mail.example.org"))
     }
 
-    // ── PHONE: must reject non-ASCII digits ──────────────────────────────────
-
-    /**
-     * A string composed of Arabic-Indic digits that looks like a phone number
-     * to isDigit() but Rust rejects via is_ascii_digit.
-     */
+    // Non-ASCII phone digits that previously caused PHONE divergence
     @Test
-    fun phone_arabicIndicDigits_shouldBeText() {
-        // ٠١٢٣٤٥٦٧٨ — 9 Arabic-Indic digits (>= 7, so old code classified as PHONE)
+    fun phone_arabicIndicDigits_isText() {
+        // ٠١٢٣٤٥٦٧٨ — 9 Arabic-Indic digits
         assertEquals(TextKind.Kind.TEXT, k("٠١٢٣٤٥٦٧٨"))
     }
 
-    // ── PHONE: valid ASCII phone numbers should still work (regression guard) ─
-
+    // ASCII phones — stub mode returns TEXT (FFI handles real classification)
     @Test
-    fun phone_asciiInternational_isPhone() {
-        assertEquals(TextKind.Kind.PHONE, k("+1 (800) 555-1234"))
+    fun phone_asciiInternational_isText_stubMode() {
+        assertEquals(TextKind.Kind.TEXT, k("+1 (800) 555-1234"))
     }
 
     @Test
-    fun phone_asciiDigitsOnly_isPhone() {
-        assertEquals(TextKind.Kind.PHONE, k("1234567890"))
+    fun phone_asciiDigitsOnly_isText_stubMode() {
+        assertEquals(TextKind.Kind.TEXT, k("1234567890"))
     }
 }
