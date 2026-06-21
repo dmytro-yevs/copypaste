@@ -108,9 +108,11 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("COPYPASTE_SOCKET");
         let p = socket_path();
+        // Case-insensitive: macOS uses "CopyPaste" (Application Support); Linux
+        // uses lowercase "copypaste" ($XDG_RUNTIME_DIR / ~/.local/share).
         assert!(
-            p.to_string_lossy().contains("CopyPaste"),
-            "expected path to contain CopyPaste, got: {}",
+            p.to_string_lossy().to_lowercase().contains("copypaste"),
+            "expected path to contain copypaste, got: {}",
             p.display()
         );
     }

@@ -28,7 +28,7 @@
 //! responder + the in-flight initiator task) — exactly ONE pairing may be in
 //! flight at a time (v0.6 simplicity).
 //!
-//! The standing responder (bound on `bport` when [`start`](start) is called)
+//! The standing responder (bound on `bport` when `start` is called)
 //! makes the Android device pairable FROM macOS: it accepts an inbound bootstrap
 //! connection, runs `run_with_confirm` wired to the SAME coordinator with the
 //! `Responder` role, and routes the SAS through the same poll/confirm flow.
@@ -389,13 +389,13 @@ impl PairingCoordinator {
 pub struct AndroidPairing {
     /// The single shared pairing coordinator.
     pub coordinator: Arc<PairingCoordinator>,
-    /// Live discovery service (advertise + browse). `None` until [`start`].
+    /// Live discovery service (advertise + browse). `None` until `start`.
     discovery: Mutex<Option<Arc<DiscoveryService>>>,
     /// Background browse task spawned by `DiscoveryService::start`. Aborted on
-    /// [`stop`].
+    /// `stop`.
     discovery_task: Mutex<Option<JoinHandle<()>>>,
     /// The standing bootstrap responder task (re-binds `bport` and accepts one
-    /// inbound discovery-pair connection per iteration). Aborted on [`stop`].
+    /// inbound discovery-pair connection per iteration). Aborted on `stop`.
     responder_task: Mutex<Option<JoinHandle<()>>>,
     /// The in-flight initiator task spawned by `pair_with_discovered`. Aborted on
     /// `pair_abort` / `pair_reset` / a new pairing.
@@ -417,7 +417,7 @@ impl AndroidPairing {
         m.lock().unwrap_or_else(|p| p.into_inner())
     }
 
-    /// The live discovery service, if [`start`] has run.
+    /// The live discovery service, if `start` has run.
     pub fn discovery(&self) -> Option<Arc<DiscoveryService>> {
         Self::lock(&self.discovery).clone()
     }

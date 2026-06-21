@@ -1067,7 +1067,7 @@ async fn push_loop(
             .map(|g| g.sync_on_wifi_only)
             .unwrap_or(false);
         if sync_on_wifi_only
-            && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+            && !tokio::task::spawn_blocking(crate::platform::is_on_wifi)
                 .await
                 .unwrap_or(true)
         {
@@ -2029,7 +2029,7 @@ async fn realtime_loop(
                         .unwrap_or((false, defaults.storage_quota_bytes))
                 };
                 if sync_on_wifi_only
-                    && !tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                    && !tokio::task::spawn_blocking(crate::platform::is_on_wifi)
                         .await
                         .unwrap_or(true)
                 {

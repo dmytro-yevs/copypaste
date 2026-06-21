@@ -53,3 +53,19 @@ pub mod macos;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
+
+/// Cross-platform Wi-Fi check for the sync-on-Wi-Fi-only gate. On macOS this
+/// queries the real network interface; on every other platform the macOS-only
+/// implementation is absent, so it fails open (returns `true`) — non-macOS
+/// daemons simply don't gate sync on Wi-Fi. Callers must use this instead of
+/// `macos::is_on_wifi` so feature-gated paths still compile off macOS.
+pub fn is_on_wifi() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        macos::is_on_wifi()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}

@@ -13,7 +13,7 @@
 //! # FFI shape
 //!
 //! UDL has no interface objects, so the long-lived listener is represented by a
-//! `u64` handle into a process-global registry ([`LISTENER_REGISTRY`]) — the
+//! `u64` handle into a process-global registry (`LISTENER_REGISTRY`) — the
 //! same idiom `lib.rs` uses for `DB_HANDLES`. The FFI surface (in `lib.rs`):
 //!   * `start_p2p_listener(..)` — bind + register + spawn on the shared runtime,
 //!     returning the handle and the OS-assigned port immediately.
@@ -68,7 +68,7 @@ pub struct PeerSessionKey {
     pub session_key: Vec<u8>,
 }
 
-/// FFI result of [`start`](start): the registry handle plus the OS-assigned
+/// FFI result of `start`: the registry handle plus the OS-assigned
 /// port. When the caller passes `listen_port == 0` the kernel picks a free port
 /// and `actual_port` reports it so Kotlin can advertise the real bind port.
 #[derive(Debug, Clone)]

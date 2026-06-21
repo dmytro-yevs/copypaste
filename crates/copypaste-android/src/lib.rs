@@ -648,7 +648,7 @@ pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteErr
 /// `item_id` is the item's UUID string — it is bound into the AEAD AAD so
 /// substituting the blob into a different item slot fails authentication.
 ///
-/// Returns base64(nonce[24] || ciphertext_with_tag), matching exactly what
+/// Returns `base64(nonce[24] || ciphertext_with_tag)`, matching exactly what
 /// the macOS daemon POSTs as `payload_ct`.
 ///
 /// Errors: `EncryptionFailed` on AEAD failure, `InvalidKeyLength` if
@@ -4924,7 +4924,7 @@ mod tests {
         peer_thread.join().expect("peer thread join");
     }
 
-    /// Blob format: nonce[24] prepended, total length = 24 + plaintext + 16 (AEAD tag).
+    /// Blob format: `nonce[24]` prepended, total length = 24 + plaintext + 16 (AEAD tag).
     #[test]
     fn cloud_encrypt_blob_format() {
         let key = derive_cloud_sync_key("format-test".into()).expect("derive");

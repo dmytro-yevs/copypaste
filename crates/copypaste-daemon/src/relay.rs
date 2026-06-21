@@ -844,7 +844,7 @@ async fn push_loop(
                     .map(|g| g.sync_on_wifi_only)
                     .unwrap_or(false);
                 if sync_on_wifi_only {
-                    let on_wifi = tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+                    let on_wifi = tokio::task::spawn_blocking(crate::platform::is_on_wifi)
                         .await
                         .unwrap_or(true); // fail-open: if check errors, assume Wi-Fi
                     if relay_should_skip_wifi(sync_on_wifi_only, on_wifi) {
@@ -1325,7 +1325,7 @@ async fn receive_loop(
             .map(|g| (g.sync_on_wifi_only, g.auto_apply_synced_clip))
             .unwrap_or((false, true));
         if sync_on_wifi_only {
-            let on_wifi = tokio::task::spawn_blocking(crate::platform::macos::is_on_wifi)
+            let on_wifi = tokio::task::spawn_blocking(crate::platform::is_on_wifi)
                 .await
                 .unwrap_or(true); // fail-open: assume Wi-Fi if detection errors
             if relay_should_skip_wifi(sync_on_wifi_only, on_wifi) {
