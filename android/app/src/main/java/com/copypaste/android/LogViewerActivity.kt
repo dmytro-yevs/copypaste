@@ -32,7 +32,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+// TextButton removed — replaced by CopyPasteButton (CopyPaste-bdac.8)
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -49,6 +49,8 @@ import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.EmptyStateCard
 import com.copypaste.android.ui.theme.MonoFontFamily
@@ -199,19 +201,19 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                CopyPasteButton(onClick = {
                     showClearDialog = false
                     scope.launch {
                         withContext(Dispatchers.IO) { clearLogs(ctx) }
                         loadLogs()
                     }
-                }) {
-                    Text("Clear", color = c.danger)
+                }, variant = ButtonVariant.DANGER) {
+                    Text("Clear")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) {
-                    Text("Cancel", color = c.dim)
+                CopyPasteButton(onClick = { showClearDialog = false }, variant = ButtonVariant.GHOST) {
+                    Text("Cancel")
                 }
             },
         )

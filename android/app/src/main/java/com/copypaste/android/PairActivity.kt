@@ -38,7 +38,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+// TextButton removed — replaced by CopyPasteButton (CopyPaste-bdac.8)
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -1517,9 +1517,9 @@ private fun PairedSuccessPopup(
             }
         },
         confirmButton = {
-            TextButton(onClick = onDismiss) {
-                // voyf: theme-adaptive accent token.
-                Text("Done", color = c.accent)
+            CopyPasteButton(onClick = onDismiss, variant = ButtonVariant.PRIMARY) {
+                // voyf: PRIMARY variant uses accent color — drop explicit color override.
+                Text("Done")
             }
         },
     )

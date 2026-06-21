@@ -47,7 +47,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+// TextButton removed — replaced by CopyPasteButton (CopyPaste-bdac.8)
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -328,7 +328,7 @@ private fun CrashDetectedDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            CopyPasteButton(onClick = onDismiss, variant = ButtonVariant.GHOST) {
                 Text(stringResource(R.string.crash_detected_dismiss))
             }
         }
