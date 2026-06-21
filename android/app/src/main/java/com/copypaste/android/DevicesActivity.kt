@@ -46,7 +46,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+// TextButton removed — replaced by CopyPasteButton (CopyPaste-bdac.8)
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -813,14 +813,14 @@ fun DevicesScreen(
                 )
             },
             confirmButton = {
-                TextButton(onClick = {
+                CopyPasteButton(onClick = {
                     unpairTarget = null
                     unpairPeer(settings, target.fingerprint)
                     refresh()
-                }) { Text("Unpair", color = c.danger) }
+                }, variant = ButtonVariant.DANGER) { Text("Unpair") }
             },
             dismissButton = {
-                TextButton(onClick = { unpairTarget = null }) { Text("Cancel") }
+                CopyPasteButton(onClick = { unpairTarget = null }, variant = ButtonVariant.GHOST) { Text("Cancel") }
             },
         )
     }
@@ -858,22 +858,22 @@ fun DevicesScreen(
             // "Revoke & rotate key" is the primary action (right-side confirm button).
             // Tapping it closes this dialog and opens the passphrase dialog.
             confirmButton = {
-                TextButton(onClick = {
+                CopyPasteButton(onClick = {
                     val t = revokeTarget
                     revokeTarget = null
                     if (t != null) {
                         revokePassphrase = ""
                         revokeRotateTarget = t
                     }
-                }) {
-                    Text("Revoke & rotate key", color = c.danger)
+                }, variant = ButtonVariant.DANGER) {
+                    Text("Revoke & rotate key")
                 }
             },
             dismissButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(0.dp)) {
                     // "Revoke only" — left; performs the plain audit+remove path.
-                    TextButton(onClick = {
-                        val t = revokeTarget ?: return@TextButton
+                    CopyPasteButton(onClick = {
+                        val t = revokeTarget ?: return@CopyPasteButton
                         revokeTarget = null
                         // CopyPaste-94o4: atomic revoke — write the audit record FIRST
                         // on the IO dispatcher; only remove the peer from the local
@@ -917,9 +917,9 @@ fun DevicesScreen(
                                 revokeError = "Failed to record revocation. The device was NOT removed — please try again."
                             }
                         }
-                    }) { Text("Revoke only", color = c.danger) }
+                    }, variant = ButtonVariant.DANGER) { Text("Revoke only") }
 
-                    TextButton(onClick = { revokeTarget = null }) { Text("Cancel") }
+                    CopyPasteButton(onClick = { revokeTarget = null }, variant = ButtonVariant.GHOST) { Text("Cancel") }
                 }
             },
         )
@@ -975,12 +975,12 @@ fun DevicesScreen(
                 }
             },
             confirmButton = {
-                TextButton(
+                CopyPasteButton(
                     enabled = isValidRotatePassphrase(revokePassphrase) && !revokeRotateInFlight,
                     onClick = {
-                        val t = revokeRotateTarget ?: return@TextButton
+                        val t = revokeRotateTarget ?: return@CopyPasteButton
                         val passphrase = revokePassphrase
-                        if (!isValidRotatePassphrase(passphrase)) return@TextButton
+                        if (!isValidRotatePassphrase(passphrase)) return@CopyPasteButton
                         revokeRotateInFlight = true
                         scope.launch {
                             val result = withContext(Dispatchers.IO) {
@@ -1026,21 +1026,23 @@ fun DevicesScreen(
                             )
                         }
                     },
+                    variant = ButtonVariant.DANGER,
                 ) {
                     if (revokeRotateInFlight) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                     } else {
-                        Text("Confirm revoke & rotate", color = c.danger)
+                        Text("Confirm revoke & rotate")
                     }
                 }
             },
             dismissButton = {
-                TextButton(
+                CopyPasteButton(
                     enabled = !revokeRotateInFlight,
                     onClick = {
                         revokeRotateTarget = null
                         revokePassphrase = ""
                     },
+                    variant = ButtonVariant.GHOST,
                 ) { Text("Cancel") }
             },
         )
@@ -1053,7 +1055,7 @@ fun DevicesScreen(
             title = { Text("Revocation incomplete") },
             text = { Text(msg) },
             confirmButton = {
-                TextButton(onClick = { revokeError = null }) { Text("OK") }
+                CopyPasteButton(onClick = { revokeError = null }, variant = ButtonVariant.GHOST) { Text("OK") }
             },
         )
     }
@@ -1075,7 +1077,7 @@ fun DevicesScreen(
             title = { Text("Scanner unavailable") },
             text = { Text(msg) },
             confirmButton = {
-                TextButton(onClick = { scanError = null }) { Text("OK") }
+                CopyPasteButton(onClick = { scanError = null }, variant = ButtonVariant.GHOST) { Text("OK") }
             },
         )
     }
@@ -2417,12 +2419,13 @@ private fun SasPairingDialog(
         confirmButton = {
             when {
                 terminal -> {
-                    TextButton(onClick = { onClose() }) { Text("Close") }
+                    CopyPasteButton(onClick = { onClose() }, variant = ButtonVariant.GHOST) { Text("Close") }
                 }
                 status.state == "awaiting_sas" && status.sas != null -> {
-                    TextButton(
+                    CopyPasteButton(
                         enabled = !confirmPending,
                         onClick = { handleConfirm(true) },
+                        variant = ButtonVariant.PRIMARY,
                     ) { Text(if (confirmPending) "…" else "Match") }
                 }
                 else -> {}
@@ -2432,13 +2435,14 @@ private fun SasPairingDialog(
             when {
                 terminal -> {}
                 status.state == "awaiting_sas" && status.sas != null -> {
-                    TextButton(
+                    CopyPasteButton(
                         enabled = !confirmPending,
                         onClick = { handleConfirm(false) },
-                    ) { Text("Doesn't match", color = c.dim) }
+                        variant = ButtonVariant.GHOST,
+                    ) { Text("Doesn't match") }
                 }
                 else -> {
-                    TextButton(onClick = { handleClose() }) { Text("Cancel", color = c.faint) }
+                    CopyPasteButton(onClick = { handleClose() }, variant = ButtonVariant.GHOST) { Text("Cancel") }
                 }
             }
         },

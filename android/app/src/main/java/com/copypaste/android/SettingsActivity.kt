@@ -29,7 +29,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+// OutlinedButton removed — replaced by CopyPasteButton(SECONDARY) (CopyPaste-bdac.8)
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
@@ -102,7 +102,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.material3.TabRowDefaults
-import androidx.compose.material3.TextButton
+// TextButton removed — replaced by CopyPasteButton (CopyPaste-bdac.8)
 import com.copypaste.android.ui.theme.EaseStandard
 import com.copypaste.android.ui.theme.Palette
 import com.copypaste.android.ui.theme.LocalPalette
@@ -390,19 +390,19 @@ fun SettingsScreen(
             title = { Text(stringResource(R.string.dialog_unsaved_title)) },
             text = { Text(stringResource(R.string.dialog_unsaved_body)) },
             confirmButton = {
-                TextButton(onClick = {
+                CopyPasteButton(onClick = {
                     showDiscardDialog = false
                     val proceed = pendingProceed
                     pendingProceed = null
                     dirty = false
                     proceed?.invoke()
-                }) { Text(stringResource(R.string.dialog_unsaved_discard)) }
+                }, variant = ButtonVariant.DANGER) { Text(stringResource(R.string.dialog_unsaved_discard)) }
             },
             dismissButton = {
-                TextButton(onClick = {
+                CopyPasteButton(onClick = {
                     showDiscardDialog = false
                     pendingProceed = null
-                }) { Text(stringResource(R.string.dialog_unsaved_keep)) }
+                }, variant = ButtonVariant.GHOST) { Text(stringResource(R.string.dialog_unsaved_keep)) }
             },
         )
     }
@@ -1284,20 +1284,20 @@ private fun StorageTab(
                 title = { Text(stringResource(R.string.dialog_clear_all_title)) },
                 text = { Text(stringResource(R.string.setting_clear_history_label)) },
                 confirmButton = {
-                    TextButton(
+                    CopyPasteButton(
                         onClick = {
                             showClearHistoryConfirm = false
                             onClearHistory()
                         },
+                        variant = ButtonVariant.DANGER,
                     ) {
                         Text(
                             text = stringResource(R.string.dialog_confirm),
-                            color = LocalIdeColors.current.danger,
                         )
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showClearHistoryConfirm = false }) {
+                    CopyPasteButton(onClick = { showClearHistoryConfirm = false }, variant = ButtonVariant.GHOST) {
                         Text(stringResource(R.string.dialog_cancel))
                     }
                 },
@@ -1311,20 +1311,20 @@ private fun StorageTab(
                 title = { Text(stringResource(R.string.dialog_reset_db_title)) },
                 text = { Text(stringResource(R.string.dialog_reset_db_body)) },
                 confirmButton = {
-                    TextButton(
+                    CopyPasteButton(
                         onClick = {
                             showResetDbConfirm = false
                             onResetDatabase()
                         },
+                        variant = ButtonVariant.DANGER,
                     ) {
                         Text(
                             text = stringResource(R.string.btn_reset_db),
-                            color = LocalIdeColors.current.danger,
                         )
                     }
                 },
                 dismissButton = {
-                    TextButton(onClick = { showResetDbConfirm = false }) {
+                    CopyPasteButton(onClick = { showResetDbConfirm = false }, variant = ButtonVariant.GHOST) {
                         Text(stringResource(R.string.dialog_cancel))
                     }
                 },
@@ -2392,9 +2392,10 @@ private fun DiagnosticsNavRow(
             color = c.dim,
             modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
         )
-        OutlinedButton(
+        CopyPasteButton(
             onClick = onClick,
             modifier = Modifier.align(Alignment.End),
+            variant = ButtonVariant.SECONDARY,
         ) {
             Text(buttonLabel)
         }
