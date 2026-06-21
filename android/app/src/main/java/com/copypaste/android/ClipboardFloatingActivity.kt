@@ -99,6 +99,14 @@ class ClipboardFloatingActivity : Activity() {
 
         wm = getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
+        // CopyPaste-xxi2: remove the ClipboardService capture overlay BEFORE adding
+        // our own focusable overlay. On Android 10+ some OEM ROMs refuse to grant the
+        // focus token when two TYPE_APPLICATION_OVERLAY windows exist in the same process
+        // simultaneously — the OS sees an ambiguous focus request and returns null from
+        // getPrimaryClip even inside the layout listener. Suppressing the service overlay
+        // here makes ours the only overlay in the process, eliminating the conflict.
+        ClipboardService.suppressCaptureOverlay(this)
+
         // Step 1: Add the overlay as NOT_FOCUSABLE first. The view is 1×1 px and
         // fully transparent — invisible to the user. FLAG_WATCH_OUTSIDE_TOUCH ensures
         // the Activity receives touch events outside its bounds (harmless but needed
@@ -248,6 +256,9 @@ class ClipboardFloatingActivity : Activity() {
      */
     private fun cleanupAndFinish() {
         val view = overlayView ?: run {
+            // CopyPaste-xxi2: restore the service overlay even when ours was never added
+            // (e.g. the canDrawOverlays guard triggered in onCreate before addView).
+            ClipboardService.restoreCaptureOverlay()
             scope.cancel()
             finish()
             return
@@ -267,6 +278,11 @@ class ClipboardFloatingActivity : Activity() {
             Log.d(TAG, "removeView (non-fatal): ${e.message}")
         }
 
+        // CopyPaste-xxi2: restore the ClipboardService capture overlay now that our
+        // focusable overlay has been removed. The service overlay re-grants the process
+        // a window token for background clipboard reads without competing for focus.
+        ClipboardService.restoreCaptureOverlay()
+
         // Do NOT cancel scope here: launched capture coroutines must drain their
         // SharedPreferences writes before the process yields. The SupervisorJob and
         // Dispatchers.IO coroutines are typically fast (< 50 ms). The scope will be
@@ -281,6 +297,9 @@ class ClipboardFloatingActivity : Activity() {
         if (view != null) {
             try { wm.removeView(view) } catch (_: Exception) { }
         }
+        // CopyPaste-xxi2: always restore the service overlay on destroy — if
+        // cleanupAndFinish ran first this is a harmless second call (idempotent flag clear).
+        ClipboardService.restoreCaptureOverlay()
         scope.cancel()
         super.onDestroy()
     }

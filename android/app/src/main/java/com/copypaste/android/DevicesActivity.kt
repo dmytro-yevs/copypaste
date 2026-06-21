@@ -248,6 +248,30 @@ internal fun PairedPeer.isOnline(nowMs: Long = System.currentTimeMillis()): Bool
 internal const val RECENT_SYNC_MS = 5 * 60 * 1_000L
 
 /**
+ * CopyPaste-d6z3: pure online-derivation function matching macOS daemon logic.
+ *
+ * A peer is "online" iff EITHER:
+ *  (a) its [lastSyncMs] is within [recentSyncMs] of [nowMs] (recent successful sync), OR
+ *  (b) it is currently in the mDNS discovery table ([isMdnsDiscovered]).
+ *
+ * This mirrors the macOS `isPeerOnline` derivation: online = recentSync || mDNSDiscovered.
+ * [onlineWindowMs] is retained as a separate parameter for future use (e.g. a tighter
+ * P2P-contact window gate); currently [recentSyncMs] is the sole lastSyncMs gate.
+ *
+ * Pure function: no Android runtime dependencies — unit-testable without an emulator.
+ */
+internal fun isPeerOnline(
+    lastSyncMs: Long,
+    isMdnsDiscovered: Boolean,
+    nowMs: Long,
+    onlineWindowMs: Long,
+    recentSyncMs: Long,
+): Boolean {
+    val recentSync = lastSyncMs > 0L && (nowMs - lastSyncMs) <= recentSyncMs
+    return recentSync || isMdnsDiscovered
+}
+
+/**
  * Shared online-count state published by [DevicesScreen] and consumed by
  * [com.copypaste.android.ui.SyncStatusBadge] so both the footer dot+count AND
  * every PeerCard dot are driven by the SAME single computation.
@@ -313,14 +337,19 @@ object DevicesOnlineState {
     /**
      * PG-41: start a background polling loop that publishes [onlineCount] /
      * [lastActivityMs] every [BACKGROUND_POLL_MS] using [Settings.pairedPeers]
-     * and [PairedPeer.isOnline]. Intended to be called once from
+     * and [isPeerOnline]. Intended to be called once from
      * [CopyPasteApplication.onCreate] (or a long-lived coroutine scope) so the
      * footer badge shows the real peer count BEFORE [DevicesScreen] is ever shown,
      * removing the binary fallback in [SyncStatusBadge].
      *
+     * CopyPaste-d6z3: uses [isPeerOnline] with [RECENT_SYNC_MS] so the background
+     * badge count matches macOS parity (online = recentSync OR mDNS-discovered).
+     * The mDNS signal is not available in this context (it lives in ClipboardService),
+     * so isMdnsDiscovered=false is passed; [DevicesScreen] provides the full composite
+     * signal via [onlineByFingerprint] while the screen is visible.
+     *
      * Safe to call from any coroutine scope; the loop exits when the scope is
-     * cancelled. Does NOT use mDNS (that lives in ClipboardService) — it only
-     * checks [PairedPeer.isOnline] (the [ONLINE_WINDOW_MS] lastSyncMs gate).
+     * cancelled. Does NOT use mDNS (that lives in ClipboardService).
      *
      * Note: caller must ensure [isNativeLibraryLoaded] before starting, or wrap
      * the body in a guard, to avoid crashing on devices where the .so failed.
@@ -329,7 +358,19 @@ object DevicesOnlineState {
         while (true) {
             val peers = settings.pairedPeers
             val nowMs = System.currentTimeMillis()
-            val count = peers.count { it.isOnline(nowMs) }
+            // CopyPaste-d6z3: use isPeerOnline with RECENT_SYNC_MS (5 min, macOS parity)
+            // instead of the old isOnline() which used the 60 s ONLINE_WINDOW_MS gate.
+            // isMdnsDiscovered=false: mDNS lives in ClipboardService, unavailable here;
+            // DevicesScreen overrides with the full composite signal while visible.
+            val count = peers.count { peer ->
+                isPeerOnline(
+                    lastSyncMs = peer.lastSyncMs,
+                    isMdnsDiscovered = false,
+                    nowMs = nowMs,
+                    onlineWindowMs = ONLINE_WINDOW_MS,
+                    recentSyncMs = RECENT_SYNC_MS,
+                )
+            }
             val maxLastSyncMs = peers.maxOfOrNull { it.lastSyncMs } ?: 0L
             publish(count = count, maxLastSyncMs = maxLastSyncMs)
             delay(BACKGROUND_POLL_MS)
@@ -559,8 +600,17 @@ fun DevicesScreen(
                 peer.peerLocalIp?.takeIf { it.isNotEmpty() },
             )
             val viaMdns = peerIpHosts.any { host -> discoveredIps.contains(host) }
-            val viaRecent = peer.isOnline(nowMs)
-            peer.fingerprint to (viaMdns || viaRecent)
+            // CopyPaste-d6z3: use isPeerOnline (recentSync OR mDNS-discovered) instead of
+            // the old peer.isOnline() which only checked the 60 s ONLINE_WINDOW_MS gate.
+            // isPeerOnline uses RECENT_SYNC_MS (5 min) matching macOS parity.
+            val online = isPeerOnline(
+                lastSyncMs = peer.lastSyncMs,
+                isMdnsDiscovered = viaMdns,
+                nowMs = nowMs,
+                onlineWindowMs = ONLINE_WINDOW_MS,
+                recentSyncMs = RECENT_SYNC_MS,
+            )
+            peer.fingerprint to online
         }
     }
 

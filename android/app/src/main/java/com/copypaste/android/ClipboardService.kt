@@ -1193,19 +1193,28 @@ class ClipboardService : Service() {
                 return
             }
 
-            // Re-encode as PNG (lossless) for the full-res copy.
+            // Re-encode the bitmap for the full-res copy (format governed by imageQuality setting).
             // Also generate a thumbnail from the same Bitmap before recycling.
             // Both operations run before recycle() — bitmap stays valid for both.
-            val pngBytes: ByteArray?
+            // CopyPaste-ctmv: apply the user's imageQuality setting to the encode step.
+            // PNG ignores the quality parameter (it is always lossless), so when the user
+            // requests quality < 100 we switch to JPEG which actually honours the value.
+            // Quality 100 keeps PNG (lossless) as before; 1–99 switches to JPEG lossy.
+            // The stored content_type stays "image/*" (original MIME) regardless of the
+            // encode format — the receiver decodes by bytes, not by the stored MIME label.
+            val encodeQuality = settings.imageQuality
+            val useJpeg = encodeQuality < 100
+            val encodeFormat = if (useJpeg) Bitmap.CompressFormat.JPEG else Bitmap.CompressFormat.PNG
+            val pngBytes: ByteArray?  // named pngBytes for historical compat; may hold JPEG bytes when useJpeg=true
             val thumbBytes: ByteArray?
             try {
                 pngBytes = try {
                     ByteArrayOutputStream().use { baos ->
-                        bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                        bitmap.compress(encodeFormat, encodeQuality, baos)
                         baos.toByteArray()
                     }
                 } catch (t: Throwable) {
-                    Log.w(TAG, "captureImageClip: PNG encode failed: ${t.message}")
+                    Log.w(TAG, "captureImageClip: ${if (useJpeg) "JPEG" else "PNG"} encode failed: ${t.message}")
                     null
                 }
 

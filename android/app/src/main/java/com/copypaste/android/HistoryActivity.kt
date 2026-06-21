@@ -1624,7 +1624,12 @@ fun HistoryScreen(
                                 }
                                 if (uri != null) {
                                     val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
-                                    ctx.grantUriPermission("com.android.systemui", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    // CopyPaste-ekcv: grant to all installed packages, not just
+                                    // "com.android.systemui". On OEMs where the clipboard host is
+                                    // not com.android.systemui (MIUI uses com.miui.home, Samsung
+                                    // uses com.samsung.android.app.clipboard, etc.) a hardcoded
+                                    // grant fails silently and the paste app cannot read the URI.
+                                    grantUriToAll(ctx, uri)
                                     cm.setPrimaryClip(clip)
                                 }
                             }
@@ -1644,7 +1649,9 @@ fun HistoryScreen(
                                 }
                                 if (uri != null) {
                                     val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
-                                    ctx.grantUriPermission("com.android.systemui", uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    // CopyPaste-ekcv: same fix — grant to all packages rather than
+                                    // hardcoding com.android.systemui (fails on OEM ROM variants).
+                                    grantUriToAll(ctx, uri)
                                     cm.setPrimaryClip(clip)
                                 }
                             }

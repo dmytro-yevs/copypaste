@@ -107,23 +107,6 @@ class OnlineOfflineDerivationTest {
     }
 }
 
-/**
- * Pure-JVM online derivation — mirrors macOS daemon peer-online logic.
- *
- * A peer is "online" iff:
- *   - lastSyncMs is within [recentSyncMs] of [nowMs], OR
- *   - the peer is currently in the mDNS discovery table ([isMdnsDiscovered]).
- *
- * [onlineWindowMs] is reserved for a future tighter P2P-contact window gate
- * (currently unused — recentSyncMs is the single gate).
- */
-fun isPeerOnline(
-    lastSyncMs: Long,
-    isMdnsDiscovered: Boolean,
-    nowMs: Long,
-    onlineWindowMs: Long,
-    recentSyncMs: Long,
-): Boolean {
-    val recentSync = lastSyncMs > 0L && (nowMs - lastSyncMs) <= recentSyncMs
-    return recentSync || isMdnsDiscovered
-}
+// isPeerOnline is defined in DevicesActivity.kt (main source, same package).
+// The local stub has been removed: the tests now exercise the canonical production
+// implementation to ensure the derivation stays in sync.
