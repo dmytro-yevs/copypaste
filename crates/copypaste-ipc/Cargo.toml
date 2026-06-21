@@ -11,3 +11,6 @@ repository.workspace = true
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+# `home` resolves the platform-specific home directory for `paths::socket_path()`.
+# Pinned to workspace version to match the daemon and CLI.
+home.workspace = true

@@ -1058,6 +1058,11 @@ mod tests {
         // in_flight=false must not change the derivation — ensures backward
         // compatibility between compute_sync_badge_state and the _with_inflight
         // variant.
+        // Each tuple is (passphrase_set, url_set, configured, signed_in, last_sync,
+        // expected_badge).  The six-element anonymous tuple is deliberately
+        // kept inline here — a named type would add noise without clarity for a
+        // single test-internal table.
+        #[allow(clippy::type_complexity)]
         let cases: &[(bool, bool, bool, bool, Option<i64>, SyncBadgeState)] = &[
             (true, true, true, true, Some(RECENT_MS), SyncBadgeState::Synced),
             (true, true, true, true, Some(STALE_MS), SyncBadgeState::Idle),
