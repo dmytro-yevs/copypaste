@@ -28,6 +28,8 @@
 
 pub mod error;
 pub mod methods;
+/// Canonical socket-path resolver — single source of truth for where the daemon socket lives.
+pub mod paths;
 pub mod request;
 pub mod response;
 

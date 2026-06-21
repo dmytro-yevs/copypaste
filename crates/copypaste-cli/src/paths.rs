@@ -1,14 +1,9 @@
 //! Filesystem path resolution for the CLI.
 //!
-//! These MUST stay byte-for-byte compatible with the daemon's path resolution
-//! in `crates/copypaste-daemon/src/paths.rs` — the CLI connects to the socket
-//! (and, for `vacuum`, opens the DB) that the daemon binds. Any divergence
-//! means the CLI talks to a path the daemon never created.
-//!
-//! Resolution mirrors the daemon exactly:
-//!   - `COPYPASTE_SOCKET` / `COPYPASTE_DB` env overrides win first.
-//!   - macOS:   `~/Library/Application Support/CopyPaste`
-//!   - Linux/other: `$XDG_DATA_HOME/copypaste` or `~/.local/share/copypaste`.
+//! `socket_path()` now delegates to [`copypaste_ipc::paths::socket_path`] —
+//! the single canonical resolver — so the CLI and daemon can never diverge
+//! on where the socket lives.  The local `app_support_dir()` is retained only
+//! for the CLI-local `db_path()` helper.
 //!
 //! Windows note (ADR-012: frozen/Homebrew-only): the named-pipe variant
 //! `\\.\pipe\copypaste-daemon` referenced below is ASPIRATIONAL and unused —
@@ -55,20 +50,11 @@ fn app_support_dir() -> PathBuf {
 
 /// Returns the IPC socket path the daemon binds.
 ///
-/// On Windows this is a named-pipe path (`\\.\pipe\copypaste-daemon`); on Unix
-/// it is `daemon.sock` inside [`app_support_dir`]. Honours `COPYPASTE_SOCKET`.
+/// Delegates to [`copypaste_ipc::paths::socket_path`] — the single canonical
+/// resolver shared by the daemon, CLI, and UI.  See that function's
+/// documentation for resolution order and platform paths.
 pub fn socket_path() -> PathBuf {
-    if let Ok(p) = std::env::var("COPYPASTE_SOCKET") {
-        return PathBuf::from(p);
-    }
-    #[cfg(target_os = "windows")]
-    {
-        PathBuf::from(r"\\.\pipe\copypaste-daemon")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        app_support_dir().join("daemon.sock")
-    }
+    copypaste_ipc::paths::socket_path()
 }
 
 #[allow(dead_code)] // tests call this; production code routes vacuum through IPC now.

@@ -65,21 +65,11 @@ pub fn app_support_dir() -> PathBuf {
 
 /// Returns the IPC socket path.
 ///
-/// On Windows this is a named-pipe path (`\\.\pipe\copypaste-daemon`);
-/// on Unix it is a socket file inside `app_support_dir()`.
+/// Delegates to [`copypaste_ipc::paths::socket_path`] — the single canonical
+/// resolver shared by the daemon, CLI, and UI.  See that function's
+/// documentation for resolution order and platform paths.
 pub fn socket_path() -> PathBuf {
-    if let Ok(p) = std::env::var("COPYPASTE_SOCKET") {
-        return PathBuf::from(p);
-    }
-    #[cfg(target_os = "windows")]
-    {
-        // Named pipes use a pseudo-filesystem path, not a real directory.
-        PathBuf::from(r"\\.\pipe\copypaste-daemon")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        app_support_dir().join("daemon.sock")
-    }
+    copypaste_ipc::paths::socket_path()
 }
 
 pub fn db_path() -> PathBuf {
