@@ -10,7 +10,8 @@ description = "Beta-bonus criterion benchmark harness for CopyPaste"
 [dependencies]
 
 [dev-dependencies]
-copypaste-core = { path = "../copypaste-core" }
+copypaste-core = { path = "../copypaste-core", features = ["test-helpers"] }
+rusqlite = { workspace = true }
 copypaste-ipc = { path = "../copypaste-ipc" }
 copypaste-sync = { path = "../copypaste-sync" }
 clap = { workspace = true, features = ["derive"] }
@@ -42,4 +43,8 @@ harness = false
 
 [[bench]]
 name = "cli_parse"
+harness = false
+
+[[bench]]
+name = "migration"
 harness = false

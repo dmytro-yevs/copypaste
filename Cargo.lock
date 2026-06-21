@@ -852,6 +852,7 @@ dependencies = [
  "copypaste-ipc",
  "copypaste-sync",
  "criterion",
+ "rusqlite",
  "serde_json",
  "sha2",
  "tempfile",
