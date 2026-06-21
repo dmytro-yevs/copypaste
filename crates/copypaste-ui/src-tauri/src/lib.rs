@@ -47,6 +47,14 @@ struct UiConfig {
     /// Where to position the quick-paste popup when shown.
     #[serde(default)]
     popup_position: PopupPosition,
+    /// CopyPaste-6uy9: when `true`, screenshot / screen-recording capture is
+    /// ALLOWED (content protection is disabled).  Default `false` = protection
+    /// ON, matching the previous hard-coded behaviour (PG-25 / CopyPaste-13a3).
+    ///
+    /// Named "allow_screenshots" so the positive value (true) maps to the user
+    /// action ("allow screenshots") rather than a double-negative.
+    #[serde(default = "default_allow_screenshots")]
+    allow_screenshots: bool,
 }
 
 fn default_launch_at_login() -> bool {
@@ -57,12 +65,18 @@ fn default_popup_shortcut() -> String {
     DEFAULT_POPUP_SHORTCUT.to_string()
 }
 
+/// Default for `allow_screenshots`: `false` = protection ON (PG-25 default).
+fn default_allow_screenshots() -> bool {
+    false
+}
+
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
             popup_shortcut: DEFAULT_POPUP_SHORTCUT.to_string(),
             launch_at_login: true,
             popup_position: PopupPosition::default(),
+            allow_screenshots: false,
         }
     }
 }
@@ -116,6 +130,12 @@ struct CurrentShortcut(Mutex<String>);
 /// without reloading the full config from disk on every call.
 struct CurrentPopupPosition(Mutex<PopupPosition>);
 
+/// CopyPaste-6uy9: persisted allow-screenshots preference.  Wrapped in Mutex
+/// so `set_allow_screenshots` can update it without touching the full config.
+/// `true` = screenshots allowed (content protection OFF).
+/// `false` = protection ON (PG-25 default).
+struct AllowScreenshots(Mutex<bool>);
+
 /// Bundle ID (or process identifier as fallback) of the app that was
 /// frontmost when the popup was last shown.  Used to restore focus after
 /// the user picks an item.
@@ -161,6 +181,10 @@ pub fn run() {
     tauri::Builder::default()
         .manage(CurrentShortcut(Mutex::new(cfg.popup_shortcut)))
         .manage(CurrentPopupPosition(Mutex::new(cfg.popup_position)))
+        // CopyPaste-6uy9: allow-screenshots state — initialised to the UiConfig
+        // default (false = protection ON); overwritten in setup once the handle
+        // is available and the persisted config is read.
+        .manage(AllowScreenshots(Mutex::new(cfg.allow_screenshots)))
         .manage(daemon_lifecycle::DaemonChild::default())
         .manage(daemon_lifecycle::DaemonSpawnError::default())
         .manage(daemon_lifecycle::DaemonLifecycleGen::default())
@@ -208,6 +232,8 @@ pub fn run() {
             set_launch_at_login,
             get_popup_position,
             set_popup_position,
+            get_allow_screenshots,
+            set_allow_screenshots,
             ipc::read_logs,
             ipc::log_dir_path,
             ipc::open_item_file,
@@ -226,6 +252,13 @@ pub fn run() {
                 let state: State<CurrentPopupPosition> = app.state();
                 let mut guard = state.0.lock().expect("mutex poisoned");
                 *guard = persisted.popup_position.clone();
+            }
+            {
+                // CopyPaste-6uy9: overwrite AllowScreenshots with the persisted
+                // value so the window builder below sees the correct setting.
+                let state: State<AllowScreenshots> = app.state();
+                let mut guard = state.0.lock().expect("mutex poisoned");
+                *guard = persisted.allow_screenshots;
             }
 
             // App-owned daemon lifecycle: start the daemon on a background
@@ -312,7 +345,10 @@ pub fn run() {
 
             #[cfg(target_os = "macos")]
             {
-                setup_macos(app);
+                // CopyPaste-6uy9: pass the persisted allow-screenshots flag so
+                // setup_macos can skip set_content_protected when the user has
+                // explicitly opted in.
+                setup_macos(app, persisted.allow_screenshots);
                 try_install_event_tap(app.handle(), &persisted.popup_shortcut);
             }
 
@@ -531,6 +567,60 @@ fn set_popup_position(
     }
     let mut cfg = load_ui_config(&handle);
     cfg.popup_position = pos;
+    save_ui_config(&handle, &cfg)
+}
+
+// ---------------------------------------------------------------------------
+// Allow-screenshots commands (CopyPaste-6uy9)
+// ---------------------------------------------------------------------------
+
+/// Return the current allow-screenshots preference.
+/// `true` = screenshots allowed (content protection OFF).
+/// `false` = protection ON (default, PG-25).
+#[tauri::command]
+fn get_allow_screenshots(state: State<'_, AllowScreenshots>) -> bool {
+    *state.0.lock().expect("mutex poisoned")
+}
+
+/// Enable or disable screenshot / screen-recording protection for all windows.
+///
+/// `allow = true`  — call set_content_protected(false) on main + popup windows
+///                   so screen-capture tools can see CopyPaste.
+/// `allow = false` — re-enable protection (default, PG-25 behaviour).
+///
+/// The preference is persisted to `ui-config.json` and applied immediately to
+/// any open windows so the user does not have to restart.
+#[tauri::command]
+#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+fn set_allow_screenshots(
+    allow: bool,
+    handle: tauri::AppHandle,
+    state: State<'_, AllowScreenshots>,
+) -> Result<(), String> {
+    // Update in-memory state first.
+    {
+        let mut guard = state.0.lock().expect("mutex poisoned");
+        *guard = allow;
+    }
+
+    // Apply to every open window immediately (non-fatal per-window).
+    #[cfg(target_os = "macos")]
+    {
+        let protected = !allow;
+        for label in &["main", "popup"] {
+            if let Some(win) = handle.get_webview_window(label) {
+                if let Err(e) = win.set_content_protected(protected) {
+                    tracing::warn!(
+                        "CopyPaste-6uy9: set_content_protected({protected}) on {label} failed: {e}"
+                    );
+                }
+            }
+        }
+    }
+
+    // Persist to config.
+    let mut cfg = load_ui_config(&handle);
+    cfg.allow_screenshots = allow;
     save_ui_config(&handle, &cfg)
 }
 
@@ -1151,15 +1241,19 @@ fn toggle_popup(handle: &tauri::AppHandle) {
                     // Wire blur-handler + vibrancy the first time we build.
                     // Infallible: we just built the window above.
                     wire_popup(&w);
-                    // CopyPaste-c27b: the popup is a SEPARATE window from "main"
-                    // (PG-25 only protects main, lib.rs:2182). Exclude the popup
-                    // from screen capture too — clipboard previews shown here must
-                    // not leak into recordings/screenshots. Maps to macOS
-                    // NSWindowSharingNone. Non-fatal: log and continue on failure.
-                    if let Err(e) = w.set_content_protected(true) {
-                        tracing::warn!(
-                            "CopyPaste-c27b: popup set_content_protected(true) failed: {e}"
-                        );
+                    // CopyPaste-c27b / CopyPaste-6uy9: exclude the popup from
+                    // screen capture unless the user has enabled "Allow screenshots".
+                    // Maps to macOS NSWindowSharingNone. Non-fatal.
+                    let allow = handle
+                        .try_state::<AllowScreenshots>()
+                        .map(|s| *s.0.lock().expect("mutex poisoned"))
+                        .unwrap_or(false);
+                    if !allow {
+                        if let Err(e) = w.set_content_protected(true) {
+                            tracing::warn!(
+                                "CopyPaste-c27b: popup set_content_protected(true) failed: {e}"
+                            );
+                        }
                     }
                     w
                 }
@@ -2244,7 +2338,7 @@ fn spawn_incoming_pairing_poller(handle: tauri::AppHandle) {
 }
 
 #[cfg(target_os = "macos")]
-fn setup_macos(app: &tauri::App) {
+fn setup_macos(app: &tauri::App, allow_screenshots: bool) {
     use tauri::ActivationPolicy;
     use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
 
@@ -2263,15 +2357,18 @@ fn setup_macos(app: &tauri::App) {
             None,
         );
 
-        // PG-25 / CopyPaste-13a3: prevent screenshots and screen recordings from
-        // capturing clipboard history.  Android parity: HistoryActivity.kt:224-227
-        // sets FLAG_SECURE; here we set NSWindow.sharingType = .none via Tauri's
-        // content-protection API, which maps to the Wry/WKWebView host window.
-        // Non-fatal: if the runtime call fails (e.g. mock environment), log and
-        // continue — the window still functions; only the screen-capture guard is
-        // absent.
-        if let Err(e) = win.set_content_protected(true) {
-            tracing::warn!("PG-25: set_content_protected(true) failed: {e}");
+        // PG-25 / CopyPaste-13a3 / CopyPaste-6uy9:
+        // Prevent screenshots and screen recordings from capturing clipboard
+        // history UNLESS the user has explicitly enabled "Allow screenshots" in
+        // Settings (allow_screenshots = true).  Default = false (protection ON).
+        // Android parity: HistoryActivity.kt:224-227 sets FLAG_SECURE.
+        // Non-fatal: log and continue on failure.
+        if !allow_screenshots {
+            if let Err(e) = win.set_content_protected(true) {
+                tracing::warn!("PG-25: set_content_protected(true) failed: {e}");
+            }
+        } else {
+            tracing::info!("CopyPaste-6uy9: content protection disabled — screenshots allowed by user preference");
         }
     }
 }

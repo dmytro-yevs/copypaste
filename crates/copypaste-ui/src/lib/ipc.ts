@@ -1374,3 +1374,30 @@ export async function showPairingRequestNotification(peerName: string): Promise<
 export async function pasteAsPlainText(text: string): Promise<void> {
   await invoke<void>("paste_plain_text", { text });
 }
+
+// ---------------------------------------------------------------------------
+// CopyPaste-6uy9: allow-screenshots / content-protection toggle
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the current allow-screenshots preference.
+ * `true` = screenshots allowed (content protection disabled).
+ * `false` = content protection ON (default — PG-25 behaviour).
+ */
+export async function getAllowScreenshots(): Promise<boolean> {
+  return invoke<boolean>("get_allow_screenshots");
+}
+
+/**
+ * Enable or disable screenshot / screen-recording protection for all windows.
+ *
+ * `allow = true`  — disables NSWindowSharingNone so screen-capture tools
+ *                   can capture CopyPaste windows.
+ * `allow = false` — re-enables protection (PG-25 default).
+ *
+ * The preference is persisted to `ui-config.json` and applied immediately
+ * to all open windows without a restart.
+ */
+export async function setAllowScreenshots(allow: boolean): Promise<void> {
+  await invoke<void>("set_allow_screenshots", { allow });
+}

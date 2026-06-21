@@ -16,6 +16,8 @@ import {
   setPopupShortcut,
   restartDaemon,
   detectStaleDaemonFromStatus,
+  getAllowScreenshots,
+  setAllowScreenshots,
   type AppSettings,
   type SyncStatus,
   type DaemonStatus,
@@ -753,6 +755,11 @@ export function SettingsView() {
   const [excludedApps, setExcludedApps] = useState<string[]>([]);
   // Text buffer for the "add excluded app" input.
   const [newExcludedApp, setNewExcludedApp] = useState("");
+  // CopyPaste-6uy9: allow-screenshots preference — Tauri-direct (not daemon).
+  // false = content protection ON (PG-25 default); true = screenshots allowed.
+  const [allowScreenshots, setAllowScreenshots_state] = useState(false);
+  const [allowScreenshotsError, setAllowScreenshotsError] = useState<string | null>(null);
+  const allowScreenshotsErrTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync-path restart guard: true while restart_daemon is in flight after a
   // sync-path toggle (P2P/relay/Supabase). Disables the control so rapid
@@ -829,6 +836,7 @@ export function SettingsView() {
       if (exportMsgTimerRef.current !== null) clearTimeout(exportMsgTimerRef.current);
       if (importMsgTimerRef.current !== null) clearTimeout(importMsgTimerRef.current);
       if (vacuumMsgTimerRef.current !== null) clearTimeout(vacuumMsgTimerRef.current);
+      if (allowScreenshotsErrTimer.current !== null) clearTimeout(allowScreenshotsErrTimer.current);
       for (const t of Object.values(limitsMsgTimers.current)) clearTimeout(t);
     };
   }, []);
@@ -851,6 +859,16 @@ export function SettingsView() {
         })
         .catch(() => {
           // Keep default if Tauri command fails (shouldn't happen in normal operation).
+        });
+
+      // CopyPaste-6uy9: allow-screenshots is Tauri-direct (not daemon-backed).
+      getAllowScreenshots()
+        .then((v) => {
+          if (cancelled) return;
+          setAllowScreenshots_state(v);
+        })
+        .catch(() => {
+          // Non-fatal: keep the default false (protection ON).
         });
 
       // CopyPaste-sqw0: fetch the authoritative default shortcut from Rust so
@@ -1228,6 +1246,28 @@ export function SettingsView() {
       }
     },
     [pmErrTimer]
+  );
+
+  // -------------------------------------------------------------------------
+  // General — Allow screenshots (CopyPaste-6uy9)
+  // -------------------------------------------------------------------------
+
+  const handleAllowScreenshots = useCallback(
+    async (val: boolean) => {
+      setAllowScreenshots_state(val);
+      setAllowScreenshotsError(null);
+      try {
+        await setAllowScreenshots(val);
+      } catch (err) {
+        // Revert on failure.
+        setAllowScreenshots_state(!val);
+        const msg = ipcErrorMessage(err, "Failed to update screenshot protection");
+        setAllowScreenshotsError(msg);
+        if (allowScreenshotsErrTimer.current !== null) clearTimeout(allowScreenshotsErrTimer.current);
+        allowScreenshotsErrTimer.current = setTimeout(() => setAllowScreenshotsError(null), 3500);
+      }
+    },
+    [allowScreenshotsErrTimer]
   );
 
   // -------------------------------------------------------------------------
@@ -1808,6 +1848,30 @@ export function SettingsView() {
                 }}
                 disabled={offline}
               />
+            </div>
+          </SettingsRow>
+          {/* CopyPaste-6uy9: allow-screenshots toggle. Tauri-direct (not daemon).
+              Default = OFF (content protection ON = PG-25 behaviour). When enabled
+              the NSWindow.sharingType is set to .readOnly so screenshots & screen
+              recordings can capture CopyPaste windows. */}
+          <SettingsRow label="Allow screenshots / screen recording">
+            <div className="flex flex-col items-end gap-1">
+              {allowScreenshots && (
+                <span className="text-[11px] text-ide-warning" role="note">
+                  Clipboard content may be captured by screenshots and screen recordings.
+                </span>
+              )}
+              {allowScreenshotsError !== null && (
+                <span className="text-[11px] text-ide-danger">{allowScreenshotsError}</span>
+              )}
+              <div className="flex items-center gap-1.5">
+                <InfoPopover text="When off (default), CopyPaste is excluded from screenshots and screen recordings (macOS NSWindowSharingNone / Android FLAG_SECURE). Enable only if you need to record or share your screen while using CopyPaste. The preference is applied immediately to all open windows." />
+                <Toggle
+                  checked={allowScreenshots}
+                  onChange={(v) => void handleAllowScreenshots(v)}
+                  aria-label="Allow screenshots and screen recording"
+                />
+              </div>
             </div>
           </SettingsRow>
           <div className="border-b border-ide-divider/70 px-3 py-2 last:border-b-0">

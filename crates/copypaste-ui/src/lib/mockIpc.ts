@@ -785,6 +785,13 @@ export async function mockInvoke(
     case "focus_main_window":
       return undefined;
 
+    // CopyPaste-6uy9: allow-screenshots preference (mock: protection ON by default)
+    case "get_allow_screenshots":
+      return false;
+
+    case "set_allow_screenshots":
+      return undefined;
+
     default:
       console.warn("[mock-ipc] unhandled Tauri command:", cmd);
       return undefined;

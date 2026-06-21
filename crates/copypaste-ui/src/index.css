@@ -963,7 +963,7 @@ body::after {
   /* opacity driven by glow-strength × motion-opacity; calm mode dims both */
   opacity: calc(var(--glow-strength) * var(--motion-opacity));
   mix-blend-mode: screen;
-  will-change: transform, filter, opacity;
+  /* [calm] will-change removed — elements are now static, no GPU layer needed */
 }
 
 body::before {
@@ -980,8 +980,8 @@ body::before {
       color-mix(in srgb, var(--accent-3) 42%, transparent),
       transparent);
   filter: blur(18px);
-  /* speed scalar slows the spin for calm/balanced motion profiles */
-  animation: auroraSpin calc(18s * var(--speed)) linear infinite;
+  /* [calm] auroraSpin removed — background is now static (no idle animation). */
+  transform: rotate(-14deg) scale(1);
 }
 
 body::after {
@@ -1000,15 +1000,8 @@ body::after {
   /* No animation — static ambient glow only */
 }
 
-/* Reduced-motion: stop all aurora animations; opacity is already zeroed by
-   the :root { --motion-opacity: 0 } override in the @media block above,
-   but we also freeze the transform so there's zero paint cost. */
-@media (prefers-reduced-motion: reduce) {
-  body::before,
-  body::after {
-    animation: none !important;
-  }
-}
+/* body::before / ::after are now static (no animation) — no reduced-motion
+   override needed. The pseudo-elements simply render their fixed background. */
 
 #root {
   display: flex;
@@ -1810,19 +1803,11 @@ button,
   }
 }
 
-/* ── Aurora background animations (CopyPaste-52mz) ──────────────────────────
-   auroraSpin: the upper-right conic gradient orb rotates + scale-pulses.
-   [rgwb] glowDrift removed — body::after is now a static ambient glow blob.
-   Speed is scaled by --speed (cinematic = 0.72 → faster). */
+/* ── Aurora background — STATIC (no animation) ────────────────────────────
+   [calm] auroraSpin and glowDrift both removed. The background orbs are now
+   fixed in place. Colour atmosphere is preserved; zero idle animation. */
 
-@keyframes auroraSpin {
-  0%   { transform: rotate(-14deg) scale(1);    filter: blur(18px) hue-rotate(0deg); }
-  50%  { transform: rotate(18deg)  scale(1.08); filter: blur(28px) hue-rotate(10deg); }
-  100% { transform: rotate(346deg) scale(1);    filter: blur(18px) hue-rotate(0deg); }
-}
-
-/* glowDrift keyframe removed [rgwb]: body::after is now a static ambient blob.
-   The animation produced a visible light line sweeping the entire app layout. */
+/* glowDrift and auroraSpin keyframes removed [calm]. */
 
 /* ── Glass hover-shine sweep ─────────────────────────────────────────────────
    [rgwb] Toned down: opacity halved (0.45 → 0.18) so it reads as a soft sheen,
@@ -1918,105 +1903,66 @@ button,
 }
 
 /* ── Component micro-interaction utilities (Liquid Glass, CopyPaste-965s) ───
-   Self-contained drop-on classes adapted from the styleguide. Each is gated
-   by --motion-opacity / --speed and dies under prefers-reduced-motion (the
-   global * rule above + the :root motion override). Apply by adding the class
-   to the target element; pseudo-element variants build their own overlay so no
-   extra markup is needed. */
+   [calm] All LOOPING / idle animations removed. Only one-shot entrance and
+   hover affordances remain (glassShine on hover, togglePop on toggle,
+   tabIndicator on tab switch). Classes kept as no-ops so existing markup
+   compiles without change.
 
-/* Live presence dot — expanding ping ring (uses currentColor of the dot).
-   [rgwb fix 3] Default border-radius: 50% so the ring is always circular.
-   Components can override with border-radius: inherit if the parent is already
-   a circle. This prevents a square ping ring on elements with no border-radius. */
+   Removed looping animations:
+     statusPing (2.4 s infinite) — status-ping class now a static dot
+     iconFloat  (4 s infinite)   — icon-float class becomes no-op
+     networkRing (2.7 s infinite) — network-rings class becomes no-op
+     qrScan    (2.5 s infinite)  — qr-scan class no longer draws a scan line
+     navActivePulse (3.2 s infinite) — nav-active-glow becomes no-op
+     badgeFloat (3.4 s infinite) — badge-float becomes no-op
+     progressPulse (2.6 s infinite) — progress-pulse becomes no-op           */
+
+/* Live presence dot — static ring, no looping animation. */
 .status-ping { position: relative; }
 .status-ping::after {
   content: "";
   position: absolute;
   inset: -5px;
-  /* 50% default makes ping rings circular regardless of parent shape.
-     Square ping rings were visible on device presence dots [rgwb fix 3]. */
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, currentColor 60%, transparent);
-  animation: statusPing calc(2.4s * var(--speed, .72)) ease-out infinite;
-  opacity: var(--motion-opacity, 1);
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  /* [calm] ping animation removed — ring is static */
+  opacity: 0.4;
   pointer-events: none;
 }
-@keyframes statusPing {
-  0% { opacity: .7; transform: scale(.5); }
-  100% { opacity: 0; transform: scale(1.8); }
-}
 
-/* Gentle floating glyph (history/quick-tile icons). */
-.icon-float { animation: iconFloat calc(4s * var(--speed, .72)) ease-in-out infinite; }
-@keyframes iconFloat {
-  0%, 100% { transform: translateY(0) rotate(0deg); }
-  50% { transform: translateY(-2px) rotate(.8deg); }
-}
+/* Floating glyph — no-op (animation removed). */
+.icon-float { /* [calm] iconFloat infinite removed */ }
 
-/* Discovery network rings (empty-state icon).
-   [rgwb fix 3] Default border-radius: 50% so rings are always circular
-   expanding from the icon. Square rings were visible when the parent icon
-   container had no explicit border-radius. */
+/* Discovery network rings — static subtle rings, no animation. */
 .network-rings { position: relative; }
 .network-rings::before,
 .network-rings::after {
   content: "";
   position: absolute;
   inset: -6px;
-  /* 50% so rings are circles regardless of icon container shape [rgwb fix 3] */
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--accent-2) 35%, transparent);
-  animation: networkRing calc(2.7s * var(--speed, .72)) ease-out infinite;
-  opacity: var(--motion-opacity, 1);
+  border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent);
+  /* [calm] networkRing infinite removed — rings are static */
+  opacity: 0.35;
   pointer-events: none;
 }
-.network-rings::after { animation-delay: calc(1.1s * var(--speed, .72)); }
-@keyframes networkRing {
-  0% { transform: scale(.78); opacity: .5; }
-  100% { transform: scale(1.35); opacity: 0; }
-}
 
-/* QR scan sweep (apply to the QR container; it builds its own scan line). */
+/* QR scan sweep — container only, no animated scan line. */
 .qr-scan { position: relative; overflow: hidden; }
-.qr-scan::after {
-  content: "";
-  position: absolute;
-  left: 14px;
-  right: 14px;
-  top: 14px;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  box-shadow: 0 0 18px var(--accent);
-  animation: qrScan calc(2.5s * var(--speed, .72)) ease-in-out infinite;
-  opacity: var(--motion-opacity, 1);
-  pointer-events: none;
-}
-@keyframes qrScan {
-  0%, 100% { transform: translateY(4px); opacity: 0; }
-  12%, 88% { opacity: .9; }
-  50% { transform: translateY(144px); }
+/* [calm] qr-scan::after scan-line pseudo-element removed entirely */
+
+/* Sidebar active nav-item — static accent glow, no breathing. */
+.nav-active-glow {
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 28%, transparent),
+              inset 0 1px 0 rgba(255,255,255,.30);
+  /* [calm] navActivePulse infinite removed */
 }
 
-/* Sidebar active nav-item breathing glow. */
-.nav-active-glow { animation: navActivePulse calc(3.2s * var(--speed, .72)) ease-in-out infinite; }
-@keyframes navActivePulse {
-  0%, 100% { box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 28%, transparent), inset 0 1px 0 rgba(255,255,255,.30); }
-  50% { box-shadow: 0 10px 32px color-mix(in srgb, var(--accent) 46%, transparent), inset 0 1px 0 rgba(255,255,255,.40); }
-}
+/* Badge — no float. */
+.badge-float { /* [calm] badgeFloat infinite removed */ }
 
-/* Badge gentle float. */
-.badge-float { animation: badgeFloat calc(3.4s * var(--speed, .72)) ease-in-out infinite; }
-@keyframes badgeFloat {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-1px); }
-}
-
-/* Progress bar brightness pulse. */
-.progress-pulse { animation: progressPulse calc(2.6s * var(--speed, .72)) ease-in-out infinite; }
-@keyframes progressPulse {
-  0%, 100% { filter: brightness(1); }
-  50% { filter: brightness(1.25); }
-}
+/* Progress bar — no brightness pulse. */
+.progress-pulse { /* [calm] progressPulse infinite removed */ }
 
 /* Toggle thumb spring pop (toggle on togglePop class to the thumb on change). */
 .toggle-pop { animation: togglePop calc(.36s * var(--speed, .72)) cubic-bezier(.2,1.24,.28,1); }
