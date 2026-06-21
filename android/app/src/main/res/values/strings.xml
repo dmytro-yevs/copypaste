@@ -209,6 +209,8 @@
     <string name="sensitive_badge_label">Sensitive</string>
     <string name="cd_sensitive_item">Sensitive content — preview hidden</string>
     <string name="sensitive_tap_hint">Sensitive — use Copy action</string>
+    <!-- CopyPaste-5917.76: feedback when paste-as-plain-text is ON and user taps a media item -->
+    <string name="error_cannot_paste_as_text">Image and file items cannot be pasted as plain text</string>
 
     <!-- Incoming pairing-request notification channel (Deliverable 1) -->
     <string name="notif_channel_pair_request_name">Pairing Requests</string>

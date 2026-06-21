@@ -23,7 +23,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
+// CopyPaste-5917.23: Outlined variant for consistency with app-wide icon styleguide.
+import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.InputChip
@@ -288,6 +289,9 @@ fun SettingsScreen(
 
     // bd CopyPaste-44rq.22: toast state for export/import feedback.
     val toastState = remember { GlassToastState() }
+    // CopyPaste-5917.17: scope for GlassToast.show (suspend) from non-composable callbacks
+    // (AdbCmdRow tap, log export error). Hoisted at screen level so any tab can use it.
+    val settingsScope = rememberCoroutineScope()
 
     // ── Diagnostics (General tab) ──
     var logcatEnabled by remember { mutableStateOf(settings.logcatCaptureEnabled) }
@@ -549,6 +553,9 @@ fun SettingsScreen(
                         // CopyPaste-hffp: pass live draft density so rows update without Save.
                         density = density,
                         ctx = ctx,
+                        // CopyPaste-5917.17: route AdbCmdRow copy feedback and log-export errors
+                        // through GlassToastHost instead of android.widget.Toast.
+                        onToastRequest = { msg -> settingsScope.launch { toastState.show(msg) } },
                     )
                     TAB_DISPLAY -> DisplayTab(
                         density = density,
@@ -738,6 +745,9 @@ private fun GeneralTab(
     // CopyPaste-hffp: live density state threaded from SettingsScreen (not SharedPrefs snapshot).
     density: Density,
     ctx: android.content.Context,
+    // CopyPaste-5917.17: replaces android.widget.Toast in AdbCmdRow and log-export error path.
+    // Called with a human-readable message; the caller (SettingsScreen) routes it to GlassToastHost.
+    onToastRequest: (String) -> Unit = {},
 ) {
     val c = LocalIdeColors.current
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -835,7 +845,9 @@ private fun GeneralTab(
                 subtitle = stringResource(R.string.log_export_description),
                 buttonLabel = stringResource(R.string.log_export_button),
                 density = density,
-                onClick = { LogExportHelper.shareLogsZip(ctx) }
+                // CopyPaste-5917.17: pass onError so failures route through GlassToastHost
+                // instead of the android.widget.Toast fallback in LogExportHelper.
+                onClick = { LogExportHelper.shareLogsZip(ctx, onError = onToastRequest) }
             )
         }
 
@@ -862,7 +874,9 @@ private fun GeneralTab(
             )
             SettingsCardDivider()
             // Tap-to-copy ADB commands
-            AdbCaptureCommandRows(ctx = ctx)
+            // CopyPaste-5917.17: pass onToastRequest so the copy feedback routes through
+            // GlassToastHost instead of android.widget.Toast.
+            AdbCaptureCommandRows(ctx = ctx, onToastRequest = onToastRequest)
         }
 
         // ── ABOUT (last General entry) ────────────────────────────────────
@@ -2438,7 +2452,11 @@ private fun AdbCaptureStatusLine(
 
 /** Three tap-to-copy ADB command rows for background capture setup. */
 @Composable
-private fun AdbCaptureCommandRows(ctx: android.content.Context) {
+private fun AdbCaptureCommandRows(
+    ctx: android.content.Context,
+    // CopyPaste-5917.17: replaces android.widget.Toast — caller routes to GlassToastHost.
+    onToastRequest: (String) -> Unit = {},
+) {
     val toastText = stringResource(R.string.bg_adb_cmd_copied)
     val commands = listOf(
         stringResource(R.string.bg_adb_cmd1_label) to stringResource(R.string.bg_adb_cmd1),
@@ -2446,11 +2464,11 @@ private fun AdbCaptureCommandRows(ctx: android.content.Context) {
         stringResource(R.string.bg_adb_cmd3_label) to stringResource(R.string.bg_adb_cmd3),
     )
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-        AdbCmdRow(label = commands[0].first, cmd = commands[0].second, toastText = toastText, ctx = ctx)
+        AdbCmdRow(label = commands[0].first, cmd = commands[0].second, toastText = toastText, ctx = ctx, onToastRequest = onToastRequest)
         Spacer(modifier = Modifier.height(6.dp))
-        AdbCmdRow(label = commands[1].first, cmd = commands[1].second, toastText = toastText, ctx = ctx)
+        AdbCmdRow(label = commands[1].first, cmd = commands[1].second, toastText = toastText, ctx = ctx, onToastRequest = onToastRequest)
         Spacer(modifier = Modifier.height(6.dp))
-        AdbCmdRow(label = commands[2].first, cmd = commands[2].second, toastText = toastText, ctx = ctx)
+        AdbCmdRow(label = commands[2].first, cmd = commands[2].second, toastText = toastText, ctx = ctx, onToastRequest = onToastRequest)
     }
 }
 
@@ -2460,6 +2478,10 @@ private fun AdbCmdRow(
     cmd: String,
     toastText: String,
     ctx: android.content.Context,
+    // CopyPaste-5917.17: replaces android.widget.Toast.makeText so the copy feedback
+    // appears as a styled GlassToast (via SettingsScreen's toastState) instead of
+    // the unstyled OS-native black pill. Callers pass a lambda that routes to GlassToastHost.
+    onToastRequest: (String) -> Unit = {},
 ) {
     val c = LocalIdeColors.current
     Text(
@@ -2479,8 +2501,8 @@ private fun AdbCmdRow(
                 val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                     as ClipboardManager
                 cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", cmd))
-                android.widget.Toast.makeText(ctx, toastText, android.widget.Toast.LENGTH_SHORT)
-                    .show()
+                // CopyPaste-5917.17: route feedback through GlassToastHost, not OS Toast.
+                onToastRequest(toastText)
             }
             .padding(top = 2.dp, bottom = 4.dp),
     )
@@ -2604,7 +2626,7 @@ private fun ExcludedAppsRow(
                         shape = RadiusChip,
                         trailingIcon = {
                             Icon(
-                                imageVector = Icons.Default.Close,
+                                imageVector = Icons.Outlined.Close,
                                 contentDescription = stringResource(R.string.action_remove),
                             )
                         },
