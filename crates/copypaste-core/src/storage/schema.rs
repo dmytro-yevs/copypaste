@@ -263,6 +263,24 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_history_page\n\
     ON clipboard_items(pinned DESC, pin_order, wall_time DESC)\n\
     WHERE deleted = 0;\n";
 
+/// Return `true` if `column` already exists in `table`.
+///
+/// Uses `pragma_table_info` which is available on all SQLite versions we
+/// target and works inside and outside transactions.  The result is used to
+/// make `ALTER TABLE … ADD COLUMN` steps idempotent: if a column is already
+/// present (e.g. because a WAL file was replayed onto a freshly-created
+/// database file after `reset_database` deleted and recreated the main .db
+/// file while another connection was still writing its WAL), we skip the
+/// ALTER rather than failing with "duplicate column name".
+fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool, rusqlite::Error> {
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+        rusqlite::params![table, column],
+        |r| r.get(0),
+    )?;
+    Ok(count > 0)
+}
+
 /// Apply pending schema migrations atomically inside a single transaction.
 ///
 /// Behavior contract:
@@ -273,6 +291,15 @@ CREATE INDEX IF NOT EXISTS idx_clipboard_history_page\n\
 ///   * `current_version >  SCHEMA_VERSION` → return `SchemaError::Downgrade`.
 ///     Previously this branch fell through to `Ok(())` and silently masked
 ///     the version mismatch (CRITICAL edge-case #2).
+///
+/// Each `ALTER TABLE … ADD COLUMN` step is guarded by a pre-check via
+/// `column_exists`. This makes the migration chain robust against the
+/// "WAL-replay onto fresh DB" scenario: when `reset_database` deletes the
+/// main .db file while a concurrent connection is writing its WAL, SQLite
+/// may replay that WAL onto the new empty file, leaving `user_version = 0`
+/// but some columns already present. Without the guard the migrator would
+/// fail with "SQLite error: duplicate column name". The guard makes each
+/// step a safe no-op when its column already exists.
 pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     // Connection-level pragmas that MUST run before BEGIN (PRAGMA journal_mode
     // is a no-op inside a transaction). The `Database::open*` paths apply the
@@ -323,9 +350,17 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     if current_version < 2 {
         // Migration v2: add content_hash column for SHA-256-based deduplication.
         // ALTER TABLE is used (not DROP/CREATE) to preserve existing data.
+        // Guard: skip ALTER if the column already exists — the WAL-replay-onto-
+        // fresh-DB scenario (reset_database race) can leave user_version=0 while
+        // columns from later migrations are already present.
+        if !column_exists(conn, "clipboard_items", "content_hash")? {
+            script.push_str(
+                "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n",
+            );
+        }
+        // The index uses CREATE … IF NOT EXISTS so it is always safe to include.
         script.push_str(
-            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
-             CREATE INDEX IF NOT EXISTS idx_clipboard_content_hash\n\
+            "CREATE INDEX IF NOT EXISTS idx_clipboard_content_hash\n\
                  ON clipboard_items(content_hash) WHERE content_hash IS NOT NULL;\n",
         );
     }
@@ -336,7 +371,9 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // empty string for legacy rows; the daemon calls
         // `items::backfill_origin_device_id` after open to stamp the local
         // device UUID onto any rows still carrying the empty default.
-        script.push_str(V3_ALTER_SQL);
+        if !column_exists(conn, "clipboard_items", "origin_device_id")? {
+            script.push_str(V3_ALTER_SQL);
+        }
     }
 
     if current_version < 4 {
@@ -345,7 +382,15 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // The actual decrypt-with-v1 + re-encrypt-with-v2 work is performed
         // by `super::migration_v4::migrate_v1_to_v2_keys`, invoked by the
         // daemon at startup after the schema migration commits.
-        script.push_str(V4_ALTER_SQL);
+        if !column_exists(conn, "clipboard_items", "key_version")? {
+            script.push_str(V4_ALTER_SQL);
+        } else {
+            // Column already exists; still need the index (IF NOT EXISTS is safe).
+            script.push_str(
+                "CREATE INDEX IF NOT EXISTS idx_clipboard_key_version \
+                 ON clipboard_items(key_version) WHERE key_version < 2;\n",
+            );
+        }
     }
 
     if current_version < 5 {
@@ -390,7 +435,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // pinned items survive both the TTL prune and the history-limit prune.
         // `DEFAULT 0` backfills all existing rows as unpinned, which is safe:
         // items were pinned only by clearing `expires_at`, so no data is lost.
-        script.push_str(V7_ALTER_SQL);
+        if !column_exists(conn, "clipboard_items", "pinned")? {
+            script.push_str(V7_ALTER_SQL);
+        } else {
+            script.push_str(
+                "CREATE INDEX IF NOT EXISTS idx_clipboard_pinned \
+                 ON clipboard_items(pinned) WHERE pinned = 1;\n",
+            );
+        }
     }
 
     if current_version < 8 {
@@ -399,7 +451,10 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // the `reorder_pinned` IPC verb. Existing pinned rows are backfilled
         // with their rowid so they start in a stable insertion-order sequence.
         // Unpinned rows keep NULL — the column is only meaningful for pinned items.
-        script.push_str(V8_ALTER_SQL);
+        if !column_exists(conn, "clipboard_items", "pin_order")? {
+            script.push_str(V8_ALTER_SQL);
+        }
+        // If column exists, the UPDATE (backfill) was already applied; skip.
     }
 
     if current_version < 9 {
@@ -407,7 +462,9 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // NULL` so image rows can carry a small capture-time encrypted preview.
         // `DEFAULT NULL` backfills existing rows with no thumbnail; this is safe
         // — the column is optional and the daemon backfills lazily.
-        script.push_str(V9_ALTER);
+        if !column_exists(conn, "clipboard_items", "thumb")? {
+            script.push_str(V9_ALTER);
+        }
     }
 
     if current_version < 10 {
@@ -415,7 +472,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // NULL DEFAULT 0` for soft-delete tombstones that LWW-propagate across
         // devices. `DEFAULT 0` backfills existing rows as live. The partial
         // index on `deleted = 1` keeps tombstone enumeration efficient.
-        script.push_str(V10_ALTER);
+        if !column_exists(conn, "clipboard_items", "deleted")? {
+            script.push_str(V10_ALTER);
+        } else {
+            script.push_str(
+                "CREATE INDEX IF NOT EXISTS idx_clipboard_deleted \
+                 ON clipboard_items(deleted) WHERE deleted = 1;\n",
+            );
+        }
     }
 
     if current_version < 11 {
@@ -492,31 +556,96 @@ mod tests {
         }
     }
 
+    /// CopyPaste-m45w: when `content_hash` already exists in the table but
+    /// `user_version` is still at 1 (WAL-replay-onto-fresh-DB scenario triggered
+    /// by `reset_database` racing with a concurrent connection), `apply_migrations`
+    /// must skip the duplicate ALTER, apply all remaining steps, and reach
+    /// `SCHEMA_VERSION` successfully — NOT fail with "duplicate column name".
     #[test]
-    fn apply_migrations_is_atomic_on_failure() {
-        // Pre-create `clipboard_items` with ONLY the legacy v1 shape, then set
-        // user_version to 1 so the migrator believes v2 must run. We then
-        // pre-add the `content_hash` column ourselves so the v2 ALTER TABLE
-        // step fails with "duplicate column name". Because the entire
-        // migration runs inside a single transaction, user_version must
-        // remain at 1 after the failure (NOT be updated to SCHEMA_VERSION).
+    fn v2_migration_idempotent_when_column_exists() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(V1_SCHEMA_SQL).unwrap();
         conn.execute_batch("PRAGMA user_version = 1;").unwrap();
 
-        // Pre-add the column the v2 step would add → guarantees ALTER fails.
+        // Pre-add the column that v2 would normally add (simulates WAL replay).
         conn.execute_batch("ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;")
             .unwrap();
 
+        // Migration must now SUCCEED (idempotent guard skips the duplicate ALTER).
         let result = apply_migrations(&conn);
-        assert!(result.is_err(), "migration should fail on duplicate column");
+        assert!(
+            result.is_ok(),
+            "migration must succeed when content_hash already exists: {result:?}"
+        );
 
+        // Must have reached the current schema version.
         let version: i64 = conn
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .unwrap();
         assert_eq!(
-            version, 1,
-            "user_version must remain at 1 after rolled-back migration"
+            version, SCHEMA_VERSION,
+            "user_version must reach SCHEMA_VERSION even when content_hash pre-exists"
+        );
+
+        // content_hash must appear exactly once.
+        let mut stmt = conn.prepare("PRAGMA table_info(clipboard_items)").unwrap();
+        let count = stmt
+            .query_map([], |r| r.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .filter(|name| name == "content_hash")
+            .count();
+        assert_eq!(count, 1, "content_hash must appear exactly once in schema");
+    }
+
+    /// Verify that the entire migration block is still atomic: when a step that
+    /// cannot be skipped (v13 purges clipboard_fts) fails because the table was
+    /// removed from the DB, `user_version` must remain unchanged.
+    #[test]
+    fn apply_migrations_is_atomic_on_failure() {
+        // Build a v12 state but deliberately DROP `clipboard_fts` so the v13
+        // migration (DELETE FROM clipboard_fts …) will fail with "no such table".
+        // The BEGIN…COMMIT block must roll back in full, leaving user_version at 12.
+        let conn = Connection::open_in_memory().unwrap();
+
+        // Bring the DB up to the v12 schema shape by hand.
+        conn.execute_batch(V1_SCHEMA_SQL).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n\
+             ALTER TABLE clipboard_items ADD COLUMN origin_device_id TEXT NOT NULL DEFAULT '';\n\
+             ALTER TABLE clipboard_items ADD COLUMN key_version INTEGER NOT NULL DEFAULT 1;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;\n\
+             ALTER TABLE clipboard_items ADD COLUMN pin_order REAL DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN thumb BLOB DEFAULT NULL;\n\
+             ALTER TABLE clipboard_items ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;\n\
+             CREATE TABLE IF NOT EXISTS migration_state (\
+               key TEXT PRIMARY KEY, key_version_in_progress INTEGER,\
+               last_processed_id INTEGER NOT NULL DEFAULT 0,\
+               started_at INTEGER, completed_at INTEGER);\n\
+             INSERT OR IGNORE INTO migration_state VALUES ('v4-key-version-sweep', 2, 0, 0, 0);\n\
+             CREATE TABLE IF NOT EXISTS revoked_devices (\
+               fingerprint TEXT PRIMARY KEY NOT NULL,\
+               name TEXT NOT NULL DEFAULT '',\
+               revoked_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA user_version = 12;").unwrap();
+
+        // Drop clipboard_fts so that the v13 DELETE fails.
+        conn.execute_batch("DROP TABLE IF EXISTS clipboard_fts;")
+            .unwrap();
+
+        // The migration must fail (v13 cannot purge a table that doesn't exist).
+        let result = apply_migrations(&conn);
+        assert!(result.is_err(), "migration must fail when clipboard_fts is absent");
+
+        // user_version must NOT have advanced — the transaction was rolled back.
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            version, 12,
+            "user_version must remain at 12 after a rolled-back migration"
         );
     }
 
