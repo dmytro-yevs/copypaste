@@ -1052,19 +1052,45 @@ pub fn delete_sensitive_expired(
     now_ms: i64,
     sensitive_ttl_ms: i64,
 ) -> Result<usize, ItemsError> {
+    // CopyPaste-44rq.62: the backfill UPDATE and the expiry DELETE must be
+    // atomic. Previously the UPDATE ran in autocommit and `delete_expired`
+    // opened a separate transaction; a crash between them left sensitive rows
+    // with `expires_at` set but not yet deleted.  We now open a single
+    // `unchecked_transaction` that covers both operations.
+    let conn = db.conn();
+    let tx = conn.unchecked_transaction()?;
+
     // Step 1: backfill expires_at for sensitive rows that pre-date the bump fix.
     // We use saturating_add to avoid overflow on pathologically large TTL values.
     // The backfill is idempotent — rows that already carry expires_at are left alone.
-    db.conn().execute(
+    tx.execute(
         "UPDATE clipboard_items
          SET expires_at = MIN(wall_time + ?1, 9223372036854775807)
          WHERE is_sensitive = 1 AND expires_at IS NULL AND pinned = 0",
         params![sensitive_ttl_ms],
     )?;
 
-    // Step 2: unified expiry sweep — delete_expired handles the predicate
-    // `expires_at IS NOT NULL AND expires_at < now_ms AND pinned = 0`.
-    delete_expired(db, now_ms)
+    // Step 2: unified expiry sweep — inline the delete_expired logic so that
+    // the UPDATE above and the DELETE below share the same transaction.
+    // Predicate: `expires_at IS NOT NULL AND expires_at < now_ms AND pinned = 0`.
+    let mut stmt = tx.prepare(
+        "SELECT id FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map(params![now_ms], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    drop(stmt);
+    // Clean pending_uploads BEFORE deleting the items rows (CopyPaste-6fd).
+    delete_pending_uploads_for_ids(&tx, &ids)?;
+    let changed = tx.execute(
+        "DELETE FROM clipboard_items WHERE expires_at IS NOT NULL AND expires_at < ?1 AND pinned = 0",
+        params![now_ms],
+    )?;
+    // Batch-delete FTS entries for all pruned ids (CopyPaste-c1dd).
+    delete_fts_for_ids(&tx, &ids)?;
+
+    tx.commit()?;
+    Ok(changed)
 }
 
 /// Run `PRAGMA incremental_vacuum(pages)` to reclaim up to `pages` free SQLite
@@ -1593,10 +1619,21 @@ fn clamp_preview(text: String, max_bytes: usize) -> String {
 pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsError> {
     let conn = db.conn();
 
-    // CopyPaste-i6pp: refuse to index sensitive items. Look up is_sensitive
-    // directly from clipboard_items; if the row is absent or sensitive, bail
-    // early without touching clipboard_fts.
-    let is_sensitive: Option<i64> = conn
+    // CopyPaste-44rq.64 / CopyPaste-i6pp: the is_sensitive check MUST be
+    // inside the same transaction as the FTS write to close the TOCTOU window
+    // where a concurrent UPDATE could flip is_sensitive=1 between the SELECT
+    // and the INSERT, letting sensitive plaintext reach the FTS index.
+    //
+    // `unchecked_transaction` matches the storage-layer convention: the daemon
+    // holds the Database behind a Mutex and only hands out `&Connection`, so
+    // there is no concurrent borrow to guard against at the Rust level; the
+    // SQLite write lock acquired by the transaction serialises any concurrent
+    // writer at the DB level.
+    let tx = conn.unchecked_transaction()?;
+
+    // Re-read is_sensitive INSIDE the transaction so the sensitivity check and
+    // the FTS write are atomic under the same write lock.
+    let is_sensitive: Option<i64> = tx
         .query_row(
             "SELECT is_sensitive FROM clipboard_items WHERE id = ?1",
             params![id],
@@ -1604,15 +1641,11 @@ pub fn upsert_fts(db: &Database, id: &str, plaintext: &str) -> Result<(), ItemsE
         )
         .optional()?;
     match is_sensitive {
-        Some(1) => return Ok(()), // sensitive — do not index
+        Some(1) => return Ok(()), // sensitive — do not index (tx auto-rolled-back on drop)
         None => return Ok(()),    // row not found — nothing to index
         _ => {}                   // non-sensitive — proceed
     }
 
-    // `unchecked_transaction` matches the storage-layer convention: the daemon
-    // holds the Database behind a Mutex and only hands out `&Connection`, so
-    // there is no concurrent borrow to guard against.
-    let tx = conn.unchecked_transaction()?;
     tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
     tx.execute(
         "INSERT INTO clipboard_fts(id, content_text) VALUES (?1, ?2)",

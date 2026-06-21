@@ -173,8 +173,12 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
 /// ephemeral bypass, a missing item, a denied/locked Keychain, or a
 /// wrong-length blob. Migration is opportunistic — a failure here must never
 /// abort the file-store load.
+///
+/// The returned array is wrapped in [`zeroize::Zeroizing`] so the 32 key bytes
+/// are scrubbed from the stack when the caller drops the value — consistent with
+/// every other key-material path in this crate (SEC-2 / CopyPaste-44rq.54).
 #[cfg(target_os = "macos")]
-fn read_legacy_keychain_key() -> Option<[u8; 32]> {
+fn read_legacy_keychain_key() -> Option<zeroize::Zeroizing<[u8; 32]>> {
     // Honour the central dev/test bypass: never touch the real Keychain (and
     // never prompt) when ephemeral keys are in force.
     if super::keychain_bypassed() {
@@ -190,7 +194,9 @@ fn read_legacy_keychain_key() -> Option<[u8; 32]> {
                 );
                 return None;
             }
-            let mut arr = [0u8; 32];
+            // Wrap in Zeroizing so the 32 secret bytes are wiped on drop
+            // (SEC-2 / CopyPaste-44rq.54: was plain [u8;32], now Zeroizing).
+            let mut arr = zeroize::Zeroizing::new([0u8; 32]);
             arr.copy_from_slice(&bytes);
             Some(arr)
         }
@@ -207,7 +213,7 @@ fn read_legacy_keychain_key() -> Option<[u8; 32]> {
 
 /// Non-macOS: there is no Keychain to migrate from.
 #[cfg(not(target_os = "macos"))]
-fn read_legacy_keychain_key() -> Option<[u8; 32]> {
+fn read_legacy_keychain_key() -> Option<zeroize::Zeroizing<[u8; 32]>> {
     None
 }
 
