@@ -87,14 +87,16 @@ pub fn run(socket_path: &Path, confirm: bool) -> Result<()> {
         .as_ref()
         .ok_or_else(|| anyhow!("daemon returned no data for reset-database"))?;
 
-    let reset = data["reset"].as_bool().unwrap_or(false);
+    // c4q2.22: the former "reset" field was removed from the response as
+    // redundant (the outer ok envelope already confirms success). Check only
+    // the "ready" field which carries meaningful information.
     let ready = data["ready"].as_bool().unwrap_or(false);
 
-    if reset && ready {
+    if ready {
         eprintln!("Database reset complete. The daemon is now ready with an empty history.");
     } else {
         return Err(anyhow!(
-            "reset-database returned unexpected response: reset={reset}, ready={ready}"
+            "reset-database returned unexpected response: ready={ready}"
         ));
     }
 

@@ -3706,8 +3706,10 @@ mod tests {
         let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
 
         // Set a tiny cap (32 bytes) so any real PNG exceeds it.
-        let mut config = AppConfig::default();
-        config.max_image_size_bytes = 32;
+        let config = copypaste_core::AppConfig {
+            max_image_size_bytes: 32,
+            ..AppConfig::default()
+        };
 
         // 33 bytes — one byte over the cap; must be rejected immediately.
         let oversized: Vec<u8> = vec![0u8; 33];

@@ -476,7 +476,7 @@ impl Drop for RelayHandle {
 /// And the `set_config` handler must drop the running `RelayHandle` when this
 /// function returns `true` for the incoming `relay_url`.
 pub fn relay_url_is_clear(url: Option<&str>) -> bool {
-    url.map_or(true, |s| s.trim().is_empty())
+    url.is_none_or(|s| s.trim().is_empty())
 }
 
 // ── Token cache (0600 file) ─────────────────────────────────────────────────

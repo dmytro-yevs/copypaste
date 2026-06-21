@@ -1,14 +1,17 @@
 use crate::commands::common::{exit_on_err, format_unix_ms};
 use crate::ipc::IpcClient;
 use anyhow::Result;
-use copypaste_ipc::METHOD_LIST;
+// c4q2.17: "list" is deprecated; CLI now calls "history_page" which has an
+// identical response shape but returns items in pinned-first order and is the
+// unified verb used by both CLI and UI.
+use copypaste_ipc::METHOD_HISTORY_PAGE;
 use std::path::Path;
 
 pub fn run(socket_path: &Path, limit: u64, offset: u64) -> Result<()> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
         &IpcClient::next_id(),
-        METHOD_LIST,
+        METHOD_HISTORY_PAGE,
         serde_json::json!({"limit": limit, "offset": offset}),
     );
     let resp = client.call(&req)?;
