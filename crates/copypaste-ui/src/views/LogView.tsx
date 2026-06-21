@@ -172,7 +172,6 @@ export function LogView() {
                   void load();
                 }}
               />
-<<<<<<< Updated upstream
             </div>
           ) : isEmpty ? (
             // bdac.63: proper empty state instead of "(no log entries)" sentinel.
@@ -181,9 +180,6 @@ export function LogView() {
               <p className="text-[13px] text-ide-faint" data-testid="log-empty-state">
                 No log entries yet
               </p>
-||||||| Stash base
-=======
->>>>>>> Stashed changes
             </div>
           ) : (
             // Scrollable log area — no extra wrapper border; the rows live directly
