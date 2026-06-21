@@ -46,6 +46,57 @@ const GENERAL_CLEANUP_INTERVAL_MS: u64 = 60_000;
 /// than the old 250 ms value.
 const DEGRADED_QUIT_POLL_INTERVAL_MS: u64 = 1_000;
 
+/// How long (in seconds) the frontmost-app bundle ID obtained from `lsappinfo`
+/// is considered fresh.  Caching avoids forking a new subprocess on every 500 ms
+/// clipboard tick (CopyPaste-44rq.33).  2 s is short enough to catch a typical
+/// Cmd+Tab switch (≤400 ms human reaction time + one full tick latency) while
+/// cutting the fork rate by ~75 % at the default 500 ms poll interval.
+#[cfg(target_os = "macos")]
+const FRONTMOST_APP_CACHE_TTL_SECS: u64 = 2;
+
+/// Per-tick cache for the frontmost application's bundle ID on macOS.
+///
+/// Populated by `handle_tick` at most once every `FRONTMOST_APP_CACHE_TTL_SECS`
+/// seconds; stale when `expires_at` is in the past.
+///
+/// `cached_value` is `None` either when `lsappinfo` failed (we cache the
+/// failure too so we do not retry on the very next tick) or when the cache has
+/// not been primed yet.  `is_failure` distinguishes "not yet primed" from "we
+/// tried and lsappinfo returned nothing", which matters for the P1-2 fail-closed
+/// gate.
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct FrontmostAppCache {
+    /// The cached bundle ID (None when lsappinfo failed or cache not yet primed).
+    cached_value: Option<String>,
+    /// Whether the last lsappinfo invocation failed (vs. cache simply being cold).
+    is_failure: bool,
+    /// When the cache entry expires and must be refreshed.
+    expires_at: std::time::Instant,
+}
+
+#[cfg(target_os = "macos")]
+impl FrontmostAppCache {
+    /// Create a new, already-expired cache so the first tick always populates it.
+    fn new() -> Self {
+        Self {
+            cached_value: None,
+            is_failure: false,
+            // Subtract 1 s so the cache is considered expired on the first call.
+            expires_at: std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(1))
+                // `checked_sub` can only fail if Instant::now() is within 1 s of
+                // the monotonic clock epoch, which is impossible in practice.
+                .unwrap_or_else(std::time::Instant::now),
+        }
+    }
+
+    /// Returns `true` if the cached value is still within the TTL window.
+    fn is_fresh(&self) -> bool {
+        std::time::Instant::now() < self.expires_at
+    }
+}
+
 /// Resolve a human-readable device name for P2P advertisements and QR pairing.
 ///
 /// On macOS uses `scutil --get ComputerName` (the user-visible name, e.g.
@@ -1338,6 +1389,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     {
         use tokio::signal::unix::{signal, SignalKind};
         let mut sigterm = signal(SignalKind::terminate())?;
+        // CopyPaste-44rq.33: one cache instance shared across all ticks so
+        // lsappinfo is forked at most once per FRONTMOST_APP_CACHE_TTL_SECS.
+        let mut frontmost_cache = FrontmostAppCache::new();
         loop {
             // Check tray quit flag before blocking on select
             if quit_flag.load(Ordering::Relaxed) {
@@ -1391,7 +1445,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                     monitor.set_max_file_bytes(
                         usize::try_from(live_config.max_file_size_bytes).unwrap_or(usize::MAX),
                     );
-                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
+                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id, &mut frontmost_cache).await;
                     cleanup_ticks += 1;
                     sensitive_cleanup_ticks += 1;
 
@@ -1759,6 +1813,10 @@ async fn handle_tick(
     private_mode: &Arc<AtomicBool>,
     new_item_tx: &broadcast::Sender<ClipboardItem>,
     local_device_id: &str,
+    // CopyPaste-44rq.33: cache the frontmost-app query so lsappinfo is not
+    // forked on every 500 ms tick.  Only present on macOS; the non-macOS path
+    // never queries lsappinfo and does not need a cache.
+    #[cfg(target_os = "macos")] frontmost_cache: &mut FrontmostAppCache,
 ) {
     // Skip recording when private/pause mode is active
     if private_mode.load(Ordering::Relaxed) {
@@ -1814,48 +1872,80 @@ async fn handle_tick(
     //
     // The P1-2 fail-closed behaviour (skip capture when lsappinfo fails AND the
     // exclusion list is non-empty) is preserved below unchanged.  Performance:
-    // lsappinfo forks once per tick regardless of exclusion-list size, same as
-    // before for non-empty lists — acceptable given the security trade-off.
+    // CopyPaste-44rq.33: lsappinfo is now cached for FRONTMOST_APP_CACHE_TTL_SECS
+    // (2 s) so the subprocess is NOT forked on every 500 ms tick — only when the
+    // cached value has expired.  The cache is shared across ticks via the
+    // `frontmost_cache` parameter.  Failure results (lsappinfo returning None) are
+    // cached for the same TTL so a transient failure does not cause repeated forks.
     //
     // Shared between the exclusion check and the is_sensitive_app check so
-    // lsappinfo is invoked AT MOST ONCE per tick regardless of which check fires.
+    // lsappinfo is invoked AT MOST ONCE per TTL window regardless of which check fires.
     #[cfg(target_os = "macos")]
     let frontmost_bundle_id: Option<String> = {
-        let lsappinfo_result = tokio::task::spawn_blocking(|| {
-            // `lsappinfo front` prints a record for the frontmost process.
-            // We extract the bundleID field from lines like:
-            //   "bundleID" = "com.1password.1password"
-            std::process::Command::new("lsappinfo")
-                .args(["front"])
-                .output()
-                .ok()
-                .and_then(|out| {
-                    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-                    for line in text.lines() {
-                        let trimmed = line.trim();
-                        // Match: "bundleID" = "com.example.app"
-                        if let Some(rest) = trimmed.strip_prefix("\"bundleID\" = \"") {
-                            if let Some(bid) = rest.strip_suffix('"') {
-                                return Some(bid.to_owned());
+        if frontmost_cache.is_fresh() {
+            // Cache hit: reuse the previously-resolved bundle ID (may be None if
+            // lsappinfo failed on the last refresh — we cache failures too so we
+            // do not hammer the subprocess on every tick during a transient error).
+            tracing::trace!(
+                cached = ?frontmost_cache.cached_value,
+                "lsappinfo: cache hit — skipping subprocess"
+            );
+            frontmost_cache.cached_value.clone()
+        } else {
+            // Cache miss (cold or expired): spawn lsappinfo and populate the cache.
+            let lsappinfo_result = tokio::task::spawn_blocking(|| {
+                // `lsappinfo front` prints a record for the frontmost process.
+                // We extract the bundleID field from lines like:
+                //   "bundleID" = "com.1password.1password"
+                std::process::Command::new("lsappinfo")
+                    .args(["front"])
+                    .output()
+                    .ok()
+                    .and_then(|out| {
+                        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+                        for line in text.lines() {
+                            let trimmed = line.trim();
+                            // Match: "bundleID" = "com.example.app"
+                            if let Some(rest) = trimmed.strip_prefix("\"bundleID\" = \"") {
+                                if let Some(bid) = rest.strip_suffix('"') {
+                                    return Some(bid.to_owned());
+                                }
                             }
                         }
-                    }
-                    None
-                })
-        })
-        .await;
+                        None
+                    })
+            })
+            .await;
 
-        // Flatten the JoinError and inner Option.
-        match lsappinfo_result {
-            Ok(opt) => opt,
-            Err(join_err) => {
-                // spawn_blocking task panicked — treat as subprocess failure.
-                tracing::warn!(
-                    error = %join_err,
-                    "lsappinfo: blocking task panicked; failing closed to protect excluded apps"
-                );
-                None
-            }
+            // Flatten the JoinError and inner Option, then populate the cache.
+            let resolved = match lsappinfo_result {
+                Ok(opt) => {
+                    frontmost_cache.is_failure = opt.is_none();
+                    opt
+                }
+                Err(join_err) => {
+                    // spawn_blocking task panicked — treat as subprocess failure.
+                    tracing::warn!(
+                        error = %join_err,
+                        "lsappinfo: blocking task panicked; failing closed to protect excluded apps"
+                    );
+                    frontmost_cache.is_failure = true;
+                    None
+                }
+            };
+
+            // Store the result (success or failure) and set the expiry so we
+            // do not fork again until FRONTMOST_APP_CACHE_TTL_SECS have elapsed.
+            frontmost_cache.cached_value = resolved.clone();
+            frontmost_cache.expires_at = std::time::Instant::now()
+                + std::time::Duration::from_secs(FRONTMOST_APP_CACHE_TTL_SECS);
+            tracing::trace!(
+                bundle_id = ?resolved,
+                ttl_secs = FRONTMOST_APP_CACHE_TTL_SECS,
+                "lsappinfo: cache refreshed"
+            );
+
+            resolved
         }
     };
 
@@ -4198,6 +4288,82 @@ mod tests {
         // real tokio runtime and ClipboardMonitor).  Behavior verified by:
         //   1. Code review: `None` match arm calls `monitor.poll()` + `return`.
         //   2. The spawn_blocking wrapper is confirmed present by compilation.
+    }
+
+    // -----------------------------------------------------------------------
+    // CopyPaste-44rq.33: FrontmostAppCache TTL behaviour
+    // -----------------------------------------------------------------------
+
+    /// Verifies `FrontmostAppCache` TTL logic: a newly-created cache is cold
+    /// (not fresh), a populated cache within the TTL is fresh, and a cache
+    /// with an `expires_at` in the past is stale.
+    ///
+    /// This test does NOT spawn lsappinfo — it exercises only the cache
+    /// bookkeeping (TTL arithmetic) that wraps the subprocess, which is the
+    /// correctness-critical part of the CopyPaste-44rq.33 fix.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn frontmost_app_cache_ttl_logic() {
+        // Cold cache (constructed via `new()`) must be stale so the first
+        // call to handle_tick always refreshes it.
+        let cache = FrontmostAppCache::new();
+        assert!(
+            !cache.is_fresh(),
+            "newly-created cache must not be fresh (forces first-tick refresh)"
+        );
+        assert!(
+            cache.cached_value.is_none(),
+            "newly-created cache must have no value"
+        );
+        assert!(
+            !cache.is_failure,
+            "newly-created cache must not be marked as a failure"
+        );
+
+        // A cache populated with a future expiry must be reported as fresh.
+        let mut hot_cache = FrontmostAppCache {
+            cached_value: Some("com.apple.finder".to_string()),
+            is_failure: false,
+            expires_at: std::time::Instant::now()
+                + std::time::Duration::from_secs(FRONTMOST_APP_CACHE_TTL_SECS),
+        };
+        assert!(
+            hot_cache.is_fresh(),
+            "cache with future expiry must be fresh"
+        );
+        assert_eq!(
+            hot_cache.cached_value.as_deref(),
+            Some("com.apple.finder"),
+            "cached bundle ID must be returned unchanged"
+        );
+
+        // Simulate TTL expiry by back-dating expires_at.
+        hot_cache.expires_at = std::time::Instant::now()
+            .checked_sub(std::time::Duration::from_millis(1))
+            // Impossible in practice; fall back to a fresh-but-immediate expiry.
+            .unwrap_or_else(std::time::Instant::now);
+        assert!(
+            !hot_cache.is_fresh(),
+            "cache with past expiry must not be fresh (must trigger refresh)"
+        );
+
+        // Failure result (lsappinfo returned None) must be cached too.
+        let failure_cache = FrontmostAppCache {
+            cached_value: None,
+            is_failure: true,
+            expires_at: std::time::Instant::now()
+                + std::time::Duration::from_secs(FRONTMOST_APP_CACHE_TTL_SECS),
+        };
+        assert!(
+            failure_cache.is_fresh(),
+            "a cached failure within the TTL must still be considered fresh \
+             so we do not re-spawn lsappinfo on every tick during a transient error"
+        );
+        assert!(failure_cache.is_failure, "is_failure flag must be preserved");
+        assert!(
+            failure_cache.cached_value.is_none(),
+            "cached_value must be None for a cached failure"
+        );
     }
 
     /// CopyPaste-44rq.43 regression guard: `is_sensitive_app` and the
