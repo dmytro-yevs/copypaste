@@ -32,38 +32,33 @@
     <false/>
 
     <!-- ─────────────────────────────────────────────────────────────────
-         Keychain ThisDeviceOnly hardening (Fix C — DO NOT enable under
-         ad-hoc signing).
+         Keychain ThisDeviceOnly hardening.
 
-         The daemon tries to re-store the X25519 device-secret key with
+         The daemon re-stores the X25519 device-secret key with
          `kSecAttrAccessibleWhenUnlockedThisDeviceOnly` so it never syncs to
          iCloud Keychain (see keychain/mod.rs `set_generic_password_locked_down`).
          Building a `SecAccessControl` with that accessibility requires the
-         app to carry a `keychain-access-groups` entitlement. When it is
-         absent, `SecItemAdd`/`SecItemUpdate` returns errSecMissingEntitlement
-         (-34018, "A required entitlement isn't present") and the daemon logs
-         the "could not migrate device key to ThisDeviceOnly accessibility"
-         warning. The code now degrades gracefully on that exact error (the
-         key stays fully usable; only the iCloud-sync suppression is skipped).
+         app to carry a `keychain-access-groups` entitlement.
 
-         CONSTRAINT: an entitlement like the one below is ONLY honored by the
-         OS when the binary is signed with a real Apple **Developer ID**
-         certificate whose team prefix matches the access-group string
-         (e.g. "$(TeamIdentifierPrefix)com.copypaste.daemon"). Ad-hoc
-         signatures (`codesign` with the ad-hoc `-` identity, which is what
-         this project uses; see .github/workflows/release.yml) CANNOT carry a usable
-         keychain-access-group: there is no team identifier to anchor it to,
-         and shipping it under ad-hoc signing can break keychain access
-         entirely. It is therefore left COMMENTED OUT here on purpose.
+         DEVELOPER ID SIGNING (release.yml with MACOS_CERTIFICATE_BASE64 set):
+           The `$(TeamIdentifierPrefix)` placeholder is resolved by `codesign`
+           from the signing certificate's team ID at signing time — no manual
+           substitution needed. The entitlement is enforced by the OS and
+           ThisDeviceOnly hardening works correctly.
 
-         To fully fix ThisDeviceOnly hardening, the release must switch to
-         Developer-ID signing and UNCOMMENT the block below (substituting the
-         real team prefix). This needs a real signed build + install to verify.
-
+         AD-HOC SIGNING (CI builds without MACOS_CERTIFICATE_BASE64):
+           Under ad-hoc signing (`codesign -s -`) there is no team identifier,
+           so the OS cannot resolve `$(TeamIdentifierPrefix)`. The entitlement
+           is present in the plist but the OS returns errSecMissingEntitlement
+           (-34018). The daemon already handles this gracefully: the key stays
+           fully usable, only the iCloud-sync suppression is skipped, and a
+           warning is logged ("could not migrate device key to ThisDeviceOnly
+           accessibility"). This is the same behaviour as before this change —
+           the entitlement being in the plist does not break ad-hoc builds.
+         ───────────────────────────────────────────────────────────────── -->
     <key>keychain-access-groups</key>
     <array>
         <string>$(TeamIdentifierPrefix)com.copypaste.daemon</string>
     </array>
-         ───────────────────────────────────────────────────────────────── -->
 </dict>
 </plist>

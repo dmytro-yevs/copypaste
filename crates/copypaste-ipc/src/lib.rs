@@ -33,7 +33,8 @@ pub mod response;
 
 pub use error::ErrorCode;
 pub use methods::{
-    compute_sync_badge_state, DbBackupRequest, DbBackupResponse, DbRestoreRequest,
+    compute_sync_badge_state, compute_sync_badge_state_with_inflight, DbBackupRequest,
+    DbBackupResponse, DbRestoreRequest,
     DbRestoreResponse, DbStatsResponse, GetSyncStatusResponse, ResetDatabaseRequest,
     ResetDatabaseResponse, StoreCloudPasswordRequest, StoreCloudPasswordResponse, SyncBadgeState,
     VacuumRequest, VacuumResponse, METHOD_ADD_FILE_ITEM, METHOD_CLOUD_SIGN_IN,

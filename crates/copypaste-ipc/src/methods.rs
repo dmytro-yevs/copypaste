@@ -223,6 +223,11 @@ pub const SYNC_BADGE_RECENT_MS: u64 = 5 * 60 * 1_000; // 5 minutes
 ///   `None` when never synced.
 /// * `now_ms` — current wall-clock time (epoch ms). Pass `None` to use
 ///   `std::time::SystemTime::now()` automatically.
+///
+/// To signal an active in-flight sync round-trip, use
+/// [`compute_sync_badge_state_with_inflight`] instead. This function is kept
+/// for backward-compatibility with existing callers and delegates with
+/// `in_flight = false`.
 pub fn compute_sync_badge_state(
     passphrase_set: bool,
     supabase_url_set: bool,
@@ -230,6 +235,46 @@ pub fn compute_sync_badge_state(
     signed_in: bool,
     last_sync_ms: Option<i64>,
     now_ms: Option<u64>,
+) -> SyncBadgeState {
+    // Delegate to the extended variant with in_flight=false so the existing
+    // daemon caller continues to compile and behave identically (CopyPaste-1jms.22).
+    compute_sync_badge_state_with_inflight(
+        passphrase_set,
+        supabase_url_set,
+        supabase_configured,
+        signed_in,
+        last_sync_ms,
+        now_ms,
+        false,
+    )
+}
+
+/// Extended variant of [`compute_sync_badge_state`] that adds an `in_flight`
+/// signal for when a sync round-trip is actively in progress.
+///
+/// When `in_flight` is `true` and no recent sync has already been recorded,
+/// this returns [`SyncBadgeState::Syncing`] (green pulse) instead of falling
+/// through to the `Error`/`Offline`/`Idle` branches. The `Syncing` state is
+/// transient: the caller is responsible for setting `in_flight` back to
+/// `false` once the round-trip completes or fails.
+///
+/// The daemon should adopt this function once it threads an `Arc<AtomicBool>`
+/// in-flight flag through the cloud-poll, relay-receive, and P2P loops.
+///
+/// # Arguments
+///
+/// Same as [`compute_sync_badge_state`], plus:
+///
+/// * `in_flight` — `true` while a cloud poll, relay push, or P2P handshake is
+///   actively running.
+pub fn compute_sync_badge_state_with_inflight(
+    passphrase_set: bool,
+    supabase_url_set: bool,
+    supabase_configured: bool,
+    signed_in: bool,
+    last_sync_ms: Option<i64>,
+    now_ms: Option<u64>,
+    in_flight: bool,
 ) -> SyncBadgeState {
     // Resolve current time — allows tests to inject a deterministic value.
     let now = now_ms.unwrap_or_else(|| {
@@ -253,6 +298,14 @@ pub fn compute_sync_badge_state(
 
     if recently_synced {
         return SyncBadgeState::Synced;
+    }
+
+    // Active round-trip in progress and no recent completed sync → Syncing
+    // (green pulse). Placed after Synced so a completed sync wins over an
+    // in-flight one: if last_sync_ms is recent the round-trip is wrapping up
+    // and Synced is the more accurate label.
+    if in_flight {
+        return SyncBadgeState::Syncing;
     }
 
     // Auth error: cloud is configured and URL is valid but GoTrue session failed.
@@ -984,6 +1037,76 @@ mod tests {
             Some(NOW_MS),
         );
         assert_eq!(state, SyncBadgeState::Synced);
+    }
+
+    // ── compute_sync_badge_state_with_inflight tests (CopyPaste-1jms.22) ──────
+
+    #[test]
+    fn badge_state_syncing_when_in_flight_and_no_recent_sync() {
+        // The primary acceptance criterion: in_flight=true with no recent sync
+        // must return Syncing (green pulse).
+        let state = compute_sync_badge_state_with_inflight(
+            true,  // passphrase_set
+            true,  // supabase_url_set
+            true,  // supabase_configured
+            true,  // signed_in
+            None,  // no prior sync
+            Some(NOW_MS),
+            true,  // in_flight — round-trip actively running
+        );
+        assert_eq!(state, SyncBadgeState::Syncing);
+    }
+
+    #[test]
+    fn badge_state_synced_wins_over_in_flight_when_recently_synced() {
+        // A completed recent sync takes priority over an in-flight flag: the
+        // round-trip is wrapping up and Synced is the more accurate label.
+        let state = compute_sync_badge_state_with_inflight(
+            true,
+            true,
+            true,
+            true,
+            Some(RECENT_MS),
+            Some(NOW_MS),
+            true, // in_flight set — but recently_synced wins
+        );
+        assert_eq!(state, SyncBadgeState::Synced);
+    }
+
+    #[test]
+    fn badge_state_in_flight_false_behaves_identically_to_original() {
+        // in_flight=false must not change the derivation — ensures backward
+        // compatibility between compute_sync_badge_state and the _with_inflight
+        // variant.
+        let cases: &[(bool, bool, bool, bool, Option<i64>, SyncBadgeState)] = &[
+            (true, true, true, true, Some(RECENT_MS), SyncBadgeState::Synced),
+            (true, true, true, true, Some(STALE_MS), SyncBadgeState::Idle),
+            (false, false, false, false, None, SyncBadgeState::Offline),
+            (false, true, false, false, None, SyncBadgeState::Misconfigured),
+            (false, true, true, false, Some(STALE_MS), SyncBadgeState::Error),
+        ];
+        for (passphrase_set, url_set, configured, signed_in, last_sync, expected) in cases {
+            let via_new = compute_sync_badge_state_with_inflight(
+                *passphrase_set,
+                *url_set,
+                *configured,
+                *signed_in,
+                *last_sync,
+                Some(NOW_MS),
+                false, // in_flight=false → should match the old function
+            );
+            let via_old = compute_sync_badge_state(
+                *passphrase_set,
+                *url_set,
+                *configured,
+                *signed_in,
+                *last_sync,
+                Some(NOW_MS),
+            );
+            assert_eq!(via_new, *expected, "new fn mismatch");
+            assert_eq!(via_old, *expected, "old fn mismatch");
+            assert_eq!(via_new, via_old, "parity between old and new(in_flight=false)");
+        }
     }
 
     #[test]
