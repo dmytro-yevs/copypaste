@@ -224,18 +224,12 @@ pub fn run() {
             set_popup_shortcut,
             check_accessibility_permission,
             request_accessibility_permission,
-            start_recording_shortcut,
-            stop_recording_shortcut,
-            record_prior_app,
             paste_to_frontmost,
             paste_plain_text,
             hide_popup,
             play_copy_sound,
             show_copy_notification,
-            get_launch_at_login,
-            set_launch_at_login,
-            get_popup_position,
-            set_popup_position,
+            check_notification_permission,
             get_allow_screenshots,
             set_allow_screenshots,
             ipc::read_logs,
@@ -494,28 +488,9 @@ fn set_popup_shortcut(
 }
 
 // ---------------------------------------------------------------------------
-// Launch-at-login commands
+// Launch-at-login — internal startup helper (no longer a public Tauri command;
+// the Settings UI for this feature has not been wired up yet — CopyPaste-loyk.7).
 // ---------------------------------------------------------------------------
-
-/// Returns `true` when the app is registered to launch at macOS login.
-#[tauri::command]
-fn get_launch_at_login(handle: tauri::AppHandle) -> bool {
-    use tauri_plugin_autostart::ManagerExt;
-    handle.autolaunch().is_enabled().unwrap_or(false)
-}
-
-/// Enable or disable launching CopyPaste at macOS login.
-///
-/// The setting is persisted to `ui-config.json` so it survives reinstalls and
-/// re-reads on the next launch via `apply_launch_at_login`.
-#[tauri::command]
-fn set_launch_at_login(enabled: bool, handle: tauri::AppHandle) -> Result<(), String> {
-    apply_launch_at_login(&handle, enabled);
-    // Persist to config.
-    let mut cfg = load_ui_config(&handle);
-    cfg.launch_at_login = enabled;
-    save_ui_config(&handle, &cfg)
-}
 
 /// Idempotently sync the OS launch-agent state with the desired value.
 ///
@@ -536,42 +511,6 @@ fn apply_launch_at_login(handle: &tauri::AppHandle, enabled: bool) {
         }
     }
     // If current == desired, nothing to do (idempotent).
-}
-
-// ---------------------------------------------------------------------------
-// Popup-position commands
-// ---------------------------------------------------------------------------
-
-/// Return the current popup-position mode as a string ("cursor", "center", "menubar").
-#[tauri::command]
-fn get_popup_position(state: State<'_, CurrentPopupPosition>) -> String {
-    let guard = state.0.lock().expect("mutex poisoned");
-    // serde_json serialises the enum as a lowercase string; strip the quotes.
-    serde_json::to_value(&*guard)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_else(|| "cursor".to_owned())
-}
-
-/// Set the popup-position mode.  Accepted values: "cursor", "center", "menubar".
-/// Returns an error string for unknown values.
-#[tauri::command]
-fn set_popup_position(
-    mode: String,
-    handle: tauri::AppHandle,
-    state: State<'_, CurrentPopupPosition>,
-) -> Result<(), String> {
-    let pos: PopupPosition = serde_json::from_value(serde_json::Value::String(mode.clone()))
-        .map_err(|_| {
-            format!("unknown popup position mode: {mode:?} (expected cursor|center|menubar)")
-        })?;
-    {
-        let mut guard = state.0.lock().expect("mutex poisoned");
-        *guard = pos.clone();
-    }
-    let mut cfg = load_ui_config(&handle);
-    cfg.popup_position = pos;
-    save_ui_config(&handle, &cfg)
 }
 
 // ---------------------------------------------------------------------------
@@ -662,62 +601,6 @@ fn request_accessibility_permission(handle: tauri::AppHandle) {
             s
         };
         try_install_event_tap(&handle, &shortcut);
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = handle;
-}
-
-/// Begin a one-shot HID-level shortcut recording session.
-///
-/// Installs a CGEventTap at `kCGHIDEventTapLocation` (below Hammerspoon's
-/// session tap) that captures the next key chord and emits a `shortcut-recorded`
-/// event on `window` with payload `{ accelerator: String }`.
-///
-/// Returns an error if Accessibility permission is not granted or the tap
-/// could not be installed.
-///
-/// NOTE: Input Monitoring permission is also required on macOS 10.15+.  If the
-/// tap fails to install, the user should grant both Accessibility **and**
-/// Input Monitoring in System Settings → Privacy & Security.
-#[tauri::command]
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-fn start_recording_shortcut(window: tauri::WebviewWindow) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        event_tap::start_recording(move |accel| {
-            // Deliver the captured accelerator to the frontend via a Tauri event.
-            let _ = window.emit(
-                "shortcut-recorded",
-                serde_json::json!({ "accelerator": accel }),
-            );
-        })
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err("shortcut recording is only supported on macOS".into())
-    }
-}
-
-/// Cancel an in-progress shortcut recording session (no-op if not recording).
-#[tauri::command]
-fn stop_recording_shortcut() {
-    #[cfg(target_os = "macos")]
-    event_tap::stop_recording();
-}
-
-/// Save the bundle ID of the currently frontmost application so we can
-/// restore focus after the popup closes.  Call this just before showing the
-/// popup (from the JS layer via `toggle_popup` or directly before `win.show`).
-#[tauri::command]
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-fn record_prior_app(handle: tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
-    {
-        let bundle_id = frontmost_bundle_id();
-        if let Some(state) = handle.try_state::<PriorApp>() {
-            let mut guard = state.0.lock().expect("mutex poisoned");
-            *guard = bundle_id;
-        }
     }
     #[cfg(not(target_os = "macos"))]
     let _ = handle;
@@ -1127,6 +1010,89 @@ fn show_copy_notification(title: String, body: String) {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = (title, body);
+    }
+}
+
+/// Check whether macOS system notification permission is granted for this app.
+///
+/// Queries `UNUserNotificationCenter.current().notificationSettings.authorizationStatus`
+/// and returns `true` when the status is `.authorized`.  This is the correct
+/// signal for whether `show_copy_notification` will actually deliver a banner
+/// from `UNUserNotificationCenter` — it is entirely separate from the browser
+/// `Notification.permission` API (which is meaningless inside a Tauri WKWebView).
+///
+/// On non-macOS platforms always returns `true` (no per-app notification
+/// permission model exists there).
+///
+/// CopyPaste-44rq.28: this command is called by `notificationPermission.ts` via
+/// `invoke("check_notification_permission")`.
+#[tauri::command]
+fn check_notification_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        query_notification_permission()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        true
+    }
+}
+
+/// Synchronously query the macOS UNUserNotificationCenter authorization status.
+///
+/// Uses a Rust mpsc channel as a one-shot semaphore: the ObjC completion block
+/// fires on an unspecified background queue and sends the result; this function
+/// blocks on `recv_timeout` so the Tauri command handler (which is driven by a
+/// Tokio blocking thread via `spawn_blocking` when async, or the main thread
+/// when sync) does not busy-spin.
+///
+/// Returns `true` when `authorizationStatus == .authorized`, `false` for
+/// `.denied`, `.notDetermined`, `.provisional`, `.ephemeral`, or any error.
+#[cfg(target_os = "macos")]
+fn query_notification_permission() -> bool {
+    use core::ptr::NonNull;
+    use block2::RcBlock;
+    use objc2_user_notifications::{
+        UNAuthorizationStatus, UNNotificationSettings, UNUserNotificationCenter,
+    };
+
+    // Channel used as a one-shot semaphore: the completion block sends a bool;
+    // we block here on recv_timeout.
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+
+    // SAFETY: UNUserNotificationCenter::currentNotificationCenter() is
+    // documented as safe to call from any thread. The completion block captures
+    // `tx` and is called exactly once on an internal GCD queue; `mpsc::Sender`
+    // is Send so the capture is sound.
+    unsafe {
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        // Block signature: dyn Fn(NonNull<UNNotificationSettings>)
+        // — matches the generated binding in UNUserNotificationCenter.rs.
+        let block = RcBlock::new(move |settings: NonNull<UNNotificationSettings>| {
+            // SAFETY: `settings` is a non-null pointer to a valid
+            // UNNotificationSettings object owned by the ObjC runtime for
+            // the duration of this block invocation.
+            let status = settings.as_ref().authorizationStatus();
+            let granted = status == UNAuthorizationStatus::Authorized;
+            // Receiver may have dropped if we timed out, which is fine.
+            let _ = tx.send(granted);
+        });
+        center.getNotificationSettingsWithCompletionHandler(&block);
+    }
+
+    // Wait up to 2 s for the ObjC callback. On a healthy system it fires
+    // within milliseconds; the timeout guards against pathological hangs.
+    match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+        Ok(v) => v,
+        Err(_) => {
+            // Timed out or channel closed — fall back to false (conservative:
+            // assume denied) so the "Notifications disabled" warning appears.
+            tracing::debug!(
+                "check_notification_permission: timed out waiting for \
+                 UNNotificationSettings; assuming denied"
+            );
+            false
+        }
     }
 }
 
