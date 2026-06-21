@@ -8,6 +8,10 @@ mod ipc;
 #[cfg(target_os = "macos")]
 mod event_tap;
 
+use copypaste_ipc::{
+    METHOD_COPY_ITEM, METHOD_GET_CONFIG, METHOD_GET_PRIVATE_MODE, METHOD_HISTORY_PAGE,
+    METHOD_PAIR_GET_SAS, METHOD_SET_PRIVATE_MODE,
+};
 use std::sync::Mutex;
 use tauri::{Emitter, Listener, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
@@ -1531,7 +1535,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
         let mut builder = SubmenuBuilder::new(app, "Recent");
 
         let items_opt: Option<Vec<(String, String)>> =
-            ipc::call("history_page", json!({ "limit": 10, "offset": 0 }))
+            ipc::call(METHOD_HISTORY_PAGE, json!({ "limit": 10, "offset": 0 }))
                 .ok()
                 .and_then(|reply| {
                     if !reply.ok {
@@ -1583,7 +1587,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
 
     // --- "Private Mode" check item ---
     // Query the daemon for the current state; fall back to false on any error.
-    let private_mode_on: bool = ipc::call("get_private_mode", json!({}))
+    let private_mode_on: bool = ipc::call(METHOD_GET_PRIVATE_MODE, json!({}))
         .ok()
         .and_then(|reply| {
             if !reply.ok {
@@ -1638,7 +1642,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                     // Read the new (already-toggled) state from the cloned item.
                     let new_state = private_mode_clone.is_checked().unwrap_or(false);
                     let result = ipc::call(
-                        "set_private_mode",
+                        METHOD_SET_PRIVATE_MODE,
                         serde_json::json!({ "enabled": new_state }),
                     );
                     match result {
@@ -1661,7 +1665,7 @@ fn setup_tray(app: &tauri::App) -> tauri::Result<()> {
                 }
                 other if other.starts_with("recent:") && other != "recent:none" => {
                     let item_id = &other["recent:".len()..];
-                    let result = ipc::call("copy_item", serde_json::json!({ "id": item_id }));
+                    let result = ipc::call(METHOD_COPY_ITEM, serde_json::json!({ "id": item_id }));
                     match &result {
                         Ok(reply) if reply.ok => {
                             // Mirror the sound/notification that row-click copy fires so
@@ -1840,7 +1844,7 @@ fn spawn_tray_private_mode_resync(handle: tauri::AppHandle) {
                 return;
             }
 
-            let result = ipc::call("get_private_mode", serde_json::json!({}));
+            let result = ipc::call(METHOD_GET_PRIVATE_MODE, serde_json::json!({}));
             match result {
                 Ok(reply) if reply.ok => {
                     let real_value = reply
@@ -1921,7 +1925,7 @@ fn rebuild_recent_submenu(
 
     // Fetch up to 10 items. On any error, fall back to a placeholder.
     let items_opt: Option<Vec<(String, String)>> = ipc::call(
-        "history_page",
+        METHOD_HISTORY_PAGE,
         serde_json::json!({ "limit": 10, "offset": 0 }),
     )
     .ok()
@@ -2113,7 +2117,7 @@ fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
 
             // A successful, ok=true history_page reply is the readiness signal.
             let ready = ipc::call(
-                "history_page",
+                METHOD_HISTORY_PAGE,
                 serde_json::json!({ "limit": 1, "offset": 0 }),
             )
             .map(|r| r.ok)
@@ -2130,7 +2134,7 @@ fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
         // the app launched.
         let mut last_seen_wall_time: i64 = {
             ipc::call(
-                "history_page",
+                METHOD_HISTORY_PAGE,
                 serde_json::json!({ "limit": 1, "offset": 0 }),
             )
             .ok()
@@ -2168,7 +2172,7 @@ fn spawn_tray_recent_resync(handle: tauri::AppHandle) {
 fn check_and_notify_new_capture(last_seen: &mut i64) {
     // Fetch the single most-recent item from history_page (limit=1).
     let reply = match ipc::call(
-        "history_page",
+        METHOD_HISTORY_PAGE,
         serde_json::json!({ "limit": 1, "offset": 0 }),
     ) {
         Ok(r) if r.ok => r,
@@ -2197,7 +2201,7 @@ fn check_and_notify_new_capture(last_seen: &mut i64) {
     *last_seen = wall_time;
 
     // Check notify_on_copy setting before firing.
-    let notify_enabled = ipc::call("get_config", serde_json::json!({}))
+    let notify_enabled = ipc::call(METHOD_GET_CONFIG, serde_json::json!({}))
         .ok()
         .and_then(|r| r.data)
         .and_then(|d| d["notify_on_copy"].as_bool())
@@ -2271,7 +2275,7 @@ fn spawn_incoming_pairing_poller(handle: tauri::AppHandle) {
                 return;
             }
 
-            match ipc::call("pair_get_sas", serde_json::json!({})) {
+            match ipc::call(METHOD_PAIR_GET_SAS, serde_json::json!({})) {
                 Err(e) => {
                     // Socket errors (daemon offline, not yet started, etc.)
                     // are expected during startup and are not worth logging

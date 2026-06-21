@@ -1078,6 +1078,7 @@ version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "block2 0.6.2",
+ "copypaste-ipc",
  "core-foundation 0.10.1",
  "core-graphics",
  "home",

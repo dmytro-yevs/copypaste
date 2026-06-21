@@ -10,6 +10,7 @@ use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use copypaste_ipc::{METHOD_GET_ITEM_FILE, METHOD_PAIR_GENERATE_QR, METHOD_RESET_DATABASE};
 use serde_json::Value;
 
 /// Resolve the daemon socket path, matching `copypaste-daemon::paths::socket_path`.
@@ -157,7 +158,10 @@ pub async fn ipc_call(method: String, params: Option<Value>) -> Result<IpcReply,
 #[tauri::command]
 pub async fn reset_database() -> Result<IpcReply, String> {
     tauri::async_runtime::spawn_blocking(|| {
-        call("reset_database", serde_json::json!({ "confirm": true }))
+        call(
+            METHOD_RESET_DATABASE,
+            serde_json::json!({ "confirm": true }),
+        )
     })
     .await
     .map_err(|e| format!("reset_database task join error: {e}"))?
@@ -186,7 +190,7 @@ pub struct PairingQr {
 pub async fn pairing_qr_svg() -> Result<PairingQr, String> {
     // Same rationale as `ipc_call`: the daemon round-trip is blocking IO, so run
     // it off the async runtime to avoid stalling the executor.
-    let reply = tauri::async_runtime::spawn_blocking(|| call("pair_generate_qr", Value::Null))
+    let reply = tauri::async_runtime::spawn_blocking(|| call(METHOD_PAIR_GENERATE_QR, Value::Null))
         .await
         .map_err(|e| format!("pairing_qr_svg task join error: {e}"))??;
     if !reply.ok {
@@ -375,7 +379,7 @@ const OPEN_ITEM_CLEANUP_DELAY_SECS: u64 = 30;
 pub async fn open_item_file(id: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         // 1. Fetch file data from daemon.
-        let reply = call("get_item_file", serde_json::json!({ "id": id }))
+        let reply = call(METHOD_GET_ITEM_FILE, serde_json::json!({ "id": id }))
             .map_err(|e| format!("IPC error: {e}"))?;
         if !reply.ok {
             return Err(reply.error.unwrap_or_else(|| "get_item_file failed".into()));

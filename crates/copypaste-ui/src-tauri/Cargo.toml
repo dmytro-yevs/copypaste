@@ -28,9 +28,16 @@ serde_json.workspace = true
 # All IPC and Tauri commands use `Result<_, String>` directly. (CopyPaste-yorm)
 home.workspace = true
 tracing.workspace = true
-# copypaste-ipc removed: this crate builds its own JSON payloads over the Unix
-# socket directly (see ipc.rs). The IPC types in copypaste-ipc are only used
-# by copypaste-daemon and copypaste-cli, not the UI crate. (CopyPaste-yorm)
+# copypaste-ipc: pure types-only crate (serde + serde_json only, no
+# copypaste-core dep). The UI uses METHOD_* constants from it so a rename of a
+# daemon method is a compile-time error here rather than a silent runtime mismatch.
+# NOTE: the local `IpcReply` struct intentionally diverges from
+# `copypaste_ipc::Response`: IpcReply has no `id` field and uses
+# `error_code: Option<String>` (owned, deserializable from wire JSON), whereas
+# Response uses `Option<&'static str>` which cannot be deserialized from
+# arbitrary wire strings. The local struct is therefore kept; only
+# METHOD_* constants are imported. (CopyPaste-c4q2.6)
+copypaste-ipc = { path = "../../copypaste-ipc" }
 # QR rendering for device pairing. `svg` feature on; the heavier `image`
 # renderer stays off (we only emit an inline SVG string the frontend displays).
 qrcode = { workspace = true, features = ["svg"] }
