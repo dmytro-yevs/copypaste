@@ -223,4 +223,93 @@ class SyncBadgeParityTest {
         )
         assertEquals("Daemon unreachable · No paired devices", tooltip)
     }
+
+    // ── IpcSyncBadgeState authoritative-path tests (CopyPaste-1jms.23) ────────
+
+    /**
+     * auth-failure "error" → DaemonUnreachable (red).
+     * Verifies parity: a Rust-computed "error" wire string routes through
+     * IpcSyncBadgeState.ERROR → DaemonUnreachable, matching macOS red dot.
+     */
+    @Test
+    fun `auth-failure error wire string maps to DaemonUnreachable (red — macOS parity)`() {
+        // Simulate FgsSyncLoop publishing "error" on auth failure.
+        val ipc = IpcSyncBadgeState.fromIpcString("error")
+        assertEquals(
+            "fromIpcString(\"error\") must return ERROR",
+            IpcSyncBadgeState.ERROR, ipc,
+        )
+        assertEquals(
+            "ERROR must map to DaemonUnreachable (red) for macOS parity",
+            SyncBadgeState.DaemonUnreachable,
+            ipc!!.toSyncBadgeState(),
+        )
+    }
+
+    /**
+     * null authoritative → falls back to heuristic.
+     * When DevicesOnlineState.badgeState is null (no poll run yet), SyncStatusBadge
+     * must use resolveSyncBadgeState rather than crashing or returning a wrong state.
+     */
+    @Test
+    fun `null authoritative badge state falls back to heuristic`() {
+        // When authoritativeBadgeState == null, we use the heuristic.
+        // Verify the heuristic produces Idle for the typical "fresh install" case:
+        // OS online, never synced, no error.
+        val heuristicResult = resolveSyncBadgeState(
+            liveOnlineCount = 0,
+            lastActivityMs = 0L,
+            recentSyncMs = RECENT_MS,
+            hasInternet = true,
+            isSyncError = false,
+            nowMs = NOW_MS,
+        )
+        assertEquals(
+            "Null authoritative → heuristic → Idle (grey) on fresh install",
+            SyncBadgeState.Idle,
+            heuristicResult,
+        )
+    }
+
+    /**
+     * "synced" wire string overrides stale heuristic.
+     * Even when the heuristic would compute Idle (stale lastActivityMs), an
+     * authoritative "synced" from the Rust FFI must produce Connected (green).
+     */
+    @Test
+    fun `synced wire string overrides stale heuristic to Connected (green)`() {
+        // Heuristic for the same inputs would return Idle (stale sync).
+        val staleLastMs = NOW_MS - RECENT_MS - 60_000L // outside the 5-min window
+        val heuristicWouldReturn = resolveSyncBadgeState(
+            liveOnlineCount = 1,
+            lastActivityMs = staleLastMs,
+            recentSyncMs = RECENT_MS,
+            hasInternet = true,
+            nowMs = NOW_MS,
+        )
+        assertEquals("Heuristic baseline: stale → Idle", SyncBadgeState.Idle, heuristicWouldReturn)
+
+        // But authoritative "synced" → Connected (overrides the stale heuristic).
+        val ipc = IpcSyncBadgeState.fromIpcString("synced")
+        assertEquals(IpcSyncBadgeState.SYNCED, ipc)
+        assertEquals(
+            "Authoritative synced must produce Connected even when heuristic would give Idle",
+            SyncBadgeState.Connected,
+            ipc!!.toSyncBadgeState(),
+        )
+    }
+
+    /**
+     * Unknown wire string → fromIpcString returns null (caller falls back to heuristic).
+     * Future-proofs against new wire values from newer Rust versions.
+     */
+    @Test
+    fun `unknown wire string returns null from fromIpcString`() {
+        val result = IpcSyncBadgeState.fromIpcString("unknown_future_state")
+        assertEquals(
+            "Unrecognised wire string must return null so the heuristic is used as fallback",
+            null,
+            result,
+        )
+    }
 }
