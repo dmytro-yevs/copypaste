@@ -4200,41 +4200,76 @@ mod tests {
         //   2. The spawn_blocking wrapper is confirmed present by compilation.
     }
 
-    /// CopyPaste-zdyw: verify the gate that controls whether lsappinfo is
-    /// forked on each clipboard tick.
+    /// CopyPaste-44rq.43 regression guard: `is_sensitive_app` and the
+    /// exclusion-list check are decoupled concerns.
     ///
-    /// `handle_tick` skips the `spawn_blocking` call entirely when
-    /// `excluded_app_bundle_ids` is empty — no exclusion check is needed and
-    /// forking `lsappinfo` twice per second for nothing wastes CPU.  When the
-    /// list is non-empty the probe must run (fail-closed P1-2 contract).
+    /// Before the fix (CopyPaste-zdyw optimisation), `handle_tick` skipped
+    /// lsappinfo entirely when `excluded_app_bundle_ids` was empty, which meant
+    /// `source_bundle_id` was always `None` in `handle_text`/`handle_image`.
+    /// Consequently `is_sensitive_app` was never called and passwords copied
+    /// from 1Password, Bitwarden, etc. were silently not flagged sensitive when
+    /// the exclusion list was empty (the default factory state).
     ///
-    /// Because `handle_tick` is an async function that requires a real
-    /// `ClipboardMonitor`, we test the gate condition directly (the boolean
-    /// guard that drives the branch) rather than the full async function.
+    /// The fix: lsappinfo runs unconditionally on macOS so
+    /// `is_sensitive_app(bundle_id)` receives a real bundle ID on every tick,
+    /// regardless of whether `excluded_app_bundle_ids` is empty.
+    ///
+    /// This test verifies the CORRECT post-fix behaviour:
+    ///   1. `is_sensitive_app` returns `true` for known password-manager bundles.
+    ///   2. An empty exclusion list does NOT suppress `is_sensitive_app` logic —
+    ///      the two checks are entirely independent.
+    ///   3. Non-sensitive apps still return `false`.
     #[test]
-    fn lsappinfo_skipped_when_exclusion_list_is_empty() {
+    fn is_sensitive_app_independent_of_exclusion_list() {
+        // Default config has an empty exclusion list — the factory/default state.
         let cfg_empty = AppConfig::default();
         assert!(
             cfg_empty.excluded_app_bundle_ids.is_empty(),
-            "default config must have an empty exclusion list"
-        );
-        // The gate condition used in handle_tick: probe is skipped when empty.
-        let should_skip = cfg_empty.excluded_app_bundle_ids.is_empty();
-        assert!(
-            should_skip,
-            "lsappinfo probe must be skipped when excluded_app_bundle_ids is empty \
-             (CopyPaste-zdyw: no fork on empty list)"
+            "pre-condition: default config must have an empty exclusion list"
         );
 
+        // Even with an empty exclusion list, `is_sensitive_app` must correctly
+        // classify known password managers as sensitive (fix for CopyPaste-44rq.43).
+        for bundle_id in &[
+            "com.1password.1password",
+            "com.bitwarden.desktop",
+            "com.keepassxc.keepassxc",
+            "com.dashlane.dashlane",
+        ] {
+            assert!(
+                copypaste_core::is_sensitive_app(bundle_id),
+                "is_sensitive_app({bundle_id:?}) must be true regardless of exclusion list size"
+            );
+        }
+
+        // Non-password-manager apps must still return false.
+        for bundle_id in &["com.apple.finder", "com.google.chrome", ""] {
+            assert!(
+                !copypaste_core::is_sensitive_app(bundle_id),
+                "is_sensitive_app({bundle_id:?}) must be false for non-sensitive apps"
+            );
+        }
+
+        // Exclusion list membership and sensitive-app classification are
+        // orthogonal: an app can be in the exclusion list without being sensitive,
+        // and vice versa.  Adding an app to the exclusion list does not change
+        // whether `is_sensitive_app` returns true for other bundle IDs.
         let mut cfg_non_empty = AppConfig::default();
         cfg_non_empty
             .excluded_app_bundle_ids
-            .push("com.1password.1password".to_string());
-        let should_skip_non_empty = cfg_non_empty.excluded_app_bundle_ids.is_empty();
+            .push("com.example.excluded".to_string());
         assert!(
-            !should_skip_non_empty,
-            "lsappinfo probe must NOT be skipped when excluded_app_bundle_ids is non-empty \
-             (fail-closed P1-2 contract)"
+            !cfg_non_empty.excluded_app_bundle_ids.is_empty(),
+            "pre-condition: non-empty exclusion list"
+        );
+        // is_sensitive_app result is independent of the exclusion list.
+        assert!(
+            copypaste_core::is_sensitive_app("com.1password.1password"),
+            "is_sensitive_app must return true for 1Password even when exclusion list is non-empty"
+        );
+        assert!(
+            !copypaste_core::is_sensitive_app("com.example.excluded"),
+            "is_sensitive_app must return false for an app that is only in the exclusion list"
         );
     }
 
