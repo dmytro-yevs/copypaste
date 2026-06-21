@@ -369,19 +369,26 @@ describe("CopyPaste-bdac.66: FullResImage placeholder copy is consistent with em
   it("HistoryView source no longer contains the old 'Image unavailable' copy", async () => {
     // Static source check: confirm the old copy strings are gone and the new ones
     // are present. This is reliable regardless of async modal-open flow in JSDOM.
+    // FullResImage was extracted to HistoryView/DetailsModal.tsx (CopyPaste-g06m.13
+    // refactor) — check both the main file and the sibling module.
     const { readFileSync } = await import("fs");
     const { resolve } = await import("path");
     const src = readFileSync(
       resolve(process.cwd(), "src/views/HistoryView.tsx"),
       "utf8",
     );
+    const detailsModalSrc = readFileSync(
+      resolve(process.cwd(), "src/views/HistoryView/DetailsModal.tsx"),
+      "utf8",
+    );
+    const combinedSrc = src + detailsModalSrc;
 
     // Old copies must be gone
-    expect(src).not.toContain('"Image unavailable"');
+    expect(combinedSrc).not.toContain('"Image unavailable"');
 
-    // New copies must be present
-    expect(src).toContain("Couldn't load image");
-    expect(src).toContain("Try reopening this item.");
+    // New copies must be present (may be in DetailsModal.tsx after refactor)
+    expect(combinedSrc).toContain("Couldn't load image");
+    expect(combinedSrc).toContain("Try reopening this item.");
   });
 
   it("shows 'Couldn't load image' in the Details modal when image fetch fails", async () => {
