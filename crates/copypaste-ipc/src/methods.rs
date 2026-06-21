@@ -605,6 +605,98 @@ pub struct ResetDatabaseResponse {
     pub ready: bool,
 }
 
+// ── Database backup / restore (CopyPaste-x94p / CopyPaste-8wbt) ─────────────
+
+/// Create an encrypted SQLCipher backup of the local clipboard database.
+///
+/// The daemon owns both the database file and the encryption key, so it can
+/// produce a hot, consistent backup without stopping itself. Internally the
+/// handler runs `VACUUM INTO '<dest>'` which copies every non-empty page into
+/// a new file encrypted with the **same key** as the source database.
+///
+/// ## Parameters ([`DbBackupRequest`])
+/// - `dest_path` (`String`): absolute path for the output backup file.
+///   The file must NOT already exist; the daemon refuses to overwrite.
+///
+/// ## Response ([`DbBackupResponse`])
+/// - `ok` (`bool`): always `true` on success.
+/// - `dest_path` (`String`): the path the backup was written to.
+/// - `size_bytes` (`u64`): size of the backup file in bytes.
+///
+/// (CopyPaste-x94p)
+pub const METHOD_DB_BACKUP: &str = "db_backup";
+
+/// Parameters for [`METHOD_DB_BACKUP`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DbBackupRequest {
+    /// Absolute path where the backup file will be written.
+    /// The daemon refuses to overwrite an existing file.
+    pub dest_path: String,
+}
+
+/// Success payload for [`METHOD_DB_BACKUP`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DbBackupResponse {
+    /// Always `true` when the daemon returns `ok` for this method.
+    pub ok: bool,
+    /// The path the backup was written to (mirrors `DbBackupRequest::dest_path`).
+    pub dest_path: String,
+    /// Size of the backup file in bytes.
+    pub size_bytes: u64,
+}
+
+/// Restore the local clipboard database from an encrypted SQLCipher backup.
+///
+/// The daemon must be running to service this call. The handler:
+///
+/// 1. Validates `confirm = true` (refuses without it).
+/// 2. Verifies the backup file exists and is readable.
+/// 3. Swaps the live DB handle to an in-memory instance so all pending writes
+///    are quiesced (mirrors the `reset_database` safe-swap pattern).
+/// 4. Renames the existing `clipboard.db` (+ WAL/SHM) aside to a timestamped
+///    `.before-restore-<ts>` name (or deletes them when `force = true`).
+/// 5. Copies the backup file into place as `clipboard.db`.
+/// 6. Reopens the database with the daemon's current key.
+///    The backup **must** have been encrypted with this same key — if the key
+///    mismatches, `Database::open` returns an error and the daemon remains
+///    degraded (the aside file is intact for manual recovery).
+/// 7. Swaps the live handle back to the restored database and returns ready.
+///
+/// ## Parameters ([`DbRestoreRequest`])
+/// - `confirm` (`bool`): must be `true`; prevents accidental invocations.
+/// - `src_path` (`String`): absolute path to the backup file to restore.
+/// - `force` (`bool`, default `false`): delete the existing DB instead of
+///   renaming it aside. Use when disk space is tight.
+///
+/// ## Response ([`DbRestoreResponse`])
+/// - `ok` (`bool`): always `true` on success.
+/// - `ready` (`bool`): always `true`; the restored DB is live.
+///
+/// (CopyPaste-8wbt)
+pub const METHOD_DB_RESTORE: &str = "db_restore";
+
+/// Parameters for [`METHOD_DB_RESTORE`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DbRestoreRequest {
+    /// Must be `true` to authorise the destructive replace-in-place.
+    #[serde(default)]
+    pub confirm: bool,
+    /// Absolute path to the backup file to restore from.
+    pub src_path: String,
+    /// When `true`, delete the existing live DB instead of renaming it aside.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// Success payload for [`METHOD_DB_RESTORE`].
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DbRestoreResponse {
+    /// Always `true` when the daemon returns `ok` for this method.
+    pub ok: bool,
+    /// `true` when the restored database is live (no restart needed).
+    pub ready: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -964,5 +1056,73 @@ mod tests {
         let resp: GetSyncStatusResponse = serde_json::from_str(legacy_json).unwrap();
         assert_eq!(resp.badge_state, None);
         assert!(resp.supabase_configured);
+    }
+
+    // ── db_backup / db_restore (CopyPaste-x94p / CopyPaste-8wbt) ────────────
+
+    #[test]
+    fn db_backup_method_has_correct_wire_name() {
+        assert_eq!(METHOD_DB_BACKUP, "db_backup");
+    }
+
+    #[test]
+    fn db_restore_method_has_correct_wire_name() {
+        assert_eq!(METHOD_DB_RESTORE, "db_restore");
+    }
+
+    #[test]
+    fn db_backup_request_roundtrip() {
+        let req = DbBackupRequest {
+            dest_path: "/tmp/backup.db.enc".to_string(),
+        };
+        let s = serde_json::to_string(&req).unwrap();
+        let back: DbBackupRequest = serde_json::from_str(&s).unwrap();
+        assert_eq!(req, back);
+        assert!(s.contains("dest_path"), "wire: {s}");
+    }
+
+    #[test]
+    fn db_backup_response_roundtrip() {
+        let resp = DbBackupResponse {
+            ok: true,
+            dest_path: "/tmp/backup.db.enc".to_string(),
+            size_bytes: 4096,
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        let back: DbBackupResponse = serde_json::from_str(&s).unwrap();
+        assert_eq!(resp, back);
+        assert!(s.contains("\"ok\":true"), "wire: {s}");
+        assert!(s.contains("\"size_bytes\":4096"), "wire: {s}");
+    }
+
+    #[test]
+    fn db_restore_request_defaults_confirm_false() {
+        // An empty params object must parse with confirm = false so a caller who
+        // forgets the flag is rejected rather than silently replacing the DB.
+        let req: DbRestoreRequest = serde_json::from_str(r#"{"src_path": "/tmp/b.db.enc"}"#).unwrap();
+        assert!(!req.confirm, "confirm must default to false");
+        assert!(!req.force, "force must default to false");
+    }
+
+    #[test]
+    fn db_restore_request_roundtrip() {
+        let req = DbRestoreRequest {
+            confirm: true,
+            src_path: "/tmp/backup.db.enc".to_string(),
+            force: false,
+        };
+        let s = serde_json::to_string(&req).unwrap();
+        let back: DbRestoreRequest = serde_json::from_str(&s).unwrap();
+        assert_eq!(req, back);
+        assert!(s.contains("\"confirm\":true"), "wire: {s}");
+        assert!(s.contains("src_path"), "wire: {s}");
+    }
+
+    #[test]
+    fn db_restore_response_roundtrip() {
+        let resp = DbRestoreResponse { ok: true, ready: true };
+        let s = serde_json::to_string(&resp).unwrap();
+        let back: DbRestoreResponse = serde_json::from_str(&s).unwrap();
+        assert_eq!(resp, back);
     }
 }

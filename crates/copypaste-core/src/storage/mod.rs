@@ -14,7 +14,8 @@ pub use items::{
     find_recent_by_hash, get_item_by_id, get_key_version, get_page, get_page_meta,
     get_page_pinned_first, get_page_pinned_first_lamport, incremental_vacuum, insert_item,
     insert_item_with_fts, insert_tombstone, next_lamport_ts, pin_item, prune_to_cap,
-    reorder_pinned, search_items, soft_delete_item, upsert_fts, ClipboardItem, ItemsError,
+    reorder_pinned, search_items, search_items_filtered, soft_delete_item, upsert_fts,
+    ClipboardItem, ItemsError,
     ITEM_KEY_VERSION_CURRENT,
 };
 pub use migration_v4::{

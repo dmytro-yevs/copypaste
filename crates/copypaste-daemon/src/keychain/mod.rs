@@ -217,12 +217,19 @@ pub fn load_or_create() -> Result<DeviceKeypair, KeychainError> {
                 match migrate_legacy_accessibility_if_needed(&arr) {
                     Ok(()) => {}
                     Err(e) if is_missing_entitlement(&e) => {
-                        tracing::debug!(
-                            "device key ThisDeviceOnly accessibility hardening \
-                             skipped: required keychain entitlement is absent \
-                             (expected on ad-hoc-signed builds). The key is \
-                             usable; iCloud-sync suppression needs a \
-                             Developer-ID-signed build with keychain-access-groups."
+                        // CopyPaste-uxt7: promote to WARN so operators can see
+                        // this on ad-hoc / unsigned builds. The key is still
+                        // fully usable; only the iCloud-sync-suppression
+                        // (ThisDeviceOnly) hardening is absent. Signing with a
+                        // Developer-ID certificate and adding the
+                        // `keychain-access-groups` entitlement fixes this.
+                        tracing::warn!(
+                            "Keychain ThisDeviceOnly hardening SKIPPED: the \
+                             `keychain-access-groups` entitlement is absent on \
+                             this build (ad-hoc / unsigned). Clipboard key is \
+                             usable but iCloud Keychain sync suppression is NOT \
+                             active — use a Developer-ID-signed build for full \
+                             security hardening."
                         );
                     }
                     Err(e) => {
@@ -547,9 +554,10 @@ fn migrate_legacy_accessibility_if_needed(secret: &[u8; 32]) -> Result<(), Keych
 mod tests {
     use super::*;
 
-    /// Fix C: the `errSecMissingEntitlement` classifier must recognise
-    /// OSStatus -34018 (and only that code) so the daemon downgrades the
-    /// ThisDeviceOnly migration failure to a quiet DEBUG on ad-hoc builds.
+    /// Fix C / CopyPaste-uxt7: the `errSecMissingEntitlement` classifier must
+    /// recognise OSStatus -34018 (and only that code) so the daemon emits a
+    /// WARN (not a hard error) for the ThisDeviceOnly migration failure on
+    /// ad-hoc builds.
     #[cfg(target_os = "macos")]
     #[test]
     fn is_missing_entitlement_matches_only_minus_34018() {
@@ -631,6 +639,26 @@ mod tests {
             set_generic_password_locked_down;
         // The function must be accessible and callable.
         let _ = _fn_ptr; // suppress unused warning
+    }
+
+    /// CopyPaste-uxt7: `is_missing_entitlement` must return `true` only for
+    /// OSStatus -34018 so the WARN branch in `load_or_create` is triggered only
+    /// on genuine ad-hoc / unsigned builds and not on other keychain failures.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn is_missing_entitlement_is_the_warn_trigger_for_ad_hoc_builds() {
+        // The exact error that triggers the ad-hoc warning path.
+        let missing = KeychainError::Keychain(SfError::from_code(-34018));
+        assert!(
+            is_missing_entitlement(&missing),
+            "OSStatus -34018 must be the warn-trigger for ThisDeviceOnly skips"
+        );
+        // No other status should trigger the ad-hoc warn path.
+        let other = KeychainError::Keychain(SfError::from_code(-25293)); // errSecAuthFailed
+        assert!(
+            !is_missing_entitlement(&other),
+            "non-missing-entitlement errors must NOT trigger the ad-hoc warn path"
+        );
     }
 
     /// CopyPaste-nkro: on non-macOS, `store_supabase_password_to_keychain` must

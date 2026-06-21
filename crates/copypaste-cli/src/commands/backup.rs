@@ -1,22 +1,22 @@
-//! `copypaste backup` and `copypaste restore` — wrap ops scripts.
+//! `copypaste backup` and `copypaste restore` — daemon IPC verbs.
 //!
-//! These commands delegate to the well-tested shell scripts in `scripts/`
-//! (`backup-db.sh`, `restore-db.sh`) so we keep a single source of truth
-//! for the SQLCipher backup/restore protocol. The CLI is intentionally a
-//! thin wrapper that:
-//!   * locates the script (env override → repo-relative → PATH),
-//!   * forwards user-supplied flags as script flags,
-//!   * forwards the script's exit code as the CLI exit code.
+//! These commands route through the daemon's `db_backup` / `db_restore` IPC
+//! verbs (CopyPaste-x94p / CopyPaste-8wbt) so the daemon owns the backup
+//! process end-to-end: it holds the encryption key, the open database handle,
+//! and can produce a consistent in-process SQLCipher copy via `VACUUM INTO`.
 //!
-//! When the script cannot be found we fall back to a clear error message
-//! (the spec mentions an inline SQLCipher `.backup` fallback via rusqlite,
-//! but adding the rusqlite-with-sqlcipher dep to this crate is a much
-//! bigger surgery; we prefer to fail loud with install guidance).
+//! The shell-script helpers (`locate_script`, `build_backup_args`,
+//! `build_restore_args`) are retained for diagnostics and external tooling
+//! but are no longer called by the CLI dispatch path.
 
 use anyhow::{anyhow, Context, Result};
+use copypaste_ipc::{METHOD_DB_BACKUP, METHOD_DB_RESTORE};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
+// These helpers are used only in the test module below. The binary no longer
+// calls them (it routes through the daemon IPC verbs instead), but we keep
+// them so the script-plumbing tests continue to verify the shell interface.
+#[allow(dead_code)]
 /// Locate a script in `scripts/` next to the running binary or the repo root.
 ///
 /// Resolution order:
@@ -74,6 +74,7 @@ pub(crate) fn locate_script(name: &str) -> Result<PathBuf> {
 
 /// Build the argument list passed to `backup-db.sh`. Pure function so we
 /// can unit-test the wiring without spawning a subprocess.
+#[allow(dead_code)]
 pub(crate) fn build_backup_args(output: Option<&str>, dry_run: bool) -> Vec<String> {
     let mut args: Vec<String> = Vec::new();
     if let Some(dir) = output {
@@ -87,6 +88,7 @@ pub(crate) fn build_backup_args(output: Option<&str>, dry_run: bool) -> Vec<Stri
 }
 
 /// Build the argument list passed to `restore-db.sh`.
+#[allow(dead_code)]
 pub(crate) fn build_restore_args(backup_path: &str, force: bool, dry_run: bool) -> Vec<String> {
     let mut args: Vec<String> = vec![backup_path.to_string()];
     if force {
@@ -98,45 +100,82 @@ pub(crate) fn build_restore_args(backup_path: &str, force: bool, dry_run: bool) 
     args
 }
 
-/// Run `scripts/backup-db.sh [--output-dir <output>] [--dry-run]`.
+/// Back up the live clipboard database via the daemon's `db_backup` IPC verb.
 ///
-/// `_socket_path` is accepted to match the other command signatures even
-/// though backup does not talk to the daemon directly (the script will
-/// stop/start the daemon itself via launchctl).
-pub fn run_backup(_socket_path: &Path, output: Option<&str>, dry_run: bool) -> Result<()> {
-    let script = locate_script("backup-db.sh")
-        .context("backup-db.sh is shipped under scripts/ in the repo or install prefix")?;
-    let args = build_backup_args(output, dry_run);
+/// `output` is the destination directory. The daemon writes a timestamped
+/// `copypaste-<YYYYMMDD-HHMMSS>.db.enc` file inside it. When `output` is
+/// `None`, the current directory is used as the output directory.
+///
+/// `dry_run` prints what would happen without writing anything. In dry-run
+/// mode the daemon is NOT contacted (the shell-script tools and IPC call
+/// both need a running daemon, so dry-run stays a client-side preview).
+///
+/// (CopyPaste-x94p)
+pub fn run_backup(socket_path: &Path, output: Option<&str>, dry_run: bool) -> Result<()> {
+    use crate::ipc::IpcClient;
+    use crate::commands::common::exit_on_err;
 
-    let status = Command::new("bash")
-        .arg(&script)
-        .args(&args)
-        .status()
-        .with_context(|| format!("failed to spawn bash {}", script.display()))?;
+    // Compute a timestamped destination path (Unix epoch seconds — unique
+    // enough for a backup filename and does not require chrono/time deps).
+    let output_dir = output.unwrap_or(".");
+    let epoch_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let dest_path = format!("{output_dir}/copypaste-{epoch_secs}.db.enc");
 
-    if !status.success() {
-        return Err(anyhow!(
-            "backup-db.sh exited with status {}",
-            status.code().unwrap_or(-1)
-        ));
+    if dry_run {
+        println!("dry-run: would write backup to: {dest_path}");
+        println!("dry-run: daemon IPC verb: {METHOD_DB_BACKUP}");
+        return Ok(());
     }
+
+    let mut client = IpcClient::connect(socket_path)
+        .context("cannot connect to daemon — is it running? start with `copypaste daemon start`")?;
+
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_DB_BACKUP,
+        serde_json::json!({ "dest_path": dest_path }),
+    );
+    let resp = client.call(&req)?;
+    exit_on_err(&resp);
+
+    let written_path = resp
+        .data
+        .as_ref()
+        .and_then(|d| d["dest_path"].as_str())
+        .unwrap_or(&dest_path);
+    let size_bytes = resp
+        .data
+        .as_ref()
+        .and_then(|d| d["size_bytes"].as_u64())
+        .unwrap_or(0);
+
+    println!("backup written: {written_path} ({size_bytes} bytes)");
     Ok(())
 }
 
-/// Run `scripts/restore-db.sh <backup_path> [--force] [--dry-run]`.
+/// Restore the live clipboard database via the daemon's `db_restore` IPC verb.
 ///
-/// We refuse to call the script when `backup_path` does not exist on disk
-/// (avoids a confusing error from the shell) UNLESS `dry_run` is set, in
-/// which case we still call the script so users can preview behaviour.
+/// The daemon quiesces writes, renames the existing database aside (or deletes
+/// it when `force = true`), copies the backup file in place, reopens the DB
+/// with its current key, and marks itself ready.
+///
+/// `dry_run` prints what would happen without contacting the daemon.
+///
+/// (CopyPaste-8wbt)
 pub fn run_restore(
-    _socket_path: &Path,
+    socket_path: &Path,
     backup_path: &str,
     force: bool,
     dry_run: bool,
 ) -> Result<()> {
+    use crate::ipc::IpcClient;
+    use crate::commands::common::exit_on_err;
+
     // Reject paths that look like flags (leading `--`) to prevent accidental
-    // shell-injection or argument confusion when the value is forwarded to
-    // the restore script. A real backup path will never start with `--`.
+    // argument confusion. A real backup path will never start with `--`.
     if backup_path.starts_with("--") {
         return Err(anyhow!(
             "invalid backup path {:?}: paths must not start with `--` \
@@ -145,26 +184,60 @@ pub fn run_restore(
         ));
     }
 
-    if !dry_run && !Path::new(backup_path).is_file() {
-        return Err(anyhow!("backup file not found: {backup_path}"));
+    // Absolute path: the daemon resolves paths relative to its own cwd, not
+    // the CLI's cwd — so we canonicalize before sending over IPC.
+    let abs_path = if dry_run {
+        // In dry-run we don't need the file to exist.
+        backup_path.to_string()
+    } else {
+        if !Path::new(backup_path).is_file() {
+            return Err(anyhow!("backup file not found: {backup_path}"));
+        }
+        std::fs::canonicalize(backup_path)
+            .with_context(|| format!("cannot resolve path: {backup_path}"))?
+            .to_string_lossy()
+            .into_owned()
+    };
+
+    if dry_run {
+        println!("dry-run: would restore from: {abs_path}");
+        println!("dry-run: force={force}");
+        println!("dry-run: daemon IPC verb: {METHOD_DB_RESTORE}");
+        return Ok(());
     }
 
-    let script = locate_script("restore-db.sh")
-        .context("restore-db.sh is shipped under scripts/ in the repo or install prefix")?;
-    let args = build_restore_args(backup_path, force, dry_run);
-
-    let status = Command::new("bash")
-        .arg(&script)
-        .args(&args)
-        .status()
-        .with_context(|| format!("failed to spawn bash {}", script.display()))?;
-
-    if !status.success() {
-        return Err(anyhow!(
-            "restore-db.sh exited with status {}",
-            status.code().unwrap_or(-1)
-        ));
+    // Interactive confirmation (unless --force skips it).
+    if !force {
+        eprint!(
+            "WARNING: this will replace the live clipboard database with the backup.\n\
+             The existing database will be renamed aside (use --force to delete it).\n\
+             Type 'restore' to confirm: "
+        );
+        let mut line = String::new();
+        std::io::stdin()
+            .read_line(&mut line)
+            .context("failed to read confirmation")?;
+        if line.trim() != "restore" {
+            return Err(anyhow!("restore cancelled (type 'restore' to confirm)"));
+        }
     }
+
+    let mut client = IpcClient::connect(socket_path)
+        .context("cannot connect to daemon — is it running? start with `copypaste daemon start`")?;
+
+    let req = IpcClient::build_request(
+        &IpcClient::next_id(),
+        METHOD_DB_RESTORE,
+        serde_json::json!({
+            "confirm": true,
+            "src_path": abs_path,
+            "force": force,
+        }),
+    );
+    let resp = client.call(&req)?;
+    exit_on_err(&resp);
+
+    println!("restore complete — daemon is ready with the restored database.");
     Ok(())
 }
 

@@ -1777,6 +1777,26 @@ pub fn search_items<D: DbRead + ?Sized>(
     query: &str,
     limit: usize,
 ) -> Result<Vec<ClipboardItem>, ItemsError> {
+    search_items_filtered(db, query, limit, None)
+}
+
+/// Full-text search over clipboard items with an optional content-type filter.
+///
+/// Identical to [`search_items`] but accepts an optional `content_type` filter
+/// so callers can restrict results to `"text"`, `"image"`, or `"file"` items.
+/// When `content_type_filter` is `None` all types are returned (same as
+/// [`search_items`]).
+///
+/// CopyPaste-tteo: adds the type filter that was previously absent from the
+/// search surface, enabling the CLI `--kind` flag and consistent daemon
+/// search results without breaking existing callers (which keep using
+/// `search_items` with no filter).
+pub fn search_items_filtered<D: DbRead + ?Sized>(
+    db: &D,
+    query: &str,
+    limit: usize,
+    content_type_filter: Option<&str>,
+) -> Result<Vec<ClipboardItem>, ItemsError> {
     if query.trim().is_empty() {
         return Ok(vec![]);
     }
@@ -1786,9 +1806,11 @@ pub fn search_items<D: DbRead + ?Sized>(
         None => return Ok(vec![]),
     };
 
+    // Fix 6: clamp before cast to avoid negative LIMIT in SQLite.
+    let limit_i64 = limit.min(i64::MAX as usize) as i64;
+
     // Single JOIN: FTS5 drives rank order; clipboard_items supplies full row data.
     // `fts.id` is the UNINDEXED text UUID column (matches `clipboard_items.id`).
-    // `prepare_cached` avoids re-compiling the statement on every call.
     //
     // CopyPaste-i6pp (defense-in-depth): `AND ci.is_sensitive = 0` ensures that
     // even if a stale FTS row exists for a sensitive item (written before this
@@ -1796,23 +1818,59 @@ pub fn search_items<D: DbRead + ?Sized>(
     // item is never surfaced by search. The primary guard is in
     // `insert_item_with_fts` and `upsert_fts`, which refuse to write sensitive
     // rows into clipboard_fts at all. This filter is the last line of defence.
-    let mut stmt = db.conn().prepare_cached(
-        "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
-                ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
-                ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version,
-                ci.pinned, ci.pin_order, ci.thumb, ci.deleted
-         FROM clipboard_fts fts
-         JOIN clipboard_items ci ON ci.id = fts.id
-         WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0
-         ORDER BY rank
-         LIMIT ?2",
-    )?;
-
-    // Fix 6: clamp before cast to avoid negative LIMIT in SQLite.
-    let limit_i64 = limit.min(i64::MAX as usize) as i64;
-    let rows: Vec<ClipboardItem> = stmt
-        .query_map(params![safe_query, limit_i64], row_to_item)?
-        .collect::<Result<Vec<_>, _>>()?;
+    //
+    // CopyPaste-tteo: branch on optional content_type filter. We use two static
+    // SQL strings (one with the extra WHERE clause, one without) rather than
+    // building a dynamic query to stay injection-safe and to keep the
+    // `prepare_cached` cache key stable for each branch.
+    // CopyPaste-tteo: branch on optional content_type filter. We use two static
+    // SQL strings (one with the extra WHERE clause, one without) rather than
+    // building a dynamic query to stay injection-safe and to keep the
+    // `prepare_cached` cache key stable for each branch.
+    //
+    // Lifetime note: `prepare_cached` borrows `conn()` and the `MappedRows`
+    // iterator borrows `stmt`, so we must collect inside the same block before
+    // `stmt` (and the borrowed connection) are dropped. We bind a named
+    // variable `rows` in each arm — NOT at the `if` expression level — to give
+    // the borrow checker enough scope information.
+    let rows: Vec<ClipboardItem> = if let Some(ct) = content_type_filter {
+        let conn = db.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
+                    ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
+                    ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version,
+                    ci.pinned, ci.pin_order, ci.thumb, ci.deleted
+             FROM clipboard_fts fts
+             JOIN clipboard_items ci ON ci.id = fts.id
+             WHERE clipboard_fts MATCH ?1
+               AND ci.deleted = 0
+               AND ci.is_sensitive = 0
+               AND ci.content_type = ?3
+             ORDER BY rank
+             LIMIT ?2",
+        )?;
+        let r: Vec<ClipboardItem> = stmt
+            .query_map(params![safe_query, limit_i64, ct], row_to_item)?
+            .collect::<Result<Vec<_>, _>>()?;
+        r
+    } else {
+        let conn = db.conn();
+        let mut stmt = conn.prepare_cached(
+            "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
+                    ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
+                    ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version,
+                    ci.pinned, ci.pin_order, ci.thumb, ci.deleted
+             FROM clipboard_fts fts
+             JOIN clipboard_items ci ON ci.id = fts.id
+             WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0
+             ORDER BY rank
+             LIMIT ?2",
+        )?;
+        let r: Vec<ClipboardItem> = stmt
+            .query_map(params![safe_query, limit_i64], row_to_item)?
+            .collect::<Result<Vec<_>, _>>()?;
+        r
+    };
 
     Ok(rows)
 }
@@ -2379,6 +2437,71 @@ mod tests {
         let results = search_items(&db, "well-known", 10).unwrap();
         assert_eq!(results.len(), 1, "hyphenated term must match stored item");
         assert_eq!(results[0].id, item.id);
+    }
+
+    // --- CopyPaste-tteo: search_items_filtered type-filter tests ---
+
+    /// `search_items_filtered(None)` is identical to `search_items`.
+    #[test]
+    fn search_items_filtered_none_matches_all_types() {
+        let db = Database::open_in_memory().unwrap();
+        let text_item = make_item(1);
+        insert_item(&db, &text_item).unwrap();
+        upsert_fts(&db, &text_item.id, "common keyword").unwrap();
+
+        // No filter: must find the text item.
+        let results = search_items_filtered(&db, "common", 10, None).unwrap();
+        assert_eq!(results.len(), 1, "no filter must find the item");
+        assert_eq!(results[0].id, text_item.id);
+    }
+
+    /// Kind filter `"text"` finds only text items, not image items.
+    #[test]
+    fn search_items_filtered_text_type_finds_only_text() {
+        let db = Database::open_in_memory().unwrap();
+        let text_item = make_item(1); // content_type = "text"
+        let image_item = ClipboardItem::new_image(vec![0u8; 4], "{}".to_string(), 2, None);
+        insert_item(&db, &text_item).unwrap();
+        insert_item(&db, &image_item).unwrap();
+        // FTS only indexes text content, but we give the image an entry too
+        // so the filter is what discriminates — not absence of FTS row.
+        upsert_fts(&db, &text_item.id, "shared term").unwrap();
+        upsert_fts(&db, &image_item.id, "shared term").unwrap();
+
+        let results = search_items_filtered(&db, "shared", 10, Some("text")).unwrap();
+        assert_eq!(results.len(), 1, "text filter must find only text items");
+        assert_eq!(results[0].content_type, "text");
+
+        let results_image = search_items_filtered(&db, "shared", 10, Some("image")).unwrap();
+        assert_eq!(results_image.len(), 1, "image filter must find only image items");
+        assert_eq!(results_image[0].content_type, "image");
+    }
+
+    /// Kind filter for a type with no matching items returns empty.
+    #[test]
+    fn search_items_filtered_unknown_type_returns_empty() {
+        let db = Database::open_in_memory().unwrap();
+        let text_item = make_item(1);
+        insert_item(&db, &text_item).unwrap();
+        upsert_fts(&db, &text_item.id, "needle").unwrap();
+
+        let results = search_items_filtered(&db, "needle", 10, Some("file")).unwrap();
+        assert!(
+            results.is_empty(),
+            "file filter must return empty when only text items exist"
+        );
+    }
+
+    /// Empty query still returns empty even with a type filter.
+    #[test]
+    fn search_items_filtered_empty_query_with_type_returns_empty() {
+        let db = Database::open_in_memory().unwrap();
+        let text_item = make_item(1);
+        insert_item(&db, &text_item).unwrap();
+        upsert_fts(&db, &text_item.id, "anything").unwrap();
+
+        let results = search_items_filtered(&db, "", 10, Some("text")).unwrap();
+        assert!(results.is_empty(), "empty query must always return empty");
     }
 
     /// Direct unit check of the sanitizer: hyphens become whitespace-separated

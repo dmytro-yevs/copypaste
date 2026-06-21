@@ -48,6 +48,9 @@ enum Commands {
         /// Maximum results (default: 20)
         #[arg(long, default_value_t = 20)]
         limit: u64,
+        /// Filter by content type: text, image, or file (CopyPaste-tteo)
+        #[arg(long, value_name = "TYPE")]
+        kind: Option<String>,
     },
     /// Copy a clipboard item back to the system clipboard
     Copy {
@@ -328,7 +331,9 @@ fn main() {
         Commands::Delete { id, force, dry_run } => {
             commands::delete::run(&socket, &id, force, dry_run)
         }
-        Commands::Search { query, limit } => commands::search::run(&socket, &query, limit),
+        Commands::Search { query, limit, kind } => {
+            commands::search::run(&socket, &query, limit, kind.as_deref())
+        }
         Commands::Copy {
             index,
             id,

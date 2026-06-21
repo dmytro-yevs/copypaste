@@ -713,6 +713,14 @@ impl Database {
     pub fn conn(&self) -> &Connection {
         &self.conn
     }
+
+    /// Return the filesystem path this connection was opened from, if any.
+    ///
+    /// `None` for in-memory databases (test helpers). Used by the `db_restore`
+    /// IPC handler to locate the live DB file for safe file-copy restore.
+    pub fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
 }
 
 /// `Database` implements [`crate::storage::pool::DbRead`] so that the same
