@@ -71,7 +71,7 @@ class ServiceRestartWorker(
         val notification: Notification =
             NotificationCompat.Builder(applicationContext, ClipboardService.CHANNEL_ID)
                 .setContentTitle(applicationContext.getString(R.string.notif_title_active))
-                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setSmallIcon(R.mipmap.ic_launcher_foreground)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .setOngoing(true)
                 .build()
