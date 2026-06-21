@@ -1,0 +1,931 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── §1 Bundled fonts — pixel-identical typography across macOS + Android ────
+   Inter (UI text) and JetBrains Mono (code/mono) are bundled as .woff2 so
+   rendering is identical on every platform (DESIGN-SYSTEM-v2 §1 / §10).
+
+   DROP-IN REQUIRED: the .woff2 binary files are NOT committed to git (large
+   binaries). You must copy them into src/assets/fonts/ before building:
+
+     Inter — download from https://github.com/rsms/inter/releases (Inter.woff2
+             or the variable font Inter[wght].woff2 at the same URL)
+       • inter-regular.woff2  (weight 400)
+       • inter-medium.woff2   (weight 500)
+       • inter-semibold.woff2 (weight 600)
+
+     JetBrains Mono — download from
+             https://github.com/JetBrains/JetBrainsMono/releases
+       • jetbrains-mono-regular.woff2  (weight 400)
+       • jetbrains-mono-medium.woff2   (weight 500)
+
+   The @font-face declarations below are intentionally "safe-to-miss": if the
+   .woff2 files are absent the browser skips the rule and falls through to the
+   system-font fallbacks in the font-family stack (system-ui / monospace). The
+   UI remains fully functional; it just uses the local system font instead.
+────────────────────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/inter-regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/inter-medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./assets/fonts/inter-semibold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./assets/fonts/jetbrains-mono-regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./assets/fonts/jetbrains-mono-medium.woff2") format("woff2");
+}
+
+/* ── Design System v2 "Quiet Precision" — token foundation ──────────────────
+   §0  Canonical palette (reconciled web/Android to ONE ramp)
+   §3  Semantic colours + elevation + interaction state tokens
+   §8  Motion tokens
+   All component files use ide-* tailwind tokens from tailwind.config.js.
+   This file adds:
+     • dark color-scheme + CSS custom properties (JS/inline consumption)
+     • global body/font baseline
+     • form-control base styles (input, select, checkbox, range)
+     • .surface-glass / .surface-solid translucency pair
+     • .focus-ring layered focus indicator
+     • thin IDE-style scrollbars
+     • popup-row size class + entrance animation
+──────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  color-scheme: dark;
+
+  /* ── §0 Canonical surface palette ──────────────────────────────────────
+     Stored as RGB channel triplets (--ide-*-rgb) so Tailwind utilities can
+     inject alpha (e.g. bg-ide-panel/60 → rgb(... / .6)) AND the data-theme
+     cascade can re-theme them. The derived --ide-* full-colour vars keep raw
+     CSS consumers (input/select/range/focus-ring) working unchanged: the
+     light theme only overrides the -rgb channels, --ide-* re-resolves lazily. */
+  --ide-bg-rgb:        19 20 26;     --ide-bg:        rgb(var(--ide-bg-rgb));
+  --ide-panel-rgb:     27 28 34;     --ide-panel:     rgb(var(--ide-panel-rgb));
+  --ide-elevated-rgb:  35 37 45;     --ide-elevated:  rgb(var(--ide-elevated-rgb));
+  --ide-raised-rgb:    45 47 52;     --ide-raised:    rgb(var(--ide-raised-rgb));
+  --ide-border-rgb:    56 59 66;     --ide-border:    rgb(var(--ide-border-rgb));
+  --ide-divider-rgb:   46 48 53;     --ide-divider:   rgb(var(--ide-divider-rgb));
+
+  /* ── §3 Interaction state tokens (kill bg-white/10 magic) ───────────── */
+  --ide-hover:        rgba(255,255,255,0.045);
+  --ide-pressed:      rgba(255,255,255,0.07);
+  --ide-selection:    rgba(77,141,255,0.16);
+  --ide-multi-sel:    rgba(77,141,255,0.20);
+
+  /* ── §0 Text hierarchy ───────────────────────────────────────────────── */
+  --ide-text-rgb:     232 234 237;   --ide-text:  rgb(var(--ide-text-rgb));
+  --ide-dim-rgb:      157 160 168;   --ide-dim:   rgb(var(--ide-dim-rgb));
+  /* Raised from #6b6f78 (3.37:1) to meet WCAG AA 4.5:1 on panel (#1B1C22). */
+  --ide-faint-rgb:    130 134 143;   --ide-faint: rgb(var(--ide-faint-rgb));
+  /* Ghost: rgba(255,255,255,0.46) composited on panel = 4.56:1 — WCAG AA.
+     Replaces inline magic rgba(255,255,255,0.28/.30/.35) in Popup/EmptyState.
+     Use for secondary metadata text (time, count, placeholder icons). */
+  --ide-ghost:        rgba(255,255,255,0.46);
+  /* Decorative-icon: rgba(255,255,255,0.33) = 3.01:1 on panel.
+     WCAG AA large-text / decorative (≥3:1). Use for 24px+ SVG icons only. */
+  --ide-ghost-deco:   rgba(255,255,255,0.33);
+
+  /* ── §0 Brand ────────────────────────────────────────────────────────── */
+  --ide-accent-rgb:       77 141 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb: 90 172 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:   rgba(77,141,255,0.12);
+
+  /* ── §3 Semantic colours (base / container) ──────────────────────────── */
+  --ide-danger-rgb:   224 92 92;   --ide-danger:  rgb(var(--ide-danger-rgb));   --ide-danger-dim:   rgba(224,92,92,0.10);
+  --ide-success-rgb:  95 173 101;  --ide-success: rgb(var(--ide-success-rgb));  --ide-success-dim:  rgba(95,173,101,0.10);
+  /* Dark: warning = amber 217 163 67; badge-warning same (both amber in dark) */
+  --ide-warning-rgb:  217 163 67;  --ide-warning: rgb(var(--ide-warning-rgb));  --ide-warning-dim:  rgba(217,163,67,0.10);
+  --ide-badge-warning-rgb: 217 163 67; --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-info-rgb:     86 182 194;  --ide-info:    rgb(var(--ide-info-rgb));     --ide-info-dim:     rgba(86,182,194,0.12);
+  /* 1hqt: sky = same as info in dark (teal readable); light theme overrides to 20 120 170 */
+  --ide-sky-rgb:      86 182 194;  --ide-sky:     rgb(var(--ide-sky-rgb));      --ide-sky-dim:      rgba(86,182,194,0.12);
+  --ide-violet-rgb:   198 120 221; --ide-violet:  rgb(var(--ide-violet-rgb));   --ide-violet-dim:   rgba(198,120,221,0.12);
+
+  /* ── §3 Elevation (E0-E3 exact shadows) ──────────────────────────────── */
+  --ide-e0: none;
+  --ide-e1: 0 1px 2px rgba(0,0,0,.40), inset 0 0 0 1px rgba(255,255,255,.04);
+  --ide-e2: 0 2px 8px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.35);
+  --ide-e3: 0 12px 40px rgba(0,0,0,.55), 0 2px 8px rgba(0,0,0,.40),
+            inset 0 1px 0 rgba(255,255,255,.06);
+
+  /* ── §3 Focus ring (:focus-visible only — layered) ───────────────────── */
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(77,141,255,.45);
+
+  /* ── §8 Motion tokens ────────────────────────────────────────────────── */
+  --motion-instant: 90ms;
+  --motion-fast:    130ms;
+  --motion-base:    180ms;
+  --motion-slow:    240ms;
+  --ease-out-expo:  cubic-bezier(.16,1,.3,1);
+  --ease-standard:  cubic-bezier(.2,0,0,1);
+  --ease-in:        cubic-bezier(.4,0,1,1);
+
+  /* ── §8 Approved motion language (verbatim spec, CopyPaste-1f90) ─────────
+     Canonical token names for all new component motion classes. The --mo-*
+     family is intentionally separate from the legacy --motion-* so existing
+     consumers keep working; the spec calls for these exact identifiers.      */
+  --mo-instant:         90ms;
+  --mo-fast:            130ms;
+  --mo-base:            180ms;
+  --mo-slow:            240ms;
+  --mo-ease-standard:   cubic-bezier(.2,0,.2,1);
+  --mo-ease-emphasized: cubic-bezier(.16,1,.3,1);
+
+  /* ── §3 Success semantic alias (VISM-2) ─────────────────────────────────
+     Components that used undefined `var(--success)` now use --ide-success.
+     This alias makes old references to --success resolve correctly too.     */
+  --success:     var(--ide-success);
+  --success-soft: var(--ide-success-dim);
+
+  /* ── §3 Accent-strong (THM-1/2/3 on-accent token bridge) ────────────────
+     accent-strong for online-pulse ring and accent-line for card hover border. */
+  --accent-strong: var(--accent);
+  --accent-line:   rgba(var(--ide-accent-rgb), 0.40);
+  --surface-hover: var(--ide-hover);
+
+  /* ── §L Liquid Glass token vocabulary (CopyPaste-52mz) ──────────────────
+     NEW switchable layer — defaults to Graphite Mist (dark grey). These tokens
+     are consumed by the palette layer (html[data-palette=...]) and by the aurora
+     background and glass surfaces below. The --ide-* tokens above are still
+     the primary design-system tokens; this layer supplements them with the full
+     palette/material specification from the Liquid Glass styleguide.
+
+     Switching palette: set `data-palette="<key>"` on <html>. The corresponding
+     html[data-palette=...] block below overrides ALL of these and re-derives the
+     --ide-*-rgb channels so existing components retheme automatically. */
+
+  /* Background gradient stops */
+  --bg-0:   #07090f;   /* Graphite Mist bg0 */
+  --bg-1:   #141924;   /* Graphite Mist bg1 */
+  --bg-2:   #202330;   /* Graphite Mist bg2 */
+
+  /* Aurora glow colours (used in body::before/::after) */
+  --glow-a: #7f8da3;   /* Graphite Mist glowA */
+  --glow-b: #5a6a83;   /* Graphite Mist glowB */
+
+  /* Glass surface fill — RGB triplets for alpha injection */
+  --surface-rgb:        28, 31, 42;   /* Graphite Mist surfaceRgb */
+  --surface-strong-rgb: 42, 46, 60;   /* Graphite Mist surfaceStrongRgb */
+
+  /* Glass material properties */
+  --glass-opacity:     .40;  /* CopyPaste-0fjj: lowered from .64 → .40 so real NSVisualEffectView
+                                backdrop bleeds through the blur (vibrancy already applied in Rust) */
+  --glass-blur:        28px;
+  --glass-saturation:  1.45;
+  --glow-strength:     .62;
+
+  /* Liquid accent palette (augments --ide-accent-rgb above) */
+  --accent:    #9db7df;  /* Graphite Mist accent  */
+  --accent-2:  #d5e2f7;  /* Graphite Mist accent2 */
+  --accent-3:  #7c8ca6;  /* Graphite Mist accent3 */
+  --on-accent: #ffffff;
+
+  /* Liquid contrast text/border tokens (balanced dark — styleguide §contrast) */
+  --text:           rgba(248,250,255,.96);
+  --text-soft:      rgba(229,236,255,.78);
+  --text-muted:     rgba(217,225,244,.58);
+  --text-disabled:  rgba(217,225,244,.38);
+  --icon:           rgba(245,249,255,.92);
+  --icon-muted:     rgba(220,229,248,.66);
+  --line:           rgba(255,255,255,.14);
+  --line-strong:    rgba(255,255,255,.24);
+  --glass-border:        rgba(255,255,255,.16);
+  --glass-border-strong: rgba(255,255,255,.26);
+
+  /* Motion speed scalar (multiplied against animation durations) */
+  --speed:          .72;  /* cinematic */
+  --motion-opacity: 1;    /* cinematic */
+
+  /* Density layout tokens (compact defaults for Graphite Mist launch) */
+  --pad:       13px;
+  --gap:       12px;
+  --row-h:     34px;
+  --radius-lg: 18px;
+  --radius-sm: 12px;
+
+  /* ── §3 Modal scrim token ────────────────────────────────────────────────
+     --ide-scrim: backdrop overlay color for modal dialogs. Dark theme uses a
+     55% black overlay (heavier = content clearly recedes); light theme softens
+     to 35% so the scrim doesn't look like a severe dark intrusion on a light
+     canvas. All modal backdrops MUST use var(--ide-scrim) — never bg-black/50
+     or a hardcoded rgba value. (CopyPaste-5917.78 / 5917.42 / 5917.106) */
+  --ide-scrim: rgba(0,0,0,.55);
+}
+
+/* ── Light theme token overrides ─────────────────────────────────────────────
+   Applied when <html data-theme="light"> is set (see App.tsx).
+   All WCAG AA contrast ratios verified against their backgrounds:
+     --ide-text  (#1A1C20) on panel (#F5F6F8)  → 13.8:1  ✓
+     --ide-dim   (#4B505A) on panel (#F5F6F8)  →  6.2:1  ✓
+     --ide-faint (#6B7280) on panel (#F5F6F8)  →  4.6:1  ✓
+     --ide-ghost (#1A1C20 @0.55) on panel      →  5.1:1  ✓ (AA)
+     --ide-accent (#1A5FCC) on elevated (#EEF0F4) → 5.2:1 ✓
+   Semantic colours (danger/success/warning) are darkened for light surfaces.
+   Elevation shadows are softened (lighter drop-shadows, faint white insets
+   become faint dark insets). ──────────────────────────────────────────────── */
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  /* ── Apple macOS Tahoe "Liquid Glass" — light/greyish surface ramp ─────
+     Neutral system greys (NSColor windowBackground / systemGray ramp). The
+     canvas is a soft grey; panels are near-white frosted glass; cards lift to
+     white. Borders/dividers use Apple's translucent separator. ─────────────── */
+  --ide-bg-rgb:        227 227 232;   /* window canvas — greyish (systemGray5) */
+  --ide-panel-rgb:     242 242 245;   /* sidebar / list — frosted near-white   */
+  --ide-elevated-rgb:  255 255 255;   /* cards, inputs — white                 */
+  --ide-raised-rgb:    236 236 240;   /* hover / pressed on elevated           */
+  --ide-border-rgb:    211 211 216;   /* separators (opaque)                   */
+  --ide-divider-rgb:   226 226 230;   /* row separators, subtler               */
+
+  /* ── Interaction states (Apple fill colors) ──────────────────────────── */
+  --ide-hover:        rgba(0,0,0,0.04);
+  --ide-pressed:      rgba(0,0,0,0.08);
+  --ide-selection:    rgba(0,122,255,0.14);
+  --ide-multi-sel:    rgba(0,122,255,0.20);
+
+  /* ── Text hierarchy (Apple label colors) ─────────────────────────────── */
+  --ide-text-rgb:     29 29 31;       /* labelColor                          */
+  --ide-dim-rgb:      91 91 96;       /* secondaryLabel                      */
+  /* Darkened from Apple tertiaryLabel #8A8A8E (3.44:1 on #F2F2F5) to #6C6C72
+     so the ~15 secondary-text uses (timestamps, "N items", device metadata,
+     fingerprints, section descriptions, placeholders) clear WCAG AA. #6C6C72
+     on panel (#F2F2F5) ≈ 4.7:1. (audit P1-4) */
+  --ide-faint-rgb:    108 108 114;    /* tertiaryLabel (AA-darkened)         */
+  --ide-ghost:        rgba(60,60,67,0.55);
+  --ide-ghost-deco:   rgba(60,60,67,0.32);
+
+  /* ── Brand — documented AA value for light theme (THM-1: #1A5FCC ≈5.2:1) ─ */
+  /* #007AFF fails WCAG AA on light panel (#F2F2F5); #1A5FCC clears 5.2:1. */
+  --ide-accent-rgb:       26 95 204;
+  --ide-accent-hover-rgb: 14 74 168;
+  --ide-accent-dim:   rgba(26,95,204,0.12);
+
+  /* ── Semantic — Apple system colors (light) ──────────────────────────── */
+  /* Darkened from Apple systemRed #FF3B30 (red-on-white 3.55:1 — fails AA, and
+     red-on-pink tint only 2.9:1) to #D7281E so destructive *text* clears AA on
+     white (≈4.6:1) and on the danger-tint fill. The tint alpha is also bumped
+     0.12→0.16 to strengthen the pill. (audit P1-5) */
+  --ide-danger-rgb:   215 40 30;   --ide-danger-dim:   rgba(215,40,30,0.16);
+  /* uufv: AA-darkened from raw systemGreen 52 199 89 → 40 140 70 (4.6:1 on white) */
+  --ide-success-rgb:  40 140 70;   --ide-success-dim:  rgba(40,140,70,0.14);
+  /* 8qzb: warning → 176 110 20 (AA text on white); badge-warning = pinned #D9A343 amber */
+  --ide-warning-rgb:  176 110 20;  --ide-warning-dim:  rgba(176,110,20,0.14);
+  --ide-badge-warning-rgb: 217 163 67; --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  /* 1hqt: sky token for URL/IMAGE kinds — 20 120 170 (AA on white) */
+  --ide-sky-rgb:      20 120 170;  --ide-sky:          rgb(var(--ide-sky-rgb)); --ide-sky-dim: rgba(20,120,170,0.14);
+  --ide-info-rgb:     20 120 170;  --ide-info-dim:     rgba(20,120,170,0.14);
+  /* lplk: violet → 128 90 213 (AA-darkened from raw systemPurple 175 82 222) */
+  --ide-violet-rgb:   128 90 213;  --ide-violet-dim:   rgba(128,90,213,0.14);
+
+  /* ── §3 Elevation (lighter shadows for light theme) ──────────────────── */
+  --ide-e0: none;
+  --ide-e1: 0 1px 2px rgba(0,0,0,.12), inset 0 0 0 1px rgba(0,0,0,.04);
+  --ide-e2: 0 2px 8px rgba(0,0,0,.10), 0 1px 2px rgba(0,0,0,.08);
+  --ide-e3: 0 12px 40px rgba(0,0,0,.14), 0 2px 8px rgba(0,0,0,.10),
+            inset 0 1px 0 rgba(255,255,255,.80);
+
+  /* ── §3 Focus ring ────────────────────────────────────────────────────── */
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(26,95,204,.45);
+
+  /* ── [a5bn] Liquid Glass tokens for light theme ──────────────────────────
+     Previously these were missing in data-theme="light", so --text fell through
+     to dark rgba(248,250,255,.96) giving near-invisible text on light surfaces.
+     These values mirror the styleguide "balanced" light contrast profile
+     (source.html lines 2619-2622). The palette accent layer overrides --accent
+     only — bg/surface/text stay as clean neutrals below. */
+  --bg-0: #e8e8ee;   /* canvas — neutral cool grey */
+  --bg-1: #f0f0f5;   /* panel/list surface */
+  --bg-2: #fafafa;   /* card/elevated */
+  --glow-a: #b8c0d0;
+  --glow-b: #d8dce8;
+  --surface-rgb:        255, 255, 255;   /* white glass fill */
+  --surface-strong-rgb: 250, 250, 252;
+  --glass-opacity: .82;
+  --glass-blur: 28px;
+  --glass-saturation: 1.3;
+  --glow-strength: .32;  /* softer glow in light mode */
+  /* Accent: #1A5FCC (THM-1 — AA-documented value, ≈5.2:1 on #F2F2F5, not #007AFF) */
+  --accent:    #1a5fcc;
+  --accent-2:  #0e4ab8;
+  --accent-3:  #5ac8fa;
+  /* THM-2/3: #1A5FCC is dark enough that #ffffff on it is ≥4.5:1 (≈5.2:1 confirmed) */
+  --on-accent: #ffffff;
+  /* Glass borders: dark on light [a5bn] */
+  --glass-border:        rgba(20,30,48,.14);
+  --glass-border-strong: rgba(20,30,48,.22);
+  /* Text tokens — "balanced" light contrast profile [a5bn].
+     These win over the dark rgba(248,..) defaults so text is readable. */
+  --text:           rgba(13,20,32,.92);
+  --text-soft:      rgba(35,47,67,.76);
+  --text-muted:     rgba(52,67,90,.58);
+  --text-disabled:  rgba(70,86,111,.40);
+  --icon:           rgba(13,20,32,.88);
+  --icon-muted:     rgba(42,56,80,.66);
+  --line:           rgba(20,30,48,.14);
+  --line-strong:    rgba(20,30,48,.23);
+
+  /* Modal scrim — lighter in light theme; 35% black is softer over near-white
+     surfaces and matches the approved styleguide scrim token (0 0 0 / .35). */
+  --ide-scrim: rgba(0,0,0,.35);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §L  LIQUID GLASS PALETTE LAYER  (CopyPaste-52mz / CopyPaste-s0uf)
+   ─────────────────────────────────────────────────────────────────────────
+   NEUTRALS vs CHROMA SPLIT — the structural principle:
+
+   THEME AXIS (from :root / :root[data-theme="light"]):
+     Provides ALL neutral tokens — surface ramps (--ide-bg-rgb through
+     --ide-divider-rgb), text/icon/line hierarchy (--ide-text-rgb, --ide-dim-rgb,
+     --ide-faint-rgb, --ide-ghost, --ide-hover, --ide-pressed), body background
+     canvas (--bg-0/1/2 in light mode), glass material (--glass-opacity,
+     --glow-strength), and contrast tokens (--text, --text-soft, etc.).
+     These are THEME-controlled and must not be overridden by the palette axis.
+
+   PALETTE AXIS (html[data-palette="X"]):
+     Provides ONLY chroma identity — glow colours (--glow-a/--glow-b for aurora
+     tinting), accent family (--accent, --accent-2, --accent-3, --on-accent),
+     and dark-mode background canvas (--bg-0/1/2, --surface-rgb for the glass
+     fill). The accent-derived component tokens (--ide-accent-rgb, --ide-selection,
+     --ide-focus-ring, semantic colours) follow the accent, so they're chroma too.
+
+   WHY SPECIFICITY MAKES THIS SAFE:
+     :root[data-theme="light"] → specificity (0,2,0) — pseudo-class + attribute
+     html[data-palette="X"]   → specificity (0,1,1) — attribute + element type
+     The light theme block wins for every token it defines. Dark palette blocks
+     set bg-0/1/2 / surface-rgb for dark mode aurora/glass identity; in light
+     mode those values are cleanly overridden by the higher-specificity light
+     theme block without needing any duplicate rules.
+
+   LIGHT PALETTES in dark mode:
+     Their original blocks had color-scheme:light + light bg/surfaces — correct
+     for light mode but wrong in dark mode. Fixed by: (1) removing color-scheme /
+     bg / surfaces from the base palette block (so dark :root neutrals apply),
+     and (2) adding html[data-theme="light"][data-palette="X"] blocks at
+     specificity (0,3,1) that restore the palette's light bg/surfaces when the
+     user actually chooses light theme. These high-specificity blocks override
+     both the dark :root and the light :root[data-theme="light"].
+
+   PER-PALETTE LIGHT-MODE ACCENT TUNING:
+     Dark palette accents (e.g. graphite-mist #9db7df, liquid-blue #4d8dff) are
+     designed for dark surfaces — they fail WCAG AA on white. For each dark palette,
+     a html[data-theme="light"][data-palette="X"] block darkens --accent and
+     --ide-accent-rgb to meet AA contrast on the light panel surface (#F2F2F5).
+
+   Switch palette:  set data-palette="<key>" on <html>.
+   Switch theme:    set data-theme="light" on <html> (absent = dark).
+   Both axes are independent — every palette works in every theme.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Graphite Mist (dark grey) — default active palette ─────────────────── */
+/* CHROMA only: glow aurora tint + accent + dark-mode canvas + glass borders.
+   Pure neutrals (text/icon/surface ramp/line) come from :root (dark theme).
+   In light mode, :root[data-theme="light"] (higher specificity 0,2,0) overrides
+   bg-0/1/2 and surface-rgb so the light canvas takes over automatically. */
+html[data-palette="graphite-mist"] {
+  color-scheme: dark;
+  --bg-0: #07090f; --bg-1: #141924; --bg-2: #202330;
+  --glow-a: #7f8da3; --glow-b: #5a6a83;
+  --surface-rgb: 28, 31, 42; --surface-strong-rgb: 42, 46, 60;
+  --accent: #9db7df; --accent-2: #d5e2f7; --accent-3: #7c8ca6; --on-accent: #080C16;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        157 183 223;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  213 226 247;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(157,183,223,0.14);
+  --ide-success-rgb:       123 224 177;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(123,224,177,0.12);
+  --ide-warning-rgb:       255 204 106;  --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,204,106,0.12);
+  --ide-danger-rgb:        255 127 140;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,127,140,0.12);
+  --ide-badge-warning-rgb: 255 204 106;  --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(157,183,223,0.18); --ide-multi-sel: rgba(157,183,223,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(157,183,223,.45);
+  /* Graphite Mist: steel-grey palette — info/sky stay teal-adjacent, violet slightly lavender */
+  --ide-info-rgb:   90 178 196;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(90,178,196,0.12);
+  --ide-sky-rgb:    90 178 196;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(90,178,196,0.12);
+  --ide-violet-rgb: 180 130 215;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(180,130,215,0.12);
+}
+
+/* Light-mode accent tuning: graphite-mist's #9db7df is a pale steel blue that
+   fails AA on white (contrast ~1.8:1). Darkened to #3a6091 for AA on #F2F2F5
+   (contrast ≈5.1:1). glow-a/glow-b stay the same — they only tint the aurora. */
+html[data-theme="light"][data-palette="graphite-mist"] {
+  --accent:    #3a6091; --accent-2: #2a4e7c; --accent-3: #6a8db5;
+  --ide-accent-rgb:        58 96 145;    --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  42 78 124;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(58,96,145,0.12);
+  --ide-selection: rgba(58,96,145,0.14); --ide-multi-sel: rgba(58,96,145,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(58,96,145,.45);
+  /* Light: graphite-mist info/sky stay near default teal-blue; violet slightly grey-lavender */
+  --ide-info-rgb:   15 110 150;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,110,150,0.14);
+  --ide-sky-rgb:    20 118 165;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,118,165,0.14);
+  --ide-violet-rgb: 110 78 190;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(110,78,190,0.14);
+}
+
+/* ── Liquid Blue (dark blue) ─────────────────────────────────────────────── */
+html[data-palette="liquid-blue"] {
+  color-scheme: dark;
+  --bg-0: #061123; --bg-1: #0b1f47; --bg-2: #12152d;
+  --glow-a: #4d8dff; --glow-b: #9e7bff;
+  --surface-rgb: 22, 30, 54; --surface-strong-rgb: 30, 42, 76;
+  --accent: #4d8dff; --accent-2: #7fc7ff; --accent-3: #9e7bff; --on-accent: #080C16;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        77 141 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  127 199 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(77,141,255,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(77,141,255,0.18); --ide-multi-sel: rgba(77,141,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(77,141,255,.45);
+  /* Liquid Blue: blue+purple identity — info blue-purple, sky vivid blue, violet from accent3 */
+  --ide-info-rgb:   110 155 240;  --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(110,155,240,0.12);
+  --ide-sky-rgb:    80 175 255;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(80,175,255,0.12);
+  --ide-violet-rgb: 158 123 255;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(158,123,255,0.12);
+}
+
+/* Light-mode accent tuning: #4d8dff (liquid-blue) is ~2.5:1 on white — fails AA.
+   Darkened to #1a5fd4 for ≈4.8:1 on #F2F2F5. */
+html[data-theme="light"][data-palette="liquid-blue"] {
+  --accent:    #1a5fd4; --accent-2: #0e4ab8; --accent-3: #7aa6ff;
+  --ide-accent-rgb:        26 95 212;    --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  14 74 184;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(26,95,212,0.12);
+  --ide-selection: rgba(26,95,212,0.14); --ide-multi-sel: rgba(26,95,212,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(26,95,212,.45);
+  /* Light: liquid-blue info tracks blue-purple identity; violet AA-darkened purple */
+  --ide-info-rgb:   18 105 195;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(18,105,195,0.14);
+  --ide-sky-rgb:    20 118 200;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,118,200,0.14);
+  --ide-violet-rgb: 105 60 188;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(105,60,188,0.14);
+}
+
+/* ── Deep Sky (dark vivid blue) ──────────────────────────────────────────── */
+html[data-palette="deep-sky"] {
+  color-scheme: dark;
+  --bg-0: #021222; --bg-1: #073766; --bg-2: #101b31;
+  --glow-a: #1fa4ff; --glow-b: #55e6ff;
+  --surface-rgb: 16, 32, 56; --surface-strong-rgb: 24, 48, 82;
+  --accent: #1f9cff; --accent-2: #8cddff; --accent-3: #4d74ff; --on-accent: #080C16;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        31 156 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  140 221 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(31,156,255,0.14);
+  --ide-success-rgb:       110 231 158;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(110,231,158,0.12);
+  --ide-warning-rgb:       255 199 93;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,199,93,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 199 93;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(31,156,255,0.18); --ide-multi-sel: rgba(31,156,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(31,156,255,.45);
+  /* Deep Sky: vivid blue+cyan identity — info/sky shift toward bright cyan, violet stays muted */
+  --ide-info-rgb:   40 195 228;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(40,195,228,0.12);
+  --ide-sky-rgb:    55 205 250;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(55,205,250,0.12);
+  --ide-violet-rgb: 140 108 232;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(140,108,232,0.12);
+}
+
+/* Light-mode accent tuning: #1f9cff is ~2.8:1 on white — fails AA.
+   Darkened to #0070cc for ≈4.6:1 on #F2F2F5. */
+html[data-theme="light"][data-palette="deep-sky"] {
+  --accent:    #0070cc; --accent-2: #0058a8; --accent-3: #3a9aee;
+  --ide-accent-rgb:        0 112 204;    --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  0 88 168;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(0,112,204,0.12);
+  --ide-selection: rgba(0,112,204,0.14); --ide-multi-sel: rgba(0,112,204,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(0,112,204,.45);
+  /* Light: deep-sky info tracks vivid blue-sky; violet AA-darkened blue-purple */
+  --ide-info-rgb:   15 110 170;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,110,170,0.14);
+  --ide-sky-rgb:    15 115 180;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(15,115,180,0.14);
+  --ide-violet-rgb: 105 78 198;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(105,78,198,0.14);
+}
+
+/* ── Nordic Cyan (dark teal) ─────────────────────────────────────────────── */
+html[data-palette="nordic-cyan"] {
+  color-scheme: dark;
+  --bg-0: #031216; --bg-1: #06333b; --bg-2: #0b1d2b;
+  --glow-a: #24d6b5; --glow-b: #478cff;
+  --surface-rgb: 15, 37, 49; --surface-strong-rgb: 21, 55, 70;
+  --accent: #25d5b4; --accent-2: #8af5e4; --accent-3: #5a9dff; --on-accent: #080C16;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        37 213 180;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  138 245 228;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(37,213,180,0.14);
+  --ide-success-rgb:       117 239 159;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(117,239,159,0.12);
+  --ide-warning-rgb:       255 209 102;  --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,209,102,0.12);
+  --ide-danger-rgb:        255 107 107;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,107,0.12);
+  --ide-badge-warning-rgb: 255 209 102;  --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(37,213,180,0.18); --ide-multi-sel: rgba(37,213,180,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(37,213,180,.45);
+  /* Nordic Cyan: teal+blue identity — info tracks teal accent, sky from accent3 blue, violet muted */
+  --ide-info-rgb:   37 213 180;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(37,213,180,0.12);
+  --ide-sky-rgb:    90 157 255;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(90,157,255,0.12);
+  --ide-violet-rgb: 160 120 240;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(160,120,240,0.12);
+}
+
+/* Light-mode accent tuning: #25d5b4 teal is very pale on white (~1.7:1) — fails AA.
+   Shifted to dark teal #0a8f78 for ≈4.6:1 on #F2F2F5. */
+html[data-theme="light"][data-palette="nordic-cyan"] {
+  --accent:    #0a8f78; --accent-2: #06705e; --accent-3: #2d74cc;
+  --ide-accent-rgb:        10 143 120;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  6 112 94;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(10,143,120,0.12);
+  --ide-selection: rgba(10,143,120,0.14); --ide-multi-sel: rgba(10,143,120,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(10,143,120,.45);
+  /* Light: nordic-cyan info tracks dark teal accent; sky tracks accent3 blue; violet muted */
+  --ide-info-rgb:   12 118 100;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(12,118,100,0.14);
+  --ide-sky-rgb:    18 100 160;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(18,100,160,0.14);
+  --ide-violet-rgb: 115 82 200;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(115,82,200,0.14);
+}
+
+/* ── Aurora Violet (dark accent) ─────────────────────────────────────────── */
+html[data-palette="aurora-violet"] {
+  color-scheme: dark;
+  --bg-0: #11071f; --bg-1: #28114d; --bg-2: #14172d;
+  --glow-a: #9a7cff; --glow-b: #ff7ad9;
+  --surface-rgb: 29, 24, 54; --surface-strong-rgb: 48, 36, 82;
+  --accent: #9a7cff; --accent-2: #d4b6ff; --accent-3: #ff7ad9; --on-accent: #080C16;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        154 124 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  212 182 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(154,124,255,0.14);
+  --ide-success-rgb:       110 231 183;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(110,231,183,0.12);
+  --ide-warning-rgb:       255 195 90;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,195,90,0.12);
+  --ide-danger-rgb:        255 111 145;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,111,145,0.12);
+  --ide-badge-warning-rgb: 255 195 90;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(154,124,255,0.18); --ide-multi-sel: rgba(154,124,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(154,124,255,.45);
+  /* Aurora Violet: violet+pink identity — info/sky shift violet-pink, violet tracks accent */
+  --ide-info-rgb:   170 128 255;  --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(170,128,255,0.12);
+  --ide-sky-rgb:    220 140 255;  --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(220,140,255,0.12);
+  --ide-violet-rgb: 154 124 255;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(154,124,255,0.12);
+}
+
+/* Light-mode accent tuning: #9a7cff violet is ~2.3:1 on white — fails AA.
+   Darkened to #5a35c8 for ≈4.7:1 on #F2F2F5. */
+html[data-theme="light"][data-palette="aurora-violet"] {
+  --accent:    #5a35c8; --accent-2: #4525a8; --accent-3: #b06abb;
+  --ide-accent-rgb:        90 53 200;    --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  69 37 168;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(90,53,200,0.12);
+  --ide-selection: rgba(90,53,200,0.14); --ide-multi-sel: rgba(90,53,200,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(90,53,200,.45);
+  /* Light: aurora-violet info/sky show violet tint; violet matches AA-darkened accent */
+  --ide-info-rgb:   95 52 185;    --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(95,52,185,0.14);
+  --ide-sky-rgb:    108 70 200;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(108,70,200,0.14);
+  --ide-violet-rgb: 90 53 200;    --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(90,53,200,0.14);
+}
+
+/* ── Amber Night (dark warm) ─────────────────────────────────────────────── */
+html[data-palette="amber-night"] {
+  color-scheme: dark;
+  --bg-0: #171008; --bg-1: #3a220a; --bg-2: #1c1a22;
+  --glow-a: #ff9f1c; --glow-b: #6ca0ff;
+  --surface-rgb: 35, 29, 24; --surface-strong-rgb: 58, 43, 30;
+  --accent: #ffad33; --accent-2: #ffd28a; --accent-3: #6ca0ff; --on-accent: #080C16;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        255 173 51;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  255 210 138;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(255,173,51,0.14);
+  --ide-success-rgb:       130 224 112;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(130,224,112,0.12);
+  --ide-warning-rgb:       255 191 71;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,191,71,0.12);
+  --ide-danger-rgb:        255 107 104;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,104,0.12);
+  --ide-badge-warning-rgb: 255 191 71;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(255,173,51,0.18); --ide-multi-sel: rgba(255,173,51,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(255,173,51,.45);
+  /* Amber Night: warm amber+blue identity — info warm-tinted teal, sky from accent3 blue, violet muted warm */
+  --ide-info-rgb:   100 160 185;  --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(100,160,185,0.12);
+  --ide-sky-rgb:    108 160 255;  --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(108,160,255,0.12);
+  --ide-violet-rgb: 190 130 200;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(190,130,200,0.12);
+}
+
+/* Light-mode accent tuning: #ffad33 amber is ~1.4:1 on white — severe AA failure.
+   Darkened to #a05d00 (burnt amber) for ≈4.7:1 on #F2F2F5. on-accent stays white. */
+html[data-theme="light"][data-palette="amber-night"] {
+  --accent:    #a05d00; --accent-2: #7c4800; --accent-3: #4a72cc; --on-accent: #ffffff;
+  --ide-accent-rgb:        160 93 0;     --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  124 72 0;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(160,93,0,0.12);
+  --ide-selection: rgba(160,93,0,0.14); --ide-multi-sel: rgba(160,93,0,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(160,93,0,.45);
+  /* Light: amber-night info warm-tinted teal-blue; sky tracks accent3 blue; violet muted warm-purple */
+  --ide-info-rgb:   15 100 140;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,100,140,0.14);
+  --ide-sky-rgb:    20 105 165;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,105,165,0.14);
+  --ide-violet-rgb: 115 70 180;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(115,70,180,0.14);
+}
+
+/* ── Cloud Silver (light grey) ───────────────────────────────────────────── */
+/* CHROMA only in base block: glow/accent for dark-mode usage (light-palette
+   under dark theme). The dark :root neutrals apply naturally. The base accent
+   is bumped to be legible on dark surfaces (#7aabff is ~5.2:1 on dark panel). */
+html[data-palette="cloud-silver"] {
+  --glow-a: #b9c7d9; --glow-b: #dce7f7;
+  --accent: #7aabff; --accent-2: #5590ee; --accent-3: #aec8f0; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        122 171 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  85 144 238;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(122,171,255,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(122,171,255,0.18); --ide-multi-sel: rgba(122,171,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(122,171,255,.45);
+  /* Cloud Silver dark-mode: soft blue-silver identity — info/sky keep teal, violet stays default */
+  --ide-info-rgb:   86 182 194;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(86,182,194,0.12);
+  --ide-sky-rgb:    86 182 194;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(86,182,194,0.12);
+  --ide-violet-rgb: 198 120 221;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(198,120,221,0.12);
+}
+
+/* Light-mode values for cloud-silver: restore the light palette's characteristic
+   bg/surface canvas, glass borders, accent, and glow-strength. */
+html[data-theme="light"][data-palette="cloud-silver"] {
+  color-scheme: light;
+  --bg-0: #edf2f8; --bg-1: #dce6f3; --bg-2: #f8fbff;
+  --surface-rgb: 255, 255, 255; --surface-strong-rgb: 245, 248, 252;
+  --accent: #5b8def; --accent-2: #2f74e8; --accent-3: #9cb3d7; --on-accent: #080C16;
+  --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
+  --ide-accent-rgb:        91 141 239;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  47 116 232;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(91,141,239,0.12);
+  --ide-success-rgb:       21 143 72;    --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(21,143,72,0.12);
+  --ide-warning-rgb:       168 103 0;    --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(168,103,0,0.12);
+  --ide-danger-rgb:        217 59 74;    --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(217,59,74,0.12);
+  --ide-badge-warning-rgb: 168 103 0;    --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(91,141,239,0.14); --ide-multi-sel: rgba(91,141,239,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(91,141,239,.45);
+  --glow-strength: .38;
+  /* Light: cloud-silver info/sky neutral blue; violet AA-safe indigo */
+  --ide-info-rgb:   15 110 155;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,110,155,0.14);
+  --ide-sky-rgb:    20 120 170;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,120,170,0.14);
+  --ide-violet-rgb: 110 80 190;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(110,80,190,0.14);
+}
+
+/* ── Frost Blue (light blue) ─────────────────────────────────────────────── */
+html[data-palette="frost-blue"] {
+  --glow-a: #91c9ff; --glow-b: #c7e6ff;
+  --accent: #5a96ff; --accent-2: #3880ff; --accent-3: #90ccff; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        90 150 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  56 128 255;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(90,150,255,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(90,150,255,0.18); --ide-multi-sel: rgba(90,150,255,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(90,150,255,.45);
+  /* Frost Blue dark-mode: sky-blue identity — info tracks blue, sky light cyan, violet default */
+  --ide-info-rgb:   86 182 194;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(86,182,194,0.12);
+  --ide-sky-rgb:    90 182 255;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(90,182,255,0.12);
+  --ide-violet-rgb: 198 120 221;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(198,120,221,0.12);
+}
+
+html[data-theme="light"][data-palette="frost-blue"] {
+  color-scheme: light;
+  --bg-0: #edf7ff; --bg-1: #d9ecff; --bg-2: #f8fcff;
+  --surface-rgb: 255, 255, 255; --surface-strong-rgb: 238, 247, 255;
+  --accent: #2777ff; --accent-2: #005fe3; --accent-3: #72b8ff; --on-accent: #080C16;
+  --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
+  --ide-accent-rgb:        39 119 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  0 95 227;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(39,119,255,0.12);
+  --ide-success-rgb:       16 135 71;    --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(16,135,71,0.12);
+  --ide-warning-rgb:       154 98 0;     --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(154,98,0,0.12);
+  --ide-danger-rgb:        202 52 70;    --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(202,52,70,0.12);
+  --ide-badge-warning-rgb: 154 98 0;     --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(39,119,255,0.14); --ide-multi-sel: rgba(39,119,255,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(39,119,255,.45);
+  --glow-strength: .38;
+  /* Light: frost-blue info/sky pure sky-blue tones; violet AA-safe indigo */
+  --ide-info-rgb:   15 110 160;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(15,110,160,0.14);
+  --ide-sky-rgb:    20 110 175;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,110,175,0.14);
+  --ide-violet-rgb: 100 75 195;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(100,75,195,0.14);
+}
+
+/* ── Porcelain (light grey-blue) ─────────────────────────────────────────── */
+html[data-palette="porcelain"] {
+  --glow-a: #a9c9ef; --glow-b: #d2e5fb;
+  /* Lightened from #3c7dd9 for legibility on dark surfaces (~4.8:1 on dark panel) */
+  --accent: #6aa3f5; --accent-2: #4c8eee; --accent-3: #a0c4f5; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        106 163 245;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  76 142 238;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(106,163,245,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(106,163,245,0.18); --ide-multi-sel: rgba(106,163,245,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(106,163,245,.45);
+  /* Porcelain dark-mode: cool grey-blue — info/sky stay teal defaults, violet default */
+  --ide-info-rgb:   86 182 194;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(86,182,194,0.12);
+  --ide-sky-rgb:    86 182 194;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(86,182,194,0.12);
+  --ide-violet-rgb: 198 120 221;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(198,120,221,0.12);
+}
+
+html[data-theme="light"][data-palette="porcelain"] {
+  color-scheme: light;
+  --bg-0: #f3f6fa; --bg-1: #e4ebf4; --bg-2: #fbfdff;
+  --surface-rgb: 255, 255, 255; --surface-strong-rgb: 246, 250, 255;
+  --accent: #3c7dd9; --accent-2: #1e5fb9; --accent-3: #8fb8e8; --on-accent: #080C16;
+  --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
+  --ide-accent-rgb:        60 125 217;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  30 95 185;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(60,125,217,0.12);
+  --ide-success-rgb:       22 135 76;    --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(22,135,76,0.12);
+  --ide-warning-rgb:       155 101 0;    --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(155,101,0,0.12);
+  --ide-danger-rgb:        202 52 70;    --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(202,52,70,0.12);
+  --ide-badge-warning-rgb: 155 101 0;    --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(60,125,217,0.14); --ide-multi-sel: rgba(60,125,217,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(60,125,217,.45);
+  --glow-strength: .38;
+  /* Light: porcelain info/sky cool blue-grey; violet AA-safe indigo */
+  --ide-info-rgb:   18 115 165;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(18,115,165,0.14);
+  --ide-sky-rgb:    22 118 170;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(22,118,170,0.14);
+  --ide-violet-rgb: 105 80 195;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(105,80,195,0.14);
+}
+
+/* ── Pearl Grey (light neutral grey) ────────────────────────────────────── */
+html[data-palette="pearl-grey"] {
+  --glow-a: #aeb4bd; --glow-b: #d4d6dc;
+  /* Original #58677f is only ~3.8:1 on dark panel — bumped to #8aa4cc (~5.0:1) */
+  --accent: #8aa4cc; --accent-2: #6a8ab5; --accent-3: #b0bdd1; --on-accent: #000000;
+  --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
+  --ide-accent-rgb:        138 164 204;  --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  106 138 181;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(138,164,204,0.14);
+  --ide-success-rgb:       103 223 129;  --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(103,223,129,0.12);
+  --ide-warning-rgb:       255 189 69;   --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(255,189,69,0.12);
+  --ide-danger-rgb:        255 107 120;  --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(255,107,120,0.12);
+  --ide-badge-warning-rgb: 255 189 69;   --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(138,164,204,0.18); --ide-multi-sel: rgba(138,164,204,0.24);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(138,164,204,.45);
+  /* Pearl Grey dark-mode: neutral grey — info/sky/violet stay at :root defaults */
+  --ide-info-rgb:   86 182 194;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(86,182,194,0.12);
+  --ide-sky-rgb:    86 182 194;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(86,182,194,0.12);
+  --ide-violet-rgb: 198 120 221;  --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(198,120,221,0.12);
+}
+
+html[data-theme="light"][data-palette="pearl-grey"] {
+  color-scheme: light;
+  --bg-0: #f1f1f2; --bg-1: #dedfe3; --bg-2: #fafafa;
+  --surface-rgb: 255, 255, 255; --surface-strong-rgb: 243, 244, 247;
+  --accent: #58677f; --accent-2: #34465f; --accent-3: #9ba6b7; --on-accent: #ffffff;
+  --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
+  --ide-accent-rgb:        88 103 127;   --ide-accent:       rgb(var(--ide-accent-rgb));
+  --ide-accent-hover-rgb:  52 70 95;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
+  --ide-accent-dim:        rgba(88,103,127,0.12);
+  --ide-success-rgb:       28 143 80;    --ide-success: rgb(var(--ide-success-rgb)); --ide-success-dim: rgba(28,143,80,0.12);
+  --ide-warning-rgb:       155 100 0;    --ide-warning: rgb(var(--ide-warning-rgb)); --ide-warning-dim: rgba(155,100,0,0.12);
+  --ide-danger-rgb:        201 52 69;    --ide-danger:  rgb(var(--ide-danger-rgb));  --ide-danger-dim:  rgba(201,52,69,0.12);
+  --ide-badge-warning-rgb: 155 100 0;    --ide-badge-warning: rgb(var(--ide-badge-warning-rgb));
+  --ide-selection: rgba(88,103,127,0.14); --ide-multi-sel: rgba(88,103,127,0.20);
+  --ide-focus-ring: 0 0 0 1px var(--ide-bg), 0 0 0 3px rgba(88,103,127,.45);
+  --glow-strength: .38;
+  /* Light: pearl-grey info/sky stay near defaults (neutral); violet AA-safe muted indigo */
+  --ide-info-rgb:   20 120 170;   --ide-info:   rgb(var(--ide-info-rgb));   --ide-info-dim:   rgba(20,120,170,0.14);
+  --ide-sky-rgb:    20 120 170;   --ide-sky:    rgb(var(--ide-sky-rgb));    --ide-sky-dim:    rgba(20,120,170,0.14);
+  --ide-violet-rgb: 115 88 200;   --ide-violet: rgb(var(--ide-violet-rgb)); --ide-violet-dim: rgba(115,88,200,0.14);
+}
+
+/* ── Contrast profile overrides ──────────────────────────────────────────────
+   Apply data-contrast="soft|balanced|high" on <html>.
+   Balanced is the built-in default (set by each palette block above).
+   These blocks only override the text/border contrast tokens; palette colour
+   and layout tokens remain from the active data-palette block. */
+
+html[data-contrast="soft"] {
+  --text:          rgba(248,250,255,.90);
+  --text-soft:     rgba(229,236,255,.68);
+  --text-muted:    rgba(217,225,244,.46);
+  --text-disabled: rgba(217,225,244,.30);
+  --glass-border:        rgba(255,255,255,.12);
+  --glass-border-strong: rgba(255,255,255,.20);
+  --ide-text-rgb: 225 228 235;
+}
+
+html[data-contrast="high"] {
+  --text:          rgba(255,255,255,.99);
+  --text-soft:     rgba(241,246,255,.88);
+  --text-muted:    rgba(226,235,250,.70);
+  --text-disabled: rgba(226,235,250,.48);
+  --glass-border:        rgba(255,255,255,.23);
+  --glass-border-strong: rgba(255,255,255,.36);
+  --ide-text-rgb: 248 250 255;
+}
+
+/* Light-theme contrast overrides — gate on data-theme="light" so these only
+   apply when actually in light mode. In dark mode the light palettes now use
+   the dark contrast tokens from :root, so the dark soft/high blocks above cover
+   them. Adding data-theme="light" also future-proofs against any dark palette
+   that the user forces into light mode — all light-theme contrasts go here.
+   Specificity: (0,3,0) beats contrast-only (0,2,0) and light-theme (0,2,0). */
+:root[data-theme="light"][data-contrast="soft"] {
+  --text:          rgba(18,25,38,.84);
+  --text-soft:     rgba(41,52,70,.66);
+  --text-muted:    rgba(61,76,99,.48);
+  --text-disabled: rgba(73,88,111,.32);
+  --glass-border:        rgba(25,35,52,.12);
+  --glass-border-strong: rgba(25,35,52,.20);
+  --ide-text-rgb: 42 48 58;
+}
+
+:root[data-theme="light"][data-contrast="high"] {
+  --text:          rgba(8,13,22,.98);
+  --text-soft:     rgba(23,34,52,.86);
+  --text-muted:    rgba(36,50,73,.70);
+  --text-disabled: rgba(49,65,90,.52);
+  --glass-border:        rgba(12,20,35,.22);
+  --glass-border-strong: rgba(12,20,35,.36);
+  --ide-text-rgb: 12 16 24;
+}
+
+/* ── Density overrides ───────────────────────────────────────────────────────
+   Apply data-density="compact|comfortable|spacious" on <html>.
+   Compact is the default for Graphite Mist (matching the styleguide). */
+
+html[data-density="compact"] {
+  --pad: 13px; --gap: 12px; --row-h: 34px; --radius-lg: 18px; --radius-sm: 12px;
+}
+
+html[data-density="comfortable"] {
+  --pad: 18px; --gap: 16px; --row-h: 42px; --radius-lg: 24px; --radius-sm: 16px;
+}
+
+html[data-density="spacious"] {
+  --pad: 24px; --gap: 22px; --row-h: 50px; --radius-lg: 30px; --radius-sm: 20px;
+}
+
+/* ── Motion profile overrides ────────────────────────────────────────────────
+   Apply data-motion="calm|balanced|cinematic" on <html>.
+   These drive the aurora animation speed (calc(Xs * var(--speed))) and the
+   aurora/glow opacity (var(--motion-opacity)).
+   Cinematic is the default. The existing --motion-* duration tokens are NOT
+   changed here — they are absolute ms values consumed by transition-duration
+   utilities; only the new scalar tokens scale the ambient animations. */
+
+html[data-motion="calm"]      { --speed: 1.45; --motion-opacity: .55; }
+html[data-motion="balanced"]  { --speed: 1;    --motion-opacity: .78; }
+html[data-motion="cinematic"] { --speed: .72;  --motion-opacity: 1;   }
+
+/* Honour OS reduce-motion preference regardless of data-motion setting. */
+@media (prefers-reduced-motion: reduce) {
+  :root { --speed: 999; --motion-opacity: 0; }
+}
+
+/* ── Auto high-contrast: honour OS 'Increase Contrast' / 'prefers-contrast: more'
+   Automatically bumps to the html[data-contrast="high"] token values so users who
+   enable the OS accessibility setting get the strongest contrast without having to
+   touch the in-app control.  No UI interaction needed — this fires at the browser
+   level.  Specificity (0,1,1) matches the data-contrast blocks above; placed after
+   them so it wins when the OS preference is active (cascade order). ──────────── */
+@media (prefers-contrast: more) {
+  :root {
+    --text:          rgba(255,255,255,.99);
+    --text-soft:     rgba(241,246,255,.88);
+    --text-muted:    rgba(226,235,250,.70);
+    --text-disabled: rgba(226,235,250,.48);
+    --glass-border:        rgba(255,255,255,.23);
+    --glass-border-strong: rgba(255,255,255,.36);
+    --ide-text-rgb: 248 250 255;
+  }
+  :root[data-theme="light"] {
+    --text:          rgba(8,13,22,.98);
+    --text-soft:     rgba(23,34,52,.86);
+    --text-muted:    rgba(36,50,73,.70);
+    --text-disabled: rgba(49,65,90,.52);
+    --glass-border:        rgba(12,20,35,.22);
+    --glass-border-strong: rgba(12,20,35,.36);
+    --ide-text-rgb: 12 16 24;
+  }
+}
+

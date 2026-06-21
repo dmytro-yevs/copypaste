@@ -1,0 +1,517 @@
+
+/* ── Keyframe animations ─────────────────────────────────────────────────── */
+
+/* Popup entrance §4 */
+@keyframes popupEnter {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Toast slide-up §8 */
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Aurora background — STATIC (no animation) ────────────────────────────
+   auroraSpin and glowDrift removed. Background orbs are fixed in place.
+   Colour atmosphere is preserved; zero idle looping animation.              */
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §MO  APPROVED MOTION LANGUAGE — keyframes + utility classes
+        (CopyPaste-1f90 epic; spec items 1-10)
+   ─────────────────────────────────────────────────────────────────────────
+   All classes below use --mo-* duration/easing tokens from :root.
+   NO laser scan-lines, NO aurora spins, NO infinite shimmer loops.
+   ALL motion wrapped in @media (prefers-reduced-motion: reduce) at bottom.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── §MO-1 Modal scrim + card ───────────────────────────────────────────── */
+@keyframes modalScrimIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalScrimOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes modalCardIn {
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
+@keyframes modalCardOut {
+  from { opacity: 1; transform: translateY(0)   scale(1);    }
+  to   { opacity: 0; transform: translateY(8px) scale(.985); }
+}
+
+.modal-scrim-enter { animation: modalScrimIn  var(--mo-base) var(--mo-ease-standard) both; }
+.modal-scrim-exit  { animation: modalScrimOut var(--mo-base) var(--mo-ease-standard) both; }
+.modal-card-enter  { animation: modalCardIn   var(--mo-slow) var(--mo-ease-emphasized) both; }
+.modal-card-exit   { animation: modalCardOut  var(--mo-slow) var(--mo-ease-emphasized) both; }
+
+/* ── §MO-2 Page/panel transition (translateX ±18–24px + opacity) ─────────── */
+@keyframes panelSlideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+@keyframes panelSlideOutLeft {
+  from { opacity: 1; transform: translateX(0);    }
+  to   { opacity: 0; transform: translateX(-20px); }
+}
+@keyframes panelSlideInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0);     }
+}
+@keyframes panelSlideOutRight {
+  from { opacity: 1; transform: translateX(0);    }
+  to   { opacity: 0; transform: translateX(20px); }
+}
+
+.panel-enter-right { animation: panelSlideInRight  var(--mo-slow) var(--mo-ease-emphasized) both; }
+.panel-exit-left   { animation: panelSlideOutLeft  var(--mo-slow) var(--mo-ease-emphasized) both; }
+.panel-enter-left  { animation: panelSlideInLeft   var(--mo-slow) var(--mo-ease-emphasized) both; }
+.panel-exit-right  { animation: panelSlideOutRight var(--mo-slow) var(--mo-ease-emphasized) both; }
+
+/* ── §MO-3 Row hover + press ─────────────────────────────────────────────── */
+/* hover: background switches to surface-hover via transition (fast, standard) */
+@keyframes rowPress {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(.992); }
+  100% { transform: scale(1); }
+}
+
+.row-interactive {
+  transition: background-color var(--mo-fast) var(--mo-ease-standard);
+}
+.row-interactive:hover {
+  background-color: var(--surface-hover, var(--ide-hover));
+}
+.row-press {
+  animation: rowPress var(--mo-fast) var(--mo-ease-standard);
+}
+
+/* ── §MO-4 Copy-flash (instant keyframe, 90ms) ───────────────────────────── */
+/* 45% snapshot: accent outline + success-soft bg; back to base. No long shimmer. */
+@keyframes copyFlash {
+  0%  { outline: 2px solid transparent; background-color: transparent; }
+  45% {
+    outline: 2px solid var(--ide-success);
+    background-color: var(--ide-success-dim, rgba(95,173,101,.10));
+  }
+  100% { outline: 2px solid transparent; background-color: transparent; }
+}
+
+.copy-flash {
+  animation: copyFlash var(--mo-instant) var(--mo-ease-standard) both;
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* ── §MO-5 Online-pulse (ONE-SHOT, triggered on connect/recent-sync) ─────── */
+/* box-shadow ring 0→9px→transparent over 2s. NOT infinite — apply class once. */
+@keyframes onlinePulse {
+  0%   { box-shadow: 0 0 0 0   var(--ide-success); opacity: 1; }
+  70%  { box-shadow: 0 0 0 9px var(--ide-success); opacity: 0; }
+  100% { box-shadow: 0 0 0 9px transparent;         opacity: 0; }
+}
+
+.online-pulse {
+  animation: onlinePulse 2s var(--mo-ease-standard) forwards;
+  /* Remove class after animation ends via JS to allow re-trigger on next connect */
+}
+
+/* ── §MO-5b Syncing-dot (CONTINUOUS while state="syncing") ────────────────── */
+/* 1jms.27: gentle opacity breathe distinguishes "syncing" from "synced" without
+   a loud loop. 1.4 s cycle at --mo-ease-standard is calm and premium. The dot
+   stays green (bg-ide-success) — only the rhythmic opacity changes.
+   @media prefers-reduced-motion: held at full opacity (no animation). */
+@keyframes syncingBreath {
+  0%, 100% { opacity: 1;    }
+  50%       { opacity: 0.35; }
+}
+
+.syncing-dot {
+  animation: syncingBreath 1.4s var(--mo-ease-standard) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .syncing-dot { animation: none; }
+}
+
+/* ── §MO-6 Toast enter/exit ──────────────────────────────────────────────── */
+@keyframes toastEnter {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px) scale(.985); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0)   scale(1);    }
+}
+@keyframes toastExit {
+  from { opacity: 1; transform: translateX(-50%) translateY(0)   scale(1);    }
+  to   { opacity: 0; transform: translateX(-50%) translateY(7px) scale(.992); }
+}
+
+/* Legacy toastIn (same base keyframe — kept for compat) */
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0);   }
+}
+
+.toast-enter { animation: toastEnter var(--mo-base) var(--mo-ease-emphasized) both; }
+.toast-exit  { animation: toastExit  var(--mo-base) var(--mo-ease-emphasized) both; }
+/* Legacy alias */
+.toast-in    { animation: toastIn 180ms cubic-bezier(.16,1,.3,1) both; }
+
+/* ── §MO-7 QR code hidden/reveal state ──────────────────────────────────── */
+/* Default hidden — blurred + faded + slightly scaled up.
+   Overlay: backdrop-blur(12px). NO laser scan-line (removed). */
+
+.qr-hidden .qr-grid {
+  filter: blur(7px);
+  opacity: .46;
+  transform: scale(1.015);
+  transition:
+    filter    var(--mo-slow) var(--mo-ease-emphasized),
+    opacity   var(--mo-slow) var(--mo-ease-emphasized),
+    transform var(--mo-slow) var(--mo-ease-emphasized);
+}
+
+.qr-visible .qr-grid {
+  filter: blur(0);
+  opacity: 1;
+  transform: scale(1);
+  transition:
+    filter    var(--mo-slow) var(--mo-ease-emphasized),
+    opacity   var(--mo-slow) var(--mo-ease-emphasized),
+    transform var(--mo-slow) var(--mo-ease-emphasized);
+}
+
+.qr-overlay {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    backdrop-filter var(--mo-slow) var(--mo-ease-emphasized),
+    opacity         var(--mo-slow) var(--mo-ease-emphasized);
+}
+
+/* qr-scan and scan-line keyframes removed per spec (NO laser scan-line). */
+/* Legacy .qr-scan kept as position:relative container only — no animation. */
+.qr-scan { position: relative; overflow: hidden; }
+
+/* ── §MO-8 Segmented control glide layer ───────────────────────────────── */
+/* Single gliding background layer moves via translateX per index (JS sets
+   --seg-index on the container). Active text gets accent colour. */
+
+.segmented-track {
+  position: relative;
+}
+
+.segmented-glider {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  /* Width is set by JS to match the active segment width */
+  transition: transform var(--mo-base) var(--mo-ease-emphasized);
+  /* Visual treatment: glass card fill for the active pill */
+  background: rgba(var(--surface-rgb), calc(var(--glass-opacity, .40) + .12));
+  border: 1px solid var(--glass-border, rgba(255,255,255,.16));
+  border-radius: var(--skin-r-ctl, 9px);
+  pointer-events: none;
+}
+
+.segmented-item {
+  position: relative;
+  z-index: 1;
+  transition: color var(--mo-base) var(--mo-ease-emphasized);
+}
+
+.segmented-item[aria-selected="true"],
+.segmented-item.active {
+  color: var(--ide-accent);
+}
+
+/* ── §MO-9 Switch / toggle track + knob ─────────────────────────────────── */
+/* Track bg changes (fast, standard). Knob translateX(20px) (fast, standard).
+   .on state → accent-strong bg. No glow halo. */
+
+.switch-track {
+  transition: background-color var(--mo-fast) var(--mo-ease-standard);
+  background-color: var(--ide-raised, rgba(255,255,255,.10));
+}
+
+.switch-track.on {
+  background-color: var(--accent-strong, var(--ide-accent));
+}
+
+.switch-knob {
+  transition: transform var(--mo-fast) var(--mo-ease-standard);
+  transform: translateX(0);
+}
+
+.switch-track.on .switch-knob {
+  transform: translateX(20px);
+}
+
+/* ── §MO-10 Card hover lift (desktop pointer only) ──────────────────────── */
+/* translateY(-2px), border accent-line, shadow lift. base/emphasized timing.
+   Scoped to hover+fine-pointer media to avoid sticky states on touch. */
+
+@media (hover: hover) and (pointer: fine) {
+  .card-hover {
+    transition:
+      transform    var(--mo-base) var(--mo-ease-emphasized),
+      border-color var(--mo-base) var(--mo-ease-emphasized),
+      box-shadow   var(--mo-base) var(--mo-ease-emphasized);
+  }
+
+  .card-hover:hover {
+    transform:    translateY(-2px);
+    border-color: var(--accent-line, rgba(var(--ide-accent-rgb), .40));
+    box-shadow:
+      0 8px 24px rgba(0,0,0,.22),
+      0 2px 8px  rgba(0,0,0,.16),
+      inset 0 1px 0 rgba(255,255,255,.12);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §MO-LEGACY  Pre-existing entrance + micro-interaction animations
+   (kept for backward-compat; see original CopyPaste-52mz / CopyPaste-965s)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Popup entrance §4 */
+@keyframes popupEnter {
+  from { opacity: 0; transform: scale(0.97) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* fadeIn — light fade+rise used by inline fadeIn references */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* Premium entrance animations (CopyPaste-52mz) */
+@keyframes cardIn {
+  from { opacity: 0; transform: scale(.96) translateY(10px); }
+  to   { opacity: 1; transform: scale(1)   translateY(0);    }
+}
+
+@keyframes revealUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+@keyframes listItemIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* glassShine removed — static ::before sheen replaces the hover sweep (VISM-5). */
+
+/* ── Animation utility classes ─────────────────────────────────────────── */
+.popup-enter {
+  animation: popupEnter 160ms cubic-bezier(.16,1,.3,1) both;
+}
+
+.card-in {
+  animation: cardIn calc(220ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
+  position: relative;
+  overflow: hidden;
+}
+
+.reveal-up {
+  animation: revealUp calc(180ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
+}
+
+.list-item-in {
+  animation: listItemIn calc(140ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
+}
+
+/* ── Skin row-treatment markers (HistoryView.tsx) ──────────────────────────── */
+/* skin-row-inset: vapor skin — each row is a self-contained rounded card.
+   Subtle elevated fill so the inset card reads against the panel surface. */
+.skin-row-inset {
+  background: rgba(var(--ide-elevated-rgb), calc(var(--glass-opacity, 0.08) + 0.08));
+}
+
+/* skin-row-line: quiet skin — flat dividers, no card depth.
+   No extra background; the divider border (border-b) provides the row separation. */
+.skin-row-line {
+  /* intentionally blank — row separation comes from the border-b Tailwind class */
+}
+
+/* ── Component micro-interaction utilities (legacy no-ops for removed anim) ─ */
+/* Live presence dot — static ring, no looping animation. */
+.status-ping { position: relative; }
+.status-ping::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* Floating glyph — no-op (iconFloat infinite removed). */
+.icon-float { /* no idle animation */ }
+
+/* Discovery network rings — static, no looping animation. */
+.network-rings { position: relative; }
+.network-rings::before,
+.network-rings::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent);
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+/* Sidebar active nav-item — static accent glow, no breathing. */
+.nav-active-glow {
+  box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 28%, transparent),
+              inset 0 1px 0 rgba(255,255,255,.30);
+}
+
+/* No-op stubs for removed looping animations (markup compiles without change). */
+.badge-float    { /* badgeFloat infinite removed */ }
+.progress-pulse { /* progressPulse infinite removed */ }
+
+/* Toggle thumb spring pop — calm ease (no >1 overshoot: MOT-12) */
+.toggle-pop { animation: togglePop calc(.36s * var(--speed, .72)) cubic-bezier(.2,0,.2,1); }
+@keyframes togglePop {
+  0%   { transform: scale(.86); }
+  100% { transform: scale(1); }
+}
+
+/* Tab active indicator grow */
+.tab-indicator {
+  animation: tabIndicator calc(.42s * var(--speed, .72)) cubic-bezier(.2,1.24,.28,1) both;
+  transform-origin: center;
+}
+@keyframes tabIndicator {
+  from { transform: scaleX(.4); opacity: 0; }
+  to   { transform: scaleX(1);  opacity: 1; }
+}
+
+/* Terminal cursor blink (logs) — ~530 ms = standard OS cadence (MOT-13) */
+.cursor-blink { animation: cursorBlink 530ms steps(1) infinite; }
+@keyframes cursorBlink {
+  0%, 49%  { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §MO-RM  REDUCED-MOTION — gate ALL motion behind OS preference
+   Applies to every §MO class + legacy animations above.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  /* Disable all keyframe animations */
+  .modal-scrim-enter, .modal-scrim-exit,
+  .modal-card-enter, .modal-card-exit,
+  .panel-enter-right, .panel-exit-left,
+  .panel-enter-left, .panel-exit-right,
+  .row-press, .copy-flash, .online-pulse,
+  .toast-enter, .toast-exit, .toast-in,
+  .popup-enter, .card-in, .reveal-up, .list-item-in,
+  .toggle-pop, .tab-indicator,
+  .cursor-blink {
+    animation: none !important;
+  }
+  /* Disable all transitions on interactive elements */
+  .row-interactive,
+  .segmented-glider, .segmented-item,
+  .switch-track, .switch-knob {
+    transition: none !important;
+  }
+  /* QR reveal is instant */
+  .qr-hidden .qr-grid,
+  .qr-visible .qr-grid,
+  .qr-overlay {
+    transition: none !important;
+  }
+  /* Card hover — no transform on reduced motion */
+  .card-hover:hover {
+    transform: none !important;
+  }
+  /* Blanket fallback for anything not explicitly listed */
+  * {
+    transition-duration: 1ms !important;
+    animation-duration:  1ms !important;
+  }
+}
+
+/* ── Content-type chip (shared across popup + history) ───────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px; /* ix8u: styleguide --radius-chip 7px */
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  padding: 2px 5px;
+  flex-shrink: 0;
+}
+
+/* ── Keycap pill (⌘1-9 shortcuts) ─────────────────────────────────────────
+   Fixed width so showing/hiding never shifts adjacent content. */
+.keycap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 16px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: rgba(255,255,255,0.06);
+  color: var(--ide-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme="light"] .keycap {
+  border-color: rgba(0,0,0,0.14);
+  background: rgba(0,0,0,0.05);
+}
+
+.keycap-selected {
+  border-color: rgba(77,141,255,0.40);
+  background: rgba(77,141,255,0.18);
+  color: var(--ide-accent);
+}
+
+/* ── Selected row: 2px accent left-bar ──────────────────────────────────── */
+.row-selected-bar {
+  position: relative;
+}
+.row-selected-bar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ide-accent);
+  border-radius: 0 2px 2px 0;
+}
