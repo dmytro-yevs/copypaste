@@ -418,6 +418,9 @@ jobs:
     env:
       INPUT_VERSION: ${{ inputs.version }}
       TAG_NAME: ${{ github.ref_name }}
+      # CopyPaste-56gh: v0.3.0 ships a debug-signed APK (no release keystore
+      # secrets configured). Remove this once ANDROID_KEYSTORE_* secrets are set.
+      ANDROID_ALLOW_DEBUG_RELEASE: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -619,6 +622,11 @@ jobs:
   android-validate:
     name: Android Kotlin/resource validation (lint + unit tests)
     runs-on: ubuntu-latest
+    env:
+      # CopyPaste-56gh: the release-variant signing guard is evaluated at
+      # configuration time (lint configures all variants), so the opt-in must
+      # be present here too or :app:lint fails before linting starts.
+      ANDROID_ALLOW_DEBUG_RELEASE: "1"
     steps:
       - uses: actions/checkout@v4
 

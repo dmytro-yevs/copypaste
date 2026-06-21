@@ -216,18 +216,32 @@ android {
             // debug fallback is still allowed — the developer will see it is debug-signed.
             val githubRef = System.getenv("GITHUB_REF")
             val isCiRelease = githubRef != null && githubRef.startsWith("refs/tags/")
+            // Explicit opt-in to ship a DEBUG-signed APK on a tag build when no
+            // release keystore is configured. Default-off so the guard below still
+            // protects normal releases; set ANDROID_ALLOW_DEBUG_RELEASE=1 to override
+            // (sideload/GitHub only — a debug cert is not Play-Store-grade and is
+            // update-incompatible with a future release-signed build).
+            val allowDebugRelease = System.getenv("ANDROID_ALLOW_DEBUG_RELEASE") == "1"
             signingConfig = signingConfigs.findByName("release") ?: run {
-                if (isCiRelease) {
+                if (isCiRelease && !allowDebugRelease) {
                     throw GradleException(
                         "CopyPaste-56gh: release keystore is missing on a CI tag build " +
                             "(GITHUB_REF=$githubRef). Set ANDROID_KEYSTORE_FILE, " +
                             "ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, and " +
                             "ANDROID_KEY_PASSWORD in the GitHub Actions secrets before " +
-                            "cutting a release. A debug-signed APK must NEVER be published.",
+                            "cutting a release, or set ANDROID_ALLOW_DEBUG_RELEASE=1 to " +
+                            "ship a debug-signed APK. A debug-signed APK must NEVER be " +
+                            "published to the Play Store.",
                     )
                 }
-                // Local / fork / non-tag CI build: fall back to debug signing.
-                // This does NOT produce a publishable APK (debug cert).
+                if (isCiRelease && allowDebugRelease) {
+                    logger.warn(
+                        "CopyPaste-56gh: ANDROID_ALLOW_DEBUG_RELEASE=1 — shipping a " +
+                            "DEBUG-signed release APK for $githubRef (sideload only).",
+                    )
+                }
+                // Local / fork / non-tag CI build, or explicit debug-release opt-in:
+                // fall back to debug signing. NOT a Play-Store-publishable APK.
                 signingConfigs.getByName("debug")
             }
         }
