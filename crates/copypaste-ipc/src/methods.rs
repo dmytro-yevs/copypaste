@@ -365,26 +365,6 @@ pub struct GetSyncStatusResponse {
 /// Run a live connection diagnostic against the configured cloud backend.
 pub const METHOD_CLOUD_TEST_CONNECTION: &str = "cloud_test_connection";
 
-/// Sign in to the cloud sync account (GoTrue / Supabase credentials).
-///
-/// Compiled-in only when the `cloud-sync` Cargo feature is active; non-cloud
-/// builds return `error_code = "not_implemented"` so callers get a machine-
-/// readable signal instead of "unknown method".
-///
-/// (CopyPaste-0w4v)
-pub const METHOD_CLOUD_SIGN_IN: &str = "cloud_sign_in";
-
-/// Sign out of the cloud sync account.
-///
-/// Clears the daemon-side `cloud_signed_in` flag immediately so
-/// `get_sync_status` reflects the signed-out state on the next poll.
-///
-/// Compiled-in only when the `cloud-sync` Cargo feature is active; non-cloud
-/// builds return `error_code = "not_implemented"`.
-///
-/// (CopyPaste-0w4v)
-pub const METHOD_CLOUD_SIGN_OUT: &str = "cloud_sign_out";
-
 // ── Pairing ─────────────────────────────────────────────────────────────────
 
 /// Generate a short-lived QR pairing payload.
