@@ -2085,13 +2085,14 @@ impl IpcServer {
         let mut incoming = AppConfig::default();
         let mut config_changed = false;
         if current.supabase_url.is_none() && !env_has_url {
-            if let Some(url) = prov.supabase_url {
+            // 34u2: SyncProvisioning is ZeroizeOnDrop (Drop) — cannot move out; clone.
+            if let Some(url) = prov.supabase_url.clone() {
                 incoming.supabase_url = Some(url);
                 config_changed = true;
             }
         }
         if current.supabase_anon_key.is_none() && !env_has_key {
-            if let Some(key) = prov.supabase_anon_key {
+            if let Some(key) = prov.supabase_anon_key.clone() {
                 incoming.supabase_anon_key = Some(key);
                 config_changed = true;
             }
@@ -2104,7 +2105,7 @@ impl IpcServer {
         // core config.toml — a config.json-only write would be clobbered on the
         // next read.
         if current.relay_url.is_none() {
-            if let Some(url) = prov.relay_url {
+            if let Some(url) = prov.relay_url.clone() {
                 incoming.relay_url = Some(url);
                 config_changed = true;
             }
@@ -2135,7 +2136,9 @@ impl IpcServer {
         // ── 2. Derived cloud sync key → key store + live slot ──
         // Only when this device has NO sync key yet (never overwrite an existing
         // one — that would orphan locally-encrypted cloud blobs).
-        let Some(key_bytes) = prov.derived_sync_key else {
+        // 34u2: clone the secret out of the ZeroizeOnDrop struct; the clone is
+        // wrapped in Zeroizing below and the original zeroizes on prov's drop.
+        let Some(key_bytes) = prov.derived_sync_key.clone() else {
             return;
         };
         if key_bytes.len() != 32 {
