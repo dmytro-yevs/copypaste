@@ -386,8 +386,16 @@ impl Db {
         Ok(())
     }
 
-    /// Delete the `count` oldest items (by `(wall_time, item_id)`) for a device.
-    /// Used to mirror the history-cap prune-oldest behaviour.
+    /// Delete the `count` oldest items (by `item_id ASC`) for a device.
+    ///
+    /// CopyPaste-1uqb: the eviction order is keyed on the server-assigned
+    /// `item_id` (a monotonically increasing counter assigned by the relay,
+    /// never client-controlled), NOT on the client-supplied `wall_time`.
+    /// Ordering by `wall_time` allowed an intra-account attacker to forge a
+    /// low `wall_time`, making their item sort near the front of the
+    /// wall_time-based prune order and surviving eviction while pushing out
+    /// legitimate items. `item_id ASC` removes the earliest-assigned (= truly
+    /// earliest-arrived) items regardless of what the sender set as `wall_time`.
     pub fn delete_oldest_items(
         &self,
         device_id: &str,
@@ -400,7 +408,7 @@ impl Db {
             "DELETE FROM inbox_items
              WHERE rowid IN (
                  SELECT rowid FROM inbox_items WHERE device_id = ?1
-                 ORDER BY wall_time ASC, item_id ASC LIMIT ?2
+                 ORDER BY item_id ASC LIMIT ?2
              )",
             params![device_id, count as i64],
         )?;

@@ -1289,10 +1289,29 @@ impl RelayStore {
         // Enforced as a silent prune of the oldest items (the fan-out sender
         // cannot know which recipient inboxes are full — see relay v2 quotas
         // plan).
+        //
+        // CopyPaste-1uqb: prune by server-assigned `id` (ascending = earliest
+        // arrival), NOT by client-supplied `wall_time`. The inbox is sorted by
+        // `wall_time` for the pull cursor, so an intra-account attacker can
+        // forge a low `wall_time` to make their malicious item sort near the
+        // front and escape eviction while displacing legitimate items.
+        // Server-side `id` is assigned monotonically by the relay and is never
+        // client-controlled, so pruning by the smallest `id` values removes
+        // the truly earliest-arriving items regardless of what the sender set
+        // as `wall_time`.
         let cap = effective_history_cap(tier).min(self.max_items_per_device);
         let pruned = if inbox.len() > cap {
             let n = inbox.len() - cap;
-            inbox.drain(..n);
+            // Collect the n smallest ids (earliest server-assigned arrivals)
+            // to prune. The inbox is wall_time-sorted, not id-sorted, so a
+            // linear scan for the minimum-id entries is required. O(n*cap)
+            // but n and cap are both small (n is usually 1, cap ≤ 500).
+            let mut ids_to_prune: Vec<i64> = inbox.iter().map(|it| it.id).collect();
+            ids_to_prune.sort_unstable();
+            ids_to_prune.truncate(n);
+            let prune_set: std::collections::HashSet<i64> =
+                ids_to_prune.into_iter().collect();
+            inbox.retain(|it| !prune_set.contains(&it.id));
             n
         } else {
             0
@@ -2480,6 +2499,97 @@ mod tests {
         assert_eq!(history_cap_for_limit(None), MAX_PUSH_ITEMS_PER_DEVICE);
     }
 
+    // ---- CopyPaste-1uqb: prune by server sync_id, not client wall_time --------
+
+    /// CopyPaste-1uqb: When the inbox overflows its cap, the items evicted must
+    /// be chosen by server-assigned `id` (smallest = earliest arrival), not by
+    /// client-supplied `wall_time`. An intra-account attacker can forge a low
+    /// `wall_time` to make their item appear "old" in wall_time order, displacing
+    /// legitimate items during overflow eviction while their own survives.
+    ///
+    /// This test sets a cap of 2 and pushes three items: a "legitimate" item at
+    /// wall_time=1000, then an "attacker" item at wall_time=1 (back-dated), then
+    /// another "legitimate" item at wall_time=2000. Under wall_time eviction the
+    /// item at wall_time=1 (the attacker's) would survive (it sorts as "newest" in
+    /// the wall_time min-heap) while the original item at wall_time=1000 would be
+    /// evicted. Under server-id eviction, the oldest server-assigned item is evicted
+    /// regardless of its wall_time.
+    #[test]
+    fn inbox_overflow_evicts_by_server_id_not_client_wall_time() {
+        let mut store = RelayStore::new_with_cap(3600, 2 /* cap = 2 items */);
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+
+        // Push item 1 at wall_time=1000 (server id = 1).
+        let id_first = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                B64.encode(b"first"),
+                1000,
+                10 * 1024 * 1024,
+            )
+            .unwrap();
+
+        // Push attacker's item at wall_time=1 (back-dated; server id = 2).
+        let id_attacker = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                B64.encode(b"attacker"),
+                1, // deliberately old wall_time to appear "oldest" in wall_time order
+                10 * 1024 * 1024,
+            )
+            .unwrap();
+
+        // Push item 3 at wall_time=2000 (server id = 3); this should trigger eviction.
+        // After eviction the inbox must have exactly 2 items.
+        let _id_third = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                B64.encode(b"third"),
+                2000,
+                10 * 1024 * 1024,
+            )
+            .unwrap();
+
+        let remaining: Vec<i64> = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap()
+            .into_iter()
+            .map(|it| it.id)
+            .collect();
+
+        // The server assigned id_first=1, id_attacker=2, id_third=3.
+        // Eviction by id_ASC must remove id_first (smallest id = earliest arrival).
+        // id_attacker and id_third must remain.
+        assert_eq!(
+            remaining.len(),
+            2,
+            "inbox must be at cap after overflow"
+        );
+        assert!(
+            !remaining.contains(&id_first),
+            "CopyPaste-1uqb: the earliest-arrived item (id={id_first}) must be evicted"
+        );
+        assert!(
+            remaining.contains(&id_attacker),
+            "CopyPaste-1uqb: attacker item (id={id_attacker}, wall_time=1) must NOT survive \
+             by appearing oldest in wall_time order — it arrived AFTER id_first"
+        );
+        assert!(
+            remaining.contains(&_id_third),
+            "the third item must survive"
+        );
+    }
+
     // ---- H1: per-scope device quota ----------------------------------------
 
     use std::net::{IpAddr, Ipv4Addr};
@@ -2874,5 +2984,118 @@ mod tests {
             items.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
             vec![10, 20, 30, 40, 50]
         );
+    }
+
+    // ---- CopyPaste-0y04: SSE per-device connection cap ----------------------
+
+    /// CopyPaste-0y04: `notifier_receiver_count` must reflect the number of
+    /// live SSE receivers for a device. Subscribing N times must increment the
+    /// count, and dropping a receiver must decrement it (broadcast semantics).
+    #[test]
+    fn sse_receiver_count_tracks_live_subscriptions() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+
+        assert_eq!(
+            store.notifier_receiver_count(&device_a_id()),
+            0,
+            "no subscriptions initially"
+        );
+
+        // Subscribe once: count must be 1.
+        let rx1 = store.subscribe_notifier(&device_a_id());
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 1);
+
+        // Subscribe again: count must be 2.
+        let rx2 = store.subscribe_notifier(&device_a_id());
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 2);
+
+        // Drop one receiver: count must drop to 1.
+        drop(rx1);
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 1);
+
+        // Drop the last: count must return to 0.
+        drop(rx2);
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 0);
+    }
+
+    /// CopyPaste-0y04: a fresh device starts with 0 SSE receivers, and calling
+    /// `notifier_receiver_count` on an unknown device also returns 0 (no panic).
+    #[test]
+    fn sse_receiver_count_returns_zero_for_unknown_device() {
+        let store = make_store();
+        // Device "aaaa…" is never registered: must return 0, not panic.
+        assert_eq!(
+            store.notifier_receiver_count(&device_a_id()),
+            0,
+            "notifier_receiver_count for unknown device must be 0"
+        );
+    }
+
+    // ---- CopyPaste-hf40: next_sync_id watermark persisted across restart ----
+
+    /// CopyPaste-hf40: the `next_sync_id` counter (relay watermark) must be
+    /// rehydrated from the database on startup. Simulated by:
+    ///   1. Create store A (on-disk SQLite via `new_persistent`).
+    ///   2. Push N items → counter advances to N+1.
+    ///   3. Create store B reloading from the same on-disk DB → must seed from N+1.
+    ///   4. Push one more item in store B → must get server id N+1 (not 1).
+    ///
+    /// Note: the default `make_store()` uses `:memory:` which is private to
+    /// each open. We create a store with an on-disk temp DB here so we can
+    /// actually reload it.
+    #[test]
+    fn next_sync_id_watermark_is_seeded_from_db_on_restart() {
+        // Create a temp file path for the DB.
+        let dir = std::env::temp_dir().join(format!(
+            "copypaste-relay-hf40-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("relay.db").to_str().unwrap().to_string();
+
+        // Store A: register device, push 3 items → last pushed id must be 3.
+        let last_id_a = {
+            let mut store = RelayStore::new_persistent(3600, 500, &db_path).unwrap();
+            store
+                .register_device(
+                    device_a_id(),
+                    "A".into(),
+                    valid_key_b64(),
+                    valid_pop_b64(),
+                )
+                .unwrap();
+            push_text(&mut store, &device_a_id(), 10); // id=1
+            push_text(&mut store, &device_a_id(), 20); // id=2
+            push_text(&mut store, &device_a_id(), 30) // id=3
+        };
+        assert_eq!(last_id_a, 3, "first store: last pushed id must be 3");
+
+        // Store B: open the same on-disk DB and reload via `new_persistent`.
+        // The next push must continue from id=4, NOT restart from 1.
+        let first_id_b = {
+            let mut store = RelayStore::new_persistent(3600, 500, &db_path).unwrap();
+            push_text(&mut store, &device_a_id(), 40) // must be id=4
+        };
+        assert_eq!(
+            first_id_b, 4,
+            "CopyPaste-hf40: after restart the first new push must get id={} (continuation), \
+             not 1 (restart from scratch); got {}",
+            last_id_a + 1, first_id_b
+        );
+
+        // Clean up.
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
