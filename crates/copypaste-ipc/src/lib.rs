@@ -35,7 +35,7 @@ pub mod response;
 
 pub use error::ErrorCode;
 pub use methods::{
-    compute_sync_badge_state, compute_sync_badge_state_with_inflight, DbBackupRequest,
+    compute_sync_badge_state, compute_sync_badge_state_with_inflight, AppConfig, DbBackupRequest,
     DbBackupResponse, DbRestoreRequest,
     DbRestoreResponse, DbStatsResponse, GetSyncStatusResponse, ResetDatabaseRequest,
     ResetDatabaseResponse, StoreCloudPasswordRequest, StoreCloudPasswordResponse, SyncBadgeState,

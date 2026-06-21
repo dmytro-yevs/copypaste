@@ -18,6 +18,9 @@
 
 pub mod app_icon;
 pub mod clipboard;
+/// Shared IPC config type re-export + structural-consistency tests.
+/// See [`copypaste_ipc::AppConfig`] for the canonical definition.
+pub mod config;
 pub mod daemon;
 pub mod device_meta;
 #[cfg(unix)]
