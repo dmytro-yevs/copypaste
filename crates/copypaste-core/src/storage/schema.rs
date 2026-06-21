@@ -354,9 +354,7 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // fresh-DB scenario (reset_database race) can leave user_version=0 while
         // columns from later migrations are already present.
         if !column_exists(conn, "clipboard_items", "content_hash")? {
-            script.push_str(
-                "ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n",
-            );
+            script.push_str("ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;\n");
         }
         // The index uses CREATE … IF NOT EXISTS so it is always safe to include.
         script.push_str(
@@ -637,7 +635,10 @@ mod tests {
 
         // The migration must fail (v13 cannot purge a table that doesn't exist).
         let result = apply_migrations(&conn);
-        assert!(result.is_err(), "migration must fail when clipboard_fts is absent");
+        assert!(
+            result.is_err(),
+            "migration must fail when clipboard_fts is absent"
+        );
 
         // user_version must NOT have advanced — the transaction was rolled back.
         let version: i64 = conn
