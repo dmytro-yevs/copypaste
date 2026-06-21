@@ -79,7 +79,7 @@
     <string name="setting_mask_sensitive_subtitle">Hide preview text for items flagged as sensitive. Tap an item to reveal for 5 seconds.</string>
     <string name="setting_allow_screenshots_title">Allow screenshots</string>
     <string name="setting_allow_screenshots_subtitle">When off, the system blocks screenshots, screen recording and the recents preview to protect clipboard contents. (Android only)</string>
-    <string name="setting_translucency_title">Transparency</string>
+    <string name="setting_translucency_title">Translucency</string>
     <string name="setting_translucency_subtitle">Use semi-transparent backgrounds on surfaces. Disable for fully solid backgrounds.</string>
     <string name="setting_reduce_motion_title">Reduce Motion</string>
     <string name="setting_reduce_motion_subtitle">Use minimal transitions instead of cinematic animations. Mirrors the system accessibility preference.</string>
@@ -408,7 +408,7 @@
     <string name="meta_label_fingerprint">Fingerprint</string>
 
     <!-- Devices screen — NoPeerCard (ojsq) -->
-    <string name="devices_no_peer_title">No device paired</string>
+    <string name="devices_no_peer_title">No paired devices</string>
     <string name="devices_no_peer_body">Pair with a Mac running CopyPaste to enable P2P clipboard sync over your local network.</string>
     <string name="devices_btn_pair_device">Pair a device</string>
 
