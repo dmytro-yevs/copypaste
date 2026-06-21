@@ -286,10 +286,26 @@ fn relay_apply_to_pasteboard(
     }
 }
 
-/// Poll interval for the receive loop (the relay also offers SSE; polling is the
-/// portable backstop and matches the at-least-once contract). Kept tight so
-/// cross-device latency is low without hammering the relay.
+/// Minimum poll interval for the receive loop (applied when items are arriving
+/// so cross-device latency stays low). After [`IDLE_EMPTY_POLL_THRESHOLD`]
+/// consecutive empty polls the interval grows linearly up to [`POLL_INTERVAL_MAX`]
+/// (CopyPaste-28br: idle back-off to reduce battery drain and relay load).
 const POLL_INTERVAL: Duration = Duration::from_secs(5);
+
+/// Number of consecutive empty polls before the interval starts growing.
+/// After this many no-op ticks the daemon clearly has no new items to fetch.
+const IDLE_EMPTY_POLL_THRESHOLD: u32 = 3;
+
+/// Step size for each idle back-off increment (60 s per step, so the first
+/// idle step immediately jumps to ≥ 60 s — satisfying the acceptance criterion
+/// of "≥ 60 s after 3 consecutive empty polls"). The interval grows as
+/// `IDLE_POLL_STEP * step_count`, capped at [`POLL_INTERVAL_MAX`].
+const IDLE_POLL_STEP: Duration = Duration::from_secs(60);
+
+/// Maximum idle poll interval (5 minutes). The interval grows linearly in
+/// `IDLE_POLL_STEP`-sized increments up to this cap.  A non-empty response
+/// resets the interval immediately back to `POLL_INTERVAL`.
+const POLL_INTERVAL_MAX: Duration = Duration::from_secs(5 * 60);
 
 /// Max items requested per pull tick. When a batch comes back full we re-poll
 /// immediately (burst drain) rather than waiting a full interval.
@@ -476,7 +492,7 @@ impl Drop for RelayHandle {
 /// And the `set_config` handler must drop the running `RelayHandle` when this
 /// function returns `true` for the incoming `relay_url`.
 pub fn relay_url_is_clear(url: Option<&str>) -> bool {
-    url.map_or(true, |s| s.trim().is_empty())
+    url.is_none_or(|s| s.trim().is_empty())
 }
 
 // ── Token cache (0600 file) ─────────────────────────────────────────────────
@@ -1344,6 +1360,16 @@ async fn receive_loop(
     let mut wm = Watermark::default();
     let mut warned_no_key = false;
 
+    // CopyPaste-28br: adaptive idle back-off.
+    //
+    // When no items arrive for `IDLE_EMPTY_POLL_THRESHOLD` consecutive polls
+    // the interval grows linearly (POLL_INTERVAL per step) up to
+    // POLL_INTERVAL_MAX, reducing battery drain and relay load during idle
+    // periods. A non-empty pull resets the counter and interval to their
+    // minimum values so latency stays low when items are actually flowing.
+    let mut consecutive_empty: u32 = 0;
+    let mut current_interval = POLL_INTERVAL;
+
     loop {
         // Wait an interval, but wake early on shutdown.
         tokio::select! {
@@ -1352,7 +1378,7 @@ async fn receive_loop(
                 tracing::info!("relay-sync receive_loop: shutdown");
                 break;
             }
-            _ = tokio::time::sleep(POLL_INTERVAL) => {}
+            _ = tokio::time::sleep(current_interval) => {}
         }
 
         let key_bytes = match snapshot_sync_key(&sync_key).await {
@@ -1435,6 +1461,22 @@ async fn receive_loop(
                 }
             };
             if page.is_empty() {
+                // CopyPaste-28br: empty poll — advance the idle counter and
+                // grow the interval (linearly in IDLE_POLL_STEP increments,
+                // capped at POLL_INTERVAL_MAX).
+                consecutive_empty = consecutive_empty.saturating_add(1);
+                if consecutive_empty >= IDLE_EMPTY_POLL_THRESHOLD {
+                    // Each idle step adds one IDLE_POLL_STEP (60 s) so the
+                    // first step already meets the ≥ 60 s acceptance criterion.
+                    let steps = consecutive_empty.saturating_sub(IDLE_EMPTY_POLL_THRESHOLD) + 1;
+                    current_interval =
+                        (IDLE_POLL_STEP * steps).min(POLL_INTERVAL_MAX);
+                    tracing::debug!(
+                        consecutive_empty,
+                        current_interval_secs = current_interval.as_secs(),
+                        "relay-sync receive_loop: idle back-off active"
+                    );
+                }
                 break;
             }
             let page_len = page.len();
@@ -1454,6 +1496,10 @@ async fn receive_loop(
                 Ok((new_wm, stored)) => {
                     wm = new_wm;
                     if stored > 0 {
+                        // CopyPaste-28br: a non-empty batch — reset idle
+                        // back-off so latency stays low while items are flowing.
+                        consecutive_empty = 0;
+                        current_interval = POLL_INTERVAL;
                         last_sync_ms.store(now_ms(), Ordering::Relaxed);
                         if auto_apply_enabled {
                             // CopyPaste-7ub: implement auto_apply_synced_clip on the
@@ -2693,6 +2739,106 @@ mod tests {
         assert!(
             cand.is_some(),
             "auto_apply=true path: candidate must be available after ingest"
+        );
+    }
+
+    // ── CopyPaste-28br: adaptive idle back-off constants ─────────────────────
+
+    /// Verify the back-off constants satisfy the acceptance criterion:
+    /// ≥60 s interval after 3 consecutive empty polls, reset to 5 s on
+    /// non-empty batch.
+    ///
+    /// The logic is in `receive_loop` (not easily extracted as a pure fn),
+    /// so this test pins the constants and the arithmetic directly.
+    #[test]
+    fn idle_backoff_constants_satisfy_acceptance_criteria() {
+        // Acceptance: after IDLE_EMPTY_POLL_THRESHOLD consecutive empty polls
+        // the interval must grow to ≥ 60 s.
+        let steps_after_threshold = 1u32; // first step beyond threshold
+        let interval = IDLE_POLL_STEP * steps_after_threshold;
+        assert!(
+            interval >= Duration::from_secs(60),
+            "CopyPaste-28br: first idle step must be ≥ 60 s, got {interval:?}. \
+             IDLE_POLL_STEP={IDLE_POLL_STEP:?}"
+        );
+
+        // The cap (POLL_INTERVAL_MAX) must be at least the first step.
+        assert!(
+            POLL_INTERVAL_MAX >= interval,
+            "POLL_INTERVAL_MAX ({POLL_INTERVAL_MAX:?}) must be ≥ first idle step ({interval:?})"
+        );
+
+        // A non-empty batch resets to POLL_INTERVAL (5 s).
+        // This is logic in receive_loop; assert the constant here.
+        assert_eq!(
+            POLL_INTERVAL,
+            Duration::from_secs(5),
+            "base POLL_INTERVAL must remain 5 s for low-latency active sync"
+        );
+    }
+
+    /// Simulate the adaptive back-off state machine from `receive_loop` to
+    /// verify the counter and interval transitions are correct.
+    #[test]
+    fn idle_backoff_state_machine_grows_then_resets() {
+        let mut consecutive_empty: u32 = 0;
+        let mut current_interval = POLL_INTERVAL;
+
+        // Helper: simulate one empty poll tick (mirrors the logic in receive_loop).
+        let tick_empty = |consecutive_empty: &mut u32, current_interval: &mut Duration| {
+            *consecutive_empty = consecutive_empty.saturating_add(1);
+            if *consecutive_empty >= IDLE_EMPTY_POLL_THRESHOLD {
+                let steps = consecutive_empty.saturating_sub(IDLE_EMPTY_POLL_THRESHOLD) + 1;
+                *current_interval = (IDLE_POLL_STEP * steps).min(POLL_INTERVAL_MAX);
+            }
+        };
+
+        // Helper: simulate one non-empty poll tick.
+        let tick_nonempty = |consecutive_empty: &mut u32, current_interval: &mut Duration| {
+            *consecutive_empty = 0;
+            *current_interval = POLL_INTERVAL;
+        };
+
+        // Initial state: interval is at minimum.
+        assert_eq!(current_interval, POLL_INTERVAL);
+
+        // Polls 1 and 2 (below threshold): interval must not grow yet.
+        tick_empty(&mut consecutive_empty, &mut current_interval);
+        assert_eq!(
+            current_interval, POLL_INTERVAL,
+            "below threshold: interval must not grow yet (poll 1)"
+        );
+        tick_empty(&mut consecutive_empty, &mut current_interval);
+        assert_eq!(
+            current_interval, POLL_INTERVAL,
+            "below threshold: interval must not grow yet (poll 2)"
+        );
+
+        // Poll 3 reaches threshold: interval must grow to ≥ 60 s.
+        tick_empty(&mut consecutive_empty, &mut current_interval);
+        assert!(
+            current_interval >= Duration::from_secs(60),
+            "CopyPaste-28br: at threshold (poll 3) interval must be ≥ 60 s, got {current_interval:?}"
+        );
+
+        // Further polls: interval must grow and stay ≤ POLL_INTERVAL_MAX.
+        for _ in 0..20 {
+            tick_empty(&mut consecutive_empty, &mut current_interval);
+            assert!(
+                current_interval <= POLL_INTERVAL_MAX,
+                "interval must be capped at POLL_INTERVAL_MAX, got {current_interval:?}"
+            );
+        }
+
+        // A non-empty poll must reset both counter and interval.
+        tick_nonempty(&mut consecutive_empty, &mut current_interval);
+        assert_eq!(
+            consecutive_empty, 0,
+            "non-empty poll must reset consecutive_empty to 0"
+        );
+        assert_eq!(
+            current_interval, POLL_INTERVAL,
+            "non-empty poll must reset interval to POLL_INTERVAL"
         );
     }
 }
