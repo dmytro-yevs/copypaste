@@ -11,6 +11,9 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 
 /**
@@ -292,9 +295,15 @@ internal suspend fun storeDecryptedItem(
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeImageBytes(storedId, item.plaintext)
-                    // Generate thumbnail after full-res storage; non-fatal on failure.
-                    SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
-                        repository.storeThumbnailBytes(storedId, thumbBytes)
+                    // CopyPaste-44rq.36: fire-and-forget thumbnail generation on
+                    // Dispatchers.Default so WorkManager's doWork() is not blocked
+                    // by 50–200 ms of CPU-bound decode/compress per image in the loop.
+                    val capturedId = storedId
+                    val capturedBytes = item.plaintext
+                    CoroutineScope(Dispatchers.Default).launch {
+                        SyncThumbnailHelper.generateAndStore(capturedBytes) { thumbBytes ->
+                            repository.storeThumbnailBytes(capturedId, thumbBytes)
+                        }
                     }
                     true
                 } else {

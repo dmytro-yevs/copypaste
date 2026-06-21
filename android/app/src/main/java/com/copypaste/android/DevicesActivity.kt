@@ -384,14 +384,37 @@ object DevicesOnlineState {
 
 /**
  * Forget a single paired peer locally: remove its roster entry (fingerprint,
- * sync address, KEK-wrapped session key). The peer is NOT notified; it may keep
- * trying to contact us until it is also unpaired on its side.
+ * sync address, KEK-wrapped session key).
+ *
+ * CopyPaste-1jms.8: Android cannot send a mutual unpair signal to the peer
+ * because the Android app has no live mTLS channel management equivalent to the
+ * macOS daemon's `send_unpair_signal_if_connected()` / `queue_unpair_for_offline_delivery()`
+ * (crates/copypaste-daemon/src/ipc.rs:998-1052). A `ControlMsg::Unpair` would
+ * need:
+ *   (a) a persistent mTLS connection handle to the peer, OR
+ *   (b) a durable pending-unpair queue flushed on next P2P dial.
+ * Neither exists on Android yet — the P2P dialer (syncWithPeer FFI) is
+ * one-shot pull, not a live connection.
+ *
+ * As a result the revoked peer continues trying to sync until it is also
+ * unpaired on its side (or times out). This is tracked as a known limitation.
+ * Backend support required: expose a "queue_unpair" IPC call or durable
+ * pending-action table that FgsSyncLoop can flush on next dial.
  *
  * Does NOT touch this device's P2P identity (cert/key) — we keep our own
  * identity so our OTHER pairings keep working and re-pairing needs no new cert.
  */
 fun unpairPeer(settings: Settings, fingerprint: String) {
     settings.removePeer(fingerprint)
+    // CopyPaste-1jms.8: local removal is all we can do on Android today.
+    // Log the limitation so it is visible in diagnostics; the revoked peer
+    // will continue dialling until it is also unpaired on its own side.
+    Log.w(
+        "DevicesActivity",
+        "unpairPeer: peer ${fingerprint.take(16)}… removed locally. " +
+            "No unpair signal sent — Android lacks a durable pending-unpair queue " +
+            "(backend support needed: see CopyPaste-1jms.8).",
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -857,6 +880,14 @@ fun DevicesScreen(
                             )
                             if (ok) {
                                 settings.removePeer(t.fingerprint)
+                                // CopyPaste-1jms.8: log the missing peer-signal limitation
+                                // (same constraint as unpairPeer — no durable pending-unpair queue).
+                                Log.w(
+                                    TAG,
+                                    "revokeOnly: peer ${t.fingerprint.take(16)}… removed locally. " +
+                                        "No unpair signal sent to peer — Android lacks a durable " +
+                                        "pending-unpair queue (see CopyPaste-1jms.8).",
+                                )
                                 refresh()
                             } else {
                                 revokeError = "Failed to record revocation. The device was NOT removed — please try again."

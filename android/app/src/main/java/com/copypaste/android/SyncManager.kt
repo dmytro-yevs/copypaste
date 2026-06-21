@@ -2,7 +2,9 @@ package com.copypaste.android
 
 import android.util.Base64
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.UUID
 
@@ -526,8 +528,15 @@ class SyncManager(
                 )
                 if (storedId.isNotEmpty()) {
                     repository.storeImageBytes(storedId, plaintext)
-                    SyncThumbnailHelper.generateAndStore(plaintext) { thumbBytes ->
-                        repository.storeThumbnailBytes(storedId, thumbBytes)
+                    // CopyPaste-44rq.36: fire-and-forget thumbnail generation on
+                    // Dispatchers.Default so the relay SSE drain loop is not blocked
+                    // by 50–200 ms of CPU-bound decode/compress per image.
+                    val capturedId = storedId
+                    val capturedBytes = plaintext
+                    CoroutineScope(Dispatchers.Default).launch {
+                        SyncThumbnailHelper.generateAndStore(capturedBytes) { thumbBytes ->
+                            repository.storeThumbnailBytes(capturedId, thumbBytes)
+                        }
                     }
                     true
                 } else {

@@ -1160,6 +1160,9 @@ private fun StorageTab(
     onExportHistory: () -> Unit = {},
     // CopyPaste-8jx8: import clipboard history from a JSON export file via SAF.
     onImportHistory: () -> Unit = {},
+    // CopyPaste-bdac.42: compact (VACUUM) the SQLCipher database (macOS parity).
+    // Null → not yet available (no FFI vacuum entry point on Android yet).
+    onVacuumDatabase: (() -> Unit)? = null,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         SectionLabel(stringResource(R.string.section_storage_limits))
@@ -1397,6 +1400,41 @@ private fun StorageTab(
                     Text(stringResource(R.string.btn_reset_db))
                 }
             }
+            SettingsCardDivider()
+            // CopyPaste-bdac.42: Compact database — macOS parity (Settings → Storage → Compact).
+            // Runs VACUUM on the SQLCipher DB to reclaim space after deletions.
+            // onVacuumDatabase is null until the FFI exposes a vacuum entry point;
+            // in that case the button is shown as disabled with an explanatory note.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = stringResource(R.string.setting_compact_db_label),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = LocalIdeColors.current.text,
+                    )
+                    Text(
+                        text = if (onVacuumDatabase != null)
+                            stringResource(R.string.setting_compact_db_subtitle)
+                        else
+                            "Not available on this build (requires FFI vacuum support)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalIdeColors.current.dim,
+                    )
+                }
+                CopyPasteButton(
+                    onClick = { onVacuumDatabase?.invoke() },
+                    variant = ButtonVariant.PRIMARY,
+                    enabled = onVacuumDatabase != null,
+                ) {
+                    Text(stringResource(R.string.btn_compact_db))
+                }
+            }
         }
         Spacer(modifier = Modifier.height(16.dp))
     }
@@ -1433,6 +1471,9 @@ private fun SyncTab(
     // CopyPaste-dxq2: sync error surfacing — written by FgsSyncLoop/SupabasePollWorker.
     syncError: String = "",
     syncErrorIsUnauthorized: Boolean = false,
+    // CopyPaste-bdac.42: test-connection callback (macOS parity).
+    // Null → not yet available (no backend reachability probe on Android).
+    onTestConnection: (() -> Unit)? = null,
 ) {
     val c = LocalIdeColors.current
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -1514,15 +1555,33 @@ private fun SyncTab(
                 density = density,
             )
             SettingsCardDivider()
-            SettingsRow(
-                title = stringResource(R.string.setting_use_supabase_title),
-                subtitle = stringResource(R.string.setting_use_supabase_subtitle),
-                checked = syncBackend == SyncBackend.SUPABASE,
-                onCheckedChange = { useSupabase ->
-                    onSyncBackendChange(if (useSupabase) SyncBackend.SUPABASE else SyncBackend.RELAY)
-                },
-                density = density,
-            )
+            // CopyPaste-bdac.57: replace boolean Switch ("Use Supabase Cloud Sync") with
+            // a segmented control "Relay | Supabase" so the label makes clear that "Off"
+            // means relay mode (not no-sync), matching the density/skin segmented controls.
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                Text(
+                    text = stringResource(R.string.setting_sync_backend_title),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = c.dim,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+                Text(
+                    text = stringResource(R.string.setting_sync_backend_subtitle),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = c.dim,
+                    modifier = Modifier.padding(bottom = 8.dp),
+                )
+                IdeSegmentedControl(
+                    options = listOf(
+                        stringResource(R.string.setting_sync_backend_relay),
+                        stringResource(R.string.setting_sync_backend_supabase),
+                    ),
+                    selectedIndex = if (syncBackend == SyncBackend.SUPABASE) 1 else 0,
+                    onSelect = { idx ->
+                        onSyncBackendChange(if (idx == 1) SyncBackend.SUPABASE else SyncBackend.RELAY)
+                    },
+                )
+            }
         }
 
         // ── SUPABASE CONFIG ────────────────────────────────────────────────
@@ -1622,6 +1681,42 @@ private fun SyncTab(
             supabaseAnonKey = supabaseAnonKey,
             relayUrl = relayUrl,
         )
+        // CopyPaste-bdac.42: "Test connection" button — macOS Settings → Sync parity.
+        // The SyncDiagnosticsCard shows live state; this button is a user-initiated
+        // probe. onTestConnection is null until a backend reachability check is
+        // implemented on Android; in that case the button is disabled with a note.
+        SettingsCard {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                    Text(
+                        text = stringResource(R.string.setting_test_connection_label),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = LocalIdeColors.current.text,
+                    )
+                    Text(
+                        text = if (onTestConnection != null)
+                            stringResource(R.string.setting_test_connection_subtitle)
+                        else
+                            "Not available on this build (see Sync Diagnostics above for live status)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = LocalIdeColors.current.dim,
+                    )
+                }
+                CopyPasteButton(
+                    onClick = { onTestConnection?.invoke() },
+                    variant = ButtonVariant.PRIMARY,
+                    enabled = onTestConnection != null,
+                ) {
+                    Text(stringResource(R.string.btn_test_connection))
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(16.dp))
     }
 }

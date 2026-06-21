@@ -532,6 +532,22 @@
     <string name="setting_import_history_subtitle">Load items from a JSON export file</string>
     <string name="action_import">Import</string>
 
+    <!-- CopyPaste-bdac.57: sync backend segmented control (replaces boolean Supabase toggle) -->
+    <string name="setting_sync_backend_title">Sync backend</string>
+    <string name="setting_sync_backend_subtitle">Choose the cloud sync backend. Both modes are end-to-end encrypted; switching does not disable sync.</string>
+    <string name="setting_sync_backend_relay">Relay</string>
+    <string name="setting_sync_backend_supabase">Supabase</string>
+
+    <!-- CopyPaste-bdac.42: Storage vacuum + Sync test-connection (macOS parity) -->
+    <string name="setting_compact_db_label">Compact database</string>
+    <string name="setting_compact_db_subtitle">Run VACUUM to reclaim space after deletions. Safe to run at any time.</string>
+    <string name="btn_compact_db">Compact…</string>
+    <string name="compact_db_ok">Database compacted</string>
+    <string name="compact_db_failed">Compact failed</string>
+    <string name="setting_test_connection_label">Test connection</string>
+    <string name="setting_test_connection_subtitle">Check that the configured sync backend is reachable.</string>
+    <string name="btn_test_connection">Test</string>
+
     <!-- CopyPaste-bdac.61: SettingsActivity — Sync tab -->
     <string name="section_sync_diagnostics">Sync Diagnostics</string>
     <string name="setting_auto_apply_synced_clip_title">Auto-apply synced clipboard</string>

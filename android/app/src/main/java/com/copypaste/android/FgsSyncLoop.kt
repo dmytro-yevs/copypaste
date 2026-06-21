@@ -8,6 +8,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -555,6 +558,11 @@ class FgsSyncLoop(
             val startId = settings.lastSupabasePollId
             var cursorWallTime = startWallTime
             var cursorId = startId
+            // CopyPaste-44rq.36: collect (storedId, imageBytes) pairs during the
+            // batch loop; thumbnail generation is deferred to AFTER the loop so the
+            // cursor is advanced for ALL items before the CPU-bound decode/compress
+            // work starts. Thumbnails are then generated in parallel on Dispatchers.Default.
+            val pendingThumbnails = mutableListOf<Pair<String, ByteArray>>()
 
             for (row in batch.rows) {
                 // Task 6: advance cursor for EVERY row before any continue.
@@ -602,10 +610,9 @@ class FgsSyncLoop(
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeImageBytes(storedId, item.plaintext)
-                            // Generate thumbnail after full-res storage; non-fatal on failure.
-                            SyncThumbnailHelper.generateAndStore(item.plaintext) { thumbBytes ->
-                                repository.storeThumbnailBytes(storedId, thumbBytes)
-                            }
+                            // CopyPaste-44rq.36: defer thumbnail generation — queue the pair
+                            // so all cursors advance before any CPU-bound decode/compress work.
+                            pendingThumbnails.add(storedId to item.plaintext)
                             true
                         } else {
                             false
@@ -671,6 +678,22 @@ class FgsSyncLoop(
             // advanceSupabaseCursor is monotonic and holds supabaseCursorLock so
             // a concurrent SupabasePollWorker run cannot interleave and lose an advance.
             settings.advanceSupabaseCursor(cursorWallTime, cursorId)
+
+            // CopyPaste-44rq.36: generate thumbnails for all images in this batch in
+            // parallel AFTER the cursor is advanced. Cursor advancement is the critical
+            // path; thumbnail generation (50–200 ms per image) is not.
+            if (pendingThumbnails.isNotEmpty()) {
+                coroutineScope {
+                    pendingThumbnails.map { (storedId, imageBytes) ->
+                        async(Dispatchers.Default) {
+                            SyncThumbnailHelper.generateAndStore(imageBytes) { thumbBytes ->
+                                repository.storeThumbnailBytes(storedId, thumbBytes)
+                            }
+                        }
+                    }.awaitAll()
+                }
+                pendingThumbnails.clear()
+            }
 
             totalNewCount += newCount
 
@@ -1098,9 +1121,16 @@ class FgsSyncLoop(
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeImageBytes(storedId, plaintextBytes)
-                            // Generate thumbnail after full-res storage; non-fatal on failure.
-                            SyncThumbnailHelper.generateAndStore(plaintextBytes) { thumbBytes ->
-                                repository.storeThumbnailBytes(storedId, thumbBytes)
+                            // CopyPaste-44rq.36: fire-and-forget thumbnail generation on
+                            // Dispatchers.Default so the P2P sync result is returned
+                            // immediately and the next item can be processed without
+                            // waiting 50–200 ms for the decode/compress step.
+                            val capturedId = storedId
+                            val capturedBytes = plaintextBytes
+                            CoroutineScope(Dispatchers.Default).launch {
+                                SyncThumbnailHelper.generateAndStore(capturedBytes) { thumbBytes ->
+                                    repository.storeThumbnailBytes(capturedId, thumbBytes)
+                                }
                             }
                             true
                         } else {
