@@ -309,6 +309,9 @@ pub fn encode_image_with_limit(
 ///   encrypted chunks → decrypt → reassemble → PNG bytes
 ///
 /// The caller is responsible for writing PNG bytes back to NSPasteboard.
+///
+/// For callers that process the bytes before use, prefer [`decode_image_zeroizing`]
+/// which wraps the plaintext in a `Zeroizing<Vec<u8>>` that scrubs the heap on drop.
 pub fn decode_image(
     chunks: &[EncryptedChunk],
     key: &[u8; 32],
@@ -316,6 +319,24 @@ pub fn decode_image(
 ) -> Result<Vec<u8>, ImageError> {
     let png_bytes = decrypt_chunks(chunks, key, file_id)?;
     Ok(png_bytes)
+}
+
+/// Full decode pipeline returning a `Zeroizing<Vec<u8>>` so the plaintext PNG
+/// bytes are scrubbed from the heap when the caller drops the buffer.
+///
+/// Prefer this variant when the caller processes the bytes before writing to
+/// NSPasteboard: the `Zeroizing` wrapper ensures no plaintext lingers in freed
+/// memory regardless of what intermediate code is added in the future.
+///
+/// CopyPaste-dgqm: pre-wired so any future expansion of the decode path can
+/// use this variant and automatically inherit the zeroize-on-drop contract.
+pub fn decode_image_zeroizing(
+    chunks: &[EncryptedChunk],
+    key: &[u8; 32],
+    file_id: &[u8; 16],
+) -> Result<zeroize::Zeroizing<Vec<u8>>, ImageError> {
+    let png_bytes = decrypt_chunks(chunks, key, file_id)?;
+    Ok(zeroize::Zeroizing::new(png_bytes))
 }
 
 /// Encode a small preview thumbnail of `img` into an encrypted chunk blob.
@@ -381,6 +402,9 @@ fn encode_thumbnail_bytes(
 /// `thumb_file_id` MUST be the same value passed to [`encode_thumbnail`]; the
 /// chunk AEAD binds it as AAD, so a wrong id fails the integrity check rather
 /// than returning garbage.
+///
+/// For callers that process the bytes before rendering, prefer
+/// [`decode_thumbnail_zeroizing`] which scrubs the heap on drop.
 pub fn decode_thumbnail(
     blob: &[u8],
     key: &[u8; 32],
@@ -389,6 +413,21 @@ pub fn decode_thumbnail(
     let chunks = chunks_from_blob(blob)?;
     let bytes = decrypt_chunks(&chunks, key, thumb_file_id)?;
     Ok(bytes)
+}
+
+/// Like [`decode_thumbnail`] but wraps the plaintext in `Zeroizing<Vec<u8>>`
+/// so the decrypted thumbnail bytes are scrubbed from the heap on drop.
+///
+/// CopyPaste-dgqm: pre-wired for future callers that hold the decrypted bytes
+/// in a processing pipeline before passing them to the render layer.
+pub fn decode_thumbnail_zeroizing(
+    blob: &[u8],
+    key: &[u8; 32],
+    thumb_file_id: &[u8; 16],
+) -> Result<zeroize::Zeroizing<Vec<u8>>, ImageError> {
+    let chunks = chunks_from_blob(blob)?;
+    let bytes = decrypt_chunks(&chunks, key, thumb_file_id)?;
+    Ok(zeroize::Zeroizing::new(bytes))
 }
 
 /// Lazy-backfill path: decode raw PNG bytes, then produce an encrypted
@@ -1208,6 +1247,62 @@ mod tests {
         assert!(
             matches!(err, ImageError::Decode(_) | ImageError::UnsupportedFormat),
             "expected Decode or UnsupportedFormat, got: {err:?}"
+        );
+    }
+
+    // CopyPaste-dgqm: Zeroizing export path tests
+    // These verify that decode_image_zeroizing and decode_thumbnail_zeroizing
+    // return the same plaintext as their non-zeroizing counterparts.
+
+    #[test]
+    fn decode_image_zeroizing_matches_decode_image() {
+        let key = test_key();
+        let file_id = test_file_id();
+        let png = minimal_png();
+
+        let (_, chunks) = encode_image(&png, &key, &file_id, 0).unwrap();
+
+        let plain = decode_image(&chunks, &key, &file_id).unwrap();
+        let zeroizing = decode_image_zeroizing(&chunks, &key, &file_id).unwrap();
+
+        // Both must produce identical bytes — the Zeroizing wrapper is transparent.
+        assert_eq!(
+            *zeroizing, plain,
+            "decode_image_zeroizing must return the same bytes as decode_image"
+        );
+    }
+
+    #[test]
+    fn decode_thumbnail_zeroizing_matches_decode_thumbnail() {
+        let key = test_key();
+        let thumb_file_id = [0xCCu8; 16];
+        let png = minimal_png();
+        let img = decode_clipboard_image(&png).unwrap();
+
+        let blob = encode_thumbnail(&img, &key, &thumb_file_id, THUMBNAIL_MAX_DIM).unwrap();
+
+        let plain = decode_thumbnail(&blob, &key, &thumb_file_id).unwrap();
+        let zeroizing = decode_thumbnail_zeroizing(&blob, &key, &thumb_file_id).unwrap();
+
+        assert_eq!(
+            *zeroizing, plain,
+            "decode_thumbnail_zeroizing must return the same bytes as decode_thumbnail"
+        );
+    }
+
+    #[test]
+    fn decode_image_zeroizing_wrong_key_fails() {
+        let key = test_key();
+        let bad_key = [0xFFu8; 32];
+        let file_id = test_file_id();
+        let png = minimal_png();
+
+        let (_, chunks) = encode_image(&png, &key, &file_id, 0).unwrap();
+
+        let err = decode_image_zeroizing(&chunks, &bad_key, &file_id).unwrap_err();
+        assert!(
+            matches!(err, ImageError::Chunk(_)),
+            "wrong key must fail AEAD auth on the Zeroizing path too"
         );
     }
 }

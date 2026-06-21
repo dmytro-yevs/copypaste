@@ -29,13 +29,17 @@ pub use crypto::{
     CLOUD_AAD_SCHEMA_VERSION, HKDF_VERSION, PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC,
     PAIRING_TOKEN_LEN,
 };
-pub use file::{decode_file, encode_file, FileError, FileMeta, FILE_CHUNK_SIZE, MAX_FILE_BYTES};
+pub use file::{
+    decode_file, decode_file_zeroizing, encode_file, FileError, FileMeta, FILE_CHUNK_SIZE,
+    MAX_FILE_BYTES,
+};
 pub use filename_security::{is_dangerous_extension, sanitize_filename};
 pub use image::{
     chunks_from_blob, chunks_to_blob, decode_clipboard_image, decode_clipboard_image_limited,
-    decode_image, decode_thumbnail, encode_as_png, encode_image, encode_image_full,
-    encode_image_with_limit, encode_thumbnail, encode_thumbnail_from_png, thumb_dims_exceed_cap,
-    thumbnail, ImageError, ImageMeta, IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES, THUMBNAIL_MAX_DIM,
+    decode_image, decode_image_zeroizing, decode_thumbnail, decode_thumbnail_zeroizing,
+    encode_as_png, encode_image, encode_image_full, encode_image_with_limit, encode_thumbnail,
+    encode_thumbnail_from_png, thumb_dims_exceed_cap, thumbnail, ImageError, ImageMeta,
+    IMAGE_CHUNK_SIZE, MAX_IMAGE_BYTES, THUMBNAIL_MAX_DIM,
 };
 pub use sensitive::{
     detect, is_sensitive_app, is_sensitive_for_autowipe, luhn_valid, redact, PatternMatch,

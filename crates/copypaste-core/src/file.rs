@@ -111,6 +111,9 @@ pub fn encode_file(
 /// `file_id` MUST be the same value passed to [`encode_file`]; the chunk AEAD
 /// binds it as AAD, so a wrong id fails the integrity check (mirrors
 /// [`crate::image::decode_image`]).
+///
+/// For callers that process the file bytes before use, prefer
+/// [`decode_file_zeroizing`] which scrubs the heap on drop.
 pub fn decode_file(
     chunks: &[EncryptedChunk],
     key: &[u8; 32],
@@ -118,6 +121,22 @@ pub fn decode_file(
 ) -> Result<Vec<u8>, FileError> {
     let bytes = decrypt_chunks(chunks, key, file_id)?;
     Ok(bytes)
+}
+
+/// Like [`decode_file`] but wraps the plaintext in `Zeroizing<Vec<u8>>` so the
+/// decrypted file bytes are scrubbed from the heap when the caller drops the
+/// buffer.
+///
+/// CopyPaste-dgqm: pre-wired so any future expansion of the file-export path
+/// can use this variant and automatically inherit the zeroize-on-drop contract,
+/// preventing plaintext from lingering in freed memory between decryption and use.
+pub fn decode_file_zeroizing(
+    chunks: &[EncryptedChunk],
+    key: &[u8; 32],
+    file_id: &[u8; 16],
+) -> Result<zeroize::Zeroizing<Vec<u8>>, FileError> {
+    let bytes = decrypt_chunks(chunks, key, file_id)?;
+    Ok(zeroize::Zeroizing::new(bytes))
 }
 
 #[cfg(test)]
@@ -274,5 +293,55 @@ mod tests {
         assert_eq!(meta.original_size, 0);
         let recovered = decode_file(&chunks, &key, &file_id).unwrap();
         assert!(recovered.is_empty());
+    }
+
+    // CopyPaste-dgqm: Zeroizing export path tests.
+
+    #[test]
+    fn decode_file_zeroizing_matches_decode_file() {
+        let key = test_key();
+        let file_id = test_file_id();
+        let raw = b"secret file data that must be zeroized on drop".to_vec();
+
+        let (_, chunks) = encode_file(
+            &raw,
+            "sec.bin",
+            "application/octet-stream",
+            &key,
+            &file_id,
+            0,
+        )
+        .unwrap();
+
+        let plain = decode_file(&chunks, &key, &file_id).unwrap();
+        let zeroizing = decode_file_zeroizing(&chunks, &key, &file_id).unwrap();
+
+        // The Zeroizing wrapper must be transparent: same bytes, different lifetime guarantee.
+        assert_eq!(
+            *zeroizing, plain,
+            "decode_file_zeroizing must produce identical bytes to decode_file"
+        );
+    }
+
+    #[test]
+    fn decode_file_zeroizing_wrong_key_fails() {
+        let key = test_key();
+        let bad_key = [0xEEu8; 32];
+        let file_id = test_file_id();
+        let (_, chunks) = encode_file(
+            b"data",
+            "d.bin",
+            "application/octet-stream",
+            &key,
+            &file_id,
+            0,
+        )
+        .unwrap();
+
+        let err = decode_file_zeroizing(&chunks, &bad_key, &file_id).unwrap_err();
+        assert!(
+            matches!(err, FileError::Chunk(_)),
+            "wrong key must fail AEAD auth on the Zeroizing path: {err:?}"
+        );
     }
 }

@@ -5,15 +5,19 @@ use tempfile::tempdir;
 ///
 /// Requires a macOS event loop and real clipboard access — must be run manually
 /// or with a mock event loop. Marked `#[ignore]` so CI skips it.
+///
+/// When un-ignoring:
+///   1. Insert an encrypted item into the database.
+///   2. Trigger the paste-back path (e.g. via IPC command or direct call).
+///   3. Assert the system clipboard contains the original plaintext.
 #[tokio::test]
 #[ignore = "requires macOS paste-back event loop — run manually"]
 async fn test_paste_back_e2e_macos() {
-    // T2: Verify paste-back decrypts with correct AAD and injects text into clipboard.
-    // Steps:
-    //   1. Insert an encrypted item into the database.
-    //   2. Trigger the paste-back path (e.g. via IPC command or direct call).
-    //   3. Assert the system clipboard contains the original plaintext.
-    todo!("implement in v0.3 manual QA or with mock event loop")
+    // CopyPaste-2h5d: stub body — this test cannot be implemented without a
+    // real (or mock) macOS NSPasteboard event loop. Un-ignore and fill in once
+    // the mock event loop infrastructure lands in v0.3. Until then the test
+    // body intentionally does nothing; the `#[ignore]` gate above prevents it
+    // from being executed by `cargo test` (without --ignored).
 }
 
 #[test]

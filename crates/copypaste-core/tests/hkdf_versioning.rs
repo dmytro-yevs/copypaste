@@ -166,30 +166,28 @@ fn key_length_matches_xchacha_requirement_32_bytes() {
 }
 
 // ---------------------------------------------------------------------------
-// 4. Migration helper — NOT YET IMPLEMENTED
+// 4. V1 ↔ V2 key isolation — currently provable invariants
 // ---------------------------------------------------------------------------
 
-/// API gap: no V2 salt constant, no `derive_enc_key_with_version()`, and no
-/// migration helper that re-encrypts V1 ciphertext under a V2 key. When V2
-/// is introduced this test must be un-`ignore`d and updated to call the real
-/// migration API. Until then it documents the missing surface.
+/// CopyPaste-e4a0: pin the two currently-verifiable key-rotation invariants:
+///   (a) A V1-salt-derived key correctly decrypts V1 ciphertext.
+///   (b) A V2-salt-derived key is rejected by V1 ciphertext (auth-tag mismatch).
 ///
-/// Expected future API shape (subject to design review):
-///   ```ignore
+/// These assertions do NOT require `migrate_ciphertext_v1_to_v2` (which does
+/// not yet exist). They prove the AEAD layer enforces key isolation, making a
+/// proper migration step mandatory when HKDF V2 eventually lands.
+///
+/// The future migration helper (`migrate_ciphertext_v1_to_v2`) will need its
+/// own test once it is implemented. Expected API shape (tracked separately):
+///   ```text
 ///   pub const HKDF_SALT_V2: &[u8] = b"copypaste-v2-salt";
-///   impl DeviceKeypair {
-///       pub fn derive_enc_key_v2(&self, peer: &[u8;32], s: &str, r: &str) -> [u8;32];
-///       pub fn local_enc_key_v2(&self) -> [u8;32];
-///   }
 ///   pub fn migrate_ciphertext_v1_to_v2(
 ///       ct: &[u8], nonce: &[u8; NONCE_SIZE],
 ///       v1_key: &[u8; 32], v2_key: &[u8; 32],
 ///   ) -> Result<(Vec<u8>, [u8; NONCE_SIZE]), EncryptError>;
 ///   ```
 #[test]
-#[ignore = "TODO: HKDF_SALT_V2 + derive_enc_key_v2 + migrate_ciphertext_v1_to_v2 \
-            not yet implemented in copypaste-core. Un-ignore when V2 lands."]
-fn migration_old_v1_ciphertext_decryptable_with_v1_key_only() {
+fn v1_key_isolates_from_v2_salt_derived_key() {
     let alice = fixed_keypair(0x77);
     let bob = fixed_keypair(0x88);
     let bob_pub = bob.public_key_bytes();
@@ -201,22 +199,16 @@ fn migration_old_v1_ciphertext_decryptable_with_v1_key_only() {
     let aad = build_item_aad("hkdf-migration", AAD_SCHEMA_VERSION);
     let (nonce, ct) = encrypt_item_with_aad(plaintext, &v1_key, &aad).unwrap();
 
-    // Sanity: v1 key decrypts the v1 ciphertext.
+    // (a) V1 key decrypts V1 ciphertext — round-trip regression.
     let pt = decrypt_item_with_aad(&ct, &nonce, &v1_key, &aad).unwrap();
     assert_eq!(pt, plaintext);
 
-    // The real contract: v2 key MUST NOT decrypt v1 ciphertext (auth tag
-    // mismatch). This is what forces a migration step rather than a silent
-    // key swap.
+    // (b) V2-salt key MUST NOT decrypt V1 ciphertext (auth-tag mismatch).
+    // This is the invariant that makes a migration step mandatory; a silent
+    // key swap would silently corrupt all stored ciphertexts.
     assert!(
         decrypt_item_with_aad(&ct, &nonce, &v2_key, &aad).is_err(),
         "v2-derived key must NOT decrypt v1-derived ciphertext — \
          a migration step is mandatory"
     );
-
-    // TODO: once `migrate_ciphertext_v1_to_v2` exists, assert:
-    //   let (new_ct, new_nonce) =
-    //       migrate_ciphertext_v1_to_v2(&ct, &nonce, &v1_key, &v2_key).unwrap();
-    //   assert_eq!(decrypt_item_with_aad(&new_ct, &new_nonce, &v2_key, &aad).unwrap(), plaintext);
-    //   assert!(decrypt_item_with_aad(&new_ct, &new_nonce, &v1_key, &aad).is_err());
 }

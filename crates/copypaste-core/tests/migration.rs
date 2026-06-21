@@ -28,17 +28,24 @@ use tempfile::tempdir;
 ///
 /// Requires the `migration_state` table (from wave1a) to be merged before this
 /// can be implemented. Marked `#[ignore]` so CI skips it.
+///
+/// When un-ignoring:
+///   1. Open a DB at schema v4 (force user_version = 4).
+///   2. Begin a v5 migration transaction and partially apply it (insert some rows).
+///   3. Simulate a crash (drop connection without committing).
+///   4. Reopen the DB and assert it can resume/complete v5 migration cleanly.
+///   5. Verify no data was lost and the schema is at v5.
 #[tokio::test]
 #[ignore = "requires migration harness — see wave1a T3 scope"]
 async fn test_schema_rollback_v5_mid_batch() {
-    // T3: Open DB with v4 schema, start v5 migration, kill mid-batch, reopen, verify resumable.
-    // Steps:
-    //   1. Open a DB at schema v4 (force user_version = 4).
-    //   2. Begin a v5 migration transaction and partially apply it (insert some rows).
-    //   3. Simulate a crash (drop connection without committing).
-    //   4. Reopen the DB and assert it can resume/complete v5 migration cleanly.
-    //   5. Verify no data was lost and the schema is at v5.
-    todo!("implement after wave1a migration_state table is merged")
+    // CopyPaste-2h5d: stub body — this test depends on the migration_state
+    // resumable-sweep infrastructure (wave1a) which has not yet landed. The
+    // migration runs atomically inside a single SQLite transaction (see
+    // apply_migrations), so a simulated crash is a no-op on the schema version
+    // even without the resumable harness; a more nuanced mid-batch test can
+    // only be written once the harness is available. Un-ignore and complete
+    // when wave1a T3 lands. The `#[ignore]` gate above prevents this stub
+    // from being run by `cargo test` (without --ignored).
 }
 
 /// Mirror of `copypaste-core/src/storage/schema.rs::SCHEMA_VERSION`.
@@ -848,4 +855,395 @@ fn migrate_v12_to_v13_purges_sensitive_fts_rows() {
     // (The stale row for 's-id' is present due to our manual INSERT above, but
     // search_items must not return it thanks to the AND ci.is_sensitive = 0 guard.)
     let _ = sensitive_fts; // acknowledged: stale row present due to test setup
+}
+
+// ---------------------------------------------------------------------------
+// On-disk migration tests for v5–v13 (CopyPaste-ghns)
+//
+// These tests stage a PLAINTEXT SQLite file at schema v1 (the only reliable
+// plaintext starting point given that `sqlcipher_export` resets `user_version`
+// to 0 after encrypting), then open it via `Database::open()` which:
+//   1. Detects the plaintext file.
+//   2. Auto-encrypts it in-place (plaintext → SQLCipher, `encrypt_existing`).
+//   3. Applies `apply_migrations` (v0 → CURRENT_SCHEMA_VERSION, all steps).
+//
+// After `sqlcipher_export` the encrypted copy always starts at user_version=0
+// regardless of the plaintext file's version, so every schema step (v2 through
+// v13) runs in a single pass. These tests verify that the v5–v13 columns,
+// indexes, and tables land correctly after the full on-disk migration path.
+// ---------------------------------------------------------------------------
+
+/// On-disk: v1 plaintext → encrypted → v5+
+///
+/// v5 adds two UNIQUE indexes (`idx_dedup_hash_minute`, `idx_clipboard_item_id`).
+/// Existing rows must survive the full encrypt+migrate pipeline with data intact.
+#[test]
+fn on_disk_v1_to_current_adds_v5_dedup_indexes() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v1-v5.db");
+    stage_v1_plaintext(&path);
+
+    // Insert two rows to verify data survives the encrypt+migrate pipeline.
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, content, content_nonce, \
+              is_sensitive, is_synced, lamport_ts, wall_time) \
+             VALUES ('r1', 'i1', 'text', X'AA', X'BB', 0, 0, 1, 1000);\
+             INSERT INTO clipboard_items \
+             (id, item_id, content_type, content, content_nonce, \
+              is_sensitive, is_synced, lamport_ts, wall_time) \
+             VALUES ('r2', 'i2', 'text', X'CC', X'DD', 0, 0, 2, 2000);",
+        )
+        .unwrap();
+    }
+
+    let key = [0x10u8; 32];
+    let db = Database::open(&path, &key).expect("on-disk v1 → current migration");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    // v5 indexes must be present.
+    assert!(
+        index_exists(&db, "idx_dedup_hash_minute"),
+        "v5 migration must add idx_dedup_hash_minute on-disk"
+    );
+    assert!(
+        index_exists(&db, "idx_clipboard_item_id"),
+        "v5 migration must add idx_clipboard_item_id on-disk"
+    );
+
+    // Original rows must survive encrypt_existing + all migrations intact.
+    let count: i64 = db
+        .conn()
+        .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 2, "both rows must survive v1→current on-disk migration");
+}
+
+/// On-disk: v1 plaintext → encrypted → migration adds pinned column (v7).
+///
+/// Legacy rows must land on `pinned = 0` (the DEFAULT in V7_ALTER_SQL).
+#[test]
+fn on_disk_v1_to_current_adds_v7_pinned_column() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v1-v7.db");
+    stage_v1_plaintext(&path);
+
+    // Insert a row pre-migration.
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, content, content_nonce, \
+              is_sensitive, is_synced, lamport_ts, wall_time) \
+             VALUES ('p1', 'ip1', 'text', X'11', X'22', 0, 0, 1, 1000)",
+            [],
+        )
+        .unwrap();
+    }
+
+    let key = [0x11u8; 32];
+    let db = Database::open(&path, &key).expect("on-disk v1 → v7 column migration");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    assert!(
+        column_exists(&db, "clipboard_items", "pinned"),
+        "v7 migration must add pinned column on-disk"
+    );
+
+    let pinned: i64 = db
+        .conn()
+        .query_row(
+            "SELECT pinned FROM clipboard_items WHERE id = 'p1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        pinned, 0,
+        "pre-v7 on-disk rows must backfill pinned = 0 after migration"
+    );
+}
+
+/// On-disk: v1 plaintext → encrypted → migration adds thumb column (v9).
+///
+/// Legacy rows must land on `thumb = NULL` (the DEFAULT in V9_ALTER).
+#[test]
+fn on_disk_v1_to_current_adds_v9_thumb_column() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v1-v9.db");
+    stage_v1_plaintext(&path);
+
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, content, content_nonce, \
+              is_sensitive, is_synced, lamport_ts, wall_time) \
+             VALUES ('t1', 'it1', 'image', X'AA', X'BB', 0, 0, 1, 1000)",
+            [],
+        )
+        .unwrap();
+    }
+
+    let key = [0x12u8; 32];
+    let db = Database::open(&path, &key).expect("on-disk v1 → v9 column migration");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    assert!(
+        column_exists(&db, "clipboard_items", "thumb"),
+        "v9 migration must add thumb column on-disk"
+    );
+
+    let thumb: Option<Vec<u8>> = db
+        .conn()
+        .query_row(
+            "SELECT thumb FROM clipboard_items WHERE id = 't1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(
+        thumb.is_none(),
+        "pre-v9 on-disk rows must land on thumb = NULL after migration"
+    );
+}
+
+/// On-disk: v1 plaintext → encrypted → migration adds deleted column (v10).
+///
+/// Legacy rows must land on `deleted = 0` (the DEFAULT in V10_ALTER).
+#[test]
+fn on_disk_v1_to_current_adds_v10_deleted_column() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v1-v10.db");
+    stage_v1_plaintext(&path);
+
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, content, content_nonce, \
+              is_sensitive, is_synced, lamport_ts, wall_time) \
+             VALUES ('d1', 'id1', 'text', X'AA', X'BB', 0, 0, 1, 1000)",
+            [],
+        )
+        .unwrap();
+    }
+
+    let key = [0x13u8; 32];
+    let db = Database::open(&path, &key).expect("on-disk v1 → v10 column migration");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    assert!(
+        column_exists(&db, "clipboard_items", "deleted"),
+        "v10 migration must add deleted column on-disk"
+    );
+
+    let deleted: i64 = db
+        .conn()
+        .query_row(
+            "SELECT deleted FROM clipboard_items WHERE id = 'd1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        deleted, 0,
+        "pre-v10 on-disk rows must backfill deleted = 0 after migration"
+    );
+}
+
+/// On-disk: v1 plaintext → encrypted → migration creates revoked_devices table (v12).
+///
+/// The table must be present and functional after the full on-disk migration
+/// path, regardless of whether `ensure_revoked_devices_table` is called.
+#[test]
+fn on_disk_v1_to_current_creates_v12_revoked_devices_table() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v1-v12.db");
+    stage_v1_plaintext(&path);
+
+    let key = [0x14u8; 32];
+    let db = Database::open(&path, &key).expect("on-disk v1 → v12 table migration");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    let table_count: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master \
+             WHERE type='table' AND name='revoked_devices'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        table_count, 1,
+        "revoked_devices table must exist on on-disk DB after v1→current migration (v12 step)"
+    );
+
+    // Table must be functional — insert a revocation row.
+    db.conn()
+        .execute(
+            "INSERT INTO revoked_devices (fingerprint, name, revoked_at) \
+             VALUES ('de:ad:be:ef', 'OldDevice', 1700000000)",
+            [],
+        )
+        .unwrap();
+
+    let name: String = db
+        .conn()
+        .query_row(
+            "SELECT name FROM revoked_devices WHERE fingerprint = 'de:ad:be:ef'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(name, "OldDevice");
+}
+
+/// On-disk: v1 plaintext with a stale FTS row for a sensitive item is purged
+/// by the v13 migration (`V13_PURGE_SENSITIVE_FTS`).
+///
+/// The pre-fix bug: `insert_item_with_fts` did not guard against
+/// `is_sensitive = 1`, so existing databases may carry plaintext secrets in
+/// `clipboard_fts`. This test exercises the on-disk migration path end-to-end:
+///   1. Stage a v1 plaintext DB with one sensitive + one normal item, both
+///      with FTS rows (simulating the pre-fix bug).
+///   2. Open via `Database::open()` (auto-encrypts + migrates to v13).
+///   3. Assert the sensitive FTS row is gone; the normal FTS row survives.
+#[test]
+fn on_disk_v1_to_current_v13_purges_sensitive_fts_rows() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("v1-v13.db");
+    stage_v1_plaintext(&path);
+
+    // Insert one sensitive and one normal item, plus stale FTS rows for both
+    // (simulating the pre-fix state where insert_item_with_fts wrote FTS rows
+    // unconditionally for all items regardless of is_sensitive).
+    {
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, content, content_nonce, \
+              is_sensitive, is_synced, lamport_ts, wall_time) \
+             VALUES ('s1', 'is1', 'text', X'AA', X'BB', 1, 0, 1, 1000)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, content, content_nonce, \
+              is_sensitive, is_synced, lamport_ts, wall_time) \
+             VALUES ('n1', 'in1', 'text', X'CC', X'DD', 0, 0, 2, 2000)",
+            [],
+        )
+        .unwrap();
+        // Stale FTS rows (pre-fix bug).
+        conn.execute_batch(
+            "INSERT INTO clipboard_fts(id, content_text) VALUES ('s1', 'my secret password');\n\
+             INSERT INTO clipboard_fts(id, content_text) VALUES ('n1', 'ordinary clipboard text');",
+        )
+        .unwrap();
+    }
+
+    let key = [0x15u8; 32];
+    let db = Database::open(&path, &key).expect("on-disk v1 → v13 migration");
+    assert_eq!(user_version(&db), CURRENT_SCHEMA_VERSION);
+
+    // Sensitive FTS row must be gone.
+    let secret_fts: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM clipboard_fts WHERE id = 's1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        secret_fts, 0,
+        "on-disk v13 migration must purge the FTS row for the sensitive item (CopyPaste-ghns)"
+    );
+
+    // Normal FTS row must survive.
+    let normal_fts: i64 = db
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM clipboard_fts WHERE id = 'n1'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        normal_fts, 1,
+        "on-disk v13 migration must preserve the FTS row for the non-sensitive item"
+    );
+}
+
+/// Vacuum preserves FTS5 index integrity (CopyPaste-ghns).
+///
+/// `VACUUM` rebuilds the database file in-place. For FTS5 virtual tables this
+/// means the shadow tables (content, data, idx, docsize, config) are rebuilt
+/// too. A correct VACUUM leaves the FTS index fully queryable: `fts5(content)`
+/// match queries must return the same rows after VACUUM as before.
+///
+/// This test pins that contract for the `clipboard_fts` FTS5 table:
+///   1. Open a fresh encrypted DB.
+///   2. Insert a row with a non-sensitive content string via `upsert_fts`.
+///   3. Confirm the row is searchable before VACUUM.
+///   4. Run `PRAGMA incremental_vacuum` (bounded reclaim) and a full `VACUUM`.
+///   5. Confirm the row is still searchable after both vacuum operations.
+#[test]
+fn vacuum_preserves_fts5_index() {
+    use copypaste_core::storage::items::{search_items, upsert_fts};
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("vacuum-fts.db");
+    let key = [0x20u8; 32];
+    let db = Database::open(&path, &key).expect("fresh DB for vacuum FTS5 test");
+
+    // Insert a non-sensitive item via direct SQL (skip insert_item to avoid
+    // depending on the full item plumbing; this is a schema/FTS invariant test).
+    db.conn()
+        .execute(
+            "INSERT INTO clipboard_items \
+             (id, item_id, content_type, lamport_ts, wall_time, origin_device_id, \
+              key_version, pinned, is_sensitive) \
+             VALUES ('vac-1', 'i-vac-1', 'text', 1, 1000, '', 2, 0, 0)",
+            [],
+        )
+        .unwrap();
+
+    // Index the content via upsert_fts.
+    upsert_fts(&db, "vac-1", "unique vacuum test phrase").expect("upsert_fts before vacuum");
+
+    // Confirm searchable before vacuum.
+    let pre: Vec<_> = search_items(&db, "vacuum", 10).expect("search before vacuum");
+    assert!(
+        !pre.is_empty(),
+        "FTS5 must return the row for 'vacuum' before any VACUUM operation"
+    );
+
+    // Run incremental_vacuum (bounded page reclaim) — must not corrupt FTS5.
+    db.conn()
+        .execute_batch("PRAGMA incremental_vacuum(10);")
+        .expect("incremental_vacuum must succeed");
+
+    let mid: Vec<_> = search_items(&db, "vacuum", 10).expect("search after incremental_vacuum");
+    assert!(
+        !mid.is_empty(),
+        "FTS5 must remain queryable after PRAGMA incremental_vacuum"
+    );
+
+    // Run a full VACUUM — must not corrupt FTS5.
+    db.conn()
+        .execute_batch("VACUUM;")
+        .expect("full VACUUM must succeed");
+
+    let post: Vec<_> = search_items(&db, "vacuum", 10).expect("search after full VACUUM");
+    assert!(
+        !post.is_empty(),
+        "FTS5 must remain queryable after full VACUUM — \
+         shadow tables must survive the rebuild intact (CopyPaste-ghns)"
+    );
 }
