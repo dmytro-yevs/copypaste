@@ -56,9 +56,26 @@ type OwnDeviceState =
 // SAS pairing — discovery-initiated (LAN) pairing modal + discovered list
 // ---------------------------------------------------------------------------
 
-/** How often to poll `pair_get_sas` while the modal is open. */
+/**
+ * How often to poll `pair_get_sas` while the SAS pairing modal is open.
+ * The daemon's SAS state machine transitions quickly (SAS digits are ready
+ * within one round-trip), so 700 ms gives a responsive feel without hammering
+ * the IPC socket.
+ *
+ * Note: if corresponding cadence constants exist in the daemon (copypaste-daemon)
+ * or copypaste-p2p crates, keep them in sync manually — there is currently no
+ * single shared source of truth for poll intervals across the language boundary.
+ * See CopyPaste-x09o for the follow-up tracking item.
+ */
 const SAS_POLL_MS = 700;
-/** How often to refresh the discovered-devices list while the view is open. */
+/**
+ * How often to refresh the discovered-devices list while the Devices view is open.
+ * 3 s is a reasonable balance: fast enough to show a newly-announced peer within
+ * a few seconds of it appearing on the LAN, slow enough to avoid busy-looping.
+ *
+ * Note: mDNS-SD announcement cadence is controlled in copypaste-p2p; if that
+ * cadence changes, adjust this constant proportionally so the list stays current.
+ */
 const DISCOVERED_POLL_MS = 3000;
 
 /**

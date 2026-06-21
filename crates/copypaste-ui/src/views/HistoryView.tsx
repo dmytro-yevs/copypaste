@@ -1249,11 +1249,21 @@ function DetailsModal({
           )}
         </div>
 
-        {/* Footer: metadata */}
+        {/* Footer: metadata.
+            For file entries, Type and Copied are already in the table body — omit
+            them here to avoid duplication. For image/text entries the footer is
+            the only metadata row, so show content_type + source app + timestamp. */}
         <div className="shrink-0 border-t border-ide-border px-4 py-2 text-[11px] text-ide-faint flex items-center gap-3">
-          <span>{entry.content_type}</span>
-          {entry.app_bundle_id && !isFile && <span>{entry.app_bundle_id}</span>}
-          <span className="ml-auto">{new Date(entry.wall_time).toLocaleString()}</span>
+          {!isFile && <span>{entry.content_type}</span>}
+          {entry.app_bundle_id && !isFile && (
+            // Show the human-readable app label; raw bundle ID is available via title tooltip.
+            <span title={entry.app_bundle_id}>
+              {sourceAppLabel(entry.app_bundle_id) || entry.app_bundle_id}
+            </span>
+          )}
+          {!isFile && (
+            <span className="ml-auto">{new Date(entry.wall_time).toLocaleString()}</span>
+          )}
         </div>
       </div>
     </div>

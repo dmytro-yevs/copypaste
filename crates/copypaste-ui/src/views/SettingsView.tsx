@@ -1791,9 +1791,11 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
+          {/* CMP-023: paste_as_plain_text is a macOS capture-path concept.
+              Android has no parity yet (no analogous platform hook). */}
           <SettingsRow label="Paste as plain text">
             <div className="flex items-center gap-1.5">
-              <InfoPopover text="Strip rich formatting (RTF/HTML) when pasting — writes plain text only." />
+              <InfoPopover text="Strip rich formatting (RTF/HTML) when pasting — writes plain text only. macOS only; no Android parity." />
               <Toggle
                 checked={pasteAsPlainText}
                 onChange={(v) => {

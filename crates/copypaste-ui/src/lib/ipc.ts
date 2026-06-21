@@ -310,16 +310,12 @@ export interface AppSettings {
    * regardless of their individual settings. When true (default), individual
    * transport switches apply as normal.
    *
-   * ⚠️ DAEMON-SIDE STUB: This field is accepted by the UI and sent via
-   * set_config, but the daemon's AppConfig / copypaste-ipc crate does NOT yet
-   * have a `sync_enabled` field. The daemon will silently ignore this key until
-   * `AppConfig` in `crates/copypaste-core/src/config/mod.rs` (and the
-   * corresponding `copypaste-ipc` IPC types) add `sync_enabled: bool` (default
-   * true). Until then the toggle is persisted in set_config payloads but has no
-   * runtime effect on the daemon. See bd issue CopyPaste-j9xj for the follow-up.
+   * Implemented end-to-end: `AppConfig::sync_enabled` exists in
+   * `crates/copypaste-core/src/config/mod.rs` (default `true`); the daemon
+   * gates P2P, relay, and Supabase transports on this flag at startup and on
+   * hot-reload. Contract tests live in `crates/copypaste-daemon/src/daemon.rs`.
    *
-   * `null` / absent = preserve stored value. Maps to `AppConfig::sync_enabled`
-   * once the daemon side is implemented.
+   * `null` / absent = preserve stored value. Maps to `AppConfig::sync_enabled`.
    */
   sync_enabled?: boolean | null;
   p2p_enabled: boolean;
