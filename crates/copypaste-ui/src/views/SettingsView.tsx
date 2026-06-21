@@ -29,6 +29,8 @@ import { SKIN_IDS } from "../lib/skins";
 import { SectionHeader } from "../components/SectionHeader";
 import { SettingsRow } from "../components/SettingsRow";
 import { Toggle } from "../components/Toggle";
+import { Panel } from "../components/Panel";
+import { SliderRow } from "../components/SliderRow";
 // i2sr (PG-40): shared hybrid last-sync formatter (relative ≤24 h, absolute beyond).
 import { formatSyncTime } from "../lib/time";
 // Step arrays (moved from StepSlider.tsx — StepSlider component deleted in v0.5.3,
@@ -94,27 +96,8 @@ const MAX_ITEMS_LABELS = ["100","250","500","1 000","2 500","5 000","10 000","Un
 const DEFAULT_MAX_ITEMS = 1000; // default UI display window
 
 // ---------------------------------------------------------------------------
-// Shared layout primitives
+// Shared layout primitives (Panel imported from ../components/Panel)
 // ---------------------------------------------------------------------------
-
-function Panel({ children }: { children: React.ReactNode }) {
-  // HW-M3: overflow-hidden was clipping the absolutely-positioned InfoPopover (z-50).
-  // The outer div keeps the border/shadow/rounding; an inner div clips the row
-  // bottom-borders to the panel's rounded corners without clipping the popover,
-  // which floats above the outer div via z-50.
-  return (
-    // surface-card = frosted translucent glass: reads --skin-* vars for material,
-    // blur, fill, shadow (--skin-shadow-card) so panels adapt to the active skin.
-    // Classic: e2 shadow + glass; Quiet: no shadow + flat; Vapor: no card shadow + sheen.
-    // shadow-ide-sm removed — surface-card drives the shadow via --skin-shadow-card
-    // so settings panels are skin-aware without a hardcoded override.
-    <div className="surface-card" style={{ borderRadius: "var(--skin-r-card)" }}>
-      <div className="overflow-hidden" style={{ borderRadius: "var(--skin-r-card)" }}>
-        {children}
-      </div>
-    </div>
-  );
-}
 
 function StatusRow({ label, ok }: { label: string; ok: boolean }) {
   return (
@@ -123,86 +106,6 @@ function StatusRow({ label, ok }: { label: string; ok: boolean }) {
       {/* §6.6: replaced ✓/— text chars with Lucide icons (size 14, semantic tint) */}
       <span className={ok ? "text-ide-success" : "text-ide-faint"}>
         {ok ? <Check size={14} /> : <span className="text-[13px]">—</span>}
-      </span>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// W4-2: Slider row — consistent grid: [slider (flex)] [fixed-width value]
-// Extended in v0.5.3 with optional onRelease to save only on mouse-up/touch-end
-// (prevents spamming IPC on every drag tick in storage sliders).
-// ---------------------------------------------------------------------------
-
-function SliderRow({
-  min,
-  max,
-  step,
-  value,
-  onChange,
-  onRelease,
-  formatValue,
-  disabled,
-  tickStepCount,
-}: {
-  min: number;
-  max: number;
-  step: number;
-  value: number;
-  onChange: (v: number) => void;
-  /** Called on mouse-up / touch-end / key-up — saves to daemon without spamming. */
-  onRelease?: (v: number) => void;
-  /** Format the numeric value for the right-hand value label. */
-  formatValue: (v: number) => string;
-  disabled?: boolean;
-  /** When provided, renders a <datalist> with this many tick options so browsers show step ticks. */
-  tickStepCount?: number;
-}) {
-  // HW-M4: compute fill % for the accent-colored track. Since appearance:none
-  // disables native accent-color, we drive the gradient via a CSS custom prop.
-  const pct = max === min ? 0 : ((value - min) / (max - min)) * 100;
-
-  // Generate a stable id for the datalist when tick marks are requested.
-  // We use the min/max/step combo as a cheap content-stable key.
-  const datalistId = tickStepCount !== undefined
-    ? `slider-ticks-${min}-${max}-${step}`
-    : undefined;
-
-  // Build tick option values for the datalist — one per step index.
-  const tickOptions = datalistId !== undefined
-    ? Array.from({ length: tickStepCount! }, (_, i) =>
-        min + i * ((max - min) / Math.max(tickStepCount! - 1, 1))
-      )
-    : [];
-
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        type="range"
-        min={min}
-        max={max}
-        step={step}
-        value={value}
-        disabled={disabled}
-        list={datalistId}
-        onChange={(e) => onChange(Number(e.target.value))}
-        onMouseUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
-        onTouchEnd={(e) => onRelease?.(Number((e.currentTarget as HTMLInputElement).value))}
-        onKeyUp={(e) => onRelease?.(Number((e.target as HTMLInputElement).value))}
-        className="w-28 disabled:opacity-40 disabled:cursor-not-allowed"
-        style={{ ["--_fill" as string]: `${pct}%` }}
-      />
-      {/* §6.5: datalist provides step tick marks rendered by the browser */}
-      {datalistId !== undefined && (
-        <datalist id={datalistId}>
-          {tickOptions.map((v) => (
-            <option key={v} value={v} />
-          ))}
-        </datalist>
-      )}
-      {/* §6.4: w-[80px] (was w-[52px]) so longer labels like "Unlimited" fit */}
-      <span className="w-[80px] text-right text-[13px] text-ide-text">
-        {formatValue(value)}
       </span>
     </div>
   );
@@ -2516,6 +2419,7 @@ export function SettingsView() {
     // onRelease fires only on mouse-up/touch-end to avoid hammering the IPC on drag.
     function LimitSliderRow<T extends number>({
       label,
+      description,
       field,
       steps,
       labels,
@@ -2524,6 +2428,7 @@ export function SettingsView() {
       onRelease,
     }: {
       label: string;
+      description?: string;
       field: string;
       steps: readonly T[];
       labels: readonly string[];
@@ -2535,7 +2440,7 @@ export function SettingsView() {
       const idx = steps.indexOf(value);
       const safeIdx = idx < 0 ? 0 : idx;
       return (
-        <SettingsRow title={label}>
+        <SettingsRow title={label} description={description}>
           <div className="flex items-center gap-2">
             <SliderRow
               min={0}
@@ -2628,8 +2533,13 @@ export function SettingsView() {
               void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: v }, () => setSensitiveTtlSecs(prev));
             }}
           />
-          {/* bdac.68: removed "(1–100)" from label — range shown by the slider control itself */}
-          <SettingsRow title="Image quality">
+          {/* ctmv: image_quality is persisted to daemon config via set_config on release.
+              The capture encode path reads this value: quality < 100 → JPEG, 100 → PNG lossless.
+              bdac.68: removed "(1–100)" from label — range shown by the slider control itself */}
+          <SettingsRow
+            title="Image quality"
+            description="Saved to daemon. Values below 100 use JPEG encoding (smaller files); 100 uses lossless PNG."
+          >
             <div className="flex items-center gap-2">
               <SliderRow
                 min={1}
@@ -2648,11 +2558,13 @@ export function SettingsView() {
               <LimitsMsg field="image_quality" />
             </div>
           </SettingsRow>
-          {/* §6.3: History display limit — UI pref only (no daemon IPC contract).
-              Sentinel 100000 → "Unlimited". No onRelease IPC call — updates UIPrefs store only.
-              Daemon storage is capped by "Local storage limit" (byte quota), not item count. */}
+          {/* bdac.88: History display limit — UI-only display filter (localStorage / UIPrefs).
+              No daemon IPC: the daemon stores items until the byte quota is reached.
+              This slider filters how many items the UI renders — it does NOT delete items.
+              Sentinel 100000 → "Unlimited". */}
           <LimitSliderRow
             label="History display limit"
+            description="Display filter only — does not delete stored items. Daemon stores until byte quota."
             field="max_items"
             steps={MAX_ITEMS_STEPS as unknown as readonly number[]}
             labels={MAX_ITEMS_LABELS}
