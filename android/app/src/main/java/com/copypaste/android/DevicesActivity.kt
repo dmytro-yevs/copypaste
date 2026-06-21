@@ -7,7 +7,6 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.WindowManager
 import java.text.DateFormat
 import java.util.Date
 import androidx.activity.ComponentActivity
@@ -74,7 +73,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.IntOffset
+
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -420,14 +419,9 @@ class DevicesActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // CopyPaste-92qs: FLAG_SECURE. This window shows the own-device pairing QR
-        // (PAKE secret material — blurred at rest but tap-to-reveal makes it fully
-        // screenshot-capturable) and the full own fingerprint. Block screenshots and
-        // keep contents out of the recents thumbnail. Set before setContent.
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
+        // CopyPasteTheme applies FLAG_SECURE centrally when allowScreenshots=false (the default).
+        applyScreenshotPolicy(Settings(this))
         enableEdgeToEdge()
         val autoOpenSas = intent?.getBooleanExtra(EXTRA_AUTO_OPEN_SAS, false) ?: false
         setContent {
@@ -1283,8 +1277,6 @@ private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap =
 @Composable
 private fun OwnQrSection(settings: Settings) {
     val c = LocalIdeColors.current
-    val tokens = LocalLiquidTokens.current
-    val reducedMotion = rememberReducedMotion()
     val scope = rememberCoroutineScope()
     var qr by remember { mutableStateOf<PairingQrResult?>(null) }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -1299,34 +1291,7 @@ private fun OwnQrSection(settings: Settings) {
 
     val expired = qr != null && remainingSeconds <= 0
 
-    // Scan line animation — always created (must not be conditional in Compose).
-    // Active only when qr is revealed (!qrBlurred) and reduced-motion is off.
-    val scanDurationMs = (2500 * tokens.motionScale).toInt()
-    val scanTransition = rememberInfiniteTransition(label = "qrScan")
-    val scanLineProgressRaw by scanTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = scanDurationMs, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "qrScanY",
-    )
-
-    // Progress bar pulse animation — always created.
-    val progressPulseTransition = rememberInfiniteTransition(label = "qrProgress")
-    val progressAlphaRaw by progressPulseTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = (2600 * tokens.motionScale).toInt(),
-                easing = FastOutSlowInEasing,
-            ),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "progressAlpha",
-    )
+    // Scan line and progress-bar pulse removed — QR is static; progress bar is static.
 
     // Generate (or regenerate) the QR.
     //
@@ -1415,20 +1380,7 @@ private fun OwnQrSection(settings: Settings) {
                         )
                     }
                     bmp != null && !expired -> {
-                        // Scan line — use top-level animated value; gate visibility here.
-                        val scanActive = !reducedMotion && !qrBlurred
-                        val scanLineProgress = if (scanActive) scanLineProgressRaw else 0f
-                        // Alpha envelope: fade in 0→12%, hold, fade out 88→100%
-                        // (mirrors qrScan: 0%,100% opacity=0; 12%,88% opacity=.9).
-                        val scanLineAlpha: Float = if (scanActive) {
-                            val p = scanLineProgressRaw
-                            when {
-                                p < 0.12f -> p / 0.12f * 0.9f
-                                p > 0.88f -> (1f - p) / 0.12f * 0.9f
-                                else -> 0.9f
-                            }
-                        } else 0f
-
+                        // Static QR — scan line removed; QR is calm and professional.
                         Box(
                             modifier = Modifier
                                 .size(DEVICES_QR_SLOT_DP.dp)
@@ -1449,7 +1401,6 @@ private fun OwnQrSection(settings: Settings) {
                         ) {
                             // CopyPaste-sry7: ioco pattern — pad → clip → background so
                             // glass shows through at the slot corners (radius-card 10dp).
-                            // Mirrors PairActivity's pad→clip→bg at lines 1023-1026.
                             Box(
                                 modifier = Modifier
                                     .size(DEVICES_QR_SLOT_DP.dp)
@@ -1463,37 +1414,6 @@ private fun OwnQrSection(settings: Settings) {
                                     contentDescription = "Your pairing QR code — tap to reveal",
                                     modifier = Modifier.size(DEVICES_QR_IMAGE_DP.dp),
                                 )
-                            }
-                            // Scan line overlay — 2 dp tall gradient beam across the QR.
-                            // Drawn OVER the white plate so it appears to scan the code.
-                            if (scanLineAlpha > 0f) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(DEVICES_QR_SLOT_DP.dp)
-                                        .clip(RoundedCornerShape(10.dp))
-                                        .padding(horizontal = DEVICES_QR_PLATE_PADDING_DP.dp)
-                                        .offset {
-                                            IntOffset(
-                                                x = 0,
-                                                y = (scanLineProgress * (DEVICES_QR_IMAGE_DP - 4) * density).toInt(),
-                                            )
-                                        },
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(2.dp)
-                                            .background(
-                                                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
-                                                    colors = listOf(
-                                                        androidx.compose.ui.graphics.Color.Transparent,
-                                                        c.accent.copy(alpha = scanLineAlpha),
-                                                        androidx.compose.ui.graphics.Color.Transparent,
-                                                    ),
-                                                ),
-                                            ),
-                                    )
-                                }
                             }
                             // Reveal overlay (only while blurred).
                             if (qrBlurred) {
@@ -1529,14 +1449,8 @@ private fun OwnQrSection(settings: Settings) {
                     style = MaterialTheme.typography.bodySmall,
                     color = if (urgent) c.warning else c.faint,
                 )
-                // §10 QR countdown drain bar: styleguide-conformant thin track
-                // (2dp, corners 999dp) replacing the Material LinearProgressIndicator.
-                // Track is mute@35% (calm hairline); fill is ACCENT normally,
-                // switching to WARNING when ≤20 s remain. Countdown logic preserved.
-                // Styleguide `progressPulse`: fill brightness pulse — uses top-level
-                // progressAlphaRaw (gated on reduced-motion).
-                val progressAlpha = if (!reducedMotion) progressAlphaRaw else 1f
-
+                // §10 QR countdown drain bar: 2dp track, mute@35%; fill drains over TTL.
+                // Static fill (no pulse) — progress-bar pulse removed for calm UI.
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1548,7 +1462,6 @@ private fun OwnQrSection(settings: Settings) {
                         modifier = Modifier
                             .fillMaxWidth(qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS))
                             .height(2.dp)
-                            .graphicsLayer { alpha = progressAlpha }
                             .background(if (urgent) c.warning else c.accent),
                     )
                 }
@@ -1810,89 +1723,11 @@ private fun NoPeerCard(onPair: () -> Unit) {
 @Composable
 private fun DiscoveryRingsIcon(size: Dp = 58.dp) {
     val c = LocalIdeColors.current
-    val tokens = LocalLiquidTokens.current
-    val reducedMotion = rememberReducedMotion()
-
-    val ringDurationMs = (2700 * tokens.motionScale).toInt()
-    val ringDelayMs = (1100 * tokens.motionScale).toInt()
-
-    // Both InfiniteTransitions must be created unconditionally (Compose rules).
-    // Animated values are gated via graphicsLayer alpha=0 when reduced-motion is on.
-    val ringATransition = rememberInfiniteTransition(label = "discoveryRingA")
-    val ringBTransition = rememberInfiniteTransition(label = "discoveryRingB")
-
-    // Ring A
-    val ringAScale by ringATransition.animateFloat(
-        initialValue = 0.78f,
-        targetValue = 1.35f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = ringDurationMs, easing = EaseOutExpo),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "ringAScale",
-    )
-    val ringAAlpha by ringATransition.animateFloat(
-        initialValue = 0.5f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = ringDurationMs, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "ringAAlpha",
-    )
-
-    // Ring B — staggered by ringDelayMs via initialStartOffset
-    val ringBScale by ringBTransition.animateFloat(
-        initialValue = 0.78f,
-        targetValue = 1.35f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = ringDurationMs, easing = EaseOutExpo),
-            repeatMode = RepeatMode.Restart,
-            initialStartOffset = androidx.compose.animation.core.StartOffset(ringDelayMs),
-        ),
-        label = "ringBScale",
-    )
-    val ringBAlpha by ringBTransition.animateFloat(
-        initialValue = 0.5f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = ringDurationMs, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart,
-            initialStartOffset = androidx.compose.animation.core.StartOffset(ringDelayMs),
-        ),
-        label = "ringBAlpha",
-    )
-
+    // Discovery rings removed — static icon is calmer (no idle loop animation).
     Box(
         modifier = Modifier.size(size),
         contentAlignment = Alignment.Center,
     ) {
-        // Ring A — expanding rounded square halo (hidden when reduced-motion is on)
-        Box(
-            modifier = Modifier
-                .size(size)
-                .graphicsLayer {
-                    alpha = if (reducedMotion) 0f else ringAAlpha
-                    scaleX = ringAScale
-                    scaleY = ringAScale
-                }
-                .clip(RoundedCornerShape(size / 3))
-                .background(c.accent.copy(alpha = 0.35f)),
-        )
-
-        // Ring B — same spec, delayed
-        Box(
-            modifier = Modifier
-                .size(size)
-                .graphicsLayer {
-                    alpha = if (reducedMotion) 0f else ringBAlpha
-                    scaleX = ringBScale
-                    scaleY = ringBScale
-                }
-                .clip(RoundedCornerShape(size / 3))
-                .background(c.accent.copy(alpha = 0.35f)),
-        )
-
         // Icon surface — glass-tinted rounded square with network symbol (text).
         Box(
             modifier = Modifier
@@ -1931,8 +1766,6 @@ internal fun OwnDeviceRow(
     // public-IP source on-device, so that row is omitted (matches the bootstrap
     // path, which sends public_ip = None for this device).
     val c = LocalIdeColors.current
-    val tokens = LocalLiquidTokens.current
-    val reducedMotion = rememberReducedMotion()
     val model = Build.MODEL.orEmpty().ifBlank { "Android" }
     val osVersion = "Android " + Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
@@ -1943,21 +1776,7 @@ internal fun OwnDeviceRow(
     // change because it was only evaluated once at first composition.
     val localIp = remember(nowMs / 5_000L) { lanIpv4Address() }
 
-    // "This Device" badge float — same 3.4 s ease-in-out loop as TransportChipLabel.
-    // Always create the InfiniteTransition (Compose composable call cannot be conditional);
-    // the animated value is masked to 0 when reduced-motion is on.
-    val floatDurationMs = (3400 * tokens.motionScale).toInt()
-    val badgeInfiniteTransition = rememberInfiniteTransition(label = "thisDeviceBadge")
-    val badgeFloatRaw by badgeInfiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = -1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = floatDurationMs, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "thisDeviceBadgeY",
-    )
-    val badgeFloatPx = if (!reducedMotion) badgeFloatRaw else 0f
+    // Badge float removed — static badge is calmer and more professional.
 
     // Row content only — the enclosing CopyPasteCard provides the glass surface
     // (PARITY-SPEC §8 grouped inset list).
@@ -1982,7 +1801,7 @@ internal fun OwnDeviceRow(
                 color = c.success,
                 style = MaterialTheme.typography.labelMedium,
             )
-            // §7 "This Device" accent badge — subtle float animation.
+            // §7 "This Device" accent badge — static (float animation removed).
             Text(
                 text = "This Device",
                 color = c.accent,
@@ -1990,7 +1809,6 @@ internal fun OwnDeviceRow(
                 letterSpacing = 0.4.sp,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier
-                    .graphicsLayer { translationY = badgeFloatPx * density }
                     .background(c.accentDim, RoundedCornerShape(4.dp))
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
@@ -2666,31 +2484,13 @@ private fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
 @Composable
 private fun TransportChipLabel(chip: TransportChip) {
     val c = LocalIdeColors.current
-    val tokens = LocalLiquidTokens.current
-    val reducedMotion = rememberReducedMotion()
     val (text, fg, bg) = when (chip) {
         TransportChip.P2P -> Triple("P2P", c.info, c.infoDim)
         TransportChip.Cloud -> Triple("Cloud", c.accent, c.accentDim)
     }
 
-    // Badge float animation — 3.4 s × motionScale, gated on reduced-motion.
-    // InfiniteTransition always created (Compose composable call cannot be conditional);
-    // value masked to 0 when reduced-motion is active.
-    val floatDurationMs = (3400 * tokens.motionScale).toInt()
-    val chipInfiniteTransition = rememberInfiniteTransition(label = "badgeFloat")
-    val floatOffsetRaw by chipInfiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = -1f,   // –1 dp; converted via graphicsLayer translationY
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = floatDurationMs, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "badgeFloatY",
-    )
-    val floatOffsetPx = if (!reducedMotion) floatOffsetRaw else 0f
-
-    // CopyPaste-sry7: RadiusChip (7dp) pill + 0.5dp hairline tinted border —
-    // matches the 483o PairActivity transport chip fix and web rounded-full style.
+    // Badge float animation removed — static chip is calmer.
+    // CopyPaste-sry7: RadiusChip (7dp) pill + 0.5dp hairline tinted border.
     Text(
         text = text,
         color = fg,
@@ -2698,7 +2498,6 @@ private fun TransportChipLabel(chip: TransportChip) {
         letterSpacing = 0.6.sp,
         style = MaterialTheme.typography.labelSmall,
         modifier = Modifier
-            .graphicsLayer { translationY = floatOffsetPx * density }
             .background(bg, RadiusChip)
             .border(0.5.dp, fg.copy(alpha = 0.35f), RadiusChip)
             .padding(horizontal = 6.dp, vertical = 2.dp),

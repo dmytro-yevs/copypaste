@@ -53,7 +53,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -77,27 +76,12 @@ import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.LocalSkin
-import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.SkinBackground
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.paletteAurora
-import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.skinTokens
 import com.copypaste.android.ui.theme.tintBlobCanvas
@@ -935,38 +919,13 @@ fun PairScreen(
     }
 
     val c = LocalIdeColors.current
-    val lt = LocalLiquidTokens.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-    val reduced = rememberReducedMotion()
     // A-C5: skin token gate — read once per composition, same pattern as DevicesScreen/SettingsScreen.
     val tok = skinTokens(LocalSkin.current)
 
-    // Entrance alpha for the QR card — fades in on first composition.
-    var pairEntered by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { pairEntered = true }
-    val cardEntranceAlpha by animateFloatAsState(
-        targetValue = if (pairEntered) 1f else 0f,
-        animationSpec = tween(if (reduced) 0 else motionDuration(Motion.Slow)),
-        label = "pairCardAlpha",
-    )
-
-    // CopyPaste-wfba: progress-bar pulse animation — always created at composable
-    // scope (Compose rule: no conditional remember). Gated on !reduced at use site.
-    // Mirrors the same animation in DevicesActivity OwnQrSection §10.
-    val progressPulseTransition = rememberInfiniteTransition(label = "pairQrProgress")
-    val progressAlphaRaw by progressPulseTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = (2600 * lt.motionScale).toInt(),
-                easing = FastOutSlowInEasing,
-            ),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "pairProgressAlpha",
-    )
+    // CopyPaste-wfba: progress-bar pulse removed — static progress bar is calmer.
+    // Entrance alpha fade removed — card appears instantly (no idle animation).
 
     Box(Modifier.fillMaxSize()) {
     // 9g57: aurora canvas backdrop — mirrors DevicesScreen pattern.
@@ -1023,7 +982,7 @@ fun PairScreen(
             }
 
             if (scannedPeer == null) {
-            CopyPasteCard(modifier = Modifier.alpha(cardEntranceAlpha)) {
+            CopyPasteCard {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1093,69 +1052,7 @@ fun PairScreen(
                                                         Modifier
                                                 )
                                         )
-                                        // Animated scan line — drawn over the QR when revealed and
-                                        // reduced motion is OFF. Sweeps top→bottom in 2.5 s on a
-                                        // FastOutSlowIn curve, matching the web qrScan keyframe.
-                                        // The line is a 2dp accent gradient with a glow shadow,
-                                        // zeroed (invisible) at both ends so it fades gracefully.
-                                        if (qrRevealed && !reduced) {
-                                            val scanTransition = rememberInfiniteTransition(label = "qrScan")
-                                            val scanProgress by scanTransition.animateFloat(
-                                                initialValue = 0f,
-                                                targetValue = 1f,
-                                                animationSpec = infiniteRepeatable(
-                                                    animation = tween(
-                                                        // 2500ms matches web qrScan 2.5s.
-                                                        durationMillis = (2500 * lt.motionScale).toInt(),
-                                                        easing = FastOutSlowInEasing,
-                                                    ),
-                                                    repeatMode = RepeatMode.Restart,
-                                                ),
-                                                label = "qrScanProgress",
-                                            )
-                                            // Fade the line in from 0 → opaque at 12% → opaque at
-                                            // 88% → back to 0, matching the web opacity keyframes.
-                                            val scanAlpha = when {
-                                                scanProgress < 0.12f -> scanProgress / 0.12f
-                                                scanProgress > 0.88f -> (1f - scanProgress) / 0.12f
-                                                else -> 1f
-                                            } * 0.9f
-
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(QR_IMAGE_SIZE_DP.dp)
-                                                    .drawBehind {
-                                                        // Compute Y position of the scan line.
-                                                        val scanY = size.height * scanProgress
-                                                        // 2dp glow line: accent gradient fades to transparent at edges.
-                                                        drawRect(
-                                                            brush = Brush.horizontalGradient(
-                                                                colors = listOf(
-                                                                    androidx.compose.ui.graphics.Color.Transparent,
-                                                                    c.accent.copy(alpha = scanAlpha),
-                                                                    c.accent.copy(alpha = scanAlpha),
-                                                                    androidx.compose.ui.graphics.Color.Transparent,
-                                                                ),
-                                                            ),
-                                                            topLeft = Offset(0f, scanY - 1.dp.toPx()),
-                                                            size = androidx.compose.ui.geometry.Size(size.width, 2.dp.toPx()),
-                                                        )
-                                                        // Soft glow halo below the line (widens the visible effect).
-                                                        drawRect(
-                                                            brush = Brush.verticalGradient(
-                                                                colors = listOf(
-                                                                    c.accent.copy(alpha = scanAlpha * 0.35f),
-                                                                    androidx.compose.ui.graphics.Color.Transparent,
-                                                                ),
-                                                                startY = scanY,
-                                                                endY = scanY + 18.dp.toPx(),
-                                                            ),
-                                                            topLeft = Offset(0f, scanY),
-                                                            size = androidx.compose.ui.geometry.Size(size.width, 18.dp.toPx()),
-                                                        )
-                                                    },
-                                            )
-                                        }
+                                        // Scan line removed — QR is static after reveal (no idle animation).
                                     }
                                     // 9luz: tap-to-reveal — glass-tinted overlay instead of
                                     // dark 35% scrim. Accent-tinted translucent pill label
@@ -1226,11 +1123,8 @@ fun PairScreen(
                                     // voyf: theme-adaptive warning/accent tokens.
                                     color = if (urgent) c.warning else c.accent,
                                 )
-                                // CopyPaste-wfba: drain bar — matches DevicesActivity OwnQrSection §10.
-                                // 2dp thin track (muted @ 35%); fill drains left-to-right over the
-                                // 120 s TTL. Switches accent → warning at ≤20 s remaining.
-                                // progressAlpha pulse is suppressed when reduced-motion is on.
-                                val progressAlpha = if (!reduced) progressAlphaRaw else 1f
+                                // Drain bar — 2dp thin track draining left-to-right over the TTL.
+                                // Static (no pulse): progress bar pulse removed for calm UI.
                                 Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1242,7 +1136,6 @@ fun PairScreen(
                                         modifier = Modifier
                                             .fillMaxWidth(qrCountdownProgress(remainingSeconds, PAIR_TOKEN_TTL_SECONDS))
                                             .height(2.dp)
-                                            .graphicsLayer { alpha = progressAlpha }
                                             .background(if (urgent) c.warning else c.accent),
                                     )
                                 }

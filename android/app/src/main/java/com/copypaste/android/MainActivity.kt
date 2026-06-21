@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -147,15 +146,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // AB-7: FLAG_SECURE. This window hosts the clipboard history (Clips tab),
-        // which can contain passwords, tokens, and other sensitive copied text.
-        // Block screenshots and keep the contents out of the recents/overview
-        // thumbnail. Set before setContent so the flag covers the whole lifetime
-        // (PairActivity already does the same for its QR screen).
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
+        // CopyPasteTheme applies FLAG_SECURE centrally when allowScreenshots=false (the default).
+        // The old hardcoded setFlags(FLAG_SECURE) is removed so the user's pref is honoured.
+        applyScreenshotPolicy(Settings(this))
         // Edge-to-edge: the bottom NavigationBar and each tab's TopAppBar apply
         // their own system-bar insets so nothing is clipped on notched phones.
         enableEdgeToEdge()

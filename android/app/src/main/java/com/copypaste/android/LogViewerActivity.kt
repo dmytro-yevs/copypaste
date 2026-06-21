@@ -1,7 +1,6 @@
 package com.copypaste.android
 
 import android.os.Bundle
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -81,12 +80,9 @@ import java.io.File
 class LogViewerActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // CopyPaste-92qs (MEDIUM): FLAG_SECURE. Logs can contain device IDs,
-        // fingerprints, and relay URLs. Block screenshots / recents capture.
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
+        // CopyPasteTheme applies FLAG_SECURE centrally when allowScreenshots=false (the default).
+        applyScreenshotPolicy(Settings(this))
         enableEdgeToEdge()
         setContent {
             CopyPasteTheme {

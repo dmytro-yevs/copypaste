@@ -9,7 +9,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
 import android.util.LruCache
-import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
@@ -17,12 +16,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.expandVertically
@@ -231,15 +226,10 @@ class HistoryActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // CopyPaste-92qs: FLAG_SECURE. This window renders the full clipboard history
-        // list AND the long-press full-screen PreviewOverlay (clip plaintext + images).
-        // HistoryActivity is a live, manifest-declared back-stack/deep-link target;
-        // MainActivity's flag does NOT cover it. Block screenshots and keep contents
-        // out of the recents thumbnail. Set before setContent so it covers the lifetime.
-        window.setFlags(
-            WindowManager.LayoutParams.FLAG_SECURE,
-            WindowManager.LayoutParams.FLAG_SECURE,
-        )
+        // CopyPaste-1g00: screenshot protection is now pref-driven (Settings.allowScreenshots).
+        // CopyPasteTheme applies FLAG_SECURE centrally when allowScreenshots=false (the default).
+        // The old hardcoded setFlags(FLAG_SECURE) is removed so the user's pref is honoured.
+        applyScreenshotPolicy(Settings(this))
         enableEdgeToEdge()
 
         // CopyPaste-0qpn: wire the mutation sync hook so pin/unpin/reorder/delete/clear
@@ -1992,32 +1982,7 @@ private fun EmptyHistoryState(padding: PaddingValues) {
     val reducedMotion = rememberReducedMotion()
     val enterDurMs = motionDuration(Motion.Slow)
 
-    // Accent halo: pulsing ring that expands from 0.78→1.35 scale and fades out,
-    // mirrors .empty-icon::before/::after (networkRing animation, 2.7s infinite).
-    val haloAlpha: Float = if (reducedMotion) 0f else {
-        val infiniteTransition = rememberInfiniteTransition(label = "emptyHalo")
-        infiniteTransition.animateFloat(
-            initialValue = 0.5f,
-            targetValue = 0f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 2700, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "haloAlpha",
-        ).value
-    }
-    val haloScale: Float = if (reducedMotion) 1.0f else {
-        val infiniteTransition = rememberInfiniteTransition(label = "emptyHaloScale")
-        infiniteTransition.animateFloat(
-            initialValue = 0.78f,
-            targetValue = 1.35f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 2700, easing = LinearEasing),
-                repeatMode = RepeatMode.Restart,
-            ),
-            label = "haloScale",
-        ).value
-    }
+    // Halo ring removed — idle pulse animation was distracting; static border below.
 
     Box(
         modifier = Modifier
@@ -2051,21 +2016,6 @@ private fun EmptyHistoryState(padding: PaddingValues) {
                         modifier = Modifier.size(58.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        // Pulsing accent halo ring — mirrors .empty-icon::before/::after.
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .scale(haloScale)
-                                .background(
-                                    color = Color.Transparent,
-                                    shape = RoundedCornerShape(20.dp),
-                                )
-                                .border(
-                                    width = 1.dp,
-                                    color = LocalLiquidTokens.current.accent2.copy(alpha = haloAlpha),
-                                    shape = RoundedCornerShape(20.dp),
-                                ),
-                        )
                         // Icon container: accent@15% bg with gradient shimmer border.
                         Box(
                             modifier = Modifier
