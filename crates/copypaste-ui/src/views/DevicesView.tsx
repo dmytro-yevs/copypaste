@@ -737,9 +737,10 @@ function DevicesViewInner({
   incomingPairing?: PairSasStatus | null;
 } = {}) {
   // --- Live peer-presence from the global event-broadcast store ---
-  // Updated ~every 1 s by `App.tsx`'s `startPeerPresencePolling()` loop.
-  // Used as a high-frequency overlay on top of the 10 s `list_peers` poll so
-  // online dots change within ~1 s of a real connect/disconnect.
+  // 5917.34: Updated ~every 5 s (30 s when idle) by `App.tsx`'s
+  // `startPeerPresencePolling()` loop (POLL_INTERVAL_MS = 5_000).
+  // Used as a higher-frequency overlay on top of the 10 s `list_peers` poll so
+  // online dots change within ~5 s of a real connect/disconnect.
   const presenceOnline = usePeerPresence((s) => s.online);
 
   // --- Own device info ---
