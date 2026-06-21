@@ -1117,9 +1117,10 @@ fun DevicesScreen(
             // then discovered (unpaired) LAN peers — ALL inside ONE glass
             // CopyPasteCard, rows separated by a single 1dp hairline divider.
             // Replaces the former stack of individually-elevated Cards.
-            // CopyPaste-9ln4: renamed from "Devices" to "Paired Devices" — avoids
+            // CopyPaste-9ln4: renamed from "Devices" to "Paired devices" — avoids
             // duplicate with the TopBar title and matches the web SectionLabel fix.
-            SectionLabel("Paired Devices")
+            // bdac.48: sentence case to match all other section headers on this screen.
+            SectionLabel("Paired devices")
 
             // Assemble the ordered row list so we know where dividers go (a
             // divider is drawn BEFORE every row except the first).

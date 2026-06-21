@@ -383,7 +383,7 @@
     <string name="error_file_pick_failed">Could not capture file</string>
 
     <!-- Devices screen — OwnQrSection strings (ojsq) -->
-    <string name="devices_section_paired">Paired Devices</string>
+    <string name="devices_section_paired">Paired devices</string>
     <string name="devices_section_your_qr">Your QR code</string>
     <string name="devices_qr_subtitle">Let another device scan this to pair</string>
     <string name="devices_qr_tap_to_reveal">Tap to reveal</string>
