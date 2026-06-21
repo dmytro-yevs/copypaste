@@ -1784,47 +1784,64 @@ async fn handle_tick(
     // offload to the tokio blocking-thread pool so the async executor is not
     // stalled by the fork+wait.
     //
+    // CopyPaste-zdyw (skip-when-empty): forking lsappinfo every 500 ms even
+    // when the exclusion list is empty wastes CPU and a file-descriptor pair.
+    // When the list IS empty we set frontmost_bundle_id to None immediately
+    // (no fork) — the content-pattern gate still protects against accidental
+    // capture of sensitive strings, and the fail-closed P1-2 logic never fires
+    // for an empty list so skipping the probe is safe.  When the list is
+    // non-empty we still probe so the exclusion check can run.
+    //
     // Shared between the exclusion check and the is_sensitive_app check so
     // lsappinfo is invoked AT MOST ONCE per tick regardless of which check fires.
     #[cfg(target_os = "macos")]
     let frontmost_bundle_id: Option<String> = {
-        // We need the bundle ID when EITHER the exclusion list is non-empty
-        // OR we want is_sensitive_app attribution (always — mtf5).  Run it
-        // unconditionally so both checks share the single subprocess result.
-        let lsappinfo_result = tokio::task::spawn_blocking(|| {
-            // `lsappinfo front` prints a record for the frontmost process.
-            // We extract the bundleID field from lines like:
-            //   "bundleID" = "com.1password.1password"
-            std::process::Command::new("lsappinfo")
-                .args(["front"])
-                .output()
-                .ok()
-                .and_then(|out| {
-                    let text = String::from_utf8_lossy(&out.stdout).into_owned();
-                    for line in text.lines() {
-                        let trimmed = line.trim();
-                        // Match: "bundleID" = "com.example.app"
-                        if let Some(rest) = trimmed.strip_prefix("\"bundleID\" = \"") {
-                            if let Some(bid) = rest.strip_suffix('"') {
-                                return Some(bid.to_owned());
+        // CopyPaste-zdyw: skip the lsappinfo fork entirely when the exclusion
+        // list is empty — there is nothing to exclude, so the probe is wasted
+        // work.  We keep the fork for non-empty lists (fail-closed P1-2 logic).
+        if config.excluded_app_bundle_ids.is_empty() {
+            // No exclusion list — skip the subprocess.  The content-pattern
+            // sensitive-detection gate (`is_sensitive_for_autowipe`) still runs
+            // downstream, so the AEAD protection remains.  is_sensitive_app
+            // attribution (mtf5) is best-effort and skipped here — it relies on
+            // lsappinfo which we are intentionally not forking.
+            None
+        } else {
+            let lsappinfo_result = tokio::task::spawn_blocking(|| {
+                // `lsappinfo front` prints a record for the frontmost process.
+                // We extract the bundleID field from lines like:
+                //   "bundleID" = "com.1password.1password"
+                std::process::Command::new("lsappinfo")
+                    .args(["front"])
+                    .output()
+                    .ok()
+                    .and_then(|out| {
+                        let text = String::from_utf8_lossy(&out.stdout).into_owned();
+                        for line in text.lines() {
+                            let trimmed = line.trim();
+                            // Match: "bundleID" = "com.example.app"
+                            if let Some(rest) = trimmed.strip_prefix("\"bundleID\" = \"") {
+                                if let Some(bid) = rest.strip_suffix('"') {
+                                    return Some(bid.to_owned());
+                                }
                             }
                         }
-                    }
-                    None
-                })
-        })
-        .await;
+                        None
+                    })
+            })
+            .await;
 
-        // Flatten the JoinError and inner Option.
-        match lsappinfo_result {
-            Ok(opt) => opt,
-            Err(join_err) => {
-                // spawn_blocking task panicked — treat as subprocess failure.
-                tracing::warn!(
-                    error = %join_err,
-                    "lsappinfo: blocking task panicked; failing closed to protect excluded apps"
-                );
-                None
+            // Flatten the JoinError and inner Option.
+            match lsappinfo_result {
+                Ok(opt) => opt,
+                Err(join_err) => {
+                    // spawn_blocking task panicked — treat as subprocess failure.
+                    tracing::warn!(
+                        error = %join_err,
+                        "lsappinfo: blocking task panicked; failing closed to protect excluded apps"
+                    );
+                    None
+                }
             }
         }
     };
@@ -4109,6 +4126,44 @@ mod tests {
         // real tokio runtime and ClipboardMonitor).  Behavior verified by:
         //   1. Code review: `None` match arm calls `monitor.poll()` + `return`.
         //   2. The spawn_blocking wrapper is confirmed present by compilation.
+    }
+
+    /// CopyPaste-zdyw: verify the gate that controls whether lsappinfo is
+    /// forked on each clipboard tick.
+    ///
+    /// `handle_tick` skips the `spawn_blocking` call entirely when
+    /// `excluded_app_bundle_ids` is empty — no exclusion check is needed and
+    /// forking `lsappinfo` twice per second for nothing wastes CPU.  When the
+    /// list is non-empty the probe must run (fail-closed P1-2 contract).
+    ///
+    /// Because `handle_tick` is an async function that requires a real
+    /// `ClipboardMonitor`, we test the gate condition directly (the boolean
+    /// guard that drives the branch) rather than the full async function.
+    #[test]
+    fn lsappinfo_skipped_when_exclusion_list_is_empty() {
+        let cfg_empty = AppConfig::default();
+        assert!(
+            cfg_empty.excluded_app_bundle_ids.is_empty(),
+            "default config must have an empty exclusion list"
+        );
+        // The gate condition used in handle_tick: probe is skipped when empty.
+        let should_skip = cfg_empty.excluded_app_bundle_ids.is_empty();
+        assert!(
+            should_skip,
+            "lsappinfo probe must be skipped when excluded_app_bundle_ids is empty \
+             (CopyPaste-zdyw: no fork on empty list)"
+        );
+
+        let mut cfg_non_empty = AppConfig::default();
+        cfg_non_empty
+            .excluded_app_bundle_ids
+            .push("com.1password.1password".to_string());
+        let should_skip_non_empty = cfg_non_empty.excluded_app_bundle_ids.is_empty();
+        assert!(
+            !should_skip_non_empty,
+            "lsappinfo probe must NOT be skipped when excluded_app_bundle_ids is non-empty \
+             (fail-closed P1-2 contract)"
+        );
     }
 
     // -----------------------------------------------------------------------

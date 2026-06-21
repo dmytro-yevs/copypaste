@@ -2570,12 +2570,14 @@ impl IpcServer {
         // the SAS is known and identical on both honest endpoints. It moves the
         // SM to `awaiting_sas` and awaits the user's decision (or the dropped
         // sender on abort, which it maps to a rejection).
-        let confirm = move |sas: &str| {
+        let confirm = move |sas: &str, peer_fp: &str| {
             let coordinator = Arc::clone(&coordinator);
             let sas = sas.to_string();
             // Forward the already-captured peer snapshot so `pair_get_sas` polls
             // surface the mDNS identity while the user is reading the SAS code.
-            let snap = peer_snapshot.clone();
+            // CopyPaste-n3bc: override with the verified TLS peer fingerprint.
+            let mut snap = peer_snapshot.clone();
+            snap.fingerprint = Some(peer_fp.to_string());
             async move {
                 let rx = coordinator.enter_awaiting_sas(
                     sas,
@@ -5289,11 +5291,98 @@ impl IpcServer {
                     }
                 };
 
+                // CopyPaste-vvsf: snapshot old key bytes BEFORE installing the new
+                // one so the re-encryption closure can decrypt existing Supabase rows.
+                // The bytes are captured as a plain array (SyncKey is !Clone) and
+                // used only inside the closure below.
+                #[cfg(feature = "cloud-sync")]
+                let old_key_bytes: Option<[u8; 32]> = {
+                    let guard = self.sync_key.lock().await;
+                    guard.as_ref().map(|k| *k.as_bytes())
+                };
+                #[cfg(not(feature = "cloud-sync"))]
+                let old_key_bytes: Option<[u8; 32]> = None;
+
+                // Derive new key bytes BEFORE consuming new_key (persist_and_install
+                // will move it into the Arc<Mutex<…>> slot).
+                #[cfg(feature = "cloud-sync")]
+                let new_key_bytes: [u8; 32] = *new_key.as_bytes();
+
                 self.persist_and_install_sync_key(new_key).await;
                 tracing::info!(
                     "rotate_sync_key: sync key rotated; relay inbox id will diverge and the old \
                      key can no longer decrypt new cloud items"
                 );
+
+                // CopyPaste-vvsf: re-encrypt all existing cloud rows under the new
+                // key so devices provisioned with the new passphrase can still read
+                // historic items.  This is a best-effort network call: we log results
+                // but never fail the rotate_sync_key response because:
+                //   * The key rotation itself (local Keychain + in-memory slot) has
+                //     already succeeded and is the caller's primary intent.
+                //   * A partial re-encryption (network failure mid-batch) is recoverable
+                //     — the push loop will re-upload newly-captured items under the new
+                //     key; the caller can retry rotate_sync_key to attempt re-encryption
+                //     of remaining rows.
+                #[cfg(feature = "cloud-sync")]
+                {
+                    use copypaste_core::{decrypt_from_cloud, encrypt_for_cloud};
+                    use copypaste_supabase::RestClient;
+                    use base64::Engine as _;
+
+                    if let Some(old_bytes) = old_key_bytes {
+                        match RestClient::from_env() {
+                            Ok(rest_client) => {
+                                let (ok, skipped, err) = rest_client
+                                    .reencrypt_all_cloud_items(
+                                        move |item_id, old_ct_b64| -> Result<String, String> {
+                                            let old_k =
+                                                copypaste_core::SyncKey::from_bytes(old_bytes);
+                                            let new_k =
+                                                copypaste_core::SyncKey::from_bytes(new_key_bytes);
+                                            let raw = base64::engine::general_purpose::STANDARD
+                                                .decode(old_ct_b64)
+                                                .map_err(|e| format!("base64: {e}"))?;
+                                            let plain =
+                                                decrypt_from_cloud(&old_k, item_id, &raw)
+                                                    .map_err(|e| format!("decrypt: {e}"))?;
+                                            let new_blob =
+                                                encrypt_for_cloud(&new_k, item_id, &plain)
+                                                    .map_err(|e| format!("re-encrypt: {e}"))?;
+                                            Ok(base64::engine::general_purpose::STANDARD
+                                                .encode(&new_blob))
+                                        },
+                                    )
+                                    .await
+                                    .unwrap_or((0, 0, 0));
+                                tracing::info!(
+                                    ok,
+                                    skipped,
+                                    err,
+                                    "rotate_sync_key: cloud re-encryption complete \
+                                     (CopyPaste-vvsf)"
+                                );
+                            }
+                            Err(e) => {
+                                // Access token not in env — cloud is managed by GoTrue
+                                // inside start_cloud. Log a warning but do not fail the
+                                // rotate (the key rotation is already done).
+                                tracing::warn!(
+                                    error = %e,
+                                    "rotate_sync_key: RestClient not available from env — \
+                                     existing cloud rows NOT re-encrypted (CopyPaste-vvsf); \
+                                     the push loop will re-upload future items under the new key"
+                                );
+                            }
+                        }
+                    } else {
+                        tracing::debug!(
+                            "rotate_sync_key: no previous sync key — nothing to re-encrypt \
+                             in cloud (CopyPaste-vvsf)"
+                        );
+                    }
+                }
+
                 Response::ok(req.id, serde_json::json!({"ok": true, "rotated": true}))
             }
 
@@ -16100,5 +16189,83 @@ mod tests {
                 "{method} must return a machine-readable error_code, got: {resp}"
             );
         }
+    }
+
+    /// CopyPaste-vvsf: verify the re-encryption closure that `rotate_sync_key`
+    /// would pass to `reencrypt_all_cloud_items` performs a correct
+    /// decrypt-old / encrypt-new round-trip using the item_id for AAD binding.
+    ///
+    /// This is a pure crypto unit test — no IPC socket, no Supabase HTTP call.
+    /// It exercises the same `base64 decode → decrypt_from_cloud(old_key, item_id)
+    /// → encrypt_for_cloud(new_key, item_id) → base64 encode` pipeline that the
+    /// production handler uses, asserting:
+    ///
+    ///   1. The new ciphertext decrypts correctly under the NEW key.
+    ///   2. The new ciphertext does NOT decrypt under the OLD key.
+    ///   3. A wrong item_id as AAD causes authentication failure.
+    #[test]
+    fn rotate_sync_key_reencrypt_closure_crypto_roundtrip() {
+        use base64::Engine as _;
+        use copypaste_core::{decrypt_from_cloud, derive_sync_key, encrypt_for_cloud, SyncKey};
+
+        let old_key = derive_sync_key("old-passphrase-test-1").expect("derive old key");
+        let new_key = derive_sync_key("new-passphrase-test-2").expect("derive new key");
+
+        let item_id = "item-uuid-deadbeef";
+        let plaintext = b"secret clipboard content";
+
+        // Simulate what the push loop stores in Supabase: encrypt under old key.
+        let old_blob =
+            encrypt_for_cloud(&old_key, item_id, plaintext).expect("encrypt under old key");
+        let old_ct_b64 = base64::engine::general_purpose::STANDARD.encode(&old_blob);
+
+        // Capture key bytes for the closure (SyncKey is !Clone).
+        let old_bytes = *old_key.as_bytes();
+        let new_bytes = *new_key.as_bytes();
+
+        // This is the closure shape that rotate_sync_key passes to
+        // reencrypt_all_cloud_items (CopyPaste-vvsf).
+        let reencrypt = |rcv_item_id: &str, old_ct: &str| -> Result<String, String> {
+            let old_k = SyncKey::from_bytes(old_bytes);
+            let new_k = SyncKey::from_bytes(new_bytes);
+            let raw = base64::engine::general_purpose::STANDARD
+                .decode(old_ct)
+                .map_err(|e| format!("base64 decode: {e}"))?;
+            let plain = decrypt_from_cloud(&old_k, rcv_item_id, &raw)
+                .map_err(|e| format!("decrypt: {e}"))?;
+            let new_blob = encrypt_for_cloud(&new_k, rcv_item_id, &plain)
+                .map_err(|e| format!("encrypt: {e}"))?;
+            Ok(base64::engine::general_purpose::STANDARD.encode(&new_blob))
+        };
+
+        // Apply the closure.
+        let new_ct_b64 = reencrypt(item_id, &old_ct_b64).expect("re-encryption must succeed");
+
+        // Decode and verify the new ciphertext decrypts under the NEW key.
+        let new_k2 = SyncKey::from_bytes(new_bytes);
+        let new_raw =
+            base64::engine::general_purpose::STANDARD.decode(&new_ct_b64).unwrap();
+        let recovered = decrypt_from_cloud(&new_k2, item_id, &new_raw)
+            .expect("new ciphertext must decrypt under new key");
+        assert_eq!(
+            recovered, plaintext,
+            "plaintext must survive old_key→decrypt→new_key→encrypt round-trip"
+        );
+
+        // The new ciphertext must NOT decrypt under the OLD key (different key → auth fail).
+        let old_k2 = SyncKey::from_bytes(old_bytes);
+        let old_decrypt_result = decrypt_from_cloud(&old_k2, item_id, &new_raw);
+        assert!(
+            old_decrypt_result.is_err(),
+            "new ciphertext must not decrypt under old key (wrong key → auth fail)"
+        );
+
+        // A wrong item_id must cause auth failure (AAD mismatch).
+        let new_k3 = SyncKey::from_bytes(new_bytes);
+        let wrong_aad_result = decrypt_from_cloud(&new_k3, "wrong-item-id", &new_raw);
+        assert!(
+            wrong_aad_result.is_err(),
+            "wrong item_id AAD must cause authentication failure"
+        );
     }
 }

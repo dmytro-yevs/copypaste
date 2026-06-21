@@ -348,7 +348,12 @@ impl RestClient {
         reencrypt: F,
     ) -> RestResult<(usize, usize, usize)>
     where
-        F: Fn(&str) -> Result<String, E>,
+        // CopyPaste-vvsf: closure receives `(item_id, old_ciphertext_b64)` so the
+        // caller can use the item_id as AEAD AAD when decrypting and re-encrypting.
+        // Both `encrypt_for_cloud` and `decrypt_from_cloud` require `item_id` as
+        // the AAD binding; without it, a round-trip through XChaCha20-Poly1305 with
+        // the correct item_id AAD is impossible from inside the closure.
+        F: Fn(&str, &str) -> Result<String, E>,
         E: std::fmt::Display,
     {
         let rows = self.list_cloud_items().await?;
@@ -372,8 +377,8 @@ impl RestClient {
                 Some(ct) => ct.clone(),
             };
 
-            // Apply the re-encryption closure.
-            let new_ct = match reencrypt(&old_ct) {
+            // Apply the re-encryption closure, passing item_id for AAD binding.
+            let new_ct = match reencrypt(&row.item_id, &old_ct) {
                 Ok(ct) => ct,
                 Err(e) => {
                     tracing::warn!(
@@ -609,8 +614,8 @@ mod tests {
         let client = RestClient::new(mockito::server_url(), "anon", "tok");
 
         let (success, skipped, errors) = client
-            .reencrypt_all_cloud_items(|old_ct| -> Result<String, String> {
-                // Simple "re-encryption": swap hex prefix
+            .reencrypt_all_cloud_items(|_item_id, old_ct| -> Result<String, String> {
+                // Simple "re-encryption": swap hex prefix (item_id available for AAD binding)
                 Ok(format!("\\xnew{}", &old_ct[2..]))
             })
             .await
@@ -641,7 +646,7 @@ mod tests {
         let client = RestClient::new(mockito::server_url(), "anon", "tok");
 
         let (success, skipped, errors) = client
-            .reencrypt_all_cloud_items(|_ct| -> Result<String, String> {
+            .reencrypt_all_cloud_items(|_item_id, _ct| -> Result<String, String> {
                 Err("decryption failed: bad key".into())
             })
             .await
@@ -650,6 +655,60 @@ mod tests {
         assert_eq!(success, 0, "closure error must not count as success");
         assert_eq!(skipped, 1, "closure-errored row must count as skipped");
         assert_eq!(errors, 0, "upsert error counter must be 0");
+    }
+
+    /// CopyPaste-vvsf: the closure must receive the row's `item_id` so the
+    /// caller can bind it as AEAD AAD when calling `decrypt_from_cloud` /
+    /// `encrypt_for_cloud`.  Verify that the closure receives the correct
+    /// item_id from the live row (not an empty string or the tombstone's id).
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn reencrypt_closure_receives_item_id_for_aad() {
+        use mockito::mock;
+        use std::sync::Mutex;
+
+        let live = live_row();
+        let expected_item_id = live.item_id.clone();
+
+        let list_body =
+            serde_json::to_string(&vec![live, tombstone_row()]).expect("serialize rows");
+
+        let _list_mock = mock("GET", "/rest/v1/clipboard_items?order=lamport_ts.asc")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(&list_body)
+            .create();
+
+        // Mock upsert for the live row.
+        let _upsert_mock = mock("POST", "/rest/v1/clipboard_items?on_conflict=item_id")
+            .with_status(201)
+            .with_header("content-type", "application/json")
+            .with_body("[]")
+            .create();
+
+        let client = RestClient::new(mockito::server_url(), "anon", "tok");
+
+        // Capture which item_ids the closure was called with.
+        let seen_ids: Mutex<Vec<String>> = Mutex::new(Vec::new());
+        let seen_ids_ref = &seen_ids;
+
+        let (success, skipped, _errors) = client
+            .reencrypt_all_cloud_items(|item_id, old_ct| -> Result<String, String> {
+                seen_ids_ref.lock().unwrap().push(item_id.to_owned());
+                // Identity re-encryption (same ciphertext).
+                Ok(old_ct.to_owned())
+            })
+            .await
+            .expect("reencrypt should succeed");
+
+        let seen = seen_ids.into_inner().unwrap();
+        assert_eq!(seen.len(), 1, "closure called once (tombstone must be skipped)");
+        assert_eq!(
+            seen[0], expected_item_id,
+            "closure must receive the live row's item_id for AAD binding (CopyPaste-vvsf)"
+        );
+        assert_eq!(success, 1, "live row must be re-encrypted");
+        assert_eq!(skipped, 1, "tombstone must be skipped");
     }
 
     // -----------------------------------------------------------------------

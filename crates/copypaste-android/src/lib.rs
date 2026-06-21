@@ -2589,7 +2589,7 @@ async fn standing_responder_loop(
                 // HB-1a: advertise this Android device's real metadata.
                 &own_meta,
                 None,
-                move |sas: &str| {
+                move |sas: &str, _peer_fp: &str| {
                     let coord = std::sync::Arc::clone(&confirm_coord);
                     let sas = sas.to_string();
                     async move {
@@ -2756,7 +2756,7 @@ pub fn pair_with_discovered(
                 // HB-1a: advertise this Android device's real metadata.
                 &own_meta,
                 provisioning,
-                move |sas: &str| {
+                move |sas: &str, _peer_fp: &str| {
                     let coord = std::sync::Arc::clone(&confirm_coord);
                     let sas = sas.to_string();
                     async move {

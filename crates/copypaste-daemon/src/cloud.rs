@@ -98,6 +98,16 @@ const PUSH_MAX_BACKOFF: Duration = Duration::from_secs(30);
 /// `PUSH_MAX_BACKOFF`.
 const PUSH_INITIAL_BACKOFF: Duration = Duration::from_secs(1);
 
+/// How often the push loop drains pending broadcast-channel items into the
+/// retry queue when the retry queue is non-empty (CopyPaste-1t38).
+///
+/// Without a periodic drain, pin/delete/new-item events sent to `new_item_tx`
+/// while the loop is busy draining a failed retry queue accumulate in the
+/// broadcast ring buffer. If the ring buffer fills (default capacity: 16), the
+/// oldest events are silently dropped (Lagged). A 10-second drain interval
+/// ensures that mutations are picked up even during a sustained cloud outage.
+const MUTATION_QUEUE_DRAIN_INTERVAL: Duration = Duration::from_secs(10);
+
 // ── Realtime / poll-interval tuning (v0.5.3) ─────────────────────────────────
 
 /// HTTP poll interval when the Realtime WebSocket is **connected** *and the
@@ -788,6 +798,122 @@ async fn sign_in_with_password(
     Ok(session.access_token)
 }
 
+// ── Push loop helpers ────────────────────────────────────────────────────────
+
+/// Decrypt a clipboard item's local ciphertext, re-encrypt it under the
+/// current cloud sync key, and append the result to the retry queue.
+///
+/// Returns `true` when the item was enqueued, `false` when it was skipped
+/// (sensitive item, no sync key, decrypt error, encrypt error).
+///
+/// This is extracted from the `push_loop` main `select!` branch so the SAME
+/// processing pipeline can be reused by the periodic drain path
+/// (CopyPaste-1t38): when the retry queue is non-empty and a new broadcast
+/// item arrives during the retry-backoff sleep, we must enqueue it
+/// immediately rather than let it age in the broadcast ring buffer.
+///
+/// # Safety / reentrancy
+///
+/// The caller holds no locks when calling this function — the function takes
+/// and immediately releases the `sync_key` lock twice (once for the fast
+/// no-key check, once for re-encryption). The intermediate plaintext is
+/// zeroized at the end of `decrypt_item_plaintext_blocking`.
+#[allow(clippy::too_many_arguments)]
+async fn prepare_and_enqueue_item(
+    item: ClipboardItem,
+    sync_key: &Arc<Mutex<Option<SyncKey>>>,
+    local_key: &Arc<zeroize::Zeroizing<[u8; 32]>>,
+    retry_queue: &mut VecDeque<(ClipboardItem, String)>,
+    warned_no_key: &mut bool,
+) -> bool {
+    // P1-1: sensitive items are NEVER uploaded.
+    if item.is_sensitive {
+        tracing::debug!(
+            "cloud-sync push_loop: skipping sensitive id={} (never uploaded)",
+            item.id
+        );
+        return false;
+    }
+    // Fast no-key skip: if no sync passphrase is set there is nothing to
+    // upload. Drop the guard immediately so the lock is not held across the
+    // await below.
+    {
+        let key_guard = sync_key.lock().await;
+        if key_guard.is_none() {
+            if !*warned_no_key {
+                tracing::warn!(
+                    "cloud-sync push_loop: no sync passphrase set — \
+                     skipping upload (call set_sync_passphrase first)"
+                );
+                *warned_no_key = true;
+            }
+            return false;
+        }
+    }
+    // Decrypt on the blocking pool (CPU-bound, potentially multi-MB).
+    let (item_back, decrypt_res) =
+        decrypt_item_plaintext_blocking(item, zeroize::Zeroizing::new(***local_key)).await;
+    let item = match item_back {
+        Some(it) => it,
+        None => {
+            tracing::warn!("cloud-sync push_loop: decrypt task failed; skipping");
+            return false;
+        }
+    };
+    let plaintext = match decrypt_res {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(
+                "cloud-sync push_loop: failed to decrypt id={} for re-encryption: {e}; skipping",
+                item.id
+            );
+            return false;
+        }
+    };
+    // Re-encrypt for cloud under the current sync key.
+    let payload_ct_b64 = {
+        let key_guard = sync_key.lock().await;
+        match &*key_guard {
+            None => {
+                if !*warned_no_key {
+                    tracing::warn!(
+                        "cloud-sync push_loop: no sync passphrase set — \
+                         skipping upload (call set_sync_passphrase first)"
+                    );
+                    *warned_no_key = true;
+                }
+                return false;
+            }
+            Some(key) => {
+                let cloud_plaintext = match wrap_and_check_cloud_upload_plaintext(&item, plaintext)
+                {
+                    Ok(p) => p,
+                    Err(e) => {
+                        tracing::warn!("cloud-sync push_loop: skipping id={}: {e}", item.id);
+                        return false;
+                    }
+                };
+                match encrypt_for_cloud(key, &item.item_id, &cloud_plaintext) {
+                    Ok(blob) => {
+                        use base64::Engine as _;
+                        base64::engine::general_purpose::STANDARD.encode(&blob)
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "cloud-sync push_loop: cloud encrypt failed for id={}: {e}; skipping",
+                            item.id
+                        );
+                        return false;
+                    }
+                }
+            }
+        }
+    };
+    *warned_no_key = false;
+    enqueue_for_retry(retry_queue, item, payload_ct_b64);
+    true
+}
+
 // ── Push loop ─────────────────────────────────────────────────────────────────
 
 /// Receive locally created items from the broadcast channel and POST them to
@@ -875,6 +1001,20 @@ async fn push_loop(
     // None→Some transition (passphrase entered after startup) and run the
     // backlog sweep exactly once on that edge, rather than every tick.
     let mut prev_key_present = key_present_at_start;
+
+    // CopyPaste-1t38: periodic drain interval.
+    //
+    // When the retry queue is non-empty the main loop's `select!` (which reads
+    // from `rx`) is never reached.  Broadcast-channel items sent during this
+    // period (pin, delete, new clipboard captures) accumulate in the ring buffer
+    // and are silently dropped when the buffer fills (Lagged).  A periodic
+    // interval ensures we drain `rx` into the retry queue even during a
+    // sustained cloud outage by adding `rx.recv()` as an additional arm in the
+    // retry-failure backoff select.
+    let mut mutation_drain_tick = tokio::time::interval(MUTATION_QUEUE_DRAIN_INTERVAL);
+    // Skip the first tick (fires immediately on creation) so we don't
+    // spuriously drain on the very first loop iteration.
+    mutation_drain_tick.tick().await;
 
     // Audit-concurrency HIGH #1 — `broadcast::Receiver::recv` is documented
     // cancellation-safe. We park each item in the retry queue immediately upon
@@ -983,8 +1123,9 @@ async fn push_loop(
                         retry_queue.len() + 1,
                     );
                     enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
-                    // Yield to the scheduler so we don't hot-loop while the
-                    // remote is down; also lets shutdown.notified() get a turn.
+                    // CopyPaste-1t38: yield and also drain any pending broadcast
+                    // items so pin/delete/new-capture events sent while the retry
+                    // loop is busy don't age out of the broadcast ring buffer.
                     tokio::select! {
                         _ = tokio::time::sleep(PUSH_INITIAL_BACKOFF) => {}
                         _ = shutdown.notified() => {
@@ -993,6 +1134,77 @@ async fn push_loop(
                                 retry_queue.len(),
                             );
                             return;
+                        }
+                        result = rx.recv() => {
+                            // A new item arrived while we were backing off.
+                            // Enqueue it immediately so it doesn't sit in the
+                            // ring buffer and risk being dropped under Lagged.
+                            match result {
+                                Ok(incoming) => {
+                                    prepare_and_enqueue_item(
+                                        incoming,
+                                        &sync_key,
+                                        &local_key,
+                                        &mut retry_queue,
+                                        &mut warned_no_key,
+                                    )
+                                    .await;
+                                }
+                                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                                    tracing::warn!(
+                                        "cloud-sync push_loop: lagged by {n} items during retry drain"
+                                    );
+                                }
+                                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                                    tracing::info!(
+                                        "cloud-sync push_loop: channel closed during retry drain \
+                                         ({} queued items not flushed)",
+                                        retry_queue.len(),
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                        _ = mutation_drain_tick.tick() => {
+                            // Periodic drain: pull any queued broadcast items
+                            // into the retry queue using try_recv so we don't
+                            // block on an empty channel.
+                            loop {
+                                match rx.try_recv() {
+                                    Ok(incoming) => {
+                                        prepare_and_enqueue_item(
+                                            incoming,
+                                            &sync_key,
+                                            &local_key,
+                                            &mut retry_queue,
+                                            &mut warned_no_key,
+                                        )
+                                        .await;
+                                    }
+                                    Err(tokio::sync::broadcast::error::TryRecvError::Empty) => {
+                                        break;
+                                    }
+                                    Err(
+                                        tokio::sync::broadcast::error::TryRecvError::Lagged(n),
+                                    ) => {
+                                        tracing::warn!(
+                                            "cloud-sync push_loop: lagged by {n} items \
+                                             during periodic drain"
+                                        );
+                                        // Continue draining after lag.
+                                    }
+                                    Err(
+                                        tokio::sync::broadcast::error::TryRecvError::Closed,
+                                    ) => {
+                                        tracing::info!(
+                                            "cloud-sync push_loop: channel closed during \
+                                             periodic drain ({} queued items not flushed)",
+                                            retry_queue.len(),
+                                        );
+                                        return;
+                                    }
+                                }
+                            }
                         }
                     }
                     continue;
@@ -1014,150 +1226,52 @@ async fn push_loop(
             result = rx.recv() => {
                 match result {
                     Ok(item) => {
-                        // P1-1: honour the "sensitive items are NEVER uploaded" guarantee
-                        // (docs/relay-api.md:105). Drop before any crypto / network work
-                        // so no ciphertext escapes to Supabase.
-                        if item.is_sensitive {
-                            tracing::debug!(
-                                "cloud-sync push_loop: skipping sensitive id={} (never uploaded)",
-                                item.id
-                            );
-                            continue;
-                        }
-                        // Fast no-key skip (preserved from the original): if no
-                        // sync passphrase is set there is nothing to upload, so
-                        // skip BEFORE doing the (now blocking-pool) decrypt. The
-                        // guard is dropped immediately so the lock is not held
-                        // across the decrypt await below.
-                        {
-                            let key_guard = sync_key.lock().await;
-                            if key_guard.is_none() {
-                                if !warned_no_key {
-                                    tracing::warn!(
-                                        "cloud-sync push_loop: no sync passphrase set — \
-                                         skipping upload (call set_sync_passphrase first)"
-                                    );
-                                    warned_no_key = true;
-                                }
-                                continue;
-                            }
-                        }
-                        // CopyPaste-z1xt: decrypt the local ciphertext on the
-                        // blocking thread pool BEFORE re-taking the sync-key lock.
-                        // `decode_image`/`decode_file`/`decrypt_item_by_version`
-                        // are CPU-bound (potentially multi-MB) and previously ran
-                        // inline on the async executor thread. Doing this before
-                        // the lock also avoids holding the `sync_key` mutex across
-                        // the await. The wrapper consumes + returns the item so we
-                        // do not clone the heavy `content` blob.
-                        let (item_back, decrypt_res) = decrypt_item_plaintext_blocking(
+                        // Encrypt and enqueue using the shared helper.  The helper
+                        // handles P1-1 (sensitive skip), the no-key fast path,
+                        // CopyPaste-z1xt (blocking decrypt), and cloud re-encrypt.
+                        let enqueued = prepare_and_enqueue_item(
                             item,
-                            zeroize::Zeroizing::new(**local_key),
+                            &sync_key,
+                            &local_key,
+                            &mut retry_queue,
+                            &mut warned_no_key,
                         )
                         .await;
-                        let item = match item_back {
-                            Some(it) => it,
-                            None => {
-                                tracing::warn!(
-                                    "cloud-sync push_loop: decrypt task failed; skipping"
-                                );
-                                continue;
-                            }
-                        };
-                        let plaintext = match decrypt_res {
-                            Ok(p) => p,
-                            Err(e) => {
-                                tracing::warn!(
-                                    "cloud-sync push_loop: failed to decrypt id={} for re-encryption: {e}; skipping",
-                                    item.id
-                                );
-                                continue;
-                            }
-                        };
-                        // Re-encrypt the item for the cloud using the current sync key.
-                        // If no sync key is set, skip with a one-time warning.
-                        let payload_ct_b64 = {
-                            let key_guard = sync_key.lock().await;
-                            match &*key_guard {
-                                None => {
-                                    if !warned_no_key {
+                        if enqueued {
+                            // Try to push the newly-enqueued item immediately.
+                            // Park it first (already in retry_queue) then pop
+                            // from the front so older queued items drain first.
+                            if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
+                                match push_item_with_retries(
+                                    &client,
+                                    &rest_url,
+                                    &config,
+                                    &bearer,
+                                    &item,
+                                    &payload_ct_b64,
+                                    Some(&cloud_signed_in),
+                                    &auth,
+                                )
+                                .await
+                                {
+                                    Ok(()) => {
+                                        tracing::info!("cloud-sync pushed id={}", item.id);
+                                        // Fix CLOUD-IS_SYNCED: mark the row synced.
+                                        mark_item_synced(&db, &item.item_id).await;
+                                        // Fix #33: update last_sync_ms on every successful push.
+                                        let now_ms = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_millis() as i64;
+                                        last_sync_ms.store(now_ms, Ordering::Relaxed);
+                                    }
+                                    Err(e) => {
                                         tracing::warn!(
-                                            "cloud-sync push_loop: no sync passphrase set — \
-                                             skipping upload (call set_sync_passphrase first)"
+                                            "cloud-sync push failed for id={}: {e}; queuing for retry",
+                                            item.id
                                         );
-                                        warned_no_key = true;
+                                        enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
                                     }
-                                    continue;
-                                }
-                                Some(key) => {
-                                    // BUG C1: for files, embed name+MIME inside
-                                    // the encrypted plaintext (Supabase schema
-                                    // carries none). No-op for text/image. The
-                                    // ceiling is enforced on the WRAPPED bytes so
-                                    // upload skips exactly what download rejects.
-                                    let cloud_plaintext =
-                                        match wrap_and_check_cloud_upload_plaintext(&item, plaintext) {
-                                            Ok(p) => p,
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    "cloud-sync push_loop: skipping id={}: {e}",
-                                                    item.id
-                                                );
-                                                continue;
-                                            }
-                                        };
-                                    // Re-encrypt for cloud with sync key + item_id AAD.
-                                    match encrypt_for_cloud(key, &item.item_id, &cloud_plaintext) {
-                                        Ok(blob) => {
-                                            use base64::Engine as _;
-                                            base64::engine::general_purpose::STANDARD.encode(&blob)
-                                        }
-                                        Err(e) => {
-                                            tracing::warn!(
-                                                "cloud-sync push_loop: cloud encrypt failed for id={}: {e}; skipping",
-                                                item.id
-                                            );
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
-                        };
-                        warned_no_key = false; // key is set, reset the warning gate
-
-                        // Park the (item, payload_ct_b64) in the retry queue first so it is
-                        // owned by us before any network await.
-                        enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
-                        if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
-                            match push_item_with_retries(
-                                &client,
-                                &rest_url,
-                                &config,
-                                &bearer,
-                                &item,
-                                &payload_ct_b64,
-                                Some(&cloud_signed_in),
-                                &auth,
-                            )
-                            .await
-                            {
-                                Ok(()) => {
-                                    tracing::info!("cloud-sync pushed id={}", item.id);
-                                    // Fix CLOUD-IS_SYNCED: mark the row synced.
-                                    mark_item_synced(&db, &item.item_id).await;
-                                    // Fix #33: update last_sync_ms on every successful push.
-                                    let now_ms = std::time::SystemTime::now()
-                                        .duration_since(std::time::UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_millis() as i64;
-                                    last_sync_ms.store(now_ms, Ordering::Relaxed);
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        "cloud-sync push failed for id={}: {e}; queuing for retry",
-                                        item.id
-                                    );
-                                    enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
                                 }
                             }
                         }
@@ -3270,6 +3384,34 @@ mod tests {
         assert!(!is_https_url("https:///"));
         assert!(!is_https_url("http://x.test"));
         assert!(!is_https_url("not-a-url"));
+    }
+
+    /// CopyPaste-1t38: verify that `MUTATION_QUEUE_DRAIN_INTERVAL` exists and
+    /// is a sensible value.
+    ///
+    /// The periodic drain prevents pin/delete mutations from being silently
+    /// dropped when the push_loop's retry queue is non-empty (and the main
+    /// `select!` that reads from `rx` is therefore never reached).
+    ///
+    /// We verify:
+    ///   1. The constant is defined (catches accidental removal).
+    ///   2. Its value is at most 60 s — long enough to avoid hot-loops but
+    ///      short enough that a user-triggered mutation (pin, delete) is
+    ///      enqueued well within a reasonable interactive timeout.
+    #[test]
+    fn mutation_queue_drain_interval_exists_and_is_bounded() {
+        const MAX_DRAIN_INTERVAL_SECS: u64 = 60;
+        let secs = MUTATION_QUEUE_DRAIN_INTERVAL.as_secs();
+        assert!(
+            secs > 0,
+            "MUTATION_QUEUE_DRAIN_INTERVAL must be positive (got {secs}s)"
+        );
+        assert!(
+            secs <= MAX_DRAIN_INTERVAL_SECS,
+            "MUTATION_QUEUE_DRAIN_INTERVAL is {secs}s — larger than the \
+             {MAX_DRAIN_INTERVAL_SECS}s interactive timeout budget \
+             (CopyPaste-1t38: mutations would take too long to be enqueued)"
+        );
     }
 
     // ── Fail-closed auth ──────────────────────────────────────────────────────

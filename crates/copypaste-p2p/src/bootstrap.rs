@@ -762,10 +762,16 @@ impl BootstrapResponder {
     ///
     /// Runs the IDENTICAL handshake transcript through frame 9 (PAKE +
     /// channel-binding tag verify), then derives the 6-digit SAS and invokes
-    /// `confirm(sas)`. If the user rejects (returns `false`) the pairing aborts
-    /// with an error (keys drop/zeroize). Otherwise both sides exchange a NEW
-    /// frame 10a ([`SAS_ACCEPT`]/[`SAS_REJECT`]) and proceed to the metadata
-    /// exchange / `Ok` ONLY if BOTH bytes are [`SAS_ACCEPT`].
+    /// `confirm(sas, peer_fingerprint)`. If the user rejects (returns `false`) the
+    /// pairing aborts with an error (keys drop/zeroize). Otherwise both sides
+    /// exchange a NEW frame 10a ([`SAS_ACCEPT`]/[`SAS_REJECT`]) and proceed to
+    /// the metadata exchange / `Ok` ONLY if BOTH bytes are [`SAS_ACCEPT`].
+    ///
+    /// The `peer_fingerprint` argument is the TLS peer certificate fingerprint
+    /// observed during the bootstrap handshake (the same value stored in
+    /// `BootstrapPairing::peer_fingerprint`). Passing it to the callback gives
+    /// the daemon coordinator identity binding on the responder path — matching
+    /// what the initiator path already has (CopyPaste-n3bc).
     ///
     /// This is a separate method so the QR `run` transcript stays byte-compatible
     /// (frame 10a is never sent there).
@@ -779,7 +785,7 @@ impl BootstrapResponder {
         confirm: F,
     ) -> Result<BootstrapPairing, TransportError>
     where
-        F: FnOnce(&str) -> Fut,
+        F: FnOnce(&str, &str) -> Fut,
         Fut: std::future::Future<Output = bool>,
     {
         let (tcp_stream, peer_addr) =
@@ -887,7 +893,9 @@ impl BootstrapResponder {
 
         // Human SAS confirmation (outside the PAKE deadline). On reject, return
         // an error so `session_key` drops/zeroizes and the caller persists nothing.
-        let accepted_locally = confirm(&sas).await;
+        // CopyPaste-n3bc: pass peer_fingerprint alongside sas so the daemon
+        // coordinator has identity binding on the responder path.
+        let accepted_locally = confirm(&sas, &peer_fingerprint).await;
 
         // Frame 10a: exchange ACCEPT/REJECT bytes. Proceed only if BOTH accept.
         let our_byte = if accepted_locally {
@@ -1101,10 +1109,15 @@ pub async fn run_initiator(
 ///
 /// Runs the IDENTICAL handshake transcript through frame 9 (PAKE +
 /// channel-binding tag verify), then derives the 6-digit SAS and invokes
-/// `confirm(sas)`. On reject (`false`) the pairing aborts with an error so the
-/// session key drops/zeroizes. Otherwise both sides exchange frame 10a
-/// ([`SAS_ACCEPT`]/[`SAS_REJECT`]) and the pairing succeeds ONLY if BOTH bytes
-/// are [`SAS_ACCEPT`].
+/// `confirm(sas, peer_fingerprint)`. On reject (`false`) the pairing aborts
+/// with an error so the session key drops/zeroizes. Otherwise both sides exchange
+/// frame 10a ([`SAS_ACCEPT`]/[`SAS_REJECT`]) and the pairing succeeds ONLY if
+/// BOTH bytes are [`SAS_ACCEPT`].
+///
+/// The `peer_fingerprint` argument is the TLS peer certificate fingerprint
+/// observed during the bootstrap handshake (the same value stored in
+/// `BootstrapPairing::peer_fingerprint`). Passing it to the callback gives the
+/// daemon coordinator identity binding on both paths (CopyPaste-n3bc).
 ///
 /// Separate from [`run_initiator`] so the QR transcript stays byte-compatible.
 #[allow(clippy::too_many_arguments)] // mirrors `run_initiator` + confirm cb + provisioning
@@ -1119,7 +1132,7 @@ pub async fn run_initiator_with_confirm<F, Fut>(
     confirm: F,
 ) -> Result<BootstrapPairing, TransportError>
 where
-    F: FnOnce(&str) -> Fut,
+    F: FnOnce(&str, &str) -> Fut,
     Fut: std::future::Future<Output = bool>,
 {
     let own_fingerprint = fingerprint_of(&cert_der);
@@ -1241,7 +1254,9 @@ where
 
     // Human SAS confirmation (outside the PAKE deadline). Reject → error → keys
     // drop/zeroize.
-    let accepted_locally = confirm(&sas).await;
+    // CopyPaste-n3bc: pass peer_fingerprint alongside sas so the daemon
+    // coordinator has identity binding on the initiator path too.
+    let accepted_locally = confirm(&sas, &peer_fingerprint).await;
 
     // Frame 10a: exchange ACCEPT/REJECT bytes. Proceed only if BOTH accept.
     let our_byte = if accepted_locally {
@@ -2187,7 +2202,7 @@ mod tests {
                     "127.0.0.1:7101",
                     &PeerMeta::default(),
                     None,
-                    move |sas| {
+                    move |sas, _peer_fp| {
                         let slot = resp_seen_cb.clone();
                         let sas = sas.to_string();
                         async move {
@@ -2210,7 +2225,7 @@ mod tests {
                 "127.0.0.1:7102",
                 &PeerMeta::default(),
                 None,
-                move |sas| {
+                move |sas, _peer_fp| {
                     let slot = init_seen_cb.clone();
                     let sas = sas.to_string();
                     async move {
@@ -2281,7 +2296,7 @@ mod tests {
                     "127.0.0.1:7111",
                     &PeerMeta::default(),
                     None,
-                    move |sas| {
+                    move |sas, _peer_fp| {
                         let slot = resp_seen_cb.clone();
                         let sas = sas.to_string();
                         async move {
@@ -2304,7 +2319,7 @@ mod tests {
                 "127.0.0.1:7112",
                 &PeerMeta::default(),
                 None,
-                move |sas| {
+                move |sas, _peer_fp| {
                     let slot = init_seen_cb.clone();
                     let sas = sas.to_string();
                     async move {
@@ -2363,7 +2378,7 @@ mod tests {
                     "127.0.0.1:7103",
                     &PeerMeta::default(),
                     None,
-                    |_sas| async { true },
+                    |_sas, _peer_fp| async { true },
                 )
                 .await
         });
@@ -2378,7 +2393,7 @@ mod tests {
                 "127.0.0.1:7104",
                 &PeerMeta::default(),
                 None,
-                |_sas| async { false },
+                |_sas, _peer_fp| async { false },
             )
             .await
         });
@@ -2431,7 +2446,7 @@ mod tests {
                     "127.0.0.1:7105",
                     &PeerMeta::default(),
                     None,
-                    move |sas| {
+                    move |sas, _peer_fp| {
                         let slot = resp_seen_cb.clone();
                         let sas = sas.to_string();
                         async move {
@@ -2507,7 +2522,7 @@ mod tests {
                 "127.0.0.1:7106",
                 &PeerMeta::default(),
                 None,
-                move |sas| {
+                move |sas, _peer_fp| {
                     let slot = init_seen_cb.clone();
                     let sas = sas.to_string();
                     async move {
@@ -2568,6 +2583,120 @@ mod tests {
         assert!(
             uppercase_hex.len() == 64 && uppercase_hex.bytes().all(|b| b.is_ascii_hexdigit()),
             "uppercase fingerprint must be accepted by the length+hex check"
+        );
+    }
+
+    // ── CopyPaste-n3bc: confirm callback receives peer_fingerprint ────────────
+
+    /// Regression test for CopyPaste-n3bc: both `run_with_confirm` and
+    /// `run_initiator_with_confirm` must pass the TLS peer fingerprint as the
+    /// SECOND argument to the `confirm` callback (`confirm(&sas, &peer_fingerprint)`).
+    ///
+    /// Before this fix the callback only received the SAS (`confirm(&sas)`), so
+    /// the responder-side confirm had no identity binding — it could not surface the
+    /// peer fingerprint on the responder path (matching the initiator path where the
+    /// fingerprint is available in `BootstrapPairing.peer_fingerprint`).
+    ///
+    /// After the fix the responder confirm captures the REAL initiator TLS
+    /// fingerprint, and the initiator confirm captures the REAL responder TLS
+    /// fingerprint. Both captured values must match the `BootstrapPairing.peer_fingerprint`
+    /// returned from the respective call.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn confirm_callbacks_receive_peer_fingerprint_n3bc() {
+        use std::sync::{Arc, Mutex};
+
+        let responder_cert = SelfSignedCert::generate("responder-n3bc").unwrap();
+        let initiator_cert = SelfSignedCert::generate("initiator-n3bc").unwrap();
+
+        // Pre-compute the expected fingerprints so we can cross-check what the
+        // callbacks receive.
+        let expected_initiator_fp = crate::cert::fingerprint_of(&initiator_cert.cert_der);
+        let expected_responder_fp = crate::cert::fingerprint_of(&responder_cert.cert_der);
+
+        let responder = BootstrapResponder::bind(
+            responder_cert.cert_der.clone(),
+            responder_cert.key_der.clone(),
+        )
+        .await
+        .expect("bind responder");
+        let port = responder.local_addr().expect("local addr").port();
+
+        // Slots to capture the fingerprint the confirm callback receives on each side.
+        let resp_fp_in_cb: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let init_fp_in_cb: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+
+        let resp_fp_slot = resp_fp_in_cb.clone();
+        let responder_task = tokio::spawn(async move {
+            responder
+                .run_with_confirm(
+                    "n3bc-test-password",
+                    "127.0.0.1:8201",
+                    &PeerMeta::default(),
+                    None,
+                    // NEW 2-arg callback: confirm(&sas, &peer_fingerprint)
+                    move |_sas: &str, peer_fp: &str| {
+                        *resp_fp_slot.lock().unwrap() = Some(peer_fp.to_string());
+                        async move { true }
+                    },
+                )
+                .await
+        });
+
+        let addr: SocketAddr = ([127, 0, 0, 1], port).into();
+        let init_fp_slot = init_fp_in_cb.clone();
+        let initiator_task = tokio::spawn(async move {
+            run_initiator_with_confirm(
+                addr,
+                initiator_cert.cert_der,
+                initiator_cert.key_der,
+                "n3bc-test-password",
+                "127.0.0.1:8202",
+                &PeerMeta::default(),
+                None,
+                // NEW 2-arg callback: confirm(&sas, &peer_fingerprint)
+                move |_sas: &str, peer_fp: &str| {
+                    *init_fp_slot.lock().unwrap() = Some(peer_fp.to_string());
+                    async move { true }
+                },
+            )
+            .await
+        });
+
+        let (resp_res, init_res) = tokio::join!(responder_task, initiator_task);
+        let resp = resp_res.expect("responder join").expect("responder pairing");
+        let init = init_res.expect("initiator join").expect("initiator pairing");
+
+        // The fingerprint the responder's confirm callback saw MUST be the
+        // initiator's TLS cert fingerprint.
+        let fp_seen_by_resp = resp_fp_in_cb
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("responder confirm must have been invoked");
+        assert_eq!(
+            fp_seen_by_resp, expected_initiator_fp,
+            "responder confirm callback must receive the initiator's TLS fingerprint (CopyPaste-n3bc)"
+        );
+        // Cross-check: the returned BootstrapPairing also carries that fingerprint.
+        assert_eq!(
+            resp.peer_fingerprint, expected_initiator_fp,
+            "BootstrapPairing.peer_fingerprint on responder side must match (CopyPaste-n3bc)"
+        );
+
+        // The fingerprint the initiator's confirm callback saw MUST be the
+        // responder's TLS cert fingerprint.
+        let fp_seen_by_init = init_fp_in_cb
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("initiator confirm must have been invoked");
+        assert_eq!(
+            fp_seen_by_init, expected_responder_fp,
+            "initiator confirm callback must receive the responder's TLS fingerprint (CopyPaste-n3bc)"
+        );
+        assert_eq!(
+            init.peer_fingerprint, expected_responder_fp,
+            "BootstrapPairing.peer_fingerprint on initiator side must match (CopyPaste-n3bc)"
         );
     }
 }

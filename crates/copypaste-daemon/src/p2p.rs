@@ -2251,17 +2251,21 @@ async fn standing_pairing_responder_loop(
         // callback is too late (the handshake already ran); instead we gate at
         // the SAS step: the confirm callback only runs after frame 9, and we
         // refuse to surface a SAS if a pairing is already active.
-        let confirm = move |sas: &str| {
+        let confirm = move |sas: &str, peer_fp: &str| {
             let coordinator = Arc::clone(&coordinator);
             let sas = sas.to_string();
+            // CopyPaste-n3bc: the verified inbound TLS peer fingerprint is now
+            // threaded into the confirm callback — surface it in the responder
+            // PeerSnapshot so pair_get_sas returns peer identity (was empty default).
+            let snap = crate::pairing_sm::PeerSnapshot {
+                fingerprint: Some(peer_fp.to_string()),
+                ..Default::default()
+            };
             async move {
                 // Single active pairing: if the coordinator is busy, reject.
-                // Responder path: no prior mDNS resolution → empty PeerSnapshot.
-                // The inbound TLS peer fingerprint is available post-handshake
-                // but not threaded into the confirm callback yet; follow-up task.
                 if !coordinator.try_begin(
                     crate::pairing_sm::PairingRole::Responder,
-                    crate::pairing_sm::PeerSnapshot::default(),
+                    snap.clone(),
                 ) {
                     tracing::warn!("LAN/SAS: inbound pairing rejected — another pairing active");
                     return false;
@@ -2269,7 +2273,7 @@ async fn standing_pairing_responder_loop(
                 let rx = coordinator.enter_awaiting_sas(
                     sas,
                     crate::pairing_sm::PairingRole::Responder,
-                    crate::pairing_sm::PeerSnapshot::default(),
+                    snap,
                 );
                 match tokio::time::timeout(crate::pairing_sm::SAS_CONFIRM_TIMEOUT, rx).await {
                     Ok(Ok(accept)) => accept,
