@@ -507,6 +507,7 @@ class ClipboardRepository(context: Context) {
             val pinnedBefore = pinnedList.size
             pinnedList.removeAll(toDelete)
             val pinnedChanged = pinnedList.size != pinnedBefore
+            cachedIds = storedList
             val editor = prefs.edit()
                 .putString(KEY_ITEM_IDS, storedList.joinToString(","))
             for (id in toDelete) {
@@ -584,6 +585,7 @@ class ClipboardRepository(context: Context) {
             // (re-syncing pinned items on the next poll is safe).
             val remaining = ids.filter { it in pinnedSet }
             deletedCount = ids.size - remaining.size
+            cachedIds = remaining
             editor
                 .putString(KEY_ITEM_IDS, remaining.joinToString(","))
                 .remove(KEY_SYNCED_SOURCE_IDS)
@@ -631,6 +633,8 @@ class ClipboardRepository(context: Context) {
             prefs.edit().clear().apply()
             // Reset in-memory parse cache so no stale entries linger after the wipe.
             evictAllParseCache()
+            // Invalidate the id cache — prefs.clear() removed KEY_ITEM_IDS.
+            cachedIds = emptyList()
             // Reset dedup state so the first captured item after reset is stored fresh.
             resetDedupState()
         }
@@ -688,6 +692,7 @@ class ClipboardRepository(context: Context) {
             // Retain only pinned ids in the index; clear source-id seen-set.
             val remaining = ids.filter { it in pinnedSet }
             deletedCount = ids.size - remaining.size
+            cachedIds = remaining
             editor
                 .putString(KEY_ITEM_IDS, remaining.joinToString(","))
                 .remove(KEY_SYNCED_SOURCE_IDS)
@@ -920,6 +925,7 @@ class ClipboardRepository(context: Context) {
             rebuiltParts[5] = newLamport.toString() // bumped lamport
             val rebuilt = rebuiltParts.joinToString("|")
             ids.add(id)  // re-append → most-recent position
+            cachedIds = ids
             prefs.edit()
                 .putString("item_$id", rebuilt)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -1048,6 +1054,7 @@ class ClipboardRepository(context: Context) {
             // would otherwise append a second copy of the same id, which then
             // crashes the history LazyColumn ("Key … was already used").
             val ids = appendUniqueId(storedIds(), id)
+            cachedIds = ids
             prefs.edit()
                 .putString("item_$id", encoded)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -1233,6 +1240,7 @@ class ClipboardRepository(context: Context) {
                 return@withContext false
             }
             val ids = appendUniqueId(storedIds(), storageId)
+            cachedIds = ids
             prefs.edit()
                 .putString("item_$storageId", encoded)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -1497,6 +1505,7 @@ class ClipboardRepository(context: Context) {
             }
 
             if (didEvict) {
+                cachedIds = ids
                 editor.putString(KEY_ITEM_IDS, ids.joinToString(",")).apply()
             }
         }
@@ -1584,6 +1593,7 @@ class ClipboardRepository(context: Context) {
             }
 
             if (deletedCount > 0) {
+                cachedIds = survivors
                 editor.putString(KEY_ITEM_IDS, survivors.joinToString(",")).apply()
             }
         }
@@ -1656,12 +1666,18 @@ class ClipboardRepository(context: Context) {
      * de-duplicated also heals any index that an older build may have corrupted,
      * so the history LazyColumn never sees a repeated key.
      */
-    private fun storedIds(): List<String> =
-        prefs.getString(KEY_ITEM_IDS, "")
+    private fun storedIds(): List<String> {
+        // Fast path: in-memory snapshot populated by every writer.
+        cachedIds?.let { return it }
+        // Cold start: parse from SharedPreferences and cache.
+        val ids = prefs.getString(KEY_ITEM_IDS, "")
             ?.split(",")
             ?.filter { it.isNotBlank() }
             ?.distinct()
             ?: emptyList()
+        cachedIds = ids
+        return ids
+    }
 
     /**
      * Append [id] to [current], guaranteeing it appears exactly once and at the
@@ -2244,6 +2260,18 @@ class ClipboardRepository(context: Context) {
 
         private data class ParsedEntry(val rawBlob: String, val item: ClipboardItem)
 
+        /**
+         * In-memory snapshot of KEY_ITEM_IDS. Populated on first read and kept
+         * in sync by every writer that holds [idsWriteLock].  Avoids re-parsing
+         * the SharedPreferences XML string on every 30-second P2P tick.
+         *
+         * @Volatile makes reads safe without a lock (single-writer pattern: all
+         * writes happen inside a synchronized(idsWriteLock) block; a stale read
+         * merely causes a harmless cache-miss that falls back to prefs).
+         */
+        @Volatile
+        var cachedIds: List<String>? = null
+
         /** Guards [parseCache] for concurrent IO reads. */
         private val parseCacheLock = Any()
 
@@ -2393,8 +2421,8 @@ class ClipboardRepository(context: Context) {
                     val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
                     uniffi.copypaste_android.EncryptedItem(
                         itemId = id,
-                        ciphertext = ciphertext.map { it.toUByte() },
-                        nonce = nonce.map { it.toUByte() },
+                        ciphertext = ciphertext.asUByteArray().asList(),
+                        nonce = nonce.asUByteArray().asList(),
                         keyVersion = keyVersionFromParts(parts),
                     )
                 } else {
@@ -2449,7 +2477,7 @@ class ClipboardRepository(context: Context) {
                         itemId = id,
                         wallTimeMs = wallTimeMs,
                         contentType = contentType,
-                        plaintext = fileBytes.map { it.toUByte() },
+                        plaintext = fileBytes.asUByteArray().asList(),
                         fileName = fileName,
                         mime = mime,
                         deleted = false,
@@ -2472,7 +2500,7 @@ class ClipboardRepository(context: Context) {
                         itemId = id,
                         wallTimeMs = wallTimeMs,
                         contentType = contentType,
-                        plaintext = imageBytes.map { it.toUByte() },
+                        plaintext = imageBytes.asUByteArray().asList(),
                         // Images carry no in-band name/MIME header (only files do).
                         fileName = null,
                         mime = null,
@@ -2497,7 +2525,7 @@ class ClipboardRepository(context: Context) {
                         itemId = id,
                         wallTimeMs = wallTimeMs,
                         contentType = contentType,
-                        plaintext = plain.map { it.toUByte() },
+                        plaintext = plain.asUByteArray().asList(),
                         fileName = null,
                         mime = null,
                         deleted = false,
@@ -2556,6 +2584,7 @@ class ClipboardRepository(context: Context) {
                 // <nowMs>|text/plain|0||tombstone|<lamportTs>|1|
                 val ghostBlob = "$nowMs|text/plain|0||tombstone|$lamportTs|1|"
                 val ids = appendUniqueId(storedIds(), itemId)
+                cachedIds = ids
                 prefs.edit()
                     .putString("item_$itemId", ghostBlob)
                     .putString(KEY_ITEM_IDS, ids.joinToString(","))

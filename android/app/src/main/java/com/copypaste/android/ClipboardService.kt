@@ -180,6 +180,9 @@ class ClipboardService : Service() {
 
         val relayHttp = RelayClient(settings.relayUrl)
         syncManager = SyncManager(relayHttp, settings.deviceId, token = "", settings = settings)
+        // CopyPaste-3ox2: bind the FGS scope so thumbnail generation tasks in
+        // SyncManager are tied to the service lifecycle and cancelled on destroy.
+        syncManager.bindScope(scope)
 
         // P1.2/P1.4: Supabase Realtime WS client — constructed here so it can be
         // passed to FgsSyncLoop as the wsConnected gate.

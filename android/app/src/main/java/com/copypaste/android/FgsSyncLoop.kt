@@ -108,6 +108,14 @@ class FgsSyncLoop(
     private var job: Job? = null
 
     /**
+     * The scope passed to [start] — kept so [storeSyncedItem] can launch
+     * thumbnail generation tasks that are cancelled when the FGS is destroyed.
+     * Null before [start] (unit tests, stub mode) → falls back to an ad-hoc
+     * scope so callers that invoke [storeSyncedItem] directly do not crash.
+     */
+    private var fgsScope: CoroutineScope? = null
+
+    /**
      * CopyPaste-44rq.41: set to true inside [dialPairedPeer] whenever at least
      * one item was sent or received across any peer.  Read and reset by the
      * [start] loop immediately after each dial round to update
@@ -359,6 +367,7 @@ class FgsSyncLoop(
      */
     fun start(scope: CoroutineScope) {
         if (job?.isActive == true) return
+        fgsScope = scope
         job = scope.launch(Dispatchers.IO) {
             Log.i(TAG, "FgsSyncLoop started")
             var consecutiveEmpty = 0
@@ -513,6 +522,7 @@ class FgsSyncLoop(
     fun stop() {
         job?.cancel()
         job = null
+        fgsScope = null
     }
 
     /**
@@ -1138,7 +1148,10 @@ class FgsSyncLoop(
                             // waiting 50–200 ms for the decode/compress step.
                             val capturedId = storedId
                             val capturedBytes = plaintextBytes
-                            CoroutineScope(Dispatchers.Default).launch {
+                            // Use the FGS-bound scope so this task is cancelled when the
+                            // service is destroyed; fall back to an ad-hoc scope only in
+                            // unit tests where start() was never called.
+                            (fgsScope ?: CoroutineScope(Dispatchers.Default)).launch(Dispatchers.Default) {
                                 SyncThumbnailHelper.generateAndStore(capturedBytes) { thumbBytes ->
                                     repository.storeThumbnailBytes(capturedId, thumbBytes)
                                 }
