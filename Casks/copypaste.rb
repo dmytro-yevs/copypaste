@@ -26,41 +26,10 @@ cask "copypaste" do
   postflight do
     # Strip quarantine (ad-hoc signed builds, no Apple Developer ID).
     # Must run before any attempt to launch the app or its helpers.
+    # The daemon is NOT bootstrapped here — per ADR-014 the app owns the daemon
+    # lifecycle: it starts the daemon as a child on launch and stops it on quit.
     system_command "/usr/bin/xattr",
                    args: ["-cr", "#{appdir}/CopyPaste.app"]
-
-    # Install + bootstrap the LaunchAgent so the daemon starts on a fresh
-    # install. The app bundle ships a plist template at
-    #   CopyPaste.app/Contents/Resources/com.copypaste.daemon.plist
-    # with a `/Users/USERNAME` placeholder for the log paths. We copy it to
-    # the user's LaunchAgents dir (if absent), substitute the placeholder
-    # with the real home directory, then enable + bootstrap it.
-    #
-    # Use `launchctl bootstrap`/`enable` (macOS 13+) rather than the removed
-    # `launchctl load -w`. Everything is `must_succeed: false` so a failure
-    # never aborts the postflight and rolls back the installation.
-    home  = File.expand_path("~")
-    plist = Pathname.new("#{home}/Library/LaunchAgents/com.copypaste.daemon.plist")
-
-    unless plist.exist?
-      template = Pathname.new("#{appdir}/CopyPaste.app/Contents/Resources/com.copypaste.daemon.plist")
-      if template.exist?
-        contents = template.read
-        contents = contents.gsub("/Users/USERNAME", home).gsub("$HOME", home)
-        plist.dirname.mkpath
-        plist.write(contents)
-      end
-    end
-
-    if plist.exist?
-      uid = `id -u`.chomp
-      system_command "/bin/launchctl",
-                     args:         ["enable", "gui/#{uid}/com.copypaste.daemon"],
-                     must_succeed: false
-      system_command "/bin/launchctl",
-                     args:         ["bootstrap", "gui/#{uid}", plist.to_s],
-                     must_succeed: false
-    end
   end
 
   uninstall_preflight do
@@ -100,20 +69,18 @@ cask "copypaste" do
     the quarantine attribute on install, so you should not see a Gatekeeper
     warning.
 
-    The daemon runs as a LaunchAgent (#{ENV.fetch("USER", "current")} user). Logs at:
+    The daemon is managed by the CopyPaste app (ADR-014): it starts automatically
+    when you open the app and stops when you quit. No LaunchAgent is installed.
+    Logs at:
       ~/Library/Logs/CopyPaste/
 
-    First run starts the daemon automatically.
-
-    To stop the daemon WITHOUT disabling it (so it restarts on next login or
-    app launch), use `bootout` — do NOT use `launchctl unload`/`-w`, which
-    writes a persistent disable override that prevents the daemon from ever
-    starting again:
-      launchctl bootout gui/$(id -u)/com.copypaste.daemon
-
-    To start it again (or recover from a previously disabled state):
-      launchctl enable gui/$(id -u)/com.copypaste.daemon
-      launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.copypaste.daemon.plist
+    For headless / CLI-only use (without the desktop app), install the optional
+    LaunchAgent via:
+      scripts/launchd/install-agent.sh
+    or:
+      copypaste daemon install
+    Note: the LaunchAgent must NOT run at the same time as the desktop app —
+    the app will boot it out.
 
     If a previous upgrade failed and left CopyPaste in a stuck state, recover with:
       brew reinstall --cask --force copypaste
