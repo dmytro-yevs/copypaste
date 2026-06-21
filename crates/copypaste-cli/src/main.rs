@@ -157,7 +157,19 @@ enum Commands {
     /// a QR code in the terminal. Scan it from the CopyPaste Android app (or
     /// another desktop) to complete pairing automatically — no typing a code.
     PairQr {
-        /// Print the raw payload string instead of rendering the QR code.
+        /// Print the raw pairing-token string to stdout instead of rendering a
+        /// QR code in the terminal.
+        ///
+        /// WARNING (by-design): the raw token is printed to stdout and stays
+        /// in terminal scrollback history indefinitely. Anyone who later reads
+        /// your scrollback buffer — another user, a screen-recording, or a
+        /// crash dump — can use it to pair with your device until the token
+        /// expires. Use this flag only in scripts that consume the token
+        /// immediately and avoid leaving terminal sessions open afterwards.
+        ///
+        /// The token is single-use and short-lived; a warning with the
+        /// expiry duration is printed to stderr before the token appears on
+        /// stdout, so the risk is visible in interactive sessions.
         #[arg(long)]
         raw: bool,
     },
