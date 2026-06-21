@@ -203,19 +203,20 @@ internal fun shouldPaintTintBlob(
 ): Boolean = background == SkinBackground.TINT_BLOB && translucent && paintCanvasBackdrop
 
 /**
- * CopyPaste-mgkr (NG-3): trust label for a paired peer.
+ * CopyPaste-mgkr / CopyPaste-1jms.4 (NG-3): trust label for a paired peer.
  *
- * Every peer in the [PairedPeer] roster completed SAS confirmation before being
- * added — that step requires both humans to visually verify the Short
- * Authentication String, proving absence of a man-in-the-middle. All persisted
- * peers are therefore "Verified" and this helper encodes that contract.
+ * Returns "Verified" only when [PairedPeer.sasVerified] is true — meaning the
+ * peer was admitted through the SAS (Short Authentication String) flow that
+ * proves absence of a man-in-the-middle. All historical roster entries default
+ * to sasVerified=true for backward-compatibility.
  *
- * Returns "Verified" for any non-null [PairedPeer]. Extracted as a pure
- * function so unit tests can verify the label without the Compose runtime and
- * so future differentiation (e.g. a Cloud-only peer that was imported without
- * SAS) can be added here without touching the composable.
+ * Peers admitted by any other mechanism (cloud-import, admin provisioning, etc.)
+ * have sasVerified=false and receive "Unverified" so users can distinguish them.
+ *
+ * Extracted as a pure function for unit-testability without the Compose runtime.
  */
-internal fun trustLabel(peer: PairedPeer): String = "Verified"
+internal fun trustLabel(peer: PairedPeer): String =
+    if (peer.sasVerified) "Verified" else "Unverified"
 
 /**
  * "Online" recency threshold for the per-peer green dot.
@@ -326,6 +327,29 @@ object DevicesOnlineState {
      */
     fun setSyncing(active: Boolean) {
         _isSyncing.value = active
+    }
+
+    /**
+     * CopyPaste-5917.52: true when the last sync attempt failed with a hard error
+     * (backend auth failure, relay unreachable, persistent P2P dial failure) and
+     * the daemon has not recovered since. Set by [FgsSyncLoop] via [setSyncError].
+     *
+     * When true AND the OS has internet, [resolveSyncBadgeState] returns
+     * [SyncBadgeState.DaemonUnreachable] (red dot) — making [DaemonUnreachable]
+     * reachable via the production code path for the first time. Previously the
+     * state was only reachable via the IPC path that does not yet exist on Android.
+     *
+     * Thread-safe: [MutableStateFlow.value] assignments are atomic.
+     */
+    private val _isSyncError = MutableStateFlow(false)
+    val isSyncError: StateFlow<Boolean> = _isSyncError.asStateFlow()
+
+    /**
+     * Called by [FgsSyncLoop] when a sync operation ends in a hard error
+     * ([error]=true) or recovers ([error]=false). Safe to call from any thread.
+     */
+    fun setSyncError(error: Boolean) {
+        _isSyncError.value = error
     }
 
     internal fun publish(count: Int, maxLastSyncMs: Long = 0L) {
@@ -1329,11 +1353,11 @@ private fun OwnQrSection(settings: Settings) {
 
     // Generate (or regenerate) the QR.
     //
-    // CopyPaste-o0yv: re-blur on every refresh (both manual and the 120 s auto-
-    // refresh). A live pairing token is sensitive material — leaving it visible
-    // after the TTL expires and a new token is silently generated would expose
-    // the fresh token to shoulder-surfers when the user has stepped away. The
-    // blur is cleared only by an explicit tap-to-reveal.
+    // CopyPaste-v5a / CopyPaste-5917.36: blur state is INDEPENDENT of QR generation.
+    // generateQr() MUST NOT touch qrBlurred — only an explicit first tap reveals,
+    // and the reveal state persists across subsequent token refreshes (both manual
+    // second-tap and the automatic 120 s TTL rotation). This matches PairActivity
+    // line 437-439 ("The blur is user-owned") and the macOS DevicesView policy.
     fun generateQr() {
         scope.launch {
             loading = true
@@ -1346,9 +1370,7 @@ private fun OwnQrSection(settings: Settings) {
                 }
                 qr = result
                 qrBitmap = bmp
-                // CopyPaste-o0yv: re-blur after every QR generation so a fresh
-                // pairing token is never automatically exposed without a tap.
-                qrBlurred = true
+                // qrBlurred intentionally NOT touched here — see CopyPaste-v5a above.
             } catch (e: Exception) {
                 // CopyPaste-7yno / CopyPaste-jwga: log raw detail internally but
                 // never store it in user-visible state — set a boolean sentinel

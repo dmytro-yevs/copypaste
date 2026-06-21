@@ -2041,6 +2041,18 @@ data class PairedPeer(
     // active sync session. Wired to the UI via DevicesViewModel; actual FgsSyncLoop
     // instrumentation deferred to CopyPaste-8dd (Gradle build cycle).
     val latencyMs: Int? = null,
+    /**
+     * CopyPaste-1jms.4: true when this peer was admitted through the SAS
+     * (Short Authentication String) confirmation flow (QR scan + visual verify).
+     * Defaults to [true] for backward-compatibility with existing persisted
+     * entries (all historical entries were created via the SAS flow).
+     *
+     * Set to [false] for peers admitted by any other mechanism (e.g. future
+     * cloud-import or admin provisioning) so [trustLabel] can surface the
+     * distinction. Only [PairActivity.runPairAndSync] and
+     * [SasPairingDialog.persistConfirmed] should set this to [true].
+     */
+    val sasVerified: Boolean = true,
 ) {
     /** Convenience overload for callers that have no wrapped key yet (e.g. the
      *  legacy-fingerprint shim). Defaults the wrapped fields to empty. */
