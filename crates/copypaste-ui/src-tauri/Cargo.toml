@@ -66,6 +66,10 @@ objc2-user-notifications = { version = "0.3", features = [
     "UNNotificationContent",
     "UNNotificationRequest",
     "UNNotificationTrigger",
+    # UNNotificationSettings + UNAuthorizationStatus: used by
+    # check_notification_permission (CopyPaste-44rq.28) to query
+    # getNotificationSettingsWithCompletionHandler.
+    "UNNotificationSettings",
     "block2",
 ] }
 # objc2-foundation 0.3.x is required by objc2-user-notifications 0.3.x (which

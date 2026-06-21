@@ -15,13 +15,6 @@
 //! # Thread safety
 //! `CURRENT_ACCEL` is a `Mutex<String>` written by the Tauri command thread
 //! and read by the tap callback on every key event.
-//!
-//! # Shortcut recording
-//! `start_recording` / `stop_recording` install a *separate* one-shot HID tap
-//! at `kCGHIDEventTapLocation` — below the Hammerspoon session tap — that
-//! captures the next raw keyDown (keycode + flags) and converts it to a Tauri
-//! accelerator string.  This lets the recorder see physical keys even when
-//! Hammerspoon has remapped them.
 
 // reason: CGEventTap bindings from the `core-graphics` crate expose C-style
 // constants with lowercase_with_underscores names (e.g. kCGEventTapOptionDefault).
@@ -83,18 +76,8 @@ fn global_callback() -> &'static Mutex<Option<Callback>> {
     CALLBACK.get_or_init(|| Mutex::new(None))
 }
 
-// ---------------------------------------------------------------------------
-// Shared state — recording tap
-// ---------------------------------------------------------------------------
-
-/// When `Some`, the recorder is active and the closure will receive the next
-/// captured accelerator string then set the slot back to `None`.
-type RecordCallback = Box<dyn FnOnce(String) + Send + 'static>;
-static RECORD_CB: OnceLock<Mutex<Option<RecordCallback>>> = OnceLock::new();
-
-fn record_cb() -> &'static Mutex<Option<RecordCallback>> {
-    RECORD_CB.get_or_init(|| Mutex::new(None))
-}
+// Recording tap (start_recording / stop_recording) was removed in CopyPaste-loyk.7:
+// the Tauri commands that called into this were dead (no TypeScript call sites).
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -121,49 +104,6 @@ pub fn open_accessibility_settings() {
 pub fn update_tap_shortcut(accel: &str) {
     let mut guard = current_accel().lock().expect("mutex poisoned");
     *guard = accel.to_owned();
-}
-
-/// Start recording mode: installs a one-shot HID-level tap that captures the
-/// next key chord (excluding bare modifiers) and delivers it as a Tauri
-/// accelerator string to `on_capture`.
-///
-/// The tap is placed at `kCGHIDEventTapLocation` — below Hammerspoon's session
-/// tap — so it sees raw physical keycodes before any remapping.
-///
-/// The captured event is *dropped* (swallowed) so it doesn't reach the app.
-///
-/// # Permissions required
-/// Accessibility (`AXIsProcessTrusted()`) **and** Input Monitoring
-/// (`kTCCServiceListenEvent`) must both be granted.  Without them
-/// `CGEventTap::new` returns `Err(())`.
-///
-/// # Keys macOS will not deliver
-/// Some hardware-level combos (e.g. Ctrl+Cmd+Q, or the Touch ID button) are
-/// handled by the kernel/security layer before any HID tap and cannot be
-/// captured.
-pub fn start_recording(on_capture: impl FnOnce(String) + Send + 'static) -> Result<(), String> {
-    if !accessibility_granted() {
-        return Err("Accessibility permission not granted".into());
-    }
-
-    // Overwrite any previous pending recording callback.
-    {
-        let mut guard = record_cb().lock().expect("mutex poisoned");
-        *guard = Some(Box::new(on_capture));
-    }
-
-    std::thread::Builder::new()
-        .name("cgeventtap-recorder".into())
-        .spawn(recording_tap_thread)
-        .map_err(|e| format!("spawn recorder thread: {e}"))?;
-
-    Ok(())
-}
-
-/// Cancel an in-progress recording session (no-op if not recording).
-pub fn stop_recording() {
-    let mut guard = record_cb().lock().expect("mutex poisoned");
-    *guard = None;
 }
 
 /// Install the CGEventTap on a dedicated background thread.
@@ -318,190 +258,6 @@ fn tap_thread_main() {
             tracing::debug!("CGEventTap run loop exited; tap + source released");
         }
     }
-}
-
-/// One-shot recording tap at HID level (below Hammerspoon's session tap).
-/// Captures the first non-modifier key chord, converts it to a Tauri
-/// accelerator string, calls the stored callback, then exits.
-fn recording_tap_thread() {
-    let result = CGEventTap::new(
-        // kCGHIDEventTapLocation = 0: lowest-level tap, before remapping.
-        CGEventTapLocation::HID,
-        CGEventTapPlacement::HeadInsertEventTap,
-        CGEventTapOptions::Default,
-        vec![CGEventType::KeyDown],
-        |_proxy, _etype, event| {
-            let kc = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE) as u16;
-            let flags = event.get_flags();
-
-            let modifier_mask = CGEventFlags::CGEventFlagCommand
-                | CGEventFlags::CGEventFlagControl
-                | CGEventFlags::CGEventFlagAlternate
-                | CGEventFlags::CGEventFlagShift;
-
-            // Ignore bare modifier keypresses.
-            let is_bare_modifier = matches!(
-                kc,
-                0x37 | // Cmd (left)
-                0x36 | // Cmd (right)
-                0x3B | // Ctrl (left)
-                0x3E | // Ctrl (right)
-                0x38 | // Shift (left)
-                0x3C | // Shift (right)
-                0x3A | // Option (left)
-                0x3D // Option (right)
-            );
-            if is_bare_modifier {
-                return CallbackResult::Keep;
-            }
-
-            // Consume the callback (one-shot).
-            let cb_opt = {
-                let mut guard = record_cb().lock().expect("mutex poisoned");
-                guard.take()
-            };
-            if let Some(cb) = cb_opt {
-                let mods = flags & modifier_mask;
-                let accel = keycode_flags_to_accelerator(kc, mods);
-                cb(accel);
-                // Stop the run loop after delivering.
-                CFRunLoop::get_current().stop();
-                return CallbackResult::Drop;
-            }
-
-            // Recording was cancelled; exit cleanly.
-            CFRunLoop::get_current().stop();
-            CallbackResult::Keep
-        },
-    );
-
-    match result {
-        Err(()) => {
-            tracing::error!("Recording CGEventTap::new failed — permission denied?");
-            // Clear callback so callers know recording did not start.
-            let mut guard = record_cb().lock().expect("mutex poisoned");
-            *guard = None;
-        }
-        Ok(tap) => {
-            let source = tap
-                .mach_port()
-                .create_runloop_source(0)
-                .expect("recorder: create_runloop_source failed");
-            let rl = CFRunLoop::get_current();
-            rl.add_source(&source, unsafe { kCFRunLoopCommonModes });
-            tap.enable();
-            CFRunLoop::run_current();
-        }
-    }
-}
-
-/// Convert a raw macOS virtual keycode + CGEventFlags to a Tauri accelerator
-/// string (e.g. `"CmdOrCtrl+Shift+V"`).
-fn keycode_flags_to_accelerator(kc: u16, flags: CGEventFlags) -> String {
-    let mut parts: Vec<&str> = Vec::new();
-
-    if flags.contains(CGEventFlags::CGEventFlagCommand) {
-        parts.push("CmdOrCtrl");
-    }
-    if flags.contains(CGEventFlags::CGEventFlagAlternate) {
-        parts.push("Alt");
-    }
-    if flags.contains(CGEventFlags::CGEventFlagShift) {
-        parts.push("Shift");
-    }
-    if flags.contains(CGEventFlags::CGEventFlagControl) {
-        parts.push("Ctrl");
-    }
-
-    let key_name = keycode_to_name(kc);
-    let mut result = parts.join("+");
-    if !result.is_empty() {
-        result.push('+');
-    }
-    result.push_str(key_name.as_deref().unwrap_or("Unknown"));
-    result
-}
-
-/// Map a macOS virtual keycode to its Tauri accelerator key name.
-fn keycode_to_name(kc: u16) -> Option<String> {
-    Some(
-        match kc {
-            0x31 => "Space",
-            0x24 => "Return",
-            0x35 => "Escape",
-            0x30 => "Tab",
-            0x33 => "Backspace",
-            0x7A => "F1",
-            0x78 => "F2",
-            0x63 => "F3",
-            0x76 => "F4",
-            0x60 => "F5",
-            0x61 => "F6",
-            0x62 => "F7",
-            0x64 => "F8",
-            0x65 => "F9",
-            0x6D => "F10",
-            0x67 => "F11",
-            0x6F => "F12",
-            0x7E => "Up",
-            0x7D => "Down",
-            0x7B => "Left",
-            0x7C => "Right",
-            0x73 => "Home",
-            0x77 => "End",
-            0x74 => "PageUp",
-            0x79 => "PageDown",
-            _ => {
-                // For letter/digit keys look up via the inverse of ascii_to_keycode.
-                let c = keycode_to_ascii(kc)?;
-                return Some(c.to_string());
-            }
-        }
-        .to_owned(),
-    )
-}
-
-/// Inverse of `ascii_to_keycode`: return the ASCII char for a keycode.
-fn keycode_to_ascii(kc: u16) -> Option<char> {
-    Some(match kc {
-        0x00 => 'A',
-        0x01 => 'S',
-        0x02 => 'D',
-        0x03 => 'F',
-        0x04 => 'H',
-        0x05 => 'G',
-        0x06 => 'Z',
-        0x07 => 'X',
-        0x08 => 'C',
-        0x09 => 'V',
-        0x0B => 'B',
-        0x0C => 'Q',
-        0x0D => 'W',
-        0x0E => 'E',
-        0x0F => 'R',
-        0x10 => 'Y',
-        0x11 => 'T',
-        0x12 => '1',
-        0x13 => '2',
-        0x14 => '3',
-        0x15 => '4',
-        0x16 => '6',
-        0x17 => '5',
-        0x19 => '9',
-        0x1A => '7',
-        0x1C => '8',
-        0x1D => '0',
-        0x1F => 'O',
-        0x20 => 'U',
-        0x22 => 'I',
-        0x23 => 'P',
-        0x25 => 'L',
-        0x26 => 'J',
-        0x28 => 'K',
-        0x2D => 'N',
-        0x2E => 'M',
-        _ => return None,
-    })
 }
 
 // ---------------------------------------------------------------------------
