@@ -384,6 +384,13 @@ pub enum RelayError {
     /// The configured `relay_url` is not a usable HTTPS (or loopback in tests) URL.
     #[error("relay_url is not a valid https URL")]
     InvalidUrl,
+    /// `relay_url` was explicitly cleared (set to `""` sentinel) — relay is disabled.
+    ///
+    /// Returned by [`start_relay`] when the caller passes an empty string, and by
+    /// [`relay_url_is_clear`] so the `set_config` IPC handler can detect the sentinel
+    /// and shut down a running [`RelayHandle`] without needing to know URL internals.
+    #[error("relay_url cleared — relay sync disabled")]
+    Disabled,
     /// Network / transport failure talking to the relay.
     #[error("relay request failed: {0}")]
     Transport(String),
@@ -416,6 +423,60 @@ impl Drop for RelayHandle {
     fn drop(&mut self) {
         self.shutdown.notify_waiters();
     }
+}
+
+// ── relay_url sentinel ───────────────────────────────────────────────────────
+
+/// Returns `true` when `url` represents an explicit "clear / disable relay"
+/// intent, i.e. when it is `None` or an empty / whitespace-only string.
+///
+/// ## Sentinel contract
+///
+/// The IPC `set_config` handler cannot write `relay_url = None` to `config.toml`
+/// directly because `update_core_config` only writes `Some(v)` values (the
+/// field is optional and `None` is treated as "omitted / no change").  The
+/// agreed sentinel for "clear the relay" is an **empty string** (`""`):
+///
+/// - **Caller (CLI / UI / ipc.rs):** send `set_config { relay_url: "" }`.
+/// - **`update_core_config` (ipc.rs):** detects `Some("")` and sets
+///   `core.relay_url = None` instead of `Some("")`; then saves the config.
+///   *Until ipc.rs is updated this clearing step is SKIPPED — see note below.*
+/// - **`set_config` handler (ipc.rs):** after writing config, checks
+///   `relay_url_is_clear(incoming.relay_url.as_deref())` and, if true, drops
+///   the live `RelayHandle` (which triggers shutdown via `Drop`).
+/// - **`start_relay`:** returns `Err(RelayError::Disabled)` for an empty-string
+///   URL so the caller never starts new relay loops for the cleared sentinel.
+///
+/// ## Current ipc.rs gap (what ipc.rs MUST do — but cannot be changed here)
+///
+/// `update_core_config` at ipc.rs:466 must be updated:
+/// ```text
+/// // Before (does not handle clear):
+/// if let Some(ref v) = incoming.relay_url {
+///     core.relay_url = Some(v.clone());
+/// }
+/// // After (treats "" as "clear"):
+/// match incoming.relay_url.as_deref() {
+///     Some("") => core.relay_url = None,          // sentinel → clear
+///     Some(v)  => core.relay_url = Some(v.to_owned()), // normal set
+///     None     => {}                               // omitted → no change
+/// }
+/// ```
+/// And `merge_config` at ipc.rs:519 must be updated:
+/// ```text
+/// // Before:
+/// relay_url: incoming.relay_url.or(existing.relay_url),
+/// // After:
+/// relay_url: if incoming.relay_url.as_deref() == Some("") {
+///     None                                        // sentinel → clear
+/// } else {
+///     incoming.relay_url.or(existing.relay_url)   // normal merge
+/// },
+/// ```
+/// And the `set_config` handler must drop the running `RelayHandle` when this
+/// function returns `true` for the incoming `relay_url`.
+pub fn relay_url_is_clear(url: Option<&str>) -> bool {
+    url.map_or(true, |s| s.trim().is_empty())
 }
 
 // ── Token cache (0600 file) ─────────────────────────────────────────────────
@@ -1481,6 +1542,13 @@ pub fn start_relay(
     core_config: Arc<std::sync::RwLock<AppConfig>>,
     auto_apply_change_count: Option<Arc<AtomicI64>>,
 ) -> Result<RelayHandle, RelayError> {
+    // Empty / whitespace-only URL is the sentinel for "relay disabled / cleared".
+    // Return Disabled (not InvalidUrl) so the caller can distinguish a deliberate
+    // clear from a malformed URL and act accordingly (e.g. stop relay fan-out).
+    if relay_url_is_clear(Some(relay_url.as_str())) {
+        tracing::info!("relay-sync: relay_url cleared (empty sentinel) — relay disabled");
+        return Err(RelayError::Disabled);
+    }
     let relay_url = relay_url.trim_end_matches('/').to_owned();
     if !is_relay_url_ok(&relay_url) {
         return Err(RelayError::InvalidUrl);
@@ -1545,6 +1613,86 @@ mod tests {
             .timeout(SYNC_HTTP_TIMEOUT)
             .build()
             .expect("client")
+    }
+
+    // ── relay_url_is_clear sentinel tests ────────────────────────────────────
+
+    /// `relay_url_is_clear` returns true for None, empty string, and
+    /// whitespace-only strings (all mean "relay disabled / not configured").
+    #[test]
+    fn relay_url_is_clear_detects_disabled_sentinel() {
+        assert!(relay_url_is_clear(None), "None → cleared");
+        assert!(
+            relay_url_is_clear(Some("")),
+            "empty string → cleared (the clear sentinel)"
+        );
+        assert!(relay_url_is_clear(Some("   ")), "whitespace-only → cleared");
+        assert!(
+            !relay_url_is_clear(Some("https://relay.example.com")),
+            "valid URL → NOT cleared"
+        );
+        assert!(
+            !relay_url_is_clear(Some("http://127.0.0.1:8080")),
+            "loopback URL → NOT cleared"
+        );
+    }
+
+    /// `start_relay` returns `Err(RelayError::Disabled)` for an empty relay_url
+    /// sentinel so the caller can distinguish a deliberate clear from an invalid URL.
+    #[test]
+    fn start_relay_empty_url_returns_disabled() {
+        use copypaste_core::{AppConfig, Database};
+        use std::sync::{Arc, RwLock};
+        use tokio::sync::Mutex;
+
+        // Minimal stubs — start_relay never reaches network code for the sentinel.
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("db")));
+        let (tx, rx) = tokio::sync::broadcast::channel(1);
+        drop(tx); // channel is open; rx is enough for the signature
+        let sync_key: Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>> =
+            Arc::new(tokio::sync::Mutex::new(None));
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+        let last_sync = Arc::new(AtomicI64::new(0));
+        let core_config = Arc::new(RwLock::new(AppConfig::default()));
+
+        let client = reqwest::Client::new();
+
+        // Empty string sentinel → Disabled, not InvalidUrl.
+        let result = crate::relay::start_relay(
+            client.clone(),
+            "".to_owned(),
+            "test-device".to_owned(),
+            db.clone(),
+            rx,
+            sync_key.clone(),
+            local_key.clone(),
+            last_sync.clone(),
+            core_config.clone(),
+            None,
+        );
+        assert!(
+            matches!(result, Err(RelayError::Disabled)),
+            "empty relay_url must yield Err(RelayError::Disabled)"
+        );
+
+        // Whitespace-only is also the sentinel.
+        let (_, rx2) = tokio::sync::broadcast::channel(1);
+        let result2 = crate::relay::start_relay(
+            client,
+            "   ".to_owned(),
+            "test-device".to_owned(),
+            db,
+            rx2,
+            sync_key,
+            local_key,
+            last_sync,
+            core_config,
+            None,
+        );
+        assert!(
+            matches!(result2, Err(RelayError::Disabled)),
+            "whitespace relay_url must yield Err(RelayError::Disabled)"
+        );
     }
 
     // ── WiFi / auto-apply guard tests ─────────────────────────────────────────

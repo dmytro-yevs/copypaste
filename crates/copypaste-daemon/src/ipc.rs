@@ -465,8 +465,15 @@ pub(crate) fn update_core_config(
     if let Some(ref v) = incoming.excluded_app_bundle_ids {
         core.excluded_app_bundle_ids = v.clone();
     }
+    // CopyPaste-44rq.10: treat empty/whitespace relay_url as a clear sentinel.
+    // A `None` incoming means "field omitted — no change". `Some("")` or
+    // `Some("  ")` is the explicit clear sentinel documented in relay.rs.
     if let Some(ref v) = incoming.relay_url {
-        core.relay_url = Some(v.clone());
+        if crate::relay::relay_url_is_clear(Some(v.as_str())) {
+            core.relay_url = None; // "" / whitespace sentinel → clear
+        } else {
+            core.relay_url = Some(v.clone()); // normal URL → set
+        }
     }
     if let Some(v) = incoming.lan_visibility {
         core.lan_visibility = v;
@@ -518,7 +525,16 @@ fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfig {
         p2p_enabled: incoming.p2p_enabled.or(existing.p2p_enabled),
         supabase_url: incoming.supabase_url.or(existing.supabase_url),
         supabase_anon_key: incoming.supabase_anon_key.or(existing.supabase_anon_key),
-        relay_url: incoming.relay_url.or(existing.relay_url),
+        // CopyPaste-44rq.10: an empty-string sentinel means "clear"; do not fall
+        // back to the existing value in that case. Otherwise use the normal
+        // None-preserves-existing merge so omitted fields keep their stored value.
+        relay_url: if crate::relay::relay_url_is_clear(incoming.relay_url.as_deref())
+            && incoming.relay_url.is_some()
+        {
+            None // explicit "" / whitespace → clear
+        } else {
+            incoming.relay_url.or(existing.relay_url)
+        },
         supabase_email: incoming.supabase_email.or(existing.supabase_email),
         supabase_password: incoming.supabase_password.or(existing.supabase_password),
         sound_on_copy: incoming.sound_on_copy.or(existing.sound_on_copy),
@@ -1466,6 +1482,19 @@ pub struct IpcServer {
     /// queueing or blocking. `Arc`-wrapped so it can be shared with the spawned
     /// connection tasks without lifetime issues.
     conn_semaphore: Arc<tokio::sync::Semaphore>,
+
+    /// CopyPaste-44rq.10: handle to the live relay push/poll loops (relay-sync
+    /// feature). Dropping or calling [`RelayHandle::shutdown`] stops both loops.
+    ///
+    /// The `set_config` handler replaces (drops) this slot when `relay_url` is
+    /// cleared via the `""` sentinel so relay polling stops immediately without
+    /// a daemon restart. Populated externally by `daemon.rs` via
+    /// [`relay_handle_slot`](Self::relay_handle_slot) after `start_relay` returns.
+    ///
+    /// `std::sync::Mutex` (not tokio's) because the critical section is a trivial
+    /// replace with no `.await`.
+    #[cfg(feature = "relay-sync")]
+    relay_handle: Arc<std::sync::Mutex<Option<crate::relay::RelayHandle>>>,
 }
 
 /// Wire-serialisable peer event record returned by `poll_peer_events`.
@@ -1755,6 +1784,9 @@ impl IpcServer {
             in_memory_cloud_password: Arc::new(std::sync::Mutex::new(None)),
             // CopyPaste-6ot5: start with the full connection cap available.
             conn_semaphore: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CONNECTIONS)),
+            // CopyPaste-44rq.10: populated externally via relay_handle_slot().
+            #[cfg(feature = "relay-sync")]
+            relay_handle: Arc::new(std::sync::Mutex::new(None)),
         }
     }
 
@@ -1766,6 +1798,18 @@ impl IpcServer {
     pub fn with_read_pool(mut self, pool: Arc<copypaste_core::SqlitePool>) -> Self {
         self.read_pool = Some(pool);
         self
+    }
+
+    /// Return the slot that `daemon.rs` stores the live [`crate::relay::RelayHandle`] into
+    /// after `start_relay` succeeds (CopyPaste-44rq.10).
+    ///
+    /// The `set_config` handler drops the handle from this slot when the caller
+    /// clears `relay_url` (sends `""`), causing both relay loops to stop immediately.
+    /// `daemon.rs` writes into this Arc after `start_relay` returns so that the
+    /// handle is injectable after the IpcServer has been moved into its task.
+    #[cfg(feature = "relay-sync")]
+    pub fn relay_handle_slot(&self) -> Arc<std::sync::Mutex<Option<crate::relay::RelayHandle>>> {
+        Arc::clone(&self.relay_handle)
     }
 
     /// Attach the shared live core config (`config.toml`) for hot-reload.
@@ -3289,7 +3333,11 @@ impl IpcServer {
             let line = match std::str::from_utf8(&buf) {
                 Ok(s) => s,
                 Err(e) => {
-                    let resp = Response::err("0", format!("invalid UTF-8: {e}"));
+                    let resp = Response::err_with_code(
+                        "0",
+                        ERR_CODE_INVALID_ARGUMENT,
+                        format!("invalid UTF-8: {e}"),
+                    );
                     if let Ok(mut out) = serde_json::to_string(&resp) {
                         out.push('\n');
                         let _ = writer.write_all(out.as_bytes()).await;
@@ -3565,7 +3613,9 @@ impl IpcServer {
                         req.id,
                         serde_json::json!({"items": json_items, "total": total}),
                     ),
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3598,7 +3648,9 @@ impl IpcServer {
                 .await;
                 match join {
                     Ok(Ok(n)) => Response::ok(req.id, serde_json::json!({"count": n})),
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3840,7 +3892,9 @@ impl IpcServer {
                         }
                         Response::ok(req.id, serde_json::json!({ "deleted": count }))
                     }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -3947,7 +4001,9 @@ impl IpcServer {
                         }
                         Response::ok(req.id, serde_json::json!({"pinned": pinned, "id": id}))
                     }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4014,7 +4070,9 @@ impl IpcServer {
                         }
                         Response::ok(req.id, serde_json::json!({"ok": true}))
                     }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4140,16 +4198,20 @@ impl IpcServer {
                             ERR_CODE_AUTH_FAILED,
                             format!("paste decrypt failed: {msg}"),
                         ),
-                        Err(PasteboardError::Other(msg)) => {
-                            Response::err(req.id, format!("pasteboard write failed: {msg}"))
-                        }
+                        Err(PasteboardError::Other(msg)) => Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("pasteboard write failed: {msg}"),
+                        ),
                     },
                     Ok(Ok((None, _))) => Response::err_with_code(
                         req.id,
                         ERR_CODE_NOT_FOUND,
                         format!("item not found: {id}"),
                     ),
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4291,7 +4353,9 @@ impl IpcServer {
                     Ok(Ok(ItemImageResult::Auth(msg))) => {
                         Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg)
                     }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4482,7 +4546,9 @@ impl IpcServer {
                         ERR_CODE_NOT_FOUND,
                         format!("item not found: {id}"),
                     ),
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4626,7 +4692,9 @@ impl IpcServer {
                     Ok(Ok(ItemFileResult::Auth(msg))) => {
                         Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg)
                     }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4790,7 +4858,9 @@ impl IpcServer {
                             "own_device_id": own_device_id,
                         }),
                     ),
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -4818,7 +4888,9 @@ impl IpcServer {
                             redact_config_secrets(&mut v);
                             Response::ok(req.id, v)
                         }
-                        Err(e) => Response::err(req.id, e.to_string()),
+                        Err(e) => {
+                            Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                        }
                     },
                     Err(e) => Response::err_with_code(
                         req.id,
@@ -4830,7 +4902,13 @@ impl IpcServer {
             "set_config" => {
                 let incoming: AppConfig = match serde_json::from_value(req.params.clone()) {
                     Ok(c) => c,
-                    Err(e) => return Response::err(req.id, format!("invalid config: {e}")),
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            format!("invalid config: {e}"),
+                        )
+                    }
                 };
                 // Capture the requested lan_visibility toggle BEFORE we move
                 // `incoming` into the blocking task, so we can hot-apply it to
@@ -4844,6 +4922,12 @@ impl IpcServer {
                 // the NEXT daemon restart. `None` means the caller did not send
                 // the field — no change, no notice needed.
                 let requested_p2p_enabled = incoming.p2p_enabled;
+                // CopyPaste-44rq.10: capture the relay_url BEFORE moving `incoming`
+                // into the blocking task so we can check the clear-sentinel after
+                // the config write succeeds.
+                let requested_relay_url = incoming.relay_url.clone();
+                #[cfg(feature = "relay-sync")]
+                let relay_handle_arc = Arc::clone(&self.relay_handle);
                 // MERGE, don't overwrite. `get_config` redacts the secret
                 // fields (`supabase_password`, `supabase_email`) to `*_set`
                 // booleans and drops the real values, so a UI/CLI
@@ -4969,9 +5053,28 @@ impl IpcServer {
                                 "p2p_enabled persisted — change takes effect on next daemon restart"
                             );
                         }
+                        // CopyPaste-44rq.10: if the caller explicitly cleared
+                        // relay_url (sent "" or whitespace), drop the live
+                        // RelayHandle so push/poll loops stop immediately.
+                        // `relay_url_is_clear(None)` returns true too, so guard
+                        // with `is_some()` to distinguish "omitted" from "cleared".
+                        #[cfg(feature = "relay-sync")]
+                        if requested_relay_url.is_some()
+                            && crate::relay::relay_url_is_clear(requested_relay_url.as_deref())
+                        {
+                            let dropped = relay_handle_arc
+                                .lock()
+                                .unwrap_or_else(|p| p.into_inner())
+                                .take();
+                            if dropped.is_some() {
+                                tracing::info!("relay_url cleared — stopped live relay sync loops");
+                            }
+                        }
                         Response::ok(req.id, serde_json::json!({"saved": true}))
                     }
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                    Ok(Err(e)) => {
+                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
+                    }
                     Err(e) => Response::err_with_code(
                         req.id,
                         ERR_CODE_INTERNAL_ERROR,
@@ -5174,7 +5277,11 @@ impl IpcServer {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("set_sync_passphrase: key derivation failed: {e}");
-                        return Response::err(req.id, format!("key derivation failed: {e}"));
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("key derivation failed: {e}"),
+                        );
                     }
                 };
 
@@ -5228,7 +5335,11 @@ impl IpcServer {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("rotate_sync_key: key derivation failed: {e}");
-                        return Response::err(req.id, format!("key derivation failed: {e}"));
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("key derivation failed: {e}"),
+                        );
                     }
                 };
 
@@ -5374,7 +5485,11 @@ impl IpcServer {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("revoke_and_rotate: key derivation failed: {e}");
-                        return Response::err(req.id, format!("key derivation failed: {e}"));
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("key derivation failed: {e}"),
+                        );
                     }
                 };
 
@@ -5405,11 +5520,21 @@ impl IpcServer {
                                 .unwrap_or(true)
                         });
                         if let Err(e) = save_peers(&peers) {
-                            return Response::err(req.id, format!("failed to save peers: {e}"));
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INTERNAL_ERROR,
+                                format!("failed to save peers: {e}"),
+                            );
                         }
                         (peers.len() < before_len, name)
                     }
-                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("failed to load peers: {e}"),
+                        )
+                    }
                 };
 
                 let db_arc = self.db.clone();
@@ -6310,8 +6435,9 @@ impl IpcServer {
                     Some(fingerprint) => {
                         Response::ok(req.id, serde_json::json!({ "fingerprint": fingerprint }))
                     }
-                    None => Response::err(
+                    None => Response::err_with_code(
                         req.id,
+                        ERR_CODE_NOT_IMPLEMENTED,
                         "P2P is disabled (set COPYPASTE_P2P=1): no mTLS certificate \
                          to advertise for pairing",
                     ),
@@ -6526,7 +6652,11 @@ impl IpcServer {
 
                         Response::ok(req.id, serde_json::json!({ "peers": enriched }))
                     }
-                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("failed to load peers: {e}"),
+                    ),
                 }
             }
 
@@ -6562,7 +6692,13 @@ impl IpcServer {
             "list_discovered" => {
                 let disc = match self.discovery.as_ref() {
                     Some(d) => d,
-                    None => return Response::err(req.id, "discovery not available (P2P disabled)"),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_NOT_IMPLEMENTED,
+                            "discovery not available (P2P disabled)",
+                        )
+                    }
                 };
 
                 // HB-4: the mDNS `device_id` is a UUID, NOT a cert fingerprint, so
@@ -6627,7 +6763,13 @@ impl IpcServer {
             "rescan_discovered" => {
                 let disc = match self.discovery.as_ref() {
                     Some(d) => d,
-                    None => return Response::err(req.id, "discovery not available (P2P disabled)"),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_NOT_IMPLEMENTED,
+                            "discovery not available (P2P disabled)",
+                        )
+                    }
                 };
 
                 // CopyPaste-ydhw: abort any browse handle stored from a prior
@@ -6701,7 +6843,11 @@ impl IpcServer {
                             .unwrap_or_else(|p| p.into_inner()) = Some(wrapper_handle);
                     }
                     Err(e) => {
-                        return Response::err(req.id, format!("rescan failed to start: {e}"));
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("rescan failed to start: {e}"),
+                        );
                     }
                 }
 
@@ -6859,7 +7005,13 @@ impl IpcServer {
             "unpair_peer" => {
                 let fingerprint = match req.params.get("fingerprint").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => return Response::err(req.id, "missing param: fingerprint"),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: fingerprint",
+                        )
+                    }
                 };
 
                 match load_peers() {
@@ -6929,10 +7081,18 @@ impl IpcServer {
                                     serde_json::json!({ "ok": true, "removed": removed }),
                                 )
                             }
-                            Err(e) => Response::err(req.id, format!("failed to save peers: {e}")),
+                            Err(e) => Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INTERNAL_ERROR,
+                                format!("failed to save peers: {e}"),
+                            ),
                         }
                     }
-                    Err(e) => Response::err(req.id, format!("failed to load peers: {e}")),
+                    Err(e) => Response::err_with_code(
+                        req.id,
+                        ERR_CODE_INTERNAL_ERROR,
+                        format!("failed to load peers: {e}"),
+                    ),
                 }
             }
 
@@ -6997,11 +7157,21 @@ impl IpcServer {
                                 .unwrap_or(true)
                         });
                         if let Err(e) = save_peers(&peers) {
-                            return Response::err(req.id, format!("failed to save peers: {e}"));
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INTERNAL_ERROR,
+                                format!("failed to save peers: {e}"),
+                            );
                         }
                         (peers.len() < before_len, name, addr)
                     }
-                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("failed to load peers: {e}"),
+                        )
+                    }
                 };
 
                 // Write the audit row. Done on the blocking thread pool
@@ -7143,7 +7313,13 @@ impl IpcServer {
                 // before clearing the store so we can write audit rows.
                 let peers = match load_peers() {
                     Ok(p) => p,
-                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("failed to load peers: {e}"),
+                        )
+                    }
                 };
                 let captured: Vec<(String, String)> = peers
                     .iter()
@@ -7474,15 +7650,20 @@ impl IpcServer {
                                         "added_at": added_at,
                                     }));
                                     if let Err(e) = save_peers(&peers) {
-                                        return Response::err(
+                                        return Response::err_with_code(
                                             req.id,
+                                            ERR_CODE_INTERNAL_ERROR,
                                             format!("failed to save peers: {e}"),
                                         );
                                     }
                                 }
                             }
                             Err(e) => {
-                                return Response::err(req.id, format!("failed to load peers: {e}"))
+                                return Response::err_with_code(
+                                    req.id,
+                                    ERR_CODE_INTERNAL_ERROR,
+                                    format!("failed to load peers: {e}"),
+                                )
                             }
                         }
 
@@ -7798,8 +7979,9 @@ impl IpcServer {
                 ) {
                     Ok(enc) => enc,
                     Err(e) => {
-                        return Response::err(
+                        return Response::err_with_code(
                             req.id,
+                            ERR_CODE_INTERNAL_ERROR,
                             format!("failed to encrypt PasswordFile for storage: {e}"),
                         )
                     }
@@ -7848,10 +8030,20 @@ impl IpcServer {
                             }
                         }
                         if let Err(e) = save_peers(&peers) {
-                            return Response::err(req.id, format!("failed to save peers: {e}"));
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INTERNAL_ERROR,
+                                format!("failed to save peers: {e}"),
+                            );
                         }
                     }
-                    Err(e) => return Response::err(req.id, format!("failed to load peers: {e}")),
+                    Err(e) => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INTERNAL_ERROR,
+                            format!("failed to load peers: {e}"),
+                        )
+                    }
                 }
 
                 // Feed the newly-paired peer into the live allowlist so the
@@ -7898,8 +8090,9 @@ impl IpcServer {
                 let fingerprint = match self.cert_fingerprint.as_ref() {
                     Some(fp) => fp.clone(),
                     None => {
-                        return Response::err(
+                        return Response::err_with_code(
                             req.id,
+                            ERR_CODE_NOT_IMPLEMENTED,
                             "P2P is disabled (set COPYPASTE_P2P=1): cannot generate a \
                              pairing QR without an mTLS certificate to advertise",
                         )
@@ -8729,7 +8922,13 @@ impl IpcServer {
             "get_app_icon" => {
                 let bundle_id = match req.params.get("bundle_id").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
-                    None => return Response::err(req.id, "missing param: bundle_id"),
+                    None => {
+                        return Response::err_with_code(
+                            req.id,
+                            ERR_CODE_INVALID_ARGUMENT,
+                            "missing param: bundle_id",
+                        )
+                    }
                 };
                 // NSWorkspace / AppKit calls are blocking — offload to a
                 // dedicated blocking thread so we never stall the async runtime.
@@ -8848,7 +9047,11 @@ impl IpcServer {
                 }
             }
 
-            other => Response::err(req.id, format!("unknown method: {other}")),
+            other => Response::err_with_code(
+                req.id,
+                ERR_CODE_NOT_IMPLEMENTED,
+                format!("unknown method: {other}"),
+            ),
         }
     }
 

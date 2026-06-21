@@ -4,9 +4,9 @@
 //! bridging `copypaste-p2p` transport with the `sync_orch` channel pair
 //! (`incoming_tx` / `outbound_rx`).
 //!
-//! Pairing via these thin wrappers (`pair_peer` / `unpair_peer`) currently
-//! returns [`P2pError::NotImplemented`]; the PAKE handshake is handled
-//! directly by the IPC layer in `ipc.rs` rather than through this module.
+//! Pairing is handled entirely by the IPC layer in `ipc.rs`
+//! (`pair_peer_with_password`, `unpair_peer` IPC methods) — this module
+//! does not expose pairing entry points.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -201,26 +201,6 @@ pub fn init(listen_port: u16, device_id: &str, device_name: &str) -> Result<P2pS
 /// Replaces the wave-1.3 IPC stub (`ipc.rs::"list_peers"`).
 pub fn list_peers(state: &P2pState) -> Vec<PeerInfo> {
     state.discovery.peers()
-}
-
-/// Pair with a peer using PAKE (Password-Authenticated Key Exchange).
-///
-/// **Not implemented via this module** — returns [`P2pError::NotImplemented`].
-/// The PAKE handshake is handled directly by the IPC layer (`ipc.rs`).
-pub fn pair_peer(
-    _state: &P2pState,
-    _peer_fingerprint: &str,
-    _display_name: &str,
-) -> Result<(), P2pError> {
-    Err(P2pError::NotImplemented)
-}
-
-/// Remove a previously-paired peer.
-///
-/// **Not implemented via this module** — returns [`P2pError::NotImplemented`].
-/// Pairing lifecycle is managed by the IPC layer alongside `pair_peer`.
-pub fn unpair_peer(_state: &P2pState, _peer_fingerprint: &str) -> Result<(), P2pError> {
-    Err(P2pError::NotImplemented)
 }
 
 /// Compute the canonical device fingerprint from a raw public key.
@@ -3022,23 +3002,6 @@ mod tests {
             peers.is_empty(),
             "fresh P2pState must have zero known peers"
         );
-    }
-
-    /// `pair_peer` is a thin stub that delegates to the IPC layer — it must
-    /// surface the explicit `NotImplemented` error rather than silently returning Ok.
-    #[test]
-    fn pair_peer_returns_not_implemented() {
-        let state = init(0, "test-device-id", "Test Device").expect("init must succeed");
-        let result = pair_peer(&state, "deadbeef", "Alice");
-        assert!(matches!(result, Err(P2pError::NotImplemented)));
-    }
-
-    /// `unpair_peer` is also a thin stub; pairing is managed by the IPC layer.
-    #[test]
-    fn unpair_peer_returns_not_implemented() {
-        let state = init(0, "test-device-id", "Test Device").expect("init must succeed");
-        let result = unpair_peer(&state, "deadbeef");
-        assert!(matches!(result, Err(P2pError::NotImplemented)));
     }
 
     /// `get_own_fingerprint` must match `keychain::own_fingerprint` exactly —

@@ -189,12 +189,12 @@ fn degraded_startup_rejects_db_methods_with_not_ready() {
         resp["ok"], false,
         "DB-touching `list` must be rejected in degraded mode, got: {resp}"
     );
-    // The error code constant is "IPC_NOT_READY"; assert it appears in the
-    // error payload (code or message) without over-fitting the envelope shape.
-    let blob = resp.to_string();
-    assert!(
-        blob.contains("IPC_NOT_READY"),
-        "rejection must carry IPC_NOT_READY, got: {resp}"
+    // CopyPaste-c4q2.13: the stable machine-readable code is now the lowercase
+    // `error_code` ("ipc_not_ready"); the human message no longer embeds the old
+    // uppercase "IPC_NOT_READY" constant. Assert on the code field.
+    assert_eq!(
+        resp["error_code"], "ipc_not_ready",
+        "rejection must carry error_code ipc_not_ready, got: {resp}"
     );
 }
 
