@@ -10380,6 +10380,25 @@ mod tests {
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixStream;
 
+    /// Create a temp directory and immediately force its permissions to 0o700.
+    ///
+    /// `tempfile::TempDir::new()` calls `mkdir(path, 0o700)`, but the kernel
+    /// applies the process umask: `mode & ~umask`. `bind_with_stale_cleanup`
+    /// (and the tests that exercise it) temporarily set `libc::umask(0o177)`,
+    /// which reduces `0o700 & ~0o177` to `0o600` (no execute bit). A 0o600
+    /// directory silently blocks all subsequent file operations inside it with
+    /// EACCES. Calling `set_permissions(0o700)` right after creation repairs
+    /// the mode unconditionally — `chmod` requires only ownership, not execute.
+    fn safe_tempdir() -> tempfile::TempDir {
+        let dir = tempdir().expect("failed to create temp dir");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700));
+        }
+        dir
+    }
+
     /// `get_config` must never ship the GoTrue password or email over IPC.
     /// `redact_config_secrets` strips both and replaces them with `*_set`
     /// presence flags, while leaving the publishable anon key intact.
@@ -10489,10 +10508,15 @@ mod tests {
     async fn list_peers_strips_password_file_fields() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
 
@@ -10542,10 +10566,15 @@ mod tests {
     async fn list_peers_includes_trust_field() {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg-trust");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
 
@@ -10675,9 +10704,18 @@ mod tests {
         let cert = copypaste_p2p::cert::SelfSignedCert::generate("test-device").unwrap();
         let server = IpcServer::new(db.clone(), private_mode.clone(), local_key, device_pub)
             .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()));
+        // Bind directly without going through `IpcServer::bind` /
+        // `bind_with_stale_cleanup`, which sets `libc::umask(0o177)` process-wide.
+        // That process-wide umask change races with concurrent tests' `mkdir` /
+        // `tempdir` calls, producing directories with mode 0o600 (no execute bit)
+        // that make all subsequent file operations inside them fail with EACCES.
+        // In tests the socket lives in a fresh tempdir, so neither stale-socket
+        // self-healing nor restrictive socket permissions are needed.
         let path = socket_path.to_path_buf();
+        let listener =
+            tokio::net::UnixListener::bind(socket_path).expect("test socket bind must succeed");
         tokio::spawn(async move {
-            if let Err(e) = server.serve(&path, CancellationToken::new()).await {
+            if let Err(e) = server.serve_on(listener, CancellationToken::new()).await {
                 tracing::error!("ipc: server on {:?} exited with error: {e}", &path);
             }
         });
@@ -10692,7 +10730,7 @@ mod tests {
     /// A path that does not exist is never "live".
     #[test]
     fn is_socket_live_false_for_missing_path() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("missing.sock");
         assert!(!is_socket_live(&sock));
     }
@@ -10702,7 +10740,20 @@ mod tests {
     /// bind helper will clean it up).
     #[test]
     fn is_socket_live_false_for_stale_regular_file() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
+        // Hold TEST_ENV_LOCK so this test is serialised with the
+        // bind_with_stale_cleanup_* tests that call libc::umask(0o177).
+        // Without serialisation, the umask window from those tests can corrupt
+        // the tempdir mode (0o600 instead of 0o700), making fs::write fail.
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_DATA_DIR",
+                "COPYPASTE_CONFIG_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
+            dir.path(),
+        );
         let sock = dir.path().join("stale.sock");
         std::fs::write(&sock, b"not a socket").unwrap();
         assert!(!is_socket_live(&sock));
@@ -10732,8 +10783,21 @@ mod tests {
     /// `#[tokio::test]`.
     #[tokio::test]
     async fn bind_with_stale_cleanup_removes_dead_socket_and_rebinds() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("daemon.sock");
+        // Hold TEST_ENV_LOCK for the duration of this test to serialise the
+        // libc::umask(0o177) call inside bind_with_stale_cleanup with concurrent
+        // tests that create directories (which are corrupted by the process-wide
+        // umask if it leaks into their mkdir calls).
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_DATA_DIR",
+                "COPYPASTE_CONFIG_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
+            dir.path(),
+        );
 
         // Create a real socket then drop its listener so the path is left
         // behind with no live acceptor — exactly what a crashed daemon leaves.
@@ -10773,7 +10837,7 @@ mod tests {
     /// covered by `..._refuses_to_steal_healthy_same_version_daemon` below.)
     #[tokio::test]
     async fn bind_with_stale_cleanup_refuses_unidentifiable_live_socket() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("daemon.sock");
 
         // Hold a live listener (std, no reactor needed) for the whole test.
@@ -10793,7 +10857,7 @@ mod tests {
     /// a healthy same-version peer — the helper must NOT steal its socket.
     #[tokio::test]
     async fn bind_with_stale_cleanup_refuses_to_steal_healthy_same_version_daemon() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("daemon.sock");
 
         // A minimal acceptor that replies to `status` with OUR build_version
@@ -10841,7 +10905,7 @@ mod tests {
     /// socket.
     #[tokio::test]
     async fn bind_with_stale_cleanup_attempts_eviction_for_different_version() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("daemon.sock");
 
         // The seed acceptor keeps the socket live for the WHOLE test (looping on
@@ -10891,7 +10955,7 @@ mod tests {
     /// that answers, and yield `None`/defaults from a socket that says nothing.
     #[tokio::test]
     async fn probe_listening_daemon_reads_version_and_pid() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("daemon.sock");
         let listener = std::os::unix::net::UnixListener::bind(&sock).expect("seed bind");
         let handle = std::thread::spawn(move || {
@@ -10953,7 +11017,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_returns_running() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test.sock");
         start_test_server(&sock).await;
 
@@ -10973,7 +11037,7 @@ mod tests {
     /// (SHA-256 of the X25519 public key, lowercase hex, 64 chars).
     #[tokio::test]
     async fn status_includes_device_key_fingerprint() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("dkfp.sock");
         start_test_server(&sock).await;
 
@@ -10999,7 +11063,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_empty_db_returns_zero() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test2.sock");
         start_test_server(&sock).await;
 
@@ -11017,7 +11081,7 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_method_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test3.sock");
         start_test_server(&sock).await;
 
@@ -11038,7 +11102,7 @@ mod tests {
     /// the dispatcher tries to interpret the method.
     #[tokio::test]
     async fn unsupported_protocol_version_rejected_with_error_code() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-proto-ver.sock");
         start_test_server(&sock).await;
 
@@ -11086,7 +11150,7 @@ mod tests {
     #[cfg(not(feature = "cloud-sync"))]
     #[tokio::test]
     async fn ipc_responses_carry_machine_readable_error_code() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test_err_code.sock");
         start_test_server(&sock).await;
 
@@ -11112,7 +11176,7 @@ mod tests {
 
     #[tokio::test]
     async fn search_with_no_fts_data_returns_empty() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test_search.sock");
         start_test_server(&sock).await;
 
@@ -11130,7 +11194,7 @@ mod tests {
 
     #[tokio::test]
     async fn search_missing_query_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test_search_err.sock");
         start_test_server(&sock).await;
 
@@ -11151,7 +11215,7 @@ mod tests {
 
     #[tokio::test]
     async fn copy_unknown_id_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("copy_test.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11167,7 +11231,7 @@ mod tests {
 
     #[tokio::test]
     async fn copy_missing_id_param_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("copy_missing_param.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11187,7 +11251,7 @@ mod tests {
 
     #[tokio::test]
     async fn stats_returns_zero_for_empty_db() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("stats.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11204,7 +11268,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_all_returns_count() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("del_all.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11223,7 +11287,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_private_mode_returns_false_by_default() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pm_get_default.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11240,7 +11304,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_private_mode_enable_then_get() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pm_set_enable.sock");
         start_test_server(&sock).await;
 
@@ -11275,7 +11339,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_private_mode_then_disable() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pm_disable.sock");
         start_test_server_with_mode(&sock, true).await;
 
@@ -11309,7 +11373,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_private_mode_missing_param_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pm_missing.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11326,7 +11390,7 @@ mod tests {
 
     #[tokio::test]
     async fn status_includes_private_mode_field() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("status_pm.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11344,7 +11408,7 @@ mod tests {
 
     #[tokio::test]
     async fn set_private_mode_updates_shared_atomic() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pm_atomic.sock");
         let flag = start_test_server(&sock).await;
 
@@ -11369,7 +11433,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_page_empty_db_returns_zero() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("hp_empty.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11387,7 +11451,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_page_default_params_succeed() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("hp_default.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11407,7 +11471,7 @@ mod tests {
 
     #[tokio::test]
     async fn paste_missing_id_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("paste_missing.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11427,7 +11491,7 @@ mod tests {
 
     #[tokio::test]
     async fn paste_unknown_id_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("paste_unknown.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -11460,9 +11524,32 @@ mod tests {
     #[tokio::test]
     async fn ipc_socket_chmod_is_0600() {
         use std::os::unix::fs::PermissionsExt;
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("hardening_chmod.sock");
-        start_test_server(&sock).await;
+        // Hold TEST_ENV_LOCK to serialise the libc::umask(0o177) inside
+        // IpcServer::bind with concurrent tests that create directories.
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_DATA_DIR",
+                "COPYPASTE_CONFIG_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
+            dir.path(),
+        );
+        // Use IpcServer::bind directly so that bind_with_stale_cleanup runs
+        // and sets umask(0o177) for the socket creation — this is the security
+        // invariant under test. start_test_server bypasses the umask to avoid
+        // process-wide races; this test specifically needs it.
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let server = IpcServer::new(
+            db,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+        );
+        let listener = server.bind(&sock).expect("bind must succeed");
+        drop(listener); // release the socket fd; the file remains for inspection
 
         let meta = std::fs::metadata(&sock).expect("socket file should exist");
         let mode = meta.permissions().mode() & 0o777;
@@ -11477,7 +11564,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ipc_oversized_request_rejected_not_crashed() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("hardening_oversize.sock");
         start_test_server(&sock).await;
 
@@ -11568,9 +11655,13 @@ mod tests {
         let device_pub = Arc::new([0u8; 32]);
         let server =
             IpcServer::new_with_ready(db, private_mode, local_key, device_pub, ready_clone);
+        // Bind directly (no umask(0o177) race) — see comment in
+        // start_test_server_returning_db for the full rationale.
         let path = socket_path.to_path_buf();
+        let listener =
+            tokio::net::UnixListener::bind(socket_path).expect("test socket bind must succeed");
         tokio::spawn(async move {
-            if let Err(e) = server.serve(&path, CancellationToken::new()).await {
+            if let Err(e) = server.serve_on(listener, CancellationToken::new()).await {
                 tracing::error!("ipc: server on {:?} exited with error: {e}", &path);
             }
         });
@@ -11580,7 +11671,7 @@ mod tests {
 
     #[tokio::test]
     async fn dispatch_returns_ipc_not_ready_when_not_ready() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("not_ready.sock");
         let ready = start_not_ready_server(&sock).await;
 
@@ -11639,7 +11730,7 @@ mod tests {
 
     #[tokio::test]
     async fn list_clamps_oversize_limit_to_max_page() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("cap_list.sock");
         start_test_server(&sock).await;
 
@@ -11669,7 +11760,7 @@ mod tests {
 
     #[tokio::test]
     async fn history_page_clamps_oversize_limit_to_max_page() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("cap_hp.sock");
         start_test_server(&sock).await;
 
@@ -11697,7 +11788,7 @@ mod tests {
     /// would carry > MAX_PAGE items; with it, exactly MAX_PAGE.
     #[tokio::test]
     async fn search_clamps_oversize_limit_to_max_page() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("cap_search.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -11738,7 +11829,7 @@ mod tests {
     /// without panicking and produce in-range, ordered char offsets.
     #[tokio::test]
     async fn history_page_adversarial_unicode_preview_no_panic() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("adv_unicode.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -11793,7 +11884,7 @@ mod tests {
     /// normalised preview so offsets and string share one basis.
     #[tokio::test]
     async fn history_page_spans_index_into_returned_preview_not_raw() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("span_basis.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -11876,7 +11967,7 @@ mod tests {
     /// Each item in `history_page` must carry a boolean `pinned` field.
     #[tokio::test]
     async fn history_page_items_include_pinned_field() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("hp_pinned_field.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -11911,7 +12002,7 @@ mod tests {
     /// regardless of wall_time ordering.
     #[tokio::test]
     async fn history_page_pinned_items_sort_first() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("hp_pinned_sort.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -11966,7 +12057,7 @@ mod tests {
     /// After unpinning, the item reverts to recency order in history_page.
     #[tokio::test]
     async fn history_page_unpinned_item_reverts_to_recency_order() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("hp_unpin.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -12022,7 +12113,7 @@ mod tests {
     /// connection; all must succeed.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn concurrent_clients_in_process_consistent_state() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("concurrent.sock");
         start_test_server(&sock).await;
 
@@ -12068,7 +12159,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn ipc_client_mid_request_disconnect_does_not_panic() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("hardening_disconnect.sock");
         start_test_server(&sock).await;
 
@@ -12130,7 +12221,7 @@ mod tests {
     /// rather than a tight one so the test stays robust on slow CI.
     #[tokio::test]
     async fn spawn_blocking_does_not_block_tokio_worker() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-spawn-blocking.sock");
         start_test_server(&sock).await;
 
@@ -12170,7 +12261,7 @@ mod tests {
     /// on a stable error_code for the not-yet-wired Transport path.
     #[tokio::test]
     async fn pair_peer_with_password_validates_inputs() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-pair-pw.sock");
         start_test_server(&sock).await;
 
@@ -12238,7 +12329,7 @@ mod tests {
     /// session_id and base64-encoded message1 to send to the responder.
     #[tokio::test]
     async fn pair_peer_with_password_initiate_returns_session_and_message1() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-pake-init.sock");
         start_test_server(&sock).await;
 
@@ -12272,7 +12363,7 @@ mod tests {
         use base64::Engine as _;
         use copypaste_p2p::pake::PakeInitiator;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-pake-accept.sock");
         start_test_server(&sock).await;
 
@@ -12316,7 +12407,7 @@ mod tests {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         // Redirect config dir so the pairing handlers never write to the
         // developer's real peers.json — and so concurrent tests that also
         // redirect HOME (e.g. revoke_all_peers_revokes_every_peer) don't pick
@@ -12640,10 +12731,15 @@ mod tests {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
 
@@ -12742,10 +12838,15 @@ mod tests {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg_j8dr");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
 
@@ -12837,7 +12938,7 @@ mod tests {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg");
         // Set COPYPASTE_CONFIG_DIR *first* — `peers_file_path` checks it ahead
         // of dirs::config_dir(), so peers.json goes into cfg_home regardless of
@@ -12955,7 +13056,7 @@ mod tests {
     #[tokio::test]
     async fn pair_accept_qr_without_token_is_rejected() {
         use base64::Engine as _;
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg");
         // Include COPYPASTE_CONFIG_DIR so peers_file_path() points at cfg_home
         // on macOS (where dirs::config_dir() ignores HOME).
@@ -12987,7 +13088,7 @@ mod tests {
     async fn revoke_peer_validates_and_records_audit_row() {
         use copypaste_core::list_revoked_devices;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-revoke.sock");
 
         // Redirect the config dir to this test's own tempdir so the
@@ -13001,7 +13102,12 @@ mod tests {
         // race the other env-mutating tests in the workspace.
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
 
@@ -13015,9 +13121,12 @@ mod tests {
             Arc::new(zeroize::Zeroizing::new([0u8; 32])),
             Arc::new([0u8; 32]),
         );
+        // Bind directly (no umask(0o177) race) — see start_test_server_returning_db.
+        let listener =
+            tokio::net::UnixListener::bind(&sock).expect("test socket bind must succeed");
         let sock_path = sock.clone();
         tokio::spawn(async move {
-            if let Err(e) = server.serve(&sock_path, CancellationToken::new()).await {
+            if let Err(e) = server.serve_on(listener, CancellationToken::new()).await {
                 tracing::error!("ipc: server on {:?} exited with error: {e}", &sock_path);
             }
         });
@@ -13084,11 +13193,16 @@ mod tests {
     async fn revoke_peer_auto_rotates_sync_key_when_active() {
         use copypaste_core::{list_revoked_devices, SyncKey};
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-revoke-rotate.sock");
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
 
@@ -13112,9 +13226,12 @@ mod tests {
             cloud_signed_in.clone(),
         );
 
+        // Bind directly (no umask(0o177) race) — see start_test_server_returning_db.
+        let listener =
+            tokio::net::UnixListener::bind(&sock).expect("test socket bind must succeed");
         let sock_path = sock.clone();
         tokio::spawn(async move {
-            if let Err(e) = server.serve(&sock_path, CancellationToken::new()).await {
+            if let Err(e) = server.serve_on(listener, CancellationToken::new()).await {
                 tracing::error!("ipc: server on {:?} exited with error: {e}", &sock_path);
             }
         });
@@ -13770,7 +13887,7 @@ mod tests {
     async fn pair_accept_password_rejects_short_password() {
         use base64::Engine as _;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-short-pw.sock");
         start_test_server(&sock).await;
 
@@ -13816,7 +13933,7 @@ mod tests {
 
     #[tokio::test]
     async fn pin_item_missing_id_returns_invalid_argument() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pin_item_missing.sock");
         start_test_server(&sock).await;
         let resp = call_one(
@@ -13830,7 +13947,7 @@ mod tests {
 
     #[tokio::test]
     async fn pin_item_missing_pinned_returns_invalid_argument() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pin_item_no_flag.sock");
         start_test_server(&sock).await;
         let fp_id = "00000000-0000-0000-0000-000000000000";
@@ -13842,7 +13959,7 @@ mod tests {
 
     #[tokio::test]
     async fn pin_item_bad_uuid_returns_invalid_argument() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pin_item_bad_uuid.sock");
         start_test_server(&sock).await;
         let resp = call_one(
@@ -13856,7 +13973,7 @@ mod tests {
 
     #[tokio::test]
     async fn pin_item_valid_uuid_pins_and_unpins() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("pin_item_ok.sock");
         start_test_server(&sock).await;
         let id = "00000000-0000-0000-0000-000000000000";
@@ -13879,7 +13996,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_item_missing_id_returns_invalid_argument() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("del_item_missing.sock");
         start_test_server(&sock).await;
         let resp = call_one(&sock, r#"{"id":"di1","method":"delete_item","params":{}}"#).await;
@@ -13889,7 +14006,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_item_bad_uuid_returns_invalid_argument() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("del_item_bad_uuid.sock");
         start_test_server(&sock).await;
         let resp = call_one(
@@ -13903,7 +14020,7 @@ mod tests {
 
     #[tokio::test]
     async fn delete_item_valid_uuid_succeeds() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("del_item_ok.sock");
         start_test_server(&sock).await;
         let id = "00000000-0000-0000-0000-000000000000";
@@ -13919,7 +14036,7 @@ mod tests {
 
     #[tokio::test]
     async fn copy_item_missing_id_returns_invalid_argument() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("copy_item_missing.sock");
         start_test_server(&sock).await;
         let resp = call_one(&sock, r#"{"id":"ci1","method":"copy_item","params":{}}"#).await;
@@ -13929,7 +14046,7 @@ mod tests {
 
     #[tokio::test]
     async fn copy_item_bad_uuid_returns_invalid_argument() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("copy_item_bad_uuid.sock");
         start_test_server(&sock).await;
         let resp = call_one(
@@ -13943,7 +14060,7 @@ mod tests {
 
     #[tokio::test]
     async fn copy_item_unknown_id_returns_not_found() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("copy_item_unknown.sock");
         start_test_server(&sock).await;
         let id = "00000000-0000-0000-0000-000000000000";
@@ -13961,7 +14078,7 @@ mod tests {
         // path returns a deterministic error *without* touching the real
         // NSPasteboard — the key assertion is that the lookup found the row, so
         // the response is anything except `not_found`.
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("copy_item_seeded.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -13987,7 +14104,7 @@ mod tests {
     async fn revoke_all_peers_empty_store_succeeds() {
         // With no peers.json present, revoke_all_peers must succeed and
         // report zero revoked rather than erroring.
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("revoke_all_empty.sock");
         // Isolate the config dir so this test never touches the developer's
         // real peers.json.  `peers_file_path()` checks COPYPASTE_CONFIG_DIR
@@ -14022,7 +14139,7 @@ mod tests {
         // Happy path: seed N peers in peers.json, call revoke_all_peers, and
         // assert all N are revoked, the store is cleared, and an audit row was
         // written for each (atomic batch via revoke_devices).
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("revoke_all_n.sock");
         // Pin COPYPASTE_CONFIG_DIR first — peers_file_path() checks it before
         // dirs::config_dir(), so the handler reads/writes cfg_home regardless
@@ -14187,7 +14304,7 @@ mod tests {
         let signed_in = Arc::new(AtomicBool::new(false));
 
         // Use a temp config dir so read_config() finds no persisted credentials.
-        let dir = tempfile::tempdir().unwrap();
+        let dir = safe_tempdir();
         let _env = EnvGuard::set_all(
             &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
             dir.path(),
@@ -14294,7 +14411,7 @@ mod tests {
     #[cfg(feature = "cloud-sync")]
     #[tokio::test]
     async fn apply_peer_provisioning_fills_missing_fields() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
             &[
@@ -14350,7 +14467,7 @@ mod tests {
     #[cfg(feature = "cloud-sync")]
     #[tokio::test]
     async fn apply_peer_provisioning_never_overwrites_existing() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
             &[
@@ -14424,7 +14541,7 @@ mod tests {
     #[cfg(feature = "cloud-sync")]
     #[tokio::test]
     async fn apply_peer_provisioning_rotation_replaces_differing_key() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
             &[
@@ -14485,7 +14602,7 @@ mod tests {
     /// read-modify-write data-loss bug is fixed at the IPC boundary.
     #[tokio::test]
     async fn set_config_with_redacted_shape_preserves_stored_password() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
             &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
@@ -14561,7 +14678,7 @@ mod tests {
             build_item_aad_v2, derive_v2, encrypt_item_with_aad, AAD_SCHEMA_VERSION_V4,
         };
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("export_limit.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -14684,7 +14801,7 @@ mod tests {
             build_item_aad_v2, derive_v2, encrypt_item_with_aad, AAD_SCHEMA_VERSION_V4,
         };
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("export_sensitive.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -14785,10 +14902,15 @@ mod tests {
     /// `copypaste/` subdir.
     #[test]
     fn config_dir_override_redirects_config_json() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("override-root");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
 
@@ -14849,7 +14971,7 @@ mod tests {
     fn write_config_creates_file_with_mode_0600_and_no_tmp_orphan() {
         use std::os::unix::fs::PermissionsExt;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let _env = EnvGuard::set_all(
             &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
             dir.path(),
@@ -15180,11 +15302,16 @@ mod tests {
     /// `online` must be `false` and `last_seen_secs` must be `-1`.
     #[tokio::test]
     async fn list_peers_response_includes_online_and_last_seen_fields() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("lp_online_fields.sock");
         let cfg_home = dir.path().join("cfg");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
         std::fs::create_dir_all(&cfg_home).unwrap();
@@ -15231,11 +15358,16 @@ mod tests {
     /// must be marked `online = true`.
     #[tokio::test]
     async fn list_peers_online_true_when_last_sync_at_is_recent() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("lp_online_recent.sock");
         let cfg_home = dir.path().join("cfg2");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
         std::fs::create_dir_all(&cfg_home).unwrap();
@@ -15281,11 +15413,16 @@ mod tests {
     /// must be marked `online = false`.
     #[tokio::test]
     async fn list_peers_online_false_when_last_sync_at_is_stale() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("lp_online_stale.sock");
         let cfg_home = dir.path().join("cfg3");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
         std::fs::create_dir_all(&cfg_home).unwrap();
@@ -15326,11 +15463,16 @@ mod tests {
     /// map, even if `last_sync_at` is absent or stale.
     #[tokio::test]
     async fn list_peers_online_true_from_live_mtls_allowlist() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("lp_online_mtls.sock");
         let cfg_home = dir.path().join("cfg4");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
         std::fs::create_dir_all(&cfg_home).unwrap();
@@ -15375,9 +15517,11 @@ mod tests {
             *guard = Some(Arc::clone(&sinks_map));
         }
 
-        let path = sock.clone();
+        // Bind directly (no umask(0o177) race) — see start_test_server_returning_db.
+        let listener =
+            tokio::net::UnixListener::bind(&sock).expect("test socket bind must succeed");
         tokio::spawn(async move {
-            let _ = server.serve(&path, CancellationToken::new()).await;
+            let _ = server.serve_on(listener, CancellationToken::new()).await;
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
@@ -15402,10 +15546,15 @@ mod tests {
     /// an empty string.
     #[tokio::test]
     async fn persist_paired_peer_populates_name_from_peer_meta_device_name() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg5");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
         std::fs::create_dir_all(&cfg_home).unwrap();
@@ -15481,7 +15630,7 @@ mod tests {
     /// (chunks_to_blob-encoded), then retrieve via the IPC verb.
     #[tokio::test]
     async fn get_item_file_round_trips_bytes_and_meta() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let socket_path = dir.path().join("ipc.sock");
         let (_pm, db) = start_test_server_returning_db(&socket_path, false).await;
 
@@ -15533,7 +15682,7 @@ mod tests {
     /// `get_item_file` must reject requests for non-file content_type items.
     #[tokio::test]
     async fn get_item_file_rejects_non_file_item() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let socket_path = dir.path().join("ipc2.sock");
         let (_pm, db) = start_test_server_returning_db(&socket_path, false).await;
 
@@ -15587,7 +15736,7 @@ mod tests {
     /// `history_page` must return `[file: <name>]` as the preview for file items.
     #[tokio::test]
     async fn history_page_shows_file_preview() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let socket_path = dir.path().join("hp_file.sock");
         let (_pm, db) = start_test_server_returning_db(&socket_path, false).await;
 
@@ -15651,7 +15800,7 @@ mod tests {
     /// retention window (~10 min) and leave recent files untouched.
     #[test]
     fn prune_old_paste_files_removes_stale_and_keeps_recent() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cache = dir.path().to_path_buf();
 
         // Write a "recent" file (mtime = now).
@@ -15692,16 +15841,17 @@ mod tests {
     ///      fallthrough, which means the file branch was reached.
     #[tokio::test]
     async fn write_to_pasteboard_file_branch_is_reached() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("wtp_file.sock");
 
         // Point COPYPASTE_CACHE_DIR at a temp path so paste-files land there
         // and don't pollute ~/Library/Caches/CopyPaste during the test.
         let cache_home = dir.path().join("cache");
-        std::fs::create_dir_all(&cache_home).unwrap();
-        // paste_file_cache_dir() calls crate::paths::cache_dir() which honours
-        // COPYPASTE_CACHE_DIR when set.
+        // Acquire EnvGuard (and thus TEST_ENV_LOCK) BEFORE create_dir_all so
+        // the mkdir is serialised with the umask(0o177) window from the
+        // bind_with_stale_cleanup tests.
         let _env = EnvGuard::set_all(&["COPYPASTE_CACHE_DIR"], &cache_home);
+        std::fs::create_dir_all(&cache_home).unwrap();
 
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -15794,10 +15944,15 @@ mod tests {
         use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
         use tokio::net::UnixStream;
 
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let cfg_home = dir.path().join("cfg_7mf");
         let _env = EnvGuard::set_all(
-            &["COPYPASTE_CONFIG_DIR", "HOME", "XDG_CONFIG_HOME"],
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
             &cfg_home,
         );
         std::fs::create_dir_all(&cfg_home).unwrap();
@@ -15826,9 +15981,11 @@ mod tests {
             )
             .with_cert_fingerprint(display_fingerprint(&cert_a.fingerprint()))
             .with_p2p_cert(cert_a.cert_der.clone(), cert_a.key_der.clone());
-            let path = sock_a.clone();
+            // Bind directly (no umask(0o177) race) — see start_test_server_returning_db.
+            let listener_a =
+                tokio::net::UnixListener::bind(&sock_a).expect("test socket A bind must succeed");
             tokio::spawn(async move {
-                let _ = server.serve(&path, CancellationToken::new()).await;
+                let _ = server.serve_on(listener_a, CancellationToken::new()).await;
             });
         }
 
@@ -15845,9 +16002,11 @@ mod tests {
             )
             .with_cert_fingerprint(display_fingerprint(&cert_b.fingerprint()))
             .with_p2p_cert(cert_b.cert_der.clone(), cert_b.key_der.clone());
-            let path = sock_b.clone();
+            // Bind directly (no umask(0o177) race) — see start_test_server_returning_db.
+            let listener_b =
+                tokio::net::UnixListener::bind(&sock_b).expect("test socket B bind must succeed");
             tokio::spawn(async move {
-                let _ = server.serve(&path, CancellationToken::new()).await;
+                let _ = server.serve_on(listener_b, CancellationToken::new()).await;
             });
         }
         // Give both sockets a moment to come up.
@@ -15990,7 +16149,7 @@ mod tests {
         let env_lock = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|p| p.into_inner());
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         unsafe { std::env::set_var("COPYPASTE_CONFIG_DIR", dir.path()) };
 
         // Disable LAN visibility via IPC patch.
@@ -16045,7 +16204,7 @@ mod tests {
     /// `COPYPASTE_P2P` env-var only; now it falls back to this accessor.
     #[test]
     fn p2p_enabled_from_config_defaults_to_true_when_no_config() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let _env = EnvGuard::set_all(
             &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
             dir.path(),
@@ -16063,7 +16222,7 @@ mod tests {
     /// when the env-var override (`COPYPASTE_P2P`) is absent.
     #[test]
     fn p2p_enabled_from_config_returns_false_when_persisted_false() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let _env = EnvGuard::set_all(
             &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
             dir.path(),
@@ -16084,7 +16243,7 @@ mod tests {
     /// return `true`. Symmetric with the false case above.
     #[test]
     fn p2p_enabled_from_config_returns_true_when_persisted_true() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let _env = EnvGuard::set_all(
             &["HOME", "XDG_CONFIG_HOME", "COPYPASTE_CONFIG_DIR"],
             dir.path(),
@@ -16327,9 +16486,20 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn bind_with_stale_cleanup_creates_lockfile() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-atomic.sock");
         let lock = dir.path().join("test-atomic.sock.lock");
+        // Hold TEST_ENV_LOCK to serialise the libc::umask(0o177) inside
+        // bind_with_stale_cleanup with concurrent tests that create directories.
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_DATA_DIR",
+                "COPYPASTE_CONFIG_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
+            dir.path(),
+        );
 
         // Lockfile must NOT exist before the first call.
         assert!(
@@ -16356,7 +16526,7 @@ mod tests {
     /// to add it as trusted without going through PAKE+SAS authentication.
     #[tokio::test]
     async fn pair_peer_is_disabled_returns_not_implemented() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-pair-peer-disabled.sock");
         start_test_server(&sock).await;
 
@@ -16484,7 +16654,7 @@ mod tests {
     /// contains a human-readable error before the connection is closed.
     #[tokio::test]
     async fn import_oversized_request_returns_clear_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-import-oversized.sock");
         start_test_server(&sock).await;
 
@@ -16640,7 +16810,7 @@ mod tests {
         // assert that the response is valid JSON with ok=false and a non-empty
         // error_code regardless of build, since the key invariant is that
         // callers get a machine-readable code instead of "unknown method".
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("test-cloud-not-impl.sock");
         start_test_server(&sock).await;
 
@@ -16744,7 +16914,7 @@ mod tests {
     /// the zero item_count.
     #[tokio::test]
     async fn db_stats_empty_database_returns_zero_count() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("db_stats_empty.sock");
         start_test_server(&sock).await;
 
@@ -16764,7 +16934,7 @@ mod tests {
     /// `db_stats` on a DB with items must report the correct count.
     #[tokio::test]
     async fn db_stats_reports_correct_item_count() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("db_stats_count.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -16797,7 +16967,7 @@ mod tests {
     /// extractable the fallback `"?"` is used.
     #[tokio::test]
     async fn parse_error_echoes_id_from_raw_json() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("parse_err_id.sock");
         start_test_server(&sock).await;
 
@@ -16818,7 +16988,7 @@ mod tests {
     /// fallback id `"?"` is used since no id can be extracted.
     #[tokio::test]
     async fn parse_error_uses_fallback_id_when_not_valid_json() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("parse_err_fallback.sock");
         start_test_server(&sock).await;
 
@@ -16837,7 +17007,7 @@ mod tests {
     /// when image items exist in the database. Text items must still export.
     #[tokio::test]
     async fn export_skipped_non_text_count_is_non_zero_for_image_items() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("export_skip_img.sock");
         let (_pm, db) = start_test_server_returning_db(&sock, false).await;
 
@@ -16898,7 +17068,7 @@ mod tests {
     /// `db_backup` without `dest_path` must return an `invalid_argument` error.
     #[tokio::test]
     async fn db_backup_missing_dest_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("backup_no_dest.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -16923,7 +17093,7 @@ mod tests {
     /// `db_backup` with a valid `dest_path` must produce a backup file.
     #[tokio::test]
     async fn db_backup_creates_backup_file() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("backup_ok.sock");
         start_test_server(&sock).await;
         let dest = dir.path().join("test-backup.db.enc");
@@ -16948,7 +17118,7 @@ mod tests {
     /// `db_backup` to an already-existing path must return an error.
     #[tokio::test]
     async fn db_backup_refuses_overwrite() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("backup_overwrite.sock");
         start_test_server(&sock).await;
         let dest = dir.path().join("existing.db.enc");
@@ -16976,7 +17146,7 @@ mod tests {
     /// `db_restore` without `confirm=true` must return `invalid_argument`.
     #[tokio::test]
     async fn db_restore_requires_confirm() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("restore_no_confirm.sock");
         start_test_server(&sock).await;
         let mut stream = UnixStream::connect(&sock).await.unwrap();
@@ -17003,7 +17173,7 @@ mod tests {
     /// `db_restore` with a non-existent `src_path` must return `invalid_argument`.
     #[tokio::test]
     async fn db_restore_missing_file_returns_error() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("restore_missing_file.sock");
         start_test_server(&sock).await;
         let req = r#"{"id":"r2","method":"db_restore","params":{"confirm":true,"src_path":"/does/not/exist/backup.db.enc"}}"#;
@@ -17034,7 +17204,7 @@ mod tests {
     /// outcome depends on filesystem permissions outside the test's control.
     #[tokio::test]
     async fn db_backup_produces_file_and_restore_sends_response() {
-        let dir = tempdir().unwrap();
+        let dir = safe_tempdir();
         let sock = dir.path().join("backup_restore_rt.sock");
         start_test_server(&sock).await;
 
