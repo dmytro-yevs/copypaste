@@ -648,6 +648,26 @@ fn peer_from_resolved(resolved: &ResolvedService) -> Option<PeerInfo> {
     }
 
     let device_id = resolved.get_property_val_str(TXT_DEVICE_ID)?.to_string();
+
+    // CopyPaste-rh27: tighten mDNS→peer correlation.
+    //
+    // A rogue LAN host could broadcast a `did` TXT record claiming to be any
+    // device (IP-correlation attack). The mTLS handshake (cert-fingerprint
+    // pinning) is the definitive defence — a rogue peer cannot impersonate
+    // another device's fingerprint without its private key. However, if the
+    // `device_id` in the TXT record is empty or malformed we would (a) skip
+    // the rate-limit key based on identity and fall through to the IP-set hash,
+    // and (b) insert a confusingly-keyed entry into `known_peers` that the
+    // connector might try to dial. Reject malformed device_ids here so the
+    // discovery layer never presents an unauthenticated device_id to callers.
+    if !is_valid_device_id(&device_id) {
+        warn!(
+            device_id = %device_id,
+            fullname = %resolved.fullname,
+            "CopyPaste-rh27: mDNS peer has empty or malformed device_id — ignoring"
+        );
+        return None;
+    }
     // `name` is optional since CopyPaste-sh9a: upgraded peers no longer
     // advertise it. Empty string = "unknown until post-PAKE exchange".
     let device_name = resolved
@@ -703,6 +723,22 @@ fn admit_peer(peers: &HashMap<String, PeerInfo>, fullname: &str, peer: &PeerInfo
         None if peers.len() >= MAX_KNOWN_PEERS => PeerAdmission::AtCapacity,
         None => PeerAdmission::Insert,
     }
+}
+
+/// Validate a `device_id` advertised in the mDNS TXT `did` field.
+///
+/// A valid device_id must be non-empty and consist entirely of lowercase hex
+/// characters (0-9, a-f). This matches the format produced by
+/// `fingerprint_of` in `crate::cert` (hex-encoded SHA-256). Uppercase hex,
+/// empty strings, and any non-hex characters are rejected to prevent a rogue
+/// LAN peer from advertising a device_id that bypasses identity-keyed rate
+/// limiting or confuses the known-peers map (CopyPaste-rh27).
+///
+/// Note: the TLS certificate-fingerprint check in `PeerTransport::connect`
+/// is the *definitive* authentication gate; this is a defence-in-depth
+/// pre-filter at the discovery layer.
+fn is_valid_device_id(id: &str) -> bool {
+    !id.is_empty() && id.chars().all(|c| matches!(c, '0'..='9' | 'a'..='f'))
 }
 
 /// Build a stable rate-limit key from a set of resolved peer addresses.
@@ -1388,5 +1424,76 @@ mod tests {
             );
             let _ = human_name;
         }
+    }
+
+    // ── CopyPaste-rh27: device_id format validation ──────────────────────────
+
+    /// rh27: a valid hex device_id (lowercase hex chars only) must pass.
+    #[test]
+    fn rh27_valid_hex_device_id_accepted() {
+        // SHA-256 fingerprint is 64 lowercase hex chars.
+        let fp = "a".repeat(64);
+        assert!(
+            is_valid_device_id(&fp),
+            "64-char lowercase hex must be accepted"
+        );
+        // Shorter IDs (e.g. in tests) are also valid as long as they are hex.
+        assert!(
+            is_valid_device_id("aabbccdd"),
+            "short hex id must be accepted"
+        );
+        assert!(
+            is_valid_device_id("0123456789abcdef"),
+            "mixed digits+hex letters must be accepted"
+        );
+        assert!(
+            is_valid_device_id("deadbeef"),
+            "classic hex id must be accepted"
+        );
+    }
+
+    /// rh27: an empty device_id must be rejected — it bypasses rate-limit keying.
+    #[test]
+    fn rh27_empty_device_id_rejected() {
+        assert!(
+            !is_valid_device_id(""),
+            "empty device_id must be rejected (bypasses rate-limit key)"
+        );
+    }
+
+    /// rh27: uppercase hex must be rejected — fingerprints are always lowercase.
+    /// This prevents a rogue peer from advertising the same fingerprint in two
+    /// casing variants (A-Z vs a-z) to get double the rate-limit budget.
+    #[test]
+    fn rh27_uppercase_hex_device_id_rejected() {
+        assert!(
+            !is_valid_device_id("AABBCCDD"),
+            "uppercase hex must be rejected (all CopyPaste fingerprints are lowercase)"
+        );
+        assert!(
+            !is_valid_device_id("AaBbCcDd"),
+            "mixed-case hex must be rejected"
+        );
+    }
+
+    /// rh27: non-hex characters in device_id must be rejected.
+    #[test]
+    fn rh27_non_hex_device_id_rejected() {
+        assert!(
+            !is_valid_device_id("not-a-fingerprint"),
+            "arbitrary string must be rejected"
+        );
+        assert!(
+            !is_valid_device_id("zzzzzzzz"),
+            "non-hex lowercase letters must be rejected"
+        );
+        assert!(
+            !is_valid_device_id("aabb:ccdd"),
+            "colon-separated hex must be rejected (colons are not hex chars)"
+        );
+        assert!(
+            !is_valid_device_id("aabb ccdd"),
+            "hex with whitespace must be rejected"
+        );
     }
 }

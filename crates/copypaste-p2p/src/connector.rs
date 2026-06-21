@@ -132,12 +132,41 @@ impl DialBackoff {
     }
 
     /// Record a failed dial at `now`: schedule the next attempt after the
-    /// current backoff step, then advance the step (capped at the last entry).
-    /// Returns the backoff delay (seconds) that was applied.
+    /// current backoff step (plus ±25% jitter to prevent thundering-herd
+    /// reconnect storms — CopyPaste-rh27), then advance the step (capped at
+    /// the last entry). Returns the nominal backoff delay in seconds (before
+    /// jitter); the actual sleep duration includes the jitter offset.
+    ///
+    /// # Jitter
+    ///
+    /// Multiple peers that fail concurrently (e.g. a network blip drops every
+    /// P2P connection simultaneously) would otherwise ALL schedule their next
+    /// dial at `now + step`, causing a synchronised reconnect storm. Adding
+    /// ±25% randomised jitter desynchronises them so retries are spread across
+    /// `[0.75×step, 1.25×step]`.
     pub fn record_failure(&mut self, now: Instant) -> u64 {
+        self.record_failure_with_rng(now, &mut rand::thread_rng())
+    }
+
+    /// Test-seam variant of [`record_failure`] that accepts an explicit RNG so
+    /// jitter behaviour can be verified deterministically in unit tests.
+    pub(crate) fn record_failure_with_rng<R: rand::Rng>(
+        &mut self,
+        now: Instant,
+        rng: &mut R,
+    ) -> u64 {
         self.connected_since = None;
         let step = BACKOFF_STEPS[self.backoff_idx.min(BACKOFF_STEPS.len() - 1)];
-        self.next_attempt = Some(now + Duration::from_secs(step));
+        // Jitter: sample from [0, step/2) ms then subtract step/4 ms to centre
+        // the window at zero, producing a signed offset in [−step/4, +step/4) s.
+        // We work in milliseconds to keep integer arithmetic; step is in seconds.
+        let step_ms = step * 1_000;
+        let half_window_ms = step_ms / 4; // 25% of step
+                                          // gen_range(0..2*half_window) − half_window → [−half_window, +half_window)
+        let raw: i64 = rng.gen_range(0..=(2 * half_window_ms as i64));
+        let jitter_ms: i64 = raw - half_window_ms as i64;
+        let jittered_ms = (step_ms as i64 + jitter_ms).max(0) as u64;
+        self.next_attempt = Some(now + Duration::from_millis(jittered_ms));
         self.backoff_idx = (self.backoff_idx + 1).min(BACKOFF_STEPS.len() - 1);
         step
     }
@@ -152,6 +181,7 @@ impl DialBackoff {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::SeedableRng;
 
     // ── M1: stale-sink dedup ────────────────────────────────────────────────
 
@@ -180,6 +210,76 @@ mod tests {
         // 60s cap if the peer is genuinely offline, so a brief failure does not
         // cost up to a minute before the next dial.
         assert_eq!(BACKOFF_STEPS, [2, 5, 10, 30, 60]);
+    }
+
+    // ── CopyPaste-rh27: jitter in per-peer backoff ──────────────────────────
+
+    /// rh27: jitter must spread retry times across [0.75×step, 1.25×step].
+    ///
+    /// Uses the seeded `record_failure_with_rng` test-seam with a fixed-seed
+    /// SmallRng so the result is deterministic while still exercising the
+    /// jitter arithmetic (a seed of 0 produces jitter ≠ 0 for the 2s step).
+    #[test]
+    fn rh27_backoff_jitter_stays_within_25_percent_of_step() {
+        let t0 = Instant::now();
+
+        // Run 100 failures with a seeded RNG; all must be in [0.75×step, 1.25×step].
+        for seed in 0u64..100 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut s = DialBackoff::new();
+            s.record_failure_with_rng(t0, &mut rng);
+
+            let step_ms = BACKOFF_STEPS[0] * 1_000;
+            let min_ms = step_ms * 3 / 4;
+            let max_ms = step_ms * 5 / 4;
+
+            let next = s
+                .next_attempt
+                .expect("next_attempt must be set after failure");
+            let actual_ms = next.duration_since(t0).as_millis() as u64;
+            assert!(
+                actual_ms >= min_ms && actual_ms <= max_ms,
+                "seed={seed}: jittered delay {actual_ms}ms must be in [{min_ms}, {max_ms}]"
+            );
+        }
+    }
+
+    /// rh27: jitter must produce at least two distinct delay values across a
+    /// large sample — confirming it is not a degenerate constant function.
+    #[test]
+    fn rh27_backoff_jitter_produces_distinct_delays() {
+        let t0 = Instant::now();
+        let mut seen_ms: std::collections::HashSet<u64> = std::collections::HashSet::new();
+
+        for seed in 0u64..50 {
+            let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+            let mut s = DialBackoff::new();
+            s.record_failure_with_rng(t0, &mut rng);
+            let next = s.next_attempt.unwrap();
+            seen_ms.insert(next.duration_since(t0).as_millis() as u64);
+        }
+
+        assert!(
+            seen_ms.len() >= 2,
+            "CopyPaste-rh27: jitter must produce multiple distinct delay values, \
+             got only {} distinct value(s): {:?}",
+            seen_ms.len(),
+            seen_ms,
+        );
+    }
+
+    /// rh27: the nominal step value returned by `record_failure` must be the
+    /// table entry (unchanged by jitter) so callers that log the "delay" see
+    /// a human-readable rounded value, not the jittered millisecond count.
+    #[test]
+    fn rh27_record_failure_returns_nominal_step_not_jittered_value() {
+        let t0 = Instant::now();
+        let mut s = DialBackoff::new();
+        let returned = s.record_failure(t0);
+        assert_eq!(
+            returned, BACKOFF_STEPS[0],
+            "record_failure must return the nominal step, not the jittered duration"
+        );
     }
 
     // ── M3: dwell-gated backoff reset ───────────────────────────────────────
@@ -290,14 +390,28 @@ mod tests {
 
     #[test]
     fn may_dial_respects_backoff_window() {
+        // Use a zero-jitter RNG fixture so the test is deterministic: seed the
+        // SmallRng with a value that produces jitter_ms == 0 for BACKOFF_STEPS[0].
+        // Rather than relying on a specific seed, use `record_failure_with_rng`
+        // with a deterministic RNG and check the actual `next_attempt`.
+        let mut rng = rand::rngs::StdRng::seed_from_u64(42);
         let mut s = DialBackoff::new();
         let t0 = Instant::now();
         assert!(s.may_dial(t0), "fresh state dials immediately");
 
-        let delay = s.record_failure(t0); // next_attempt = t0 + BACKOFF_STEPS[0]
+        let delay = s.record_failure_with_rng(t0, &mut rng);
         assert_eq!(delay, BACKOFF_STEPS[0]);
-        assert!(!s.may_dial(t0 + Duration::from_secs(delay) - Duration::from_millis(1)));
-        assert!(s.may_dial(t0 + Duration::from_secs(delay)));
+
+        // The actual next_attempt includes jitter; read it back and check
+        // may_dial at both extremes of the jitter window.
+        let next = s.next_attempt.expect("next_attempt set after failure");
+        // 1 ms before next_attempt: must NOT be able to dial.
+        assert!(
+            !s.may_dial(next - Duration::from_millis(1)),
+            "must not dial 1ms before next_attempt"
+        );
+        // At next_attempt: must be able to dial.
+        assert!(s.may_dial(next), "must dial at or after next_attempt");
     }
 
     #[test]

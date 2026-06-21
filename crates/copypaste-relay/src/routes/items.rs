@@ -2,7 +2,7 @@ use std::convert::Infallible;
 use std::time::Duration;
 
 use axum::extract::{Extension, Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
 use axum::Json;
@@ -180,16 +180,42 @@ pub async fn push(
     Ok((StatusCode::CREATED, Json(PushResponse { id })))
 }
 
+/// HTTP response header name for the pull watermark hint (CopyPaste-tspz).
+///
+/// The relay echoes the effective next cursor position in this header so
+/// a client that loses its in-memory watermark (e.g. after a 401-forced
+/// re-registration during burst-drain) can retrieve the last confirmed
+/// cursor from the response headers rather than discarding progress and
+/// re-fetching from scratch.
+///
+/// Format: `<wall_time>,<id>` where `wall_time` is the last item's `wall_time`
+/// (or the incoming `since` when the page is empty) and `id` is the last
+/// item's `id` (or `since_id` when the page is empty / 0 when absent).
+/// The cursor is strictly non-decreasing — clients should save the largest
+/// value seen and use it as `?since=<wall_time>&since_id=<id>` on resume.
+///
+/// Consumers: any client that persists this header value across reconnects
+/// can resume an interrupted burst-drain without re-fetching already-ingested
+/// items.
+pub const RELAY_WATERMARK_HEADER: &str = "relay-watermark";
+
 /// GET /devices/:device_id/items?since=<wall_time>
 ///
 /// Returns all items in `device_id`'s inbox with `wall_time > since`, ordered ascending.
 /// Auth: `Authorization: Bearer <token>` — must match the token for `device_id`.
+///
+/// # Response headers
+///
+/// `Relay-Watermark: <wall_time>,<id>` (CopyPaste-tspz) — the effective next
+/// cursor position after this page.  Clients interrupted mid-drain (e.g. by a
+/// 401 token expiry) can persist this header and use it as `?since=&since_id=`
+/// on reconnect to resume without discarding progress.
 pub async fn pull(
     State(state): State<AppState>,
     Path(device_id): Path<String>,
     BearerToken(token): BearerToken,
     Query(params): Query<PullParams>,
-) -> Result<Json<Vec<PullItem>>, RelayError> {
+) -> Result<impl IntoResponse, RelayError> {
     // Resolve the page size before taking the lock: default when absent,
     // clamped to the hard ceiling so a caller-supplied `limit` cannot force an
     // oversized clone under the global mutex (M4).
@@ -212,7 +238,28 @@ pub async fn pull(
     store.update_last_seen(&device_id);
 
     let items = store.pull_items(&device_id, params.since, params.since_id, limit)?;
-    Ok(Json(items))
+
+    // CopyPaste-tspz: build the watermark header from the effective next cursor.
+    //
+    // If the page is non-empty, the next cursor is the last item's (wall_time, id).
+    // If the page is empty, echo the incoming (since, since_id) back so the client
+    // always has a valid cursor to persist, even on an empty-inbox reconnect.
+    //
+    // The header value is `<wall_time>,<id>` — both i64/u64, comma-separated,
+    // easily parsed by `split_once(',')`.
+    let watermark_val = if let Some(last) = items.last() {
+        format!("{},{}", last.wall_time, last.id)
+    } else {
+        format!("{},{}", params.since, params.since_id.unwrap_or(0))
+    };
+    // HeaderValue::from_str is infallible for digit+comma strings.
+    let watermark_header =
+        HeaderValue::from_str(&watermark_val).unwrap_or_else(|_| HeaderValue::from_static("0,0"));
+
+    let mut resp = Json(items).into_response();
+    resp.headers_mut()
+        .insert(RELAY_WATERMARK_HEADER, watermark_header);
+    Ok(resp)
 }
 
 // ---------------------------------------------------------------------------
