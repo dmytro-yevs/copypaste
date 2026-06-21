@@ -52,6 +52,9 @@ function relativizeLogPath(absPath: string): string {
 
 export function LogView() {
   const [content, setContent] = useState<string>("");
+  // bdac.63: track empty state as a boolean, not a string sentinel.
+  // Previously setContent("(no log entries)") tied display text to logic.
+  const [isEmpty, setIsEmpty] = useState(false);
   const [logPath, setLogPath] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -63,7 +66,9 @@ export function LogView() {
         readLogs(MAX_LINES),
         logDirPath(),
       ]);
-      setContent(logs || "(no log entries)");
+      const empty = !logs || logs.trim().length === 0;
+      setIsEmpty(empty);
+      setContent(empty ? "" : logs);
       setLogPath(path);
       setError(null);
     } catch (err) {
@@ -123,7 +128,7 @@ export function LogView() {
       </button>
       <button
         onClick={handleExport}
-        disabled={!content || content === "(no log entries)"}
+        disabled={isEmpty || !content}
         className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text disabled:opacity-40"
         style={{ borderRadius: "var(--skin-r-ctl)" }}
       >
@@ -167,6 +172,14 @@ export function LogView() {
                   void load();
                 }}
               />
+            </div>
+          ) : isEmpty ? (
+            // bdac.63: proper empty state instead of "(no log entries)" sentinel.
+            // Centered muted message matching the app's empty-state pattern.
+            <div className="flex h-full items-center justify-center">
+              <p className="text-[13px] text-ide-faint" data-testid="log-empty-state">
+                No log entries yet
+              </p>
             </div>
           ) : (
             // Scrollable log area — no extra wrapper border; the rows live directly

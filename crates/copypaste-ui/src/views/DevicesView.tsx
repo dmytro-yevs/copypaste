@@ -1287,6 +1287,23 @@ function DevicesViewInner({
     </div>
   );
 
+  // --- Loading state (bdac.2) ---
+  // Early-return spinner prevents the empty-layout flash while peers are being
+  // fetched. Without this, loadState==="loading" fell through to the main JSX
+  // and rendered a blank structured layout indistinguishable from "no devices".
+  if (loadState === "loading") {
+    return (
+      <ViewShell title="Devices" actions={actions}>
+        <div className="flex h-full items-center justify-center">
+          <span
+            aria-label="Loading devices…"
+            className="inline-block h-5 w-5 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent"
+          />
+        </div>
+      </ViewShell>
+    );
+  }
+
   // --- Offline state ---
   if (loadState === "offline") {
     return (
@@ -1399,22 +1416,13 @@ function DevicesViewInner({
           <ThisDeviceCard info={ownState.info} />
         )}
 
-        {/* Paired peers */}
-        {loadState === "loading" && (
-          /* Skeleton matches PeerRow layout: avatar block + two text rows (CopyPaste-5917.22). */
-          <div className="flex items-center gap-3 px-3 py-2.5 animate-pulse" aria-busy="true" aria-label="Loading peers…">
-            <div className="shrink-0 w-[38px] h-[38px] rounded-xl bg-ide-divider" />
-            <div className="min-w-0 flex-1 space-y-1.5">
-              <div className="h-[13px] w-36 rounded bg-ide-divider" />
-              <div className="h-[11px] w-24 rounded bg-ide-divider" />
-            </div>
-          </div>
-        )}
+        {/* Paired peers — loadState is always "ready" here; "loading" returns
+            early with a full-page spinner (CopyPaste-bdac.2). */}
         {loadState === "ready" && peers.length === 0 && (
           <div className="px-3 py-3 flex items-center gap-2">
             {/* Briefcase icon via lucide-react (§9: replace inline SVGs) */}
             <Briefcase size={14} strokeWidth={1.5} className="text-ide-faint shrink-0" />
-            <p className="text-[13px] text-ide-dim">No paired devices yet.</p>
+            <p className="text-[13px] text-ide-dim">No paired devices</p>
           </div>
         )}
         {loadState === "ready" &&
@@ -1577,21 +1585,13 @@ function DevicesViewInner({
               )}
             </div>
             <div className="min-w-0 flex-1 space-y-2">
-              {/* Payload only visible when QR is revealed — display-only, never
-                  copyable. The QR SVG above is the canonical pairing channel;
-                  the raw payload string must not be extractable via clipboard.
-                  userSelect:none prevents select-all clipboard capture.
-                  (bd CopyPaste-1jms.5) */}
-              {qrBlur === "revealed" && (
-                <p
-                  className="break-all font-mono text-[10.5px] text-ide-faint"
-                  style={{ userSelect: "none" }}
-                  data-testid="qr-payload-text"
-                  aria-hidden="true"
-                >
-                  {qrState.qr.payload}
-                </p>
-              )}
+              {/* CopyPaste-1jms.5: The raw QR payload string (CPPAIR2.* — contains
+                  PAKE password, device cert fingerprint, Supabase anon key) must
+                  NEVER be rendered into the DOM, even when the QR is revealed.
+                  The QR SVG above is the sole canonical pairing channel.
+                  Rendering the payload as text (even with userSelect:none) left it
+                  accessible via element.textContent / browser extensions / a11y APIs.
+                  Fix: remove the <p> block entirely. */}
               {qrSecsLeft !== null && qrSecsLeft > 0 && (
                 <>
                   {/* Determinate drain bar: width drains from 100% to 0 as time runs out */}

@@ -124,35 +124,61 @@ describe("CopyPaste-1jms.1: SAS code is display-only (non-copyable)", () => {
 // CopyPaste-1jms.5: QR payload text is non-selectable
 // ---------------------------------------------------------------------------
 
-describe("CopyPaste-1jms.5: QR payload text is non-selectable", () => {
-  it("renders the QR payload with userSelect:none when revealed", async () => {
-    // Return a resolved QR so the payload text appears.
+describe("CopyPaste-1jms.5: QR payload NEVER rendered in the DOM", () => {
+  // The raw CPPAIR2.* payload (PAKE password, device cert fingerprint, Supabase
+  // anon key) must not appear in the DOM even when the QR is revealed.
+  // userSelect:none was insufficient because element.textContent / browser
+  // extensions / execCommand('copy') could still extract the secret.
+  // Fix: the <p> block is removed entirely — the QR SVG is the only channel.
+
+  it("does not render the QR payload text in the DOM while the QR is blurred", async () => {
     pairingQrSvg.mockReset().mockResolvedValue({
       svg: "<svg><rect/></svg>",
-      payload: "CPPAIR1.test.payload.string",
+      payload: "CPPAIR2.secret.pake.payload.string",
       expires_in_secs: 120,
     });
-    // poll stays in awaiting_sas so the SAS modal doesn't interfere.
     pairGetSas.mockReset().mockResolvedValue({ state: "idle" });
 
     await act(async () => {
       render(<DevicesView />);
     });
 
-    // Reveal the QR: find and click the "Click to reveal" button.
+    // Wait for QR to load (reveal button should be visible)
+    await screen.findByRole("button", { name: /click to reveal/i });
+
+    // Payload must not appear anywhere in the DOM while blurred.
+    expect(
+      document.body.textContent
+    ).not.toContain("CPPAIR2.secret.pake.payload.string");
+
+    // The [data-testid="qr-payload-text"] element must not exist.
+    expect(screen.queryByTestId("qr-payload-text")).not.toBeInTheDocument();
+  });
+
+  it("does not render the QR payload text in the DOM after revealing", async () => {
+    pairingQrSvg.mockReset().mockResolvedValue({
+      svg: "<svg><rect/></svg>",
+      payload: "CPPAIR2.secret.pake.payload.string",
+      expires_in_secs: 120,
+    });
+    pairGetSas.mockReset().mockResolvedValue({ state: "idle" });
+
+    await act(async () => {
+      render(<DevicesView />);
+    });
+
+    // Reveal the QR: find and click "Click to reveal".
     const revealBtn = await screen.findByRole("button", { name: /click to reveal/i });
     await act(async () => {
       revealBtn.click();
     });
 
-    // The QR payload text element must now be present.
-    const payloadEl = await screen.findByTestId("qr-payload-text");
-    expect(payloadEl).toBeInTheDocument();
-    expect(payloadEl.textContent).toContain("CPPAIR1");
-
-    // Must have userSelect: none to prevent clipboard capture.
-    const style = payloadEl.getAttribute("style") ?? "";
-    expect(style).toMatch(/user-select\s*:\s*none/i);
+    // After reveal, the [data-testid="qr-payload-text"] element must NOT exist.
+    // The raw payload must not be in any DOM text node.
+    expect(screen.queryByTestId("qr-payload-text")).not.toBeInTheDocument();
+    expect(
+      document.body.textContent
+    ).not.toContain("CPPAIR2.secret.pake.payload.string");
   });
 });
 

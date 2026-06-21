@@ -2344,11 +2344,10 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
-          {/* M7: "Set" button removed — passphrase saves on Enter or focus-out */}
           <SettingsRow title="Sync passphrase">
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-1.5">
-                <InfoPopover text="Enter the same passphrase on every device to enable encrypted sync. Saves automatically when you press Enter or move focus away." />
+                <InfoPopover text="Enter the same passphrase on every device to enable encrypted sync. Click 'Set passphrase' or press Enter to save." />
                 <input
                   type="password"
                   className={inputCls}
@@ -2361,10 +2360,16 @@ export function SettingsView() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") void handleSetPassphrase();
                   }}
-                  onBlur={() => {
-                    if (passphrase.trim() !== "") void handleSetPassphrase();
-                  }}
                 />
+                <button
+                  type="button"
+                  disabled={offline || passphrase.trim() === ""}
+                  onClick={() => void handleSetPassphrase()}
+                  className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
+                  style={{ borderRadius: "var(--skin-r-ctl)" }}
+                >
+                  Set passphrase
+                </button>
               </div>
               {passphraseSavedMsg !== null && (
                 <span

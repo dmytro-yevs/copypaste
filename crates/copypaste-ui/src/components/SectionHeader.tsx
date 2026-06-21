@@ -12,12 +12,17 @@ import { useUI } from "../store";
 interface SectionHeaderProps {
   label: string;
   hint?: string;
-  /** When true, keeps label colour as text-ide-faint (DevicesView section style).
-   *  Default false → uses text-ide-dim (SubsectionHeader / Settings style). */
+  /**
+   * bdac.89: canonical section-label colour is text-ide-faint, matching
+   * Android SectionLabel (Components.kt:1256 — c.faint per PARITY-SPEC §3).
+   * Default changed to true so all section headers are faint by default.
+   * Pass faint={false} explicitly only when a higher-contrast dim label
+   * is intentionally needed (non-standard use case).
+   */
   faint?: boolean;
 }
 
-export function SectionHeader({ label, hint, faint = false }: SectionHeaderProps) {
+export function SectionHeader({ label, hint, faint = true }: SectionHeaderProps) {
   // CopyPaste-hffp: tighter top margin in compact density to reduce whitespace.
   const density = useUI((s) => s.prefs.density ?? "comfortable");
   const mt =
