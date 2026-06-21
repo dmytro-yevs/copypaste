@@ -848,7 +848,8 @@ function DevicesViewInner({
       // accessibility tree (CopyPaste-tzzu).
       // eslint-disable-next-line no-console
       console.error("[DevicesView] QR generation failed:", err);
-      const next: QrState = { status: "error", message: "Could not generate pairing code. Make sure the daemon is running and try again." };
+      // bdac.36: canonical term "clipboard service" — never "daemon" in user-facing strings.
+      const next: QrState = { status: "error", message: "Could not generate pairing code. Make sure the clipboard service is running and try again." };
       setQrState(next);
       qrStateRef.current = next;
     } finally {
@@ -1100,7 +1101,8 @@ function DevicesViewInner({
         // in the DOM (CopyPaste-j5qg).
         // eslint-disable-next-line no-console
         console.error("[DevicesView] rescan failed:", e);
-        setDiscoverError("Network scan failed. Check that Wi-Fi is on and the daemon is running.");
+        // bdac.36: "clipboard service" is the canonical user-facing term.
+        setDiscoverError("Network scan failed. Check that Wi-Fi is on and the clipboard service is running.");
       }
     } finally {
       setRescanning(false);
@@ -1312,7 +1314,7 @@ function DevicesViewInner({
           className="h-full"
           icon={<Zap width={28} height={28} strokeWidth={1.5} />}
           title="Clipboard service offline"
-          body="The daemon is not running."
+          body="The clipboard service is not running."
           action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
         />
       </ViewShell>
@@ -1358,7 +1360,7 @@ function DevicesViewInner({
           className="h-full"
           icon={<AlertCircle width={28} height={28} strokeWidth={1.5} />}
           title="Failed to load devices"
-          body="Try restarting the daemon."
+          body="Try restarting the clipboard service."
           action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void loadPeers()} /></div>}
         />
       </ViewShell>
@@ -1409,7 +1411,8 @@ function DevicesViewInner({
         )}
         {ownState.status === "offline" && (
           <div className="px-3 py-2.5">
-            <p className="text-[13px] text-ide-danger">Daemon not running.</p>
+            {/* bdac.34/36: canonical user-facing term is "Clipboard service" — never "Daemon" */}
+            <p className="text-[13px] text-ide-danger">Clipboard service not running.</p>
           </div>
         )}
         {ownState.status === "ready" && (

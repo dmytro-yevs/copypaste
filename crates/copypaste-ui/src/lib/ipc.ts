@@ -810,6 +810,17 @@ export const api = {
     ipcCall<{ ok: boolean; accepted: boolean }>("pair_confirm_sas", { accept }),
   /** Abort an in-flight discovery pairing and reset the machine to idle. */
   pairAbort: () => ipcCall<{ ok: boolean }>("pair_abort", {}),
+  /**
+   * Reset the pairing state machine to idle without cancelling an in-flight
+   * handshake. Safe to call from any state — in particular AFTER a terminal
+   * outcome (confirmed / aborted / timed_out / rejected) so the machine is
+   * ready for the next LAN pairing attempt. (bd CopyPaste-1jms.3 / 1jms.12)
+   *
+   * Difference from pairAbort: `pair_abort` also signals the remote peer;
+   * `pair_reset` is a local-only reset used once the handshake has already
+   * ended and we just want the SM back at idle.
+   */
+  pairReset: () => ipcCall<{ ok: boolean }>("pair_reset", {}),
   pairWithPassword: (peer_fingerprint: string, password: string) =>
     ipcCall("pair_peer_with_password", { peer_fingerprint, password }),
   unpairPeer: (fingerprint: string) => ipcCall("unpair_peer", { fingerprint }),
