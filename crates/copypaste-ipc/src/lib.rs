@@ -36,12 +36,10 @@ pub mod response;
 pub use error::ErrorCode;
 pub use methods::{
     compute_sync_badge_state, compute_sync_badge_state_with_inflight, AppConfig, DbBackupRequest,
-    DbBackupResponse, DbRestoreRequest,
-    DbRestoreResponse, DbStatsResponse, GetSyncStatusResponse, ResetDatabaseRequest,
-    ResetDatabaseResponse, StatsResponse, StoreCloudPasswordRequest, StoreCloudPasswordResponse,
-    SyncBadgeState,
-    VacuumRequest, VacuumResponse, METHOD_ADD_FILE_ITEM, METHOD_CLOUD_TEST_CONNECTION,
-    METHOD_COPY, METHOD_COPY_ITEM,
+    DbBackupResponse, DbRestoreRequest, DbRestoreResponse, DbStatsResponse, GetSyncStatusResponse,
+    ResetDatabaseRequest, ResetDatabaseResponse, StatsResponse, StoreCloudPasswordRequest,
+    StoreCloudPasswordResponse, SyncBadgeState, VacuumRequest, VacuumResponse,
+    METHOD_ADD_FILE_ITEM, METHOD_CLOUD_TEST_CONNECTION, METHOD_COPY, METHOD_COPY_ITEM,
     METHOD_COUNT, METHOD_DB_BACKUP, METHOD_DB_RESTORE, METHOD_DB_STATS, METHOD_DELETE,
     METHOD_DELETE_ALL, METHOD_DELETE_ITEM, METHOD_EXPORT, METHOD_GET_APP_ICON, METHOD_GET_CONFIG,
     METHOD_GET_ITEM_FILE, METHOD_GET_ITEM_IMAGE, METHOD_GET_ITEM_THUMBNAIL,
