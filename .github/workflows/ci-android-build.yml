@@ -85,9 +85,29 @@ jobs:
           test -f android/app/src/main/jniLibs/arm64-v8a/libcopypaste_android.so || \
             { echo "ERROR: arm64-v8a .so missing"; exit 1; }
 
-      # Note: no "Pre-generate debug keystore" step needed — android/app/debug.keystore
-      # is committed to the repo and referenced by signingConfigs.debug in build.gradle.kts.
-      # Generating a fresh keystore each run was the root cause of INSTALL_FAILED_UPDATE_INCOMPATIBLE.
+      - name: Upload .so artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: copypaste-android-so
+          path: android/app/src/main/jniLibs/
+          retention-days: 1
+
+      - name: Generate fallback debug keystore (CopyPaste-d41w.4)
+        # build.gradle.kts generates debug.keystore via project.exec at config
+        # time, which the Gradle configuration cache forbids -> the keystore is
+        # never created -> assembleDebug fails with a config-cache serialization
+        # error. Pre-create it here so the config-time exec is skipped by its
+        # exists() guard. Mirrors the equivalent step in release.yml (line 578).
+        # android/app/debug.keystore is gitignored — never commit the file.
+        run: |
+          KS=android/app/debug.keystore
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -v -keystore "$KS" -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug keystore at $KS"
+          fi
 
       - name: Gradle assembleDebug
         working-directory: android
@@ -114,24 +134,21 @@ jobs:
   # These run on every PR and push that touches Android sources, giving
   # fast feedback without the multi-minute emulator boot.
   #
+  # CopyPaste-ojas.9: this job must declare needs: build-android-ndk so that
+  # a Rust compile failure in the native .so blocks unit tests from reporting
+  # green on a broken commit. Without the dependency, both jobs could run in
+  # parallel and a merge could happen while build-android-ndk was still failing.
+  #
   # connectedAndroidTest (instrumented tests that need a real device / AVD)
-  # is NOT run in CI at all — there is no emulator step in any workflow.
-  # Running a hardware-accelerated AVD requires GitHub's larger hosted runners
-  # (expensive) and adds ~10 min of boot time per run. To run instrumented
-  # tests locally: ./gradlew :app:connectedAndroidTest
-  # See CopyPaste-7zby: the previous comment incorrectly claimed they ran in
-  # the nightly workflow; the nightly-android job only builds Docker artifacts.
+  # runs in the android-instrumented job below (CopyPaste-ojas.5).
   android-unit-test:
     name: Android JVM unit tests
     runs-on: ubuntu-latest
-    # Unit tests do not need the native .so; the Kotlin/Java sources compile
-    # on the JVM and Robolectric stubs the Android runtime. Run this job in
-    # parallel with build-android-ndk to keep CI fast.
-    #
-    # IMPORTANT — .so gate: because this job uses -x buildCargoNdk, a broken
-    # native library will NOT be caught here. The build-android-ndk job above
-    # is the definitive gate for native .so correctness and MUST NOT be removed
-    # or made optional. Both jobs are required to pass before merging.
+    needs: build-android-ndk
+    # needs: build-android-ndk ensures the native .so is built and correct
+    # before these JVM unit tests run (CopyPaste-ojas.9). Even though
+    # Robolectric stubs the Android runtime and no .so is loaded in JVM tests,
+    # a Rust compile failure must block this job to prevent false-green CI.
     steps:
       - uses: actions/checkout@v4
 
@@ -155,6 +172,17 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
           restore-keys: gradle-${{ runner.os }}-
+
+      - name: Generate fallback debug keystore (CopyPaste-d41w.4)
+        run: |
+          KS=android/app/debug.keystore
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -v -keystore "$KS" -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug keystore at $KS"
+          fi
 
       - name: Run JVM unit tests
         working-directory: android
@@ -205,6 +233,17 @@ jobs:
           key: gradle-lint-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties', 'android/**/libs.versions.toml') }}
           restore-keys: gradle-lint-${{ runner.os }}-
 
+      - name: Generate fallback debug keystore (CopyPaste-d41w.4)
+        run: |
+          KS=android/app/debug.keystore
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -v -keystore "$KS" -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug keystore at $KS"
+          fi
+
       - name: Android lint
         working-directory: android
         # -x buildCargoNdk: skip the Rust .so build — lint analyses
@@ -219,5 +258,72 @@ jobs:
         with:
           name: android-lint-report
           path: android/app/build/reports/lint-results*.html
+          retention-days: 7
+          if-no-files-found: warn
+
+  # Instrumented tests — run on an AVD emulator (CopyPaste-ojas.5).
+  # CryptoConformanceTest and LiveP2pSyncTest require a connected device/emulator
+  # because they exercise real cross-language crypto conformance and live P2P sync.
+  # Uses reactivecircus/android-emulator-runner which boots a managed AVD and
+  # automatically tears it down after the test run.
+  #
+  # This job runs on every PR/push touching android/ or crates/copypaste-android/
+  # (same paths filter as the workflow), gated on build-android-ndk succeeding so
+  # the native .so is present in jniLibs before connectedDebugAndroidTest runs.
+  android-instrumented:
+    name: Android instrumented tests (AVD)
+    runs-on: macos-latest
+    needs: build-android-ndk
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Download .so artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: copypaste-android-so
+          path: android/app/src/main/jniLibs/
+
+      - name: Generate fallback debug keystore (CopyPaste-d41w.4)
+        run: |
+          KS=android/app/debug.keystore
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -v -keystore "$KS" -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug keystore at $KS"
+          fi
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-instrumented-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties') }}
+          restore-keys: gradle-instrumented-${{ runner.os }}-
+
+      - name: Run instrumented tests on AVD
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          profile: Nexus 6
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: cd android && ./gradlew :app:connectedDebugAndroidTest -x buildCargoNdk
+
+      - name: Upload instrumented test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-instrumented-test-results
+          path: android/app/build/reports/androidTests/
           retention-days: 7
           if-no-files-found: warn
