@@ -117,6 +117,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.collectAsState
+import androidx.activity.compose.rememberLauncherForActivityResult
 import com.copypaste.android.ui.SyncBadgeState
 import com.copypaste.android.ui.resolveSyncBadgeState
 import java.text.DateFormat
@@ -1389,7 +1390,7 @@ private fun SyncTab(
                     containerColor = if (syncErrorIsUnauthorized)
                         c.danger.copy(alpha = 0.12f)
                     else
-                        c.surface,
+                        c.elevated,
                 ),
                 modifier = Modifier
                     .fillMaxWidth()

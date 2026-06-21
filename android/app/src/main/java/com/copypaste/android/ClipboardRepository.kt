@@ -2606,7 +2606,7 @@ class ClipboardRepository(context: Context) {
 
                 if (stored.isNotBlank() && pinned) {
                     // Restore pinned state.
-                    setPinned(stored, true, encryptionKey)
+                    setPinned(stored, true)
                 }
 
                 if (stored.isNotBlank()) {
