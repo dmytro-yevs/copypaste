@@ -1,3 +1,28 @@
+// # Why this is polling, not push
+//
+// The ideal implementation would open a long-lived Unix socket connection and
+// have the daemon push a JSON line each time a new item is captured (server-sent
+// events over the existing socket transport). The daemon already has an internal
+// broadcast channel (`new_item_tx`, `tokio::sync::broadcast`) that drives P2P
+// and cloud-sync paths — a `"subscribe"` IPC verb would be a thin wrapper.
+//
+// However, **no such IPC method exists today**. The daemon's dispatch loop
+// (copypaste-daemon/src/ipc.rs) handles only request/response methods; the
+// broadcast channel is internal and never exposed over the socket. Implementing
+// a streaming verb requires protocol changes in the daemon (`copypaste-daemon`)
+// and possibly in the shared types (`copypaste-ipc`) — changes that are out of
+// scope for the CLI crate.
+//
+// Until a `"subscribe"` (or equivalent streaming) IPC method is added to the
+// daemon, polling is the only option available to CLI-side code.
+//
+// Current mitigation: the `SeenIds` set ensures we only print new items —
+// polling a quiet clipboard costs one IPC round-trip every `interval_ms`
+// (default 2 000 ms) but produces no output. This is wasteful but not harmful.
+//
+// TODO(CopyPaste-44rq.19): replace polling with a push subscription once the
+// daemon exposes a streaming/subscribe IPC verb.
+
 use crate::commands::common::format_unix_ms;
 use crate::ipc::IpcClient;
 use anyhow::Result;
