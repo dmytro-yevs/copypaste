@@ -115,11 +115,15 @@ async fn register(app: axum::Router, device_id: &str, key: &str) -> (StatusCode,
 }
 
 async fn get_json(app: axum::Router, uri: &str) -> (StatusCode, Value) {
-    let req = Request::builder()
-        .method(Method::GET)
-        .uri(uri)
-        .body(Body::empty())
-        .unwrap();
+    get_json_auth(app, uri, None).await
+}
+
+async fn get_json_auth(app: axum::Router, uri: &str, token: Option<&str>) -> (StatusCode, Value) {
+    let mut builder = Request::builder().method(Method::GET).uri(uri);
+    if let Some(t) = token {
+        builder = builder.header(header::AUTHORIZATION, format!("Bearer {t}"));
+    }
+    let req = builder.body(Body::empty()).unwrap();
     let resp = app.oneshot(req).await.unwrap();
     let status = resp.status();
     let bytes = resp.into_body().collect().await.unwrap().to_bytes();
@@ -165,8 +169,9 @@ async fn relay_bearer_token_is_random_not_derived_from_pubkey() {
 #[tokio::test]
 async fn relay_get_devices_does_not_leak_bearer_token() {
     let (app, _state) = make_app();
-    let (status, _) = register(app.clone(), &device_uuid(1), &pub_key(1)).await;
+    let (status, reg_body) = register(app.clone(), &device_uuid(1), &pub_key(1)).await;
     assert_eq!(status, StatusCode::CREATED);
+    let token = reg_body["auth_token"].as_str().expect("missing auth_token");
 
     let (list_status, list_body) = get_json(app.clone(), "/devices").await;
     assert_eq!(list_status, StatusCode::OK);
@@ -184,9 +189,24 @@ async fn relay_get_devices_does_not_leak_bearer_token() {
         "list endpoint leaks auth_token field: {body_str}"
     );
 
-    // Per-device GET must also not leak the bearer token.
-    let (info_status, info_body) = get_json(app, &format!("/devices/{}", device_uuid(1))).await;
-    assert_eq!(info_status, StatusCode::OK);
+    // CopyPaste-44rq.52: GET /devices/:id now requires bearer auth.
+    // Without auth → 401 (must not expose device_name / public_key_b64).
+    let (unauth_status, _) =
+        get_json_auth(app.clone(), &format!("/devices/{}", device_uuid(1)), None).await;
+    assert_eq!(
+        unauth_status,
+        StatusCode::UNAUTHORIZED,
+        "GET /devices/:id must return 401 without a bearer token"
+    );
+
+    // With a valid bearer token → 200, and the response must not leak auth secrets.
+    let (info_status, info_body) =
+        get_json_auth(app, &format!("/devices/{}", device_uuid(1)), Some(token)).await;
+    assert_eq!(
+        info_status,
+        StatusCode::OK,
+        "GET /devices/:id must return 200 with a valid bearer token"
+    );
     let info_str = serde_json::to_string(&info_body).unwrap();
     assert!(
         !info_str.contains("bearer_token"),

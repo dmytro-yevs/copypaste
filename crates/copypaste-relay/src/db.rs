@@ -46,7 +46,9 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection};
+#[cfg(test)]
+use rusqlite::OptionalExtension;
 
 /// Sentinel path that selects an in-memory database (no on-disk persistence).
 /// This is the relay's default so existing tests and ephemeral deploys behave
@@ -428,7 +430,10 @@ impl Db {
     // -- Test/diagnostic helpers --------------------------------------------
 
     /// Count inbox items for a device (used by persistence tests).
-    #[allow(dead_code)]
+    ///
+    /// Only called from test code (`#[cfg(test)]` in state.rs and db.rs tests).
+    /// Gated so production binaries never compile dead SQL.
+    #[cfg(test)]
     pub fn item_count(&self, device_id: &str) -> Result<i64, rusqlite::Error> {
         self.conn
             .query_row(
