@@ -186,6 +186,18 @@ path = "tests/pairing_e2e.rs"
 name = "import_handler"
 path = "tests/import_handler.rs"
 
+# CopyPaste-ojas.7: `db_stats` IPC verb integration tests — item_count /
+# size_bytes shape, count after import, concurrent calls.
+[[test]]
+name = "db_stats_ipc"
+path = "tests/db_stats_ipc.rs"
+
+# CopyPaste-ojas.7: `export` + `import` roundtrip and `reset_database` tests —
+# field presence, content preservation, limit param, confirm guard, wipe+health.
+[[test]]
+name = "export_import_roundtrip"
+path = "tests/export_import_roundtrip.rs"
+
 # Poison-row guard unit + integration tests (CopyPaste-jww / CopyPaste-5y4).
 [[test]]
 name = "poison_row_guard"
