@@ -1184,7 +1184,10 @@ mod tests {
             "label must not contain the raw device_id prefix '{raw_prefix}', got: {label}"
         );
         // The label still has the 'cp-' prefix and is exactly 11 chars.
-        assert!(label.starts_with("cp-"), "label must start with 'cp-': {label}");
+        assert!(
+            label.starts_with("cp-"),
+            "label must start with 'cp-': {label}"
+        );
         assert_eq!(label.len(), 11, "label must be exactly 11 chars: {label}");
         // All chars after 'cp-' are lowercase hex digits.
         assert!(
