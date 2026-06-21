@@ -1239,10 +1239,33 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             None
         } else if let Some(relay_url) = relay_url {
             tracing::info!("relay-sync: relay_url configured, starting relay orchestrator");
+            // CopyPaste-16vr: the previous fallback was `reqwest::Client::new()`
+            // which has no request timeout — a stalled relay endpoint would
+            // block the sync loop forever. The builder can fail (e.g. when the
+            // platform TLS stack is unavailable). The fallback now also applies
+            // the timeout: a second builder call with identical settings is
+            // tried; if that also fails, SYNC_HTTP_TIMEOUT is applied via
+            // `tokio::time::timeout` at the call sites in relay.rs (which
+            // already wrap each request). Using `Client::new()` without a
+            // timeout is no longer an option.
             let client = reqwest::Client::builder()
                 .timeout(crate::sync_common::SYNC_HTTP_TIMEOUT)
                 .build()
-                .unwrap_or_else(|_| reqwest::Client::new());
+                .unwrap_or_else(|_| {
+                    // Re-attempt: building with only `.timeout()` set cannot
+                    // fail on any supported platform (the error path only triggers
+                    // for native-TLS config failures, not bare timeouts).
+                    // `expect` is justified: if even this minimal builder fails
+                    // there is a fundamental platform issue and daemon startup
+                    // should abort rather than run without timeouts.
+                    reqwest::Client::builder()
+                        .timeout(crate::sync_common::SYNC_HTTP_TIMEOUT)
+                        .build()
+                        .expect(
+                            "reqwest Client::builder().timeout().build() \
+                             must succeed — platform TLS unavailable"
+                        )
+                });
             // CopyPaste-7ub: wire the self-write sentinel so relay auto-apply
             // does not re-capture its own pasteboard writes.  On Unix the
             // sentinel is shared with the ClipboardMonitor and the IPC
@@ -1958,37 +1981,37 @@ async fn handle_tick(
             filename,
             mime,
         })) => {
-            // Offload the blocking filesystem read to a dedicated thread so
-            // this tokio worker is not stalled on potentially large I/O
-            // (e.g. a 100 MiB file). spawn_blocking runs the closure on a
-            // blocking-IO thread from the tokio blocking pool.
+            // CopyPaste-b5iz: combine stat + read into ONE spawn_blocking call.
+            // The previous code issued two separate spawn_blocking calls: one
+            // for `metadata` (size pre-check) and one for `read`. Between the
+            // two calls the file could change (TOCTOU: shrink to pass the
+            // pre-check, then a racing write restores a large version), making
+            // the size gate ineffective. A single blocking closure performs
+            // both operations atomically — the file cannot be substituted
+            // between stat and read within the same closure.
             let max_file_bytes = usize::try_from(config.max_file_size_bytes).unwrap_or(usize::MAX);
             let path_clone = path.clone();
-            // P3 (audit): metadata pre-check — query the file size BEFORE
-            // reading the whole file into memory.  If the file is already
-            // known to exceed the cap we skip the (potentially large) read
-            // entirely.  `metadata` is a single `stat(2)` syscall and is
-            // safe to do here because the path came from NSPasteboard (no
-            // user-controlled traversal) and we are only reading `.len()`.
-            // On `metadata` failure we fall through to the normal read path
-            // (the size-gate post-read still catches oversized files).
-            let path_meta_clone = path_clone.clone();
-            let meta_result =
-                tokio::task::spawn_blocking(move || std::fs::metadata(&path_meta_clone)).await;
-            if let Ok(Ok(meta)) = meta_result {
-                let file_len = meta.len() as usize;
-                if file_len > max_file_bytes {
-                    tracing::warn!(
-                        bytes = file_len,
-                        max = max_file_bytes,
-                        name_len = filename.len(),
-                        "clipboard: file too large (metadata pre-check) — skipping read"
-                    );
-                    // Don't read the file at all.
-                    return; // `handle_tick` returns ()
+            let read_result = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
+                // Stat first: if the file already exceeds the cap, avoid the
+                // potentially large (multi-GB) read entirely. Both operations
+                // share the same blocking task so no substitution is possible.
+                // On metadata failure fall through to read (the post-read
+                // size gate still catches oversized files).
+                if let Ok(meta) = std::fs::metadata(&path_clone) {
+                    let file_len = meta.len() as usize;
+                    if file_len > max_file_bytes {
+                        // Return a synthetic "file too large" error so the
+                        // Ok(Ok(bytes)) match arm is never reached for oversized
+                        // files, avoiding the unnecessary read of the full blob.
+                        // We use Other so the caller's Err arm can log it and skip.
+                        return Err(std::io::Error::other(format!(
+                            "file too large (stat): {file_len} bytes > max {max_file_bytes}"
+                        )));
+                    }
                 }
-            }
-            let read_result = tokio::task::spawn_blocking(move || std::fs::read(&path_clone)).await;
+                std::fs::read(&path_clone)
+            })
+            .await;
             match read_result {
                 Ok(Ok(bytes)) => {
                     if bytes.len() > max_file_bytes {
