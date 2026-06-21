@@ -103,7 +103,23 @@ import com.copypaste.android.Settings
 /** PARITY-SPEC §2 LIGHT glass alpha (warm near-white fill). */
 const val GLASS_ALPHA_LIGHT = 0.62f
 
-/** PARITY-SPEC §2 DARK glass alpha. */
+/**
+ * PARITY-SPEC §2 DARK glass alpha — 0.55f (flat tint, not a gradient).
+ *
+ * Platform-divergence rationale (CopyPaste-2ji4):
+ * The web styleguide uses a gradient fill for both dark and light:
+ *   CARD tier light  → linear-gradient(rgba(255,255,255,0.58), rgba(255,255,255,0.40))
+ *   CARD tier dark   → the styleguide does not publish a separate dark per-tier gradient.
+ * Android Compose's `Modifier.background()` applies a single solid Color (not a CSS
+ * `linear-gradient`), so we use a single flat alpha. The 0.55f value was calibrated
+ * to match the perceptual *midpoint* of the published dark glass spec and to satisfy
+ * WCAG-AA text contrast (4.5:1) on the dark palette surfaces (#1E202A).
+ *
+ * The web "dark .40" figure refers to the *bottom* alpha of the CARD-tier light
+ * gradient (rgba(255,255,255,0.40)), not a flat dark value; applying 0.40 flat on
+ * Android dark would make surfaces too translucent and fail contrast requirements.
+ * Aligning to 0.55f flat on Android dark is therefore intentional and correct.
+ */
 const val GLASS_ALPHA_DARK = 0.55f
 
 /**

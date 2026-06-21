@@ -44,19 +44,79 @@ class SupabaseClient(
         private const val TAG = "SupabaseClient"
 
         /**
-         * Maximum rows to fetch in a single poll (matches daemon's `limit=20`).
+         * Maximum rows to fetch in a single poll.
          *
-         * Public so callers can drain a backlog: a returned batch whose size
-         * equals POLL_LIMIT means the server very likely has more rows waiting,
-         * so the caller re-polls immediately instead of waiting the idle delay.
+         * Raised from 20 to 100 (CopyPaste-gh1h): the daemon's original limit=20 was
+         * mirrored here, but 20 rows per poll makes full-table catch-up after a long
+         * offline period very slow (N/20 round-trips). 100 keeps each response well
+         * under 1 MB of JSON while cutting recovery time by 5×.
+         *
+         * Public so callers can drain a backlog: a returned batch whose size equals
+         * POLL_LIMIT means the server very likely has more rows waiting, so the caller
+         * re-polls immediately (pagination) instead of waiting the idle delay.
          */
-        const val POLL_LIMIT = 20
+        const val POLL_LIMIT = 100
 
         /** Connect / read timeout for every HTTP call, ms. */
         private const val TIMEOUT_MS = 15_000
 
         /** Lowercase hex digits for [encodePayloadCt]. */
         private val HEX_DIGITS = "0123456789abcdef".toCharArray()
+
+        /**
+         * Build the JSON PATCH body for a tombstone (delete) mutation.
+         *
+         * CopyPaste-gh1h: the tombstone body MUST include an explicit
+         * `payload_ct: null` so PostgREST writes NULL into the `bytea` column,
+         * wiping the ciphertext on the server. Omitting the key leaves the old
+         * encrypted bytes in place — they remain decryptable until the row TTL
+         * expires, creating an information-disclosure window.
+         *
+         * Mirrors the macOS daemon's cloud.rs `mark_deleted`:
+         *   UPDATE clipboard_items
+         *     SET deleted=true, payload_ct=NULL, pinned=false, pin_order=NULL,
+         *         lamport_ts=<ts>, wall_time=<wt>
+         *   WHERE item_id=<id>
+         *
+         * Extracted as a `@JvmStatic` helper so it can be unit-tested on the
+         * host JVM without constructing a full [SupabaseClient] or making HTTP calls.
+         */
+        @JvmStatic
+        fun buildTombstonePatchBody(lamportTs: Long, wallTime: Long): String =
+            JSONObject().apply {
+                put("lamport_ts", lamportTs)
+                put("wall_time", wallTime)
+                put("deleted", true)
+                put("pinned", false)
+                put("pin_order", JSONObject.NULL)
+                // Explicitly null payload_ct to wipe the ciphertext (gh1h).
+                // Without this key the PATCH leaves the old ciphertext intact.
+                put("payload_ct", JSONObject.NULL)
+            }.toString()
+
+        /**
+         * Build the JSON PATCH body for a pin-state update mutation.
+         *
+         * Does NOT touch `payload_ct` — the ciphertext is untouched by pin/unpin.
+         * Only `pinned`, `pin_order`, `deleted`, `lamport_ts`, and `wall_time` change.
+         *
+         * Extracted as a `@JvmStatic` helper for unit-testability (same rationale as
+         * [buildTombstonePatchBody]).
+         */
+        @JvmStatic
+        fun buildPinStatePatchBody(
+            lamportTs: Long,
+            wallTime: Long,
+            pinned: Boolean,
+            pinOrder: Double?,
+        ): String = JSONObject().apply {
+            put("lamport_ts", lamportTs)
+            put("wall_time", wallTime)
+            put("deleted", false)
+            put("pinned", pinned)
+            if (pinOrder != null) put("pin_order", pinOrder) else put("pin_order", JSONObject.NULL)
+            // NOTE: payload_ct intentionally omitted — only update pin/lamport state.
+        }.toString()
 
         /**
          * Encode a raw cloud ciphertext blob (nonce[24] || ciphertext_with_tag)
@@ -526,19 +586,21 @@ class SupabaseClient(
         wallTime: Long = System.currentTimeMillis(),
     ): Boolean = withContext(Dispatchers.IO) {
         try {
-            val body = JSONObject().apply {
-                put("lamport_ts", lamportTs)
-                put("wall_time", wallTime)
-                if (isDelete) {
-                    put("deleted", true)
-                    put("pinned", false)
-                    put("pin_order", JSONObject.NULL)
-                } else {
-                    put("deleted", false)
-                    put("pinned", pinned)
-                    if (pinOrder != null) put("pin_order", pinOrder) else put("pin_order", JSONObject.NULL)
-                }
-            }.toString()
+            // CopyPaste-gh1h: use dedicated body builders so the tombstone path
+            // explicitly nulls payload_ct (wiping the ciphertext) while the pin-state
+            // path leaves payload_ct untouched. The old inline JSONObject omitted
+            // payload_ct from the tombstone body, leaving the encrypted bytes intact
+            // on the server until TTL expiry — an information-disclosure window.
+            val body = if (isDelete) {
+                buildTombstonePatchBody(lamportTs = lamportTs, wallTime = wallTime)
+            } else {
+                buildPinStatePatchBody(
+                    lamportTs = lamportTs,
+                    wallTime = wallTime,
+                    pinned = pinned,
+                    pinOrder = pinOrder,
+                )
+            }
 
             // PATCH /rest/v1/clipboard_items?item_id=eq.<itemId>
             // PostgREST PATCH with equality filter updates only the matching row.
