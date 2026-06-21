@@ -577,16 +577,22 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("mask_sensitive_content", v).apply()
 
     /**
-     * Whether the OS is allowed to capture this app's screens. When true
-     * (default) screenshots, screen recording and the recents-thumbnail all
-     * work normally. When false we set WindowManager FLAG_SECURE on every app
-     * window so the clipboard contents cannot be screenshotted / recorded /
-     * shown in the recents preview — a privacy guard for sensitive pastes.
+     * Whether the OS is allowed to capture this app's screens. When false
+     * (default — SECURE), we set WindowManager FLAG_SECURE on every app window
+     * so the clipboard contents cannot be screenshotted / recorded / shown in
+     * the recents preview. When true (user opt-in) screenshots work normally.
      * Applied centrally in CopyPasteTheme; toggling recreates the activity so
      * the flag change takes effect (same pattern as the palette/theme switch).
+     *
+     * SECURITY: default must remain false (SECURE) so a first-install or
+     * cleared-prefs state never silently exposes clipboard data to screenshots.
      */
     var allowScreenshots: Boolean
-        get() = prefs.getBoolean("allow_screenshots", true)
+        // CopyPaste-44rq.46: default is FALSE (screenshots BLOCKED = SECURE by default).
+        // A missing pref (first install, cleared prefs) must not silently allow the OS to
+        // capture clipboard contents via screenshot/recents. Only an explicit opt-in by the
+        // user (toggling the setting to true) removes FLAG_SECURE from the app's windows.
+        get() = prefs.getBoolean("allow_screenshots", false)
         set(v) = prefs.edit().putBoolean("allow_screenshots", v).apply()
 
     /**
@@ -2112,10 +2118,10 @@ fun rememberSkin(): Skin {
  * CopyPaste-1g00: apply the user's screenshot-protection preference to this
  * activity's window.
  *
- * When [Settings.allowScreenshots] is `false` (the default — protection ON),
+ * When [Settings.allowScreenshots] is `false` (the default — SECURE, protection ON),
  * [WindowManager.LayoutParams.FLAG_SECURE] is set, blocking screenshots, screen
- * recording, and the recents thumbnail.  When `true` (user opts in to allowing
- * captures), the flag is cleared so screenshots work normally.
+ * recording, and the recents thumbnail.  When `true` (user explicitly opts in to
+ * allowing screen captures), the flag is cleared so screenshots work normally.
  *
  * Call from each Activity's `onCreate`, before `setContent`, so the flag is
  * in place for the full window lifetime.
