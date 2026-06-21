@@ -12,7 +12,14 @@ pub struct RelayConfig {
     /// Override via `RELAY_BIND_ADDR` to restrict to a specific interface
     /// (e.g. `127.0.0.1` for loopback-only when behind a local proxy).
     pub bind_addr: String,
-    /// Item TTL in seconds (default: 86400 — matches AppConfig::SYNC_TTL_SECS)
+    /// Item TTL in seconds (default: 86400 = 24 h).
+    ///
+    /// The relay inbox is intentionally ephemeral: items are pruned after 24 h
+    /// by the background evictor. This is shorter than the daemon's local
+    /// `AppConfig::SYNC_TTL_SECS` (2 592 000 s = 30 days), which governs how
+    /// long history is kept in the local SQLCipher DB. Devices that are offline
+    /// for longer than this TTL must re-sync from cloud storage rather than the
+    /// relay inbox. Override with `RELAY_SYNC_TTL_SECS`.
     pub sync_ttl_secs: u64,
     /// Maximum allowed decoded size of a single ciphertext payload in bytes (default: 10 MiB)
     pub max_item_bytes: usize,
@@ -154,11 +161,41 @@ mod tests {
         let cfg = RelayConfig::default();
         assert_eq!(cfg.port, 8080);
         assert_eq!(cfg.bind_addr, "0.0.0.0");
-        assert_eq!(cfg.sync_ttl_secs, 86_400);
+        // Relay inbox TTL is intentionally 24 h (86 400 s), NOT 30 days.
+        // The daemon's AppConfig::SYNC_TTL_SECS (2 592 000 s = 30 days) governs
+        // local SQLCipher history retention; the relay is an ephemeral transit
+        // buffer. See docs/relay-api.md and ADR-009 for the design rationale.
+        assert_eq!(
+            cfg.sync_ttl_secs,
+            86_400,
+            "relay TTL default must be 86400 s (24 h); \
+             this is intentionally shorter than the daemon's 30-day local history TTL"
+        );
         assert_eq!(cfg.max_item_bytes, 10 * 1024 * 1024);
         assert_eq!(cfg.max_items_per_device, 500);
         assert!(!cfg.trust_proxy_headers, "proxy trust must be opt-in");
         assert_eq!(cfg.max_connections, 1024);
+    }
+
+    /// Asserts that the relay TTL default is intentionally shorter than the
+    /// daemon's local history TTL. This documents the design decision so that
+    /// a future change to either constant triggers a deliberate review.
+    #[test]
+    fn relay_ttl_is_shorter_than_daemon_local_history_ttl() {
+        // copypaste-core's SYNC_TTL_SECS = 2_592_000 (30 days) governs how long
+        // the daemon keeps items in its local SQLCipher DB. The relay inbox is
+        // an ephemeral transit buffer with a 24 h TTL by design (see ADR-009).
+        // If the relay default ever equals or exceeds SYNC_TTL_SECS without a
+        // deliberate product decision, this test will catch the drift.
+        const DAEMON_SYNC_TTL_SECS: u64 = 2_592_000; // copypaste-core AppConfig default
+        let cfg = RelayConfig::default();
+        assert!(
+            cfg.sync_ttl_secs < DAEMON_SYNC_TTL_SECS,
+            "relay default TTL ({}) should be shorter than daemon local history TTL ({}) \
+             — the relay is an ephemeral transit buffer, not long-term storage",
+            cfg.sync_ttl_secs,
+            DAEMON_SYNC_TTL_SECS,
+        );
     }
 
     /// CopyPaste-pbre: `RELAY_MAX_CONNECTIONS` overrides the default and is
