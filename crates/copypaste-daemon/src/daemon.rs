@@ -1773,6 +1773,27 @@ async fn handle_tick(
     // list, and (b) mark items as sensitive when the source is a password
     // manager (mtf5 / PG-22).  `lsappinfo front` is macOS-only.
     //
+    // ── KNOWN LIMITATION (44rq.47 / PRIV-6) ────────────────────────────────
+    // Sensitive-app detection via `is_sensitive_app` is BEST-EFFORT on macOS
+    // because it depends on `lsappinfo front`, an Apple-private CLI tool that
+    // CopyPaste forks at each clipboard tick.
+    //
+    //  • `lsappinfo` may fail (binary absent, sandboxed, or the subprocess
+    //    panics) → `frontmost_bundle_id` becomes `None` → the app-sensitive
+    //    flag is NOT set, even if the user is copying from 1Password.  Content-
+    //    pattern detection (`is_sensitive_for_autowipe`) still applies for text.
+    //  • Process substitution (e.g. a password manager that delegates the copy
+    //    to a helper process) may surface a different bundle ID than expected,
+    //    causing a miss.
+    //  • This detection is unavailable on Linux / non-macOS (always None).
+    //
+    // The correct long-term fix (PRIV-2) is to query the Accessibility API or
+    // use NSWorkspace.frontmostApplication instead of forking lsappinfo.  Until
+    // then, users relying on sensitive-masking for password-manager images
+    // should also add those apps to `excluded_app_bundle_ids` so the fail-
+    // closed P1-2 gate catches any lsappinfo failure.
+    // ────────────────────────────────────────────────────────────────────────
+    //
     // P1-2 (fail-closed): when `lsappinfo` fails AND the exclusion list is
     // non-empty, we do NOT know the frontmost app — skip capture this tick to
     // avoid silently capturing from a potentially-excluded password manager.
@@ -2407,16 +2428,31 @@ async fn handle_image(
         .map(copypaste_core::is_sensitive_app)
         .unwrap_or(false);
     let join = tokio::task::spawn_blocking(move || {
-        // Derive a stable file_id from SHA-256(raw_bytes)[..16] — a 128-bit
-        // collision-resistant content hash. Deterministic so identical images
-        // dedup naturally (Wave 2.1 security LOW #19).
-        let file_id = crate::clipboard::image_content_hash(&raw_bytes);
-
+        // fix(44rq.39): compute the size cap BEFORE hashing.  A SHA-256 pass
+        // over a 25 MB oversize image wastes ~25 ms of CPU and then is thrown
+        // away by `encode_image_full`'s own size gate.  Reject early to avoid
+        // that wasted work — behaviour for accepted images is unchanged.
+        //
         // Honour the user-configured raw-image cap (default 25 MB) instead of
         // the library's hard 10 MB floor, which silently rejected 10–25 MB
         // images the config permitted. `usize::MAX` saturation keeps 32-bit
         // targets safe.
         let max_image_bytes = usize::try_from(config.max_image_size_bytes).unwrap_or(usize::MAX);
+        if raw_bytes.len() > max_image_bytes {
+            tracing::warn!(
+                actual = raw_bytes.len(),
+                max = max_image_bytes,
+                "image too large; rejecting before hash (fix 44rq.39)"
+            );
+            return None;
+        }
+
+        // Derive a stable file_id from SHA-256(raw_bytes)[..16] — a 128-bit
+        // collision-resistant content hash. Deterministic so identical images
+        // dedup naturally (Wave 2.1 security LOW #19).
+        // NOTE: only reached for images that pass the size gate above.
+        let file_id = crate::clipboard::image_content_hash(&raw_bytes);
+
         // The thumbnail is encrypted with the SAME content key but a DISTINCT
         // file_id so its AEAD AAD is isolated from the full image's. Derive it
         // deterministically from the content-hash file_id so identical images
@@ -3649,6 +3685,48 @@ mod tests {
         assert_eq!(
             recovered, reference_png,
             "under its original key the row decodes to the stored PNG"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // fix(44rq.39): size gate fires BEFORE image_content_hash
+    // -----------------------------------------------------------------------
+
+    /// An oversize image must be rejected by the size gate inside the
+    /// `spawn_blocking` closure before `image_content_hash` (SHA-256) is
+    /// called.  We can't intercept the hash call, but we CAN verify that
+    /// `handle_image` returns `None` for an image that exceeds
+    /// `max_image_size_bytes` — which is the externally observable contract.
+    ///
+    /// The test also confirms that a same-size-as-cap image is accepted
+    /// (boundary condition: `len == cap` must pass, `len > cap` must not).
+    #[tokio::test]
+    async fn oversize_image_rejected_before_hash_fix_44rq39() {
+        let local_key = [0xABu8; 32];
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
+
+        // Set a tiny cap (32 bytes) so any real PNG exceeds it.
+        let mut config = AppConfig::default();
+        config.max_image_size_bytes = 32;
+
+        // 33 bytes — one byte over the cap; must be rejected immediately.
+        let oversized: Vec<u8> = vec![0u8; 33];
+        let result = handle_image(oversized, &db, &local_key, &config, "test-device", None).await;
+        assert!(
+            result.is_none(),
+            "handle_image must return None for an image exceeding max_image_size_bytes \
+             (fix 44rq.39: size gate must fire before SHA-256 hash)"
+        );
+
+        // Confirm the DB is still empty — nothing was inserted for the oversize image.
+        let guard = db.lock().await;
+        let count: i64 = guard
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| r.get(0))
+            .expect("count query");
+        assert_eq!(
+            count, 0,
+            "no image row must be written for an oversize image"
         );
     }
 

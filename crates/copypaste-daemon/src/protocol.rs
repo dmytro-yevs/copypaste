@@ -23,7 +23,12 @@ use serde::{Deserialize, Serialize};
 
 /// Wire-format version produced and accepted by this build of the daemon.
 /// Bump on every breaking change. See ADR-007 for the full versioning policy.
-pub const CURRENT_PROTOCOL_VERSION: u32 = 1;
+///
+/// **Single source of truth:** this is a re-export of
+/// [`copypaste_ipc::PROTOCOL_VERSION`].  Do NOT define a separate literal
+/// here — bump `copypaste_ipc::PROTOCOL_VERSION` and the change propagates
+/// automatically to the daemon, CLI, and UI (CopyPaste-c4q2.19).
+pub const CURRENT_PROTOCOL_VERSION: u32 = copypaste_ipc::PROTOCOL_VERSION;
 
 /// Inclusive lower bound of protocol versions this daemon will still accept.
 /// Keep this at 1 until we actively drop alpha-era clients.
@@ -36,6 +41,28 @@ fn default_protocol_version() -> u32 {
     1
 }
 
+// ---------------------------------------------------------------------------
+// NOTE (CopyPaste-c4q2.11): Request / Response / ERR_CODE_* defined below are
+// intentionally NOT re-exported from `copypaste_ipc` even though that crate
+// is already a dependency. The divergences are load-bearing for the wire
+// format and cannot be collapsed without a coordinated migration:
+//
+// 1. `Request::protocol_version` default: this struct uses
+//    `#[serde(default = "default_protocol_version")]` which falls back to `1`
+//    when the field is absent on the wire (alpha client backward-compat).
+//    `copypaste_ipc::Request` uses `#[serde(default)]` which falls back to `0`,
+//    which the dispatch gate at `ipc.rs` would reject as below MIN_SUPPORTED.
+//
+// 2. `Response::not_implemented` message: this implementation (fix 44rq.14)
+//    produces "feature not compiled in: X (rebuild the daemon with
+//    `--features X`…)" — an actionable operator hint. `copypaste_ipc::Response`
+//    produces "not implemented: X". The inline test
+//    `response_not_implemented_uses_stable_code` asserts the long form.
+//
+// When both divergences are resolved in a future clean-up, delete the local
+// definitions and use `pub use copypaste_ipc::{Request, Response, ERR_CODE_*}`.
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Deserialize)]
 pub struct Request {
     pub id: String,
@@ -44,6 +71,9 @@ pub struct Request {
     pub params: serde_json::Value,
     /// Wire-format version the client speaks. Missing = treated as `1`
     /// for forward-compat with alpha clients. See ADR-007.
+    ///
+    /// **Diverges from [`copypaste_ipc::Request`]** which defaults to `0`
+    /// (see CopyPaste-c4q2.11 comment above).
     #[serde(default = "default_protocol_version")]
     pub protocol_version: u32,
 }
@@ -56,6 +86,11 @@ pub struct Request {
 // clients (UI, CLI, third-party integrations) can branch deterministically
 // without parsing English error text. Keep this set small and additive — once
 // a code is shipped, never repurpose it.
+//
+// Cross-reference: these constants are intentional local copies — they must
+// stay byte-identical to the corresponding `copypaste_ipc::ERR_CODE_*`
+// constants (see `copypaste-ipc/src/response.rs`). See CopyPaste-c4q2.11 for
+// the plan to collapse them into a single source of truth.
 
 /// Requested resource (item id, peer, etc.) does not exist.
 pub const ERR_CODE_NOT_FOUND: &str = "not_found";
@@ -82,6 +117,12 @@ pub const ERR_CODE_MIGRATION_IN_PROGRESS: &str = "migration_in_progress";
 /// the client should wait for the current operation to finish, then retry.
 pub const ERR_CODE_RATE_LIMITED: &str = "rate_limited";
 
+/// Daemon-side IPC response.
+///
+/// **Diverges from [`copypaste_ipc::Response`]** in `not_implemented`:
+/// this version (fix 44rq.14) emits an actionable operator message
+/// ("feature not compiled in: X — rebuild with `--features X`") while the
+/// shared crate emits "not implemented: X". See CopyPaste-c4q2.11.
 #[derive(Debug, Serialize)]
 pub struct Response {
     pub id: String,

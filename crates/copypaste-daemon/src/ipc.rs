@@ -102,10 +102,12 @@ const MAX_IMPORT_ITEM_BYTES: usize = 4 * 1024 * 1024;
 /// unbounded resource growth from a buggy or hostile client.
 const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
-/// Error code returned when an IPC method is called before the server's
-/// backing state (database, etc.) has finished initializing. Clients should
-/// back off and retry rather than treat this as a hard failure.
-const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
+// ERR_IPC_NOT_READY constant removed (CopyPaste-c4q2.13): the constant held
+// the legacy uppercase "IPC_NOT_READY" string that was used as the human-
+// readable `error` message field, confusing clients that read `error` instead
+// of `error_code`. The canonical machine-readable code is already carried by
+// ERR_CODE_IPC_NOT_READY ("ipc_not_ready") in the `error_code` field.
+// The usage site (readiness gate) now passes a plain descriptive string.
 
 /// Persistent application configuration stored at
 /// `dirs::config_dir()/copypaste/config.json`.
@@ -3012,16 +3014,15 @@ impl IpcServer {
         matches!(
             method,
             "list"
-                | "delete"
+                // "delete" / "copy" / "paste" / "pin" removed: deprecated to
+                // not_implemented stubs (CopyPaste-c4q2.14, c4q2.15, loyk.8,
+                // loyk.9). Stubs return early before touching the DB.
                 | "count"
                 | "search"
-                | "copy"
-                | "paste"
                 | "copy_item"
                 | "delete_all"
                 | "delete_item"
                 | "stats"
-                | "pin"
                 | "pin_item"
                 | "reorder_pinned"
                 | "history_page"
@@ -3316,9 +3317,8 @@ impl IpcServer {
     ///
     /// Returns `Ok((changed, tombstone_opt))` where `changed` is the number of
     /// rows modified (0 = not found). `Err` carries either the DB error string
-    /// or a spawn-join failure message. Used by both the legacy `"delete"` arm
-    /// and the typed `"delete_item"` arm; each arm formats its own distinct
-    /// response shape and error style.
+    /// or a spawn-join failure message. Used by the `"delete_item"` arm.
+    /// (The legacy `"delete"` arm is deprecated — see CopyPaste-loyk.9.)
     async fn soft_delete_and_broadcast(
         &self,
         id: &str,
@@ -3426,7 +3426,14 @@ impl IpcServer {
                 id = %req.id,
                 "rejecting DB-touching request: server not ready"
             );
-            return Response::err_with_code(req.id, ERR_CODE_IPC_NOT_READY, ERR_IPC_NOT_READY);
+            // CopyPaste-c4q2.13: replaced uppercase "IPC_NOT_READY" constant
+            // with a plain human-readable message. Clients must check
+            // `error_code == "ipc_not_ready"`, not the `error` string.
+            return Response::err_with_code(
+                req.id,
+                ERR_CODE_IPC_NOT_READY,
+                "daemon not ready — still initialising (retry shortly)",
+            );
         }
 
         match req.method.as_str() {
@@ -3566,32 +3573,15 @@ impl IpcServer {
                     ),
                 }
             }
-            "delete" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
-                    // clients can classify the error rather than getting a bare
-                    // untyped error string.
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
-                };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
-                match self.soft_delete_and_broadcast(&id).await {
-                    Ok(_) => Response::ok(req.id, serde_json::Value::Null),
-                    Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
-                }
-            }
+            // CopyPaste-loyk.9 / c4q2.15: "delete" is the legacy verb — no
+            // current client sends it (CLI uses METHOD_DELETE_ITEM / "delete_item",
+            // UI uses "delete_item"). Retained as an explicit stub so old callers
+            // get a diagnosable error instead of "unknown method".
+            "delete" => Response::err_with_code(
+                req.id,
+                ERR_CODE_NOT_IMPLEMENTED,
+                "delete is deprecated: use delete_item with {id: \"<uuid>\"}",
+            ),
             "count" => {
                 let pool_opt = self.read_pool.clone();
                 let db_arc = self.db.clone();
@@ -3749,126 +3739,17 @@ impl IpcServer {
                     ),
                 }
             }
-            "copy" | "paste" => {
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    // P2-8u2b: tag with ERR_CODE_INVALID_ARGUMENT so machine
-                    // clients can classify the error.
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
-                };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
-                let db_arc = self.db.clone();
-                let id_for_task = id.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let db = db_arc.blocking_lock();
-                    // Resolve directly by primary key — paging + linear scan
-                    // silently missed any item past position 1000 (data loss).
-                    let item = get_item_by_id(&*db, &id_for_task)?;
-                    Ok::<_, anyhow::Error>(item)
-                })
-                .await;
-                match join {
-                    Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
-                        Ok(()) => {
-                            // C. PROMOTE-ON-COPY: bump wall_time/lamport so this
-                            // item sorts to the top of history_page on the next
-                            // request, matching Maccy-style recency ordering.
-                            let db_arc2 = self.db.clone();
-                            let item_id_bump = item.id.clone();
-                            // P1: surface bump errors via tracing instead of
-                            // double-swallowing (let _ spawn + let _ inside).
-                            // Promote-on-copy is best-effort — a failure must
-                            // not abort the copy response — but silent failures
-                            // make it impossible to diagnose why items don't
-                            // reorder after being copied.
-                            match tokio::task::spawn_blocking(move || {
-                                let db = db_arc2.blocking_lock();
-                                let now_ms = std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .map(|d| d.as_millis() as i64)
-                                    .unwrap_or(0);
-                                // CopyPaste-ojhe: unified lamport value space —
-                                // max(existing + 1, now_ms) keeps the promote
-                                // monotonic vs the row's own prior lamport so a
-                                // later pin/delete (also unified) can overtake it.
-                                let prev_lamport = get_item_by_id(&*db, &item_id_bump)
-                                    .ok()
-                                    .flatten()
-                                    .map(|r| r.lamport_ts)
-                                    .unwrap_or(0);
-                                let new_lamport =
-                                    copypaste_core::next_lamport_ts(prev_lamport, now_ms);
-                                // Pass None: ipc recopy path doesn't know sensitive TTL;
-                                // delete_expired picks up expires_at set at capture time.
-                                bump_item_recency(&db, &item_id_bump, now_ms, new_lamport, None)
-                            })
-                            .await
-                            {
-                                Ok(Ok(_)) => {}
-                                Ok(Err(e)) => {
-                                    tracing::warn!(
-                                        id = %item.id,
-                                        "bump_item_recency failed: {e}"
-                                    );
-                                }
-                                Err(e) => {
-                                    tracing::warn!(
-                                        id = %item.id,
-                                        "bump_item_recency task join error: {e}"
-                                    );
-                                }
-                            }
-                            Response::ok(
-                                req.id,
-                                serde_json::json!({
-                                    "id": item.id,
-                                    "content_type": item.content_type,
-                                    "written": true,
-                                }),
-                            )
-                        }
-                        Err(PasteboardError::DecryptFailed(msg)) => Response::err_with_code(
-                            req.id,
-                            ERR_CODE_AUTH_FAILED,
-                            format!("paste decrypt failed: {msg}"),
-                        ),
-                        // CopyPaste-kfe9: tag pasteboard-write failures with
-                        // ERR_CODE_INTERNAL_ERROR for machine-readable classification.
-                        Err(PasteboardError::Other(msg)) => Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("pasteboard write failed: {msg}"),
-                        ),
-                    },
-                    // CopyPaste-kfe9: not_found so clients can distinguish
-                    // "item missing" from other internal errors (follow-up of 8u2b).
-                    Ok(Ok(None)) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_NOT_FOUND,
-                        format!("item not found: {id}"),
-                    ),
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
-                }
-            }
+            // CopyPaste-loyk.8 / c4q2.15: "copy" and "paste" are legacy verbs —
+            // no current client sends them. The CLI switched to METHOD_COPY_ITEM
+            // ("copy_item") in CopyPaste-abg1; the UI uses "copy_item" exclusively.
+            // The legacy arm also had a data-loss bug (linear scan capped at 1000
+            // items). Retained as an explicit stub so old callers get a diagnosable
+            // error instead of "unknown method".
+            "copy" | "paste" => Response::err_with_code(
+                req.id,
+                ERR_CODE_NOT_IMPLEMENTED,
+                "copy/paste is deprecated: use copy_item with {id: \"<uuid>\"}",
+            ),
             "delete_all" => {
                 // CopyPaste-cb7u: previously this called soft_delete_and_broadcast
                 // once per item, each with its own spawn_blocking. On large histories
@@ -4015,58 +3896,15 @@ impl IpcServer {
                     ),
                 }
             }
-            "pin" => {
-                // Pin an item (remove expiry so it's never auto-deleted)
-                let id = match req.params.get("id").and_then(|v| v.as_str()) {
-                    Some(s) => s.to_string(),
-                    // CopyPaste-kfe9: tag with ERR_CODE_INVALID_ARGUMENT so
-                    // machine clients can classify the error (follow-up of 8u2b).
-                    None => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INVALID_ARGUMENT,
-                            "missing param: id",
-                        )
-                    }
-                };
-                if uuid::Uuid::parse_str(&id).is_err() {
-                    return Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INVALID_ARGUMENT,
-                        "invalid param: id must be a valid UUID",
-                    );
-                }
-                let db_arc = self.db.clone();
-                let id_for_task = id.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let db = db_arc.blocking_lock();
-                    copypaste_core::pin_item(&db, &id_for_task)?;
-                    // Re-read the updated row so the broadcast carries the new
-                    // pinned=true / pin_order for LWW propagation to peers.
-                    let row = get_item_by_id(&*db, &id_for_task)?;
-                    Ok::<_, copypaste_core::storage::items::ItemsError>(row)
-                })
-                .await;
-                match join {
-                    Ok(Ok(row_opt)) => {
-                        // Propagate pin state to peers via the sync channel.
-                        if let (Some(row), Some(ref tx)) = (row_opt, &self.new_item_tx) {
-                            let _ = tx.send(row);
-                        }
-                        Response::ok(req.id, serde_json::json!({"pinned": true, "id": id}))
-                    }
-                    // CopyPaste-kfe9: tag DB errors with ERR_CODE_INTERNAL_ERROR
-                    // for machine-readable classification (follow-up of 8u2b).
-                    Ok(Err(e)) => {
-                        Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
-                    }
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
-                }
-            }
+            // CopyPaste-c4q2.14: "pin" is the legacy pin-only verb — it lacked
+            // the `pinned: bool` toggle needed to also unpin. No current client
+            // sends it (CLI and UI both use "pin_item"). Retained as an explicit
+            // stub so old callers get a diagnosable error instead of "unknown method".
+            "pin" => Response::err_with_code(
+                req.id,
+                ERR_CODE_NOT_IMPLEMENTED,
+                "pin is deprecated: use pin_item with {id: \"<uuid>\", pinned: bool}",
+            ),
             // T5.x — pin or unpin an item by id. Unlike the legacy `pin`
             // verb (pin-only), this takes an explicit `pinned: bool` so the
             // UI can toggle from a single callback. A `pinned=false` request
@@ -6953,6 +6791,11 @@ impl IpcServer {
                     if let Some(ref fp) = snap.fingerprint {
                         body["peer_fingerprint"] = serde_json::Value::String(fp.clone());
                     }
+                }
+                // CopyPaste-1jms.10: surface remaining SAS-confirm seconds so the
+                // UI can show a countdown (parity with the macOS/Android timers).
+                if let Some(secs) = state.secs_until_timeout() {
+                    body["secs_until_timeout"] = serde_json::json!(secs);
                 }
                 Response::ok(req.id, body)
             }
@@ -11229,6 +11072,9 @@ mod tests {
         assert_eq!(resp["ok"], false);
     }
 
+    // CopyPaste-loyk.8 / c4q2.15: "copy" is deprecated — now a not_implemented
+    // stub. Any payload (including empty params) gets the same rejection pointing
+    // to "copy_item".
     #[tokio::test]
     async fn copy_missing_id_param_returns_error() {
         let dir = safe_tempdir();
@@ -11243,10 +11089,8 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert!(resp["error"]
-            .as_str()
-            .unwrap()
-            .contains("missing param: id"));
+        assert_eq!(resp["error_code"].as_str().unwrap_or(""), "not_implemented");
+        assert!(resp["error"].as_str().unwrap_or("").contains("copy_item"));
     }
 
     #[tokio::test]
@@ -11469,6 +11313,8 @@ mod tests {
 
     // --- paste ---
 
+    // CopyPaste-loyk.8 / c4q2.15: "paste" is deprecated alongside "copy" — now
+    // a not_implemented stub pointing to "copy_item".
     #[tokio::test]
     async fn paste_missing_id_returns_error() {
         let dir = safe_tempdir();
@@ -11483,12 +11329,12 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert!(resp["error"]
-            .as_str()
-            .unwrap()
-            .contains("missing param: id"));
+        assert_eq!(resp["error_code"].as_str().unwrap_or(""), "not_implemented");
+        assert!(resp["error"].as_str().unwrap_or("").contains("copy_item"));
     }
 
+    // CopyPaste-loyk.8 / c4q2.15: "paste" is deprecated — returns not_implemented
+    // regardless of whether the given id exists.
     #[tokio::test]
     async fn paste_unknown_id_returns_error() {
         let dir = safe_tempdir();
@@ -11505,7 +11351,8 @@ mod tests {
         let line = lines.next_line().await.unwrap().unwrap();
         let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
         assert_eq!(resp["ok"], false);
-        assert!(resp["error"].as_str().unwrap().contains("not found"));
+        assert_eq!(resp["error_code"].as_str().unwrap_or(""), "not_implemented");
+        assert!(resp["error"].as_str().unwrap_or("").contains("copy_item"));
     }
 
     // ------------------------------------------------------------------
@@ -11675,7 +11522,9 @@ mod tests {
         let sock = dir.path().join("not_ready.sock");
         let ready = start_not_ready_server(&sock).await;
 
-        // DB-touching methods must be rejected with IPC_NOT_READY.
+        // DB-touching methods must be rejected with ipc_not_ready.
+        // CopyPaste-c4q2.13: check error_code (machine-readable) not the error
+        // string; the legacy uppercase "IPC_NOT_READY" constant is removed.
         for (method, params) in [
             ("list", "{}"),
             ("count", "{}"),
@@ -11692,9 +11541,15 @@ mod tests {
             let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
             assert_eq!(resp["ok"], false, "{method} should be rejected: {resp}");
             assert_eq!(
-                resp["error"].as_str().unwrap_or_default(),
-                "IPC_NOT_READY",
-                "{method} should return IPC_NOT_READY, got: {resp}"
+                resp["error_code"].as_str().unwrap_or_default(),
+                "ipc_not_ready",
+                "{method} should return error_code=ipc_not_ready, got: {resp}"
+            );
+            // The human-readable message must NOT be the legacy uppercase constant.
+            let err = resp["error"].as_str().unwrap_or_default();
+            assert!(
+                !err.contains("IPC_NOT_READY"),
+                "{method} error must not contain uppercase legacy constant, got: {resp}"
             );
         }
 
@@ -16335,10 +16190,10 @@ mod tests {
         drop(permits);
     }
 
-    /// CopyPaste-kfe9: legacy IPC arms (search / copy / paste / pin) must
-    /// return a machine-readable `error_code` on failure, not a bare untyped
-    /// error string.  This is the follow-up to CopyPaste-8u2b which wired
-    /// `error_code` onto the `delete` arm but left the others unchanged.
+    /// CopyPaste-kfe9: legacy IPC arm (search) must return a machine-readable
+    /// `error_code` on failure, not a bare untyped error string. (The pin /
+    /// copy / paste / delete arms are now deprecated stubs — see the
+    /// not_implemented tests below.)
     #[tokio::test]
     async fn legacy_ipc_arms_return_error_code_on_failure() {
         let server = bare_server();
@@ -16353,54 +16208,127 @@ mod tests {
             Some("invalid_argument"),
             "search/missing-query must carry error_code=invalid_argument, got: {resp:?}"
         );
+    }
 
-        // -- pin: missing required `id` param → invalid_argument ---------------
+    /// CopyPaste-c4q2.14: deprecated "pin" arm must return not_implemented with
+    /// an actionable message pointing to "pin_item". Any payload (valid or not)
+    /// must get the same rejection — the stub short-circuits before param parsing.
+    #[tokio::test]
+    async fn deprecated_pin_returns_not_implemented() {
+        let server = bare_server();
+
+        // No params.
         let resp = server
             .dispatch(r#"{"id":"p1","method":"pin","params":{}}"#)
             .await;
-        assert!(!resp.ok, "pin without id must fail");
+        assert!(!resp.ok, "pin must be rejected");
         assert_eq!(
             resp.error_code,
-            Some("invalid_argument"),
-            "pin/missing-id must carry error_code=invalid_argument, got: {resp:?}"
+            Some("not_implemented"),
+            "pin must return not_implemented, got: {resp:?}"
+        );
+        let err = resp.error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("pin_item"),
+            "error must mention pin_item, got: {err}"
         );
 
-        // -- pin: non-UUID `id` → invalid_argument -----------------------------
+        // Valid-looking UUID — still rejected.
         let resp = server
-            .dispatch(r#"{"id":"p2","method":"pin","params":{"id":"not-a-uuid"}}"#)
+            .dispatch(r#"{"id":"p2","method":"pin","params":{"id":"00000000-0000-0000-0000-000000000000"}}"#)
             .await;
-        assert!(!resp.ok, "pin with bad UUID must fail");
+        assert!(!resp.ok, "pin with any payload must be rejected");
         assert_eq!(
             resp.error_code,
-            Some("invalid_argument"),
-            "pin/bad-uuid must carry error_code=invalid_argument, got: {resp:?}"
+            Some("not_implemented"),
+            "pin/uuid must return not_implemented, got: {resp:?}"
         );
+    }
 
-        // -- copy: item not found → not_found ----------------------------------
-        let missing_uuid = "00000000-0000-0000-0000-000000000000";
+    /// CopyPaste-loyk.8 / c4q2.15: deprecated "copy" and "paste" arms must
+    /// return not_implemented with an actionable message pointing to "copy_item".
+    #[tokio::test]
+    async fn deprecated_copy_paste_returns_not_implemented() {
+        let server = bare_server();
+        let any_uuid = "00000000-0000-0000-0000-000000000000";
+
+        for method in &["copy", "paste"] {
+            let resp = server
+                .dispatch(&format!(
+                    r#"{{"id":"c1","method":"{method}","params":{{"id":"{any_uuid}"}}}}"#
+                ))
+                .await;
+            assert!(!resp.ok, "{method} must be rejected");
+            assert_eq!(
+                resp.error_code,
+                Some("not_implemented"),
+                "{method} must return not_implemented, got: {resp:?}"
+            );
+            let err = resp.error.as_deref().unwrap_or("");
+            assert!(
+                err.contains("copy_item"),
+                "{method} error must mention copy_item, got: {err}"
+            );
+        }
+    }
+
+    /// CopyPaste-loyk.9 / c4q2.15: deprecated "delete" arm must return
+    /// not_implemented with an actionable message pointing to "delete_item".
+    #[tokio::test]
+    async fn deprecated_delete_returns_not_implemented() {
+        let server = bare_server();
+        let any_uuid = "00000000-0000-0000-0000-000000000000";
+
         let resp = server
             .dispatch(&format!(
-                r#"{{"id":"c1","method":"copy","params":{{"id":"{missing_uuid}"}}}}"#
+                r#"{{"id":"d1","method":"delete","params":{{"id":"{any_uuid}"}}}}"#
             ))
             .await;
-        assert!(!resp.ok, "copy of non-existent item must fail");
+        assert!(!resp.ok, "delete must be rejected");
         assert_eq!(
             resp.error_code,
-            Some("not_found"),
-            "copy/not-found must carry error_code=not_found, got: {resp:?}"
+            Some("not_implemented"),
+            "delete must return not_implemented, got: {resp:?}"
+        );
+        let err = resp.error.as_deref().unwrap_or("");
+        assert!(
+            err.contains("delete_item"),
+            "error must mention delete_item, got: {err}"
+        );
+    }
+
+    /// CopyPaste-c4q2.13: readiness gate must use a human-readable message in
+    /// the `error` field — NOT the legacy uppercase "IPC_NOT_READY" constant.
+    /// The machine-readable signal is `error_code == "ipc_not_ready"`.
+    #[tokio::test]
+    async fn readiness_gate_uses_human_readable_error_message() {
+        // Use new_with_ready(..., false) to simulate a not-yet-ready daemon.
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let server = IpcServer::new_with_ready(
+            db,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(zeroize::Zeroizing::new([0u8; 32])),
+            Arc::new([0u8; 32]),
+            Arc::new(AtomicBool::new(false)), // ready = false
         );
 
-        // -- paste: item not found → not_found ---------------------------------
         let resp = server
-            .dispatch(&format!(
-                r#"{{"id":"p3","method":"paste","params":{{"id":"{missing_uuid}"}}}}"#
-            ))
+            .dispatch(r#"{"id":"r1","method":"list","params":{}}"#)
             .await;
-        assert!(!resp.ok, "paste of non-existent item must fail");
+        assert!(!resp.ok, "list before ready must be rejected");
         assert_eq!(
             resp.error_code,
-            Some("not_found"),
-            "paste/not-found must carry error_code=not_found, got: {resp:?}"
+            Some("ipc_not_ready"),
+            "readiness gate must carry error_code=ipc_not_ready, got: {resp:?}"
+        );
+        let err = resp.error.as_deref().unwrap_or("");
+        assert!(
+            !err.contains("IPC_NOT_READY"),
+            "error field must NOT contain the uppercase legacy constant, got: {err}"
+        );
+        assert!(
+            err.contains("initialising") || err.contains("not ready"),
+            "error field must be human-readable, got: {err}"
         );
     }
 

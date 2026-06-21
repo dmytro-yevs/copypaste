@@ -40,9 +40,11 @@ use tokio::sync::oneshot;
 ///
 /// On the initiator path this comes from the mDNS [`PeerInfo`] snapshot taken
 /// before dialling (device name + resolved IP addresses + mDNS `device_id` which
-/// is the canonical cert fingerprint).  On the responder path the inbound
-/// connection arrives without prior mDNS resolution, so all fields are `None` /
-/// empty — the UI renders whatever is populated and silently omits the rest.
+/// is the canonical cert fingerprint).  On the responder path, `device_name` and
+/// `ip_addrs` are `None`/empty (no prior mDNS resolution), but `fingerprint` IS
+/// populated from the verified inbound TLS peer cert (see `CopyPaste-n3bc` in
+/// `copypaste_daemon::p2p`).  The UI renders whatever is populated and silently
+/// omits the rest.
 ///
 /// `peer_model`, `peer_os`, `peer_app_version` are NOT available here: the
 /// metadata extension exchange happens AFTER the SAS human-confirmation step
@@ -58,9 +60,10 @@ pub struct PeerSnapshot {
     pub ip_addrs: Vec<String>,
     /// Cert fingerprint (the mDNS `device_id` = hex SHA-256 of the peer cert).
     /// Available on the initiator path because we know the mDNS `device_id`
-    /// before dialling.  `None` on the responder path (inbound connection —
-    /// the TLS fingerprint is available post-handshake but not yet surfaced here;
-    /// follow-up: thread `tls_peer_fp` into the responder's confirm callback).
+    /// before dialling.  Also populated on the responder path: the inbound TLS
+    /// peer fingerprint is threaded into the `confirm` callback in
+    /// `copypaste_daemon::p2p` (see `CopyPaste-n3bc`) and forwarded here so that
+    /// `pair_get_sas` surfaces peer identity on both roles.
     pub fingerprint: Option<String>,
 }
 
@@ -180,6 +183,27 @@ impl PairingState {
     pub fn sas(&self) -> Option<&str> {
         match self {
             PairingState::AwaitingSas { sas, .. } => Some(sas.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Seconds remaining until the SAS confirmation window closes.
+    ///
+    /// Returns `Some(secs)` (minimum 0) when in [`PairingState::AwaitingSas`] so
+    /// callers (e.g. the `pair_get_sas` IPC handler in `copypaste_daemon::ipc`)
+    /// can surface a countdown to the UI without exposing the internal `Instant`.
+    ///
+    /// Returns `None` in all other states (no pairing in flight, or terminal).
+    ///
+    /// The value is clamped to 0 rather than going negative: the daemon's
+    /// `SAS_CONFIRM_TIMEOUT` task will fire shortly and transition to `TimedOut`,
+    /// but a poll that races the transition should not return a nonsensical value.
+    pub fn secs_until_timeout(&self) -> Option<u64> {
+        match self {
+            PairingState::AwaitingSas { expires_at, .. } => {
+                let remaining = expires_at.saturating_duration_since(Instant::now());
+                Some(remaining.as_secs())
+            }
             _ => None,
         }
     }
@@ -604,5 +628,91 @@ mod tests {
         assert!(snap.device_name.is_none());
         assert!(snap.ip_addrs.is_empty());
         assert!(snap.fingerprint.is_none());
+    }
+
+    // ── CopyPaste-1jms.6: responder-path fingerprint ───────────────────────────
+
+    /// On the responder path the p2p layer (CopyPaste-n3bc) threads the verified
+    /// TLS peer fingerprint into `PeerSnapshot.fingerprint`.  Simulate that by
+    /// supplying a non-None fingerprint with otherwise-empty metadata and assert
+    /// that `peer_snapshot()` surfaces it from `AwaitingSas`.
+    #[test]
+    fn responder_path_fingerprint_is_surfaced_from_awaiting_sas() {
+        let c = PairingCoordinator::new();
+        // Responder: device_name + ip_addrs are empty, but fingerprint is known
+        // (it comes from the post-handshake TLS cert, not from mDNS).
+        let snap = PeerSnapshot {
+            device_name: None,
+            ip_addrs: vec![],
+            fingerprint: Some("aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99".to_string()),
+        };
+        assert!(c.try_begin(PairingRole::Responder, snap.clone()));
+        let _rx = c.enter_awaiting_sas("888888".to_string(), PairingRole::Responder, snap);
+        let s = c.snapshot();
+        assert_eq!(s.as_str(), "awaiting_sas");
+        let peer = s
+            .peer_snapshot()
+            .expect("peer_snapshot must be Some in AwaitingSas");
+        assert!(
+            peer.device_name.is_none(),
+            "name must be absent on responder path"
+        );
+        assert!(
+            peer.ip_addrs.is_empty(),
+            "IPs must be absent on responder path"
+        );
+        assert_eq!(
+            peer.fingerprint.as_deref(),
+            Some("aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99"),
+            "fingerprint must carry through for responder path (CopyPaste-1jms.6)"
+        );
+    }
+
+    // ── CopyPaste-1jms.10: secs_until_timeout ─────────────────────────────────
+
+    /// `secs_until_timeout()` must return `Some` with a positive count while in
+    /// `AwaitingSas`, and `None` in all other states.
+    ///
+    /// Note: the JSON wire-up (`body["secs_until_timeout"] = …`) must be added
+    /// to the `pair_get_sas` handler in `copypaste_daemon::ipc` (around line 6957)
+    /// by calling `state.secs_until_timeout()`.  That change is outside this file.
+    #[test]
+    fn secs_until_timeout_is_some_while_awaiting_sas_and_none_otherwise() {
+        let c = PairingCoordinator::new();
+
+        // Idle → None.
+        assert!(
+            c.snapshot().secs_until_timeout().is_none(),
+            "Idle must have no timeout"
+        );
+
+        // Initiating → None (SAS not derived yet, no expires_at).
+        assert!(c.try_begin(PairingRole::Initiator, PeerSnapshot::default()));
+        assert!(
+            c.snapshot().secs_until_timeout().is_none(),
+            "Initiating must have no timeout"
+        );
+
+        // AwaitingSas → Some; value must be ≤ SAS_CONFIRM_TIMEOUT seconds and ≥ 0.
+        let _rx = c.enter_awaiting_sas(
+            "777777".to_string(),
+            PairingRole::Initiator,
+            PeerSnapshot::default(),
+        );
+        let secs = c
+            .snapshot()
+            .secs_until_timeout()
+            .expect("AwaitingSas must have secs_until_timeout");
+        assert!(
+            secs <= SAS_CONFIRM_TIMEOUT.as_secs(),
+            "remaining secs ({secs}) must not exceed SAS_CONFIRM_TIMEOUT"
+        );
+
+        // Terminal → None.
+        c.finish(PairingState::Confirmed);
+        assert!(
+            c.snapshot().secs_until_timeout().is_none(),
+            "terminal state must have no timeout"
+        );
     }
 }
