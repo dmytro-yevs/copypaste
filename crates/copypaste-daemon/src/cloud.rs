@@ -467,6 +467,21 @@ pub struct CloudHandle {
     /// `.abort()` it on cloud shutdown/restart so it cannot outlive the loops
     /// it serves.
     auth_refresh_handle: Option<tokio::task::JoinHandle<()>>,
+    /// Canonical account identity token for the signed-in GoTrue session.
+    ///
+    /// Computed at `start_cloud` time by [`copypaste_supabase::supabase_account_id`]
+    /// from `(supabase_url, user.id)`.  Two paired devices must share the SAME
+    /// token — different tokens mean different Supabase projects or different
+    /// GoTrue accounts, and Supabase RLS will silently hide each device's rows
+    /// from the other.
+    ///
+    /// `None` when no GoTrue session is available (anon-key-only mode, which
+    /// the project's RLS rejects anyway).
+    ///
+    /// Exposed here for the IPC `get_sync_status` handler to include in the
+    /// status response (CopyPaste-44rq.26 follow-up: add the field to ipc.rs
+    /// and propagate it through `IpcState` once the IPC/UI lane owns that work).
+    pub cloud_account_id: Option<String>,
 }
 
 impl CloudHandle {
@@ -593,6 +608,44 @@ pub async fn start_cloud(
     // Used as the Realtime postgres_changes filter so the server pre-filters
     // rows by user_id before delivering events (P1 audit fix: realtime.rs ~235).
     let ws_user_id: Option<String> = auth_client.current_session().map(|s| s.user.id.clone());
+
+    // CopyPaste-44rq.26: compute a canonical account identity token that
+    // combines the Supabase project reference (parsed from the URL) and the
+    // GoTrue user UUID.  Two devices must share the SAME token for their RLS
+    // policies to let them see each other's rows.
+    //
+    // We log the project slug (non-secret) and emit a WARN when the user_id is
+    // absent (= anon-key-only, which means RLS will reject all operations
+    // anyway).  The IPC `get_sync_status` handler can expose this token once
+    // the ipc.rs IPC/UI lane adds the field (see bd note on CopyPaste-44rq.26).
+    let cloud_account_id: Option<String> = ws_user_id.as_deref().map(|uid| {
+        copypaste_supabase::supabase_account_id(&config.supabase_url, uid)
+    });
+    {
+        let project_ref = copypaste_supabase::supabase_project_ref(&config.supabase_url)
+            .unwrap_or_else(|| config.supabase_url.clone());
+        match cloud_account_id {
+            Some(ref id) => {
+                // Log the project ref and a truncated (non-secret) account id.
+                // The full user UUID is not PII but we avoid echoing the entire
+                // token to reduce noise; the first 8 chars identify the project.
+                tracing::info!(
+                    project_ref = %project_ref,
+                    account_id_prefix = %id.chars().take(16).collect::<String>(),
+                    "cloud-sync: account identity established (CopyPaste-44rq.26)"
+                );
+            }
+            None => {
+                // No GoTrue session → anon-key-only; RLS rejects all operations.
+                tracing::warn!(
+                    project_ref = %project_ref,
+                    "cloud-sync: no GoTrue user session — anon-key-only requests \
+                     will be rejected by RLS; sign in with email/password \
+                     (CopyPaste-44rq.26)"
+                );
+            }
+        }
+    }
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     // We need two copies of the shutdown signal — use a shared Notify.
@@ -725,6 +778,7 @@ pub async fn start_cloud(
     Ok(CloudHandle {
         shutdown_tx: Some(shutdown_tx),
         auth_refresh_handle: Some(auth_refresh_handle),
+        cloud_account_id,
     })
 }
 
