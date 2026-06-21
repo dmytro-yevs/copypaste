@@ -23,6 +23,8 @@ interface AccessibilityBannerProps {
 
 /** How long (ms) to show the "granted" confirmation before it auto-hides. */
 const GRANTED_CONFIRMATION_MS = 3000;
+/** How long (ms) before the end of GRANTED_CONFIRMATION_MS to start fading out. */
+const GRANTED_FADE_MS = 500;
 
 export function AccessibilityBanner({
   axGranted,
@@ -33,7 +35,11 @@ export function AccessibilityBanner({
   // CopyPaste-xn95: track whether we transitioned from not-granted → granted
   // while the banner was visible so we can show positive feedback.
   const [showGranted, setShowGranted] = useState(false);
+  // CopyPaste-5917.103: track whether we are in the fade-out phase so sighted
+  // users see the banner transitioning away (visual ephemerality cue).
+  const [grantedFading, setGrantedFading] = useState(false);
   const grantedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Watch for the granted transition — only fire when we were previously showing
   // the "not granted" banner (i.e. not dismissed) and axGranted flips to true.
@@ -42,9 +48,17 @@ export function AccessibilityBanner({
     if (!prevGranted.current && axGranted && !axDismissed) {
       // Permission was just granted while the banner was visible — show feedback.
       setShowGranted(true);
+      setGrantedFading(false);
       if (grantedTimerRef.current !== null) clearTimeout(grantedTimerRef.current);
+      if (fadeTimerRef.current !== null) clearTimeout(fadeTimerRef.current);
+      // Start fade-out 500ms before the banner disappears so sighted users get
+      // a visual signal that the confirmation is transient (5917.103 fix).
+      fadeTimerRef.current = setTimeout(() => {
+        setGrantedFading(true);
+      }, GRANTED_CONFIRMATION_MS - GRANTED_FADE_MS);
       grantedTimerRef.current = setTimeout(() => {
         setShowGranted(false);
+        setGrantedFading(false);
       }, GRANTED_CONFIRMATION_MS);
     }
     prevGranted.current = axGranted;
@@ -53,6 +67,7 @@ export function AccessibilityBanner({
   useEffect(() => {
     return () => {
       if (grantedTimerRef.current !== null) clearTimeout(grantedTimerRef.current);
+      if (fadeTimerRef.current !== null) clearTimeout(fadeTimerRef.current);
     };
   }, []);
 
@@ -60,10 +75,21 @@ export function AccessibilityBanner({
   if (showGranted) {
     return (
       <div
-        className="surface-glass flex shrink-0 items-center gap-3 border border-ide-success/40 px-3 py-2 text-[13px] text-ide-success"
+        className={[
+          "surface-glass flex shrink-0 items-center gap-3 border border-ide-success/40 px-3 py-2 text-[13px] text-ide-success",
+          // CopyPaste-5917.103: fade-out cue — transitions opacity to 0 over the
+          // last GRANTED_FADE_MS ms so sighted users see the banner leaving
+          // rather than it abruptly vanishing (visual ephemerality indicator).
+          grantedFading
+            ? "opacity-0 transition-opacity duration-500"
+            : "opacity-100 transition-opacity duration-150",
+        ].join(" ")}
         style={{ borderRadius: "var(--skin-r-card)" }}
         role="status"
         aria-live="polite"
+        data-testid="granted-banner"
+        // Inform assistive tech that the confirmation will disappear shortly.
+        aria-label="Accessibility permission granted — closing shortly"
       >
         {/* xn95: positive confirmation so the user sees their action succeeded. */}
         Accessibility permission granted — global paste shortcut and hotkey capture are active.
