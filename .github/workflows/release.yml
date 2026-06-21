@@ -578,6 +578,22 @@ jobs:
       # release signingConfig). When absent, no -P signing args are passed and the
       # release buildType falls back to the debug keystore — build still succeeds.
       # C-P0-2: versionName/versionCode come from the tag-derived values above.
+      - name: Generate fallback debug keystore (CopyPaste-fpmf)
+        # build.gradle.kts generates debug.keystore via project.exec at config
+        # time, which the Gradle configuration cache forbids -> the keystore is
+        # never created -> validateSigningRelease fails. Pre-create it here so the
+        # debug-signing fallback (no release secrets) works and the config-time
+        # exec is skipped by its exists() guard.
+        run: |
+          KS=android/app/debug.keystore
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -v -keystore "$KS" -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug keystore at $KS"
+          fi
+
       - name: Build release APK
         working-directory: android
         env:
@@ -651,6 +667,20 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-validate-${{ runner.os }}-${{ hashFiles('android/**/*.gradle*', 'android/**/gradle-wrapper.properties', 'android/**/libs.versions.toml') }}
           restore-keys: gradle-validate-${{ runner.os }}-
+
+      - name: Generate fallback debug keystore (CopyPaste-fpmf)
+        # Configuring the release variant references the debug signingConfig,
+        # whose config-time keytool project.exec breaks the configuration cache.
+        # Pre-create the keystore so that exec is skipped (exists() guard).
+        run: |
+          KS=android/app/debug.keystore
+          if [ ! -f "$KS" ]; then
+            keytool -genkeypair -v -keystore "$KS" -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass android -keypass android \
+              -dname "CN=Android Debug,O=Android,C=US"
+            echo "Generated fallback debug keystore at $KS"
+          fi
 
       - name: Android lint
         working-directory: android
