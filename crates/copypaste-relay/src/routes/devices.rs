@@ -7,6 +7,7 @@ use axum::Json;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 
+use crate::auth::BearerToken;
 use crate::error::RelayError;
 use crate::models::{DeviceInfoResponse, RegisterRequest, RegisterResponse};
 use crate::state::AppState;
@@ -147,16 +148,30 @@ pub async fn register(
     ))
 }
 
-/// GET /devices/:device_id — retrieve public info about a registered device.
+/// GET /devices/:device_id — retrieve info about a registered device.
+///
+/// Requires a valid `Authorization: Bearer <token>` matching the requested
+/// `device_id`. CopyPaste-44rq.52: previously unauthenticated, leaking
+/// `device_name`, `public_key_b64`, and timestamps to any caller who had
+/// observed a `device_id` from traffic. Now gated: callers must prove they
+/// hold the correct bearer token for that device.
 ///
 /// Response (200): `{ device_id, device_name, public_key_b64, registered_at, expires_at }`
-/// Error (404): device not found.
+/// Error (401): missing or invalid bearer token.
+/// Error (404): device not found (only after auth succeeds).
 pub async fn get_device(
     State(state): State<AppState>,
     Path(device_id): Path<String>,
+    BearerToken(token): BearerToken,
 ) -> Result<Json<DeviceInfoResponse>, RelayError> {
     // Survive mutex poisoning (security INFO #21).
     let store = state.lock().unwrap_or_else(|e| e.into_inner());
+    // CopyPaste-44rq.52: authenticate before returning any device data.
+    // verify_token uses constant-time comparison (subtle crate) and enforces
+    // token expiry (fail-closed on clock error). We use Unauthorized (not
+    // DeviceNotFound) on a bad token so callers cannot enumerate device IDs
+    // by probing with a garbage token — see verify_token_at comment in state.rs.
+    store.verify_token(&device_id, &token)?;
     let record = store.get_device(&device_id)?;
 
     // Convert Instant → wall-clock by computing elapsed and subtracting from now.

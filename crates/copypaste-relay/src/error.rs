@@ -6,19 +6,13 @@ use serde_json::json;
 pub enum RelayError {
     #[error("device not found")]
     DeviceNotFound,
-    // No longer constructed in production since R1a shared-account
-    // co-registration: a duplicate `device_id` co-registers (mints an
-    // additional token) instead of conflicting. The variant + its 409 mapping
-    // are retained for the error-mapping test and any future re-introduction of
-    // a conflict path.
-    #[allow(dead_code)]
-    #[error("device already registered")]
-    DeviceConflict,
     #[error("unauthorized")]
     Unauthorized,
     #[error("bad request: {0}")]
     BadRequest(String),
-    #[allow(dead_code)]
+    // Constructed at state.rs `push_item_decoded` when the decoded payload
+    // exceeds `max_item_bytes`. Maps to 413 PAYLOAD_TOO_LARGE; clients
+    // should not retry with the same content.
     #[error("payload too large")]
     PayloadTooLarge,
     #[error("item not found")]
@@ -69,7 +63,6 @@ impl RelayError {
     fn status_and_code(&self) -> (StatusCode, &'static str) {
         match self {
             RelayError::DeviceNotFound => (StatusCode::NOT_FOUND, "DEVICE_NOT_FOUND"),
-            RelayError::DeviceConflict => (StatusCode::CONFLICT, "DEVICE_CONFLICT"),
             RelayError::Unauthorized => (StatusCode::UNAUTHORIZED, "UNAUTHORIZED"),
             RelayError::BadRequest(_) => (StatusCode::BAD_REQUEST, "BAD_REQUEST"),
             RelayError::PayloadTooLarge => (StatusCode::PAYLOAD_TOO_LARGE, "PAYLOAD_TOO_LARGE"),
@@ -146,11 +139,6 @@ mod tests {
     #[test]
     fn device_not_found_is_404() {
         assert_eq!(status_of(RelayError::DeviceNotFound), StatusCode::NOT_FOUND);
-    }
-
-    #[test]
-    fn device_conflict_is_409() {
-        assert_eq!(status_of(RelayError::DeviceConflict), StatusCode::CONFLICT);
     }
 
     #[test]
