@@ -648,8 +648,16 @@ private fun maskEmail(email: String): String {
     }
 }
 
-/** Poll cadence for re-reading configured-target state and network status. Matches the macOS chip's 10 s. */
-private const val POLL_INTERVAL_MS = 10_000L
+/**
+ * Poll cadence for re-reading configured-target state and network status.
+ *
+ * CopyPaste-1jms.16: aligned with macOS SyncStatusChip.tsx SYNC_POLL_INTERVAL_MS (2 000 ms).
+ * The old value of 10 000 ms caused the badge to lag up to 10 s behind the macOS chip's
+ * 2 s offline-detection latency (PARITY-SPEC §9). macOS does not use an idle back-off;
+ * it polls at a flat 2 s interval. Android mirrors that cadence here — at 2 s the battery
+ * cost of a lightweight SharedPrefs read + ConnectivityManager check is negligible.
+ */
+internal const val POLL_INTERVAL_MS = 2_000L
 
 /** Duration for one half of the 2 s pulse cycle (1 s per direction). */
 private const val PULSE_DURATION_MS = 1_000
