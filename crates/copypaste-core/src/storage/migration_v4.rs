@@ -571,6 +571,13 @@ fn rotate_one_image(
 
 /// Minimal projection of a candidate mislabeled kv=2 blob row.
 struct Kv2BlobRow {
+    /// SQLite implicit integer rowid — used as a stable pagination cursor.
+    /// Unlike `wall_time` (which may be duplicated) or `id` (a UUID string
+    /// that is not numerically ordered), `rowid` is a unique monotonic integer
+    /// that SQLite guarantees for every non-WITHOUT-ROWID table.  Using it as
+    /// a `WHERE rowid > last_cursor` cursor is O(log N) on the primary-key
+    /// B-tree and produces deterministic, non-overlapping pages.
+    rowid: i64,
     id: String,
     // item_id is read from the DB for structural consistency with V1ImageRow
     // but not used in the repair logic (file_id comes from blob_ref JSON).
@@ -580,26 +587,38 @@ struct Kv2BlobRow {
     blob_ref: Option<String>,
 }
 
-fn fetch_kv2_blob_batch(db: &Database, limit: usize) -> Result<Vec<Kv2BlobRow>, MigrationV4Error> {
-    // Clamp to i64::MAX to avoid overflow when the caller passes usize::MAX
-    // or i64::MAX as usize.
-    let sql_limit = i64::try_from(limit).unwrap_or(i64::MAX);
+/// Fetch at most `BATCH_SIZE` candidate kv=2 blob rows whose `rowid` is
+/// strictly greater than `after_rowid` (the pagination cursor).
+///
+/// `ORDER BY rowid ASC LIMIT BATCH_SIZE` guarantees:
+/// * each page is a disjoint, non-overlapping window (cursor moves forward),
+/// * no row can be skipped or repeated between pages, and
+/// * the cursor is stable even if rows are UPDATEd between pages
+///   (re-encryption writes the same `key_version = 2` and does not change
+///   `rowid`; the predicate `WHERE rowid > last_cursor` will therefore
+///   skip any already-visited rows on the next fetch).
+fn fetch_kv2_blob_batch(
+    db: &Database,
+    after_rowid: i64,
+) -> Result<Vec<Kv2BlobRow>, MigrationV4Error> {
     let mut stmt = db.conn().prepare(
-        "SELECT id, item_id, content, blob_ref \
+        "SELECT rowid, id, item_id, content, blob_ref \
          FROM clipboard_items \
          WHERE key_version = 2 \
            AND content IS NOT NULL \
            AND content_type IN ('image', 'file') \
-         ORDER BY wall_time ASC \
-         LIMIT ?1",
+           AND rowid > ?1 \
+         ORDER BY rowid ASC \
+         LIMIT ?2",
     )?;
     let rows = stmt
-        .query_map(params![sql_limit], |r| {
+        .query_map(params![after_rowid, BATCH_SIZE as i64], |r| {
             Ok(Kv2BlobRow {
-                id: r.get(0)?,
-                item_id: r.get(1)?,
-                content: r.get(2)?,
-                blob_ref: r.get(3)?,
+                rowid: r.get(0)?,
+                id: r.get(1)?,
+                item_id: r.get(2)?,
+                content: r.get(3)?,
+                blob_ref: r.get(4)?,
             })
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -680,41 +699,70 @@ fn maybe_repair_one_kv2_blob(
 /// The function is idempotent: repaired rows fail the v1-decrypt probe on
 /// subsequent runs and are silently skipped.
 ///
-/// The repair fetches all kv=2 blob rows in one pass. The expected set is
-/// small (only rows captured before the writer fix was deployed), so a
-/// single unbounded fetch is acceptable. Rows that fail the v1-decrypt probe
-/// are skipped in-place; rows that fail re-encryption are logged and left
-/// unchanged (they remain readable with the v2 key if they were truly v2).
+/// ## Batching
+///
+/// The repair streams through all kv=2 blob rows in pages of [`BATCH_SIZE`]
+/// using a `rowid`-based cursor (`WHERE rowid > last_cursor ORDER BY rowid
+/// ASC LIMIT BATCH_SIZE`).  This bounds peak memory to `BATCH_SIZE × (row
+/// overhead + encrypted content blob size)` regardless of how many image/file
+/// rows the database contains, and yields [`INTER_BATCH_SLEEP`] between pages
+/// so long-running repairs do not monopolise the SQLite write lock.
+///
+/// Rows that fail the v1-decrypt probe are skipped in-place; rows that fail
+/// re-encryption are logged and left unchanged (they remain readable with the
+/// v2 key if they were truly v2).
 pub fn repair_mislabeled_kv2_blob_rows(
     db: &Database,
     v1_key: &[u8; 32],
     v2_key: &[u8; 32],
 ) -> Result<usize, MigrationV4Error> {
-    // Fetch all candidates in one shot — the set is expected to be tiny.
-    // i64::MAX safely caps the SQL LIMIT to "all rows".
-    let candidates = fetch_kv2_blob_batch(db, i64::MAX as usize)?;
     let mut total_repaired = 0usize;
+    // `rowid` cursor — start before the first possible row (rowid >= 1).
+    let mut cursor: i64 = 0;
 
-    for row in &candidates {
-        match maybe_repair_one_kv2_blob(db, row, v1_key, v2_key) {
-            Ok(true) => {
-                total_repaired += 1;
-                tracing::debug!(
-                    row_id = %row.id,
-                    "repair_mislabeled_kv2: repaired mislabeled kv2 blob row"
-                );
-            }
-            Ok(false) => {
-                // Correctly v2-encrypted; skip.
-            }
-            Err(e) => {
-                tracing::warn!(
-                    row_id = %row.id,
-                    error = %e,
-                    "repair_mislabeled_kv2: could not repair row (left unchanged)"
-                );
+    loop {
+        let batch = fetch_kv2_blob_batch(db, cursor)?;
+        if batch.is_empty() {
+            break;
+        }
+
+        // Advance cursor to the last rowid in this batch so the next fetch
+        // starts strictly after it.  The batch is ORDER BY rowid ASC so the
+        // last element always has the highest rowid.
+        //
+        // Unwrap is safe: we just checked `!batch.is_empty()`.
+        cursor = batch.last().unwrap().rowid;
+
+        for row in &batch {
+            match maybe_repair_one_kv2_blob(db, row, v1_key, v2_key) {
+                Ok(true) => {
+                    total_repaired += 1;
+                    tracing::debug!(
+                        row_id = %row.id,
+                        "repair_mislabeled_kv2: repaired mislabeled kv2 blob row"
+                    );
+                }
+                Ok(false) => {
+                    // Correctly v2-encrypted; skip.
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        row_id = %row.id,
+                        error = %e,
+                        "repair_mislabeled_kv2: could not repair row (left unchanged)"
+                    );
+                }
             }
         }
+
+        // If the batch was smaller than BATCH_SIZE we've reached the end.
+        if batch.len() < BATCH_SIZE {
+            break;
+        }
+
+        // Yield between pages to avoid holding the write lock for an
+        // unbounded duration on large databases.
+        std::thread::sleep(INTER_BATCH_SLEEP);
     }
 
     if total_repaired > 0 {
@@ -1378,6 +1426,67 @@ mod tests {
             )
             .unwrap();
         assert_eq!(kv, 2, "key_version stamp must remain 2 after repair");
+    }
+
+    /// CopyPaste-44rq.32/60: repair must process rows in BATCH_SIZE pages and
+    /// not load all rows into memory at once.  Seed 3×BATCH_SIZE mislabeled
+    /// rows; every row must be repaired and each fetch page must return at most
+    /// BATCH_SIZE rows.
+    ///
+    /// The pagination is verified indirectly: `fetch_kv2_blob_batch` is called
+    /// with a `rowid` cursor, so each call returns a disjoint window.  We
+    /// confirm correctness by asserting total repaired == 3×BATCH_SIZE and
+    /// that every row becomes genuinely v2-decryptable (v1-decrypt now fails).
+    #[test]
+    fn repair_processes_multi_batch_in_pages() {
+        let db = Database::open_in_memory().unwrap();
+        let v1_key = [0xC1u8; 32];
+        let v2_key = [0xC2u8; 32];
+
+        // Seed 3 × BATCH_SIZE mislabeled rows.
+        let n = BATCH_SIZE * 3;
+        let mut row_ids: Vec<(String, [u8; 16])> = Vec::with_capacity(n);
+        for i in 0..n {
+            let plaintext = vec![(i % 256) as u8; 64];
+            let (row_id, file_id, _) = seed_mislabeled_kv2_image_row(&db, &v1_key, &plaintext);
+            row_ids.push((row_id, file_id));
+        }
+
+        let repaired = repair_mislabeled_kv2_blob_rows(&db, &v1_key, &v2_key).unwrap();
+        assert_eq!(repaired, n, "all {n} mislabeled rows must be repaired");
+
+        // Every row must now genuinely v2-decrypt (v1-decrypt must fail).
+        for (row_id, file_id) in &row_ids {
+            let blob: Vec<u8> = db
+                .conn()
+                .query_row(
+                    "SELECT content FROM clipboard_items WHERE id = ?1",
+                    params![row_id],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            let chunks = chunks_from_blob(&blob).unwrap();
+            assert!(
+                decrypt_chunks(&chunks, &v2_key, file_id).is_ok(),
+                "row {row_id} must decrypt with v2 key after repair"
+            );
+            assert!(
+                decrypt_chunks(&chunks, &v1_key, file_id).is_err(),
+                "row {row_id} must NOT decrypt with v1 key after repair"
+            );
+        }
+
+        // Verify pagination: fetch the first page at cursor=0 and assert it
+        // returns exactly BATCH_SIZE rows (confirming the query is bounded).
+        let first_page = fetch_kv2_blob_batch(&db, 0).unwrap();
+        // After repair all rows are correctly v2-encrypted, so v1-decrypt
+        // will fail for each — but that doesn't affect cursor pagination.
+        // What we care about is that the page size is BATCH_SIZE.
+        assert_eq!(
+            first_page.len(),
+            BATCH_SIZE,
+            "first page must contain exactly BATCH_SIZE rows, not all {n}"
+        );
     }
 
     /// A correctly v2-encrypted kv=2 row (v1-decrypt fails) must be left

@@ -68,6 +68,21 @@ impl DbRead for ReadHandle {
 pub enum PoolError {
     #[error("failed to build r2d2 pool: {0}")]
     Build(#[from] r2d2::Error),
+    /// A rusqlite error occurred during the schema-version pre-flight check
+    /// (before the pool was built).
+    #[error("pool pre-flight SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    /// The database at `path` has not been migrated yet (`user_version = 0`).
+    ///
+    /// Call `Database::open()` on the same path first to apply schema
+    /// migrations, then open the pool.  This guard prevents silent
+    /// "no such table" errors when a pool connection is used on a brand-new
+    /// or uninitialized SQLCipher file.
+    #[error(
+        "database schema not initialized (user_version = 0); \
+         call Database::open() to run migrations before opening a pool"
+    )]
+    SchemaNotInitialized,
 }
 
 /// Format a 32-byte key as the hex string SQLCipher expects in a `PRAGMA key`
@@ -142,6 +157,27 @@ pub fn open_pool_with_cache_mb(
         crate::storage::db::CONNECTION_PRAGMAS,
         cache_pragma.trim_end()
     ));
+
+    // Schema-version pre-flight: open a single throw-away connection to check
+    // `PRAGMA user_version` before building the pool.  This catches the common
+    // mistake of calling `open_pool()` before `Database::open()` has been used
+    // to apply migrations, turning a silent "no such table: clipboard_items"
+    // deep inside the application into an immediate, descriptive error here.
+    //
+    // We read user_version on a fresh connection (applying the key + WAL
+    // pragmas first, same as the pool's init hook) so that the check works on
+    // an encrypted SQLCipher file.  The connection is dropped before the pool
+    // is built; no resources are leaked.
+    {
+        let probe = rusqlite::Connection::open(path)?;
+        probe.execute_batch(pragma_str.as_str())?;
+        let user_version: i64 =
+            probe.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        if user_version == 0 {
+            return Err(PoolError::SchemaNotInitialized);
+        }
+    }
+
     let manager = SqliteConnectionManager::file(path).with_init(move |conn| {
         // SQLCipher requirement: key pragma MUST be the very first statement
         // executed on a fresh connection. WAL mode applies to the database
@@ -298,6 +334,37 @@ mod tests {
         assert!(
             cipher_version.is_ok() && !cipher_version.unwrap().is_empty(),
             "cipher_version pragma should return non-empty on a SQLCipher build"
+        );
+    }
+
+    /// CopyPaste-44rq.63: opening a pool on a SQLCipher file that has not had
+    /// `Database::open()` run yet (i.e. `user_version = 0`) must return
+    /// `PoolError::SchemaNotInitialized` rather than silently succeeding and
+    /// failing later with "no such table: clipboard_items".
+    #[test]
+    fn pool_rejects_uninitialized_schema() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("uninit.db");
+        let key = [0x11u8; 32];
+
+        // Create a raw encrypted SQLCipher file with the key applied but
+        // WITHOUT running any migrations (user_version stays at 0).
+        {
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            let kh = key_hex(&key);
+            conn.execute_batch(&format!(
+                "PRAGMA key = \"x'{}'\";\nPRAGMA journal_mode = WAL;",
+                kh.as_str()
+            ))
+            .unwrap();
+            // Do not call Database::open() — leave user_version = 0.
+        }
+
+        let result = open_pool(&path, &key, 2);
+        assert!(
+            matches!(result, Err(PoolError::SchemaNotInitialized)),
+            "expected SchemaNotInitialized, got {:?}",
+            result
         );
     }
 
