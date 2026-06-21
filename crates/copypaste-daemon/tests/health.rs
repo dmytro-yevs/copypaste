@@ -240,14 +240,17 @@ async fn status_request_without_daemon_returns_clear_error() {
         .expect_err("connect to missing socket must fail");
 
     // The CLI branches on `ErrorKind` to print the friendly message — assert
-    // the kind is one of the well-known "no daemon here" variants.
+    // the kind is one of the well-known "no daemon here" variants. PermissionDenied
+    // is included because connecting to a non-existent socket under the macOS CI
+    // runner's sandboxed $TMPDIR (/var/folders) yields EACCES rather than ENOENT;
+    // it is still a clean typed error (not a hang/panic), which is what this guards.
     use std::io::ErrorKind;
     assert!(
         matches!(
             err.kind(),
-            ErrorKind::ConnectionRefused | ErrorKind::NotFound
+            ErrorKind::ConnectionRefused | ErrorKind::NotFound | ErrorKind::PermissionDenied
         ),
-        "expected ConnectionRefused or NotFound, got {:?} ({err})",
+        "expected ConnectionRefused/NotFound/PermissionDenied, got {:?} ({err})",
         err.kind()
     );
 }
