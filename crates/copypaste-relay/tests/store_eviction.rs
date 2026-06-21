@@ -41,7 +41,7 @@ mod models;
 #[path = "../src/quota.rs"]
 mod quota;
 #[allow(dead_code)]
-#[path = "../src/state.rs"]
+#[path = "../src/state/mod.rs"]
 mod state;
 #[allow(dead_code)]
 #[path = "../src/store.rs"]

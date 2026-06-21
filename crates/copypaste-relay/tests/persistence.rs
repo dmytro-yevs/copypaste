@@ -23,7 +23,7 @@ mod error;
 mod models;
 #[path = "../src/quota.rs"]
 mod quota;
-#[path = "../src/state.rs"]
+#[path = "../src/state/mod.rs"]
 mod state;
 
 use state::RelayStore;
