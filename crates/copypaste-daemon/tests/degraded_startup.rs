@@ -181,13 +181,16 @@ fn degraded_startup_rejects_db_methods_with_not_ready() {
         "degraded daemon must bind its socket"
     );
 
+    // CopyPaste-c4q2.17 deprecated `list` (it now short-circuits to
+    // `not_implemented` before the degraded DB-gate runs), so probe degraded
+    // rejection with the live replacement `history_page` instead.
     let resp = request(
         &daemon.socket_path,
-        r#"{"id":"l1","method":"list","params":{"limit":10},"protocol_version":1}"#,
+        r#"{"id":"l1","method":"history_page","params":{"limit":10},"protocol_version":1}"#,
     );
     assert_eq!(
         resp["ok"], false,
-        "DB-touching `list` must be rejected in degraded mode, got: {resp}"
+        "DB-touching `history_page` must be rejected in degraded mode, got: {resp}"
     );
     // CopyPaste-c4q2.13: the stable machine-readable code is now the lowercase
     // `error_code` ("ipc_not_ready"); the human message no longer embeds the old
