@@ -105,7 +105,7 @@ pub(crate) const HKDF_SALT_V2: &[u8; 32] = &[
 /// Derive a 32-byte local-storage key from a raw 32-byte seed using the v2
 /// HKDF family.
 ///
-/// Uses HKDF-SHA512 with the frozen [`HKDF_SALT_V2`] salt and the info string
+/// Uses HKDF-SHA512 with the frozen `HKDF_SALT_V2` salt and the info string
 /// `"copypaste-local-storage-v2"`. Domain-separated from the network sync/
 /// telemetry keys by the `info` string and from v1 by both the algorithm
 /// (SHA-512 vs SHA-256) and the salt bytes.
@@ -174,7 +174,7 @@ impl DeviceKeypair {
     /// Returns the raw 32-byte X25519 secret wrapped in [`zeroize::Zeroizing`] so
     /// the bytes are scrubbed when the returned value is dropped.
     ///
-    /// Prefer this over [`Self::secret_key_bytes`] for any new code path
+    /// Prefer this over `secret_key_bytes` for any new code path
     /// that hands the secret to encryption, keychain storage, or any
     /// other transient consumer. See audit MED #3.
     pub fn secret_key_bytes_zeroizing(&self) -> zeroize::Zeroizing<[u8; 32]> {

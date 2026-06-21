@@ -269,7 +269,7 @@ impl Database {
 
     /// Like [`Database::open`] but applies `cache_mb` MiB of SQLite page cache
     /// per connection instead of the 8 MiB default. `cache_mb` is clamped to
-    /// `SQLITE_CACHE_MB_MIN..=SQLITE_CACHE_MB_MAX` (see [`cache_size_pragma`]).
+    /// `SQLITE_CACHE_MB_MIN..=SQLITE_CACHE_MB_MAX` (see `cache_size_pragma`).
     pub fn open_with_cache_mb(
         path: impl AsRef<Path>,
         key: &[u8; 32],
@@ -376,7 +376,7 @@ impl Database {
         }
     }
 
-    /// Like [`open`] but returns [`DbError::PlaintextMigrationBlocked`] instead
+    /// Like [`Database::open`] but returns [`DbError::PlaintextMigrationBlocked`] instead
     /// of auto-migrating when a plaintext database is found. Use this when the
     /// caller has received `COPYPASTE_NO_AUTO_MIGRATE=1` from the environment.
     ///
@@ -940,7 +940,7 @@ impl Database {
     /// logged `rotated=0 failed=N` and left `completed_at` NULL forever, so
     /// every clipboard capture was rejected with `MigrationInProgress`.
     ///
-    /// Unlike [`force_complete_if_no_v1_rows`], this does NOT require zero v1
+    /// Unlike [`Self::force_complete_if_no_v1_rows`], this does NOT require zero v1
     /// rows: it seeds the sweep row if absent and sets `completed_at` no matter
     /// what. The remaining `key_version = 1` rows are left untouched (they were
     /// already unreadable under the current key); only the gate is released.

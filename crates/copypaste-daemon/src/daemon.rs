@@ -1784,64 +1784,56 @@ async fn handle_tick(
     // offload to the tokio blocking-thread pool so the async executor is not
     // stalled by the fork+wait.
     //
-    // CopyPaste-zdyw (skip-when-empty): forking lsappinfo every 500 ms even
-    // when the exclusion list is empty wastes CPU and a file-descriptor pair.
-    // When the list IS empty we set frontmost_bundle_id to None immediately
-    // (no fork) — the content-pattern gate still protects against accidental
-    // capture of sensitive strings, and the fail-closed P1-2 logic never fires
-    // for an empty list so skipping the probe is safe.  When the list is
-    // non-empty we still probe so the exclusion check can run.
+    // fix(44rq.43): lsappinfo must ALWAYS run on macOS so is_sensitive_app
+    // can flag passwords from password managers even when excluded_app_bundle_ids
+    // is empty (the default).  The previous CopyPaste-zdyw optimisation
+    // short-circuited to None when the exclusion list was empty, which meant
+    // `is_sensitive_app` in handle_text always received None → false → passwords
+    // from 1Password, Bitwarden, etc. got no sensitive flag and no TTL wipe.
+    //
+    // The P1-2 fail-closed behaviour (skip capture when lsappinfo fails AND the
+    // exclusion list is non-empty) is preserved below unchanged.  Performance:
+    // lsappinfo forks once per tick regardless of exclusion-list size, same as
+    // before for non-empty lists — acceptable given the security trade-off.
     //
     // Shared between the exclusion check and the is_sensitive_app check so
     // lsappinfo is invoked AT MOST ONCE per tick regardless of which check fires.
     #[cfg(target_os = "macos")]
     let frontmost_bundle_id: Option<String> = {
-        // CopyPaste-zdyw: skip the lsappinfo fork entirely when the exclusion
-        // list is empty — there is nothing to exclude, so the probe is wasted
-        // work.  We keep the fork for non-empty lists (fail-closed P1-2 logic).
-        if config.excluded_app_bundle_ids.is_empty() {
-            // No exclusion list — skip the subprocess.  The content-pattern
-            // sensitive-detection gate (`is_sensitive_for_autowipe`) still runs
-            // downstream, so the AEAD protection remains.  is_sensitive_app
-            // attribution (mtf5) is best-effort and skipped here — it relies on
-            // lsappinfo which we are intentionally not forking.
-            None
-        } else {
-            let lsappinfo_result = tokio::task::spawn_blocking(|| {
-                // `lsappinfo front` prints a record for the frontmost process.
-                // We extract the bundleID field from lines like:
-                //   "bundleID" = "com.1password.1password"
-                std::process::Command::new("lsappinfo")
-                    .args(["front"])
-                    .output()
-                    .ok()
-                    .and_then(|out| {
-                        let text = String::from_utf8_lossy(&out.stdout).into_owned();
-                        for line in text.lines() {
-                            let trimmed = line.trim();
-                            // Match: "bundleID" = "com.example.app"
-                            if let Some(rest) = trimmed.strip_prefix("\"bundleID\" = \"") {
-                                if let Some(bid) = rest.strip_suffix('"') {
-                                    return Some(bid.to_owned());
-                                }
+        let lsappinfo_result = tokio::task::spawn_blocking(|| {
+            // `lsappinfo front` prints a record for the frontmost process.
+            // We extract the bundleID field from lines like:
+            //   "bundleID" = "com.1password.1password"
+            std::process::Command::new("lsappinfo")
+                .args(["front"])
+                .output()
+                .ok()
+                .and_then(|out| {
+                    let text = String::from_utf8_lossy(&out.stdout).into_owned();
+                    for line in text.lines() {
+                        let trimmed = line.trim();
+                        // Match: "bundleID" = "com.example.app"
+                        if let Some(rest) = trimmed.strip_prefix("\"bundleID\" = \"") {
+                            if let Some(bid) = rest.strip_suffix('"') {
+                                return Some(bid.to_owned());
                             }
                         }
-                        None
-                    })
-            })
-            .await;
-
-            // Flatten the JoinError and inner Option.
-            match lsappinfo_result {
-                Ok(opt) => opt,
-                Err(join_err) => {
-                    // spawn_blocking task panicked — treat as subprocess failure.
-                    tracing::warn!(
-                        error = %join_err,
-                        "lsappinfo: blocking task panicked; failing closed to protect excluded apps"
-                    );
+                    }
                     None
-                }
+                })
+        })
+        .await;
+
+        // Flatten the JoinError and inner Option.
+        match lsappinfo_result {
+            Ok(opt) => opt,
+            Err(join_err) => {
+                // spawn_blocking task panicked — treat as subprocess failure.
+                tracing::warn!(
+                    error = %join_err,
+                    "lsappinfo: blocking task panicked; failing closed to protect excluded apps"
+                );
+                None
             }
         }
     };

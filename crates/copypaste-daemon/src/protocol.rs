@@ -145,13 +145,19 @@ impl Response {
         }
     }
 
-    /// Convenience wrapper for unimplemented methods (cloud-sync stubs, etc.).
-    /// Always sets `error_code = "not_implemented"`.
+    /// Convenience wrapper for feature-gated methods not compiled into this
+    /// binary (cloud-sync stubs, etc.).  Always sets
+    /// `error_code = "not_implemented"` with an actionable build hint so the
+    /// operator knows this is a compile-time gate, not a runtime misconfiguration
+    /// (fix 44rq.14).
     pub fn not_implemented(id: impl Into<String>, feature: &'static str) -> Self {
         Self::err_with_code(
             id,
             ERR_CODE_NOT_IMPLEMENTED,
-            format!("not implemented: {feature}"),
+            format!(
+                "feature not compiled in: {feature} \
+                 (rebuild the daemon with `--features {feature}` to enable this method)",
+            ),
         )
     }
 }
@@ -202,7 +208,9 @@ mod tests {
         assert_eq!(resp.error_code, Some(ERR_CODE_NOT_IMPLEMENTED));
         let s = serde_json::to_string(&resp).unwrap();
         assert!(s.contains("\"error_code\":\"not_implemented\""));
-        assert!(s.contains("not implemented: cloud-sync"));
+        // fix(44rq.14): message now includes an actionable build hint.
+        assert!(s.contains("feature not compiled in: cloud-sync"));
+        assert!(s.contains("--features cloud-sync"));
     }
 
     // ----- ADR-007: protocol versioning -------------------------------------

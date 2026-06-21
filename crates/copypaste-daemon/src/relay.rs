@@ -2223,9 +2223,9 @@ mod tests {
 
     // ── CopyPaste-bfiu: delete-before-create over relay must not resurrect ────
 
-    /// A tombstone for an UNKNOWN item_id inserts a tombstone row; a later
-    /// out-of-order create with a LOWER lamport then loses LWW and the item
-    /// stays deleted.
+    // A tombstone for an UNKNOWN item_id inserts a tombstone row; a later
+    // out-of-order create with a LOWER lamport then loses LWW and the item
+    // stays deleted.
     // ── P1-1: sensitive items must never enter the push pipeline ─────────────
 
     /// P1-1 guard: the SOLE filter for sensitive items is the

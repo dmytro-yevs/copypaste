@@ -93,7 +93,7 @@ pub struct P2pConfig {
 ///
 /// Keyed by the peer's verified **certificate fingerprint** in canonical
 /// lowercase, colon-free hex form (matching
-/// [`crate::ipc::canonical_fingerprint`]). The IPC `list_peers` handler reads
+/// `canonical_fingerprint`). The IPC `list_peers` handler reads
 /// this map to compute the authoritative `online` flag — a peer is online iff
 /// it has a live, non-closed sender here.  The `last_sync_at` heuristic acts
 /// as a fallback when P2P is disabled or not yet connected.
@@ -1112,7 +1112,7 @@ fn dialable_peers_from_path(path: &std::path::Path) -> Vec<DialablePeer> {
 ///   fanout loop are never blocked by an in-flight dial.
 /// * Already-connected peers are skipped (cheap `contains_key`).
 /// * We never dial our own fingerprint (`own_fp`).
-/// * Per-peer exponential backoff ([`CONNECTOR_BACKOFF_STEPS`]) spaces out
+/// * Per-peer exponential backoff (`CONNECTOR_BACKOFF_STEPS`) spaces out
 ///   retries to an offline peer instead of dialing every tick.
 ///
 /// # Double-connect race (both sides dialing)
@@ -1490,8 +1490,8 @@ const WRITE_TIMEOUT: Duration = Duration::from_secs(8);
 /// Reads incoming frames and forwards them to `incoming_tx`; reads from
 /// `peer_rx` and writes outgoing frames to the peer. Both directions run
 /// concurrently via `tokio::select!`; the task exits when either side closes.
-/// Generic over the framed stream so the server-side ([`PeerStream`]) and
-/// client-side ([`PeerClientStream`]) TLS stream types share one implementation.
+/// Generic over the framed stream so the server-side (`PeerStream`) and
+/// client-side (`PeerClientStream`) TLS stream types share one implementation.
 ///
 /// ## Security — unpair signal eviction
 ///

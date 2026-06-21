@@ -282,7 +282,7 @@ impl PairingCoordinator {
     /// Transition `Initiating → AwaitingSas`, storing the derived SAS and the
     /// confirmation channel. Called from the handshake's `confirm` callback.
     ///
-    /// `peer` is the same snapshot passed to [`try_begin`]; it is forwarded into
+    /// `peer` is the same snapshot passed to [`Self::try_begin`]; it is forwarded into
     /// `AwaitingSas` so `pair_get_sas` can surface it while the user is reading
     /// the code.
     ///

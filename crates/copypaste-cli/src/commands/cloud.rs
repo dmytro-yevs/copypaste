@@ -201,8 +201,15 @@ pub fn setup(
 fn check_resp(resp: &Response) -> Result<()> {
     if !resp.ok {
         let msg = resp.error.as_deref().unwrap_or_default();
-        match resp.error_code {
-            Some(ref code) => bail!("error [{code}]: {msg}"),
+        // FEACLI-8: prefer raw_error_code so unknown codes are surfaced.
+        // Falls back to the typed variant for any pre-FEACLI-8 call sites that
+        // construct Response literals without raw_error_code.
+        match resp
+            .raw_error_code
+            .as_deref()
+            .or(resp.error_code.map(|c| c.as_str()))
+        {
+            Some(code) => bail!("error [{code}]: {msg}"),
             None => bail!("error: {msg}"),
         }
     }
@@ -265,6 +272,14 @@ pub fn status(socket_path: &Path) -> Result<()> {
         println!("Account:             {email}");
     }
     println!("Passphrase set:      {}", yn(get_bool("passphrase_set")));
+    // FEACLI-7: show configured relay URL when the daemon includes it.
+    if let Some(relay_url) = data.get("relay_url").and_then(|v| v.as_str()) {
+        println!("Relay URL:           {relay_url}");
+    }
+    // FEACLI-4: show badge_state when the daemon includes it.
+    if let Some(badge) = data.get("badge_state").and_then(|v| v.as_str()) {
+        println!("Badge state:         {badge}");
+    }
     match data.get("last_sync_ms").and_then(|v| v.as_i64()) {
         Some(ms) if ms > 0 => println!("Last sync (epoch ms): {ms}"),
         _ => println!("Last sync:           never"),
@@ -352,6 +367,7 @@ mod tests {
             data: None,
             error: None,
             error_code: None,
+            raw_error_code: None,
         };
         assert!(check_resp(&resp).is_ok(), "ok response must pass");
     }
@@ -366,6 +382,7 @@ mod tests {
             data: None,
             error: Some("daemon refused".to_string()),
             error_code: None,
+            raw_error_code: None,
         };
         let result = check_resp(&resp);
         assert!(result.is_err(), "error response must yield Err");
@@ -387,11 +404,31 @@ mod tests {
             data: None,
             error: Some("not implemented".to_string()),
             error_code: Some(ErrorCode::NotImplemented),
+            raw_error_code: Some("not_implemented".to_string()),
         };
         let msg = check_resp(&resp).unwrap_err().to_string();
         assert!(
             msg.contains("not_implemented"),
             "error message must contain the error code, got: {msg}"
+        );
+    }
+
+    /// FEACLI-8: an unknown error code (not in the ErrorCode enum) must be
+    /// preserved in the output rather than silently dropped.
+    #[test]
+    fn check_resp_preserves_unknown_error_code() {
+        let resp = Response {
+            id: "4".to_string(),
+            ok: false,
+            data: None,
+            error: Some("something new".to_string()),
+            error_code: None, // not recognised by this CLI build
+            raw_error_code: Some("future_code_unknown_to_cli".to_string()),
+        };
+        let msg = check_resp(&resp).unwrap_err().to_string();
+        assert!(
+            msg.contains("future_code_unknown_to_cli"),
+            "unknown error_code must appear in output, got: {msg}"
         );
     }
 }

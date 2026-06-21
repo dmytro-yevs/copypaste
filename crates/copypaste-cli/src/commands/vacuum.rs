@@ -10,7 +10,7 @@
 //!
 //! The daemon now exposes a `vacuum` IPC verb (METHOD_VACUUM) that:
 //!   * Holds the write-lock for the duration of the operation (exclusive
-//!     access is already serialised through the daemon's Mutex<Database>).
+//!     access is already serialised through the daemon's `Mutex<Database>`).
 //!   * Runs `PRAGMA wal_checkpoint(TRUNCATE)` + `VACUUM` + `REINDEX` on a
 //!     blocking thread so the async executor is not starved.
 //!   * Returns `{ ok, size_before, size_after, reclaimed }` which the CLI

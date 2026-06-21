@@ -664,12 +664,29 @@ mod tests {
     /// CopyPaste-nkro: on non-macOS, `store_supabase_password_to_keychain` must
     /// return `Err(KeychainError::Unsupported)` — the locked-down path is a
     /// macOS-only security hardening, not a cross-platform behaviour change.
+    ///
+    /// We explicitly unset `COPYPASTE_EPHEMERAL_KEY` so the keychain-bypass
+    /// short-circuit does not fire (it returns `Ok(())`, masking the
+    /// `Unsupported` path we are testing). The `TEST_ENV_LOCK` serialises all
+    /// tests that mutate the process environment so they cannot race.
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn store_supabase_password_to_keychain_returns_unsupported_on_non_macos() {
-        // On non-macOS the Keychain is unavailable; the function must return
-        // Unsupported so callers can fall back to the config.json persistence.
+        // Hold the env lock for the full test body so no other test can concurrently
+        // set COPYPASTE_EPHEMERAL_KEY while we have it cleared.
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Ensure the bypass is off so we exercise the real non-macOS path.
+        let prev = std::env::var_os("COPYPASTE_EPHEMERAL_KEY");
+        // SAFETY: single-threaded under the TEST_ENV_LOCK guard.
+        unsafe { std::env::remove_var("COPYPASTE_EPHEMERAL_KEY") };
         let result = store_supabase_password_to_keychain("test-password");
+        // Restore original value (if any) before any assert so the env is always
+        // cleaned up even on panic.
+        if let Some(v) = prev {
+            unsafe { std::env::set_var("COPYPASTE_EPHEMERAL_KEY", v) };
+        }
         assert!(
             matches!(result, Err(KeychainError::Unsupported)),
             "expected Unsupported on non-macOS, got {result:?}"

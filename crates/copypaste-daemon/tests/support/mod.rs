@@ -73,6 +73,23 @@ impl Daemon {
         let tmp_dir = tempfile::tempdir().expect("could not create temp dir for daemon");
         let root = tmp_dir.path();
 
+        // Harden the root tempdir to 0o700 immediately after creation.
+        //
+        // Rationale: the daemon's `bind_with_stale_cleanup` temporarily sets
+        // `umask(0o177)` (process-wide) so the Unix socket is created at 0o600
+        // with no TOCTOU window. If a unit test in this test binary runs that
+        // path concurrently with the `tempfile::tempdir()` / `create_dir_all`
+        // calls here, those directories can be created as 0o600 (no exec bit),
+        // causing the daemon subprocess — or the test's own `read_peers_json` —
+        // to fail with EACCES. Explicitly chmoding to 0o700 after creation
+        // removes the dependency on umask and makes the test hermetic on macOS
+        // and Linux regardless of what other parallel tests are doing.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700));
+        }
+
         let socket_path = root.join("copypaste.sock");
         let db_path = root.join("clipboard.db");
         let data_dir = root.join("data");
@@ -83,6 +100,12 @@ impl Daemon {
 
         for dir in [&data_dir, &config_dir, &cache_dir, &log_dir] {
             std::fs::create_dir_all(dir).expect("could not create isolated daemon dir");
+            // Ensure each subdirectory is also 0o700 for the same reason.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+            }
         }
 
         let mut cmd = Command::new(daemon_binary());

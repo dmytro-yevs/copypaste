@@ -134,7 +134,7 @@ impl From<WireItemUnclamped> for WireItem {
 /// ## Deserialization safety (CopyPaste-psx7)
 ///
 /// `#[serde(from = "WireItemUnclamped")]` routes every deserialization through
-/// [`WireItemUnclamped`] → [`From`] → [`WireItem::clamp_timestamps`], so
+/// `WireItemUnclamped` → [`From`] → [`WireItem::clamp_timestamps`], so
 /// negative `lamport_ts` / `wall_time` values from a malicious or buggy peer
 /// are zeroed out at the decode boundary — regardless of which code path
 /// performs the deserialization.  Only [`Serialize`] is derived directly;
@@ -178,7 +178,7 @@ pub struct WireItem {
     pub file_name: Option<String>,
     /// MIME type for `content_type = "file"` items (e.g. `"application/pdf"`).
     ///
-    /// Paired with [`file_name`]; same backward-compat contract.
+    /// Paired with `file_name`; same backward-compat contract.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mime: Option<String>,
     /// HKDF key generation the `content` ciphertext + AAD were produced under
@@ -190,7 +190,7 @@ pub struct WireItem {
     ///
     /// `#[serde(default = ...)]` keeps us wire-compatible with peers on a build
     /// that predates this field: an absent value defaults to
-    /// [`default_key_version`] (= 2), the only version every supported build
+    /// `default_key_version` (= 2), the only version every supported build
     /// encrypts under today (the v4 sweep rotates all local rows to 2 and
     /// `merge::local_to_wire` stamps the row's real version for same-version
     /// peers). Defaulting to 1 would resurrect the original bug — decrypting a

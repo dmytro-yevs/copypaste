@@ -39,7 +39,7 @@ const SSE_KEEPALIVE_SECS: u64 = 25;
 /// exactly one receiver). Without this cap, an attacker (or misbehaving client)
 /// can open an unbounded number of simultaneous streams per device, each with
 /// its own producer task and associated resources (tokio task stack, broadcast
-/// receiver, Arc<AppState> clone, mpsc channel). This cap refuses any subscribe
+/// receiver, `Arc<AppState>` clone, mpsc channel). This cap refuses any subscribe
 /// request that would push the per-device concurrent connection count above the
 /// limit, returning HTTP 429 with a descriptive message.
 ///
@@ -267,7 +267,7 @@ pub async fn pull(
 // GET /devices/:id/subscribe?since=<wall_time>&since_id=<id>
 // ---------------------------------------------------------------------------
 
-/// GET /devices/:device_id/subscribe?since=<wall_time>&since_id=<id>
+/// `GET /devices/:device_id/subscribe?since=<wall_time>&since_id=<id>`
 ///
 /// Real-time Server-Sent Events stream of new inbox items for `device_id`,
 /// additive to (and independent of) `GET .../items` polling — poll remains the

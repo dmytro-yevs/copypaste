@@ -35,7 +35,7 @@ use crate::state::AppState;
 /// hasn't received any fan-out yet is never evicted out from under an active
 /// user, short enough that abandoned registrations don't leak forever. A device
 /// whose inbox has *any* item is always retained regardless of age (see
-/// [`RelayStore::cleanup_inactive_devices`]).
+/// [`crate::state::RelayStore::cleanup_inactive_devices`]).
 const DEVICE_INACTIVE_THRESHOLD_SECS: u64 = 30 * 24 * 3600;
 
 /// Inner async loop body for the TTL evictor (CopyPaste-bp3o).

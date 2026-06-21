@@ -120,7 +120,7 @@ pub fn open_pool(path: &Path, key: &[u8; 32], max_size: u32) -> Result<SqlitePoo
 /// Like [`open_pool`] but applies `cache_mb` MiB of page cache per connection
 /// instead of the 8 MiB default. `cache_mb` is clamped to
 /// `SQLITE_CACHE_MB_MIN..=SQLITE_CACHE_MB_MAX` (via
-/// [`crate::storage::db::cache_size_pragma`]).
+/// `crate::storage::db::cache_size_pragma`).
 pub fn open_pool_with_cache_mb(
     path: &Path,
     key: &[u8; 32],

@@ -135,7 +135,7 @@ const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
 /// text: it replaces them with `supabase_email_set: bool` and
 /// `supabase_password_set: bool`. `set_config` accepts plain-text values and
 /// persists them; `null` / absent means "preserve existing" — the merge policy
-/// in [`merge_config`] prevents a UI round-trip from wiping stored credentials.
+/// in `merge_config` prevents a UI round-trip from wiping stored credentials.
 ///
 /// The limit fields (`max_text_size_bytes`, `max_image_size_bytes`,
 /// `max_file_size_bytes`, `storage_quota_bytes`, `sensitive_ttl_secs`,
@@ -162,7 +162,7 @@ pub struct AppConfig {
     /// HTTP relay base URL for store-and-forward sync fan-out (e.g.
     /// `https://relay.example.com`). Non-secret: surfaced verbatim by
     /// `get_config`. `None` / absent on `set_config` preserves the stored value
-    /// (see [`merge_config`]). Mirrored into the core `config.toml`.
+    /// (see `merge_config`). Mirrored into the core `config.toml`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relay_url: Option<String>,
     /// GoTrue account email for the `authenticated` scope sign-in. Persisted
@@ -668,7 +668,7 @@ fn byte_to_char_offset(s: &str, byte: usize) -> usize {
 /// Threshold: [`crate::sync_orch::SYNC_MAX_BLOB_BYTES`] (8 MiB). This is the
 /// ceiling the *local* sync pipeline actually enforces on the wrapped plaintext
 /// for ALL content types — text via
-/// [`crate::sync_common::wrap_and_check_cloud_upload_plaintext`] and image/file
+/// `wrap_and_check_cloud_upload_plaintext` and image/file
 /// via `crate::sync_orch::rekey_blob_outbound`. An item above this size is kept
 /// locally but never forwarded, regardless of the relay's nominal 10 MiB
 /// image/file tier (a higher transport cap, not what drops the item). Using the
@@ -949,7 +949,7 @@ fn is_valid_fingerprint(fp: &str) -> bool {
 /// ([`copypaste_p2p::cert::fingerprint_of`] → `hex::encode(SHA-256(cert_der))`).
 ///
 /// The IPC pairing surface and `peers.json` carry the human-readable colon
-/// form; [`PairedPeers::is_known`] compares against `fingerprint_of` output.
+/// form; [`copypaste_p2p::transport::PairedPeers::is_known`] compares against `fingerprint_of` output.
 /// Both must agree or a paired peer is silently rejected at handshake time, so
 /// the live-allowlist registration (fix/p2p-c-review #2) goes through this.
 pub(crate) fn canonical_fingerprint(fp: &str) -> String {
@@ -1239,7 +1239,7 @@ pub struct IpcServer {
     /// Live P2P paired-peer allowlist, shared with the running mTLS transport
     /// (fix/p2p-c-review #2). When a PAKE handshake finishes, the newly-paired
     /// peer fingerprint is fed into this same instance via
-    /// [`PairedPeers::rotate_peer`] so the accept loop immediately honours it
+    /// [`copypaste_p2p::transport::PairedPeers::rotate_peer`] so the accept loop immediately honours it
     /// (the S10 grace path is exercised). `None` when P2P is disabled — the
     /// PAKE handlers then only persist to `peers.json` (loaded on next start).
     p2p_peers: Option<copypaste_p2p::transport::PairedPeers>,
@@ -1837,7 +1837,7 @@ impl IpcServer {
     ///
     /// `peer_fingerprint` is the user-facing colon-hex form; it is normalised
     /// to the canonical lowercase, colon-free hex the transport compares
-    /// against. We go through [`PairedPeers::rotate_peer`] (rather than `add`)
+    /// against. We go through [`copypaste_p2p::transport::PairedPeers::rotate_peer`] (rather than `add`)
     /// so the S10 cert-rotation grace path is exercised on the same code path
     /// used for re-pairing; for a first-time pair `old == new`, which `rotate`
     /// treats as a plain add (no superseded entry — nothing to grace).
@@ -5404,7 +5404,7 @@ impl IpcServer {
                     guard.as_ref().map(|k| *k.as_bytes())
                 };
                 #[cfg(not(feature = "cloud-sync"))]
-                let old_key_bytes: Option<[u8; 32]> = None;
+                let _old_key_bytes: Option<[u8; 32]> = None;
 
                 // Derive new key bytes BEFORE consuming new_key (persist_and_install
                 // will move it into the Arc<Mutex<…>> slot).
@@ -10137,7 +10137,7 @@ fn map_content_type_to_uti(content_type: &str) -> String {
 ///
 /// Path: `<cache_dir>/paste-files`  (e.g. `~/Library/Caches/CopyPaste/paste-files` on macOS).
 ///
-/// The directory is created lazily in [`write_file_to_paste_cache`]; callers that
+/// The directory is created lazily in `write_file_to_paste_cache`; callers that
 /// only need the path (e.g. [`prune_old_paste_files`]) do not require it to exist.
 pub(crate) fn paste_file_cache_dir() -> std::path::PathBuf {
     crate::paths::cache_dir().join("paste-files")
@@ -16800,9 +16800,11 @@ mod tests {
 
     /// `cloud_sign_in` and `cloud_sign_out` must return a machine-readable
     /// `not_implemented` error (not "unknown method") when `cloud-sync` is not
-    /// compiled in. This is verified by calling both methods and checking the
-    /// error_code field. (In cloud builds they behave differently but the test
-    /// is written to be feature-agnostic.)
+    /// compiled in. Gated on `not(feature = "cloud-sync")` because when the
+    /// feature is enabled the handler performs a real auth attempt and returns
+    /// a different error code (`invalid_argument` for missing credentials),
+    /// not `not_implemented`.
+    #[cfg(not(feature = "cloud-sync"))]
     #[tokio::test]
     async fn cloud_sign_in_out_return_not_implemented_without_cloud_feature() {
         // This test is only meaningful for non-cloud builds.

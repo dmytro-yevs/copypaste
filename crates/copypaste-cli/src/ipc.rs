@@ -47,6 +47,12 @@ const MAX_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
 /// W3.3: gained an optional [`ErrorCode`] parsed from the daemon's
 /// `error_code` field. Existing fields are unchanged so prior call sites
 /// keep working.
+///
+/// FEACLI-8: `raw_error_code` captures the wire string verbatim so that
+/// codes unknown to this build of the CLI are still surfaced in error output
+/// rather than silently dropped.  `error_code` remains the typed variant
+/// (used internally for retry/version-mismatch branching); display code
+/// should prefer `raw_error_code` so future daemon codes remain visible.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct Response {
@@ -56,8 +62,14 @@ pub struct Response {
     pub data: Option<Value>,
     pub error: Option<String>,
     /// Typed machine-readable error code, when the daemon attached one.
-    /// `None` on success and on legacy (untagged) error responses.
+    /// `None` on success, on legacy (untagged) error responses, and for
+    /// codes that are not yet known to this CLI build (use `raw_error_code`
+    /// for display in those cases).
     pub error_code: Option<ErrorCode>,
+    /// Raw `error_code` wire string, preserved verbatim even when the code
+    /// is not recognised by [`ErrorCode::parse`].  `None` only when the
+    /// daemon did not attach an `error_code` field at all.
+    pub raw_error_code: Option<String>,
 }
 
 pub struct IpcClient {
@@ -213,7 +225,12 @@ impl IpcClient {
             .map(|s| s.to_string())
             .unwrap_or_else(|| resp_id_value.to_string());
 
-        let error_code = v["error_code"].as_str().and_then(ErrorCode::parse);
+        // FEACLI-8: capture the raw wire string first so unknown codes are
+        // never silently dropped.  `error_code` is the typed variant; it is
+        // `None` for unrecognised codes, but `raw_error_code` always carries
+        // the original string when the daemon sent one.
+        let raw_error_code: Option<String> = v["error_code"].as_str().map(|s| s.to_string());
+        let error_code = raw_error_code.as_deref().and_then(ErrorCode::parse);
 
         // Surface version_mismatch immediately so users get a clear, actionable
         // message rather than a generic error string buried in resp.error.
@@ -236,10 +253,10 @@ impl IpcClient {
                 Some(v["data"].clone())
             },
             error: v["error"].as_str().map(|s| s.to_string()),
-            // W3.3: parse the machine-readable `error_code` if attached.
-            // Unknown / missing codes collapse to `None` so older daemons
-            // keep working unchanged.
+            // W3.3: typed code for retry/branching logic.
+            // FEACLI-8: raw string for display — preserves unknown codes.
             error_code,
+            raw_error_code,
         })
     }
 
@@ -524,5 +541,36 @@ mod tests {
             "expected ok=true after migration retry, got: {resp:?}"
         );
         assert_eq!(connection_count.load(Ordering::SeqCst), 2);
+    }
+
+    /// FEACLI-8: a response carrying an error_code that is NOT in the
+    /// ErrorCode enum must still be preserved in raw_error_code so callers
+    /// can surface it rather than silently dropping it.
+    #[test]
+    fn call_preserves_unknown_error_code_in_raw_field() {
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("unknown_code.sock");
+        // "future_code" is not in the ErrorCode enum — raw_error_code must
+        // carry it even though error_code will be None.
+        mock_server(
+            &sock,
+            r#"{"id":"1","ok":false,"error":"daemon says nope","error_code":"future_code"}"#,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let mut client = IpcClient::connect(&sock).unwrap();
+        let req = serde_json::json!({"id": "1", "method": "list", "params": {}});
+        let resp = client.call(&req).unwrap();
+
+        assert!(!resp.ok);
+        assert_eq!(
+            resp.raw_error_code.as_deref(),
+            Some("future_code"),
+            "raw_error_code must preserve the wire string verbatim"
+        );
+        assert!(
+            resp.error_code.is_none(),
+            "typed error_code must be None for unrecognised codes"
+        );
     }
 }

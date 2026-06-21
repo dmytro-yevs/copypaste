@@ -89,7 +89,7 @@ fn make_limits(max_decoded_mb: u32) -> Limits {
 
 /// Decode raw clipboard bytes (PNG or TIFF) into a `DynamicImage`.
 ///
-/// Enforces `image::Limits` capped at [`MAX_DECODED_IMAGE_MB`] (50 MB) so that
+/// Enforces `image::Limits` capped at [`crate::config::MAX_DECODED_IMAGE_MB`] (50 MB) so that
 /// a highly-compressed "decode-bomb" image is rejected before any large
 /// allocation occurs.  To supply a custom cap from `AppConfig` call
 /// [`decode_clipboard_image_limited`] instead.
@@ -141,7 +141,7 @@ pub fn decode_clipboard_image_limited(
 /// Decode raw image bytes (PNG/TIFF/BMP) and produce an RGBA8 thumbnail
 /// that fits within `(max_w, max_h)`, preserving aspect ratio.
 ///
-/// Enforces the same [`MAX_DECODED_IMAGE_MB`] allocation cap as
+/// Enforces the same [`crate::config::MAX_DECODED_IMAGE_MB`] allocation cap as
 /// [`decode_clipboard_image`] so decode-bomb inputs are rejected before any
 /// large allocation.
 ///
@@ -193,7 +193,7 @@ pub fn encode_as_png(img: &DynamicImage) -> Result<Vec<u8>, ImageError> {
 /// library default [`MAX_IMAGE_BYTES`] so callers without config still get a
 /// sane bound.
 ///
-/// Enforces the [`make_limits`] allocation cap (derived from
+/// Enforces the `make_limits` allocation cap (derived from
 /// [`crate::config::MAX_DECODED_IMAGE_MB`]) to prevent decode-bomb OOM before
 /// the pixel buffer is allocated.
 ///

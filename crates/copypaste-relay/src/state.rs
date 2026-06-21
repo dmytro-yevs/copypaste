@@ -29,7 +29,7 @@ const MAX_PUSH_ITEMS_PER_DEVICE: usize = 500;
 /// Effective per-inbox history cap for a device: the tighter of the absolute
 /// hard cap [`MAX_PUSH_ITEMS_PER_DEVICE`] and the device tier's
 /// `max_history_items` (`None` = unlimited tier history → only the hard cap
-/// applies). Enforced as a silent prune-oldest inside [`RelayStore::push_item`]
+/// applies). Enforced as a silent prune-oldest inside `RelayStore::push_item`
 /// — the sender is never told a recipient inbox is full, matching the existing
 /// hard-cap eviction behaviour (see the relay v2 quotas plan).
 fn effective_history_cap(tier: Tier) -> usize {
@@ -388,12 +388,12 @@ pub struct RelayStore {
     /// `push_item_decoded` and are waiting to be retried (CopyPaste-k4py).
     ///
     /// When a `push_item_decoded` DB write fails, the write parameters are
-    /// serialised into a [`crate::retry::PendingDbWrite`] and enqueued here
+    /// serialised into a `PendingDbWrite` and enqueued here
     /// instead of returning `Err`. The HTTP handler then returns 201 (the item
     /// IS in the in-memory inbox) and the background
     /// `crate::retry::run_push_retry` task drains this queue, replaying each
     /// write with exponential backoff. Bounded at
-    /// [`crate::retry::PUSH_RETRY_QUEUE_CAP`] to prevent unbounded growth.
+    /// `PUSH_RETRY_QUEUE_CAP` to prevent unbounded growth.
     pub push_retry_queue: PushRetryQueue,
 }
 
@@ -1185,7 +1185,7 @@ impl RelayStore {
 
     /// Store an encrypted item whose decoded length is already known.
     ///
-    /// Identical to [`push_item`](Self::push_item) except the caller passes the
+    /// Identical to `push_item` except the caller passes the
     /// pre-computed `decoded_len` (the number of decoded ciphertext bytes) so
     /// the base64 payload is **not** decoded again while the store mutex is
     /// held. `content_b64` is still validated for membership/quotas; it is the
@@ -1415,7 +1415,7 @@ impl RelayStore {
     /// matching pre-cursor clients. New clients paginate by feeding back the
     /// last returned `(wall_time, id)` as `(since, since_id)`.
     ///
-    /// The inbox is kept sorted by `wall_time` on insert (see [`Self::push_item`]),
+    /// The inbox is kept sorted by `wall_time` on insert (see `push_item`),
     /// and within an equal `wall_time` run `id` is ascending too (ids are issued
     /// monotonically and ties preserve insertion order), so the inbox is sorted
     /// by the full `(wall_time, id)` tuple. This binary-searches for the first

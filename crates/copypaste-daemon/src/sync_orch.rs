@@ -206,7 +206,7 @@ impl SyncCrypto {
     ///
     /// **Outbound use only** — used by `rekey_outbound` / `rekey_blob_outbound`
     /// for the legacy single-peer fallback path.  For the inbound path use
-    /// [`all_sync_keys`] (CopyPaste-kw2) to avoid the arbitrary-first-entry
+    /// [`Self::all_sync_keys`] (CopyPaste-kw2) to avoid the arbitrary-first-entry
     /// bias that breaks 3+ device topologies.
     ///
     /// This is an O(1) memory read — no file I/O (H8 fix).
@@ -442,7 +442,7 @@ pub async fn merge_incoming(
 /// Crypto-aware variant of [`merge_incoming`] (P2P Phase 3).
 ///
 /// When `crypto` is `Some` and an incoming item is sync-key-wrapped
-/// (`content_nonce == None`, see [`rekey_outbound`]), the wire blob is
+/// (`content_nonce == None`, see `rekey_outbound`), the wire blob is
 /// decrypted with the shared sync key and re-encrypted under THIS device's
 /// local v2 key before storage, and the plaintext is indexed into FTS so the
 /// synced row is searchable / previewable. Items that are not sync-key-wrapped
@@ -1513,7 +1513,7 @@ fn read_png_dimensions(png: &[u8]) -> Option<(u32, u32)> {
 /// 2. Re-derive `file_id` deterministically from the plaintext content hash so
 ///    the AEAD AAD matches on both devices and item_id/dedup converge.
 /// 3. Re-encode under `crypto.v1_key` (image → [`encode_image_with_limit`] or
-///    the small-image fast path, file → [`encode_file`]) → `chunks_to_blob` →
+///    the small-image fast path, file → `encode_file`) → `chunks_to_blob` →
 ///    `local.content`; rebuild the meta JSON; set `blob_ref`, `content_type`,
 ///    `key_version = 1` (chunks are v1-keyed). `fts_plaintext = None` (blobs
 ///    are not FTS-indexed).

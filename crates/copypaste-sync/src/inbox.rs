@@ -121,7 +121,7 @@ impl SyncInboxSender {
 
 /// Forwarder that bridges the non-blocking ring to the downstream `mpsc`.
 ///
-/// Construct with [`SyncInboxForwarder::new`], then call [`start`] to
+/// Construct with [`SyncInboxForwarder::new`], then call [`Self::start`] to
 /// spawn the forwarding task and obtain a [`SyncInboxSender`] to hand to
 /// P2P tasks.
 pub struct SyncInboxForwarder {

@@ -96,7 +96,15 @@ fn is_leap(y: u64) -> bool {
 pub fn exit_on_err(resp: &Response) {
     if !resp.ok {
         let msg = resp.error.as_deref().unwrap_or_default();
-        match resp.error_code {
+        // FEACLI-8: use raw_error_code for display so unknown codes (ones the
+        // CLI doesn't recognise yet) are still shown to the user rather than
+        // silently dropped.  Falls back to checking the typed error_code for
+        // backwards compatibility when raw_error_code is absent.
+        match resp
+            .raw_error_code
+            .as_deref()
+            .or(resp.error_code.map(|c| c.as_str()))
+        {
             Some(code) => eprintln!("error [{code}]: {msg}"),
             None => eprintln!("error: {msg}"),
         }
@@ -120,6 +128,7 @@ mod tests {
             data: None,
             error: None,
             error_code: None,
+            raw_error_code: None,
         };
         // Should not exit.
         exit_on_err(&resp);
@@ -138,9 +147,15 @@ mod tests {
             data: None,
             error: Some("boom".into()),
             error_code: None,
+            raw_error_code: None,
         };
         let msg = resp.error.as_deref().unwrap_or_default();
-        let rendered = match resp.error_code {
+        // FEACLI-8: use raw_error_code for display (mirrors exit_on_err).
+        let rendered = match resp
+            .raw_error_code
+            .as_deref()
+            .or(resp.error_code.map(|c| c.as_str()))
+        {
             Some(code) => format!("error [{code}]: {msg}"),
             None => format!("error: {msg}"),
         };
@@ -157,9 +172,15 @@ mod tests {
             data: None,
             error: Some("cloud sync".into()),
             error_code: Some(ErrorCode::NotImplemented),
+            raw_error_code: Some("not_implemented".to_string()),
         };
         let msg = resp.error.as_deref().unwrap_or_default();
-        let rendered = match resp.error_code {
+        // FEACLI-8: use raw_error_code for display (mirrors exit_on_err).
+        let rendered = match resp
+            .raw_error_code
+            .as_deref()
+            .or(resp.error_code.map(|c| c.as_str()))
+        {
             Some(code) => format!("error [{code}]: {msg}"),
             None => format!("error: {msg}"),
         };
@@ -176,9 +197,15 @@ mod tests {
             data: None,
             error: None,
             error_code: None,
+            raw_error_code: None,
         };
         let msg = resp_no_code.error.as_deref().unwrap_or_default();
-        let rendered = match resp_no_code.error_code {
+        // FEACLI-8: use raw_error_code for display (mirrors exit_on_err).
+        let rendered = match resp_no_code
+            .raw_error_code
+            .as_deref()
+            .or(resp_no_code.error_code.map(|c| c.as_str()))
+        {
             Some(code) => format!("error [{code}]: {msg}"),
             None => format!("error: {msg}"),
         };
@@ -190,9 +217,15 @@ mod tests {
             data: None,
             error: None,
             error_code: Some(ErrorCode::RateLimited),
+            raw_error_code: Some("rate_limited".to_string()),
         };
         let msg = resp_with_code.error.as_deref().unwrap_or_default();
-        let rendered = match resp_with_code.error_code {
+        // FEACLI-8: use raw_error_code for display (mirrors exit_on_err).
+        let rendered = match resp_with_code
+            .raw_error_code
+            .as_deref()
+            .or(resp_with_code.error_code.map(|c| c.as_str()))
+        {
             Some(code) => format!("error [{code}]: {msg}"),
             None => format!("error: {msg}"),
         };

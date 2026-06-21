@@ -95,7 +95,7 @@ pub struct PullItem {
     pub wall_time: u64,
 }
 
-/// Query params for GET /devices/:id/items?since=<wall_time>&since_id=<id>&limit=<n>
+/// Query params for `GET /devices/:id/items?since=<wall_time>&since_id=<id>&limit=<n>`
 #[derive(Debug, Deserialize)]
 pub struct PullParams {
     /// Return only items past the `(since, since_id)` cursor (defaults to 0).

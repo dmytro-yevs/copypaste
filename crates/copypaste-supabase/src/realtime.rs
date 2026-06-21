@@ -201,7 +201,7 @@ impl RealtimeConfig {
 
     /// Construct config with both JWT and user-id (for row-level filtering).
     ///
-    /// Prefer this over [`with_jwt`] when the GoTrue user UUID is available
+    /// Prefer this over [`Self::with_jwt`] when the GoTrue user UUID is available
     /// so that the `postgres_changes` subscription carries a server-side
     /// `filter: "user_id=eq.<uuid>"` clause (audit P1 fix).
     pub fn with_jwt_and_user_id(
@@ -706,7 +706,7 @@ fn is_loopback_host(host: &str) -> bool {
     false
 }
 
-/// Extract the host portion from a URL string (scheme://host[:port]/...).
+/// Extract the host portion from a URL string (`scheme://host[:port]/...`).
 fn extract_host(url: &str) -> &str {
     // Strip scheme.
     let after_scheme = if let Some(idx) = url.find("://") {

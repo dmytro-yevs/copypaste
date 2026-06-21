@@ -343,7 +343,7 @@ impl PairingPayload {
     ///
     /// `addr_hint` is base64url-encoded so that IPv4 dots (e.g. `192.168.1.5`)
     /// cannot collide with the `.` field delimiter and corrupt a 6-field split.
-    /// This is a v2-only encoding — `decode_v2` base64url-decodes field[4].
+    /// This is a v2-only encoding — `decode_v2` base64url-decodes `field[4]`.
     ///
     /// The fingerprint (hex or colon-hex) is stripped of colons and hex-decoded to
     /// 32 raw bytes, then base64url-encoded (43 chars). If the fingerprint is not
@@ -390,9 +390,9 @@ impl PairingPayload {
     /// * [`PairingQrError::Utf8`] — the device-name field was not valid UTF-8.
     /// * [`PairingQrError::TokenLength`] — the token was not exactly 32 bytes.
     /// * [`PairingQrError::FingerprintLength`] — the fingerprint b64 field did not
-    ///   decode to exactly [`FP_BYTE_LEN`] bytes (CPPAIR2 only).
+    ///   decode to exactly `FP_BYTE_LEN` bytes (CPPAIR2 only).
     /// * [`PairingQrError::DeviceIdLength`] — the device_id b64 field did not
-    ///   decode to exactly [`UUID_BYTE_LEN`] bytes (CPPAIR2 only).
+    ///   decode to exactly `UUID_BYTE_LEN` bytes (CPPAIR2 only).
     /// * [`PairingQrError::AddrHintDecode`] — addr_hint b64url decode failed (CPPAIR2 only).
     /// * [`PairingQrError::EmptyFingerprint`] — the fingerprint field was empty.
     pub fn decode(input: &str) -> Result<Self, PairingQrError> {
@@ -760,12 +760,12 @@ pub enum PairingQrError {
     EmptyFingerprint,
 
     /// (CPPAIR2) The fingerprint b64url field decoded to the wrong number of bytes.
-    /// Expected exactly [`FP_BYTE_LEN`] (32).
+    /// Expected exactly `FP_BYTE_LEN` (32).
     #[error("fingerprint must be {FP_BYTE_LEN} bytes, got {0}")]
     FingerprintLength(usize),
 
     /// (CPPAIR2) The device_id b64url field decoded to the wrong number of bytes.
-    /// Expected exactly [`UUID_BYTE_LEN`] (16).
+    /// Expected exactly `UUID_BYTE_LEN` (16).
     #[error("device_id must be {UUID_BYTE_LEN} bytes, got {0}")]
     DeviceIdLength(usize),
 

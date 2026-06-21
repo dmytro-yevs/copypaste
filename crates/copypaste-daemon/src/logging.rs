@@ -8,7 +8,7 @@
 //! - **EnvFilter** driven by the `COPYPASTE_LOG` environment variable
 //!   (default: `copypaste=info,warn`).
 //! - **PiiScrubber** (CopyPaste-lx6c): both the file layer and the stderr
-//!   layer wrap their `io::Write` targets in a [`ScrubWriter`] that redacts PII
+//!   layer wrap their `io::Write` targets in a [`ScrubWriterInner`] that redacts PII
 //!   patterns (emails, IPs, tokens, home-directory paths) from every log line
 //!   before it reaches the OS file-system or the terminal. This is the last
 //!   line of defence ensuring that even if a developer accidentally logs a
