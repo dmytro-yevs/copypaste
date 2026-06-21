@@ -27,24 +27,37 @@ use crate::ipc::IpcClient;
 
 /// Maximum import file size accepted before reading into memory.
 ///
-/// A 64 MiB cap prevents an accidental (or malicious) multi-GB file from
-/// OOM-ing the CLI process. Legitimate export files are bounded by the
-/// daemon's own in-memory list limit, so this cap should never be hit in
-/// normal usage.
-const MAX_IMPORT_FILE_BYTES: u64 = 64 * 1024 * 1024; // 64 MiB
+/// The daemon's IPC framing caps any single request at 16 MiB
+/// (`MAX_REQUEST_BYTES`). Because the CLI wraps the entire file contents in a
+/// single `import` JSON-RPC frame (plus `{"method":"import","params":{"items":`
+/// envelope overhead), we cap the **source file** at 12 MiB — safely under
+/// 16 MiB after serialisation overhead — and surface a clear error here rather
+/// than letting the daemon close the connection with `request_too_large`.
+///
+/// If you need to import larger exports, split them into ≤12 MiB chunks and
+/// import each chunk separately.
+const MAX_IMPORT_FILE_BYTES: u64 = 12 * 1024 * 1024; // 12 MiB (IPC limit headroom)
+
+/// The daemon's IPC frame limit, mirrored here for the error message.
+/// Keep this in sync with `MAX_REQUEST_BYTES` in `copypaste-daemon/src/ipc.rs`.
+const DAEMON_MAX_REQUEST_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
 
 pub fn run(socket_path: &Path, file: &str) -> Result<()> {
     // Pre-check file size before reading into memory.  read_to_string would
     // allocate the full file contents up-front; without this guard a multi-GB
     // file could exhaust the process's virtual address space.
+    //
+    // The tighter 12 MiB cap (vs. the daemon's 16 MiB IPC frame limit) also
+    // prevents the daemon from rejecting the request mid-flight with a cryptic
+    // connection-closed error (CopyPaste-aazu).
     let file_size = std::fs::metadata(file)
         .with_context(|| format!("failed to stat import file: {file}"))?
         .len();
     if file_size > MAX_IMPORT_FILE_BYTES {
         return Err(anyhow!(
-            "import file is too large ({} bytes > {} byte limit): {file}",
-            file_size,
-            MAX_IMPORT_FILE_BYTES
+            "import file is too large ({file_size} bytes > {MAX_IMPORT_FILE_BYTES} byte limit): {file}\n\
+             The daemon's IPC frame limit is {DAEMON_MAX_REQUEST_BYTES} bytes; \
+             split the export into ≤12 MiB chunks and import each separately."
         ));
     }
 
@@ -94,25 +107,27 @@ mod tests {
         let _: fn(&Path, &str) -> Result<()> = run;
     }
 
-    /// A file larger than MAX_IMPORT_FILE_BYTES must be rejected before
-    /// read_to_string so we never allocate the full content in memory.
-    /// We create a sparse file (via set_len) so the test stays fast.
-    #[test]
-    fn oversized_file_is_rejected_before_read() {
+    /// Helper: create a sparse file of exactly `size` bytes.
+    fn make_sparse_file(dir: &std::path::Path, name: &str, size: u64) -> std::path::PathBuf {
         use std::fs::OpenOptions;
-
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("big.json");
-
-        // Create a sparse file just over the cap without writing all the bytes.
+        let path = dir.join(name);
         let f = OpenOptions::new()
             .write(true)
             .create(true)
             .truncate(true)
             .open(&path)
             .unwrap();
-        f.set_len(MAX_IMPORT_FILE_BYTES + 1).unwrap();
-        drop(f);
+        f.set_len(size).unwrap();
+        path
+    }
+
+    /// A file larger than MAX_IMPORT_FILE_BYTES (12 MiB) must be rejected with
+    /// a clear "too large" error before read_to_string so we never allocate the
+    /// full content in memory (CopyPaste-aazu).
+    #[test]
+    fn oversized_file_is_rejected_before_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = make_sparse_file(dir.path(), "big.json", MAX_IMPORT_FILE_BYTES + 1);
 
         let sock = dir.path().join("dummy.sock"); // doesn't need to exist
         let err = run(&sock, path.to_str().unwrap()).unwrap_err();
@@ -120,6 +135,53 @@ mod tests {
         assert!(
             msg.contains("too large"),
             "expected 'too large' error, got: {msg}"
+        );
+    }
+
+    /// A file between 12 MiB and 16 MiB (old cap vs. new cap) is now rejected
+    /// at the CLI with a clear error that mentions the IPC frame limit — it must
+    /// NOT reach the daemon and get a cryptic connection-closed error.
+    /// (CopyPaste-aazu: the root mismatch was 64 MiB CLI cap vs 16 MiB daemon
+    /// IPC frame limit; this range previously reached the daemon and failed.)
+    #[test]
+    fn file_between_12_and_16_mib_is_rejected_with_helpful_message() {
+        let dir = tempfile::tempdir().unwrap();
+        // 13 MiB: above our 12 MiB CLI cap but below the old 64 MiB cap and
+        // below the daemon's 16 MiB IPC frame limit — the old code would have
+        // sent this to the daemon, which would close the connection.
+        let thirteen_mib: u64 = 13 * 1024 * 1024;
+        let path = make_sparse_file(dir.path(), "medium.json", thirteen_mib);
+
+        let sock = dir.path().join("dummy.sock"); // doesn't need to exist
+        let err = run(&sock, path.to_str().unwrap()).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("too large"),
+            "expected 'too large' error, got: {msg}"
+        );
+        // The error must explain the IPC limit so users know why.
+        assert!(
+            msg.contains("IPC") || msg.contains("16"),
+            "expected error to mention IPC limit, got: {msg}"
+        );
+    }
+
+    /// A file exactly at the cap (12 MiB) is NOT rejected — only files strictly
+    /// greater than MAX_IMPORT_FILE_BYTES are. This documents the boundary.
+    /// The file will still fail to parse as JSON (sparse file is all NUL bytes)
+    /// but the size guard must pass without a "too large" error.
+    #[test]
+    fn file_at_exact_cap_passes_size_guard() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = make_sparse_file(dir.path(), "exact.json", MAX_IMPORT_FILE_BYTES);
+
+        let sock = dir.path().join("dummy.sock");
+        let err = run(&sock, path.to_str().unwrap()).unwrap_err();
+        let msg = format!("{err}");
+        // Must NOT be a "too large" error — the exact-cap file is within the limit.
+        assert!(
+            !msg.contains("too large"),
+            "exact-cap file should pass size guard but got: {msg}"
         );
     }
 }
