@@ -231,12 +231,12 @@ async fn ipc_server_caps_message_at_16_mib() {
     handle.abort();
 }
 
-/// Resilience #3 — 10 concurrent clients each issue `count` + `delete`
+/// Resilience #3 — 10 concurrent clients each issue `count` + `delete_item`
 /// roundtrips against a pre-seeded DB. The final `count` (read on a fresh
 /// connection) must equal zero — proving no state corruption under
 /// parallel access through the spawn-per-connection accept loop.
 ///
-/// We use `delete` rather than `insert` because the IPC surface does not
+/// We use `delete_item` rather than `insert` because the IPC surface does not
 /// expose an `insert` method (clipboard ingest happens via the clipboard
 /// monitor, not IPC). The contract — *N parallel mutators converge to a
 /// deterministic post-state* — is identical either way.
@@ -263,15 +263,16 @@ async fn concurrent_clients_no_state_corruption() {
     // Fan out: N tokio tasks, each opens its own connection and deletes
     // exactly one row. Each then issues a `count` so we exercise both
     // mutator and reader code paths concurrently.
+    // Note: "delete" is deprecated (returns not_implemented); use "delete_item".
     let mut handles = Vec::with_capacity(N);
     for (i, id) in ids.iter().enumerate() {
         let sock = sock.clone();
         let id = id.clone();
         handles.push(tokio::spawn(async move {
             let del_req =
-                format!(r#"{{"id":"del-{i}","method":"delete","params":{{"id":"{id}"}}}}"#);
+                format!(r#"{{"id":"del-{i}","method":"delete_item","params":{{"id":"{id}"}}}}"#);
             let del_resp = ipc_roundtrip(&sock, &del_req).await;
-            assert_eq!(del_resp["ok"], true, "client {i} delete: {del_resp}");
+            assert_eq!(del_resp["ok"], true, "client {i} delete_item: {del_resp}");
 
             let cnt_req = format!(r#"{{"id":"cnt-{i}","method":"count"}}"#);
             let cnt_resp = ipc_roundtrip(&sock, &cnt_req).await;
@@ -347,8 +348,11 @@ async fn panic_in_handler_does_not_kill_server() {
     .await;
     assert_eq!(bad_ver["ok"], false, "bad version must return ok=false");
 
-    // Volley 4: missing required param (delete with no id).
-    let bad_param = ipc_roundtrip(&sock, r#"{"id":"badp","method":"delete","params":{}}"#).await;
+    // Volley 4: missing required param (delete_item with no id).
+    // "delete" is deprecated and returns not_implemented — use "delete_item"
+    // to test the actual missing-param error path.
+    let bad_param =
+        ipc_roundtrip(&sock, r#"{"id":"badp","method":"delete_item","params":{}}"#).await;
     assert_eq!(bad_param["ok"], false, "missing param must return ok=false");
 
     // Final: a normal client must still succeed.
