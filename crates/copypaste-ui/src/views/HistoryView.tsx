@@ -37,7 +37,7 @@ import { SKINS } from "../lib/skins";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 import { FileChip } from "../components/FileChip";
-import { ContentIconTile, kindFallback } from "../components/ContentIcon";
+import { ContentIconTile, KindChip, kindFallback } from "../components/ContentIcon";
 import { DeviceBadge } from "../components/DeviceBadge";
 import { IconActionButton } from "../components/IconActionButton";
 import { useFocusTrap } from "../lib/useFocusTrap";
@@ -625,118 +625,123 @@ const HistoryRow = React.memo(function HistoryRow({
         })()}
       </span>
 
-      {isImage ? (
-        // M1: Maccy parity — image rows show ONLY the thumbnail, no text title.
-        // Wrapped in flex-1 min-w-0 so images align in the same column as text rows.
-        <span className="flex-1 min-w-0 flex items-center">
-          <ImageThumb id={entry.id} maxHeight={imageMaxHeight} />
-        </span>
-      ) : isFile ? (
-        // File rows: show a FileChip with filename parsed from the "[file: name]" preview.
-        <span className="flex-1 min-w-0 flex items-center py-0.5">
-          <FileChip
-            id={entry.id}
-            filename={parseFilename(entry.preview)}
-            mime="application/octet-stream"
-          />
-        </span>
-      ) : (
-        // Text / URL rows: multi-line preview clamped with webkit-line-clamp.
-        // §5: for URL content, show hostname bold (text-ide-text) + path dim (text-ide-dim).
-        <span
-          className={[
-            "flex-1 min-w-0 break-words",
-            entry.is_sensitive ? "italic text-ide-dim" : "",
-          ].join(" ")}
-          style={
-            previewLines > 1
-              ? {
-                  display: "-webkit-box",
-                  WebkitLineClamp: previewLines,
-                  WebkitBoxOrient: "vertical",
-                  overflow: "hidden",
-                }
-              : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
-          }
-        >
-          {blurred ? (
-            // Placeholder — the real plaintext is NOT in the DOM when blurred.
-            // `preview` is already set to maskPlaceholder() above, so no real
-            // content leaks to screen readers, devtools, or clipboard scanners.
-            // CSS blur is intentionally absent: blurring placeholder text is
-            // useless and would look odd. The click handler reveals real content.
-            // n9gp (PG-34): title reinforces "confirmation required" when
-            // showSensitiveWarnings is true; suppressed when false.
-            <span
-              title={showSensitiveWarnings ? "Click to reveal sensitive content" : undefined}
-              onClick={(e) => {
-                e.stopPropagation(); // don't also trigger row copy
-                setRevealed(true);
-              }}
-              style={{
-                userSelect: "none",
-                cursor: "pointer",
-                display: "inline-block",
-                maxWidth: "100%",
-                opacity: 0.55,
-                fontStyle: "italic",
-              }}
-            >
-              {preview}
-            </span>
-          ) : (() => {
-            // §5: URL rows — parse hostname and show host bold + rest dim.
-            // Only when content_type is "url" (not on generic text that happens to look like a URL).
-            if (entry.content_type === "url" && !entry.is_sensitive) {
-              const parsed = parseUrl(preview);
-              if (parsed !== null) {
-                return (
-                  <>
-                    <span className="font-medium text-ide-text">{parsed.host}</span>
-                    {parsed.rest && parsed.rest !== "/" && (
-                      <span className="text-ide-dim">{parsed.rest}</span>
-                    )}
-                  </>
-                );
-              }
+      {/* CopyPaste-5917.54: body wrapper — preview on top, .meta sub-row beneath.
+          Mirrors the approved styleguide .hrow .body / .preview / .meta pattern:
+          the icon tile stays in its own shrink-0 slot; the body takes flex-1. */}
+      <div className="flex-1 min-w-0 flex flex-col gap-[2px]">
+        {isImage ? (
+          // M1: Maccy parity — image rows show ONLY the thumbnail, no text title.
+          <span className="flex items-center">
+            <ImageThumb id={entry.id} maxHeight={imageMaxHeight} />
+          </span>
+        ) : isFile ? (
+          // File rows: show a FileChip with filename parsed from the "[file: name]" preview.
+          <span className="flex items-center py-0.5">
+            <FileChip
+              id={entry.id}
+              filename={parseFilename(entry.preview)}
+              mime="application/octet-stream"
+            />
+          </span>
+        ) : (
+          // Text / URL rows: multi-line preview clamped with webkit-line-clamp.
+          // §5: for URL content, show hostname bold (text-ide-text) + path dim (text-ide-dim).
+          <span
+            className={[
+              "min-w-0 break-words",
+              entry.is_sensitive ? "italic text-ide-dim" : "",
+            ].join(" ")}
+            style={
+              previewLines > 1
+                ? {
+                    display: "-webkit-box",
+                    WebkitLineClamp: previewLines,
+                    WebkitBoxOrient: "vertical",
+                    overflow: "hidden",
+                  }
+                : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }
             }
-            return preview;
-          })()}
-        </span>
-      )}
+          >
+            {blurred ? (
+              // Placeholder — the real plaintext is NOT in the DOM when blurred.
+              // `preview` is already set to maskPlaceholder() above, so no real
+              // content leaks to screen readers, devtools, or clipboard scanners.
+              // CSS blur is intentionally absent: blurring placeholder text is
+              // useless and would look odd. The click handler reveals real content.
+              // n9gp (PG-34): title reinforces "confirmation required" when
+              // showSensitiveWarnings is true; suppressed when false.
+              <span
+                title={showSensitiveWarnings ? "Click to reveal sensitive content" : undefined}
+                onClick={(e) => {
+                  e.stopPropagation(); // don't also trigger row copy
+                  setRevealed(true);
+                }}
+                style={{
+                  userSelect: "none",
+                  cursor: "pointer",
+                  display: "inline-block",
+                  maxWidth: "100%",
+                  opacity: 0.55,
+                  fontStyle: "italic",
+                }}
+              >
+                {preview}
+              </span>
+            ) : (() => {
+              // §5: URL rows — parse hostname and show host bold + rest dim.
+              // Only when content_type is "url" (not on generic text that happens to look like a URL).
+              if (entry.content_type === "url" && !entry.is_sensitive) {
+                const parsed = parseUrl(preview);
+                if (parsed !== null) {
+                  return (
+                    <>
+                      <span className="font-medium text-ide-text">{parsed.host}</span>
+                      {parsed.rest && parsed.rest !== "/" && (
+                        <span className="text-ide-dim">{parsed.rest}</span>
+                      )}
+                    </>
+                  );
+                }
+              }
+              return preview;
+            })()}
+          </span>
+        )}
 
-      {/* Right-side slot: device badge + source-app chip + timestamp (always visible) + icon action buttons (on hover).
-          SCRH-3: was a fixed minWidth:"4.5rem" shrink-0 container which clipped when all
-          three badge/chip/timestamp elements were present. Changed to flex-wrap so the
-          contents wrap to a second line rather than overflowing or clipping. The outer
-          element stays shrink-0 to prevent the preview text column from being squeezed,
-          but max-w-[10rem] caps the slot so it doesn't swallow excessive row width. */}
+        {/* .meta sub-row: KindChip label + timestamp + device badge + app chip.
+            CopyPaste-5917.54: matches styleguide .hrow .meta (flex, gap-[7px], 11px, faint).
+            Moved from the right-side shrink-0 slot so metadata appears beneath the preview
+            text rather than at the same baseline — restores approved two-line row layout. */}
+        <div className="flex items-center gap-[5px] min-w-0">
+          <KindChip contentType={entry.content_type} kind={entry.kind} />
+          <span className="text-[11px] text-ide-faint tabular-nums shrink-0">
+            {formatRelativeTime(entry.wall_time, "long")}
+          </span>
+          {/* Origin-device badge */}
+          <DeviceBadge originId={entry.origin_device_id} ownId={ownDeviceId} originName={entry.origin_device_name} />
+          {/* Source-app icon + label chip; only rendered when present */}
+          {entry.app_bundle_id && (() => {
+            const appLabel = sourceAppLabel(entry.app_bundle_id);
+            return appLabel ? (
+              <span
+                className="flex shrink-0 items-center gap-1 text-[10.5px] text-ide-faint px-1 py-0.5 rounded border border-ide-divider/60 bg-ide-elevated/50 leading-none"
+                title={entry.app_bundle_id ?? undefined}
+              >
+                <AppIcon bundleId={entry.app_bundle_id} size={14} />
+                {appLabel}
+              </span>
+            ) : null;
+          })()}
+        </div>
+      </div>
+
+      {/* Right-side slot: icon action buttons (on hover only).
+          No longer holds timestamp/badge/app — those moved into .meta sub-row.
+          Slot stays shrink-0 so buttons don't squeeze the body column. */}
       <div
-        className="flex shrink-0 flex-wrap items-center justify-end gap-1"
-        style={{ maxWidth: "10rem" }}
+        className="flex shrink-0 items-center"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Origin-device badge: "This device", device name, or compact UUID prefix */}
-        <DeviceBadge originId={entry.origin_device_id} ownId={ownDeviceId} originName={entry.origin_device_name} />
-
-        {/* Source-app icon + label chip; only rendered when present */}
-        {entry.app_bundle_id && (() => {
-          const appLabel = sourceAppLabel(entry.app_bundle_id);
-          return appLabel ? (
-            <span
-              className="flex shrink-0 items-center gap-1 text-[10.5px] text-ide-faint px-1 py-0.5 rounded border border-ide-divider/60 bg-ide-elevated/50 leading-none"
-              title={entry.app_bundle_id ?? undefined}
-            >
-              <AppIcon bundleId={entry.app_bundle_id} size={14} />
-              {appLabel}
-            </span>
-          ) : null;
-        })()}
-        {/* Timestamp — always shown; sits before the buttons. §1: tabular-nums. */}
-        <span className="text-[11px] text-ide-faint tabular-nums">
-          {formatRelativeTime(entry.wall_time, "long")}
-        </span>
-
         {/* Icon action buttons — invisible at rest, visible on hover.
             They DO NOT shift the row because the slot width is reserved.
             No "Copy" button: row-click copies instead. */}
@@ -988,12 +993,18 @@ function FullResImage({ id, maxHeight }: { id: string; maxHeight: number }) {
   }, [id]);
 
   if (failed) {
+    // CopyPaste-bdac.66: old placeholder removed → consistent error pattern with sub-hint.
+    // Matches other empty/error states: italic+faint primary, ghost sub-line.
     return (
-      <span className="text-[12px] text-ide-faint italic">Image unavailable</span>
+      <span className="flex flex-col items-center gap-1 py-4 text-center">
+        <span className="text-[12px] text-ide-dim italic">Couldn't load image</span>
+        <span className="text-[11px] text-ide-faint">Try reopening this item.</span>
+      </span>
     );
   }
   if (src === null) {
-    return <span className="text-[12px] text-ide-faint">Loading…</span>;
+    // CopyPaste-bdac.66: "Loading…" → italic/faint consistent with other placeholder states.
+    return <span className="text-[12px] text-ide-faint italic">Loading…</span>;
   }
   return (
     <img
@@ -1399,7 +1410,8 @@ function VirtualList({
             style={{
               top: glideStyle.top,
               height: glideStyle.height,
-              borderRadius: "var(--skin-r-card, 14px)",
+              // CopyPaste-bdac.54: fallback corrected to 12px (Classic canonical) — was 14px.
+              borderRadius: "var(--skin-r-card, 12px)",
               transition:
                 "top 130ms cubic-bezier(.2,0,0,1), height 130ms cubic-bezier(.2,0,0,1)",
             }}
