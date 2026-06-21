@@ -70,7 +70,11 @@ async fn test_schema_rollback_v5_mid_batch() {
 ///      Before this fix, insert_item_with_fts and upsert_fts did not guard
 ///      against is_sensitive = 1, leaving plaintext secrets in the FTS table.
 ///      Migration v13 removes those rows; the write paths are also patched.
-const CURRENT_SCHEMA_VERSION: i64 = 13;
+/// v14: adds idx_clipboard_history_page partial covering index on
+///      (pinned DESC, pin_order, wall_time DESC) WHERE deleted=0 so that
+///      get_page_pinned_first uses an index scan instead of a full-table scan
+///      + filesort on every history_page IPC call (CopyPaste-89rd).
+const CURRENT_SCHEMA_VERSION: i64 = 14;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from
