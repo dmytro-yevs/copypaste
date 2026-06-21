@@ -823,7 +823,7 @@ async fn prepare_and_enqueue_item(
     item: ClipboardItem,
     sync_key: &Arc<Mutex<Option<SyncKey>>>,
     local_key: &Arc<zeroize::Zeroizing<[u8; 32]>>,
-    retry_queue: &mut VecDeque<(ClipboardItem, String)>,
+    retry_queue: &mut VecDeque<(ClipboardItem, Option<String>)>,
     warned_no_key: &mut bool,
 ) -> bool {
     // P1-1: sensitive items are NEVER uploaded.
@@ -833,6 +833,13 @@ async fn prepare_and_enqueue_item(
             item.id
         );
         return false;
+    }
+    // CopyPaste-e89n: tombstone items (soft-deleted) carry no content —
+    // push them directly without decrypt/re-encrypt. The server stores
+    // `deleted=true, payload_ct=NULL` so receiving devices apply the deletion.
+    if item.deleted {
+        enqueue_for_retry(retry_queue, item, None);
+        return true;
     }
     // Fast no-key skip: if no sync passphrase is set there is nothing to
     // upload. Drop the guard immediately so the lock is not held across the
@@ -910,7 +917,7 @@ async fn prepare_and_enqueue_item(
         }
     };
     *warned_no_key = false;
-    enqueue_for_retry(retry_queue, item, payload_ct_b64);
+    enqueue_for_retry(retry_queue, item, Some(payload_ct_b64));
     true
 }
 
@@ -952,10 +959,14 @@ async fn push_loop(
 ) {
     // P1: set a per-request timeout so a stalled Supabase endpoint cannot hang
     // this loop indefinitely. See `sync_common::SYNC_HTTP_TIMEOUT` for rationale.
+    //
+    // CopyPaste-16vr: propagate builder error rather than falling back to a
+    // no-timeout client (which would be worse than the builder failure itself).
+    // TLS cert-store load cannot fail on macOS/Linux in normal operation.
     let client = reqwest::Client::builder()
         .timeout(SYNC_HTTP_TIMEOUT)
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+        .expect("reqwest Client::builder should not fail on supported platforms");
     let rest_url = format!("{}/rest/v1/clipboard_items", config.supabase_url);
     // Track whether we've already warned about a missing sync key so we don't
     // spam the log on every item in a burst.
@@ -965,7 +976,7 @@ async fn push_loop(
     // The cloud ciphertext is stored alongside the item so re-encryption
     // does NOT happen on each retry attempt — the same blob is re-sent until
     // it succeeds or is evicted by the capacity cap.
-    let mut retry_queue: VecDeque<(ClipboardItem, String)> = VecDeque::new();
+    let mut retry_queue: VecDeque<(ClipboardItem, Option<String>)> = VecDeque::new();
 
     // ── Startup backlog push (fix #33) ────────────────────────────────────────
     // Load all syncable items that have not yet been synced (`is_synced = 0`)
@@ -985,6 +996,7 @@ async fn push_loop(
         match key_snapshot {
             Some(key_bytes) => {
                 run_backlog_sweep(&db, &local_key, &key_bytes, &mut retry_queue).await;
+                run_tombstone_backlog_sweep(&db, &mut retry_queue).await;
                 true
             }
             None => {
@@ -1039,6 +1051,7 @@ async fn push_loop(
                      running backlog sweep once"
                 );
                 run_backlog_sweep(&db, &local_key, key_bytes, &mut retry_queue).await;
+                run_tombstone_backlog_sweep(&db, &mut retry_queue).await;
             }
         }
         // Update the edge tracker every tick (covers both →true and →false) so
@@ -1092,7 +1105,7 @@ async fn push_loop(
                 &config,
                 &bearer,
                 &item,
-                &payload_ct_b64,
+                payload_ct_b64.as_deref(),
                 Some(&cloud_signed_in),
                 &auth,
             )
@@ -1122,6 +1135,7 @@ async fn push_loop(
                         item.id,
                         retry_queue.len() + 1,
                     );
+                    // payload_ct_b64 is Option<String> — pass it directly back to the queue.
                     enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
                     // CopyPaste-1t38: yield and also drain any pending broadcast
                     // items so pin/delete/new-capture events sent while the retry
@@ -1248,7 +1262,7 @@ async fn push_loop(
                                     &config,
                                     &bearer,
                                     &item,
-                                    &payload_ct_b64,
+                                    payload_ct_b64.as_deref(),
                                     Some(&cloud_signed_in),
                                     &auth,
                                 )
@@ -1270,6 +1284,7 @@ async fn push_loop(
                                             "cloud-sync push failed for id={}: {e}; queuing for retry",
                                             item.id
                                         );
+                                        // payload_ct_b64 is Option<String> — pass directly back.
                                         enqueue_for_retry(&mut retry_queue, item, payload_ct_b64);
                                     }
                                 }
@@ -1304,7 +1319,7 @@ async fn run_backlog_sweep(
     db: &Arc<Mutex<Database>>,
     local_key: &Arc<zeroize::Zeroizing<[u8; 32]>>,
     key_bytes: &[u8],
-    retry_queue: &mut VecDeque<(ClipboardItem, String)>,
+    retry_queue: &mut VecDeque<(ClipboardItem, Option<String>)>,
 ) {
     let mut key_arr = [0u8; 32];
     if key_bytes.len() != key_arr.len() {
@@ -1464,7 +1479,7 @@ async fn run_backlog_sweep(
                 Ok(blob) => {
                     use base64::Engine as _;
                     let payload_ct_b64 = base64::engine::general_purpose::STANDARD.encode(&blob);
-                    enqueue_for_retry(retry_queue, item, payload_ct_b64);
+                    enqueue_for_retry(retry_queue, item, Some(payload_ct_b64));
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -1483,13 +1498,88 @@ async fn run_backlog_sweep(
     zeroize::Zeroize::zeroize(&mut key_arr);
 }
 
+/// Sweep the local DB for tombstone rows that have not yet been pushed to cloud
+/// (`deleted = 1 AND is_synced = 0`), and enqueue each as a tombstone push.
+///
+/// # CopyPaste-e89n
+///
+/// `soft_delete_item` now resets `is_synced = 0` when deleting an item. This
+/// sweep picks those rows up and enqueues a minimal tombstone push (no ciphertext,
+/// `deleted = true`) so the cloud row transitions to `deleted = true` on the
+/// server. Other devices apply the tombstone on their next poll/WS event.
+///
+/// Tombstones carry no content; they are pushed directly without decrypt/re-encrypt.
+async fn run_tombstone_backlog_sweep(
+    db: &Arc<Mutex<Database>>,
+    retry_queue: &mut VecDeque<(ClipboardItem, Option<String>)>,
+) {
+    let db_arc = db.clone();
+    let tombstones: Vec<ClipboardItem> = tokio::task::spawn_blocking(move || {
+        let db = db_arc.blocking_lock();
+        let mut stmt = match db.conn().prepare(
+            "SELECT id, item_id, content_type, is_sensitive, is_synced, lamport_ts, \
+             wall_time, expires_at, app_bundle_id, content_hash, origin_device_id, \
+             key_version, pinned, pin_order \
+             FROM clipboard_items \
+             WHERE deleted = 1 AND is_synced = 0 \
+             ORDER BY wall_time ASC \
+             LIMIT ?1",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("cloud-sync tombstone-backlog query prepare failed: {e}");
+                return vec![];
+            }
+        };
+        stmt.query_map(rusqlite::params![PUSH_RETRY_QUEUE_CAP as i64], |row| {
+            Ok(ClipboardItem {
+                id: row.get(0)?,
+                item_id: row.get(1)?,
+                content_type: row.get(2)?,
+                content: None, // tombstone: content already wiped
+                content_nonce: None,
+                blob_ref: None,
+                is_sensitive: row.get(3)?,
+                is_synced: row.get(4)?,
+                lamport_ts: row.get(5)?,
+                wall_time: row.get(6)?,
+                expires_at: row.get(7)?,
+                app_bundle_id: row.get(8)?,
+                content_hash: row.get(9)?,
+                origin_device_id: row.get(10).unwrap_or_default(),
+                key_version: row.get::<_, i64>(11).unwrap_or(2) as u8,
+                pinned: row.get(12).unwrap_or(false),
+                pin_order: row.get(13)?,
+                thumb: None,
+                deleted: true,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect::<Vec<_>>())
+        .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default();
+
+    let count = tombstones.len();
+    if count > 0 {
+        tracing::info!(
+            "cloud-sync tombstone-backlog: found {count} unsynced tombstone(s) — queuing for push"
+        );
+        for tombstone in tombstones {
+            // Tombstones carry no content — push directly without decrypt/encrypt.
+            // payload_ct is None so clipboard_item_to_json sends null to the server.
+            enqueue_for_retry(retry_queue, tombstone, None);
+        }
+    }
+}
+
 /// Append `(item, payload_ct_b64)` to the retry queue, evicting the oldest
 /// entry when the queue is at capacity. Bounded so a long outage cannot exhaust
 /// memory.
 fn enqueue_for_retry(
-    queue: &mut VecDeque<(ClipboardItem, String)>,
+    queue: &mut VecDeque<(ClipboardItem, Option<String>)>,
     item: ClipboardItem,
-    payload_ct_b64: String,
+    payload_ct_b64: Option<String>,
 ) {
     if queue.len() >= PUSH_RETRY_QUEUE_CAP {
         if let Some((dropped, _)) = queue.pop_front() {
@@ -1562,14 +1652,17 @@ enum PushOutcome {
 ///
 /// `payload_ct_b64` is the base64-encoded cloud ciphertext (nonce||ciphertext)
 /// produced by `encrypt_for_cloud`. It is pre-computed by the push loop so
-/// re-encryption only happens once even when the attempt is retried.
+/// re-encryption only happens once even when the attempt is retried. For
+/// tombstone rows (`item.deleted == true`) this is `None` — the server stores
+/// `payload_ct = NULL` and receiving devices apply a soft-delete.
 async fn push_item_once(
     client: &reqwest::Client,
     url: &str,
     anon_key: &str,
     bearer: &str,
     item: &ClipboardItem,
-    payload_ct_b64: &str,
+    // `None` for tombstone rows (item.deleted == true); `Some(b64)` for live items.
+    payload_ct_b64: Option<&str>,
 ) -> PushOutcome {
     let body = clipboard_item_to_json(item, payload_ct_b64);
 
@@ -1643,7 +1736,8 @@ pub(crate) async fn push_item_with_retries(
     config: &CloudConfig,
     bearer: &Arc<RwLock<String>>,
     item: &ClipboardItem,
-    payload_ct_b64: &str,
+    // `None` for tombstone rows (item.deleted == true); `Some(b64)` for live items.
+    payload_ct_b64: Option<&str>,
     cloud_signed_in: Option<&Arc<std::sync::atomic::AtomicBool>>,
     auth: &AuthClient,
 ) -> Result<(), String> {
@@ -1934,10 +2028,13 @@ async fn realtime_loop(
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) {
     // P1: same timeout as push_loop — see `sync_common::SYNC_HTTP_TIMEOUT`.
+    //
+    // CopyPaste-16vr: propagate builder error rather than falling back to a
+    // no-timeout client. TLS cert-store load cannot fail on macOS/Linux.
     let client = reqwest::Client::builder()
         .timeout(SYNC_HTTP_TIMEOUT)
         .build()
-        .unwrap_or_else(|_| reqwest::Client::new());
+        .expect("reqwest Client::builder should not fail on supported platforms");
     // Start at the fallback (full-speed) interval; the tick period is
     // updated dynamically before each sleep based on ws_connected.
     let mut interval = tokio::time::interval(POLL_INTERVAL_WS_FALLBACK);
@@ -2302,9 +2399,39 @@ async fn ws_ingest_loop(
                             break; // outer loop will reconnect
                         }
                         Some(event) => {
-                            // Only ingest INSERTs for the clipboard_items table.
+                            // Only ingest clipboard_items events (INSERT, UPDATE, DELETE).
+                            // CopyPaste-44rq.66: previously only INSERT was handled; UPDATE
+                            // (pin-state changes from another device) and DELETE (tombstones
+                            // pushed by another device) were silently dropped.
+                            if event.table != "clipboard_items" {
+                                continue;
+                            }
+                            // DELETE events from Realtime carry old_record, not record.
+                            // Route them through the tombstone path using old_record.
+                            if event.change_type == ChangeType::Delete {
+                                let old_row = event.old_record.as_ref().unwrap_or(&event.record);
+                                let Some(item_id) = old_row["item_id"].as_str() else { continue };
+                                let item_id_owned = item_id.to_owned();
+                                let db_arc = db.clone();
+                                let _join = tokio::task::spawn_blocking(move || {
+                                    let db = db_arc.blocking_lock();
+                                    // Try soft-delete first (item exists locally).
+                                    // If the item is not found, it was either never
+                                    // seen or already tombstoned — either is fine.
+                                    let _ = db.conn().execute(
+                                        "UPDATE clipboard_items SET deleted = 1, \
+                                         content = NULL, content_nonce = NULL, thumb = NULL \
+                                         WHERE item_id = ?1 AND deleted = 0",
+                                        rusqlite::params![item_id_owned],
+                                    );
+                                })
+                                .await;
+                                continue;
+                            }
+                            // For INSERT and UPDATE, fall through to the existing
+                            // decrypt → LWW → dedup → re-encrypt → insert path below.
                             if event.change_type != ChangeType::Insert
-                                || event.table != "clipboard_items"
+                                && event.change_type != ChangeType::Update
                             {
                                 continue;
                             }
@@ -3278,7 +3405,23 @@ pub fn exists_item(db: &Database, id: &str) -> Result<bool, anyhow::Error> {
 ///
 /// `user_id` is intentionally omitted — the default `auth.uid()` on the
 /// column fills it in automatically, and the RLS `with check` enforces it.
-fn clipboard_item_to_json(item: &ClipboardItem, payload_ct_b64: &str) -> serde_json::Value {
+/// Build the PostgREST upsert JSON body for a clipboard item.
+///
+/// `payload_ct_b64` is `Some(base64_ciphertext)` for live items and `None`
+/// for tombstones (`item.deleted == true`). Tombstone rows set `deleted: true`
+/// and send `payload_ct: null` so the server stores NULL (no ciphertext leak)
+/// and receiving devices know to apply a soft-delete.
+///
+/// # CopyPaste-e89n
+///
+/// The previous implementation hardcoded `"deleted": false` because
+/// `ClipboardItem` was not yet expected to carry a `deleted` field. Now that
+/// `soft_delete_item` materialises tombstone rows locally (schema v10) and
+/// resets `is_synced = 0`, the backlog sweep can feed tombstones into this path.
+fn clipboard_item_to_json(
+    item: &ClipboardItem,
+    payload_ct_b64: Option<&str>,
+) -> serde_json::Value {
     // CLOUD-ROUNDTRIP fix: `payload_ct` is a Postgres `bytea` column. PostgREST
     // accepts a string assigned to a bytea column in Postgres' INPUT formats —
     // a bare base64 string is NOT one of them (it is stored as the literal
@@ -3287,22 +3430,26 @@ fn clipboard_item_to_json(item: &ClipboardItem, payload_ct_b64: &str) -> serde_j
     // cloud DOWNLOAD never worked. We therefore send the canonical hex input
     // form `\x<hex>` so the column holds the true ciphertext bytes and the
     // read-back round-trips. See `decode_payload_ct` for the symmetric read.
-    let payload_ct_hex = encode_payload_ct_hex(payload_ct_b64);
+    //
+    // Tombstones (deleted = true) send null for payload_ct so the server stores
+    // NULL — no ciphertext to leak — and receiving devices know to call delete_item.
+    let payload_ct_val: serde_json::Value = match payload_ct_b64 {
+        Some(b64) => serde_json::Value::String(encode_payload_ct_hex(b64)),
+        None => serde_json::Value::Null,
+    };
     serde_json::json!({
         "id":            item.id,
         "item_id":       item.item_id,
         "content_type":  item.content_type,
-        "payload_ct":    payload_ct_hex,
+        "payload_ct":    payload_ct_val,
         "lamport_ts":    item.lamport_ts,
         "wall_time":     item.wall_time,
         "expires_at":    item.expires_at,
         "app_bundle_id": item.app_bundle_id,
         "device_id":     item.origin_device_id,
-        // Soft-delete tombstone. ClipboardItem has no dedicated `deleted` field
-        // (tombstones are not yet materialised locally); live uploads are always
-        // false. A future tombstone-upload path will set this to `true` and send
-        // a minimal payload so the receiver calls delete_item.
-        "deleted":       false,
+        // CopyPaste-e89n: use the item's actual deleted flag so tombstone rows
+        // (soft_delete_item sets deleted=1, is_synced=0) propagate to the cloud.
+        "deleted":       item.deleted,
         // Pin state: propagate so a pin/unpin on one device is reflected on
         // every other device after the next cloud sync round.
         "pinned":        item.pinned,
@@ -3681,7 +3828,7 @@ mod tests {
         // test runner. 30s is well over the 1+2+4 = 7s worth of backoff.
         let result = tokio::time::timeout(
             Duration::from_secs(30),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None, &auth),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, Some("dGVzdA=="), None, &auth),
         )
         .await
         .expect("push pipeline must not hang");
@@ -3733,7 +3880,7 @@ mod tests {
 
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None, &auth),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, Some("dGVzdA=="), None, &auth),
         )
         .await
         .expect("must not hang");
@@ -3783,7 +3930,7 @@ mod tests {
         let start = std::time::Instant::now();
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None, &auth),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, Some("dGVzdA=="), None, &auth),
         )
         .await
         .expect("must not hang");
@@ -3879,7 +4026,7 @@ mod tests {
 
         let result = tokio::time::timeout(
             Duration::from_secs(10),
-            push_item_with_retries(&client, &url, &cfg, &bearer, &item, "dGVzdA==", None, &auth),
+            push_item_with_retries(&client, &url, &cfg, &bearer, &item, Some("dGVzdA=="), None, &auth),
         )
         .await
         .expect("must not hang");
@@ -4048,14 +4195,14 @@ mod tests {
     /// outage.
     #[test]
     fn enqueue_for_retry_caps_at_max() {
-        let mut q: VecDeque<(copypaste_core::ClipboardItem, String)> = VecDeque::new();
+        let mut q: VecDeque<(copypaste_core::ClipboardItem, Option<String>)> = VecDeque::new();
         // Push CAP + 5 items; size must remain == CAP and the oldest must be
         // evicted.
         for i in 0..(PUSH_RETRY_QUEUE_CAP + 5) {
             enqueue_for_retry(
                 &mut q,
                 test_item(&format!("item-{i}")),
-                "dGVzdA==".to_owned(),
+                Some("dGVzdA==".to_owned()),
             );
         }
         assert_eq!(
@@ -5102,7 +5249,7 @@ mod e2e_live {
             &cfg,
             &bearer,
             &item,
-            &payload_ct_b64,
+            Some(payload_ct_b64.as_str()),
             None,
             &auth,
         )
@@ -5155,7 +5302,7 @@ mod e2e_live {
             &cfg,
             &bearer,
             &item,
-            &payload_ct_b64,
+            Some(payload_ct_b64.as_str()),
             None,
             &auth,
         )
@@ -5223,7 +5370,7 @@ mod e2e_live {
             &cfg,
             &bearer,
             &item,
-            &payload_ct_b64,
+            Some(payload_ct_b64.as_str()),
             None,
             &auth,
         )
@@ -5653,7 +5800,7 @@ mod bytea_e2e {
             &cfg,
             &bearer,
             &item,
-            &payload_ct_b64,
+            Some(payload_ct_b64.as_str()),
             None,
             &auth,
         )

@@ -1195,6 +1195,7 @@ pub fn soft_delete_item(
     let changed = tx.execute(
         "UPDATE clipboard_items
          SET deleted = 1,
+             is_synced = 0,
              content = NULL,
              content_nonce = NULL,
              thumb = NULL,

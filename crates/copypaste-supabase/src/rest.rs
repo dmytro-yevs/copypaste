@@ -76,6 +76,21 @@ pub type RestResult<T> = std::result::Result<T, RestError>;
 // RestClient
 // ---------------------------------------------------------------------------
 
+/// Default HTTP timeout for all PostgREST requests.
+///
+/// Matches `SYNC_HTTP_TIMEOUT` in the daemon's `sync_common.rs` (30 s). A
+/// single constant here avoids divergence: callers that construct `RestClient`
+/// directly via [`RestClient::new`] get the same guard as the daemon push/poll
+/// loops.
+///
+/// # CopyPaste-16vr
+///
+/// The previous `RestClient::new()` used `Client::new()` with no timeout, so
+/// a stalled Supabase endpoint could block the `reencrypt_all_cloud_items` call
+/// (invoked from `rotate_sync_key`) indefinitely. This constant applies the
+/// same 30 s guard as the daemon push/poll loops.
+const REST_HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// PostgREST client scoped to the `clipboard_items` table.
 ///
 /// Requires:
@@ -99,13 +114,54 @@ impl RestClient {
     /// `supabase_url` should be the HTTPS base URL (e.g.
     /// `https://abc.supabase.co`). The `/rest/v1/clipboard_items` path is
     /// appended automatically.
+    ///
+    /// # CopyPaste-16vr
+    ///
+    /// Uses a 30 s HTTP timeout (`REST_HTTP_TIMEOUT`) so a stalled Supabase
+    /// endpoint cannot block a sync loop indefinitely.
     pub fn new(
         supabase_url: impl Into<String>,
         anon_key: impl Into<String>,
         access_token: impl Into<String>,
     ) -> Self {
+        // TLS cert-store load cannot fail on macOS/Linux in normal operation.
+        // Propagate via expect rather than silently falling back to a no-timeout
+        // client (which would be worse than aborting on a stalled endpoint).
+        let http = Client::builder()
+            .timeout(REST_HTTP_TIMEOUT)
+            .build()
+            .expect("reqwest Client::builder should not fail on supported platforms");
         Self {
-            http: Client::new(),
+            http,
+            base_url: supabase_url.into().trim_end_matches('/').to_string(),
+            anon_key: anon_key.into(),
+            access_token: access_token.into(),
+        }
+    }
+
+    /// Construct from explicit credentials with a caller-supplied HTTP client.
+    ///
+    /// Use this when the caller already holds a `reqwest::Client` configured
+    /// with specific timeouts, TLS settings, or a connection pool — for example,
+    /// the `rotate_sync_key` IPC handler that reuses the daemon's live bearer
+    /// without going through `from_env()`.  Prefer [`RestClient::new`] for
+    /// one-shot callers.
+    ///
+    /// # CopyPaste-n4dt
+    ///
+    /// The original `rotate_sync_key` path called `RestClient::from_env()`, which
+    /// requires `SUPABASE_ACCESS_TOKEN` — an env var never set in production (auth
+    /// is managed by GoTrue inside the daemon). Callers that hold the live bearer
+    /// `Arc<RwLock<String>>` should construct via this method instead, bypassing
+    /// the env-var requirement.
+    pub fn with_http_client(
+        supabase_url: impl Into<String>,
+        anon_key: impl Into<String>,
+        access_token: impl Into<String>,
+        http: Client,
+    ) -> Self {
+        Self {
+            http,
             base_url: supabase_url.into().trim_end_matches('/').to_string(),
             anon_key: anon_key.into(),
             access_token: access_token.into(),
