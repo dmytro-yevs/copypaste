@@ -17,19 +17,19 @@ import { act } from "react";
 // ---------------------------------------------------------------------------
 
 describe("ContentIcon", () => {
-  it("renders text icon with accent class for 'text'", () => {
+  it("renders text icon with faint class for 'text'", () => {
     const { container } = render(<ContentIcon contentType="text" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
-    // The text icon carries text-ide-accent
-    expect(svg!.className.baseVal).toContain("text-ide-accent");
+    // 5917.80: the text glyph carries text-ide-faint (grey), not accent (blue)
+    expect(svg!.className.baseVal).toContain("text-ide-faint");
   });
 
-  it("renders text icon with accent class for 'text/plain'", () => {
+  it("renders text icon with faint class for 'text/plain'", () => {
     const { container } = render(<ContentIcon contentType="text/plain" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
-    expect(svg!.className.baseVal).toContain("text-ide-accent");
+    expect(svg!.className.baseVal).toContain("text-ide-faint");
   });
 
   it("renders url icon with sky class", () => {

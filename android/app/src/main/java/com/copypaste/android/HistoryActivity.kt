@@ -2174,9 +2174,9 @@ private fun EmptySearchState(padding: PaddingValues, query: String) {
  * scroll recompositions.
  */
 private fun chipColorFor(kind: String, c: IdeColors): Color = when (kind) {
-    // PG-49: TEXT→accent (parity macOS KindChip spec §6: TEXT/fallback → accent blue).
-    // IMAGE→info/sky (parity web KindChip), FILE→faint (styleguide .b-file = --ide-faint).
-    "TEXT"    -> c.accent
+    // 5917.80: TEXT→faint (grey), not accent (blue) — parity with macOS KindChip fallback.
+    // IMAGE→violet (1jms.14 PARITY-SPEC §6), FILE→faint (styleguide .b-file = --ide-faint).
+    "TEXT"    -> c.faint
     "URL"     -> c.info
     "EMAIL"   -> c.success
     "PHONE"   -> c.success

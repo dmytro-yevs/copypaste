@@ -94,7 +94,7 @@ export interface ContentIconProps {
  * Renders a lucide-react icon tinted with the appropriate IDE design-token
  * color class based on the content type category:
  *
- *   text   → <Type>       text-ide-accent
+ *   text   → <Type>       text-ide-faint
  *   url    → <Link>       text-ide-sky
  *   image  → <Image>      text-ide-violet
  *   code   → <Code>       text-ide-violet
@@ -120,7 +120,8 @@ export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
 
   switch (kind) {
     case "text":
-      return <Type {...shared} className="shrink-0 text-ide-accent" />;
+      // 5917.80: TEXT → faint (grey), not accent (blue); matches KindChip fallback + Android c.faint
+      return <Type {...shared} className="shrink-0 text-ide-faint" />;
     case "url":
       // 1hqt: URL uses sky token (20 120 170 in light, teal in dark)
       return <Link {...shared} className="shrink-0 text-ide-sky" />;
