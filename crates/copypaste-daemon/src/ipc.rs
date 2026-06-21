@@ -7,9 +7,10 @@ use crate::protocol::{
 // CopyPaste-merc: canonical badge-state computation lives in copypaste-ipc so it
 // is shared across crates. The daemon calls this once per get_sync_status request
 // and embeds the result in the response; UI / Android consume the value directly.
-// Gated on cloud-sync: the get_sync_status handler is only compiled with that
-// feature, so the import must match to avoid an unused-import warning (-D warnings).
-#[cfg(feature = "cloud-sync")]
+// CopyPaste-c4q2.7: get_sync_status is now available under cloud-sync OR relay-sync
+// (relay-only daemons have passphrase_set and last_sync_ms too), so the import gate
+// must match the widened handler condition.
+#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
 use copypaste_ipc::compute_sync_badge_state;
 // derive_sync_key / SyncKey are used by both cloud-sync (Supabase) and relay-sync.
 // `revoke_and_rotate` / `rotate_sync_key` derive a key from a passphrase;
@@ -1121,10 +1122,22 @@ const MAX_PAKE_SESSIONS: usize = 64;
 
 /// A peer whose `last_sync_at` is within this many seconds of the current
 /// clock is considered **online** in the `list_peers` response, even if no
-/// live mTLS or mDNS signal is available.  60 s is chosen to survive a single
-/// missed polling cycle (the sync loop re-connects approximately every 30 s)
-/// while still marking a device offline quickly after it disconnects.
-const ONLINE_THRESHOLD_SECS: i64 = 60;
+/// live mTLS or mDNS signal is available.
+///
+/// CopyPaste-1jms.25: this must equal `copypaste_ipc::SYNC_BADGE_RECENT_MS / 1_000`
+/// (currently 5 × 60 = 300 s) so the peer-card online dot and the sync badge
+/// chip use the same staleness window.  A peer offline for 90 s would otherwise
+/// show `online=false` on the card but `idle` (not `offline`) on the chip —
+/// contradictory to the user.  Verified by the const assert below.
+const ONLINE_THRESHOLD_SECS: i64 = (copypaste_ipc::SYNC_BADGE_RECENT_MS / 1_000) as i64;
+// Single-source-of-truth guard: if SYNC_BADGE_RECENT_MS changes this fails at
+// compile time, forcing the author to reconsider this threshold.
+const _ONLINE_THRESHOLD_MATCHES_BADGE: () = {
+    assert!(
+        ONLINE_THRESHOLD_SECS == (copypaste_ipc::SYNC_BADGE_RECENT_MS / 1_000) as i64,
+        "ONLINE_THRESHOLD_SECS must equal SYNC_BADGE_RECENT_MS / 1000"
+    );
+};
 
 /// In-progress PAKE handshake session stored between IPC round-trips.
 ///
@@ -5589,66 +5602,68 @@ impl IpcServer {
                 )
             }
 
-            #[cfg(feature = "cloud-sync")]
+            // CopyPaste-c4q2.7: get_sync_status is available whenever ANY sync
+            // transport is compiled in (cloud-sync OR relay-sync).  Supabase-specific
+            // fields (supabase_configured, signed_in, supabase_url, email) are only
+            // meaningful under cloud-sync and are gated accordingly; relay-only builds
+            // receive passphrase_set + last_sync_ms + badge_state (sufficient for the
+            // badge chip and sync settings UI).
+            #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             "get_sync_status" => {
                 let passphrase_set = self.sync_key.lock().await.is_some();
-                // Fix HIGH #3: read_config() does blocking fs I/O; move it to
-                // the blocking thread pool so the async worker is not stalled.
-                let app_cfg = match tokio::task::spawn_blocking(read_config).await {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        return Response::err_with_code(
-                            req.id,
-                            ERR_CODE_INTERNAL_ERROR,
-                            format!("get_sync_status blocking task failed: {e}"),
-                        )
-                    }
-                };
-                let supabase_configured = app_cfg.supabase_url.is_some()
-                    && app_cfg.supabase_anon_key.is_some()
-                    || std::env::var("SUPABASE_URL").is_ok();
-                // BUG 2 fix: report the REAL GoTrue auth state published by the
-                // cloud loops, not the old `signed_in = supabase_configured`
-                // placeholder. The flag is set `true` once `start_cloud` resolves
-                // a bearer and `false` on a bearer-resolution / 401-refresh
-                // failure, so the UI no longer claims "signed in" after a
-                // `CloudError::AuthFailed` aborted cloud sync.
-                let signed_in = self
-                    .cloud_signed_in
-                    .load(std::sync::atomic::Ordering::Relaxed);
                 let raw_ts = self.last_sync_ms.load(std::sync::atomic::Ordering::Relaxed);
                 let last_sync_ms_val: Option<i64> = if raw_ts > 0 { Some(raw_ts) } else { None };
-                // B. Expose the non-secret Supabase URL and email so the UI can
-                // show/prefill them. We do NOT expose the anon key, password, or
-                // passphrase. Priority: env vars override AppConfig (same as
-                // CloudConfig::from_env).
-                let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
-                    .ok()
-                    .or_else(|| app_cfg.supabase_url.clone());
-                // M3 FIX: mask the email before sending over IPC so arbitrary
-                // same-UID processes cannot harvest the full GoTrue address.
-                // `a***@example.com` preserves the account-indicator the UI
-                // needs (SettingsView shows "Signed in as …") without leaking
-                // the full address. Mirrors `cloud::redact_email` — inlined
-                // here because that helper is private to the cloud module.
-                let email_val: Option<String> = std::env::var("SUPABASE_EMAIL")
-                    .ok()
-                    .or_else(|| app_cfg.supabase_email.clone())
-                    .map(|e| {
-                        // Show first char + *** + @domain; non-address input →
-                        // "<redacted>" (same contract as cloud::redact_email).
-                        match e.split_once('@') {
-                            Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
-                                let first = local.chars().next().unwrap_or('*');
-                                if local.chars().count() <= 1 {
-                                    format!("*@{domain}")
-                                } else {
-                                    format!("{first}***@{domain}")
-                                }
-                            }
-                            _ => "<redacted>".to_string(),
+
+                // Supabase-specific fields: only available under cloud-sync.
+                #[cfg(feature = "cloud-sync")]
+                let (supabase_configured, signed_in, supabase_url_val, email_val) = {
+                    // Fix HIGH #3: read_config() does blocking fs I/O; move it to
+                    // the blocking thread pool so the async worker is not stalled.
+                    let app_cfg = match tokio::task::spawn_blocking(read_config).await {
+                        Ok(cfg) => cfg,
+                        Err(e) => {
+                            return Response::err_with_code(
+                                req.id,
+                                ERR_CODE_INTERNAL_ERROR,
+                                format!("get_sync_status blocking task failed: {e}"),
+                            )
                         }
-                    });
+                    };
+                    let supabase_configured = app_cfg.supabase_url.is_some()
+                        && app_cfg.supabase_anon_key.is_some()
+                        || std::env::var("SUPABASE_URL").is_ok();
+                    // BUG 2 fix: report the REAL GoTrue auth state published by the
+                    // cloud loops, not the old `signed_in = supabase_configured`
+                    // placeholder. The flag is set `true` once `start_cloud` resolves
+                    // a bearer and `false` on a bearer-resolution / 401-refresh
+                    // failure, so the UI no longer claims "signed in" after a
+                    // `CloudError::AuthFailed` aborted cloud sync.
+                    let signed_in = self
+                        .cloud_signed_in
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    // B. Expose the non-secret Supabase URL and email so the UI can
+                    // show/prefill them. We do NOT expose the anon key, password, or
+                    // passphrase. Priority: env vars override AppConfig (same as
+                    // CloudConfig::from_env).
+                    let supabase_url_val: Option<String> = std::env::var("SUPABASE_URL")
+                        .ok()
+                        .or_else(|| app_cfg.supabase_url.clone());
+                    // M3 FIX: mask the email before sending over IPC so arbitrary
+                    // same-UID processes cannot harvest the full GoTrue address.
+                    // CopyPaste-c4q2.4: use the shared `cloud::redact_email` (now
+                    // `pub(crate)`) instead of the inline copy that used to live here.
+                    let email_val: Option<String> = std::env::var("SUPABASE_EMAIL")
+                        .ok()
+                        .or_else(|| app_cfg.supabase_email.clone())
+                        .map(|e| crate::cloud::redact_email(&e));
+                    (supabase_configured, signed_in, supabase_url_val, email_val)
+                };
+                // Relay-only: supabase fields are absent — provide stub values for
+                // the badge computation below.
+                #[cfg(not(feature = "cloud-sync"))]
+                let (supabase_configured, signed_in, supabase_url_val, email_val) =
+                    (false, false, None::<String>, None::<String>);
+
                 // CopyPaste-merc: compute badge state once here in the daemon so
                 // every consumer (macOS UI, Android) renders the SAME canonical
                 // value instead of each re-deriving it with a local constant.
@@ -5698,10 +5713,17 @@ impl IpcServer {
             // When cloud-sync is not compiled in, return not_implemented for
             // Supabase-specific methods so the UI gets a machine-readable code
             // rather than "method not found".
+            // CopyPaste-c4q2.7: get_sync_status is now available under relay-sync
+            // too (widened above), so it is no longer listed here.  set_sync_passphrase
+            // and cloud_test_connection remain cloud-sync only.
             #[cfg(not(feature = "cloud-sync"))]
-            "set_sync_passphrase" | "get_sync_status" | "cloud_test_connection" => {
+            "set_sync_passphrase" | "cloud_test_connection" => {
                 Response::not_implemented(req.id, "cloud-sync")
             }
+            // get_sync_status: not_implemented only when NEITHER cloud-sync NOR
+            // relay-sync is active (any-sync guard above won't compile in then).
+            #[cfg(not(any(feature = "cloud-sync", feature = "relay-sync")))]
+            "get_sync_status" => Response::not_implemented(req.id, "cloud-sync or relay-sync"),
 
             // rotate_sync_key and revoke_and_rotate are available when EITHER
             // cloud-sync OR relay-sync is compiled in (widened from cloud-sync
@@ -6979,6 +7001,22 @@ impl IpcServer {
             // session key drops/zeroizes; the machine moves to `aborted`.
             "pair_abort" => {
                 self.pairing.abort();
+                Response::ok(req.id, serde_json::json!({ "ok": true }))
+            }
+
+            // LAN/SAS Phase 2: reset the pairing state machine to Idle.
+            //
+            // CopyPaste-1jms.3 / CopyPaste-1jms.12: `pair_abort` moves the SM to
+            // the terminal `Aborted` state but leaves `try_begin` claimed.  Without
+            // a follow-up `pair_reset` every subsequent pairing attempt fails with
+            // "pairing is already in flight" until the next `try_begin` call
+            // auto-clears the stale terminal state.  The Android path has always
+            // called `pairReset()` after `pairAbort()` (DevicesActivity.kt:2369–
+            // 2383) — this handler gives the macOS UI and CLI the same capability.
+            // Must also be called after the `Confirmed` terminal state so the SM
+            // returns to `Idle` immediately, matching the Android confirmed path.
+            "pair_reset" => {
+                self.pairing.reset();
                 Response::ok(req.id, serde_json::json!({ "ok": true }))
             }
 
@@ -13721,6 +13759,59 @@ mod tests {
         assert_eq!(resp.data.unwrap()["state"], "idle");
     }
 
+    /// CopyPaste-1jms.3 / CopyPaste-1jms.12: `pair_reset` must return `ok: true`
+    /// and leave the pairing state machine in the `Idle` state regardless of which
+    /// terminal state it was in.  This lets the macOS UI (and CLI) call reset after
+    /// `pair_abort` or after a confirmed pairing — matching the Android path that
+    /// always calls `pairReset()` to clear stale terminal state before the next
+    /// pairing attempt.
+    #[tokio::test]
+    async fn pair_reset_returns_ok_and_leaves_machine_idle() {
+        use crate::pairing_sm::{PairingRole, PairingState, PeerSnapshot};
+        let server = bare_server();
+
+        // Verify pair_reset from Idle is a no-op (returns ok, stays idle).
+        let resp = server
+            .dispatch(r#"{"id":"pr1","method":"pair_reset","params":{}}"#)
+            .await;
+        assert!(resp.ok, "pair_reset from Idle must succeed: {resp:?}");
+        assert_eq!(
+            resp.data.as_ref().and_then(|d| d["ok"].as_bool()),
+            Some(true),
+            "pair_reset must return ok=true: {resp:?}"
+        );
+
+        // Drive the SM into a terminal Aborted state (e.g. after pair_abort).
+        let pairing = server.pairing_coordinator();
+        pairing.try_begin(PairingRole::Initiator, PeerSnapshot::default());
+        pairing.finish(PairingState::Aborted);
+        assert!(
+            pairing.snapshot().is_terminal(),
+            "SM must be in a terminal state before reset"
+        );
+
+        // pair_reset must return ok and leave the machine idle.
+        let resp = server
+            .dispatch(r#"{"id":"pr2","method":"pair_reset","params":{}}"#)
+            .await;
+        assert!(resp.ok, "pair_reset from Aborted must succeed: {resp:?}");
+        assert_eq!(
+            resp.data.as_ref().and_then(|d| d["ok"].as_bool()),
+            Some(true),
+            "pair_reset must return ok=true after Aborted: {resp:?}"
+        );
+
+        // Confirm the SM is idle so the next pairing can begin immediately.
+        let state_resp = server
+            .dispatch(r#"{"id":"pr3","method":"pair_get_sas","params":{}}"#)
+            .await;
+        assert_eq!(
+            state_resp.data.unwrap()["state"],
+            "idle",
+            "pair_reset must leave the SM idle"
+        );
+    }
+
     /// LAN/SAS Phase 2: `pair_with_discovered` requires P2P (a cert); without one
     /// it errors with invalid_argument rather than silently starting a pairing.
     #[tokio::test]
@@ -15431,7 +15522,8 @@ mod tests {
         std::fs::create_dir_all(&cfg_home).unwrap();
 
         let peers_json = cfg_home.join("peers.json");
-        // last_sync_at = now − 30 s  → within the 60 s threshold.
+        // last_sync_at = now − 30 s  → within the ONLINE_THRESHOLD_SECS (300 s).
+        // CopyPaste-1jms.25: threshold is SYNC_BADGE_RECENT_MS / 1000 = 300 s.
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -15486,12 +15578,13 @@ mod tests {
         std::fs::create_dir_all(&cfg_home).unwrap();
 
         let peers_json = cfg_home.join("peers.json");
-        // last_sync_at = now − 120 s  → stale (threshold is 60 s).
+        // CopyPaste-1jms.25: threshold is now SYNC_BADGE_RECENT_MS / 1000 = 300 s.
+        // Use 600 s (2× the threshold) to stay well clear of the boundary.
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let stale = now_secs - 120;
+        let stale = now_secs - 600; // 600 s > 300 s threshold → stale
         let peers = serde_json::json!([
             {
                 "name": "Tablet",
