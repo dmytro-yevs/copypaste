@@ -341,6 +341,23 @@ class SyncManager(
 
     private var lastLamportTs: Long = 0
 
+    /**
+     * Lifecycle-bound scope for thumbnail generation (CopyPaste-3ox2).
+     * Set by [ClipboardService] after construction via [bindScope].
+     * When non-null, thumbnail tasks launched in [ingestRelaySseItem] are tied
+     * to the FGS lifecycle and are cancelled on service destroy.
+     */
+    private var thumbnailScope: CoroutineScope? = null
+
+    /**
+     * Bind the FGS CoroutineScope so thumbnail generation tasks in
+     * [ingestRelaySseItem] are cancelled when the service is destroyed.
+     * Call once after constructing [SyncManager] from [ClipboardService].
+     */
+    fun bindScope(scope: CoroutineScope) {
+        thumbnailScope = scope
+    }
+
     // ── Relay backend — incoming (SSE, 3rd transport) ─────────────────────────
 
     /**
@@ -533,7 +550,10 @@ class SyncManager(
                     // by 50–200 ms of CPU-bound decode/compress per image.
                     val capturedId = storedId
                     val capturedBytes = plaintext
-                    CoroutineScope(Dispatchers.Default).launch {
+                    // Use the FGS-bound scope so this task is cancelled when the
+                    // service is destroyed; fall back to an ad-hoc scope only in
+                    // unit tests where bindScope() was never called.
+                    (thumbnailScope ?: CoroutineScope(Dispatchers.Default)).launch(Dispatchers.Default) {
                         SyncThumbnailHelper.generateAndStore(capturedBytes) { thumbBytes ->
                             repository.storeThumbnailBytes(capturedId, thumbBytes)
                         }
