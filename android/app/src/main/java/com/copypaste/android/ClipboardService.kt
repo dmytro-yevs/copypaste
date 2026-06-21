@@ -1583,7 +1583,7 @@ class ClipboardService : Service() {
             lastCopyNotifMs = now
             ensureChannel(context)
             val notification = NotificationCompat.Builder(context, CHANNEL_COPY_EVENT)
-                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setSmallIcon(R.mipmap.ic_launcher_foreground)
                 .setContentTitle(context.getString(R.string.notif_copy_event_title))
                 .setContentText(context.getString(R.string.notif_copy_event_content))
                 .setPriority(NotificationCompat.PRIORITY_MIN)
@@ -1715,7 +1715,7 @@ class ClipboardService : Service() {
             }
 
             val notification = NotificationCompat.Builder(context, CHANNEL_PAIR_REQUEST)
-                .setSmallIcon(android.R.drawable.ic_menu_share)
+                .setSmallIcon(R.mipmap.ic_launcher_foreground)
                 .setContentTitle(context.getString(R.string.notif_pair_request_title))
                 .setContentText(content)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -1936,7 +1936,7 @@ class ClipboardService : Service() {
             return NotificationCompat.Builder(context, CHANNEL_ID)
                 .setContentTitle(title)
                 .setContentText(content)
-                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setSmallIcon(R.mipmap.ic_launcher_foreground)
                 .setColor(IdeAccent.toArgb())
                 .setOngoing(true)
                 .setShowWhen(false)
