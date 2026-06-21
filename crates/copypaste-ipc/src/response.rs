@@ -46,8 +46,9 @@ pub const ERR_CODE_DAEMON_OFFLINE: &str = "daemon_offline";
 /// (preferred) `error_code = Some(stable_machine_code)`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Response {
-    /// Echoed [`crate::Request::id`].
-    pub id: u64,
+    /// Echoed [`crate::Request::id`]. Serialised as a JSON **string** to match
+    /// the daemon wire format — see [`crate::Request::id`] for rationale.
+    pub id: String,
     /// `true` on success, `false` on failure.
     pub ok: bool,
     /// Method-specific success payload. Omitted from the wire when `None`.
@@ -69,9 +70,9 @@ pub struct Response {
 
 impl Response {
     /// Build a success response carrying `data`.
-    pub fn ok(id: u64, data: serde_json::Value) -> Self {
+    pub fn ok(id: impl Into<String>, data: serde_json::Value) -> Self {
         Self {
-            id,
+            id: id.into(),
             ok: true,
             data: Some(data),
             error: None,
@@ -82,9 +83,9 @@ impl Response {
 
     /// Untagged error (no machine code). Prefer [`Response::err_with_code`]
     /// for new call sites so clients can branch deterministically.
-    pub fn err(id: u64, msg: impl Into<String>) -> Self {
+    pub fn err(id: impl Into<String>, msg: impl Into<String>) -> Self {
         Self {
-            id,
+            id: id.into(),
             ok: false,
             data: None,
             error: Some(msg.into()),
@@ -97,9 +98,13 @@ impl Response {
     /// `auth_failed`, `invalid_argument`, `not_implemented`, `ipc_not_ready`,
     /// `internal_error`). Clients should branch on `error_code`, not on the
     /// `error` string.
-    pub fn err_with_code(id: u64, code: &'static str, msg: impl Into<String>) -> Self {
+    pub fn err_with_code(
+        id: impl Into<String>,
+        code: &'static str,
+        msg: impl Into<String>,
+    ) -> Self {
         Self {
-            id,
+            id: id.into(),
             ok: false,
             data: None,
             error: Some(msg.into()),
@@ -110,7 +115,7 @@ impl Response {
 
     /// Convenience wrapper for unimplemented methods (cloud-sync stubs, etc.).
     /// Always sets `error_code = "not_implemented"`.
-    pub fn not_implemented(id: u64, feature: &'static str) -> Self {
+    pub fn not_implemented(id: impl Into<String>, feature: &'static str) -> Self {
         Self::err_with_code(
             id,
             ERR_CODE_NOT_IMPLEMENTED,
@@ -127,7 +132,7 @@ mod tests {
     #[test]
     fn request_serialize_roundtrip() {
         let req = Request {
-            id: 42,
+            id: "42".into(),
             method: "list".into(),
             params: serde_json::json!({"limit": 10, "offset": 0}),
             protocol_version: 1,
@@ -135,9 +140,12 @@ mod tests {
         let s = serde_json::to_string(&req).unwrap();
         let back: Request = serde_json::from_str(&s).unwrap();
         assert_eq!(req, back);
-        // params default applies when absent on the wire
-        let minimal: Request = serde_json::from_str(r#"{"id":7,"method":"ping"}"#).unwrap();
-        assert_eq!(minimal.id, 7);
+        // id must be serialised as a JSON string, not a number
+        assert!(s.contains(r#""id":"42""#), "id must be JSON string, got: {s}");
+        // params default applies when absent on the wire (string id)
+        let minimal: Request =
+            serde_json::from_str(r#"{"id":"7","method":"ping"}"#).unwrap();
+        assert_eq!(minimal.id, "7");
         assert_eq!(minimal.method, "ping");
         assert_eq!(minimal.params, serde_json::Value::Null);
         assert_eq!(minimal.protocol_version, 0);
@@ -145,29 +153,29 @@ mod tests {
 
     #[test]
     fn response_omits_none_fields() {
-        let ok = Response::ok(1, serde_json::json!({"total": 0}));
+        let ok = Response::ok("1", serde_json::json!({"total": 0}));
         let s = serde_json::to_string(&ok).unwrap();
         assert!(s.contains("\"ok\":true"));
         assert!(s.contains("\"data\""));
         assert!(!s.contains("\"error\""));
         assert!(!s.contains("\"error_code\""));
 
-        let legacy_err = Response::err(2, "boom");
+        let legacy_err = Response::err("2", "boom");
         let s = serde_json::to_string(&legacy_err).unwrap();
         assert!(s.contains("\"ok\":false"));
         assert!(s.contains("\"error\":\"boom\""));
         assert!(!s.contains("\"data\""));
         assert!(!s.contains("\"error_code\""));
 
-        let tagged = Response::err_with_code(3, ERR_CODE_INVALID_ARGUMENT, "bad param");
+        let tagged = Response::err_with_code("3", ERR_CODE_INVALID_ARGUMENT, "bad param");
         let s = serde_json::to_string(&tagged).unwrap();
         assert!(s.contains("\"error_code\":\"invalid_argument\""));
     }
 
     #[test]
     fn response_not_implemented_helper() {
-        let resp = Response::not_implemented(11, "cloud-sync");
-        assert_eq!(resp.id, 11);
+        let resp = Response::not_implemented("11", "cloud-sync");
+        assert_eq!(resp.id, "11");
         assert!(!resp.ok);
         assert_eq!(resp.error_code, Some(ERR_CODE_NOT_IMPLEMENTED));
         assert_eq!(resp.error.as_deref(), Some("not implemented: cloud-sync"));

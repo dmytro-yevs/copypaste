@@ -17,15 +17,11 @@
 //!
 //! ## Consumers
 //!
-//! Today only [`ErrorCode`] and the `METHOD_*` constants are actively consumed
-//! by the daemon/UI/CLI. The [`Request`] and [`Response`] structs define the
-//! *proposed* arch-2 wire shape but are **not yet live on the daemon wire**:
-//! the daemon still uses `id: String` whereas this crate uses `id: u64`.
-//!
-//! **Do NOT change `id: u64` to `String` here without a coordinated daemon
-//! migration** — the mismatch is intentional (arch-2 plan) and tracked as a
-//! TODO. Consumers that need the live daemon wire today should use the daemon's
-//! own `protocol` module directly until the migration is complete.
+//! [`ErrorCode`], the `METHOD_*` constants, and the [`Request`]/[`Response`]
+//! structs are consumed by the daemon, CLI, and UI. The typed structs use
+//! `id: String` to match the actual daemon wire format (CopyPaste-crol: the
+//! previous `id: u64` was an arch-2 planning artefact that was never aligned
+//! with the live wire — fixed by migrating to `String` here).
 
 #![deny(missing_docs)]
 #![deny(rust_2018_idioms)]
