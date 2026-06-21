@@ -37,6 +37,9 @@
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { toLinear, luminance, contrast, composite } from "./lib/wcag-math.mjs";
+import { hexToRgb, tripletToRgb, parseRgba } from "./lib/color-utils.mjs";
+import { parseKotlinPalettes } from "./lib/kotlin-parser.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dir, "..");
@@ -56,71 +59,6 @@ const VERBOSE = process.argv.includes("--verbose");
 // WCAG AA thresholds
 const AA_NORMAL = 4.5;
 const AA_LARGE  = 3.0;
-
-// ---------------------------------------------------------------------------
-// WCAG contrast math
-// ---------------------------------------------------------------------------
-
-/** Convert an sRGB channel value (0–255) to linear light. */
-function toLinear(c) {
-  const s = c / 255;
-  return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
-}
-
-/** Compute WCAG relative luminance for an [r,g,b] triplet (0–255 each). */
-function luminance([r, g, b]) {
-  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
-}
-
-/** Compute WCAG contrast ratio for two [r,g,b] colors. */
-function contrast(fg, bg) {
-  const L1 = Math.max(luminance(fg), luminance(bg));
-  const L2 = Math.min(luminance(fg), luminance(bg));
-  return (L1 + 0.05) / (L2 + 0.05);
-}
-
-/**
- * Composite a foreground color with alpha over an opaque background.
- * fg: [r, g, b] (0–255), alpha: 0–1, bg: [r, g, b] (0–255)
- * Returns opaque [r, g, b].
- */
-function composite(fg, alpha, bg) {
-  return fg.map((c, i) => Math.round(c * alpha + bg[i] * (1 - alpha)));
-}
-
-// ---------------------------------------------------------------------------
-// Hex / rgba parsers
-// ---------------------------------------------------------------------------
-
-/** Parse "#RRGGBB" or "#RGB" to [r, g, b]. Returns null on failure. */
-function hexToRgb(hex) {
-  hex = hex.replace(/^#/, "");
-  if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
-  if (hex.length !== 6) return null;
-  const n = parseInt(hex, 16);
-  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
-}
-
-/** Parse "R, G, B" or "R G B" (CSS rgb triplet) to [r, g, b]. */
-function tripletToRgb(s) {
-  const parts = s.trim().split(/[\s,]+/);
-  if (parts.length !== 3) return null;
-  return parts.map(Number);
-}
-
-/**
- * Parse "rgba(r,g,b,a)" or "rgba(r, g, b, a)" to { rgb:[r,g,b], alpha:a }.
- * Also handles "rgb(r,g,b)" (alpha=1).
- */
-function parseRgba(s) {
-  s = s.trim();
-  const rgbaM = s.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?\s*\)/);
-  if (!rgbaM) return null;
-  return {
-    rgb: [parseInt(rgbaM[1]), parseInt(rgbaM[2]), parseInt(rgbaM[3])],
-    alpha: rgbaM[4] !== undefined ? parseFloat(rgbaM[4]) : 1,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // TypeScript token source parser
@@ -291,128 +229,6 @@ function parseContrastProfiles(src) {
   }
 
   return result;
-}
-
-// ---------------------------------------------------------------------------
-// Kotlin parser (reuses logic from parity-check.mjs)
-// ---------------------------------------------------------------------------
-
-/** Parse Android Palette.kt + Color.kt for accent/accentOn/panel/text per palette. */
-function parseKotlinPalettes(kt) {
-  const result = {};
-
-  // Build symbol table of named Color constants
-  const colorValRe = /(?:private\s+)?val\s+(\w+)\s*=\s*Color\(0x([0-9a-fA-F]{6,8})\)/g;
-  const symbols = {};
-  let m;
-  while ((m = colorValRe.exec(kt)) !== null) {
-    symbols[m[1]] = ktHexToRgb("0x" + m[2]);
-  }
-  // Color.White and Color.Black
-  symbols["Color.White"] = [255, 255, 255];
-  symbols["Color.Black"] = [0, 0, 0];
-
-  function resolveExpr(expr) {
-    if (!expr) return null;
-    expr = expr.trim();
-    if (/^Color\.White$/.test(expr)) return [255, 255, 255];
-    if (/^Color\.Black$/.test(expr)) return [0, 0, 0];
-    const symM = expr.match(/^(\w+)(?:\.copy\(.*\))?$/);
-    if (symM && symbols[symM[1]]) return symbols[symM[1]];
-    const hexM = expr.match(/Color\(0x([0-9a-fA-F]{6,8})\)/);
-    if (hexM) return ktHexToRgb("0x" + hexM[1]);
-    return null;
-  }
-
-  function extractParenBlock(text, startIdx) {
-    let depth = 0, i = startIdx, start = -1;
-    while (i < text.length) {
-      if (text[i] === "(") { if (depth === 0) start = i + 1; depth++; }
-      else if (text[i] === ")") { depth--; if (depth === 0) return text.slice(start, i); }
-      i++;
-    }
-    return null;
-  }
-
-  // Parse IdeColors constructors
-  const ideColorsRe = /val\s+(\w+IdeColors)\s*=\s*IdeColors\s*\(/g;
-  const ideColorsMap = {
-    GraphiteMistIdeColors: "graphite-mist",
-    DeepSkyIdeColors: "deep-sky",
-    NordicCyanIdeColors: "nordic-cyan",
-    AuroraVioletIdeColors: "aurora-violet",
-    AmberNightIdeColors: "amber-night",
-    CloudSilverIdeColors: "cloud-silver",
-    FrostBlueIdeColors: "frost-blue",
-    PorcelainIdeColors: "porcelain",
-    PearlGreyIdeColors: "pearl-grey",
-    DarkIdeColors: "liquid-blue",
-    LightIdeColors: "_light-base",
-  };
-
-  while ((m = ideColorsRe.exec(kt)) !== null) {
-    const varName = m[1];
-    const palKey = ideColorsMap[varName];
-    if (!palKey) continue;
-
-    const startIdx = m.index + m[0].length - 1;
-    const block = extractParenBlock(kt, startIdx);
-    if (!block) continue;
-
-    const fields = ["accent", "accentOn", "bg", "panel"];
-    const entry = {};
-    for (const field of fields) {
-      const re = new RegExp(`\\b${field}\\s*=\\s*([^,\\n]+)`);
-      const fm = block.match(re);
-      if (!fm) continue;
-      const rgb = resolveExpr(fm[1].trim());
-      if (rgb) entry[field] = rgb;
-    }
-
-    if (!result[palKey]) result[palKey] = {};
-    Object.assign(result[palKey], entry);
-  }
-
-  // AuroraDef for bg0 (for surface background)
-  const auroraMap = {
-    GraphiteMistAurora: "graphite-mist",
-    LiquidBlueAurora: "liquid-blue",
-    DeepSkyAurora: "deep-sky",
-    NordicCyanAurora: "nordic-cyan",
-    AuroraVioletAurora: "aurora-violet",
-    AmberNightAurora: "amber-night",
-    CloudSilverAurora: "cloud-silver",
-    FrostBlueAurora: "frost-blue",
-    PorcelainAurora: "porcelain",
-    PearlGreyAurora: "pearl-grey",
-  };
-  const auroraRe = /val\s+(\w+Aurora)\s*=\s*AuroraDef\s*\(/g;
-  while ((m = auroraRe.exec(kt)) !== null) {
-    const palKey = auroraMap[m[1]];
-    if (!palKey) continue;
-    const startIdx = m.index + m[0].length - 1;
-    const block = extractParenBlock(kt, startIdx);
-    if (!block) continue;
-    const bg0m = block.match(/\bbg0\s*=\s*([^,\n]+)/);
-    if (bg0m) {
-      const rgb = resolveExpr(bg0m[1].trim());
-      if (rgb) {
-        if (!result[palKey]) result[palKey] = {};
-        result[palKey].bg0 = rgb;
-      }
-    }
-  }
-
-  return result;
-}
-
-/** Parse Android Color(0xFFRRGGBB) hex to [r,g,b]. */
-function ktHexToRgb(hex) {
-  hex = hex.replace(/^0[xX]/, "");
-  if (hex.length === 8) hex = hex.slice(2);
-  if (hex.length !== 6) return null;
-  const n = parseInt(hex, 16);
-  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
 }
 
 // ---------------------------------------------------------------------------
