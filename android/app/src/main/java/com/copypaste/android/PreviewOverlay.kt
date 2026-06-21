@@ -34,14 +34,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.BookmarkAdded
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.BookmarkBorder
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.SaveAlt
+// CopyPaste-5917.23: use Outlined variants to match the app-wide outlined icon styleguide.
+// AttachFile, BookmarkAdded, BookmarkBorder, Close, ContentCopy, Delete, OpenInNew, SaveAlt
+// all have Outlined equivalents — no Filled exceptions needed.
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.BookmarkAdded
+import androidx.compose.material.icons.outlined.OpenInNew
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.SaveAlt
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -447,7 +450,7 @@ private fun PreviewHeader(
                 // so the icon does not grow.
                 IconButton(onClick = onDismiss, modifier = Modifier.size(48.dp)) {
                     Icon(
-                        imageVector = Icons.Filled.Close,
+                        imageVector = Icons.Outlined.Close,
                         contentDescription = stringResource(R.string.cd_close_selection),
                         tint = c.dim,
                         modifier = Modifier.size(16.dp),
@@ -641,7 +644,7 @@ private fun PreviewImageContent(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Icon(
-                    imageVector = Icons.Filled.AttachFile,
+                    imageVector = Icons.Outlined.AttachFile,
                     contentDescription = null,
                     tint = c.danger,
                     modifier = Modifier.size(32.dp),
@@ -696,7 +699,7 @@ private fun PreviewFileContent(item: ClipboardItem) {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Icon(
-            imageVector = Icons.Filled.AttachFile,
+            imageVector = Icons.Outlined.AttachFile,
             contentDescription = null,
             tint = c.dim,
             modifier = Modifier.size(40.dp),
@@ -737,7 +740,7 @@ private fun PreviewActionRow(
     ) {
         IconButton(onClick = onCopy, modifier = Modifier.size(48.dp)) {
             Icon(
-                imageVector = Icons.Filled.ContentCopy,
+                imageVector = Icons.Outlined.ContentCopy,
                 contentDescription = stringResource(R.string.cd_copy),
                 tint = c.accent,
                 modifier = Modifier.size(18.dp),
@@ -746,8 +749,8 @@ private fun PreviewActionRow(
         Spacer(Modifier.width(4.dp))
         IconButton(onClick = { onSetPinned(!item.pinned) }, modifier = Modifier.size(48.dp)) {
             Icon(
-                imageVector = if (item.pinned) Icons.Filled.BookmarkAdded
-                              else Icons.Filled.BookmarkBorder,
+                imageVector = if (item.pinned) Icons.Outlined.BookmarkAdded
+                              else Icons.Outlined.BookmarkBorder,
                 contentDescription = stringResource(
                     if (item.pinned) R.string.action_unpin else R.string.action_pin,
                 ),
@@ -760,7 +763,7 @@ private fun PreviewActionRow(
             Spacer(Modifier.width(4.dp))
             IconButton(onClick = onOpenFile, modifier = Modifier.size(48.dp)) {
                 Icon(
-                    imageVector = Icons.Filled.OpenInNew,
+                    imageVector = Icons.Outlined.OpenInNew,
                     contentDescription = stringResource(R.string.cd_open_file),
                     tint = c.accent,
                     modifier = Modifier.size(18.dp),
@@ -771,7 +774,7 @@ private fun PreviewActionRow(
             Spacer(Modifier.width(4.dp))
             IconButton(onClick = onSaveFile, modifier = Modifier.size(48.dp)) {
                 Icon(
-                    imageVector = Icons.Filled.SaveAlt,
+                    imageVector = Icons.Outlined.SaveAlt,
                     contentDescription = stringResource(R.string.action_save_file),
                     tint = c.accent,
                     modifier = Modifier.size(18.dp),
@@ -781,7 +784,7 @@ private fun PreviewActionRow(
         Spacer(Modifier.width(4.dp))
         IconButton(onClick = onDelete, modifier = Modifier.size(48.dp)) {
             Icon(
-                imageVector = Icons.Filled.Delete,
+                imageVector = Icons.Outlined.Delete,
                 contentDescription = stringResource(R.string.cd_delete),
                 tint = c.danger,
                 modifier = Modifier.size(18.dp),

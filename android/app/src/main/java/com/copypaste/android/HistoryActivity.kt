@@ -1606,6 +1606,11 @@ fun HistoryScreen(
                         previewItemId = null
                         previewPhase = PreviewPhase.Idle
                     },
+                    // CopyPaste-5917.76: image/file tapped with paste-as-plain-text ON —
+                    // notify via GlassToast and leave clipboard unchanged.
+                    onMediaCopyAsText = { msg ->
+                        scope.launch { toastState.show(msg, GlassToastKind.INFO) }
+                    },
                 )
             }
 
@@ -2406,6 +2411,14 @@ private fun HistoryList(
     onPreviewPin: (String) -> Unit = {},
     /** Called when peek is dismissed without committing. */
     onPreviewDismiss: () -> Unit = {},
+    /**
+     * CopyPaste-5917.76: called when paste-as-plain-text is ON and the user taps an image
+     * or file row — these items have no usable plaintext payload, so the copy would silently
+     * fall back to the item's snippet (e.g. "[image]"). Instead of setting a useless clip,
+     * the callback is invoked with the human-readable error string so the caller can show
+     * a toast. Clipboard is NOT modified when this fires.
+     */
+    onMediaCopyAsText: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -2447,6 +2460,12 @@ private fun HistoryList(
             .getString("density", "comfortable")
             ?.equals("compact", ignoreCase = true) ?: false
     }
+
+    // CopyPaste-5917.76: rememberUpdatedState captures the latest onMediaCopyAsText without
+    // invalidating the copyItemById remember key. The lambda inside always calls the most
+    // recently provided callback (stable indirection), so callers can update the lambda without
+    // forcing a reallocation of copyItemById.
+    val currentOnMediaCopyAsText by androidx.compose.runtime.rememberUpdatedState(onMediaCopyAsText)
 
     // D: hoist the per-item copy logic into a single stable lambda (copyItemById) that
     // captures only stable screen-level values (ctx, repository, settings, scope).
@@ -2540,6 +2559,18 @@ private fun HistoryList(
                         }
                     }
                     else -> {
+                        // CopyPaste-5917.76: when paste-as-plain-text is ON, image and file
+                        // items reach this branch because their typed branches require
+                        // !forcePlainText. These items have no usable plaintext payload
+                        // (loadFullPlaintext returns null; snippet is "[image]" etc.).
+                        // Instead of silently setting a useless clipboard entry, notify the
+                        // user and leave the clipboard unchanged — matching macOS behaviour.
+                        if (forcePlainText && (item.isImage || item.isFile)) {
+                            currentOnMediaCopyAsText(
+                                ctx.getString(R.string.error_cannot_paste_as_text)
+                            )
+                            return@launch  // do not update clipboard; skip onCopied bump
+                        }
                         val key = settings.encryptionKey
                         val fullText = repository.loadFullPlaintext(item.id, key)
                             ?: item.snippet
