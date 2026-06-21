@@ -1,23 +1,15 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { Search, Clipboard, SearchX, PlugZap, Star, StarOff } from "lucide-react";
-import { api, HistoryEntry, friendlyIpcError, IpcError, isIpcNotReady, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
-import { applySpanMasking, shouldMask } from "../lib/masking";
-import { fuzzyMatch } from "../lib/fuzzy";
-import { formatRelativeTime } from "../lib/time";
+import { Search, Clipboard, SearchX, PlugZap } from "lucide-react";
+import { api, friendlyIpcError, pasteAsPlainText, playCopySound, showCopyNotification } from "../lib/ipc";
 import { useUI } from "../store";
-import { clearImageCache, ImageThumb } from "../components/ImageThumb";
-import { AppIcon } from "../components/AppIcon";
 import { EmptyState } from "../components/EmptyState";
-import { ContentIcon } from "../components/ContentIcon";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
-
-// Max items fetched for the popup list. Intentionally compact — the popup is a
-// quick-access surface, not a full history browser.
-const MAX_ITEMS = 50;
+import { GlideHighlight } from "./GlideHighlight";
+import { PopupRow } from "./PopupRow";
+import { usePopupHistory } from "./usePopupHistory";
 
 // M1: Global hook called by Rust's hide_popup_internal via popup.eval() to free
 // the JS heap (image LRU + item list) after the window is hidden without
@@ -29,56 +21,8 @@ declare global {
   }
 }
 
-// Brief delay (ms) before focusing the search input after the window is shown.
-// Needed because the native window activation and React render are not
-// synchronous — focusing too early silently no-ops on macOS.
-const FOCUS_DELAY_MS = 50;
-
 // Default text row height when previewSize hasn't been set yet.
 const DEFAULT_TEXT_ROW_H = 34;
-
-// Maccy parity: image rows in the popup use imageMaxHeight + 10 px padding.
-function popupRowHeight(isImage: boolean, textH: number, imageMaxH: number): number {
-  return isImage ? Math.max(imageMaxH + 10, 34) : Math.max(textH, 22);
-}
-
-// ── Highlighted text ──────────────────────────────────────────────────────────
-// Fuzzy-matched chars wrapped in accent colour+bg. DROP bold weight (causes width-shift).
-
-function HighlightedText({ text, positions }: { text: string; positions: number[] }): React.ReactElement {
-  if (positions.length === 0) {
-    return <>{text}</>;
-  }
-  const posSet = new Set(positions);
-  const nodes: React.ReactNode[] = [];
-  let i = 0;
-  while (i < text.length) {
-    if (posSet.has(i)) {
-      let j = i;
-      while (j < text.length && posSet.has(j)) j++;
-      nodes.push(
-        <span
-          key={i}
-          style={{
-            color: "var(--ide-accent)",
-            background: "var(--ide-selection)",  /* rgba(61,139,255,0.16) — §3 selected fill */
-            borderRadius: 2,
-            // Deliberately NO fontWeight change — prevents width-shift on highlight
-          }}
-        >
-          {text.slice(i, j)}
-        </span>
-      );
-      i = j;
-    } else {
-      let j = i;
-      while (j < text.length && !posSet.has(j)) j++;
-      nodes.push(text.slice(i, j));
-      i = j;
-    }
-  }
-  return <>{nodes}</>;
-}
 
 // ── Main Popup ────────────────────────────────────────────────────────────────
 
@@ -120,14 +64,11 @@ export function Popup() {
   useEffect(() => {
     document.documentElement.setAttribute("data-skin", skin ?? "classic");
   }, [skin]);
+
   const [query, setQuery] = useState("");
-  const [items, setItems] = useState<HistoryEntry[]>([]);
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
-  const win = getCurrentWindow();
   const isKeyboardNavRef = useRef(false);
   // zuzu: isScrollingRef tracks momentum-scroll state so onMouseEnter doesn't
   // fire for every row the pointer passes over during scroll, causing the
@@ -137,126 +78,11 @@ export function Popup() {
   const scrollIdleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [isScrolling, setIsScrolling] = useState(false);
 
-  // Fetch/refresh clipboard items from the daemon.
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const page = await api.historyPage(MAX_ITEMS, 0);
-      setItems(page.items);
-      setSelectedIdx(0);
-    } catch (e) {
-      if (e instanceof IpcError) {
-        if (e.code === "daemon_offline") {
-          setError("daemon_offline");
-        } else if (isIpcNotReady(e)) {
-          setError("ipc_not_ready");
-        } else {
-          // ERR-1: never render raw e.message — it may contain the socket path.
-          // Log to console for diagnostics; show a generic friendly message in the DOM.
-          console.error("[Popup] history load error:", e);
-          setError("error_unknown");
-        }
-      } else {
-        setError("error_unknown");
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Refresh when the window gains focus (popup was shown).
-  useEffect(() => {
-    // cancelled prevents a late-resolving unlisten promise or a stale focus
-    // event from executing after the component has unmounted / effect re-ran.
-    let cancelled = false;
-    let focusTimer: ReturnType<typeof setTimeout> | null = null;
-    const unlisten = win.onFocusChanged(({ payload: focused }) => {
-      if (cancelled) return;
-      if (focused) {
-        setQuery("");
-        refresh();
-        if (focusTimer !== null) clearTimeout(focusTimer);
-        focusTimer = setTimeout(() => { if (!cancelled) inputRef.current?.focus(); }, FOCUS_DELAY_MS);
-      }
-    });
-    return () => {
-      cancelled = true;
-      if (focusTimer !== null) clearTimeout(focusTimer);
-      unlisten.then((fn) => fn());
-    };
-  }, [win, refresh]);
-
-  // Initial load.
-  useEffect(() => {
-    refresh();
-    const focusTimer = setTimeout(() => inputRef.current?.focus(), FOCUS_DELAY_MS);
-    return () => clearTimeout(focusTimer);
-  }, [refresh]);
-
-  // Visibility-gated polling: refresh items every ~3 seconds while the popup
-  // window is in the foreground so newly-copied content appears without the
-  // user having to close and re-open the popup.
-  useEffect(() => {
-    const POLL_MS = 3000;
-    let timer: ReturnType<typeof setInterval> | null = null;
-
-    const start = () => {
-      if (timer !== null) return;
-      timer = setInterval(() => void refresh(), POLL_MS);
-    };
-    const stop = () => {
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-
-    const sync = () => {
-      if (document.visibilityState === "visible") start();
-      else stop();
-    };
-
-    sync();
-    document.addEventListener("visibilitychange", sync);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", sync);
-    };
-  }, [refresh]);
-
-  // Fuzzy-filtered and scored items.
-  const filtered = useMemo<Array<{ item: HistoryEntry; positions: number[] }>>(() => {
-    const q = query.trim();
-    if (!q) {
-      return items.map((item) => ({ item, positions: [] }));
-    }
-    const scored: Array<{ item: HistoryEntry; positions: number[]; score: number }> = [];
-    for (const item of items) {
-      const isImage = isImageType(item.content_type);
-      const isSensitive = item.is_sensitive;
-      let label: string;
-      if (isImage) {
-        label = "[Image]";
-      } else if (isSensitive) {
-        label = "••••••••";
-      } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
-        label =
-          applySpanMasking(item.preview, item.sensitive_spans)
-            .replace(/\s+/g, " ")
-            .trim() || "(empty)";
-      } else {
-        label = item.preview.replace(/\s+/g, " ").trim() || "(empty)";
-      }
-
-      const result = fuzzyMatch(q, label);
-      if (result !== null) {
-        scored.push({ item, positions: result.positions, score: result.score });
-      }
-    }
-    scored.sort((a, b) => b.score - a.score);
-    return scored.map(({ item, positions }) => ({ item, positions }));
-  }, [items, query, maskSensitive]);
+  const { setItems, filtered, loading, error, setError, refresh } = usePopupHistory(
+    query,
+    maskSensitive,
+    inputRef
+  );
 
   // Keep the selected index in bounds when filter changes.
   useEffect(() => {
@@ -325,20 +151,6 @@ export function Popup() {
     };
   }, []);
 
-  // M1: Register a global free-memory hook so the Rust hide path (hide_popup_internal)
-  // can call popup.eval("window.__copypasteFreeMemory()") after hiding to reclaim the
-  // JS heap (image LRU cache + history list) without navigating away from popup.html.
-  // Re-populating on next show is handled by the existing onFocusChanged → refresh().
-  useEffect(() => {
-    window.__copypasteFreeMemory = () => {
-      clearImageCache();
-      setItems([]);
-    };
-    return () => {
-      delete window.__copypasteFreeMemory;
-    };
-  }, []);
-
   // Open the main window's Settings view. We hide the popup, surface the main
   // window (show + focus via the JS WebviewWindow API), then emit a global
   // "open-settings" event that App.tsx listens for to navigate to the Settings
@@ -396,7 +208,7 @@ export function Popup() {
         isHidingRef.current = false;
       }
     },
-    [hide, playSoundOnCopy, notifyOnCopy]
+    [hide, playSoundOnCopy, notifyOnCopy, setError]
   );
 
   /// Paste the item as plain text (Option+Enter / F1).
@@ -419,7 +231,7 @@ export function Popup() {
         isHidingRef.current = false;
       }
     },
-    [hide]
+    [hide, setError]
   );
 
   const handlePin = useCallback(
@@ -427,13 +239,13 @@ export function Popup() {
       try {
         await api.pinItem(id, !pinned);
         // Refresh items directly from the daemon
-        const page = await api.historyPage(MAX_ITEMS, 0);
+        const page = await api.historyPage(50, 0);
         setItems(page.items);
       } catch (e) {
         console.error("Popup pin failed", e);
       }
     },
-    []
+    [setItems]
   );
 
   const confirmSelection = useCallback(async () => {
@@ -718,364 +530,3 @@ export function Popup() {
     </div>
   );
 }
-
-// ── GlideHighlight ────────────────────────────────────────────────────────────
-// §4/§8: A single absolutely-positioned layer that slides to the selected row.
-// Animates top + height over 130ms ease (CSS var --ease-standard if defined,
-// else cubic-bezier(0.2,0,0,1)). Instant when prefers-reduced-motion is set.
-
-interface GlideHighlightProps {
-  selectedIdx: number;
-  items: Array<{ item: HistoryEntry; positions: number[] }>;
-  textRowHeight: number;
-  imageMaxHeight: number;
-  listRef: React.RefObject<HTMLUListElement | null>;
-  /** zuzu: when true, suppress CSS transition and hide the layer if the
-   *  selected item has scrolled out of the visible clip region. */
-  isScrolling?: boolean;
-}
-
-function GlideHighlight({
-  selectedIdx,
-  items,
-  textRowHeight,
-  imageMaxHeight,
-  listRef,
-  isScrolling = false,
-}: GlideHighlightProps) {
-  const [top, setTop] = useState(0);
-  const [height, setHeight] = useState(textRowHeight);
-  // zuzu: track visibility separately so we can hide when out-of-viewport.
-  const [visible, setVisible] = useState(true);
-  // Track whether the user prefers reduced motion so we can skip animation.
-  // Guard against jsdom / test environments where matchMedia is unavailable.
-  const prefersReduced = useRef(
-    typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-
-  useEffect(() => {
-    // Read geometry directly from the rendered list item so we match the
-    // exact heights produced by popupRowHeight() without duplicating the calc.
-    const list = listRef.current;
-    if (!list) return;
-    const child = list.children[selectedIdx] as HTMLElement | undefined;
-    if (!child) return;
-    // offsetTop is relative to the list's offsetParent (which is our wrapper div).
-    // We also need to offset by the list's own scrollTop so the glide layer
-    // tracks the visible position (list scrolls, wrapper does not).
-    const newTop = child.offsetTop - list.scrollTop;
-    setTop(newTop);
-    setHeight(child.offsetHeight);
-    // zuzu: hide when the selected item has scrolled completely out of view.
-    setVisible(newTop >= 0 && newTop < list.clientHeight);
-  }, [selectedIdx, items, textRowHeight, imageMaxHeight, listRef]);
-
-  // Keep glide in sync when the list scrolls (user scrolls with keyboard nav).
-  // zuzu: also update visibility and freeze transition during scroll.
-  useEffect(() => {
-    const list = listRef.current;
-    if (!list) return;
-    const onScroll = () => {
-      const child = list.children[selectedIdx] as HTMLElement | undefined;
-      if (!child) return;
-      const newTop = child.offsetTop - list.scrollTop;
-      setTop(newTop);
-      // Hide if scrolled out of the visible clip region.
-      setVisible(newTop >= 0 && newTop < list.clientHeight);
-    };
-    list.addEventListener("scroll", onScroll, { passive: true });
-    return () => list.removeEventListener("scroll", onScroll);
-  }, [selectedIdx, listRef]);
-
-  return (
-    <div
-      aria-hidden
-      style={{
-        position: "absolute",
-        left: 0,
-        right: 0,
-        top,
-        height,
-        // §3 selection fill — token so it re-themes in light mode.
-        background: "var(--ide-selection)",
-        // zuzu: suppress the 130ms transition during scroll so the glide layer
-        // doesn't visibly slide out of the container during momentum scroll.
-        // Also hide (opacity 0) if the selected item is outside the viewport.
-        transition: prefersReduced.current || isScrolling
-          ? "none"
-          : "top 130ms cubic-bezier(0.2,0,0,1), height 130ms cubic-bezier(0.2,0,0,1)",
-        opacity: visible && !isScrolling ? 1 : 0,
-        // Behind row content (z=0), above list background.
-        zIndex: 0,
-        pointerEvents: "none",
-      }}
-    />
-  );
-}
-
-// ── PopupRow ──────────────────────────────────────────────────────────────────
-
-interface PopupRowProps {
-  item: HistoryEntry;
-  index: number;
-  selected: boolean;
-  textRowHeight: number;
-  imageMaxHeight: number;
-  maskSensitive: boolean;
-  matchPositions: number[];
-  /** M4: number of preview text lines (1 = ellipsis; > 1 = multiline clamp). */
-  previewLines: number;
-  showKeycap: boolean;
-  onMouseEnter: () => void;
-  onClick: () => void;
-  onPin: () => void;
-}
-
-const PopupRow = React.memo(function PopupRow({
-  item,
-  index,
-  selected,
-  textRowHeight,
-  imageMaxHeight,
-  maskSensitive,
-  matchPositions,
-  previewLines,
-  showKeycap,
-  onMouseEnter,
-  onClick,
-  onPin,
-}: PopupRowProps) {
-  const isImage = isImageType(item.content_type);
-  const isSensitive = item.is_sensitive;
-
-  // Per-row reveal: user clicks the blurred text to temporarily see it.
-  const [revealed, setRevealed] = useState(false);
-  const blurred = shouldMask(item, maskSensitive) && !revealed;
-
-  const rowH = popupRowHeight(isImage, textRowHeight, imageMaxHeight);
-
-  let label: string;
-  let canHighlight = false;
-  if (isImage) {
-    label = "[Image]";
-  } else if (isSensitive) {
-    // Use actual preview text so the blur reveals real content on click.
-    label = item.preview.replace(/\s+/g, " ").trim() || "••••••••";
-  } else if (maskSensitive && item.sensitive_spans && item.sensitive_spans.length > 0) {
-    label =
-      applySpanMasking(item.preview, item.sensitive_spans)
-        .replace(/\s+/g, " ")
-        .trim() || "(empty)";
-  } else {
-    label = item.preview.replace(/\s+/g, " ").trim() || "(empty)";
-    canHighlight = true;
-  }
-
-  // Relative time (tabular-nums)
-  const relTime = formatRelativeTime(item.wall_time, "short");
-
-  return (
-    <li
-      id={`popup-item-${item.id}`}
-      role="option"
-      aria-selected={selected}
-      className={[
-        isImage ? "popup-row-image" : "popup-row",
-        "flex items-center gap-2 px-3 cursor-pointer select-none relative group",
-        selected ? "row-selected-bar" : "",
-      ].join(" ")}
-      style={{
-        minHeight: isImage ? Math.max(rowH, 50) : rowH,
-        // §4/§8 glide: row background is always transparent — the GlideHighlight
-        // layer provides the selection colour via absolute positioning.
-        // Pinned rows keep their warm tint since it's a persistent state marker.
-        background: item.pinned ? "var(--ide-warning-dim)" : "transparent",
-        // No per-row transition needed — GlideHighlight handles animation.
-        zIndex: 1,
-      }}
-      onMouseEnter={onMouseEnter}
-      onClick={onClick}
-    >
-      {/* Content-type glyph — shared ContentIcon (Lucide, strokeWidth 1.5) */}
-      <ContentIcon contentType={isImage ? "image" : item.content_type} size={14} />
-
-      {/* Primary label / image thumb */}
-      {isImage ? (
-        <ImageThumb id={item.id} maxHeight={imageMaxHeight} />
-      ) : (
-        <span
-          className="flex-1 min-w-0 text-[13px]"
-          style={{
-            // Token text (was hardcoded white) — legible on light + dark glass.
-            color: blurred ? "var(--ide-faint)" : "var(--ide-text)",
-            // M4: multi-line clamp when previewLines > 1, single-line ellipsis otherwise
-            ...(previewLines > 1
-              ? {
-                  display: "-webkit-box",
-                  WebkitLineClamp: previewLines,
-                  WebkitBoxOrient: "vertical" as const,
-                  overflow: "hidden",
-                }
-              : {
-                  whiteSpace: "nowrap" as const,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                }),
-          }}
-        >
-          {blurred ? (
-            // Blur reveal: click temporarily shows this row's text.
-            // stopPropagation prevents triggering the row's copy-on-click.
-            <span
-              title="Click to reveal sensitive content"
-              onClick={(e) => {
-                e.stopPropagation();
-                setRevealed(true);
-              }}
-              style={{
-                filter: "blur(5px)",
-                userSelect: "none",
-                cursor: "pointer",
-                display: "inline-block",
-                maxWidth: "100%",
-              }}
-            >
-              {label}
-            </span>
-          ) : canHighlight && matchPositions.length > 0 ? (
-            <HighlightedText text={label} positions={matchPositions} />
-          ) : (
-            label
-          )}
-        </span>
-      )}
-
-      {/* Source-app icon + label chip — subtle, right of preview text */}
-      {item.app_bundle_id && (() => {
-        const appLabel = sourceAppLabel(item.app_bundle_id);
-        return appLabel ? (
-          <span
-            // Theme-aware subtle pill (was hardcoded white fill/border, invisible
-            // on light): reuse the .keycap surface tokens which adapt per theme.
-            // CopyPaste-kp6f: borderRadius via skin token (--skin-r-chip) as
-            // inline style — not the static rounded-ide-sm Tailwind class — so
-            // quiet/vapor get their canonical chip corner radius.
-            className="flex shrink-0 items-center gap-1 text-[10.5px] leading-none px-1 py-0.5"
-            style={{
-              color: "var(--ide-ghost)",
-              background: "var(--ide-hover)",
-              border: "1px solid var(--ide-divider)",
-              borderRadius: "var(--skin-r-chip)",
-            }}
-            title={item.app_bundle_id ?? undefined}
-          >
-            {/* §4: AppIcon 12→16px */}
-            <AppIcon bundleId={item.app_bundle_id} size={16} />
-            {appLabel}
-          </span>
-        ) : null;
-      })()}
-
-      {/* Right cluster — fixed-width so layout never shifts */}
-      <div
-        className="flex items-center gap-1.5 shrink-0"
-        style={{ minWidth: "5.5rem", justifyContent: "flex-end" }}
-      >
-        {/* Relative time (tabular-nums, 11px) */}
-        <span
-          className="text-[11px]"
-          style={{ color: "var(--ide-ghost)", fontVariantNumeric: "tabular-nums" }}
-        >
-          {relTime}
-        </span>
-
-        {/* Star interactive hover pin button and at-rest indicator.
-            HW-M5 fix: both the hover button and the at-rest badge are absolute
-            within the fixed h-5 w-5 slot — no in-flow children, so the slot
-            width never changes between pinned/unpinned rows, keeping the
-            timestamp and keycap aligned across all rows.
-            dm51: ★ star glyph (styleguide §pin) replaces bookmark SVG. */}
-        <div className="relative flex items-center justify-center h-5 w-5 shrink-0">
-          {/* At-rest pinned badge — visible when pinned, fades out on row hover */}
-          {item.pinned && (
-            <Star
-              width={10}
-              height={10}
-              strokeWidth={0}
-              fill="currentColor"
-              aria-label="Pinned"
-              className="absolute group-hover:opacity-0 transition-opacity"
-              style={{ color: "var(--ide-warning)", transitionDuration: "120ms", zIndex: 1 }}
-            />
-          )}
-
-          {/* Hover pin/unpin button — shown on group hover, sits above badge */}
-          <button
-            type="button"
-            aria-label={item.pinned ? "Unpin" : "Pin"}
-            title={item.pinned ? "Unpin" : "Pin"}
-            onClick={(e) => {
-              e.stopPropagation();
-              onPin();
-            }}
-            className="absolute inset-0 flex items-center justify-center rounded hover:bg-ide-hover text-ide-dim hover:text-ide-text transition-opacity opacity-0 group-hover:opacity-100"
-            style={{ border: "none", background: "none", cursor: "pointer", zIndex: 2 }}
-          >
-            {item.pinned ? (
-              // Filled star = currently pinned; amber tint matches at-rest badge
-              <Star
-                width={11}
-                height={11}
-                strokeWidth={0}
-                fill="currentColor"
-                aria-hidden={true}
-                style={{ color: "var(--ide-warning)" }}
-              />
-            ) : (
-              // Outline star = unpinned; inherits button's text-ide-dim / hover:text-white
-              <StarOff
-                width={11}
-                height={11}
-                strokeWidth={1.5}
-                aria-hidden={true}
-              />
-            )}
-          </button>
-        </div>
-
-        {/* ⌘1-9 keycap (first 9 rows, no active query) */}
-        {showKeycap && (
-          <span className={selected ? "keycap keycap-selected" : "keycap"}>
-            ⌘{index + 1}
-          </span>
-        )}
-      </div>
-    </li>
-  );
-// Custom comparator: skip re-render when item data, display settings, and
-// selection state are all unchanged. Handler function references are ignored —
-// they are per-item closures whose effective inputs (item.id, item.pinned, idx)
-// are already covered by the structural checks below.
-}, (prev, next) => {
-  if (prev.item.id !== next.item.id) return false;
-  if (prev.item.preview !== next.item.preview) return false;
-  if (prev.item.pinned !== next.item.pinned) return false;
-  if (prev.item.wall_time !== next.item.wall_time) return false;
-  if (prev.item.is_sensitive !== next.item.is_sensitive) return false;
-  if (prev.item.content_type !== next.item.content_type) return false;
-  if (prev.item.app_bundle_id !== next.item.app_bundle_id) return false;
-  if (prev.index !== next.index) return false;
-  if (prev.selected !== next.selected) return false;
-  if (prev.textRowHeight !== next.textRowHeight) return false;
-  if (prev.imageMaxHeight !== next.imageMaxHeight) return false;
-  if (prev.maskSensitive !== next.maskSensitive) return false;
-  if (prev.previewLines !== next.previewLines) return false;
-  if (prev.showKeycap !== next.showKeycap) return false;
-  // matchPositions: compare by length + first element as a cheap heuristic
-  // (positions only change when the query changes, which also changes item order).
-  if (prev.matchPositions.length !== next.matchPositions.length) return false;
-  if (prev.matchPositions[0] !== next.matchPositions[0]) return false;
-  return true;
-});
