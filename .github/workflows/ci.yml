@@ -101,6 +101,20 @@ jobs:
           mkdir -p "$COPYPASTE_DATA_DIR" "$COPYPASTE_CACHE_DIR" "$COPYPASTE_CONFIG_DIR" "$COPYPASTE_LOG_DIR"
           cargo test -p copypaste-daemon -- --test-threads=1 --nocapture
 
+      - name: Test daemon with cloud-sync feature (44rq.14)
+        # cloud-sync is now a default feature (Cargo.toml default = ["cloud-sync", "relay-sync"]),
+        # but this explicit step ensures the cloud IPC paths (cloud_sign_in, get_sync_status, etc.)
+        # compile and their mockito-backed unit tests run.  Uses --features to be unambiguous even
+        # if defaults change.  --test-threads=1 for the same env-mutation reason as above.
+        env:
+          COPYPASTE_DATA_DIR: ${{ runner.temp }}/cp-cloud/data
+          COPYPASTE_CACHE_DIR: ${{ runner.temp }}/cp-cloud/cache
+          COPYPASTE_CONFIG_DIR: ${{ runner.temp }}/cp-cloud/config
+          COPYPASTE_LOG_DIR: ${{ runner.temp }}/cp-cloud/log
+        run: |
+          mkdir -p "$COPYPASTE_DATA_DIR" "$COPYPASTE_CACHE_DIR" "$COPYPASTE_CONFIG_DIR" "$COPYPASTE_LOG_DIR"
+          cargo test -p copypaste-daemon --features cloud-sync -- --test-threads=1
+
   # Feature-combination coverage (audit zbkm): the default `test` job only
   # exercises default features. This job catches cfg/feature-gated breakage.
   # --no-default-features is fully tested; --all-features runs clippy (-D warnings)
@@ -184,8 +198,10 @@ jobs:
           - checks: bans
             continue-on-error: false
           - checks: advisories
-            # advisory hits are informational — do not block merges
-            continue-on-error: true
+            # d41w.14: advisory hits are now blocking — a new CVE must not silently
+            # pass CI. Known-safe advisories should be added to deny.toml [advisories]
+            # ignore list with a justification comment rather than suppressed globally.
+            continue-on-error: false
     continue-on-error: ${{ matrix.continue-on-error }}
     steps:
       - uses: actions/checkout@v4

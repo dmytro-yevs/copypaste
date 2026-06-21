@@ -6,26 +6,14 @@ name: Design Token Parity Check
 # Also checks structural skin token parity (skins.ts ↔ Skin.kt) per §2.2 of
 # docs/design/skins-implementation-plan.md (CopyPaste-sn8k V1).
 on:
+  # ojas.2: removed paths: filters — parity must run on EVERY PR, not just when
+  # token source files change. A PR touching only a Component or View file can
+  # still drift token values; path filtering was hiding that.
   pull_request:
-    paths:
-      - "crates/copypaste-ui/src/index.css"
-      - "android/app/src/main/java/com/copypaste/android/ui/theme/Palette.kt"
-      - "scripts/parity-check.mjs"
-      - "docs/PARITY-SPEC.md"
-      - "crates/copypaste-ui/src/lib/skins.ts"
-      - "android/app/src/main/java/com/copypaste/android/ui/theme/Skin.kt"
-      - "scripts/check-skin-parity.mjs"
+    branches: [main]
   push:
     branches:
       - main
-    paths:
-      - "crates/copypaste-ui/src/index.css"
-      - "android/app/src/main/java/com/copypaste/android/ui/theme/Palette.kt"
-      - "scripts/parity-check.mjs"
-      - "docs/PARITY-SPEC.md"
-      - "crates/copypaste-ui/src/lib/skins.ts"
-      - "android/app/src/main/java/com/copypaste/android/ui/theme/Skin.kt"
-      - "scripts/check-skin-parity.mjs"
   # Allow manual runs from the Actions tab
   workflow_dispatch:
 

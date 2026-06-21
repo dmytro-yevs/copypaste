@@ -14,15 +14,15 @@ name = "copypaste-daemon"
 path = "src/main.rs"
 
 [features]
-# fix(44rq.14): relay-sync is now a default feature so `cargo build` ships a
-# daemon where relay IPC methods (set_sync_passphrase, get_sync_status,
-# rotate_sync_key, revoke_and_rotate) are compiled in.  The relay path is a
-# no-op at runtime until `config.relay_url` is set — no credentials are
-# baked in, so enabling by default is safe.  cloud-sync is NOT added to
-# defaults because it pulls in copypaste-supabase + chacha20poly1305 and
-# requires external SUPABASE_URL / SUPABASE_ANON_KEY env vars; opt-in is
-# the right model for that heavier dependency set.
-default = ["relay-sync"]
+# fix(44rq.14): cloud-sync and relay-sync are both default features so
+# `cargo build -p copypaste-daemon` ships a daemon where ALL sync IPC methods
+# (cloud_sign_in, cloud_sign_out, get_sync_status, set_sync_passphrase,
+# cloud_test_connection, rotate_sync_key, revoke_and_rotate) are compiled in
+# and respond with real logic rather than `not_implemented`.  Enabling by
+# default is safe: the cloud path is a no-op at runtime until the user signs in
+# (SUPABASE_URL / SUPABASE_ANON_KEY are consumed from config, not baked in).
+# The relay path is a no-op until `config.relay_url` is set.
+default = ["cloud-sync", "relay-sync"]
 # Enables Supabase cloud sync (requires SUPABASE_URL + SUPABASE_ANON_KEY env vars at runtime).
 cloud-sync = ["reqwest", "copypaste-supabase", "chacha20poly1305"]
 # Enables the relay-as-database sync path (relay client: register/push/subscribe).

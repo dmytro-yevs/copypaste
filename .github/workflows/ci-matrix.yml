@@ -108,7 +108,8 @@ jobs:
           - checks: bans
             continue-on-error: false
           - checks: advisories
-            continue-on-error: true
+            # d41w.14: blocking — see ci.yml cargo-deny job for rationale.
+            continue-on-error: false
     continue-on-error: ${{ matrix.continue-on-error }}
     steps:
       - uses: actions/checkout@v4
