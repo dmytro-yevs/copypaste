@@ -7,9 +7,6 @@ import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.UUID
-import javax.crypto.Cipher
-import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.SecretKeySpec
 
 /**
  * Persists clipboard items to SharedPreferences.
@@ -180,13 +177,13 @@ class ClipboardRepository(context: Context) {
                 return@withContext lamportOrderedIds.mapNotNull { id ->
                     val raw = prefs.getString("item_$id", null) ?: return@mapNotNull null
                     if (isDeletedBlob(raw)) return@mapNotNull null
-                    val item = synchronized(parseCacheLock) {
-                        val entry = parseCache[id]
+                    val item = synchronized(ClipboardItemCache.parseCacheLock) {
+                        val entry = ClipboardItemCache.parseCache[id]
                         if (entry != null && entry.rawBlob == raw) entry.item else null
                     } ?: run {
                         val parsed = parseItem(id, raw, key) ?: return@mapNotNull null
-                        synchronized(parseCacheLock) {
-                            parseCache[id] = ParsedEntry(raw, parsed)
+                        synchronized(ClipboardItemCache.parseCacheLock) {
+                            ClipboardItemCache.parseCache[id] = ClipboardItemCache.ParsedEntry(raw, parsed)
                         }
                         parsed
                     }
@@ -232,13 +229,13 @@ class ClipboardRepository(context: Context) {
                 // A: serve from parse cache when the raw blob is unchanged — avoids a
                 // full AEAD decrypt + native isSensitive() for every row on every reload.
                 // Only decrypt when the blob has actually been written since last load.
-                val item = synchronized(parseCacheLock) {
-                    val entry = parseCache[id]
+                val item = synchronized(ClipboardItemCache.parseCacheLock) {
+                    val entry = ClipboardItemCache.parseCache[id]
                     if (entry != null && entry.rawBlob == raw) entry.item else null
                 } ?: run {
                     val parsed = parseItem(id, raw, key) ?: return@mapNotNull null
-                    synchronized(parseCacheLock) {
-                        parseCache[id] = ParsedEntry(raw, parsed)
+                    synchronized(ClipboardItemCache.parseCacheLock) {
+                        ClipboardItemCache.parseCache[id] = ClipboardItemCache.ParsedEntry(raw, parsed)
                     }
                     parsed
                 }
@@ -507,7 +504,7 @@ class ClipboardRepository(context: Context) {
             val pinnedBefore = pinnedList.size
             pinnedList.removeAll(toDelete)
             val pinnedChanged = pinnedList.size != pinnedBefore
-            cachedIds = storedList
+            ClipboardItemCache.cachedIds = storedList
             val editor = prefs.edit()
                 .putString(KEY_ITEM_IDS, storedList.joinToString(","))
             for (id in toDelete) {
@@ -585,7 +582,7 @@ class ClipboardRepository(context: Context) {
             // (re-syncing pinned items on the next poll is safe).
             val remaining = ids.filter { it in pinnedSet }
             deletedCount = ids.size - remaining.size
-            cachedIds = remaining
+            ClipboardItemCache.cachedIds = remaining
             editor
                 .putString(KEY_ITEM_IDS, remaining.joinToString(","))
                 .remove(KEY_SYNCED_SOURCE_IDS)
@@ -634,7 +631,7 @@ class ClipboardRepository(context: Context) {
             // Reset in-memory parse cache so no stale entries linger after the wipe.
             evictAllParseCache()
             // Invalidate the id cache — prefs.clear() removed KEY_ITEM_IDS.
-            cachedIds = emptyList()
+            ClipboardItemCache.cachedIds = emptyList()
             // Reset dedup state so the first captured item after reset is stored fresh.
             resetDedupState()
         }
@@ -692,7 +689,7 @@ class ClipboardRepository(context: Context) {
             // Retain only pinned ids in the index; clear source-id seen-set.
             val remaining = ids.filter { it in pinnedSet }
             deletedCount = ids.size - remaining.size
-            cachedIds = remaining
+            ClipboardItemCache.cachedIds = remaining
             editor
                 .putString(KEY_ITEM_IDS, remaining.joinToString(","))
                 .remove(KEY_SYNCED_SOURCE_IDS)
@@ -925,7 +922,7 @@ class ClipboardRepository(context: Context) {
             rebuiltParts[5] = newLamport.toString() // bumped lamport
             val rebuilt = rebuiltParts.joinToString("|")
             ids.add(id)  // re-append → most-recent position
-            cachedIds = ids
+            ClipboardItemCache.cachedIds = ids
             prefs.edit()
                 .putString("item_$id", rebuilt)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -993,14 +990,14 @@ class ClipboardRepository(context: Context) {
         // different clip would have to share both its length and its hashCode
         // within the window to be wrongly dropped.
         val dedupKey = "${plaintext.length}:${plaintext.hashCode()}"
-        synchronized(dedupLock) {
+        synchronized(ClipboardDedupState.dedupLock) {
             val now = System.currentTimeMillis()
-            if (dedupKey == lastStoredKey && now - lastStoredAtMs < DEDUP_WINDOW_MS) {
-                Log.d(TAG, "Duplicate clip within ${DEDUP_WINDOW_MS}ms — skipping")
+            if (dedupKey == ClipboardDedupState.lastStoredKey && now - ClipboardDedupState.lastStoredAtMs < ClipboardDedupState.DEDUP_WINDOW_MS) {
+                Log.d(TAG, "Duplicate clip within ${ClipboardDedupState.DEDUP_WINDOW_MS}ms — skipping")
                 return@withContext ""
             }
-            lastStoredKey = dedupKey
-            lastStoredAtMs = now
+            ClipboardDedupState.lastStoredKey = dedupKey
+            ClipboardDedupState.lastStoredAtMs = now
         }
 
         // AB-6b — PARITY with macOS: do NOT drop sensitive items. macOS stores
@@ -1054,7 +1051,7 @@ class ClipboardRepository(context: Context) {
             // would otherwise append a second copy of the same id, which then
             // crashes the history LazyColumn ("Key … was already used").
             val ids = appendUniqueId(storedIds(), id)
-            cachedIds = ids
+            ClipboardItemCache.cachedIds = ids
             prefs.edit()
                 .putString("item_$id", encoded)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -1240,7 +1237,7 @@ class ClipboardRepository(context: Context) {
                 return@withContext false
             }
             val ids = appendUniqueId(storedIds(), storageId)
-            cachedIds = ids
+            ClipboardItemCache.cachedIds = ids
             prefs.edit()
                 .putString("item_$storageId", encoded)
                 .putString(KEY_ITEM_IDS, ids.joinToString(","))
@@ -1505,7 +1502,7 @@ class ClipboardRepository(context: Context) {
             }
 
             if (didEvict) {
-                cachedIds = ids
+                ClipboardItemCache.cachedIds = ids
                 editor.putString(KEY_ITEM_IDS, ids.joinToString(",")).apply()
             }
         }
@@ -1593,7 +1590,7 @@ class ClipboardRepository(context: Context) {
             }
 
             if (deletedCount > 0) {
-                cachedIds = survivors
+                ClipboardItemCache.cachedIds = survivors
                 editor.putString(KEY_ITEM_IDS, survivors.joinToString(",")).apply()
             }
         }
@@ -1608,25 +1605,8 @@ class ClipboardRepository(context: Context) {
      * Returns false (treat as non-sensitive) when no [key] is available or the
      * blob cannot be decrypted, so a missing key never wrongly wipes data.
      */
-    private fun isItemSensitive(id: String, raw: String, key: ByteArray?): Boolean {
-        if (key == null) return false
-        val parts = raw.split("|")
-        val nonceB64 = parts.getOrNull(3) ?: return false
-        val ctB64 = parts.getOrNull(4) ?: return false
-        return try {
-            val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
-            val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
-            val plain = decryptForPreview(id, ciphertext, nonce, key, keyVersionFromParts(parts))
-            try {
-                isSensitive(plain)
-            } catch (_: UnsatisfiedLinkError) {
-                false
-            }
-        } catch (e: Exception) {
-            Log.d(TAG, "isItemSensitive: decrypt failed for $id: ${e.message}")
-            false
-        }
-    }
+    private fun isItemSensitive(id: String, raw: String, key: ByteArray?): Boolean =
+        ClipboardBlobCodec.isItemSensitive(id, raw, key)
 
     /**
      * General retention TTL in seconds. Read from the same "copypaste" prefs file
@@ -1648,16 +1628,8 @@ class ClipboardRepository(context: Context) {
      * ([storeImageBytes] caps on raw `bytes.size`), preventing the byte quota
      * from being over-counted by the ~1.33x Base64 inflation.
      */
-    private fun base64RawByteSize(b64: String): Int {
-        val len = b64.length
-        if (len == 0) return 0
-        val padding = when {
-            b64.endsWith("==") -> 2
-            b64.endsWith("=") -> 1
-            else -> 0
-        }
-        return (len / 4) * 3 - padding
-    }
+    private fun base64RawByteSize(b64: String): Int =
+        ClipboardBlobCodec.base64RawByteSize(b64)
 
     /**
      * The ordered id index, read back canonical: blanks removed and any
@@ -1668,14 +1640,14 @@ class ClipboardRepository(context: Context) {
      */
     private fun storedIds(): List<String> {
         // Fast path: in-memory snapshot populated by every writer.
-        cachedIds?.let { return it }
+        ClipboardItemCache.cachedIds?.let { return it }
         // Cold start: parse from SharedPreferences and cache.
         val ids = prefs.getString(KEY_ITEM_IDS, "")
             ?.split(",")
             ?.filter { it.isNotBlank() }
             ?.distinct()
             ?: emptyList()
-        cachedIds = ids
+        ClipboardItemCache.cachedIds = ids
         return ids
     }
 
@@ -1752,20 +1724,9 @@ class ClipboardRepository(context: Context) {
         wallTimeMs: Long = System.currentTimeMillis(),
         deleted: Boolean = false,
         originDeviceId: String = "",
-        // Field 8 (index 8): AEAD key_version. Must match the value passed to
-        // encryptText and must be threaded back into decryptText at read time.
-        // Default 2 = ITEM_KEY_VERSION_CURRENT (matches the daemon).
         keyVersion: UByte = 2u,
-        // Field 9 (index 9): source app package name. Null/blank = unknown.
-        // When present and in KNOWN_SENSITIVE_PACKAGES, parseItem() forces
-        // isSensitive=true regardless of the content classifier verdict.
         sourceApp: String? = null,
-    ): String {
-        val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
-        val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
-        val deletedFlag = if (deleted) 1 else 0
-        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs|$deletedFlag|$originDeviceId|$keyVersion|${sourceApp ?: ""}"
-    }
+    ): String = ClipboardBlobCodec.encodeItem(blob, plaintextLen, contentType, lamportTs, wallTimeMs, deleted, originDeviceId, keyVersion, sourceApp)
 
     /**
      * Build a tombstone blob for item [id].
@@ -1782,14 +1743,8 @@ class ClipboardRepository(context: Context) {
      * The original originDeviceId (index 7) is preserved so the tombstone still
      * attributes to its source device.
      */
-    private fun encodeTombstone(existingRaw: String, bumpedLamportTs: Long): String {
-        val parts = existingRaw.split("|")
-        val wallTimeMs = System.currentTimeMillis()
-        // Preserve contentType from the original blob so tombstones are typed.
-        val contentType = parts.getOrNull(1) ?: "text/plain"
-        val originDeviceId = parts.getOrNull(7) ?: ""
-        return "$wallTimeMs|$contentType|0||tombstone|$bumpedLamportTs|1|$originDeviceId"
-    }
+    private fun encodeTombstone(existingRaw: String, bumpedLamportTs: Long): String =
+        ClipboardBlobCodec.encodeTombstone(existingRaw, bumpedLamportTs)
 
     /**
      * Read the deleted flag from a raw blob string.
@@ -1798,9 +1753,8 @@ class ClipboardRepository(context: Context) {
      * NOTE: index 6 is read explicitly (not the LAST field) because v4 appended
      * originDeviceId at index 7 — the deleted flag is no longer terminal.
      */
-    private fun isDeletedBlob(raw: String): Boolean {
-        return raw.split("|").getOrNull(6) == "1"
-    }
+    private fun isDeletedBlob(raw: String): Boolean =
+        ClipboardBlobCodec.isDeletedBlob(raw)
 
     /**
      * Return a new blob string with field 5 (lamport_ts) replaced by [newLamportTs].
@@ -1813,100 +1767,11 @@ class ClipboardRepository(context: Context) {
      * Returns the raw string unchanged when the blob has fewer than 6 fields (legacy
      * pre-lamport format) — those items cannot carry a lamport stamp.
      */
-    private fun bumpBlobLamportTs(raw: String, newLamportTs: Long): String {
-        val parts = raw.split("|")
-        if (parts.size < 6) return raw  // legacy format — leave untouched
-        val mutable = parts.toMutableList()
-        mutable[5] = newLamportTs.toString()
-        return mutable.joinToString("|")
-    }
+    private fun bumpBlobLamportTs(raw: String, newLamportTs: Long): String =
+        ClipboardBlobCodec.bumpBlobLamportTs(raw, newLamportTs)
 
-    private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? {
-        val parts = try {
-            raw.split("|")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse item $id: ${e.message}")
-            return null
-        }
-        val wallTimeMs = parts.getOrNull(0)?.toLongOrNull() ?: return null
-        val contentType = parts.getOrNull(1) ?: return null
-        val nonceB64 = parts.getOrNull(3)
-        val ctB64 = parts.getOrNull(4)
-
-        val plaintext: String? = if (nonceB64 != null && ctB64 != null) {
-            try {
-                val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
-                val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
-                decryptForPreview(id, ciphertext, nonce, key, keyVersionFromParts(parts))
-            } catch (e: Exception) {
-                Log.d(TAG, "Preview decrypt failed for $id: ${e.message}")
-                null
-            }
-        } else {
-            null
-        }
-
-        val contentSensitive = plaintext != null && try {
-            isSensitive(plaintext)
-        } catch (_: UnsatisfiedLinkError) {
-            false
-        }
-
-        // Field 9 (index 9): sourceApp — package name of the capturing app (v5 format).
-        // Absent in legacy blobs (< 10 fields) → null → no effect on sensitivity verdict.
-        // SECURITY: only ever override sensitivity to TRUE, never false. A known password-
-        // manager source always produces a sensitive item regardless of the content
-        // classifier — the content may not match patterns (e.g. TOTP codes, short pins).
-        val sourceApp = parts.getOrNull(9)?.takeIf { it.isNotBlank() }
-        val sourceAppForcedSensitive = sourceApp != null && sourceApp in KNOWN_SENSITIVE_PACKAGES
-
-        // Sensitivity is the logical OR of the content classifier AND the source-app override.
-        val sensitive = contentSensitive || sourceAppForcedSensitive
-
-        val snippet = if (plaintext == null) UNABLE_TO_PREVIEW else previewFromPlaintext(plaintext)
-
-        // CopyPaste-ojsh: detect sensitive spans for non-fully-sensitive text items.
-        // Fully-sensitive items use full-blur masking in HistoryActivity; they don't
-        // need span masking. Only compute spans when we have plaintext AND the item is
-        // NOT fully sensitive (span masking is the partial-masking path).
-        // When sourceApp forced sensitivity, clear sensitiveSpans — the full item is
-        // sensitive, not individual spans within it. This matches the full-blur path.
-        val sensitiveSpans: List<IntRange> = if (!sensitive && plaintext != null && snippet.isNotBlank()) {
-            try {
-                sensitiveSpanRanges(detectSensitiveSpans(snippet))
-            } catch (_: Exception) {
-                emptyList()
-            }
-        } else {
-            emptyList()
-        }
-
-        // Text payload byte size is the encoded plaintextLen field (parts[2]) — the UTF-8
-        // byte length recorded at capture by encodeItem(). Already in hand here, no blob load.
-        // Image/file items carry their real bytes under separate prefs keys, so getItems()
-        // overrides tooLargeToSync for those after this returns.
-        val plaintextLen = parts.getOrNull(2)?.toLongOrNull() ?: 0L
-        val tooLargeToSync = plaintextLen > SYNC_MAX_BLOB_BYTES
-
-        // Field 7 (index 7): originDeviceId — added for device-attribution parity with macOS.
-        // (Index 6 is the soft-delete flag; originDeviceId was appended after it.)
-        // Absent in legacy blobs (< 8 fields); blank string means "captured locally,
-        // no device id recorded yet". Both map to null in the ClipboardItem.
-        val originDeviceId = parts.getOrNull(7)?.takeIf { it.isNotBlank() }
-
-        // pinned, imagePng, and image/file tooLargeToSync are populated by getItems()
-        // after parseItem returns.
-        return ClipboardItem(
-            id = id,
-            contentType = contentType,
-            isSensitive = sensitive,
-            wallTimeMs = wallTimeMs,
-            snippet = snippet,
-            tooLargeToSync = tooLargeToSync,
-            originDeviceId = originDeviceId,
-            sensitiveSpans = sensitiveSpans,
-        )
-    }
+    private fun parseItem(id: String, raw: String, key: ByteArray): ClipboardItem? =
+        ClipboardBlobCodec.parseItem(id, raw, key)
 
     /**
      * Read the AEAD key_version stored in field 8 (index 8) of a pipe-delimited
@@ -1914,7 +1779,7 @@ class ClipboardRepository(context: Context) {
      * so pre-4i2 items (written without the field) still decrypt correctly.
      */
     private fun keyVersionFromParts(parts: List<String>): UByte =
-        parts.getOrNull(8)?.toUByteOrNull() ?: 1u
+        ClipboardBlobCodec.keyVersionFromParts(parts)
 
     private fun decryptForPreview(
         id: String,
@@ -1922,14 +1787,7 @@ class ClipboardRepository(context: Context) {
         nonce: ByteArray,
         key: ByteArray,
         keyVersion: UByte,
-    ): String {
-        val bytes = try {
-            decryptText(id, ciphertext, nonce, key, keyVersion)
-        } catch (_: Exception) {
-            localAesDecrypt(ciphertext, nonce, key)
-        }
-        return String(bytes, Charsets.UTF_8)
-    }
+    ): String = ClipboardBlobCodec.decryptForPreview(id, ciphertext, nonce, key, keyVersion)
 
     /**
      * Read the stored lamport_ts for the item at [storageId].
@@ -1951,54 +1809,11 @@ class ClipboardRepository(context: Context) {
         /**
          * Package names of apps whose clipboard content must always be treated as
          * sensitive (isSensitive=true), regardless of the content-classifier verdict.
-         *
-         * Rationale (CopyPaste-44rq.48 / PRIV-7): password managers copy secrets
-         * (passwords, TOTP codes, card numbers, PINs) whose content may not match
-         * the content-classifier's patterns — the text is short, opaque, or already
-         * redacted. Marking ALL clipboard events from these apps as sensitive ensures
-         * the item is masked in history and subject to the sensitive-TTL auto-wipe,
-         * matching macOS's excluded_app_bundle_ids parity behaviour.
-         *
-         * Security: this set only ever UPGRADES sensitivity to true — it never
-         * downgrades an item that the content classifier already marked sensitive.
-         *
-         * To add a new entry: append the exact Android package name and file a bd
-         * issue documenting the rationale (e.g. "com.example.pwmanager").
+         * Defined in [ClipboardBlobCodec.KNOWN_SENSITIVE_PACKAGES]; re-exported here
+         * for call-site compatibility (CopyPaste-44rq.48 / PRIV-7).
          */
-        val KNOWN_SENSITIVE_PACKAGES: Set<String> = setOf(
-            // 1Password
-            "com.agilebits.onepassword",
-            // Bitwarden
-            "com.x8bit.bitwarden",
-            // LastPass
-            "com.lastpass.lpandroid",
-            "com.lastpass.passwordmanager",
-            // Dashlane
-            "com.dashlane",
-            // Keeper
-            "com.callpod.android_apps.keeper",
-            // Enpass
-            "io.enpass.app",
-            "io.enpass.beta",
-            // KeePassDX
-            "com.kunzisoft.keepass.free",
-            "com.kunzisoft.keepass.libre",
-            "com.kunzisoft.keepass.pro",
-            // NordPass
-            "com.nordpass.android.app.password.manager",
-            // Apple Keychain / iCloud Keychain (via Apple Passwords app on Android)
-            "com.apple.passwordmanager",
-            // RoboForm
-            "com.siber.roboform",
-            // Password Safe (pwsafe)
-            "com.passwdsafe",
-            // Strongbox
-            "net.strongapp.passwordmanager",
-            // Buttercup
-            "com.buttercup.mobile",
-            // ProtonPass
-            "me.proton.pass.mobile",
-        )
+        val KNOWN_SENSITIVE_PACKAGES: Set<String>
+            get() = ClipboardBlobCodec.KNOWN_SENSITIVE_PACKAGES
 
         /**
          * Compute the next Lamport timestamp, mirroring `next_lamport_ts` in
@@ -2018,14 +1833,12 @@ class ClipboardRepository(context: Context) {
             maxOf(prevLamport + 1L, nowMs)
 
         /**
-         * Sync size ceiling in bytes (8 MiB). Items whose stored payload exceeds this are
-         * flagged [ClipboardItem.tooLargeToSync] and will not propagate to other devices.
-         * Matches the macOS/daemon sync blob cap exactly — single source of truth, do not
-         * scatter the literal.
+         * Sync size ceiling in bytes (8 MiB). Delegates to [ClipboardBlobCodec.SYNC_MAX_BLOB_BYTES]
+         * -- single source of truth, do not scatter the literal.
          */
         const val SYNC_MAX_BLOB_BYTES: Long = 8L * 1024 * 1024
 
-        /** SharedPreferences file name — single source of truth, not scattered as string literals. */
+        /** SharedPreferences file name -- single source of truth, not scattered as string literals. */
         const val PREFS_NAME = "copypaste_items"
 
         /**
@@ -2062,272 +1875,65 @@ class ClipboardRepository(context: Context) {
 
         const val MAX_SEEN_SOURCE_IDS = 1_000
 
-        private const val DEDUP_WINDOW_MS = 2_000L
+        // -- Dedup state -- delegates to ClipboardDedupState ------------------
+        //
+        // Process-wide dedup state extracted to [ClipboardDedupState] (CopyPaste-g06m.20).
+        // These forwarding members preserve the public API for callers that use
+        // ClipboardRepository.expectClip / shouldSkipExpectedClip / etc.
 
-        /**
-         * Process-wide dedup state shared across all [ClipboardRepository] instances.
-         * Multiple listener owners (FGS, a11y service, activity) each build their own
-         * instance; per-instance state lets the same physical copy slip past all three
-         * guards independently. All accesses must be under [dedupLock].
-         */
-        @Volatile var lastStoredKey: String = ""
-        @Volatile var lastStoredAtMs: Long = 0L
-        val dedupLock = Any()
+        /** @see ClipboardDedupState.expectClip */
+        fun expectClip(content: String) = ClipboardDedupState.expectClip(content)
 
-        /**
-         * "Expected next clip" guard for copy-from-history (HIGH-3 follow-up).
-         *
-         * When the user taps a row in [HistoryActivity] to copy it, the UI calls
-         * setPrimaryClip with that text. The capture listeners
-         * ([ClipboardService] / [LogcatCaptureService]) then observe the
-         * SAME text as a fresh clipboard change and would re-capture it as a NEW
-         * row (outside the [DEDUP_WINDOW_MS] window when the original was copied
-         * long ago) — producing a duplicate row AND a redundant cloud re-push.
-         *
-         * [HistoryActivity] calls [expectClip] with the content-hash right BEFORE
-         * setPrimaryClip; [shouldSkipExpectedClip] consumes that expectation in
-         * the capture path and skips the re-capture exactly once. The expectation
-         * is single-shot ([expectedClipHash] is cleared on the first match) and
-         * also expires after [EXPECTED_CLIP_WINDOW_MS] so a stale expectation
-         * never silently drops a genuinely new copy of the same text.
-         *
-         * Process-wide ([companion object]) for the same reason as the dedup
-         * state: the UI activity sets it but the capture listeners (separate
-         * [ClipboardRepository] instances in the same process) consume it.
-         */
-        @Volatile var expectedClipHash: Int = 0
-        @Volatile var expectedClipLen: Int = 0
-        @Volatile var expectedClipHasValue: Boolean = false
-        @Volatile var expectedClipAtMs: Long = 0L
-        val expectedClipLock = Any()
+        /** @see ClipboardDedupState.shouldSkipExpectedClip */
+        fun shouldSkipExpectedClip(content: String): Boolean =
+            ClipboardDedupState.shouldSkipExpectedClip(content)
 
-        private const val EXPECTED_CLIP_WINDOW_MS = 5_000L
+        /** @see ClipboardDedupState.expectImageUri */
+        fun expectImageUri(uri: android.net.Uri) = ClipboardDedupState.expectImageUri(uri)
 
-        // ── Image/URI copy-from-history echo guard ────────────────────────────
-        // Mirrors the text guard above, but keyed by the content:// URI string
-        // written to the clipboard when the user copies an image (or file) back
-        // from the history list.  The capture listeners see an image/file MIME
-        // clip whose URI is our own FileProvider URI — we must not re-store it.
-        // 5-second window (same as text); does NOT clear on first match so that
-        // concurrent ClipboardService + LogcatCaptureService callbacks
-        // for the same user tap are both suppressed.
-        @Volatile private var expectedImageUri: String = ""
-        @Volatile private var expectedImageUriAtMs: Long = 0L
-        @Volatile private var expectedImageUriHasValue: Boolean = false
-        private val expectedImageUriLock = Any()
-
-        /**
-         * Record that the next observed clipboard change carrying an image (or
-         * file) URI equal to [uri] is an internal copy-from-history echo and must
-         * NOT be re-captured.  Call immediately before [ClipboardManager.setPrimaryClip]
-         * in the image/file copy-back path of [HistoryActivity].
-         */
-        fun expectImageUri(uri: android.net.Uri) {
-            synchronized(expectedImageUriLock) {
-                expectedImageUri = uri.toString()
-                expectedImageUriAtMs = System.currentTimeMillis()
-                expectedImageUriHasValue = true
-            }
-        }
-
-        /**
-         * Returns true when [uri] matches the pending [expectImageUri] registration
-         * within [EXPECTED_CLIP_WINDOW_MS].  Does NOT clear on a match so concurrent
-         * listeners both get suppressed; the window expiry self-clears after 5 s.
-         */
-        fun shouldSkipExpectedImageUri(uri: android.net.Uri): Boolean {
-            synchronized(expectedImageUriLock) {
-                if (!expectedImageUriHasValue) return false
-                val now = System.currentTimeMillis()
-                if (now - expectedImageUriAtMs > EXPECTED_CLIP_WINDOW_MS) {
-                    expectedImageUriHasValue = false
-                    return false
-                }
-                if (uri.toString() == expectedImageUri) return true
-                return false
-            }
-        }
-
-        /**
-         * Record that the next observed clipboard change carrying text whose
-         * (length, hash) equals [content]'s is an internal copy-from-history echo
-         * and must NOT be re-captured. Call immediately before setPrimaryClip.
-         *
-         * The match key is the clip's length plus its [String.hashCode] rather than
-         * the full string, so a very large expected clip (megabytes of text) is
-         * never retained or compared in full. Length is paired with the hash so a
-         * hashCode collision between two different-length clips cannot match.
-         */
-        fun expectClip(content: String) {
-            synchronized(expectedClipLock) {
-                expectedClipHash = content.hashCode()
-                expectedClipLen = content.length
-                expectedClipHasValue = true
-                expectedClipAtMs = System.currentTimeMillis()
-            }
-        }
-
-        /**
-         * Returns true when [content] matches a pending [expectClip] within
-         * [EXPECTED_CLIP_WINDOW_MS].
-         *
-         * The expectation is NOT cleared on a match — it stays active for the
-         * full window so that all concurrent listeners (ClipboardService,
-         * LogcatCaptureService, MainActivity) that fire for the same
-         * user tap are all suppressed, not just the first one.  Without this,
-         * the second listener would see [expectedClipHasValue] already cleared
-         * and store a duplicate row.
-         *
-         * The expectation is cleared only when:
-         *   - the window expires (stale expectation — genuinely new copy), or
-         *   - the (length, hash) does NOT match (different clip — not our echo).
-         *
-         * Matching on (length, hash) instead of full-string equality avoids
-         * retaining/comparing the entire clip text for large clips while keeping
-         * the suppression semantics identical for matching clips.
-         *
-         * A later genuine re-copy of the same text after [EXPECTED_CLIP_WINDOW_MS]
-         * has elapsed will not be suppressed because the window will have expired.
-         */
-        fun shouldSkipExpectedClip(content: String): Boolean {
-            synchronized(expectedClipLock) {
-                if (!expectedClipHasValue) return false
-                val now = System.currentTimeMillis()
-                if (now - expectedClipAtMs > EXPECTED_CLIP_WINDOW_MS) {
-                    // Window expired — clear and treat as a new clip.
-                    expectedClipHasValue = false
-                    return false
-                }
-                if (content.length == expectedClipLen && content.hashCode() == expectedClipHash) {
-                    // (length, hash) matches within window: suppress this echo.
-                    // Do NOT clear expectedClipHasValue — other concurrent
-                    // listeners firing for the same tap must also be suppressed.
-                    // The window expiry above will self-clear after 5 s.
-                    return true
-                }
-                return false
-            }
-        }
+        /** @see ClipboardDedupState.shouldSkipExpectedImageUri */
+        fun shouldSkipExpectedImageUri(uri: android.net.Uri): Boolean =
+            ClipboardDedupState.shouldSkipExpectedImageUri(uri)
 
         /**
          * Zero the cross-listener dedup window. Call after [clearAll] so a re-copy
          * of the same text immediately after a clear is stored as a fresh row rather
          * than silently skipped as a recent duplicate.
+         * @see ClipboardDedupState.resetDedupState
          */
-        fun resetDedupState() {
-            synchronized(dedupLock) {
-                lastStoredKey = ""
-                lastStoredAtMs = 0L
-            }
-            synchronized(expectedClipLock) {
-                expectedClipHasValue = false
-            }
-        }
+        fun resetDedupState() = ClipboardDedupState.resetDedupState()
 
+        /** @see ClipboardDedupState.isNewSourceId */
         fun isNewSourceId(sourceId: String, seen: Set<String>): Boolean =
-            sourceId !in seen
+            ClipboardDedupState.isNewSourceId(sourceId, seen)
+
+        // -- Parse cache -- delegates to ClipboardItemCache -------------------
 
         const val PREVIEW_MAX_CHARS = 140
         const val UNABLE_TO_PREVIEW = "(unable to preview)"
 
-        private const val AES_TRANSFORMATION = "AES/GCM/NoPadding"
-        private const val GCM_TAG_BITS = 128
-        private const val GCM_NONCE_BYTES = 12
-
-        /**
-         * Process-wide SecureRandom singleton. SecureRandom is thread-safe and
-         * expensive to instantiate (seeds from /dev/urandom on Android). Promoting
-         * it here avoids re-instantiation on every localAesEncrypt call.
-         */
-        private val secureRandom = java.security.SecureRandom()
-
-        // ── A: decrypt result cache ──────────────────────────────────────────────
-        //
-        // getItems() previously called parseItem()/decryptForPreview() for EVERY id
-        // on EVERY reload — a full AEAD decrypt + native isSensitive() per row.
-        // On a 200-item list this saturates Dispatchers.IO and produces Davey frames.
-        //
-        // We cache the parsed ClipboardItem keyed by storage id, invalidated only
-        // when the raw blob string changes (i.e. the item was actually written).
-        // getItems() reads the cheap prefs.getString("item_$id") and only decrypts
-        // when the raw blob differs from the cached entry; otherwise reuses the
-        // cached item. On a quiescent list (no new items since last load) this
-        // reduces decryptions from N→0.
-        //
-        // The cache stores (rawBlob, ClipboardItem) without imagePng (that field
-        // is removed). getItems() always applies cheap pinned/pinnedSortIndex/
-        // tooLargeToSync overrides via .copy() after the cache lookup.
-
-        private data class ParsedEntry(val rawBlob: String, val item: ClipboardItem)
-
-        /**
-         * In-memory snapshot of KEY_ITEM_IDS. Populated on first read and kept
-         * in sync by every writer that holds [idsWriteLock].  Avoids re-parsing
-         * the SharedPreferences XML string on every 30-second P2P tick.
-         *
-         * @Volatile makes reads safe without a lock (single-writer pattern: all
-         * writes happen inside a synchronized(idsWriteLock) block; a stale read
-         * merely causes a harmless cache-miss that falls back to prefs).
-         */
-        @Volatile
-        var cachedIds: List<String>? = null
-
-        /** Guards [parseCache] for concurrent IO reads. */
-        private val parseCacheLock = Any()
-
-        /**
-         * Maps storage id → (rawBlob, ClipboardItem). Process-wide so multiple
-         * ClipboardRepository instances (VM + searchRepository + filePickLauncher)
-         * share the same warm cache.
-         */
-        private val parseCache = HashMap<String, ParsedEntry>()
-
         /**
          * Evict a single id from the parse cache.
-         * Call on delete / LWW-replace paths alongside evictImageCaches.
+         * @see ClipboardItemCache.evictParseCache
          */
-        fun evictParseCache(id: String) {
-            synchronized(parseCacheLock) { parseCache.remove(id) }
-        }
+        fun evictParseCache(id: String) = ClipboardItemCache.evictParseCache(id)
 
-        /** Evict ALL entries — call on clearAll / clearUnpinned. */
-        fun evictAllParseCache() {
-            synchronized(parseCacheLock) { parseCache.clear() }
-        }
+        /** Evict ALL entries -- call on clearAll / clearUnpinned.
+         * @see ClipboardItemCache.evictAllParseCache
+         */
+        fun evictAllParseCache() = ClipboardItemCache.evictAllParseCache()
 
-        fun previewFromPlaintext(text: String): String {
-            val collapsed = text.replace(Regex("\\s+"), " ").trim()
-            if (collapsed.isEmpty()) return ""
-            return if (collapsed.length > PREVIEW_MAX_CHARS) {
-                collapsed.take(PREVIEW_MAX_CHARS).trimEnd() + "…"
-            } else {
-                collapsed
-            }
-        }
+        /** @see ClipboardBlobCodec.previewFromPlaintext */
+        fun previewFromPlaintext(text: String): String =
+            ClipboardBlobCodec.previewFromPlaintext(text)
 
-        fun localAesDecrypt(ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray {
-            val cipher = Cipher.getInstance(AES_TRANSFORMATION)
-            cipher.init(
-                Cipher.DECRYPT_MODE,
-                SecretKeySpec(key.copyOf(32), "AES"),
-                GCMParameterSpec(GCM_TAG_BITS, nonce)
-            )
-            return cipher.doFinal(ciphertext)
-        }
+        /** @see ClipboardBlobCodec.localAesDecrypt */
+        fun localAesDecrypt(ciphertext: ByteArray, nonce: ByteArray, key: ByteArray): ByteArray =
+            ClipboardBlobCodec.localAesDecrypt(ciphertext, nonce, key)
 
-        fun localAesEncrypt(plaintext: ByteArray, key: ByteArray): EncryptedBlob {
-            val nonce = ByteArray(GCM_NONCE_BYTES).also {
-                secureRandom.nextBytes(it)
-            }
-            val cipher = Cipher.getInstance(AES_TRANSFORMATION)
-            cipher.init(
-                Cipher.ENCRYPT_MODE,
-                SecretKeySpec(key.copyOf(32), "AES"),
-                GCMParameterSpec(GCM_TAG_BITS, nonce)
-            )
-            val ciphertext = cipher.doFinal(plaintext)
-            return EncryptedBlob(nonce = nonce, ciphertext = ciphertext)
-        }
+        /** @see ClipboardBlobCodec.localAesEncrypt */
+        fun localAesEncrypt(plaintext: ByteArray, key: ByteArray): EncryptedBlob =
+            ClipboardBlobCodec.localAesEncrypt(plaintext, key)
     }
 
     /**
@@ -2584,7 +2190,7 @@ class ClipboardRepository(context: Context) {
                 // <nowMs>|text/plain|0||tombstone|<lamportTs>|1|
                 val ghostBlob = "$nowMs|text/plain|0||tombstone|$lamportTs|1|"
                 val ids = appendUniqueId(storedIds(), itemId)
-                cachedIds = ids
+                ClipboardItemCache.cachedIds = ids
                 prefs.edit()
                     .putString("item_$itemId", ghostBlob)
                     .putString(KEY_ITEM_IDS, ids.joinToString(","))
