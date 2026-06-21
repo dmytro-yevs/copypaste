@@ -3,13 +3,11 @@ package com.copypaste.android.ui
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -148,6 +146,12 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // The PRIMARY signal is DevicesOnlineState (daemon-derived sync connectivity).
     var hasInternet by remember { mutableStateOf(true) }
 
+    // CopyPaste-1jms.15: cloud-misconfig chip — mirrors the macOS SyncStatusChip
+    // amber "Misconfig" pill (PG-44 / CopyPaste-k1jo). True when a Supabase URL
+    // is set but the credentials are incomplete (URL present, not fully configured).
+    // Polled on the same cadence as hasInternet — no separate effect needed.
+    var cloudMisconfig by remember { mutableStateOf(false) }
+
     LaunchedEffect(Unit) {
         while (true) {
             // Configured-target count for the fallback path.
@@ -159,6 +163,10 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
             // OS connectivity: secondary signal only — used to distinguish
             // NetworkOffline from DaemonUnreachable (PG-10 / 5qbe).
             hasInternet = hasInternetConnectivity(context)
+
+            // CopyPaste-1jms.15: misconfig = URL entered but not fully configured.
+            // Matches macOS: `cloudMisconfig = supabase_url.isNotEmpty() && !supabase_configured`.
+            cloudMisconfig = settings.supabaseUrl.isNotBlank() && !settings.isSupabaseConfigured
 
             delay(POLL_INTERVAL_MS)
         }
@@ -196,19 +204,27 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
         SyncBadgeState.DaemonUnreachable -> c.danger
     }
 
-    // §9 + §11: 2 s pulse on the dot when connected, mirroring web `animate-pulse`.
-    // The pulse scales the dot 1.0→1.35→1.0 with ease-in-out over 2 s, repeated forever.
-    // Disabled when offline or idle (static dot).
-    val infiniteTransition = rememberInfiniteTransition(label = "sync-pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue  = if (connected) 1.35f else 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = PULSE_DURATION_MS, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "dot-pulse-scale",
-    )
+    // §9 + §11: ONE-SHOT pulse on the dot on each new connect event.
+    // Fires a single 1.0→1.35→1.0 scale ping when connected transitions false→true
+    // (per connect event, not a perpetual loop). macOS does not loop the status dot.
+    // Implementation: LaunchedEffect(connected) detects the rising edge and runs a
+    // sequential Animatable forward→reverse ping, then settles at 1f.
+    val pulseAnimatable = remember { Animatable(1f) }
+    LaunchedEffect(connected) {
+        if (!connected) {
+            // Disconnected — snap back to resting scale immediately (no animation).
+            pulseAnimatable.snapTo(1f)
+            return@LaunchedEffect
+        }
+        // Rising edge (connected just became true): one-shot ping 1f→1.35f→1f.
+        // CSS ease-in-out (0.42,0,0.58,1) — matches macOS Tailwind animate-pulse cadence
+        // (MOT-17: FastOutSlowIn was asymmetric/snappy; true ease-in-out gives symmetric breathing).
+        val easeInOut = CubicBezierEasing(0.42f, 0f, 0.58f, 1f)
+        pulseAnimatable.animateTo(1.35f, tween(PULSE_DURATION_MS, easing = easeInOut))
+        pulseAnimatable.animateTo(1f, tween(PULSE_DURATION_MS, easing = easeInOut))
+        // Settled — stays at 1f until the next connect event.
+    }
+    val pulseScale = pulseAnimatable.value
 
     // PG-42: sheet visibility state.
     var showSheet by remember { mutableStateOf(false) }
@@ -268,6 +284,31 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
                 fontSize = 10.5.sp,
                 modifier = Modifier.padding(start = 6.dp),
             )
+            // CopyPaste-1jms.15: amber "Misconfig" pill — parity with macOS
+            // SyncStatusChip (PG-44 / CopyPaste-k1jo). Shown only when a Supabase
+            // URL is set but credentials are incomplete. Mirrors the macOS pill:
+            //   border border-ide-warning/30 bg-ide-warning/14 text-ide-warning
+            if (cloudMisconfig) {
+                Box(
+                    modifier = Modifier
+                        .padding(start = 6.dp)
+                        .clip(RoundedCornerShape(50))
+                        .background(c.warning.copy(alpha = 0.14f))
+                        .border(
+                            width = 1.dp,
+                            color = c.warning.copy(alpha = 0.30f),
+                            shape = RoundedCornerShape(50),
+                        )
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text(
+                        text = "Misconfig",
+                        color = c.warning,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                }
+            }
         }
     }
 

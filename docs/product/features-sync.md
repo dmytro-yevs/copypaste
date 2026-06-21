@@ -1,5 +1,9 @@
 # CopyPaste — Sync & Connectivity: Complete Product Inventory
 
+> ⚠️ Snapshot as of 2026-06-04; branch references may be outdated. This inventory was audited
+> against branch `v0.6.1-integration`. Gaps listed may have been addressed since.
+> Check current code before relying on this inventory.
+
 Branch: `v0.6.1-integration`  
 Audit date: 2026-06-04  
 Status: READ-ONLY. This document describes behavior as found in code; it does not prescribe future changes.

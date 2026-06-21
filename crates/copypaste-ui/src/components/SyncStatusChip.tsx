@@ -3,10 +3,42 @@ import { api, formatWallTime } from "../lib/ipc";
 import type { PairedDevice, SyncBadgeState } from "../lib/ipc";
 
 // ---------------------------------------------------------------------------
-// SyncState — the three display conditions we surface
+// SyncState — canonical six-state display model (CMP-7 parity with Android)
 // ---------------------------------------------------------------------------
 
-type SyncState = "connected" | "idle" | "offline";
+/**
+ * CMP-7: SyncState now mirrors the full IPC SyncBadgeState set so each
+ * daemon-reported state has a 1:1 internal representation. Previously the
+ * web component collapsed six states to three ("connected"/"idle"/"offline"),
+ * losing the distinction between syncing vs synced, idle vs misconfigured,
+ * and offline vs error.
+ *
+ * Mapping to dot colours (three colours, six states):
+ *   - "synced"        → green  (bg-ide-success)   — recent successful exchange
+ *   - "syncing"       → green  (bg-ide-success)   — in-flight (same as synced visually)
+ *   - "idle"          → grey   (bg-ide-faint)      — configured, no recent activity
+ *   - "misconfigured" → grey   (bg-ide-faint)      — incomplete setup (amber chip separately)
+ *   - "offline"       → red    (bg-ide-danger)     — daemon cannot reach sync backend
+ *   - "error"         → red    (bg-ide-danger)     — backend returned auth/RLS/relay error
+ *
+ * Android parity note (CMP-7): Android uses a 4-state sealed class
+ * (Connected, Idle, NetworkOffline, DaemonUnreachable). macOS does NOT
+ * distinguish NetworkOffline vs DaemonUnreachable because the web side has
+ * no reliable OS-network signal (navigator.onLine is not used per CopyPaste-5qbe).
+ * Both "offline" and "error" map to red and share the same label semantics as
+ * Android's DaemonUnreachable/NetworkOffline. The "syncing" state has no direct
+ * Android counterpart (Android uses isSyncing=true to gate the Connected branch);
+ * on web it maps to the same green dot as "synced". A future parity pass should
+ * reconcile: Android → add "syncing" distinction; web → consider NetworkOffline
+ * if a platform API for OS-level connectivity is ever added.
+ */
+type SyncState =
+  | "synced"
+  | "syncing"
+  | "idle"
+  | "misconfigured"
+  | "offline"
+  | "error";
 
 interface SyncInfo {
   state: SyncState;
@@ -17,6 +49,8 @@ interface SyncInfo {
    * PG-44 / CopyPaste-k1jo: true when a Supabase URL is configured but the
    * cloud sync is not working (supabase_configured===false or !signed_in).
    * Android parity: shows a badge chip rather than tooltip-only.
+   * Note: when state is "misconfigured", cloudMisconfig will typically also
+   * be true, but the amber chip is driven by this field independently.
    */
   cloudMisconfig: boolean;
 }
@@ -50,25 +84,17 @@ export const SYNC_POLL_INTERVAL_MS = 2_000;
 
 /**
  * Map the daemon's canonical `SyncBadgeState` to the component's internal
- * `SyncState`. This is a THIN ADAPTER — the mapping is straightforward because
- * the canonical states are richer than the three-way display model.
+ * `SyncState`. CMP-7: now a 1:1 identity mapping — SyncState was expanded to
+ * match the full IPC state set, so no folding is needed.
  *
  * Consumers must call this when `badge_state` is present in the IPC response.
  * Do NOT re-derive from raw fields when badge_state is available.
  */
 export function badgeStateToSyncState(badge: SyncBadgeState): SyncState {
-  switch (badge) {
-    case "synced":
-    case "syncing":
-      return "connected";
-    case "offline":
-    case "error":
-      return "offline";
-    case "idle":
-    case "misconfigured":
-    default:
-      return "idle";
-  }
+  // CMP-7: 1:1 — SyncState now mirrors SyncBadgeState exactly.
+  // No folding: each IPC state has its own internal representation so future
+  // callers can branch on the precise state (e.g. show "Syncing…" label).
+  return badge;
 }
 
 /**
@@ -77,12 +103,18 @@ export function badgeStateToSyncState(badge: SyncBadgeState): SyncState {
  * @deprecated Use `badgeStateToSyncState(sync.badge_state)` when `badge_state`
  * is present in the IPC response. This function is only called when `badge_state`
  * is absent (daemon version predating CopyPaste-merc).
+ *
+ * CMP-7: Returns the expanded SyncState. Fallback path can only distinguish
+ * "synced" (recent round-trip) from "idle" (no recent activity) — it cannot
+ * produce "syncing", "misconfigured", "offline", or "error" since those require
+ * the daemon-computed badge_state. Both the fallback "synced" and "idle" states
+ * are valid members of the expanded SyncState type.
  */
 function deriveSyncStateFallback(
   lastSyncMs: number | null,
   deviceCount: number
 ): SyncState {
-  // "connected" (green dot) means at least one device is online/syncing. We
+  // "synced" (green dot) means at least one device is online/syncing. We
   // require BOTH a paired device AND a recent last_sync_ms: a recent sync
   // round-trip is the only liveness signal the daemon exposes today, and it is
   // updated by both the P2P and Supabase paths on a successful exchange. With
@@ -90,7 +122,7 @@ function deriveSyncStateFallback(
   const recentSync =
     lastSyncMs !== null && Date.now() - lastSyncMs <= RECENT_SYNC_MS_FALLBACK;
   if (deviceCount > 0 && recentSync) {
-    return "connected";
+    return "synced";
   }
   // Paired/configured but no recent round-trip, or zero devices → idle (grey).
   // We never show red here for a missing sync, to avoid alarm on a fresh
@@ -102,8 +134,13 @@ function deriveSyncStateFallback(
 function buildTooltip(info: SyncInfo): string {
   const parts: string[] = [];
 
-  if (info.state === "offline") {
-    parts.push("Daemon unreachable");
+  // CMP-7: "offline" and "error" are now distinct states but both indicate
+  // hard sync failures — show "Background service unreachable" for both (same as
+  // Android DaemonUnreachable/NetworkOffline; bdac.45: jargon "Daemon" removed).
+  // When the component is offline (IPC socket rejected), state is "offline";
+  // when daemon reports a backend error (auth/RLS/relay), state is "error".
+  if (info.state === "offline" || info.state === "error") {
+    parts.push("Background service unreachable");
   } else if (info.lastSyncMs !== null) {
     parts.push(`Last sync: ${formatWallTime(info.lastSyncMs)}`);
   } else {
@@ -126,14 +163,26 @@ function buildTooltip(info: SyncInfo): string {
 }
 
 // ---------------------------------------------------------------------------
-// Dot colours — keyed to the ide-* Tailwind palette
+// Dot colours — keyed to the ide-* Tailwind palette (CMP-7: all six states)
 // ---------------------------------------------------------------------------
 
 const DOT_CLASS: Record<SyncState, string> = {
-  connected: "bg-ide-success",  // #5fad65 green
-  idle:      "bg-ide-faint",    // #6f737a grey
-  offline:   "bg-ide-danger",   // #db5c5c red
+  synced:        "bg-ide-success",  // green — recent successful exchange
+  syncing:       "bg-ide-success",  // green — in-flight (same visual as synced)
+  idle:          "bg-ide-faint",    // grey  — configured but no recent activity
+  misconfigured: "bg-ide-faint",    // grey  — incomplete setup (amber chip shows detail)
+  offline:       "bg-ide-danger",   // red   — IPC socket rejected (daemon down)
+  error:         "bg-ide-danger",   // red   — backend auth/RLS/relay error
 };
+
+/**
+ * CMP-7: "connected" in the old 3-state model (synced|syncing → green).
+ * Used by the pulse-on-connect logic: we want to pulse when transitioning
+ * INTO any green state, not just the old "connected" label.
+ */
+function isConnectedState(state: SyncState): boolean {
+  return state === "synced" || state === "syncing";
+}
 
 // ---------------------------------------------------------------------------
 // SyncStatusChip
@@ -147,6 +196,15 @@ export function SyncStatusChip() {
     email: null,
     cloudMisconfig: false,
   });
+
+  // VISM-12: track previous state so we can detect the transition INTO
+  // a "connected" (green) state and trigger the one-shot .online-pulse class.
+  // We use a ref (not state) to avoid an extra render cycle on every poll.
+  // CMP-7: initial prev is "idle" (not "connected"); green states are synced/syncing.
+  const prevStateRef = useRef<SyncState>("idle");
+  // Controls whether the one-shot .online-pulse class is applied to the dot.
+  // Set to true on connect transition; cleared after the 2 s animation completes.
+  const [pulsing, setPulsing] = useState(false);
 
   // cancelRef prevents setState after unmount when the poll fires mid-flight.
   const cancelRef = useRef(false);
@@ -166,7 +224,8 @@ export function SyncStatusChip() {
     // invoke). cancelRef is reset to false at the top of each effect run.
     if (cancelRef.current) return;
 
-    // If the sync-status call itself failed → daemon is offline.
+    // If the sync-status call itself failed → daemon is offline (IPC socket down).
+    // CMP-7: use "offline" (IPC unreachable) — not "error" (backend error).
     if (syncResult.status === "rejected") {
       setInfo({ state: "offline", deviceCount: 0, lastSyncMs: null, email: null, cloudMisconfig: false });
       return;
@@ -198,6 +257,15 @@ export function SyncStatusChip() {
       state = deriveSyncStateFallback(lastSyncMs, deviceCount);
     }
 
+    // VISM-12: detect transition INTO a connected (green) state so we fire the
+    // one-shot .online-pulse only on the leading edge, not every poll tick.
+    // CMP-7: "connected" is now "synced" or "syncing" — use isConnectedState().
+    const prevState = prevStateRef.current;
+    if (isConnectedState(state) && !isConnectedState(prevState)) {
+      setPulsing(true);
+    }
+    prevStateRef.current = state;
+
     setInfo({
       state,
       deviceCount,
@@ -226,19 +294,28 @@ export function SyncStatusChip() {
       aria-label={`Sync: ${info.state}. ${tooltip}`}
       className="flex items-center gap-1.5 cursor-default select-none"
     >
-      {/* Coloured status dot; pulses when actively syncing */}
+      {/* Coloured status dot; one-shot .online-pulse on transition INTO a green state (VISM-12).
+          CMP-7: green states are "synced" and "syncing" (isConnectedState).
+          1jms.27: when state is "syncing", apply .syncing-dot (gentle opacity
+          breathe) to distinguish an active in-flight sync from a completed one.
+          The .online-pulse class is removed after the 2 s animation ends to allow re-trigger.
+          Note: .online-pulse and .syncing-dot share the same element; in the
+          brief overlap at connect-time, online-pulse (forwards) takes visual
+          precedence then ends, leaving syncing-dot if still syncing. */}
       <span
         className={[
           "h-2 w-2 shrink-0 rounded-full",
           DOT_CLASS[info.state],
-          info.state === "connected" ? "animate-pulse" : "",
+          pulsing ? "online-pulse" : "",
+          info.state === "syncing" && !pulsing ? "syncing-dot" : "",
         ]
           .filter(Boolean)
           .join(" ")}
+        onAnimationEnd={() => setPulsing(false)}
       />
       {/* Device count — only shown when at least one peer is paired */}
       {info.deviceCount > 0 && (
-        <span className="text-[10px] leading-none text-ide-faint tabular-nums">
+        <span className="text-[10.5px] leading-none text-ide-faint tabular-nums">
           {info.deviceCount}
         </span>
       )}
@@ -250,7 +327,7 @@ export function SyncStatusChip() {
       {info.cloudMisconfig && (
         <span
           aria-label="Cloud sync misconfigured"
-          className="shrink-0 rounded-full border border-ide-warning/30 bg-ide-warning/14 px-1.5 py-0.5 text-[10px] font-medium text-ide-warning"
+          className="shrink-0 rounded-full border border-ide-warning/30 bg-ide-warning/14 px-1.5 py-0.5 text-[10.5px] font-medium text-ide-warning"
         >
           Misconfig
         </span>

@@ -16,6 +16,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import React from "react";
 import { useUI } from "../store";
 
 // ---------------------------------------------------------------------------
@@ -27,6 +28,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { HistoryView } from "./HistoryView";
+import { GlassToast } from "../components/Toast";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -109,6 +111,16 @@ describe("CopyPaste-10lk: rowTreatment token-driven (not skin-name hardcoded)", 
     expect(rows[0].className).toContain("border-b");
     expect(rows[0].className).not.toContain("skin-row-inset");
     expect(rows[0].className).not.toContain("skin-row-line");
+    // Classic "card" rows must carry the cinematic hover lift transform — this is
+    // the distinguishing token of the card treatment vs. the quiet "line" treatment
+    // (which explicitly omits the translateX+scale hover). Previously missing:
+    // this assertion catches regressions where the hover lift is removed without
+    // the test failing.
+    expect(rows[0].className).toMatch(/hover:\[transform:translateX.*scale/);
+    // Classic rows must carry the card-entry animation class (list-item-in).
+    // This is the surface-card entry class — it drives the appear animation for
+    // each card on the glass surface. Previously missing from this test.
+    expect(rows[0].className).toContain("list-item-in");
   });
 });
 
@@ -221,26 +233,26 @@ describe("CopyPaste-kp6f: controls use var(--skin-r-ctl) inline, not rounded-ide
     // If sort button not shown (single device), pass — that's expected.
   });
 
-  it("Toast component uses var(--skin-r-card) for borderRadius, not 10", async () => {
-    // We test the Toast component indirectly by checking that no toast element
-    // in the document uses a hardcoded borderRadius of 10 when it appears.
-    // The actual check is that the value is the CSS var, not a bare number.
-    // Since Toast renders only after IPC actions, we verify the source-level correctness
-    // by checking that the rendered toast (if any) uses the token.
+  it("Toast component uses var(--skin-r-modal) for borderRadius, not a hardcoded value", () => {
+    // Previously this test was a conditional no-op: it only asserted when a toast
+    // happened to be visible after HistoryView IPC actions, which never fired in
+    // JSDOM. This replacement renders GlassToast directly and asserts the token
+    // unconditionally — the assertion can never silently pass without the
+    // var(--skin-r-modal) token being present.
+    // CopyPaste-bdac.56: Toast radius is the modal token (--skin-r-modal), not --skin-r-card.
+    const { container } = render(
+      <GlassToast msg={{ id: "kp6f-toast", text: "test" }} onDismiss={() => {}} />,
+    );
+    const bubble = container.querySelector('[role="status"]') as HTMLElement | null;
+    expect(bubble).not.toBeNull();
 
-    setupInvokeWithItems([makeEntry("a")]);
-    render(<HistoryView />);
-    await waitFor(() => expect(screen.getByText("Item a")).toBeInTheDocument());
+    // Accept either inline style or a Tailwind arbitrary-value class that encodes the var.
+    const inlineStyle = bubble!.style.borderRadius;
+    const hasVarInStyle = inlineStyle.includes("--skin-r-modal");
+    const hasVarInClass = bubble!.className.includes("--skin-r-modal");
+    expect(hasVarInStyle || hasVarInClass).toBe(true);
 
-    // If a toast is visible, assert its borderRadius is not "10px".
-    // (Toasts only appear after copy/pin/delete actions — not easily triggered here.)
-    // This test primarily ensures the component renders without error.
-    // The detailed Toast style assertion is a regression guard: when Toast appears,
-    // its borderRadius should use var(--skin-r-card).
-    const toastEl = document.querySelector('[role="status"], [role="alert"]');
-    if (toastEl instanceof HTMLElement && toastEl.style.borderRadius) {
-      // If a borderRadius is set inline, it must not be "10px"
-      expect(toastEl.style.borderRadius).not.toBe("10px");
-    }
+    // Regression guard: must NOT be a bare hardcoded pixel value (e.g. "10px").
+    expect(inlineStyle).not.toBe("10px");
   });
 });

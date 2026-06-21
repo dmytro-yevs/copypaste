@@ -212,9 +212,27 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
   }, [id]);
 
   if (src === null) {
-    // Still loading — render nothing (avoids layout shift; row height is already
-    // reserved by the virtualizer).
-    return null;
+    // SCRH-11: Still loading — render a skeleton placeholder that occupies the
+    // reserved row height so the row doesn't visually collapse while the fetch is
+    // in flight. Previously returned null which left a blank gap in the list.
+    return (
+      <span
+        style={{
+          display: "inline-block",
+          width: 80,
+          height: Math.min(maxHeight, 40),
+          borderRadius: 3,
+          background: "var(--ide-elevated)",
+          border: "1px solid var(--ide-divider)",
+          flexShrink: 0,
+          // Subtle shimmer animation defined in index.css (.skeleton-pulse).
+          // Falls back gracefully when the class is absent (static muted rect).
+        }}
+        className="skeleton-pulse"
+        aria-label="Loading image…"
+        aria-busy="true"
+      />
+    );
   }
 
   if (src === FETCH_FAILED) {

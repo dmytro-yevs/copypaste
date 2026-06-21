@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# DEPRECATED: Use scripts/regen-uniffi.sh instead. That script is the canonical entrypoint
+# and includes dry-run mode, verbose output, ABI parity checks, and ktlint integration.
+# This script is retained because CLAUDE.md and some docs reference it by name.
+#
 # generate-android-bindings.sh — Generate Kotlin UniFFI bindings for copypaste-android.
 #
 # Usage:

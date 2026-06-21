@@ -1,5 +1,9 @@
 # CopyPaste macOS — Complete Feature Inventory
 
+> ⚠️ Snapshot as of 2026-06-04; branch references may be outdated. This inventory was audited
+> against branch `feat/android-parity-v0.5.3`. Gaps listed may have been addressed since.
+> Check current code before relying on this inventory.
+
 > **Scope:** macOS desktop app (Tauri shell + React/TS frontend + copypaste-daemon).
 > **Sources inspected:** `crates/copypaste-ui/src/`, `crates/copypaste-ui/src-tauri/src/lib.rs`,
 > `crates/copypaste-ui/src-tauri/src/ipc.rs`, `crates/copypaste-ui/src-tauri/src/daemon_lifecycle.rs`,

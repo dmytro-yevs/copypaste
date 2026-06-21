@@ -104,6 +104,19 @@ class FgsSyncLoop(
 ) {
     private var job: Job? = null
 
+    /**
+     * CopyPaste-44rq.41: set to true inside [dialPairedPeer] whenever at least
+     * one item was sent or received across any peer.  Read and reset by the
+     * [start] loop immediately after each dial round to update
+     * [p2pConsecutiveEmpty] and compute the adaptive P2P interval.
+     *
+     * Not thread-safe by itself, but both the writer ([dialPairedPeer]) and
+     * reader ([start]) run on [Dispatchers.IO] inside the same coroutine (the
+     * P2P dial is always `suspend`-called inline, never as a separate launch),
+     * so no extra synchronisation is needed.
+     */
+    private var lastP2pHadActivity: Boolean = false
+
     companion object {
         private const val TAG = "FgsSyncLoop"
 
@@ -138,9 +151,9 @@ class FgsSyncLoop(
         private const val IDLE_THRESHOLD_POLLS = 3
 
         /**
-         * Cadence for the background LAN P2P dial, DECOUPLED from the Supabase
-         * poll delay. The poll delay can grow to [IDLE_POLL_INTERVAL_MS] after an
-         * empty streak; the P2P dial fires on this fixed cadence regardless.
+         * Minimum P2P dial cadence — the base interval used while activity is
+         * occurring.  Also the value exposed to external callers (e.g.
+         * [ClipboardService] inbound-listener drain cadence) — MUST NOT change.
          *
          * 30 s is short enough to deliver new clips promptly while avoiding the
          * "re-transmit entire history every 3 s" behaviour that the old 3 s value
@@ -151,6 +164,41 @@ class FgsSyncLoop(
          * Also drives the inbound listener drain cadence in [ClipboardService].
          */
         const val P2P_DIAL_INTERVAL_MS = 30_000L
+
+        /**
+         * CopyPaste-44rq.41: maximum P2P dial interval after an idle streak.
+         * After [P2P_IDLE_THRESHOLD] consecutive dials with zero items exchanged,
+         * the inter-dial sleep grows linearly up to this cap.  A successful
+         * exchange (any items sent or received) resets the interval to
+         * [P2P_DIAL_INTERVAL_MS].  5 min matches [IDLE_POLL_INTERVAL_MS].
+         */
+        private const val P2P_IDLE_DIAL_INTERVAL_MS = 300_000L // 5 min
+
+        /**
+         * CopyPaste-44rq.41: how many consecutive empty P2P dials before the
+         * inter-dial sleep starts to grow.  Mirrors [IDLE_THRESHOLD_POLLS] so
+         * the two backoff mechanisms behave symmetrically.
+         */
+        private const val P2P_IDLE_THRESHOLD = 3
+
+        /**
+         * CopyPaste-44rq.41: compute the effective P2P inter-dial sleep given
+         * the number of consecutive idle dials.
+         *
+         * Grows linearly from [P2P_DIAL_INTERVAL_MS] to [P2P_IDLE_DIAL_INTERVAL_MS]
+         * over [P2P_IDLE_THRESHOLD] empty dials, then stays capped.  Linear growth
+         * (not exponential) is intentional: P2P peers may come online at any time
+         * and a gentler ramp avoids a multi-minute gap on the first post-idle dial.
+         *
+         * Pure function — no Android runtime — safe to call in JVM unit tests.
+         *
+         * @param consecutiveEmpty Number of consecutive P2P dials with zero items
+         *   exchanged (including the most recent one).
+         */
+        fun p2pDialIntervalMs(consecutiveEmpty: Int): Long {
+            if (consecutiveEmpty < P2P_IDLE_THRESHOLD) return P2P_DIAL_INTERVAL_MS
+            return P2P_IDLE_DIAL_INTERVAL_MS
+        }
 
         /**
          * WS-aware steady-state catch-up poll interval.
@@ -312,6 +360,10 @@ class FgsSyncLoop(
             Log.i(TAG, "FgsSyncLoop started")
             var consecutiveEmpty = 0
             var consecutiveFailures = 0
+            // CopyPaste-44rq.41: idle backoff for P2P dials.
+            // Grows to P2P_IDLE_DIAL_INTERVAL_MS after P2P_IDLE_THRESHOLD empty
+            // dials; resets to 0 (→ P2P_DIAL_INTERVAL_MS) on any activity.
+            var p2pConsecutiveEmpty = 0
 
             while (isActive) {
                 // M6: poll FIRST, then delay. The previous loop delayed a full
@@ -394,38 +446,58 @@ class FgsSyncLoop(
                 // delay above. Whenever we hold a complete set of persisted
                 // pairing credentials we dial the paired peer so a one-time pair
                 // keeps syncing unattended. The P2P link is the priority
-                // transport, so we dial it on a fixed short cadence
-                // ([P2P_DIAL_INTERVAL_MS]) even while the Supabase poll is backed
-                // off to the idle interval. We sleep out `nextDelay` in P2P-dial
-                // chunks: dial, sleep one chunk, repeat, until the poll is due
-                // again. Failures are logged, never fatal.
+                // transport, so we dial it on an adaptive cadence — short
+                // ([P2P_DIAL_INTERVAL_MS]) while active, growing to
+                // [P2P_IDLE_DIAL_INTERVAL_MS] after [P2P_IDLE_THRESHOLD]
+                // consecutive empty dials (CopyPaste-44rq.41) — even while the
+                // Supabase poll is backed off to the idle interval. We sleep out
+                // `nextDelay` in per-chunk slices: dial, sleep one chunk, repeat,
+                // until the poll is due again. Failures are logged, never fatal.
                 // CopyPaste-lwnz: gate the SYNCING badge around the P2P dial too.
                 // CopyPaste-agde: re-check wifi gate before P2P dial — the transport
                 // could change between the poll check above and the dial below.
                 if (isWifi) {
-                DevicesOnlineState.setSyncing(true)
-                try {
-                    dialPairedPeer()
-                } finally {
-                    DevicesOnlineState.setSyncing(false)
-                }
+                    lastP2pHadActivity = false
+                    DevicesOnlineState.setSyncing(true)
+                    try {
+                        dialPairedPeer()
+                    } finally {
+                        DevicesOnlineState.setSyncing(false)
+                    }
+                    // CopyPaste-44rq.41: update P2P idle counter based on activity
+                    // signalled by dialPairedPeer() via lastP2pHadActivity.
+                    if (lastP2pHadActivity) {
+                        p2pConsecutiveEmpty = 0
+                    } else {
+                        p2pConsecutiveEmpty++
+                    }
                 }
                 if (!isActive) break
 
+                // Compute the effective P2P chunk size for the inter-poll sleep.
+                // CopyPaste-44rq.41: grows after P2P_IDLE_THRESHOLD empty dials.
+                val p2pChunk = p2pDialIntervalMs(p2pConsecutiveEmpty)
                 var remaining = nextDelay
                 while (remaining > 0 && isActive) {
-                    val chunk = minOf(remaining, P2P_DIAL_INTERVAL_MS)
+                    val chunk = minOf(remaining, p2pChunk)
                     delay(chunk)
                     if (!isActive) break
                     remaining -= chunk
                     // Re-dial on each chunk boundary that is not the final poll
                     // tick (the post-poll dial above already covers tick zero).
                     if (remaining > 0 && isOnWifi(context)) {
+                        lastP2pHadActivity = false
                         DevicesOnlineState.setSyncing(true)
                         try {
                             dialPairedPeer()
                         } finally {
                             DevicesOnlineState.setSyncing(false)
+                        }
+                        // CopyPaste-44rq.41: update idle counter after each inner dial.
+                        if (lastP2pHadActivity) {
+                            p2pConsecutiveEmpty = 0
+                        } else {
+                            p2pConsecutiveEmpty++
                         }
                     }
                 }
@@ -870,6 +942,9 @@ class FgsSyncLoop(
                     "P2P dial ${peerFingerprint.take(8)}: received ${result.itemsReceived} " +
                         "(stored $stored), sent ${result.itemsSent}",
                 )
+                // CopyPaste-44rq.41: signal activity so the start() loop can
+                // reset the P2P idle backoff counter for this dial round.
+                lastP2pHadActivity = true
             }
             // Auto-apply the newest P2P text clip once (not per item).
             newestTextClip(p2pTextClips)?.let { text ->

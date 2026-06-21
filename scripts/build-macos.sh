@@ -22,13 +22,14 @@ build_target() {
   fi
 
   cargo build --release --target "$rust_target" \
-    -p copypaste-daemon -p copypaste-cli \
+    -p copypaste-daemon -p copypaste-cli -p copypaste-relay \
     --features copypaste-daemon/cloud-sync,copypaste-daemon/relay-sync
 
   mkdir -p "$out_dir"
   cp "target/${rust_target}/release/copypaste-daemon" "$out_dir/"
   cp "target/${rust_target}/release/copypaste"        "$out_dir/"
-  echo "  -> wrote $out_dir/{copypaste-daemon,copypaste}"
+  cp "target/${rust_target}/release/copypaste-relay"  "$out_dir/"
+  echo "  -> wrote $out_dir/{copypaste-daemon,copypaste,copypaste-relay}"
 }
 
 build_universal() {
@@ -47,6 +48,8 @@ build_universal() {
     "$arm_dir/copypaste-daemon" "$x86_dir/copypaste-daemon"
   lipo -create -output "$out_dir/copypaste" \
     "$arm_dir/copypaste" "$x86_dir/copypaste"
+  lipo -create -output "$out_dir/copypaste-relay" \
+    "$arm_dir/copypaste-relay" "$x86_dir/copypaste-relay"
   echo "  -> wrote universal binaries to $out_dir/"
   lipo -info "$out_dir/copypaste-daemon"
 }
@@ -75,8 +78,9 @@ bundle_app() {
     return 0
   fi
   mkdir -p target/release
-  cp "$src_dir/copypaste-daemon" target/release/
-  cp "$src_dir/copypaste"        target/release/
+  cp "$src_dir/copypaste-daemon"   target/release/
+  cp "$src_dir/copypaste"          target/release/
+  cp "$src_dir/copypaste-relay"    target/release/
 
   # Derive version from the workspace Cargo.toml ([workspace.package] version).
   local cargo_version

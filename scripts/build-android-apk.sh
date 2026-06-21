@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# DEPRECATED: This script is not wired into any CI workflow or Makefile target.
+# The active release pipeline performs equivalent steps inline in .github/workflows/release.yml.
+# References to android/keystore-beta.jks in this script are stale — that file does not exist.
+# Do NOT use this script for production APK builds. See .github/workflows/release.yml instead.
+#
 # build-android-apk.sh — Full Android APK release build, in-container.
 #
 # Pipeline:

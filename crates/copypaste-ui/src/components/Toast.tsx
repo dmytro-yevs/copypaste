@@ -38,6 +38,16 @@ const KIND_CLS: Record<ToastKind, string> = {
   warning: "text-ide-warning",
 };
 
+// VISM-11: semantic colour dot for each kind — mirrors the HistoryView toast
+// spec and the Android GlassToast leading indicator. Dot is purely presentational
+// so it carries aria-hidden="true"; the KIND_CLS text colour already conveys kind.
+const DOT_CLS: Record<ToastKind, string> = {
+  info:    "bg-ide-text",
+  success: "bg-ide-success",
+  error:   "bg-ide-danger",
+  warning: "bg-ide-warning",
+};
+
 function GlassToastItem({
   msg,
   onDismiss,
@@ -56,26 +66,31 @@ function GlassToastItem({
 
   return (
     // surface-card: glass float over aurora canvas (spec §surface-card)
-    // animate-toast-in: slide-up entrance (tailwind keyframes §8)
-    // W-C6: radius and shadow use --skin-* vars so Quiet/Vapor tokens apply
-    //   automatically without touching foundation files. Classic values are
-    //   identical to the former hardcoded values (--skin-r-card=14px,
-    //   --skin-shadow-card=var(--ide-e2)).
+    // toast-enter: approved motion primitive for entrance (§MO-6).
+    // UIC-5: radius uses --skin-r-modal (not --skin-r-card) — a floating toast
+    //   is a modal-tier surface (same tier as dropdowns and popovers), so it
+    //   receives the modal corner radius rather than the card radius.
+    //   Shadow stays --skin-shadow-card as toasts are lighter than full modals.
     <div
       role="status"
       aria-live="polite"
       style={{
-        borderRadius: "var(--skin-r-card)",
+        borderRadius: "var(--skin-r-modal)",
         boxShadow: "var(--skin-shadow-card)",
       }}
       className={[
-        "surface-card animate-toast-in",
+        "surface-card toast-enter",
         "min-w-[200px] max-w-[340px] px-4 py-2.5",
-        "flex items-center justify-between gap-3",
+        "flex items-center gap-3",
         KIND_CLS[kind],
       ].join(" ")}
     >
-      <span className="text-[13px] leading-snug">{msg.text}</span>
+      {/* VISM-11: leading semantic colour dot — visual consistency with HistoryView toasts */}
+      <span
+        aria-hidden="true"
+        className={["h-2 w-2 shrink-0 rounded-full", DOT_CLS[kind]].join(" ")}
+      />
+      <span className="flex-1 text-[13px] leading-snug">{msg.text}</span>
       <button
         type="button"
         aria-label="Dismiss"

@@ -130,10 +130,14 @@ data class AuroraDef(
     val bg0: Color,
     val bg1: Color,
     val bg2: Color,
-    val glowA: Color,      // primary blob color
-    val glowB: Color,      // secondary blob color
+    val glowA: Color,         // primary blob color
+    val glowB: Color,         // secondary blob color
     val overlayAccent: Color, // mid-canvas E blob color
     val overlayWarm: Color,   // mid-canvas F blob color (warm tone / amber)
+    // CopyPaste-bdac.43: per-palette glass fill base color (--surface-rgb on web).
+    // Used by LiquidGlassSurface as the dark-mode fill instead of the global GlassFillDark.
+    // Light palettes keep Color(0xFFFFFFFF) (same as GlassFillLight).
+    val surfaceRgb: Color,
 )
 
 // ---------------------------------------------------------------------------
@@ -185,8 +189,8 @@ private val GmAccentPress   = Color(0xFF8AABDA)  // slightly deeper than accent 
 private val GmSuccess    = Color(0xFF7BE0B1)
 private val GmWarning    = Color(0xFFFFCC6A)
 private val GmDanger     = Color(0xFFFF7F8C)
-private val GmInfo       = Color(0xFF7FBCDF)  // cool sky blue (derived from glowA tint)
-private val GmViolet     = Color(0xFFB59FD4)  // muted lavender (graphite-adjacent)
+private val GmInfo       = Color(0xFF5AB2C4)  // teal-adjacent (parity §A: CSS graphite-mist dark info)
+private val GmViolet     = Color(0xFFB482D7)  // muted lavender (parity §A: CSS graphite-mist dark violet)
 
 // Balanced-dark text/border tokens
 // text #F8FAFF@.96, dim #E5ECFF@.78, faint/muted #D9E1F4@.58/icon #F5F9FF@.92
@@ -213,7 +217,8 @@ val GraphiteMistIdeColors = IdeColors(
     ghost    = GmGhost,
     ghostDeco = GmGhostDeco,
     accent      = GmAccent,
-    accentOn    = Color.White,          // onAccent #ffffff
+    // #080C16 achieves 9.03:1 on GmAccent #9DB7DF; white was 2.04:1 (WCAG AA fail).
+    accentOn    = Color(0xFF080C16),
     accentDim   = GmAccent.copy(alpha = 0.15f),
     accentPress = GmAccentPress,
     selection   = GmAccent.copy(alpha = 0.16f),
@@ -248,6 +253,7 @@ val GraphiteMistAurora = AuroraDef(
     glowB         = Color(0xFF5A6A83).copy(alpha = 0.38f),  // glowB #5a6a83 — deeper slate
     overlayAccent = GmAccent.copy(alpha = 0.22f),           // accent-tinted mid-canvas E blob
     overlayWarm   = Color(0xFF5A6A83).copy(alpha = 0.14f),  // no amber in graphite palette; use glowB as warm stand-in
+    surfaceRgb    = Color(0xFF1C1F2A),  // rgb(28,31,42) — styleguide surface token (bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -274,9 +280,38 @@ val LiquidBlueAurora = AuroraDef(
     glowB         = Color(0xFF9E7BFF).copy(alpha = 0.38f),
     overlayAccent = Color(0xFF4D8DFF).copy(alpha = 0.22f),
     overlayWarm   = Color(0xFFD9A343).copy(alpha = 0.16f),
+    surfaceRgb    = Color(0xFF161E36),  // rgb(22,30,54) — styleguide surface token (bdac.43)
 )
 
-// Note: LiquidBlue IdeColors = existing DarkIdeColors; wired in paletteIdeColors().
+private val LbBg0    = Color(0xFF061123)
+private val LbBg1    = Color(0xFF0B1F47)
+private val LbBg2    = Color(0xFF12152D)
+private val LbAccent = Color(0xFF4D8DFF)
+
+// CopyPaste-5917.38: bespoke IdeColors ramp for LiquidBlue — bg/panel/elevated match
+// the AuroraDef so glass-surface backgrounds are in the same deep-blue family as the
+// aurora canvas. Semantic colours match DeepSky profile tuned for #061123 background.
+val LiquidBlueIdeColors = IdeColors(
+    bg = LbBg0, panel = LbBg1, elevated = LbBg2,
+    raised   = Color(0xFF1A2550),    // surfaceStrong — slightly lighter deep navy
+    border   = darkLine(0.16f), divider = darkLine(0.14f),
+    text     = darkText(0.96f), dim = darkTextBlue(0.78f),
+    faint    = Color(0xFFD9E1F4).copy(alpha = 0.58f),
+    mute     = Color(0xFFD9E1F4).copy(alpha = 0.46f),
+    ghost    = Color.White.copy(alpha = 0.55f),
+    ghostDeco = Color.White.copy(alpha = 0.38f),
+    accent      = LbAccent,
+    accentOn    = Color(0xFF080C16),  // dark text on blue: 6.11:1 on #4D8DFF (WCAG AA)
+    accentDim   = LbAccent.copy(alpha = 0.15f),
+    accentPress = Color(0xFF2F7AE8),
+    selection   = LbAccent.copy(alpha = 0.16f),
+    hover       = Color.White.copy(alpha = 0.05f),
+    success     = Color(0xFF6EE79E),  successDim = Color(0xFF6EE79E).copy(alpha = 0.12f),
+    warning     = Color(0xFFFFC75D),  warningDim = Color(0xFFFFC75D).copy(alpha = 0.12f),
+    danger      = Color(0xFFFF6B78),  dangerDim  = Color(0xFFFF6B78).copy(alpha = 0.12f),
+    info        = Color(0xFF7FC7FF),  infoDim    = Color(0xFF7FC7FF).copy(alpha = 0.14f),
+    violet      = Color(0xFF9E7BFF),  violetDim  = Color(0xFF9E7BFF).copy(alpha = 0.14f),
+)
 
 // ---------------------------------------------------------------------------
 // DEEP SKY (dark, electric blue)
@@ -300,7 +335,8 @@ val DeepSkyIdeColors = IdeColors(
     ghost    = Color.White.copy(alpha = 0.55f),
     ghostDeco = Color.White.copy(alpha = 0.38f),
     accent      = DsAccent,
-    accentOn    = Color.White,
+    // #080C16 achieves 6.75:1 on DsAccent #1F9CFF; white was 2.89:1 (WCAG AA fail).
+    accentOn    = Color(0xFF080C16),
     accentDim   = DsAccent.copy(alpha = 0.15f),
     accentPress = Color(0xFF0E8FF0),
     selection   = DsAccent.copy(alpha = 0.16f),
@@ -308,8 +344,8 @@ val DeepSkyIdeColors = IdeColors(
     success     = Color(0xFF6EE79E),  successDim = Color(0xFF6EE79E).copy(alpha = 0.12f),
     warning     = Color(0xFFFFC75D),  warningDim = Color(0xFFFFC75D).copy(alpha = 0.12f),
     danger      = Color(0xFFFF6B78),  dangerDim  = Color(0xFFFF6B78).copy(alpha = 0.12f),
-    info        = Color(0xFF55E6FF),  infoDim    = Color(0xFF55E6FF).copy(alpha = 0.14f),
-    violet      = Color(0xFF9E7BFF),  violetDim  = Color(0xFF9E7BFF).copy(alpha = 0.14f),
+    info        = Color(0xFF28C3E4),  infoDim    = Color(0xFF28C3E4).copy(alpha = 0.14f),  // parity §A: CSS deep-sky dark info
+    violet      = Color(0xFF8C6CE8),  violetDim  = Color(0xFF8C6CE8).copy(alpha = 0.14f),  // parity §A: CSS deep-sky dark violet
 )
 
 val DeepSkyLiquidTokens = LiquidTokens(
@@ -324,6 +360,7 @@ val DeepSkyAurora = AuroraDef(
     glowB         = Color(0xFF55E6FF).copy(alpha = 0.35f),
     overlayAccent = Color(0xFF1F9CFF).copy(alpha = 0.22f),
     overlayWarm   = Color(0xFFD9A343).copy(alpha = 0.14f),
+    surfaceRgb    = Color(0xFF0E1B31),  // rgb(14,27,49) — between bg2 #101B31 and raised #183052 (bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -356,8 +393,8 @@ val NordicCyanIdeColors = IdeColors(
     success     = Color(0xFF75EF9F),  successDim = Color(0xFF75EF9F).copy(alpha = 0.12f),
     warning     = Color(0xFFFFD166),  warningDim = Color(0xFFFFD166).copy(alpha = 0.12f),
     danger      = Color(0xFFFF6B6B),  dangerDim  = Color(0xFFFF6B6B).copy(alpha = 0.12f),
-    info        = Color(0xFF8AF5E4),  infoDim    = Color(0xFF8AF5E4).copy(alpha = 0.14f),
-    violet      = Color(0xFF5A9DFF),  violetDim  = Color(0xFF5A9DFF).copy(alpha = 0.14f),
+    info        = Color(0xFF25D5B4),  infoDim    = Color(0xFF25D5B4).copy(alpha = 0.14f),  // parity §A: CSS nordic-cyan dark info (tracks teal accent)
+    violet      = Color(0xFFA078F0),  violetDim  = Color(0xFFA078F0).copy(alpha = 0.14f),  // parity §A: CSS nordic-cyan dark violet
 )
 
 val NordicCyanLiquidTokens = LiquidTokens(
@@ -372,6 +409,7 @@ val NordicCyanAurora = AuroraDef(
     glowB         = Color(0xFF478CFF).copy(alpha = 0.32f),
     overlayAccent = Color(0xFF25D5B4).copy(alpha = 0.20f),
     overlayWarm   = Color(0xFFFFD166).copy(alpha = 0.14f),
+    surfaceRgb    = Color(0xFF0D2130),  // rgb(13,33,48) — close to bg2 #0B1D2B (bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -396,7 +434,8 @@ val AuroraVioletIdeColors = IdeColors(
     ghost    = Color.White.copy(alpha = 0.55f),
     ghostDeco = Color.White.copy(alpha = 0.38f),
     accent      = AvAccent,
-    accentOn    = Color.White,
+    // #080C16 achieves 6.24:1 on AvAccent #9A7CFF; white was 3.13:1 (WCAG AA fail).
+    accentOn    = Color(0xFF080C16),
     accentDim   = AvAccent.copy(alpha = 0.15f),
     accentPress = Color(0xFF8A6DF5),
     selection   = AvAccent.copy(alpha = 0.16f),
@@ -404,8 +443,8 @@ val AuroraVioletIdeColors = IdeColors(
     success     = Color(0xFF6EE7B7),  successDim = Color(0xFF6EE7B7).copy(alpha = 0.12f),
     warning     = Color(0xFFFFC35A),  warningDim = Color(0xFFFFC35A).copy(alpha = 0.12f),
     danger      = Color(0xFFFF6F91),  dangerDim  = Color(0xFFFF6F91).copy(alpha = 0.12f),
-    info        = Color(0xFFD4B6FF),  infoDim    = Color(0xFFD4B6FF).copy(alpha = 0.14f),
-    violet      = Color(0xFFFF7AD9),  violetDim  = Color(0xFFFF7AD9).copy(alpha = 0.14f),
+    info        = Color(0xFFAA80FF),  infoDim    = Color(0xFFAA80FF).copy(alpha = 0.14f),  // parity §A: CSS aurora-violet dark info (violet-shifted)
+    violet      = Color(0xFF9A7CFF),  violetDim  = Color(0xFF9A7CFF).copy(alpha = 0.14f),  // parity §A: CSS aurora-violet dark violet (tracks accent)
 )
 
 val AuroraVioletLiquidTokens = LiquidTokens(
@@ -420,6 +459,7 @@ val AuroraVioletAurora = AuroraDef(
     glowB         = Color(0xFFFF7AD9).copy(alpha = 0.38f),
     overlayAccent = Color(0xFF9A7CFF).copy(alpha = 0.22f),
     overlayWarm   = Color(0xFFFFC35A).copy(alpha = 0.16f),
+    surfaceRgb    = Color(0xFF1D1836),  // rgb(29,24,54) — styleguide surface token (bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -452,8 +492,8 @@ val AmberNightIdeColors = IdeColors(
     success     = Color(0xFF82E070),  successDim = Color(0xFF82E070).copy(alpha = 0.12f),
     warning     = Color(0xFFFFBF47),  warningDim = Color(0xFFFFBF47).copy(alpha = 0.12f),
     danger      = Color(0xFFFF6B68),  dangerDim  = Color(0xFFFF6B68).copy(alpha = 0.12f),
-    info        = Color(0xFF6CA0FF),  infoDim    = Color(0xFF6CA0FF).copy(alpha = 0.14f),
-    violet      = Color(0xFFD4B6FF),  violetDim  = Color(0xFFD4B6FF).copy(alpha = 0.14f),
+    info        = Color(0xFF64A0B9),  infoDim    = Color(0xFF64A0B9).copy(alpha = 0.14f),  // parity §A: CSS amber-night dark info (warm-tinted teal)
+    violet      = Color(0xFFBE82C8),  violetDim  = Color(0xFFBE82C8).copy(alpha = 0.14f),  // parity §A: CSS amber-night dark violet (muted warm-purple)
 )
 
 val AmberNightLiquidTokens = LiquidTokens(
@@ -468,6 +508,7 @@ val AmberNightAurora = AuroraDef(
     glowB         = Color(0xFF6CA0FF).copy(alpha = 0.32f),
     overlayAccent = Color(0xFFFFAD33).copy(alpha = 0.22f),
     overlayWarm   = Color(0xFFFF9F1C).copy(alpha = 0.18f),
+    surfaceRgb    = Color(0xFF241E22),  // rgb(36,30,34) — warm-amber tinted surface (bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -490,7 +531,8 @@ val CloudSilverIdeColors = IdeColors(
     ghost    = Color(0xFF3C3C43).copy(alpha = 0.55f),
     ghostDeco = Color(0xFF3C3C43).copy(alpha = 0.32f),
     accent      = CsAccent,
-    accentOn    = Color.White,
+    // #080C16 achieves 6.05:1 on CsAccent #5B8DEF; white was 3.23:1 (WCAG AA fail).
+    accentOn    = Color(0xFF080C16),
     accentDim   = CsAccent.copy(alpha = 0.12f),
     accentPress = Color(0xFF4A7EDF),
     selection   = CsAccent.copy(alpha = 0.14f),
@@ -498,8 +540,8 @@ val CloudSilverIdeColors = IdeColors(
     success     = Color(0xFF158F48),  successDim = Color(0xFF158F48).copy(alpha = 0.12f),
     warning     = Color(0xFFA86700),  warningDim = Color(0xFFA86700).copy(alpha = 0.12f),
     danger      = Color(0xFFD93B4A),  dangerDim  = Color(0xFFD93B4A).copy(alpha = 0.12f),
-    info        = Color(0xFF1478AA),  infoDim    = Color(0xFF1478AA).copy(alpha = 0.12f),
-    violet      = Color(0xFF805AD5),  violetDim  = Color(0xFF805AD5).copy(alpha = 0.12f),
+    info        = Color(0xFF0F6E9B),  infoDim    = Color(0xFF0F6E9B).copy(alpha = 0.12f),  // parity §A: CSS cloud-silver light info
+    violet      = Color(0xFF6E50BE),  violetDim  = Color(0xFF6E50BE).copy(alpha = 0.12f),  // parity §A: CSS cloud-silver light violet
 )
 
 val CloudSilverLiquidTokens = LiquidTokens(
@@ -514,6 +556,7 @@ val CloudSilverAurora = AuroraDef(
     glowB         = Color(0xFFDCE7F7).copy(alpha = 0.20f),  // glowB — near-white blue
     overlayAccent = Color(0xFF5B8DEF).copy(alpha = 0.12f),  // accent E blob (light)
     overlayWarm   = Color(0xFFD9A343).copy(alpha = 0.08f),  // subtle warm F blob
+    surfaceRgb    = Color(0xFFFFFFFF),  // light palette: pure white fill (same as GlassFillLight; bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -536,7 +579,8 @@ val FrostBlueIdeColors = IdeColors(
     ghost    = Color(0xFF3C3C43).copy(alpha = 0.55f),
     ghostDeco = Color(0xFF3C3C43).copy(alpha = 0.32f),
     accent      = FbAccent,
-    accentOn    = Color.White,
+    // #080C16 achieves 4.81:1 on FbAccent #2777FF; white was 4.06:1 (WCAG AA fail).
+    accentOn    = Color(0xFF080C16),
     accentDim   = FbAccent.copy(alpha = 0.12f),
     accentPress = Color(0xFF1A6DF0),
     selection   = FbAccent.copy(alpha = 0.14f),
@@ -544,8 +588,8 @@ val FrostBlueIdeColors = IdeColors(
     success     = Color(0xFF108747),  successDim = Color(0xFF108747).copy(alpha = 0.12f),
     warning     = Color(0xFF9A6200),  warningDim = Color(0xFF9A6200).copy(alpha = 0.12f),
     danger      = Color(0xFFCA3446),  dangerDim  = Color(0xFFCA3446).copy(alpha = 0.12f),
-    info        = Color(0xFF1478AA),  infoDim    = Color(0xFF1478AA).copy(alpha = 0.12f),
-    violet      = Color(0xFF805AD5),  violetDim  = Color(0xFF805AD5).copy(alpha = 0.12f),
+    info        = Color(0xFF0F6EA0),  infoDim    = Color(0xFF0F6EA0).copy(alpha = 0.12f),  // parity §A: CSS frost-blue light info
+    violet      = Color(0xFF644BC3),  violetDim  = Color(0xFF644BC3).copy(alpha = 0.12f),  // parity §A: CSS frost-blue light violet
 )
 
 val FrostBlueLiquidTokens = LiquidTokens(
@@ -560,6 +604,7 @@ val FrostBlueAurora = AuroraDef(
     glowB         = Color(0xFFC7E6FF).copy(alpha = 0.22f),
     overlayAccent = Color(0xFF2777FF).copy(alpha = 0.12f),
     overlayWarm   = Color(0xFFD9A343).copy(alpha = 0.08f),
+    surfaceRgb    = Color(0xFFFFFFFF),  // light palette: pure white fill (bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -582,7 +627,8 @@ val PorcelainIdeColors = IdeColors(
     ghost    = Color(0xFF3C3C43).copy(alpha = 0.55f),
     ghostDeco = Color(0xFF3C3C43).copy(alpha = 0.32f),
     accent      = PorcAccent,
-    accentOn    = Color.White,
+    // #080C16 achieves 4.77:1 on PorcAccent #3C7DD9; white was 4.10:1 (WCAG AA fail).
+    accentOn    = Color(0xFF080C16),
     accentDim   = PorcAccent.copy(alpha = 0.12f),
     accentPress = Color(0xFF2E6FC5),
     selection   = PorcAccent.copy(alpha = 0.14f),
@@ -590,8 +636,8 @@ val PorcelainIdeColors = IdeColors(
     success     = Color(0xFF16874C),  successDim = Color(0xFF16874C).copy(alpha = 0.12f),
     warning     = Color(0xFF9B6500),  warningDim = Color(0xFF9B6500).copy(alpha = 0.12f),
     danger      = Color(0xFFCA3446),  dangerDim  = Color(0xFFCA3446).copy(alpha = 0.12f),
-    info        = Color(0xFF1478AA),  infoDim    = Color(0xFF1478AA).copy(alpha = 0.12f),
-    violet      = Color(0xFF805AD5),  violetDim  = Color(0xFF805AD5).copy(alpha = 0.12f),
+    info        = Color(0xFF1273A5),  infoDim    = Color(0xFF1273A5).copy(alpha = 0.12f),  // parity §A: CSS porcelain light info (within ±5 of CSS 18/115/165)
+    violet      = Color(0xFF6950C3),  violetDim  = Color(0xFF6950C3).copy(alpha = 0.12f),  // parity §A: CSS porcelain light violet
 )
 
 val PorcelainLiquidTokens = LiquidTokens(
@@ -606,6 +652,7 @@ val PorcelainAurora = AuroraDef(
     glowB         = Color(0xFFD2E5FB).copy(alpha = 0.20f),
     overlayAccent = Color(0xFF3C7DD9).copy(alpha = 0.12f),
     overlayWarm   = Color(0xFFD9A343).copy(alpha = 0.08f),
+    surfaceRgb    = Color(0xFFFFFFFF),  // light palette: pure white fill (bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -637,7 +684,7 @@ val PearlGreyIdeColors = IdeColors(
     warning     = Color(0xFF9B6400),  warningDim = Color(0xFF9B6400).copy(alpha = 0.12f),
     danger      = Color(0xFFC93445),  dangerDim  = Color(0xFFC93445).copy(alpha = 0.12f),
     info        = Color(0xFF1478AA),  infoDim    = Color(0xFF1478AA).copy(alpha = 0.12f),
-    violet      = Color(0xFF805AD5),  violetDim  = Color(0xFF805AD5).copy(alpha = 0.12f),
+    violet      = Color(0xFF7358C8),  violetDim  = Color(0xFF7358C8).copy(alpha = 0.12f),  // parity §A: CSS pearl-grey light violet
 )
 
 val PearlGreyLiquidTokens = LiquidTokens(
@@ -652,6 +699,7 @@ val PearlGreyAurora = AuroraDef(
     glowB         = Color(0xFFD4D6DC).copy(alpha = 0.18f),
     overlayAccent = Color(0xFF58677F).copy(alpha = 0.10f),
     overlayWarm   = Color(0xFFD9A343).copy(alpha = 0.06f),
+    surfaceRgb    = Color(0xFFFFFFFF),  // light palette: pure white fill (bdac.43)
 )
 
 // ---------------------------------------------------------------------------
@@ -665,7 +713,7 @@ val PearlGreyAurora = AuroraDef(
  */
 fun paletteIdeColors(palette: Palette): IdeColors = when (palette) {
     Palette.GRAPHITE_MIST  -> GraphiteMistIdeColors
-    Palette.LIQUID_BLUE    -> DarkIdeColors          // existing DS-v2 dark ramp
+    Palette.LIQUID_BLUE    -> LiquidBlueIdeColors    // CopyPaste-5917.38: bespoke deep-blue ramp
     Palette.DEEP_SKY       -> DeepSkyIdeColors
     Palette.NORDIC_CYAN    -> NordicCyanIdeColors
     Palette.AURORA_VIOLET  -> AuroraVioletIdeColors
@@ -686,7 +734,7 @@ fun paletteIdeColors(palette: Palette): IdeColors = when (palette) {
 fun paletteIdeColors(palette: Palette, dark: Boolean): IdeColors =
     if (dark) when (palette) {
         Palette.GRAPHITE_MIST -> GraphiteMistIdeColors
-        Palette.LIQUID_BLUE   -> DarkIdeColors
+        Palette.LIQUID_BLUE   -> LiquidBlueIdeColors  // CopyPaste-5917.38
         Palette.DEEP_SKY      -> DeepSkyIdeColors
         Palette.NORDIC_CYAN   -> NordicCyanIdeColors
         Palette.AURORA_VIOLET -> AuroraVioletIdeColors

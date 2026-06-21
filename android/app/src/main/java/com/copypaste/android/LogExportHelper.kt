@@ -30,16 +30,25 @@ object LogExportHelper {
      * Call from any Activity or Context that can start activities.
      *
      * @param context must be an Activity context (or have FLAG_ACTIVITY_NEW_TASK).
+     * @param onError optional callback invoked with a human-readable error message when the
+     *   export fails. When provided, the callback is called instead of showing an
+     *   [android.widget.Toast]. When null (default), a Toast is shown as a fallback so
+     *   callers without a Compose error channel keep working.
      */
-    fun shareLogsZip(context: Context) {
+    fun shareLogsZip(context: Context, onError: ((String) -> Unit)? = null) {
+        fun reportError(msg: String) {
+            if (onError != null) onError(msg)
+            else Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+        }
+
         val files = AppLogger.allLogFiles(context)
         if (files.isEmpty()) {
-            Toast.makeText(context, context.getString(R.string.log_export_empty), Toast.LENGTH_SHORT).show()
+            reportError(context.getString(R.string.log_export_empty))
             return
         }
 
         val zipFile = buildZip(context, files) ?: run {
-            Toast.makeText(context, context.getString(R.string.log_export_failed), Toast.LENGTH_SHORT).show()
+            reportError(context.getString(R.string.log_export_failed))
             return
         }
 
@@ -49,7 +58,7 @@ object LogExportHelper {
             FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", zipFile)
         } catch (e: Exception) {
             AppLogger.e(TAG, "FileProvider failed", e)
-            Toast.makeText(context, context.getString(R.string.log_export_failed), Toast.LENGTH_SHORT).show()
+            reportError(context.getString(R.string.log_export_failed))
             return
         }
 

@@ -12,22 +12,15 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 
 object NotificationHelper {
-    private const val CHANNEL_SENSITIVE = "copypaste_sensitive"
+    // ANDO-2: CHANNEL_SENSITIVE + notifySensitiveDetected removed — no caller exists anywhere
+    // in the codebase. The sensitive-detection path silently drops items rather than notifying.
+    // CHANNEL_SYNC is kept because notifyNativeUnavailable (CHANNEL_SYNC) is called from
+    // ClipboardRepository (6 call-sites) as a security sentinel for native library failures.
     private const val CHANNEL_SYNC = "copypaste_sync"
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(NotificationManager::class.java)
-
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_SENSITIVE,
-                    "Sensitive Data",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply {
-                    description = "Alerts when sensitive data (API keys, passwords) is detected"
-                }
-            )
 
             manager.createNotificationChannel(
                 NotificationChannel(
@@ -52,8 +45,11 @@ object NotificationHelper {
      * [nativeUnavailableNotified] before calling this.
      */
     fun notifyNativeUnavailable(context: Context, id: Int = 1002) {
+        // ANDO-7: use app icon (monochrome foreground layer) rather than generic system drawable.
+        // ic_launcher_foreground is an alpha-channel PNG produced from the adaptive-icon foreground —
+        // it is white-on-transparent on API 26+ where adaptive icons are used as notification icons.
         val notification = NotificationCompat.Builder(context, CHANNEL_SYNC)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
+            .setSmallIcon(R.mipmap.ic_launcher_foreground)
             .setContentTitle("CopyPaste: sync disabled")
             .setContentText(
                 "The encryption library failed to load. " +
@@ -81,39 +77,6 @@ object NotificationHelper {
                 TAG,
                 "notifyNativeUnavailable: notify() blocked by SecurityException: ${e.message}"
             )
-        }
-    }
-
-    fun notifySensitiveDetected(context: Context, id: Int = 1001) {
-        val notification = NotificationCompat.Builder(context, CHANNEL_SENSITIVE)
-            .setSmallIcon(android.R.drawable.ic_dialog_alert)
-            .setContentTitle("Sensitive data detected")
-            .setContentText("An item with a secret key or credential was detected and not stored.")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-            .build()
-
-        // [P1] API 33+ (TIRAMISU) requires POST_NOTIFICATIONS permission at runtime.
-        // NotificationManagerCompat.notify() throws SecurityException if the permission
-        // was granted then revoked. Guard with both an areNotificationsEnabled() check
-        // (covers all API levels) and a belt-and-suspenders try/catch for the
-        // SecurityException path on API 33+ where revocation can race with notify().
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
-            Log.d(TAG, "notifySensitiveDetected: notifications disabled — skipping")
-            return
-        }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
-                    != PackageManager.PERMISSION_GRANTED) {
-                Log.d(TAG, "notifySensitiveDetected: POST_NOTIFICATIONS not granted — skipping")
-                return
-            }
-        }
-        try {
-            NotificationManagerCompat.from(context).notify(id, notification)
-        } catch (e: SecurityException) {
-            Log.w(TAG, "notifySensitiveDetected: notify() blocked by SecurityException — " +
-                "POST_NOTIFICATIONS was revoked concurrently: ${e.message}")
         }
     }
 

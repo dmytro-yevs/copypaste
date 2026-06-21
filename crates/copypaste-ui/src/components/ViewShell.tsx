@@ -57,8 +57,8 @@ export function ViewShell({
       >
         <h1
           data-tauri-drag-region
-          // §3: view title = 14px medium (was 13px semibold).
-          className="text-[14px] font-medium tracking-wide text-ide-text"
+          // §3: view title = 13px medium (design spec).
+          className="text-[13px] font-medium tracking-wide text-ide-text"
         >
           {title}
         </h1>

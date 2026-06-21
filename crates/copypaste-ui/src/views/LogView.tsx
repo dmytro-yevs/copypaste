@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { readLogs, logDirPath, IpcError } from "../lib/ipc";
+import { ViewShell } from "../components/ViewShell";
+import { RestartDaemonButton } from "../components/RestartDaemonButton";
 
 const MAX_LINES = 500;
 
@@ -105,109 +107,122 @@ export function LogView() {
   const lines = content.split("\n");
   const lastLineIdx = lines.length - 1;
 
+  // Actions slot rendered into the ViewShell header (Refresh + Export buttons).
+  const headerActions = (
+    <div className="flex items-center gap-2">
+      {/* rounded-ide removed; --skin-r-ctl drives radius so Quiet/Vapor adapt. */}
+      <button
+        onClick={() => {
+          setLoading(true);
+          void load();
+        }}
+        className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text"
+        style={{ borderRadius: "var(--skin-r-ctl)" }}
+      >
+        Refresh
+      </button>
+      <button
+        onClick={handleExport}
+        disabled={!content || content === "(no log entries)"}
+        className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text disabled:opacity-40"
+        style={{ borderRadius: "var(--skin-r-ctl)" }}
+      >
+        Export
+      </button>
+    </div>
+  );
+
   return (
-    // surface-glass on the frame; the opaque bg-ide-bg was DEFEATING the glass —
-    // removed so the aurora canvas blurs through.
-    <div className="surface-glass flex h-full flex-col">
-      {/* Header — glass too, so it reads as a layered material, not an opaque bar. */}
-      <div className="surface-card reveal-up flex shrink-0 items-center justify-between border-b border-ide-border px-4 py-3">
-        <div>
-          <h2 className="text-[13px] font-medium text-ide-text">Daemon Logs</h2>
-          {logPath && (
-            // title keeps the full absolute path for power-users / clipboard.
-            // Display text is ~-relativized so the username never leaks
-            // in screen recordings or screenshots (CopyPaste-2b3i).
-            <p className="mt-0.5 text-[11px] text-ide-faint" title={logPath}>
-              {relativizeLogPath(logPath)}
-            </p>
+    // SCRL-11: use shared ViewShell for consistent header + drag-region + glass
+    // surface. The redundant inner surface-card header is removed (fixes SCRL-3).
+    <ViewShell title="Daemon Logs" actions={headerActions}>
+      <div className="flex h-full flex-col">
+        {/* Path subtitle shown below the ViewShell title, inside the content panel. */}
+        {logPath && (
+          <p className="mb-2 text-[11px] text-ide-faint" title={relativizeLogPath(logPath)}>
+            {relativizeLogPath(logPath)}
+          </p>
+        )}
+
+        {/* Content */}
+        <div className="min-h-0 flex-1">
+          {loading ? (
+            /* bdac.94: animated spinner replaces static "Loading…" text — matches
+               the DevicesView pattern (animate-spin + motion-reduce guard). */
+            <div className="flex h-full items-center justify-center">
+              <span
+                aria-label="Loading logs…"
+                className="inline-block h-5 w-5 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent"
+              />
+            </div>
+          ) : error ? (
+            /* bdac.96: RestartDaemonButton added to error state so users can recover
+               without navigating away — consistent with HistoryView / DevicesView. */
+            <div className="flex h-full flex-col items-center justify-center gap-3">
+              <p className="text-[13px] text-ide-danger">{error}</p>
+              <RestartDaemonButton
+                label="Restart background service"
+                onRestarted={() => {
+                  setLoading(true);
+                  void load();
+                }}
+              />
+            </div>
+          ) : (
+            // Scrollable log area — no extra wrapper border; the rows live directly
+            // on the content panel surface (one cohesive glass surface, no box-in-box).
+            // select-text preserved so users can still copy lines.
+            <div
+              ref={scrollRef}
+              className="h-full w-full overflow-auto select-text"
+            >
+              {lines.map((line, i) => {
+                const level = levelOf(line);
+                const isLast = i === lastLineIdx;
+                return (
+                  // Each row is a .mono-line glass pill — hover accent border via
+                  // Tailwind group and inline transition (mirrors source.html §870-896).
+                  // border-l-2 gives a per-level accent stripe (error/warn only).
+                  <div
+                    key={i}
+                    className={[
+                      "list-item-in",
+                      "group flex items-start gap-2",
+                      "rounded border border-ide-border bg-ide-hover",
+                      "px-2 py-1 font-mono text-[11px] leading-relaxed",
+                      "mb-1 last:mb-0",
+                      "border-l-2",
+                      LEVEL_BORDER[level],
+                      LEVEL_CLASS[level],
+                      // Hover: accent-tinted border + subtle bg fill (mirrors .mono-line:hover)
+                      "transition-[border-color,background] duration-200 ease-out",
+                      "hover:border-ide-accent/40 hover:bg-ide-accent/5",
+                      "cursor-default whitespace-pre-wrap break-words",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                    style={{ animationDelay: `${Math.min(i * 8, 200)}ms` }}
+                  >
+                    <code className="flex-1 overflow-hidden">{line || " "}</code>
+                    {/* Terminal cursor blink on the last (live) line. */}
+                    {isLast && (
+                      <span
+                        className="cursor-blink ml-0.5 inline-block h-[1em] w-[6px] shrink-0 rounded-sm bg-current opacity-70"
+                        aria-hidden="true"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {/* rounded-ide removed; --skin-r-ctl drives radius so Quiet/Vapor adapt. */}
-          <button
-            onClick={() => {
-              setLoading(true);
-              void load();
-            }}
-            className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
-          >
-            Refresh
-          </button>
-          <button
-            onClick={handleExport}
-            disabled={!content || content === "(no log entries)"}
-            className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text disabled:opacity-40"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
-          >
-            Export
-          </button>
+
+        {/* SCRL-13: corrected copy — daemon emits plain text, not JSON. */}
+        <div className="mt-2 shrink-0 border-t border-ide-border pt-2 text-[11px] text-ide-faint">
+          Last {MAX_LINES} lines · Plain-text log
         </div>
       </div>
-
-      {/* Content */}
-      <div className="min-h-0 flex-1 p-3">
-        {loading ? (
-          <div className="flex h-full items-center justify-center text-[13px] text-ide-dim">
-            Loading…
-          </div>
-        ) : error ? (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-[13px] text-ide-danger">{error}</p>
-          </div>
-        ) : (
-          // Scrollable log area — no extra wrapper border; the rows live directly
-          // on the content panel surface (one cohesive glass surface, no box-in-box).
-          // select-text preserved so users can still copy lines.
-          <div
-            ref={scrollRef}
-            className="h-full w-full overflow-auto select-text"
-          >
-            {lines.map((line, i) => {
-              const level = levelOf(line);
-              const isLast = i === lastLineIdx;
-              return (
-                // Each row is a .mono-line glass pill — hover accent border via
-                // Tailwind group and inline transition (mirrors source.html §870-896).
-                // border-l-2 gives a per-level accent stripe (error/warn only).
-                <div
-                  key={i}
-                  className={[
-                    "list-item-in",
-                    "group flex items-start gap-2",
-                    "rounded border border-ide-border bg-black/10",
-                    "px-2 py-1 font-mono text-[11px] leading-relaxed",
-                    "mb-1 last:mb-0",
-                    "border-l-2",
-                    LEVEL_BORDER[level],
-                    LEVEL_CLASS[level],
-                    // Hover: accent-tinted border + subtle bg fill (mirrors .mono-line:hover)
-                    "transition-[border-color,background] duration-200 ease-out",
-                    "hover:border-ide-accent/40 hover:bg-ide-accent/5",
-                    "cursor-default whitespace-pre-wrap break-words",
-                  ]
-                    .filter(Boolean)
-                    .join(" ")}
-                  style={{ animationDelay: `${Math.min(i * 8, 200)}ms` }}
-                >
-                  <code className="flex-1 overflow-hidden">{line || " "}</code>
-                  {/* Terminal cursor blink on the last (live) line. */}
-                  {isLast && (
-                    <span
-                      className="cursor-blink ml-0.5 inline-block h-[1em] w-[6px] shrink-0 rounded-sm bg-current opacity-70"
-                      aria-hidden="true"
-                    />
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      <div className="shrink-0 border-t border-ide-border px-4 py-2 text-[11px] text-ide-faint">
-        Last {MAX_LINES} lines · Daemon log (JSON format)
-      </div>
-    </div>
+    </ViewShell>
   );
 }

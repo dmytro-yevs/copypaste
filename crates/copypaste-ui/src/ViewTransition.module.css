@@ -1,46 +1,54 @@
 /* Co-located keyframes for the view-switch crossfade (CopyPaste-2bhh / 4r48).
- * A genuine crossfade: old view fades+slides OUT while new view fades+slides IN
- * simultaneously, so the user sees a smooth blend rather than a blink-then-appear.
+ * §MO-2 Page transition: panel translateX ±18-24px + opacity (slow, emphasized).
+ * A genuine crossfade: old view slides OUT while new view slides IN simultaneously.
  *
  * NOT in index.css (another agent owns that file).
+ * Uses --mo-* tokens; fallback literals match token defaults for jsdom tests.
  */
 
-@keyframes viewFadeIn {
+@keyframes viewSlideIn {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateX(20px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(0);
   }
 }
 
-/* 4r48: outgoing view fades out and slides slightly UP (mirror of fade-in direction
- * flipped) so the transition feels directional rather than a mere dissolve. */
-@keyframes viewFadeOut {
+/* Outgoing view slides to the left (directional — mirror of in direction). */
+@keyframes viewSlideOut {
   from {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateX(0);
   }
   to {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateX(-20px);
   }
+}
+
+/* Legacy fallback keyframes (Y-axis) kept for any consumer still referencing them. */
+@keyframes viewFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+@keyframes viewFadeOut {
+  from { opacity: 1; transform: translateY(0);   }
+  to   { opacity: 0; transform: translateY(-4px); }
 }
 
 .view-fade-in {
-  animation-name: viewFadeIn;
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-  /* duration and fill-mode come from inline styles so they are testable in
-   * jsdom (which doesn't parse stylesheets) and so prefers-reduced-motion
-   * can set duration=0ms via inline style without !important wars. */
+  /* §MO-2: X-axis slide in. Duration/fill-mode via inline style (testable in jsdom). */
+  animation-name: viewSlideIn;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); /* --mo-ease-emphasized */
 }
 
-/* 4r48: outgoing panel class — applied to the leaving view during crossfade. */
+/* 4r48: outgoing panel — slides left during crossfade. */
 .view-fade-out {
-  animation-name: viewFadeOut;
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
-  /* Stays at opacity:0 after animation ends (fill=forwards via inline style). */
+  animation-name: viewSlideOut;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1); /* --mo-ease-emphasized */
   pointer-events: none;
 }

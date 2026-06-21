@@ -67,11 +67,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.GlassAlertDialog
@@ -94,6 +92,7 @@ import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.RadiusControl
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.SectionLabel
 import android.content.ClipData
 import android.content.ClipboardManager
 import androidx.compose.animation.core.animateDpAsState
@@ -118,8 +117,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.collectAsState
 import androidx.activity.compose.rememberLauncherForActivityResult
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.SyncBadgeState
 import com.copypaste.android.ui.resolveSyncBadgeState
+// CopyPaste-5917.77: NavIcons.About / NavIcons.Logs for Settings → About / Logs rows
+import com.copypaste.android.ui.theme.NavIcons
+import androidx.compose.ui.graphics.vector.ImageVector
 import java.text.DateFormat
 import java.util.Date
 
@@ -207,7 +212,11 @@ fun SettingsScreen(
 
     // ── Display ──
     var density by remember { mutableStateOf(settings.density) }
-    var showWarnings by remember { mutableStateOf(settings.showSensitiveWarnings) }
+    // CopyPaste-bdac.32: renamed — captures toast-on-skip (not reveal-guard).
+    var showWarnings by remember { mutableStateOf(settings.notifyOnSensitiveSkip) }
+    // CopyPaste-bdac.35: reveal-guard toggle — "Warn before revealing sensitive items".
+    // Distinct from showWarnings (capture-skip toast). Mirrors macOS prefs.showSensitiveWarnings.
+    var revealGuard by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
     var translucency by remember { mutableStateOf(settings.translucency) }
     // hujj: user-facing reduce-motion toggle (calm ↔ cinematic), mirrors web data-motion attr.
@@ -253,6 +262,8 @@ fun SettingsScreen(
     var p2pSyncEnabled by remember { mutableStateOf(settings.p2pSyncEnabled) }
     // PG-29 (CopyPaste-yqn5): LAN/mDNS-SD visibility toggle — mirrors macOS lan_visibility.
     var lanVisibility by remember { mutableStateOf(settings.lanVisibility) }
+    // CopyPaste-44rq.24: auto-apply synced clipboard — mirrors macOS auto_apply_synced_clip.
+    var autoApplySyncedClip by remember { mutableStateOf(settings.autoApplySyncedClip) }
     var supabaseUrl by remember { mutableStateOf(settings.supabaseUrl) }
     var supabaseAnonKey by remember { mutableStateOf(settings.supabaseAnonKey) }
     var cloudPassphrase by remember { mutableStateOf(settings.cloudSyncPassphrase) }
@@ -274,6 +285,9 @@ fun SettingsScreen(
     // ── Notifications ──
     var notifyOnCopy by remember { mutableStateOf(settings.notifyOnCopy) }
     var soundOnCopy by remember { mutableStateOf(settings.soundOnCopy) }
+
+    // bd CopyPaste-44rq.22: toast state for export/import feedback.
+    val toastState = remember { GlassToastState() }
 
     // ── Diagnostics (General tab) ──
     var logcatEnabled by remember { mutableStateOf(settings.logcatCaptureEnabled) }
@@ -305,7 +319,7 @@ fun SettingsScreen(
             captureEnabled = settings.captureEnabled,
             privateMode = privateMode,
             syncEnabled = syncEnabled,
-            showSensitiveWarnings = showWarnings,
+            notifyOnSensitiveSkip = showWarnings, // CopyPaste-bdac.32: renamed param
             maskSensitiveContent = maskSensitive,
             translucency = translucency,
             motionReduced = motionReduced,
@@ -344,6 +358,10 @@ fun SettingsScreen(
         settings.collectPublicIp = collectPublicIp
         settings.pasteAsPlainText = pasteAsPlainText
         settings.excludedAppBundleIds = excludedApps
+        // CopyPaste-bdac.35: persist reveal-guard toggle (not in saveScreenSettings batch).
+        settings.showSensitiveWarnings = revealGuard
+        // CopyPaste-44rq.24: persist auto-apply-synced-clip toggle.
+        settings.autoApplySyncedClip = autoApplySyncedClip
         SupabasePollWorker.schedule(ctx, enabled = syncBackend == SyncBackend.SUPABASE)
         LogcatCaptureService.syncState(ctx, settings)
     }
@@ -404,28 +422,19 @@ fun SettingsScreen(
     }
 
     // CopyPaste-y94e: three-way background canvas driven by tok.background:
-    //   AURORA  (Classic) → animated aurora canvas (byte-identical to previous behaviour).
-    //   TINT_BLOB (Vapor) → static radial accent blob painted via drawBehind.
-    //   FLAT    (Quiet)   → no canvas; containerColor stays opaque c.bg.
+    //   AURORA    (Classic) → animated aurora canvas (byte-identical to previous behaviour).
+    //   TINT_BLOB (Vapor)   → canonical tintBlobCanvas() — same helper used on every other screen
+    //                         (VISA-5/6: was an inline single-blob drawBehind; unified to the
+    //                          shared implementation in Components.kt so Vapor looks consistent).
+    //   FLAT      (Quiet)   → no canvas; containerColor stays opaque c.bg.
     val paintAurora   = tok.background == SkinBackground.AURORA    && translucency && paintCanvasBackdrop
     val paintTintBlob = tok.background == SkinBackground.TINT_BLOB && translucency && paintCanvasBackdrop
     val scaffoldModifier = when {
-        paintAurora -> modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
-        paintTintBlob -> modifier.drawBehind {
-            val diag = kotlin.math.hypot(size.width, size.height)
-            drawRect(
-                brush = Brush.radialGradient(
-                    colorStops = arrayOf(
-                        0.0f to c.accent.copy(alpha = tok.glow * 0.55f),
-                        0.65f to c.accent.copy(alpha = tok.glow * 0.12f),
-                        1.0f to androidx.compose.ui.graphics.Color.Transparent,
-                    ),
-                    center = Offset(size.width * 0.35f, size.height * 0.28f),
-                    radius = diag * 0.75f,
-                ),
-            )
-        }
-        else -> modifier
+        paintAurora   -> modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+        // VISA-5/6: use the canonical shared tintBlobCanvas() from Components.kt so Vapor
+        // renders identically on Settings as it does on History/About/Devices/etc.
+        paintTintBlob -> modifier.tintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
+        else          -> modifier
     }
     Scaffold(
         // CopyPaste-7em1/1a61: pass paletteAurora so Settings screen uses the active palette's
@@ -546,6 +555,8 @@ fun SettingsScreen(
                         onDensityChange = { density = it; dirty = true },
                         showWarnings = showWarnings,
                         onShowWarningsChange = { showWarnings = it; dirty = true },
+                        revealGuard = revealGuard,
+                        onRevealGuardChange = { revealGuard = it; dirty = true },
                         maskSensitive = maskSensitive,
                         onMaskSensitiveChange = { maskSensitive = it; dirty = true },
                         translucency = translucency,
@@ -576,6 +587,8 @@ fun SettingsScreen(
                         val repository = remember { ClipboardRepository(ctx) }
 
                         // CopyPaste-8jx8: Export via SAF — user picks a destination file.
+                        // bd CopyPaste-44rq.22: show GlassToast on success/failure instead of
+                        // silently logging — keeps the user informed about async SAF outcomes.
                         val exportLauncher = rememberLauncherForActivityResult(
                             androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json"),
                         ) { uri ->
@@ -588,13 +601,16 @@ fun SettingsScreen(
                                         out.write(json.toByteArray(Charsets.UTF_8))
                                     }
                                     android.util.Log.i("SettingsActivity", "Exported history to $uri")
+                                    toastState.show(ctx.getString(R.string.history_export_ok), GlassToastKind.SUCCESS)
                                 } catch (e: Exception) {
                                     android.util.Log.e("SettingsActivity", "Export failed: ${e.message}", e)
+                                    toastState.show(ctx.getString(R.string.history_export_failed), GlassToastKind.DANGER)
                                 }
                             }
                         }
 
                         // CopyPaste-8jx8: Import via SAF — user picks a previously exported JSON.
+                        // bd CopyPaste-44rq.22: show GlassToast on success/failure.
                         val importLauncher = rememberLauncherForActivityResult(
                             androidx.activity.result.contract.ActivityResultContracts.OpenDocument(),
                         ) { uri ->
@@ -606,8 +622,13 @@ fun SettingsScreen(
                                     val key = settings.encryptionKey
                                     val count = repository.importHistory(json, key)
                                     android.util.Log.i("SettingsActivity", "Imported $count items from $uri")
+                                    toastState.show(
+                                        ctx.getString(R.string.history_import_ok, count),
+                                        GlassToastKind.SUCCESS,
+                                    )
                                 } catch (e: Exception) {
                                     android.util.Log.e("SettingsActivity", "Import failed: ${e.message}", e)
+                                    toastState.show(ctx.getString(R.string.history_import_failed), GlassToastKind.DANGER)
                                 }
                             }
                         }
@@ -627,15 +648,16 @@ fun SettingsScreen(
                             onMaxItemsChange = { maxItems = it; dirty = true },
                             excludedApps = excludedApps,
                             onExcludedAppsChange = { excludedApps = it; dirty = true },
-                            // CopyPaste-hffp: pass live draft density.
-                            density = density,
-                            ctx = ctx,
                             onClearHistory = {
                                 scope.launch(Dispatchers.IO) { repository.clearAll() }
                             },
                             // CopyPaste-12f0: degraded-DB reset — wipes the whole repository.
+                            // bd CopyPaste-44rq.59: confirmed=true is passed here because the
+                            // StorageTab already shows a confirmation dialog before calling this
+                            // lambda (the dialog is the user-confirmation gate; confirmed=true
+                            // signals the user explicitly approved the destructive action).
                             onResetDatabase = {
-                                scope.launch(Dispatchers.IO) { repository.resetDatabase() }
+                                scope.launch(Dispatchers.IO) { repository.resetDatabase(confirmed = true) }
                             },
                             // CopyPaste-8jx8: export/import via SAF file picker.
                             onExportHistory = {
@@ -657,6 +679,8 @@ fun SettingsScreen(
                         onP2pSyncEnabledChange = { p2pSyncEnabled = it; dirty = true },
                         lanVisibility = lanVisibility,
                         onLanVisibilityChange = { lanVisibility = it; dirty = true },
+                        autoApplySyncedClip = autoApplySyncedClip,
+                        onAutoApplySyncedClipChange = { autoApplySyncedClip = it; dirty = true },
                         supabaseUrl = supabaseUrl,
                         onSupabaseUrlChange = { v -> supabaseUrl = v; dirty = true },
                         supabaseAnonKey = supabaseAnonKey,
@@ -687,6 +711,10 @@ fun SettingsScreen(
             }
         } // end CopyPasteCard
         } // end outer Column
+        // bd CopyPaste-44rq.22: glass toast host for export/import feedback.
+        // Inside Scaffold so it overlays the settings panel bottom-center,
+        // matching the HistoryActivity pattern (replaces Log.i/Log.e-only feedback).
+        GlassToastHost(state = toastState)
     }
 }
 
@@ -714,7 +742,7 @@ private fun GeneralTab(
     val c = LocalIdeColors.current
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         // ── GENERAL section card ──────────────────────────────────────────
-        SettingsSectionLabel(stringResource(R.string.section_general))
+        SectionLabel(stringResource(R.string.section_general))
         SettingsCard {
             SettingsRow(
                 title = stringResource(R.string.setting_private_mode_title),
@@ -734,7 +762,7 @@ private fun GeneralTab(
         }
 
         // ── PRIVACY section card ──────────────────────────────────────────
-        SettingsSectionLabel(stringResource(R.string.section_privacy))
+        SectionLabel(stringResource(R.string.section_privacy))
         SettingsCard {
             // "Discover public IP" — allow a one-off STUN request to learn this
             // device's public IP (shown in the device-info card). Mirrors macOS.
@@ -772,15 +800,31 @@ private fun GeneralTab(
                     ctx.startActivity(Intent(ctx, DevicesActivity::class.java))
                 }
             )
+            // CopyPaste-bdac.7: BackgroundCaptureSetup moved from Storage tab to
+            // General tab — parity/logical grouping: capture behaviour belongs with
+            // other general/permissions settings, not alongside storage sliders.
+            SettingsCardDivider()
+            SettingsNavRow(
+                title = stringResource(R.string.setting_bg_capture_title),
+                subtitle = stringResource(R.string.setting_bg_capture_subtitle),
+                density = density,
+                onClick = {
+                    ctx.startActivity(Intent(ctx, BackgroundCaptureSetupActivity::class.java))
+                }
+            )
         }
 
         // ── DIAGNOSTICS section card ──────────────────────────────────────
-        SettingsSectionLabel(stringResource(R.string.section_diagnostics))
+        SectionLabel(stringResource(R.string.section_diagnostics))
         SettingsCard {
+            // CopyPaste-5917.77: NavIcons.Logs (doc.text SF-like icon) — parity with macOS Logs tab.
+            // Android intentionally routes Logs via Settings rather than a bottom-nav tab;
+            // see NavTabTest which asserts the 3-tab (Clips/Devices/Settings) nav is canonical.
             SettingsNavRow(
                 title = stringResource(R.string.log_viewer_button),
                 subtitle = stringResource(R.string.log_viewer_description),
                 density = density,
+                leadingIcon = NavIcons.Logs,
                 onClick = {
                     ctx.startActivity(Intent(ctx, LogViewerActivity::class.java))
                 }
@@ -796,7 +840,7 @@ private fun GeneralTab(
         }
 
         // ── BACKGROUND CAPTURE (ADB) section card ────────────────────────
-        SettingsSectionLabel(stringResource(R.string.bg_adb_section_title))
+        SectionLabel(stringResource(R.string.bg_adb_section_title))
         SettingsCard {
             // Explainer
             Text(
@@ -822,12 +866,16 @@ private fun GeneralTab(
         }
 
         // ── ABOUT (last General entry) ────────────────────────────────────
+        // CopyPaste-5917.77: NavIcons.About (info.circle SF-like icon) — parity with macOS About tab.
+        // Android intentionally routes About via Settings rather than a bottom-nav tab;
+        // see NavTabTest which asserts the 3-tab (Clips/Devices/Settings) nav is canonical.
         Spacer(modifier = Modifier.height(8.dp))
         SettingsCard {
             SettingsNavRow(
                 title = stringResource(R.string.title_about),
                 subtitle = stringResource(R.string.about_tagline),
                 density = density,
+                leadingIcon = NavIcons.About,
                 onClick = {
                     ctx.startActivity(Intent(ctx, AboutActivity::class.java))
                 }
@@ -844,6 +892,10 @@ private fun DisplayTab(
     onDensityChange: (Density) -> Unit,
     showWarnings: Boolean,
     onShowWarningsChange: (Boolean) -> Unit,
+    // CopyPaste-bdac.35: reveal-guard toggle — "Warn before revealing sensitive items".
+    // Mirrors macOS prefs.showSensitiveWarnings (SettingsView.tsx:2055-2063).
+    revealGuard: Boolean,
+    onRevealGuardChange: (Boolean) -> Unit,
     maskSensitive: Boolean,
     onMaskSensitiveChange: (Boolean) -> Unit,
     translucency: Boolean,
@@ -875,8 +927,9 @@ private fun DisplayTab(
 
         // ── APPEARANCE section card (hvr4) ─────────────────────────────────
         // Palette picker: grid of all Palette entries; tapping rethemes + recreates.
+
         // Theme picker: System / Light / Dark segmented control.
-        SettingsSectionLabel("Appearance")
+        SectionLabel(stringResource(R.string.section_appearance))
         SettingsCard {
             // ── Palette swatches ──────────────────────────────────────────
             PalettePicker(
@@ -888,14 +941,18 @@ private fun DisplayTab(
             // ── Theme mode (System / Light / Dark) ────────────────────────
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
-                    text = "Color scheme",
+                    text = stringResource(R.string.setting_color_scheme_label),
                     style = MaterialTheme.typography.bodyMedium,
                     color = c.dim,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 // Inline segmented control: System / Light / Dark
                 val themeModes = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
-                val themeLabels = listOf("System", "Light", "Dark")
+                val themeLabels = listOf(
+                    stringResource(R.string.theme_system),
+                    stringResource(R.string.theme_light),
+                    stringResource(R.string.theme_dark),
+                )
                 val currentTheme = remember { settings.themeMode }
                 var selectedTheme by remember { mutableStateOf(currentTheme) }
                 IdeSegmentedControl(
@@ -924,7 +981,7 @@ private fun DisplayTab(
         }
 
         // ── DISPLAY section card ──────────────────────────────────────────
-        SettingsSectionLabel(stringResource(R.string.section_display))
+        SectionLabel(stringResource(R.string.section_display))
         SettingsCard {
             // §6/§10 density segmented control — comfortable|compact.
             // Spec §7: segmented control replaces the density Switch.
@@ -936,9 +993,12 @@ private fun DisplayTab(
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
                 // CopyPaste-gzli: extended to 3 options — Comfortable / Compact / Spacious.
-                // TODO(strings): strings.xml owned by another agent; using hardcoded strings for now.
                 IdeSegmentedControl(
-                    options = listOf("Comfortable", "Compact", "Spacious"),
+                    options = listOf(
+                        stringResource(R.string.setting_density_comfortable_label),
+                        stringResource(R.string.setting_density_compact_label),
+                        stringResource(R.string.setting_density_spacious_label),
+                    ),
                     selectedIndex = when (density) {
                         Density.COMPACT   -> 1
                         Density.SPACIOUS  -> 2
@@ -961,6 +1021,17 @@ private fun DisplayTab(
                 subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
                 checked = showWarnings,
                 onCheckedChange = onShowWarningsChange,
+                density = density,
+            )
+            SettingsCardDivider()
+            // CopyPaste-bdac.35: reveal-guard — "Warn before revealing sensitive items".
+            // Mirrors macOS SettingsView.tsx:2055-2063 prefs.showSensitiveWarnings.
+            // When OFF, sensitive items unmask on first tap without a confirmation step.
+            SettingsRow(
+                title = stringResource(R.string.setting_reveal_guard_title),
+                subtitle = stringResource(R.string.setting_reveal_guard_subtitle),
+                checked = revealGuard,
+                onCheckedChange = onRevealGuardChange,
                 density = density,
             )
             SettingsCardDivider()
@@ -1012,7 +1083,7 @@ private fun DisplayTab(
         }
 
         // ── IMAGE & PREVIEW sliders ───────────────────────────────────────
-        SettingsSectionLabel("Sliders")
+        SectionLabel(stringResource(R.string.section_image_preview))
         SettingsCard {
             Column(modifier = Modifier.padding(vertical = 4.dp)) {
                 // AND5: continuous slider 10–200 dp for image thumbnail height.
@@ -1081,9 +1152,6 @@ private fun StorageTab(
     onMaxItemsChange: (Long) -> Unit,
     excludedApps: List<String>,
     onExcludedAppsChange: (List<String>) -> Unit,
-    // CopyPaste-hffp: live density from SettingsScreen for density-aware nav rows.
-    density: Density,
-    ctx: android.content.Context,
     // CopyPaste-wuek NG-1: clear-all in Settings (canonical parity with macOS Settings → Storage → Data).
     onClearHistory: () -> Unit,
     // CopyPaste-12f0: degraded-DB recovery — wipes the entire repository (macOS parity).
@@ -1094,7 +1162,7 @@ private fun StorageTab(
     onImportHistory: () -> Unit = {},
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        SettingsSectionLabel(stringResource(R.string.section_storage_limits))
+        SectionLabel(stringResource(R.string.section_storage_limits))
         SettingsCard {
             Column(modifier = Modifier.padding(vertical = 4.dp)) {
                 SteppedSliderRow(
@@ -1152,25 +1220,12 @@ private fun StorageTab(
         }
 
         // ── EXCLUDED APPS ─────────────────────────────────────────────────
-        SettingsSectionLabel(stringResource(R.string.setting_excluded_apps_label))
+        SectionLabel(stringResource(R.string.setting_excluded_apps_label))
         SettingsCard {
             // C-P1-1: excluded apps — editable list (text input + Add + removable chips).
             ExcludedAppsRow(
                 excludedApps = excludedApps,
                 onExcludedAppsChange = onExcludedAppsChange,
-            )
-        }
-
-        // ── OTHER STORAGE ACTIONS ─────────────────────────────────────────
-        SettingsSectionLabel("")
-        SettingsCard {
-            SettingsNavRow(
-                title = stringResource(R.string.setting_bg_capture_title),
-                subtitle = stringResource(R.string.setting_bg_capture_subtitle),
-                density = density,
-                onClick = {
-                    ctx.startActivity(Intent(ctx, BackgroundCaptureSetupActivity::class.java))
-                }
             )
         }
 
@@ -1232,7 +1287,7 @@ private fun StorageTab(
                 },
             )
         }
-        SettingsSectionLabel(stringResource(R.string.section_data))
+        SectionLabel(stringResource(R.string.section_data))
         SettingsCard {
             val c = LocalIdeColors.current
             // CopyPaste-8jx8: Export history — produces a JSON file with text items
@@ -1246,12 +1301,12 @@ private fun StorageTab(
             ) {
                 Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                     Text(
-                        text = "Export history",
+                        text = stringResource(R.string.setting_export_history_label),
                         style = MaterialTheme.typography.bodyMedium,
                         color = c.text,
                     )
                     Text(
-                        text = "Save text items to a JSON file (images and sensitive items excluded)",
+                        text = stringResource(R.string.setting_export_history_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = c.dim,
                     )
@@ -1260,7 +1315,7 @@ private fun StorageTab(
                     onClick = onExportHistory,
                     variant = ButtonVariant.PRIMARY,
                 ) {
-                    Text("Export")
+                    Text(stringResource(R.string.action_export))
                 }
             }
             SettingsCardDivider()
@@ -1275,12 +1330,12 @@ private fun StorageTab(
             ) {
                 Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                     Text(
-                        text = "Import history",
+                        text = stringResource(R.string.setting_import_history_label),
                         style = MaterialTheme.typography.bodyMedium,
                         color = c.text,
                     )
                     Text(
-                        text = "Load items from a JSON export file",
+                        text = stringResource(R.string.setting_import_history_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = c.dim,
                     )
@@ -1289,7 +1344,7 @@ private fun StorageTab(
                     onClick = onImportHistory,
                     variant = ButtonVariant.PRIMARY,
                 ) {
-                    Text("Import")
+                    Text(stringResource(R.string.action_import))
                 }
             }
             SettingsCardDivider()
@@ -1358,6 +1413,9 @@ private fun SyncTab(
     // PG-29 (CopyPaste-yqn5): LAN/mDNS-SD visibility — mirrors macOS lan_visibility.
     lanVisibility: Boolean,
     onLanVisibilityChange: (Boolean) -> Unit,
+    // CopyPaste-44rq.24: auto-apply synced clipboard — mirrors macOS auto_apply_synced_clip.
+    autoApplySyncedClip: Boolean,
+    onAutoApplySyncedClipChange: (Boolean) -> Unit,
     supabaseUrl: String,
     onSupabaseUrlChange: (String) -> Unit,
     supabaseAnonKey: String,
@@ -1414,7 +1472,7 @@ private fun SyncTab(
                 }
             }
         }
-        SettingsSectionLabel(stringResource(R.string.section_sync))
+        SectionLabel(stringResource(R.string.section_sync))
         SettingsCard {
             // HW-A9: P2P sync toggle — LAN direct device-to-device sync.
             SettingsRow(
@@ -1433,6 +1491,18 @@ private fun SyncTab(
                 subtitle = stringResource(R.string.setting_lan_visibility_subtitle),
                 checked = lanVisibility,
                 onCheckedChange = onLanVisibilityChange,
+                density = density,
+            )
+            SettingsCardDivider()
+            // CopyPaste-44rq.24: auto-apply synced clipboard — mirrors macOS
+            // SettingsView.tsx:2189-2215. When ON a clip synced from a peer is
+            // applied to the local clipboard automatically; when OFF the user taps
+            // to apply. Pref-only until daemon IPC exposes the config knob.
+            SettingsRow(
+                title = stringResource(R.string.setting_auto_apply_synced_clip_title),
+                subtitle = stringResource(R.string.setting_auto_apply_synced_clip_subtitle),
+                checked = autoApplySyncedClip,
+                onCheckedChange = onAutoApplySyncedClipChange,
                 density = density,
             )
             SettingsCardDivider()
@@ -1457,7 +1527,7 @@ private fun SyncTab(
 
         // ── SUPABASE CONFIG ────────────────────────────────────────────────
         if (syncBackend == SyncBackend.SUPABASE) {
-            SettingsSectionLabel(stringResource(R.string.section_supabase_config))
+            SectionLabel(stringResource(R.string.section_supabase_config))
             SettingsCard {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
                     SettingsTextField(
@@ -1483,7 +1553,7 @@ private fun SyncTab(
                 }
             }
 
-            SettingsSectionLabel(stringResource(R.string.section_supabase_account))
+            SectionLabel(stringResource(R.string.section_supabase_account))
             SettingsCard {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
@@ -1492,15 +1562,16 @@ private fun SyncTab(
                         color = c.dim,
                         modifier = Modifier.padding(bottom = 4.dp),
                     )
-                    val accountDisplay = supabaseEmail.ifBlank { "(anon key — no sign-in)" }
                     Text(
-                        text = "Signed-in account: $accountDisplay",
+                        text = if (supabaseEmail.isBlank())
+                            stringResource(R.string.setting_supabase_account_anon)
+                        else
+                            stringResource(R.string.setting_supabase_account_signed_in, supabaseEmail),
                         style = MaterialTheme.typography.bodyMedium,
                         color = c.text,
                     )
                     Text(
-                        text = "All your devices must use THIS SAME Supabase account to sync — " +
-                            "different accounts can't see each other's clips.",
+                        text = stringResource(R.string.setting_supabase_account_same_warning),
                         style = MaterialTheme.typography.bodySmall,
                         color = c.danger,
                         modifier = Modifier.padding(top = 2.dp),
@@ -1530,7 +1601,7 @@ private fun SyncTab(
         // which renders the relay URL field unconditionally regardless of sync backend.
         // Previously Android mode-gated this behind `syncBackend == RELAY`, hiding it when
         // the user switched to Supabase — reducing discoverability and diverging from macOS.
-        SettingsSectionLabel(stringResource(R.string.section_relay_config))
+        SectionLabel(stringResource(R.string.section_relay_config))
         SettingsCard {
             SettingsTextField(
                 label = stringResource(R.string.setting_relay_url_label),
@@ -1544,7 +1615,7 @@ private fun SyncTab(
         // Parity with the macOS Settings "Test Connection" / live diagnostics surface.
         // Shows last-sync time, connection state, and actionable misconfig hints for
         // the selected backend. No secrets are exposed.
-        SettingsSectionLabel("Sync Diagnostics")
+        SectionLabel(stringResource(R.string.section_sync_diagnostics))
         SyncDiagnosticsCard(
             syncBackend = syncBackend,
             supabaseUrl = supabaseUrl,
@@ -1720,6 +1791,16 @@ private fun SyncDiagnosticsCard(
     }
 }
 
+/**
+ * CopyPaste-1jms.18: Notifications is an intentional Android-only tab.
+ *
+ * macOS exposes notification preferences through the OS-level System Settings
+ * (Notification Center) rather than an in-app tab. Android requires the app to
+ * manage its own notification behaviour (notify-on-copy sound/vibration), so this
+ * tab is a valid platform-specific addition and NOT a parity gap. It should NOT be
+ * removed to match macOS; instead, the macOS SettingsView could add equivalent rows
+ * if the daemon ever exposes fine-grained notification control there.
+ */
 @Composable
 private fun NotificationsTab(
     notifyOnCopy: Boolean,
@@ -1730,7 +1811,7 @@ private fun NotificationsTab(
     density: Density,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-        SettingsSectionLabel(stringResource(R.string.section_notifications))
+        SectionLabel(stringResource(R.string.section_notifications))
         SettingsCard {
             SettingsRow(
                 title = stringResource(R.string.setting_notify_on_copy_title),
@@ -1792,7 +1873,7 @@ private fun PalettePicker(
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
         // ── Dark palettes row ─────────────────────────────────────────────
         Text(
-            text = "Dark",
+            text = stringResource(R.string.palette_dark_label),
             style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
@@ -1822,7 +1903,7 @@ private fun PalettePicker(
         Spacer(modifier = Modifier.height(12.dp))
         // ── Light palettes row ────────────────────────────────────────────
         Text(
-            text = "Light",
+            text = stringResource(R.string.palette_light_label),
             style = MaterialTheme.typography.labelSmall.copy(
                 fontWeight = FontWeight.SemiBold,
                 fontSize = 11.sp,
@@ -1892,7 +1973,7 @@ private fun PaletteSwatchItem(
         Spacer(modifier = Modifier.height(4.dp))
         Text(
             text = paletteDisplayLabel(palette),
-            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+            style = MaterialTheme.typography.labelSmall,
             color = if (isActive) c.text else c.dim,
             textAlign = TextAlign.Center,
             maxLines = 2,
@@ -1913,9 +1994,7 @@ private fun PaletteSwatchItem(
  *  3. Calls [Activity.recreate] so [CopyPasteTheme] re-reads the new skin from
  *     SharedPreferences and provides it via [LocalSkin] to all composables.
  *
- * Labels are hardcoded strings (no new string resource needed — mirrors how the
- * theme-mode labels "System"/"Light"/"Dark" are hardcoded inline). If a dedicated
- * strings.xml entry is desired later, replace the literal list with string resources.
+ * Labels are defined in strings.xml (CopyPaste-bdac.61) and referenced via stringResource.
  */
 @Composable
 private fun SkinPicker(
@@ -1926,13 +2005,17 @@ private fun SkinPicker(
 ) {
     val c = LocalIdeColors.current
     val skins = listOf(Skin.CLASSIC, Skin.QUIET, Skin.VAPOR)
-    // Labels mirror the enum names (Classic/Quiet/Vapor) — consistent with §2 plan.
-    val skinLabels = listOf("Classic", "Quiet", "Vapor")
+    // Labels extracted to strings.xml (CopyPaste-bdac.61).
+    val skinLabels = listOf(
+        stringResource(R.string.skin_classic),
+        stringResource(R.string.skin_quiet),
+        stringResource(R.string.skin_vapor),
+    )
     var selectedSkin by remember { mutableStateOf(activeSkin) }
 
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(
-            text = "Visual style",
+            text = stringResource(R.string.skin_visual_style_label),
             style = MaterialTheme.typography.bodyMedium,
             color = c.dim,
             modifier = Modifier.padding(bottom = 8.dp),
@@ -1958,29 +2041,8 @@ private fun SkinPicker(
 // Grouped-card primitives (spec §8 — Apple grouped-inset style)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Section label: §3 spec — uppercase 11sp semibold, ide-faint (grey, NOT accent).
- * CopyPaste-3gsk: use c.faint (not c.dim) to match Components.kt canonical SectionLabel
- * and the web text-ide-faint token. Renders above the card group, left-padded per Apple HIG.
- */
-@Composable
-private fun SettingsSectionLabel(text: String) {
-    val c = LocalIdeColors.current
-    if (text.isNotEmpty()) {
-        Text(
-            text = text.uppercase(),
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 11.sp,
-                letterSpacing = 0.6.sp,
-            ),
-            color = c.faint,
-            modifier = Modifier.padding(start = 4.dp, top = 16.dp, bottom = 4.dp),
-        )
-    } else {
-        Spacer(modifier = Modifier.height(8.dp))
-    }
-}
+// CopyPaste-bdac.65: SettingsSectionLabel removed — all call sites now use the
+// canonical SectionLabel from Components.kt (start=16.dp, aligned with other screens).
 
 /**
  * Apple grouped-inset card container (§8). Holds a vertical list of rows with
@@ -2131,49 +2193,27 @@ private fun SettingsTextField(
     )
 }
 
+/**
+ * CopyPaste-bdac.11: local private wrapper delegating to [SharedSettingsNavRow] in
+ * Components.kt. Call sites in this file are unchanged; the shared implementation
+ * lives in the component library and can be reused by other screens.
+ */
 @Composable
 private fun SettingsNavRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    // CopyPaste-hffp: live density param — replaces the SharedPrefs snapshot read.
-    // The draft density state from SettingsScreen is threaded down so density
-    // changes are reflected immediately without waiting for Save.
     density: Density,
+    // CopyPaste-5917.77: optional leading icon (NavIcons.About / NavIcons.Logs).
+    leadingIcon: ImageVector? = null,
 ) {
-    val c = LocalIdeColors.current
-    val isCompact  = density == Density.COMPACT
-    val isSpacious = density == Density.SPACIOUS
-    val vertPad = when {
-        isCompact  -> 8.dp
-        isSpacious -> 16.dp
-        else       -> 12.dp
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = vertPad),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier
-            .weight(1f)
-            .padding(end = 12.dp)) {
-            Text(
-                text = title,
-                // hffp: compact density → bodyMedium (14sp), comfortable/spacious → bodyLarge (16sp)
-                style = if (isCompact) MaterialTheme.typography.bodyMedium
-                        else MaterialTheme.typography.bodyLarge,
-                color = c.text,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = c.dim,
-            )
-        }
-    }
+    com.copypaste.android.ui.theme.SharedSettingsNavRow(
+        title = title,
+        subtitle = subtitle,
+        density = density,
+        onClick = onClick,
+        leadingIcon = leadingIcon,
+    )
 }
 
 /**
@@ -2226,58 +2266,26 @@ private fun DiagnosticsNavRow(
     }
 }
 
+/**
+ * CopyPaste-bdac.11: local private wrapper delegating to [SharedSettingsRow] in
+ * Components.kt. Call sites in this file are unchanged; the shared implementation
+ * lives in the component library and can be reused by other screens.
+ */
 @Composable
 private fun SettingsRow(
     title: String,
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    // CopyPaste-hffp: live density param — replaces the SharedPrefs snapshot read.
-    // The draft density state from SettingsScreen is threaded down so density
-    // changes are reflected immediately without waiting for Save.
     density: Density,
 ) {
-    val c = LocalIdeColors.current
-    val isCompact  = density == Density.COMPACT
-    val isSpacious = density == Density.SPACIOUS
-    val vertPad = when {
-        isCompact  -> 8.dp
-        isSpacious -> 16.dp
-        else       -> 12.dp
-    }
-    Row(
-        // CopyPaste-aod: merge the title + subtitle + switch into ONE TalkBack node
-        // labelled with the title so it reads "<title>, <subtitle>, On/Off" instead
-        // of the title/subtitle and a context-free "Switch, on" as separate stops.
-        modifier = Modifier
-            .fillMaxWidth()
-            .semantics(mergeDescendants = true) {}
-            .padding(horizontal = 16.dp, vertical = vertPad),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Column(modifier = Modifier
-            .weight(1f)
-            .padding(end = 12.dp)) {
-            Text(
-                text = title,
-                // hffp: compact density → bodyMedium (14sp), comfortable/spacious → bodyLarge (16sp)
-                style = if (isCompact) MaterialTheme.typography.bodyMedium
-                        else MaterialTheme.typography.bodyLarge,
-                color = c.text,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodySmall,
-                color = c.dim,
-            )
-        }
-        IdeSwitch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            name = title,
-        )
-    }
+    com.copypaste.android.ui.theme.SharedSettingsRow(
+        title = title,
+        subtitle = subtitle,
+        checked = checked,
+        onCheckedChange = onCheckedChange,
+        density = density,
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

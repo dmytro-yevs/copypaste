@@ -20,8 +20,11 @@ evicted when the 16-token cap is reached (FIFO).
   Set `RELAY_TRUST_PROXY_HEADERS=1` to honor `X-Forwarded-For`/`X-Real-IP`/
   `Forwarded` headers instead — only safe when a trusted reverse proxy is in
   front.
-- Per-device: 1 req/s steady-state, burst 20 (60 req/min). Applied to
-  device-scoped item routes only, keyed by the `:device_id` URL segment.
+- Per-device item routes: 1 req/s steady-state, burst 20 (60 req/min). Applied
+  to device-scoped item routes only, keyed by **source IP** (same unspoofable
+  key as the per-IP layer — not the `:device_id` URL segment, which an attacker
+  could rotate to obtain a fresh bucket on every request). See
+  `crates/copypaste-relay/src/routes/mod.rs` `build_router` (CopyPaste-hzmb).
 - Registration: 5 attempts per (IP, device_id) per 60 s, enforced inside the
   handler (separate from the governor layer).
 
@@ -158,9 +161,11 @@ encoded), enforced by a global body-limit layer before the handler runs.
 - `"image"`, `"file"`: decoded ciphertext ≤ 10 MiB
 
 **Inbox overflow:** when a device inbox exceeds the per-device cap (default 500;
-configurable via `RELAY_MAX_ITEMS_PER_DEVICE`), the **oldest items are silently
-pruned** to make room. The sender is not notified. This is a silent prune, not a
-rejection.
+configurable via `RELAY_MAX_ITEMS_PER_DEVICE`), the **items with the lowest
+server-assigned `id` values (earliest arrivals) are silently pruned** to make
+room. Pruning is by server-assigned `id`, not by sender-supplied `wall_time` —
+`wall_time` is client-controlled and could be forged to escape eviction. The
+sender is not notified. This is a silent prune, not a rejection.
 
 **Response 201:**
 ```json
@@ -346,7 +351,10 @@ unparseable values fall back to defaults.
   24 h), measured by server-side insert time — not the (untrusted) sender
   `wall_time`. Expired items are pruned by a background task.
 - **Inbox overflow:** when a device inbox exceeds `RELAY_MAX_ITEMS_PER_DEVICE`,
-  the oldest items (lowest `wall_time`) are silently pruned on each push.
+  the items with the lowest server-assigned `id` values (earliest arrivals) are
+  silently pruned on each push. Pruning is by server-assigned `id`, not by the
+  client-supplied `wall_time`. See `state.rs` `push_item_decoded`
+  (CopyPaste-1uqb).
 - **Sensitivity:** sensitive items do sync through the relay (encrypted). The
   receiving daemon re-evaluates sensitivity from decrypted plaintext.
 - **Persistence:** the relay stores device records, token sets, and inbox items

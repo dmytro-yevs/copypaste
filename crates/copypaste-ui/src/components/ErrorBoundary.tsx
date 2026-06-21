@@ -52,8 +52,8 @@ export class ErrorBoundary extends Component<
           Something went wrong{where}
         </div>
         <div className="max-w-sm text-[12px] text-ide-dim">
-          The daemon may be unavailable, or this screen failed to load. The rest
-          of the app is still usable.
+          The background service may be unavailable, or this screen failed to
+          load. The rest of the app is still usable.
         </div>
         {/* Error detail is logged by componentDidCatch — not rendered here
             to avoid leaking filesystem paths or internal strings into the DOM. */}

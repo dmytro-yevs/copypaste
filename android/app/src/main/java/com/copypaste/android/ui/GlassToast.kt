@@ -9,7 +9,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -20,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
@@ -84,6 +87,7 @@ internal data class GlassToastData(
     val message: String,
     val kind: GlassToastKind,
     val durationMs: Long,
+    val action: Pair<String, () -> Unit>? = null,
 )
 
 /**
@@ -111,16 +115,30 @@ class GlassToastState {
      * dismissed (auto after [durationMs]) or replaced by a newer toast, then
      * returns — mirroring [androidx.compose.material3.SnackbarHostState.showSnackbar]
      * control flow so existing `showSnackbar(...)` call sites can swap 1:1.
+     *
+     * [action] is an optional label+callback pair rendered as a TextButton inside
+     * the toast. When the action button is clicked the toast is dismissed immediately
+     * and the callback is invoked, so callers can detect it via a flag set in the
+     * lambda before show() returns.
      */
     suspend fun show(
         message: String,
         kind: GlassToastKind = GlassToastKind.SUCCESS,
         durationMs: Long = DEFAULT_DURATION_MS,
+        action: Pair<String, () -> Unit>? = null,
     ) {
         val myToken = ++token
         // Wake any currently-suspended show() so it stops driving `current`.
         supersede.trySend(Unit)
-        current = GlassToastData(message, kind, durationMs)
+        // Wrap the action so clicking it also dismisses the toast immediately
+        // (sets current = null) before invoking the caller's lambda.
+        val wrappedAction = if (action != null) {
+            action.first to {
+                current = null  // dismiss immediately on action click
+                action.second()
+            }
+        } else null
+        current = GlassToastData(message, kind, durationMs, wrappedAction)
         // Auto-dismiss after the duration; bail early if superseded.
         delay(durationMs)
         // Only clear if we are still the active toast (no newer show ran).
@@ -264,14 +282,32 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
                         .clip(CircleShape)
                         .drawBehind { drawCircle(dotColor) },
                 )
+                // VISA-14: use bodyLarge (13sp/18sp line-height) so lineHeight is correct.
+                // bodyMedium.copy(fontSize=13.sp) overrides the size but keeps bodyMedium's
+                // shorter lineHeight — bodyLarge carries the matching 18sp lineHeight for 13sp.
                 Text(
                     text = data.message,
                     color = c.text,
-                    style = MaterialTheme.typography.bodyMedium.copy(
+                    style = MaterialTheme.typography.bodyLarge.copy(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Normal,
                     ),
                 )
+                // Optional action button — rendered after the message when present.
+                if (data.action != null) {
+                    Spacer(Modifier.width(4.dp))
+                    TextButton(onClick = data.action.second) {
+                        // VISA-14: match bodyLarge baseline (13sp/18sp) consistent with message text.
+                        Text(
+                            text = data.action.first,
+                            color = c.accent,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Normal,
+                            ),
+                        )
+                    }
+                }
             }
         }
     }

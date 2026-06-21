@@ -1,13 +1,15 @@
 /**
- * W-C6: Toast skin-token tests.
+ * W-C6 / UIC-5 / VISM-11: Toast skin-token tests.
  *
  * Verifies:
  * 1. GlassToastItem no longer uses hardcoded `rounded-ide-lg` class (replaced by skin var).
  * 2. GlassToastItem no longer uses hardcoded `shadow-ide-sm` class (replaced by skin var).
- * 3. Toast bubble carries skin-driven border-radius via --skin-r-card CSS var reference.
+ * 3. Toast bubble carries skin-driven border-radius via --skin-r-modal CSS var (UIC-5: modal tier).
  * 4. Toast bubble carries skin-driven box-shadow via --skin-shadow-card CSS var reference.
  * 5. surface-card material class is retained (correct floating-surface tier).
  * 6. All features preserved: auto-dismiss timer, dismiss button, kind variants (info/success/error/warning).
+ * 7. UIC-5: border-radius uses --skin-r-modal (NOT --skin-r-card) — toast is a modal-tier surface.
+ * 8. VISM-11: a leading semantic colour dot is rendered for each kind.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -43,21 +45,22 @@ describe("W-C6 §1 — GlassToastItem: no hardcoded radius or shadow Tailwind cl
 // §2  Skin-driven radius and shadow via CSS var
 // ---------------------------------------------------------------------------
 
-describe("W-C6 §2 — GlassToastItem: skin-driven radius and shadow", () => {
-  it("bubble has border-radius referencing --skin-r-card via inline style or arbitrary class", () => {
+describe("W-C6 / UIC-5 §2 — GlassToastItem: skin-driven radius and shadow", () => {
+  it("UIC-5: bubble has border-radius referencing --skin-r-modal (NOT --skin-r-card)", () => {
     const { container } = render(
       <GlassToast msg={{ id: "t1", text: "hello" }} onDismiss={() => {}} />,
     );
     const bubble = container.querySelector('[role="status"]') as HTMLElement | null;
     expect(bubble).not.toBeNull();
 
-    // Accept either inline style or a tailwind arbitrary class that references the skin var
+    // Must reference --skin-r-modal (modal-tier radius), not --skin-r-card.
     const inlineStyle = bubble!.style.borderRadius;
-    const hasVarInStyle = inlineStyle.includes("--skin-r-card");
-    // Tailwind arbitrary classes encode parens as \28 \29, check class string for the var name
-    const hasVarInClass = bubble!.className.includes("--skin-r-card");
+    const hasModalVar = inlineStyle.includes("--skin-r-modal") || bubble!.className.includes("--skin-r-modal");
+    expect(hasModalVar).toBe(true);
 
-    expect(hasVarInStyle || hasVarInClass).toBe(true);
+    // Must NOT reference --skin-r-card (card radius is wrong tier for a floating toast).
+    const hasCardVar = inlineStyle.includes("--skin-r-card") || bubble!.className.includes("--skin-r-card");
+    expect(hasCardVar).toBe(false);
   });
 
   it("bubble has box-shadow referencing --skin-shadow-card via inline style or arbitrary class", () => {
@@ -172,7 +175,47 @@ describe("W-C6 §6 — feature preservation: kind variants", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §7  ToastProvider integration: show + auto-dismiss via provider
+// §7  VISM-11: semantic colour dot
+// ---------------------------------------------------------------------------
+
+describe("VISM-11 §7 — GlassToastItem: leading semantic colour dot", () => {
+  const dotCases: { kind: ToastKind; dotCls: string }[] = [
+    { kind: "info",    dotCls: "bg-ide-text" },
+    { kind: "success", dotCls: "bg-ide-success" },
+    { kind: "error",   dotCls: "bg-ide-danger" },
+    { kind: "warning", dotCls: "bg-ide-warning" },
+  ];
+
+  for (const { kind, dotCls } of dotCases) {
+    it(`kind="${kind}" renders a leading dot with class ${dotCls}`, () => {
+      const { container } = render(
+        <GlassToast msg={{ id: "dot-test", text: "msg", kind }} onDismiss={() => {}} />,
+      );
+      // The dot is an aria-hidden span with h-2 w-2 rounded-full and the kind colour class.
+      const dots = container.querySelectorAll('[aria-hidden="true"]');
+      const dot = Array.from(dots).find((el) =>
+        el.className.includes("h-2") && el.className.includes("w-2") && el.className.includes("rounded-full")
+      );
+      expect(dot).not.toBeUndefined();
+      expect(dot!.className).toMatch(new RegExp(dotCls));
+    });
+  }
+
+  it("dot is aria-hidden (purely presentational — kind text colour conveys the same info)", () => {
+    const { container } = render(
+      <GlassToast msg={{ id: "a11y-dot", text: "msg", kind: "error" }} onDismiss={() => {}} />,
+    );
+    const dots = container.querySelectorAll('[aria-hidden="true"]');
+    const dot = Array.from(dots).find((el) =>
+      el.className.includes("h-2") && el.className.includes("rounded-full")
+    );
+    expect(dot).not.toBeUndefined();
+    expect(dot!.getAttribute("aria-hidden")).toBe("true");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// §8  ToastProvider integration: show + auto-dismiss via provider
 // ---------------------------------------------------------------------------
 
 function TestConsumer() {
@@ -184,7 +227,7 @@ function TestConsumer() {
   );
 }
 
-describe("W-C6 §7 — ToastProvider integration", () => {
+describe("W-C6 §8 — ToastProvider integration", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });

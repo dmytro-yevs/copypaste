@@ -244,6 +244,8 @@ internal fun PairedPeer.isOnline(nowMs: Long = System.currentTimeMillis()): Bool
  * falling back to the configured-count path (PG-41 / PG-11 follow-up):
  * `lastActivityMs.value > 0 && (now - lastActivityMs.value) <= RECENT_SYNC_MS`.
  */
+// c4q2.5: This value mirrors copypaste_ipc::SYNC_BADGE_RECENT_MS (crates/copypaste-ipc/src/methods.rs:208).
+// Both must stay equal — if the Rust constant changes, update this too (and vice-versa).
 internal const val RECENT_SYNC_MS = 5 * 60 * 1_000L
 
 /**
@@ -693,8 +695,10 @@ fun DevicesScreen(
         pairStarting = true
         scope.launch {
             try {
+                // CopyPaste-44rq.55: getOrCreate() zeroes cert.keyDer before returning;
+                // peek() re-fetches the KEK-unwrapped identity from AndroidKeyStore.
                 val cert = withContext(Dispatchers.IO) {
-                    deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
+                    deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate().let { deviceKeyStore.peek()!! }
                 }
                 withContext(Dispatchers.IO) {
                     pairWithDiscovered(
@@ -753,7 +757,8 @@ fun DevicesScreen(
         // §8 glass dialog (audit #10) — appearance only; unpair logic unchanged.
         GlassAlertDialog(
             onDismissRequest = { unpairTarget = null },
-            title = { Text("Forget paired device?") },
+            // CopyPaste-bdac.51: standardized to "Unpair" — was "Forget" (terminology conflict).
+            title = { Text("Unpair device?") },
             text = {
                 Text(
                     "This device will no longer sync with ${target.displayName()} over P2P. " +
@@ -765,7 +770,7 @@ fun DevicesScreen(
                     unpairTarget = null
                     unpairPeer(settings, target.fingerprint)
                     refresh()
-                }) { Text("Forget", color = c.danger) }
+                }) { Text("Unpair", color = c.danger) }
             },
             dismissButton = {
                 TextButton(onClick = { unpairTarget = null }) { Text("Cancel") }
@@ -1112,12 +1117,9 @@ fun DevicesScreen(
                 // between rows is added by the forEachIndexed renderer below.
                 if (p2pEnabled) {
                     add {
-                        Text(
-                            text = "Discovered on your network",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = c.dim,
-                            modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 4.dp),
-                        )
+                        // 1jms.20: use SectionLabel for visual consistency with all other
+                        // section headers (Paired Devices, Your QR code, etc.).
+                        SectionLabel("Discovered on your network")
                     }
                     if (discovered.isEmpty()) {
                         // CopyPaste-0nd4: add DiscoveryRingsIcon + text in a Row so the
@@ -1411,18 +1413,30 @@ private fun OwnQrSection(settings: Settings) {
                             ) {
                                 Image(
                                     bitmap = bmp.asImageBitmap(),
-                                    contentDescription = "Your pairing QR code — tap to reveal",
+                                    contentDescription = stringResource(R.string.cd_own_qr_blurred),
                                     modifier = Modifier.size(DEVICES_QR_IMAGE_DP.dp),
                                 )
                             }
-                            // Reveal overlay (only while blurred).
+                            // CopyPaste-5917.40: reveal overlay — accent pill matching PairActivity
+                            // pattern (was bare Text with c.text, no background). Now uses
+                            // accentDim container + RadiusChip shape, accent text colour.
                             if (qrBlurred) {
-                                Text(
-                                    text = "Tap to reveal",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = c.text,
-                                    textAlign = TextAlign.Center,
-                                )
+                                Box(
+                                    modifier = Modifier
+                                        .size(DEVICES_QR_SLOT_DP.dp)
+                                        .background(c.accentDim, RoundedCornerShape(12.dp)),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    Text(
+                                        text = "Tap to reveal",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = c.accent,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier
+                                            .background(c.accentDim, RadiusChip)
+                                            .padding(horizontal = 12.dp, vertical = 5.dp),
+                                    )
+                                }
                             }
                         }
                     }
@@ -1802,6 +1816,7 @@ internal fun OwnDeviceRow(
                 style = MaterialTheme.typography.labelMedium,
             )
             // §7 "This Device" accent badge — static (float animation removed).
+            // CopyPaste-5917.44: was RoundedCornerShape(4.dp); canonical chip token is RadiusChip (7dp).
             Text(
                 text = "This Device",
                 color = c.accent,
@@ -1809,7 +1824,7 @@ internal fun OwnDeviceRow(
                 letterSpacing = 0.4.sp,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier
-                    .background(c.accentDim, RoundedCornerShape(4.dp))
+                    .background(c.accentDim, RadiusChip)
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
@@ -2539,25 +2554,6 @@ internal fun MetaRow(label: String, value: String) {
             color = c.text,
             fontSize = 11.sp,
             modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-
-@Composable
-private fun DeviceField(label: String, value: String) {
-    val c = LocalIdeColors.current
-    Column {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = c.dim,
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-            color = c.text,
-            fontSize = 11.sp,
         )
     }
 }

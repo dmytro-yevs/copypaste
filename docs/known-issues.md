@@ -1,6 +1,6 @@
 # Known Issues — CopyPaste
 
-Current as of v0.7.4. Items marked **tracked** have an open beads issue.
+Current as of v0.3.0. Items marked **tracked** have an open beads issue.
 
 ---
 

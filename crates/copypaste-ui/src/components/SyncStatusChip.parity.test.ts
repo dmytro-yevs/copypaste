@@ -4,15 +4,15 @@
  * CANONICAL RULE (CopyPaste-5qbe):
  *   "Offline" is determined exclusively by daemon/IPC-reported connectivity.
  *   OS-level network state (navigator.onLine, ConnectivityManager) is NOT used
- *   on web — the IPC socket failure is the only offline signal. The three-state
- *   display model is:
- *     - connected (green)  : daemon badge_state is "synced" or "syncing"
- *     - idle (grey)        : daemon badge_state is "idle" or "misconfigured"
- *                            OR IPC succeeded but no recent sync activity (fallback)
- *     - offline (red)      : daemon IPC call itself failed (socket rejected)
- *                            OR daemon badge_state is "offline" or "error"
+ *   on web — the IPC socket failure is the only offline signal.
  *
- *   Both web and Android must use this rule identically. Android uses
+ * CMP-7 update: the display model is now SIX states matching IPC SyncBadgeState
+ * exactly (1:1 mapping). The three-colour grouping is:
+ *   - green  : "synced" or "syncing"     — dot bg-ide-success
+ *   - grey   : "idle" or "misconfigured" — dot bg-ide-faint
+ *   - red    : "offline" or "error"      — dot bg-ide-danger
+ *
+ *   Both web and Android must use this colour rule identically. Android uses
  *   DevicesOnlineState (daemon-derived sync connectivity) as its equivalent of
  *   the IPC socket liveness signal, with OS network as a secondary signal ONLY
  *   to distinguish NetworkOffline from DaemonUnreachable — both still show red.
@@ -26,15 +26,15 @@
 import { describe, it, expect } from "vitest";
 import { badgeStateToSyncState } from "./SyncStatusChip";
 
-describe("SyncStatusChip offline-signal parity (CopyPaste-5qbe)", () => {
+describe("SyncStatusChip offline-signal parity (CopyPaste-5qbe / CMP-7)", () => {
   // ── Canonical rule: daemon badge_state drives the dot colour ──────────────
 
-  it("synced → connected (green): IPC-reported sync working", () => {
-    expect(badgeStateToSyncState("synced")).toBe("connected");
+  it("synced → synced (green): IPC-reported sync working", () => {
+    expect(badgeStateToSyncState("synced")).toBe("synced");
   });
 
-  it("syncing → connected (green): IPC-reported sync in-flight", () => {
-    expect(badgeStateToSyncState("syncing")).toBe("connected");
+  it("syncing → syncing (green): IPC-reported sync in-flight", () => {
+    expect(badgeStateToSyncState("syncing")).toBe("syncing");
   });
 
   it("idle → idle (grey): IPC says configured but no recent activity — NOT red", () => {
@@ -43,18 +43,38 @@ describe("SyncStatusChip offline-signal parity (CopyPaste-5qbe)", () => {
     expect(badgeStateToSyncState("idle")).toBe("idle");
   });
 
-  it("misconfigured → idle (grey): incomplete setup — not a hard failure, NOT red", () => {
+  it("misconfigured → misconfigured (grey): incomplete setup — not a hard failure, NOT red", () => {
     // PARITY: cloudMisconfig chip provides the additional warning;
-    // the dot stays grey. Android must match.
-    expect(badgeStateToSyncState("misconfigured")).toBe("idle");
+    // the dot itself is grey. Android must match.
+    expect(badgeStateToSyncState("misconfigured")).toBe("misconfigured");
   });
 
   it("offline → offline (red): daemon cannot reach sync backend", () => {
     expect(badgeStateToSyncState("offline")).toBe("offline");
   });
 
-  it("error → offline (red): backend returned auth/RLS/relay error", () => {
-    expect(badgeStateToSyncState("error")).toBe("offline");
+  it("error → error (red): backend returned auth/RLS/relay error", () => {
+    // CMP-7: "error" is now its own state (not folded into "offline").
+    // Both "offline" and "error" show red via DOT_CLASS, but the state label
+    // is preserved for future label/tooltip differentiation.
+    expect(badgeStateToSyncState("error")).toBe("error");
+  });
+
+  // ── Colour grouping contracts ─────────────────────────────────────────────
+
+  it("synced and syncing are both green-class states (isConnectedState)", () => {
+    // Verify neither maps to a grey or red state.
+    expect(badgeStateToSyncState("synced")).not.toBe("idle");
+    expect(badgeStateToSyncState("synced")).not.toBe("offline");
+    expect(badgeStateToSyncState("syncing")).not.toBe("idle");
+    expect(badgeStateToSyncState("syncing")).not.toBe("offline");
+  });
+
+  it("idle and misconfigured are both grey-class states — neither is red", () => {
+    expect(badgeStateToSyncState("idle")).not.toBe("offline");
+    expect(badgeStateToSyncState("idle")).not.toBe("error");
+    expect(badgeStateToSyncState("misconfigured")).not.toBe("offline");
+    expect(badgeStateToSyncState("misconfigured")).not.toBe("error");
   });
 
   // ── OS network is NOT the offline signal on web ───────────────────────────

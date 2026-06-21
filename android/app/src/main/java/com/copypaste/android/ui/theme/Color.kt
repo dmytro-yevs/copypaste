@@ -51,7 +51,9 @@ val IdeGhostDeco = Color.White.copy(alpha = 0.33f)  // dark: white@0.33 (decorat
 // ── Brand / accent ────────────────────────────────────────────────────────
 
 val IdeAccent     = Color(0xFF4D8DFF)   // §0 canonical accent blue (matches CSS liquid-blue, parity spj2)
-val IdeAccentOn   = Color(0xFFFFFFFF)   // text on accent surfaces
+// #080C16 achieves ≥4.5:1 WCAG AA on IdeAccent (#4D8DFF, ratio 6.11:1)
+// and on all mid-to-light blue accent hues; white was 3.20:1 (AA fail).
+val IdeAccentOn   = Color(0xFF080C16)   // text on accent surfaces
 val IdeAccentDim  = Color(0xFF4D8DFF).copy(alpha = 0.12f)  // accent container tint
 val IdeAccentPress = Color(0xFF2F7AE8)  // primary-button press (dark): a touch deeper than accent
 
@@ -66,11 +68,11 @@ val IdeWarningDim  = Color(0xFFD9A343).copy(alpha = 0.10f)
 val IdeDanger      = Color(0xFFE05C5C)  // destructive / error
 val IdeDangerDim   = Color(0xFFE05C5C).copy(alpha = 0.10f)
 
-val IdeInfo        = Color(0xFF56B6C2)  // url / info (teal)
-val IdeInfoDim     = Color(0xFF56B6C2).copy(alpha = 0.12f)
+val IdeInfo        = Color(0xFF6E9BF0)  // url / info — liquid-blue identity blue-purple (parity §A CSS liquid-blue dark info)
+val IdeInfoDim     = Color(0xFF6E9BF0).copy(alpha = 0.12f)
 
-val IdeViolet      = Color(0xFFC678DD)  // image / code (purple)
-val IdeVioletDim   = Color(0xFFC678DD).copy(alpha = 0.12f)
+val IdeViolet      = Color(0xFF9E7BFF)  // image / code — blue-purple (parity §A CSS liquid-blue dark violet)
+val IdeVioletDim   = Color(0xFF9E7BFF).copy(alpha = 0.12f)
 
 // ── Error container (for sensitive-item badge) ────────────────────────────
 

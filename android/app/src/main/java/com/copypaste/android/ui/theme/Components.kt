@@ -3,9 +3,13 @@
 package com.copypaste.android.ui.theme
 
 import androidx.annotation.RequiresApi
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -81,6 +85,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.background
 import com.copypaste.android.Density
 import com.copypaste.android.Settings
 
@@ -97,8 +105,8 @@ import com.copypaste.android.Settings
 //
 // GLASS_ALPHA_LIGHT/DARK and glassAlphaFor() are pure values/functions so they
 // can be unit-tested on the host JVM without the Android SDK. Call
-// glassContainerColor() from @Composable sites; call rememberTranslucency() to
-// read the pref from context. CopyPasteCard is the canonical glass surface.
+// rememberTranslucency() to read the pref from context. CopyPasteCard is the
+// canonical glass surface. (glassContainerColor() was removed — zero call sites.)
 // ---------------------------------------------------------------------------
 
 /** PARITY-SPEC §2 LIGHT glass alpha (warm near-white fill). */
@@ -208,18 +216,14 @@ val GlassShadowTint = Color(0xFF3C3C5A).copy(alpha = 0.14f)
 val GLASS_BLUR_RADIUS = GlassTier.GLASS.blur
 
 /**
- * Styleguide `saturate(180%)` as a 4×5 ColorMatrix (skzd). Boosts chroma so the
- * frosted aurora pops; chained AFTER the blur via [android.graphics.RenderEffect.createChainEffect]
- * on API 31+. The matrix is the standard saturation interpolation around the
- * Rec.601 luma coefficients with s = 1.8.
+ * Saturation boost as a 4×5 ColorMatrix (skzd). Boosts chroma so the frosted aurora pops;
+ * chained AFTER the blur via [android.graphics.RenderEffect.createChainEffect] on API 31+.
+ * The matrix is the standard saturation interpolation around the Rec.601 luma coefficients.
  *
- * [s] is the saturation multiplier — defaults to 1.8 (Classic/current implementation
- * value). Skin-aware callers pass [SkinTokens.saturation] for non-Classic skins.
- *
- * NOTE: Classic uses s=1.8 here even though ClassicSkinTokens.saturation=1.45 — the
- * 1.8 is the implementation constant that produces the desired visual on Android;
- * the web value (1.45) maps to a CSS backdrop-filter which operates differently.
- * Discrepancy logged in bd notes (A-F4).
+ * [s] is the saturation multiplier — callers pass [SkinTokens.saturation] so the token is
+ * the single source of truth for all skins. Classic skin uses 1.80f (Android ColorMatrix scale)
+ * rather than the web CSS 145% value, because CSS backdrop-filter saturate() operates on a
+ * different scale than the Android ColorMatrix.
  */
 // RenderEffect is API 31+; callers are already gated on supportsGlassBlur (SDK >= S).
 @RequiresApi(android.os.Build.VERSION_CODES.S)
@@ -272,6 +276,39 @@ fun Modifier.glassFloatShadow(
     }
 }
 
+/**
+ * Explicit-geometry float shadow (VISA-12 / styleguide floating-pill spec).
+ *
+ * Identical to [glassFloatShadow] but accepts raw [yOffset] and [blurRadius]
+ * dp values instead of deriving them from a [GlassTier] — use this when the
+ * styleguide calls for different shadow geometry than the tier defaults.
+ *
+ * Example: the FloatingTabBar pill uses `yOffset=18.dp, blurRadius=45.dp`
+ * (styleguide `box-shadow: 0 18px 45px rgba(0,0,0,.20)`) rather than the
+ * `GlassTier.GLASS` defaults (8dp/24dp).
+ */
+fun Modifier.glassFloatShadowExplicit(
+    yOffset: Dp,
+    blurRadius: Dp,
+    radius: Dp,
+    tint: Color = GlassShadowTint,
+): Modifier = this.drawBehind {
+    val yPx = yOffset.toPx()
+    val blurPx = blurRadius.toPx()
+    if (blurPx <= 0f) return@drawBehind
+    val rPx = radius.toPx()
+    val paint = android.graphics.Paint().apply {
+        isAntiAlias = true
+        color = tint.toArgb()
+        maskFilter = android.graphics.BlurMaskFilter(blurPx, android.graphics.BlurMaskFilter.Blur.NORMAL)
+    }
+    drawIntoCanvas { canvas ->
+        canvas.nativeCanvas.drawRoundRect(
+            0f, yPx, size.width, size.height + yPx, rPx, rPx, paint,
+        )
+    }
+}
+
 /** True when the platform can render a real RenderEffect blur (API 31+). */
 val supportsGlassBlur: Boolean
     get() = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
@@ -284,7 +321,7 @@ val supportsGlassBlur: Boolean
  *
  * When [auroraDef] is provided (CopyPaste-bexa: palette-aware light/dark fix),
  * the canvas gradient is derived from the palette's bg ramp via [auroraCanvasBrush]
- * so each palette frosts the correct colours. Falls back to hardcoded greys when null.
+ * so each palette frosts the correct colours.
  */
 fun glassCanvasBrush(dark: Boolean, auroraDef: AuroraDef? = null): Brush {
     if (auroraDef != null) return auroraCanvasBrush(auroraDef, dark)
@@ -313,43 +350,10 @@ private data class AuroraBlob(
     val stopFrac: Float,
 )
 
-// Dark-mode aurora — deep, saturated blue/violet/teal/green over the §1 base.
-// Mirrors index.css `body { background: radial-gradient(... 0.42/0.38/0.28/0.18) }`.
-private val AURORA_DARK = listOf(
-    AuroraBlob(Color(0xFF3D8BFF).copy(alpha = 0.42f), 0.06f, -0.18f, 1.05f, 0.50f),
-    AuroraBlob(Color(0xFFC678DD).copy(alpha = 0.38f), 1.08f, 1.18f, 1.00f, 0.50f),
-    AuroraBlob(Color(0xFF56B6C2).copy(alpha = 0.28f), 0.95f, -0.12f, 0.82f, 0.46f),
-    AuroraBlob(Color(0xFF5FAD65).copy(alpha = 0.18f), -0.10f, 1.05f, 0.88f, 0.48f),
-)
-
-// Light-mode aurora — softer cool blobs so frosted near-white panels still read
-// as glass. Blob positions shifted inward per canonical styleguide spec (esph):
-// A (0.12,0.08), B (0.88,0.12), C (0.80,0.92), D (0.18,0.88).
-// Blob-B violet updated from systemPurple 0xAF52DE → AA-darkened 0x805AD5 (rgb 128,90,213).
-private val AURORA_LIGHT = listOf(
-    AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.22f), 0.12f,  0.08f, 1.05f, 0.52f), // A blue
-    AuroraBlob(Color(0xFF805AD5).copy(alpha = 0.20f), 0.88f,  0.12f, 1.00f, 0.50f), // B violet (AA-darkened)
-    AuroraBlob(Color(0xFF1478AA).copy(alpha = 0.18f), 0.80f,  0.92f, 0.82f, 0.46f), // C sky (20 120 170, parity w/ web)
-    AuroraBlob(Color(0xFF288C46).copy(alpha = 0.14f), 0.18f,  0.88f, 0.86f, 0.48f), // D green (40 140 70, parity w/ web)
-)
-
-// Mid-canvas overlay blobs (esph) — two small centre blobs that add depth and
-// make the blur "obviously do something" in the centre of the glass canvas.
-// Mirrors the styleguide ::after floating accent+amber overlay layer.
-// Painted AFTER the 4 main blobs in auroraCanvas().
-private val AURORA_OVERLAY_LIGHT = listOf(
-    // E — accent blue, centre-left; radiusFrac ~0.28 of diagonal, stop 65%
-    AuroraBlob(Color(0xFF007AFF).copy(alpha = 0.18f), 0.50f, 0.38f, 0.28f, 0.65f),
-    // F — amber, slightly lower-left; radiusFrac ~0.20, stop 65%
-    AuroraBlob(Color(0xFFD9A343).copy(alpha = 0.16f), 0.30f, 0.60f, 0.20f, 0.65f),
-)
-
-private val AURORA_OVERLAY_DARK = listOf(
-    // E — accent blue (slightly brighter than light theme for dark canvas contrast)
-    AuroraBlob(Color(0xFF3D8BFF).copy(alpha = 0.22f), 0.50f, 0.38f, 0.28f, 0.65f),
-    // F — amber
-    AuroraBlob(Color(0xFFD9A343).copy(alpha = 0.16f), 0.30f, 0.60f, 0.20f, 0.65f),
-)
+// CopyPaste-bdac.37: AURORA_DARK, AURORA_LIGHT, AURORA_OVERLAY_DARK, AURORA_OVERLAY_LIGHT
+// removed — dead code. All call sites pass a non-null AuroraDef (paletteAurora(...)) so
+// the legacy null-fallback branch in auroraCanvas() was unreachable. Blobs are now
+// exclusively derived from palette AuroraDefs via auroraBlobs() / auroraOverlayBlobs().
 
 /**
  * Builds the 4 primary aurora [AuroraBlob]s from a palette [AuroraDef].
@@ -405,27 +409,15 @@ private fun auroraCanvasBrush(def: AuroraDef, dark: Boolean): Brush =
  * Apply to a `Modifier.fillMaxSize()` Box that sits BEHIND the glass surfaces; the
  * hosting Scaffold/container must be `Color.Transparent` so this shows through.
  *
- * **Palette-aware overload**: pass [auroraDef] from [paletteAurora(LocalPalette.current)]
- * to get per-palette blob colors. When [auroraDef] is null, falls back to the
- * legacy [dark]-boolean path (DS-v2 hardcoded blobs). Existing call sites
- * (`auroraCanvas(dark = true)`) continue to compile unchanged.
+ * Pass [auroraDef] from [paletteAurora(LocalPalette.current)] to get per-palette
+ * blob colors. All screens pass a non-null AuroraDef (CopyPaste-bdac.37: legacy null
+ * fallback and hardcoded DS-v2 blob constants removed).
  */
-fun Modifier.auroraCanvas(dark: Boolean, auroraDef: AuroraDef? = null): Modifier {
-    val base: Brush
-    val blobs: List<AuroraBlob>
-    val overlayBlobs: List<AuroraBlob>
-
-    if (auroraDef != null) {
-        // c48e: palette-parameterized aurora
-        base = auroraCanvasBrush(auroraDef, dark)
-        blobs = auroraBlobs(auroraDef)
-        overlayBlobs = auroraOverlayBlobs(auroraDef)
-    } else {
-        // Legacy path: original hardcoded blobs
-        base = glassCanvasBrush(dark)
-        blobs = if (dark) AURORA_DARK else AURORA_LIGHT
-        overlayBlobs = if (dark) AURORA_OVERLAY_DARK else AURORA_OVERLAY_LIGHT
-    }
+fun Modifier.auroraCanvas(dark: Boolean, auroraDef: AuroraDef): Modifier {
+    // c48e / bdac.37: palette-parameterized aurora only — no null fallback.
+    val base = auroraCanvasBrush(auroraDef, dark)
+    val blobs = auroraBlobs(auroraDef)
+    val overlayBlobs = auroraOverlayBlobs(auroraDef)
 
     return this.drawBehind {
         // Base linear gradient (opaque — gives the canvas real colour, §1).
@@ -596,18 +588,16 @@ fun LiquidGlassSurface(
     // so blur is never applied regardless of the 0.dp value.
     val blurRadius = tok.glassBlurDp
 
-    // CopyPaste-xxjt: saturation branch intentionally kept for Classic.
-    // Classic uses implementation constant 1.8f (ColorMatrix scale on Android) while
-    // ClassicSkinTokens.saturation=1.45f mirrors the web CSS value. These two numbers
-    // are on different scales: CSS `saturate(145%)` ≠ ColorMatrix s=1.45 — the Android
-    // ColorMatrix needs s=1.8 to visually match the web backdrop-filter output.
-    // Unifying would change Classic rendering; left as a documented intentional branch.
-    // Non-Classic GLASS skins use tok.saturation directly (Vapor=1.7f is already correct
-    // for the ColorMatrix scale since Vapor was designed for Android from scratch).
-    val saturationScale = if (skin == Skin.CLASSIC) 1.8f else tok.saturation
+    // CopyPaste-5917.35: tok.saturation is the single source of truth for all skins.
+    // ClassicSkinTokens.saturation was updated to 1.80f (Android ColorMatrix scale) to
+    // match the implementation value — the CSS saturate(145%) web value used a different
+    // scale. All skins now read the token uniformly; no Classic-specific branch needed.
+    val saturationScale = tok.saturation
 
     // Per-tier WHITE alpha gradient (light) / flat deep tint (dark) — zd35.
-    val fillColor = if (dark) GlassFillDark else GlassFillLight
+    // CopyPaste-bdac.43: dark fill is now per-palette (surfaceRgb from AuroraDef)
+    // so each palette's glass tint matches the web --surface-rgb token.
+    val fillColor = if (dark) paletteAurora(LocalPalette.current).surfaceRgb else GlassFillLight
     val alphaTop = if (dark) tier.darkAlpha else tier.lightAlphaTop
     val alphaBot = if (dark) tier.darkAlpha else tier.lightAlphaBottom
 
@@ -748,18 +738,6 @@ fun glassFillForTheme(solid: Color, translucent: Boolean, dark: Boolean): Color 
         val fill = if (dark) GlassFillDark else GlassFillLight
         fill.copy(alpha = glassAlphaForTheme(translucent = true, dark = dark))
     }
-
-/**
- * Returns [base] with its alpha adjusted for the glass effect (legacy shim).
- *
- *   translucent = true  → base.copy(alpha = GLASS_ALPHA)
- *   translucent = false → base (unchanged, fully opaque)
- *
- * Retained for source compatibility; new code should prefer [glassFillForTheme]
- * (theme-correct warm-near-white light fill). Compose-only (uses Color.copy).
- */
-fun glassContainerColor(base: Color, translucent: Boolean): Color =
-    if (translucent) base.copy(alpha = GLASS_ALPHA) else base
 
 /**
  * True when the active Material color scheme is the dark "Liquid Glass" scheme.
@@ -1252,8 +1230,9 @@ fun SectionLabel(
             fontWeight    = FontWeight.SemiBold,
             letterSpacing = 0.6.sp,   // tracking-wide
         ),
-        // 5jkb: styleguide section label uses the tertiary --ide-faint token (was dim).
-        color = c.faint,
+        // CopyPaste-bdac.89: canonical section label uses --ide-dim (same as macOS SectionHeader.tsx).
+        // 5jkb had changed to faint but parity audit shows macOS uses dim (higher contrast). Aligned.
+        color = c.dim,
         // CopyPaste-aod: mark as a heading so TalkBack users can jump between sections.
         modifier = modifier
             .semantics { heading() }
@@ -1781,6 +1760,256 @@ fun CopyPasteButton(
  * [hitTarget] invisible touch area (styleguide: 28px glyph, 44px hit target).
  * Tint defaults to the theme dim; press has no halo (clickable indication=null).
  */
+// ---------------------------------------------------------------------------
+// Shared settings row composables — extracted from SettingsActivity so they
+// can be reused by other screens (CopyPaste-bdac.11).
+//
+// SettingsRow       — label/subtitle + trailing IdeSwitch (toggle row)
+// SettingsNavRow    — label/subtitle + optional leading icon (navigation row,
+//                     no trailing control; tapping navigates to another screen)
+//
+// Both are density-aware: the live Density draft from SettingsScreen is
+// threaded down so density changes preview without Save.
+// ---------------------------------------------------------------------------
+
+/**
+ * A label/subtitle + trailing [IdeSwitch] settings toggle row (CopyPaste-bdac.11).
+ *
+ * Extracted from SettingsActivity's private `SettingsRow` so other screens can
+ * use the same primitive without copy-pasting. Density-aware: compact → 8dp
+ * vertical pad + bodyMedium title; spacious → 16dp; comfortable → 12dp.
+ *
+ * Accessibility: the row merges descendants so TalkBack reads
+ * "<title>, <subtitle>, On/Off" as a single node instead of separate stops.
+ *
+ * @param title         Main label text.
+ * @param subtitle      Secondary description text.
+ * @param checked       Current toggle state.
+ * @param onCheckedChange Called with the new value when toggled.
+ * @param density       Active UI density for padding/typography.
+ */
+@Composable
+fun SharedSettingsRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    density: Density,
+    modifier: Modifier = Modifier,
+) {
+    val c = LocalIdeColors.current
+    val isCompact  = density == Density.COMPACT
+    val isSpacious = density == Density.SPACIOUS
+    val vertPad = when {
+        isCompact  -> 8.dp
+        isSpacious -> 16.dp
+        else       -> 12.dp
+    }
+    Row(
+        // CopyPaste-aod: merge the title + subtitle + switch into ONE TalkBack node
+        // labelled with the title so it reads "<title>, <subtitle>, On/Off" instead
+        // of the title/subtitle and a context-free "Switch, on" as separate stops.
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) {}
+            .padding(horizontal = 16.dp, vertical = vertPad),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column(modifier = Modifier
+            .weight(1f)
+            .padding(end = 12.dp)) {
+            Text(
+                text = title,
+                style = if (isCompact) MaterialTheme.typography.bodyMedium
+                        else MaterialTheme.typography.bodyLarge,
+                color = c.text,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = c.dim,
+            )
+        }
+        IdeSwitch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            name = title,
+        )
+    }
+}
+
+/**
+ * A label/subtitle navigation row with optional leading icon (CopyPaste-bdac.11).
+ *
+ * Extracted from SettingsActivity's private `SettingsNavRow`. Tapping the row
+ * calls [onClick] to navigate elsewhere; there is no trailing control.
+ * Density-aware (same padding/typography rules as [SharedSettingsRow]).
+ *
+ * @param title         Main label text.
+ * @param subtitle      Secondary description text.
+ * @param density       Active UI density for padding/typography.
+ * @param leadingIcon   Optional leading icon (e.g. NavIcons.About/Logs).
+ * @param onClick       Called when the row is tapped.
+ */
+@Composable
+fun SharedSettingsNavRow(
+    title: String,
+    subtitle: String,
+    density: Density,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+) {
+    val c = LocalIdeColors.current
+    val isCompact  = density == Density.COMPACT
+    val isSpacious = density == Density.SPACIOUS
+    val vertPad = when {
+        isCompact  -> 8.dp
+        isSpacious -> 16.dp
+        else       -> 12.dp
+    }
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = vertPad),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        if (leadingIcon != null) {
+            Icon(
+                imageVector = leadingIcon,
+                contentDescription = null,
+                tint = c.dim,
+                modifier = Modifier.size(20.dp),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+        }
+        Column(modifier = Modifier
+            .weight(1f)
+            .padding(end = 12.dp)) {
+            Text(
+                text = title,
+                style = if (isCompact) MaterialTheme.typography.bodyMedium
+                        else MaterialTheme.typography.bodyLarge,
+                color = c.text,
+            )
+            Text(
+                text = subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = c.dim,
+            )
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// EmptyStateCard — shared empty-state composable (CopyPaste-bdac.15).
+//
+// Extracted from HistoryActivity's EmptyHistoryState / EmptySearchState so
+// other screens (LogViewerActivity, etc.) can use the same icon+card pattern
+// without duplicating the animated card structure.
+//
+// Callers provide the [icon], [title], and [subtitle] strings. The animation
+// (fade+scale entrance) is gated on [reducedMotion]. [iconTint] defaults to
+// the theme's accent2 (same as the history empty-state icon).
+// ---------------------------------------------------------------------------
+
+/**
+ * Structured empty-state card with animated entrance (CopyPaste-bdac.15).
+ *
+ * Renders a 58dp icon box with an accent-tinted bg + accent border, followed
+ * by a title + subtitle text column inside a [CopyPasteCard]. The entrance
+ * animation (fade + scale-in) is skipped when [reducedMotion] is true.
+ *
+ * Extracted from HistoryActivity's `EmptyHistoryState`; preserves styling.
+ *
+ * @param icon          Icon to display in the 58dp icon box.
+ * @param title         Primary empty-state label.
+ * @param subtitle      Supporting description.
+ * @param padding       Content padding (from surrounding Scaffold).
+ * @param iconTint      Tint for the icon; defaults to the theme's accent2.
+ * @param reducedMotion When true, disables the entrance animation.
+ */
+@Composable
+fun EmptyStateCard(
+    icon: @Composable () -> Unit,
+    title: String,
+    subtitle: String,
+    padding: PaddingValues,
+    modifier: Modifier = Modifier,
+    reducedMotion: Boolean = false,
+) {
+    val c = LocalIdeColors.current
+    val translucent = rememberTranslucency()
+    val enterDurMs = if (reducedMotion) 0 else 400
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .then(Modifier.background(if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg))
+            .padding(padding)
+            .padding(horizontal = 32.dp, vertical = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        AnimatedVisibility(
+            visible = true,
+            enter = if (reducedMotion || enterDurMs == 0)
+                        EnterTransition.None
+                    else
+                        fadeIn(tween(enterDurMs)) + scaleIn(
+                            tween(enterDurMs),
+                            initialScale = 0.92f,
+                        ),
+        ) {
+            CopyPasteCard(
+                modifier = Modifier.widthIn(max = 400.dp),
+                accent = MaterialTheme.colorScheme.outline,
+                translucent = translucent,
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    // 58dp icon box with accent-tinted bg + border (mirrors EmptyHistoryState).
+                    Box(
+                        modifier = Modifier
+                            .size(58.dp)
+                            .background(
+                                color = c.accent.copy(alpha = 0.15f),
+                                shape = RoundedCornerShape(20.dp),
+                            )
+                            .border(
+                                width = 1.dp,
+                                color = c.accent.copy(alpha = 0.28f),
+                                shape = RoundedCornerShape(20.dp),
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        icon()
+                    }
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.bodyLarge.copy(
+                                fontWeight = FontWeight.SemiBold,
+                            ),
+                            color = c.text,
+                        )
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = c.dim,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun CopyPasteIconButton(
     onClick: () -> Unit,

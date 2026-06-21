@@ -70,8 +70,8 @@ val LocalIdeColors = staticCompositionLocalOf<IdeColors> { GraphiteMistIdeColors
 /** §8 out-expo easing — matches CSS cubic-bezier(.16,1,.3,1). */
 val EaseOutExpo = CubicBezierEasing(0.16f, 1.0f, 0.3f, 1.0f)
 
-/** §8 standard easing — matches CSS cubic-bezier(.2,0,0,1). */
-val EaseStandard = CubicBezierEasing(0.20f, 0.0f, 0.0f, 1.0f)
+/** §8 standard easing — matches CSS cubic-bezier(.2,0,.2,1). */
+val EaseStandard = CubicBezierEasing(0.20f, 0.0f, 0.2f, 1.0f)
 
 /** §8 ease-in — matches CSS cubic-bezier(.4,0,1,1). */
 val EaseIn = CubicBezierEasing(0.40f, 0.0f, 1.0f, 1.0f)

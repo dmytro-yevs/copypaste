@@ -1,5 +1,16 @@
 package com.copypaste.android.ui.theme
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.FolderOpen
+import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Link
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Email
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.DataObject
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathFillType
 import androidx.compose.ui.graphics.SolidColor
@@ -17,14 +28,52 @@ import androidx.compose.ui.unit.dp
 //   History  → clock.arrow.circlepath   (clock face + CCW refresh arc)
 //   Devices  → laptopcomputer.and.iphone (laptop + phone)
 //   Settings → gear / gearshape         (8-tooth gear)
+//   About    → info.circle              (circle with i) — CopyPaste-5917.77
+//   Logs     → doc.text                 (document with lines) — CopyPaste-5917.77
 //
-// Usage: pass NavIcons.History / NavIcons.Devices / NavIcons.Settings as the
-// imageVector in Icon(), or reference from MainActivity's NavTab enum.
+// Usage: pass NavIcons.History / NavIcons.Devices / NavIcons.Settings /
+// NavIcons.About / NavIcons.Logs as the imageVector in Icon(), or reference
+// from MainActivity's NavTab enum.
 //
 // Tint is always driven by the call site (Icon tint param) — these ImageVectors
 // use a placeholder Black stroke that is replaced by the runtime tint.
 // All are aria-hidden equivalents — the parent button carries the a11y label.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// contentIconFor — canonical content-type → icon mapping (CopyPaste-5917.84)
+//
+// Maps the chip label string (as produced by TextKind and used by
+// ContentIconTile) to an Outlined Material icon. This is the SINGLE SOURCE OF
+// TRUTH for the Android icon parity with macOS (lucide canonical):
+//   PATH    → FolderOpen   (was: AttachFile — wrong, macOS uses folder-open)
+//   NUMBER  → Tag          (hash/# symbol — matches macOS Hash/lucide)
+//   IMAGE   → Image
+//   URL     → Link
+//   CODE    → Code
+//   EMAIL   → Email
+//   PHONE   → Phone
+//   COLOR   → Palette
+//   JSON    → DataObject
+//   default → ContentCopy
+//
+// Call sites: ContentIconTile in HistoryActivity (delegates here), and any
+// future composable that needs the same icon mapping.
+// ---------------------------------------------------------------------------
+fun contentIconFor(chipLabel: String): ImageVector = when (chipLabel) {
+    "IMAGE"  -> Icons.Outlined.Image
+    "URL"    -> Icons.Outlined.Link
+    "CODE"   -> Icons.Outlined.Code
+    "EMAIL"  -> Icons.Outlined.Email
+    "PHONE"  -> Icons.Outlined.Phone
+    "COLOR"  -> Icons.Outlined.Palette
+    "JSON"   -> Icons.Outlined.DataObject
+    // CopyPaste-5917.84: NUMBER=Tag (hash/# matches macOS lucide Hash)
+    "NUMBER" -> Icons.Outlined.Tag
+    // CopyPaste-5917.84: PATH=FolderOpen (was AttachFile — parity fix)
+    "PATH"   -> Icons.Outlined.FolderOpen
+    else     -> Icons.Outlined.ContentCopy
+}
 
 private val NoFill = SolidColor(Color.Transparent)
 private val PlaceholderStroke = SolidColor(Color.Black)
@@ -255,6 +304,147 @@ object NavIcons {
                 lineTo(21.35f, 14.2f)
                 arcTo(0.48f, 0.48f, 0f, false, false, 21.23f, 13.58f)
                 close()
+            }
+        }.build()
+    }
+
+    // -------------------------------------------------------------------------
+    // About — info.circle (SF Symbols) / info (lucide) — CopyPaste-5917.77
+    // Circle + dot above + vertical bar: mirrors macOS About tab icon.
+    // 24×24 grid, same thin-stroke recipe as History/Devices/Settings.
+    // -------------------------------------------------------------------------
+    val About: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "NavIcons.About",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            // Outer circle: cx=12 cy=12 r=9
+            path(
+                fill = NoFill,
+                stroke = PlaceholderStroke,
+                strokeLineWidth = SW,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                moveTo(12f, 3f)
+                arcTo(9f, 9f, 0f, false, true, 12f, 21f)
+                arcTo(9f, 9f, 0f, false, true, 12f, 3f)
+                close()
+            }
+            // "i" dot: tiny circle/point at cx=12, cy=8.5
+            path(
+                fill = NoFill,
+                stroke = PlaceholderStroke,
+                strokeLineWidth = SW + 0.3f, // slightly thicker to read as a dot
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                // Zero-length line renders as a round dot
+                moveTo(12f, 8.5f)
+                lineTo(12f, 8.51f)
+            }
+            // "i" stem: vertical bar from 11 to 16
+            path(
+                fill = NoFill,
+                stroke = PlaceholderStroke,
+                strokeLineWidth = SW,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                moveTo(12f, 11f)
+                lineTo(12f, 16f)
+            }
+        }.build()
+    }
+
+    // -------------------------------------------------------------------------
+    // Logs — doc.text (SF Symbols) / file-text (lucide) — CopyPaste-5917.77
+    // Document rectangle with three text lines: mirrors macOS Logs tab icon.
+    // 24×24 grid, same thin-stroke recipe.
+    // -------------------------------------------------------------------------
+    val Logs: ImageVector by lazy {
+        ImageVector.Builder(
+            name = "NavIcons.Logs",
+            defaultWidth = 24.dp,
+            defaultHeight = 24.dp,
+            viewportWidth = 24f,
+            viewportHeight = 24f,
+        ).apply {
+            // Document body: rounded-rect x=4 y=2 w=14 h=20 rx=2, with folded top-right corner
+            // Drawn as the outer outline: left side, bottom, right side, and a dog-ear at top-right.
+            path(
+                fill = NoFill,
+                stroke = PlaceholderStroke,
+                strokeLineWidth = SW,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                // Start at top-left corner (after radius), go clockwise.
+                moveTo(6f, 2f)           // top-left start
+                arcTo(2f, 2f, 0f, false, false, 4f, 4f)    // top-left corner arc
+                lineTo(4f, 20f)          // left side down
+                arcTo(2f, 2f, 0f, false, false, 6f, 22f)   // bottom-left corner arc
+                lineTo(18f, 22f)         // bottom edge right
+                arcTo(2f, 2f, 0f, false, false, 20f, 20f)  // bottom-right corner arc
+                lineTo(20f, 8f)          // right side partial (to dog-ear)
+                lineTo(14f, 2f)          // diagonal to dog-ear top
+                close()                  // back to start
+            }
+            // Dog-ear fold crease: M14,2 → M14,8 → M20,8
+            path(
+                fill = NoFill,
+                stroke = PlaceholderStroke,
+                strokeLineWidth = SW,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                moveTo(14f, 2f)
+                lineTo(14f, 8f)
+                lineTo(20f, 8f)
+            }
+            // Text line 1: x=8 to x=16, y=12
+            path(
+                fill = NoFill,
+                stroke = PlaceholderStroke,
+                strokeLineWidth = SW,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                moveTo(8f, 12f)
+                lineTo(16f, 12f)
+            }
+            // Text line 2: x=8 to x=16, y=15.5
+            path(
+                fill = NoFill,
+                stroke = PlaceholderStroke,
+                strokeLineWidth = SW,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                moveTo(8f, 15.5f)
+                lineTo(16f, 15.5f)
+            }
+            // Text line 3 (shorter): x=8 to x=13, y=19
+            path(
+                fill = NoFill,
+                stroke = PlaceholderStroke,
+                strokeLineWidth = SW,
+                strokeLineCap = StrokeCap.Round,
+                strokeLineJoin = StrokeJoin.Round,
+                pathFillType = PathFillType.NonZero,
+            ) {
+                moveTo(8f, 19f)
+                lineTo(13f, 19f)
             }
         }.build()
     }

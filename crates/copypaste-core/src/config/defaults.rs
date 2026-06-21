@@ -73,4 +73,8 @@ pub const SQLITE_CACHE_MB_MIN: u32 = 1;
 pub const SQLITE_CACHE_MB_MAX: u32 = 256;
 pub const ENCRYPTION_CHUNK_KB: u32 = 64;
 pub const MAX_DECODED_IMAGE_MB: u32 = 50;
+// TODO: not yet enforced — `max_bandwidth_kbps` is stored in `AppConfig` and
+// propagated to config serialisation, but no code path in the daemon reads this
+// value to throttle upload or download throughput. Value of 0 means "unlimited"
+// by convention; the field exists as a future wiring point.
 pub const MAX_BANDWIDTH_KBPS: u32 = 0;

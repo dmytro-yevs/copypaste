@@ -600,20 +600,32 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * CopyPaste-12f0: Degraded-DB recovery — wipe the entire clipboard SharedPreferences
-     * store (all items, pinned or not, all indexes, all metadata).
+     * CopyPaste-12f0 / bd CopyPaste-44rq.59: Degraded-DB recovery — wipe the entire
+     * clipboard SharedPreferences store (all items, pinned or not, all indexes, all metadata).
      *
      * This is a DESTRUCTIVE operation with no undo, intended as a last resort when the
      * database is in a state that prevents normal operation (equivalent to macOS's
-     * Settings → Storage → Reset database). The caller MUST show a confirmation dialog
-     * before invoking this.
+     * Settings → Storage → Reset database).
+     *
+     * [confirmed] MUST be true for the wipe to proceed; passing false (or calling without
+     * explicit confirmation) is a no-op. This guards against accidental silent invocations —
+     * the caller must show a confirmation dialog and only pass `confirmed = true` when the
+     * user explicitly acknowledges the destructive action.
      *
      * Unlike [clearAll] which preserves pinned items and queues sync tombstones, this
      * wipes the SharedPreferences file entirely and resets all in-memory state. It does
      * NOT wipe [Settings] — user preferences (encryption key, device id, etc.) are
      * preserved so the device can continue to participate in sync after recovery.
+     *
+     * @param confirmed Must be `true` to proceed. Pass `false` to no-op (e.g. if the caller
+     *   has not yet obtained user confirmation). Throws [IllegalArgumentException] if the
+     *   parameter is omitted or false, to make silent misuse immediately visible in tests.
      */
-    fun resetDatabase() {
+    fun resetDatabase(confirmed: Boolean) {
+        require(confirmed) {
+            "resetDatabase must only be called with confirmed=true after an explicit user " +
+                "confirmation dialog — this operation is irreversible and wipes all history."
+        }
         synchronized(idsWriteLock) {
             // Wipe all item data in the repository SharedPreferences file.
             prefs.edit().clear().apply()
@@ -622,7 +634,7 @@ class ClipboardRepository(context: Context) {
             // Reset dedup state so the first captured item after reset is stored fresh.
             resetDedupState()
         }
-        Log.w(TAG, "resetDatabase: clipboard SharedPreferences wiped (recovery action)")
+        Log.w(TAG, "resetDatabase: clipboard SharedPreferences wiped (recovery action, confirmed=true)")
         // Notify the service that items were deleted so the persistent notification counter resets.
         ClipboardService.onItemsDeleted(appContext, 0)
     }
@@ -1407,6 +1419,45 @@ class ClipboardRepository(context: Context) {
 
             val editor = prefs.edit()
             var didEvict = false
+            val nowMs = System.currentTimeMillis()
+
+            // CopyPaste-44rq.58: helper that tombstones an evicted item (instead of hard-
+            // deleting it) and enqueues a delete mutation so peers learn about the eviction
+            // and do NOT re-push the item on the next sync. Without this, a hard-evicted
+            // item would resurect on the next sync because no tombstone existed to suppress it.
+            fun tombstoneEvict(evictId: String) {
+                val existing = prefs.getString("item_$evictId", null)
+                val oldLamport = try {
+                    existing?.split("|")?.getOrNull(5)?.toLongOrNull() ?: 0L
+                } catch (_: Exception) { 0L }
+                val newLamport = nextLamportTs(oldLamport, nowMs)
+                if (existing != null && !isDeletedBlob(existing)) {
+                    // Write a soft-delete tombstone so the id stays in the index (prevents
+                    // re-sync resurrection) but the content is logically gone. Mirrors the
+                    // deleteItem() path (CopyPaste-up1c).
+                    editor.putString("item_$evictId", encodeTombstone(existing, newLamport))
+                }
+                // Enqueue an OP_DELETE mutation so all transports (relay/Supabase/P2P)
+                // propagate the eviction to peers. Mirrors the deleteItems() path
+                // (CopyPaste-0qpn).
+                OutboundMutationQueue.enqueueMutation(
+                    appContext,
+                    OutboundMutationQueue.MutationRecord(
+                        itemId = evictId,
+                        op = OutboundMutationQueue.OP_DELETE,
+                        lamportTs = newLamport,
+                        wallTimeMs = nowMs,
+                        pinned = false,
+                        pinOrder = null,
+                    ),
+                )
+                editor.remove("item_img_$evictId")
+                editor.remove("item_thumb_$evictId")
+                editor.remove("item_file_$evictId")
+                editor.remove("item_filemeta_$evictId")
+                editor.remove("item_id_ref_$evictId")
+                evictParseCache(evictId)
+            }
 
             // Pass 1: byte-quota eviction (oldest unpinned first, same as before).
             while (unpinned.isNotEmpty()) {
@@ -1417,14 +1468,7 @@ class ClipboardRepository(context: Context) {
                 ids.remove(evictId)
                 val sz = blobSizes[evictId] ?: 0
                 totalBytes -= sz
-                editor.remove("item_$evictId")
-                editor.remove("item_img_$evictId")
-                editor.remove("item_thumb_$evictId")
-                editor.remove("item_file_$evictId")
-                editor.remove("item_filemeta_$evictId")
-                // Remove reverse-lookup key to prevent orphan LWW ghost on re-sync.
-                editor.remove("item_id_ref_$evictId")
-                evictParseCache(evictId) // A: evict stale decrypt cache entry
+                tombstoneEvict(evictId)
                 didEvict = true
                 evictedCount++
                 Log.d(TAG, "pruneToLimits: evicted $evictId (blob ${sz}B, totalNow=${totalBytes}B)")
@@ -1439,13 +1483,7 @@ class ClipboardRepository(context: Context) {
             while (unpinned.isNotEmpty() && ids.size > maxItems) {
                 val evictId = unpinned.removeAt(0)
                 ids.remove(evictId)
-                editor.remove("item_$evictId")
-                editor.remove("item_img_$evictId")
-                editor.remove("item_thumb_$evictId")
-                editor.remove("item_file_$evictId")
-                editor.remove("item_filemeta_$evictId")
-                editor.remove("item_id_ref_$evictId")
-                evictParseCache(evictId)
+                tombstoneEvict(evictId)
                 didEvict = true
                 evictedCount++
                 Log.d(TAG, "pruneToLimits: count-evicted $evictId (total now ${ids.size}/${maxItems})")

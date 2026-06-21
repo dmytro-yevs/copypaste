@@ -68,7 +68,7 @@ describe("§W5-A  SettingsView Panel — skin-driven card radius", () => {
       </ErrorBoundary>,
     );
     await waitFor(() =>
-      expect(screen.getByText(/Daemon not running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
     // rounded-ide-lg = hardcoded 14px; must be driven by --skin-r-card instead
     expect(noElementHasClass(container, "rounded-ide-lg")).toBe(true);
@@ -81,7 +81,7 @@ describe("§W5-A  SettingsView Panel — skin-driven card radius", () => {
       </ErrorBoundary>,
     );
     await waitFor(() =>
-      expect(screen.getByText(/Daemon not running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
     expect(someInlineStyleContains(container, "--skin-r-card")).toBe(true);
   });
@@ -99,7 +99,7 @@ describe("§W5-B  SettingsView InfoPopover — skin-driven control radius", () =
       </ErrorBoundary>,
     );
     await waitFor(() =>
-      expect(screen.getByText(/Daemon not running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
     // The popover bubble uses rounded-ide; it should be --skin-r-ctl instead.
     // Verify no element that is a popover (surface-glass-strong) has rounded-ide hardcoded.
@@ -122,7 +122,7 @@ describe("§W5-C  SettingsView controls — skin-driven control radius", () => {
       </ErrorBoundary>,
     );
     await waitFor(() =>
-      expect(screen.getByText(/Daemon not running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
     expect(noElementHasClass(container, "rounded-ide")).toBe(true);
   });
@@ -134,7 +134,7 @@ describe("§W5-C  SettingsView controls — skin-driven control radius", () => {
       </ErrorBoundary>,
     );
     await waitFor(() =>
-      expect(screen.getByText(/Daemon not running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
     expect(someInlineStyleContains(container, "--skin-r-ctl")).toBe(true);
   });
@@ -152,7 +152,7 @@ describe("§W5-D  SettingsView status banners — skin-driven card radius", () =
       </ErrorBoundary>,
     );
     await waitFor(() =>
-      expect(screen.getByText(/Daemon not running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
     // No element anywhere in the tree should have rounded-ide-lg (covers banners too).
     expect(noElementHasClass(container, "rounded-ide-lg")).toBe(true);
@@ -165,7 +165,7 @@ describe("§W5-D  SettingsView status banners — skin-driven card radius", () =
       </ErrorBoundary>,
     );
     await waitFor(() =>
-      expect(screen.getByText(/Daemon not running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
     // Find the banner div that is a direct wrapper (has surface-card class and
     // contains "Daemon not running" in its text content).
@@ -174,7 +174,7 @@ describe("§W5-D  SettingsView status banners — skin-driven card radius", () =
     ).find(
       (el) =>
         el.className.includes("surface-card") &&
-        el.textContent?.includes("Daemon not running"),
+        el.textContent?.includes("Background service not running"),
     );
     expect(bannerDiv).not.toBeUndefined();
     const style = bannerDiv!.getAttribute("style") ?? "";
@@ -198,7 +198,7 @@ describe("§W5-E  SettingsView outer shell card — skin-driven card radius", ()
       </ErrorBoundary>,
     );
     await waitFor(() =>
-      expect(screen.getByText(/Daemon not running/i)).toBeInTheDocument(),
+      expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
     // No element anywhere should have rounded-ide-lg (we already check in §A,
     // but this is an explicit check for the shell card)

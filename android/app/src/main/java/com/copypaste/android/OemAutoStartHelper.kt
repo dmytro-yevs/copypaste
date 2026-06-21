@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.core.content.edit
 
 /**
  * Detects the device manufacturer and deep-links to the OEM-specific autostart
@@ -286,4 +287,30 @@ object OemAutoStartHelper {
      */
     fun isResolvable(context: Context, intent: Intent): Boolean =
         context.packageManager.resolveActivity(intent, 0) != null
+
+    // ── ANDO-6: OEM acknowledgement flag ────────────────────────────────────
+    // The OEM autostart state cannot be queried reliably without root. Instead
+    // of always showing the card as "not configured", we let the user dismiss it
+    // by tapping "Done — I've enabled it". The flag persists in SharedPreferences
+    // so the card stays hidden on subsequent opens.
+
+    private const val PREFS_NAME = "oem_autostart"
+    private const val KEY_ACKNOWLEDGED = "ack_done"
+
+    /**
+     * Returns true when the user has previously tapped the OEM acknowledgement
+     * button, indicating they have enabled autostart in the OEM settings screen.
+     */
+    fun isOemAcknowledged(context: Context): Boolean =
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getBoolean(KEY_ACKNOWLEDGED, false)
+
+    /**
+     * Persists the OEM acknowledgement flag so [isOemAcknowledged] returns true
+     * on subsequent calls. Call this when the user taps "Done — I've enabled it".
+     */
+    fun setOemAcknowledged(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit { putBoolean(KEY_ACKNOWLEDGED, true) }
+    }
 }

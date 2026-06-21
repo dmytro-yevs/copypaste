@@ -7,20 +7,24 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Share
+import androidx.compose.material.icons.outlined.SearchOff
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -42,7 +46,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.EmptyStateCard
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.LocalIdeColors
@@ -51,6 +59,7 @@ import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.SkinBackground
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.ideTextFieldColors
+import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberTranslucency
@@ -113,19 +122,22 @@ fun LogViewerScreen(onBack: () -> Unit) {
 
     // Which background variant to draw:
     //   AURORA    → full palette-aware animated aurora (auroraCanvas modifier)
-    //   TINT_BLOB → static accent-tinted blob; no dedicated Modifier exists yet,
-    //               so we reuse auroraCanvas as the closest available primitive.
-    //               (Missing: dedicated tintBlobCanvas Modifier — noted in bd notes.)
+    //   TINT_BLOB → canonical tintBlobCanvas() — same helper used on every other screen
+    //               (VISA-6: was falling through to auroraCanvas; now uses the shared
+    //                implementation so Vapor looks identical on LogViewer and History/About).
     //   FLAT      → no canvas — plain c.bg solid fill
     val paintCanvas = translucent && tok.background != SkinBackground.FLAT
 
     // ── State ──────────────────────────────────────────────────────────────
+    val toastState = remember { GlassToastState() }
     var allLines by remember { mutableStateOf<List<String>>(emptyList()) }
     var filterText by remember { mutableStateOf("") }
     var fileSizeDesc by remember { mutableStateOf("") }
     var isTruncated by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
     var atBottom by remember { mutableStateOf(true) }
+    // CopyPaste-bdac.4: error state for IO failures in readLogs().
+    var readError by remember { mutableStateOf<String?>(null) }
 
     // Filtered lines derived from allLines + filterText
     val displayLines = remember(allLines, filterText) {
@@ -136,12 +148,19 @@ fun LogViewerScreen(onBack: () -> Unit) {
     // ── Load logs ──────────────────────────────────────────────────────────
     fun loadLogs() {
         scope.launch {
-            val result = withContext(Dispatchers.IO) { readLogs(ctx) }
-            allLines = result.lines
-            fileSizeDesc = result.sizeDesc
-            isTruncated = result.truncated
-            // Auto-scroll to bottom after load
-            atBottom = true
+            // CopyPaste-bdac.4: wrap IO in try/catch so a missing or unreadable log
+            // file shows a friendly error instead of silently staying empty.
+            try {
+                val result = withContext(Dispatchers.IO) { readLogs(ctx) }
+                readError = null
+                allLines = result.lines
+                fileSizeDesc = result.sizeDesc
+                isTruncated = result.truncated
+                // Auto-scroll to bottom after load
+                atBottom = true
+            } catch (e: Exception) {
+                readError = "Could not read log file — try restarting the app. (${e.message})"
+            }
         }
     }
 
@@ -209,15 +228,21 @@ fun LogViewerScreen(onBack: () -> Unit) {
         }
     }
 
+    // A-C6 / VISA-6: three-way background canvas driven by tok.background.
+    //   AURORA    (Classic) → animated palette aurora.
+    //   TINT_BLOB (Vapor)   → canonical shared tintBlobCanvas() (was auroraCanvas fallback).
+    //   FLAT      (Quiet)   → no canvas; opaque c.bg.
+    val paintAurora   = paintCanvas && tok.background == SkinBackground.AURORA
+    val paintTintBlob = paintCanvas && tok.background == SkinBackground.TINT_BLOB
+    val scaffoldModifier = when {
+        paintAurora   -> Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
+        paintTintBlob -> Modifier.tintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
+        else          -> Modifier
+    }
+
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
-        // A-C6: gate the aurora/canvas backdrop by tok.background.
-        // CLASSIC (AURORA) → animated palette aurora, transparent container.
-        // VAPOR  (TINT_BLOB) → auroraCanvas fallback (dedicated tintBlobCanvas missing),
-        //   transparent container so the canvas shows through glass surfaces.
-        // QUIET  (FLAT) → no canvas, opaque solid c.bg container.
-        modifier = if (paintCanvas)
-            Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
-        else Modifier,
+        modifier = scaffoldModifier,
         containerColor = if (paintCanvas) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
@@ -233,8 +258,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
                         atBottom = !atBottom
                     }) {
                         Icon(
-                            imageVector = if (atBottom) Icons.Default.KeyboardArrowUp
-                                          else Icons.Default.KeyboardArrowDown,
+                            imageVector = if (atBottom) Icons.Outlined.KeyboardArrowUp
+                                          else Icons.Outlined.KeyboardArrowDown,
                             contentDescription = if (atBottom) "Scroll to top" else "Scroll to bottom",
                             tint = c.dim,
                         )
@@ -242,15 +267,19 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     // Refresh
                     IconButton(onClick = { loadLogs() }) {
                         Icon(
-                            imageVector = Icons.Default.Refresh,
+                            imageVector = Icons.Outlined.Refresh,
                             contentDescription = "Refresh logs",
                             tint = c.dim,
                         )
                     }
                     // Share / Export
-                    IconButton(onClick = { LogExportHelper.shareLogsZip(ctx) }) {
+                    IconButton(onClick = {
+                        LogExportHelper.shareLogsZip(ctx, onError = { msg ->
+                            scope.launch { toastState.show(msg, GlassToastKind.DANGER) }
+                        })
+                    }) {
                         Icon(
-                            imageVector = Icons.Default.Share,
+                            imageVector = Icons.Outlined.Share,
                             contentDescription = "Export logs",
                             tint = c.dim,
                         )
@@ -258,7 +287,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                     // Clear logs
                     IconButton(onClick = { showClearDialog = true }) {
                         Icon(
-                            imageVector = Icons.Default.Delete,
+                            imageVector = Icons.Outlined.Delete,
                             contentDescription = "Clear logs",
                             tint = c.danger,
                         )
@@ -318,16 +347,34 @@ fun LogViewerScreen(onBack: () -> Unit) {
 
             // ── Log lines ─────────────────────────────────────────────────
             if (displayLines.isEmpty()) {
-                Box(
+                // CopyPaste-bdac.15: use shared EmptyStateCard (icon+card) so the empty state
+                // matches HistoryActivity's pattern (was a bare centered Text composable).
+                // Error state (bdac.4) still uses accent2 icon but with danger text below.
+                val errorMsg = readError
+                val isFilter = allLines.isNotEmpty() && errorMsg == null
+                EmptyStateCard(
+                    icon = {
+                        Icon(
+                            imageVector = if (isFilter) Icons.Outlined.SearchOff
+                                          else Icons.Outlined.Description,
+                            contentDescription = null,
+                            tint = if (errorMsg != null) c.danger else c.accent,
+                            modifier = Modifier.size(26.dp),
+                        )
+                    },
+                    title = when {
+                        errorMsg != null -> "Could not read logs"
+                        isFilter -> "No lines match filter"
+                        else -> "No log entries yet"
+                    },
+                    subtitle = when {
+                        errorMsg != null -> errorMsg
+                        isFilter -> "Clear the filter above to see all log lines"
+                        else -> "Diagnostic logs appear here after app activity"
+                    },
+                    padding = PaddingValues(0.dp),
                     modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = if (allLines.isEmpty()) "No log entries yet." else "No lines match filter.",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = c.dim,
-                    )
-                }
+                )
             } else {
                 SelectionContainer {
                     LazyColumn(
@@ -344,6 +391,8 @@ fun LogViewerScreen(onBack: () -> Unit) {
             }
         }
     }
+    GlassToastHost(state = toastState)
+    } // end Box
 }
 
 /**

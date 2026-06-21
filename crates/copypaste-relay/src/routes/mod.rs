@@ -5,11 +5,9 @@ pub mod items;
 use std::sync::Arc;
 
 use axum::extract::State;
-use axum::http::{Request, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get};
 use axum::Router;
-use tower_governor::errors::GovernorError;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_governor::key_extractor::{KeyExtractor, PeerIpKeyExtractor, SmartIpKeyExtractor};
 use tower_governor::GovernorLayer;
@@ -23,57 +21,6 @@ use crate::middleware::rate_limit::{
 };
 use crate::state::AppState;
 
-/// `KeyExtractor` that pulls the `:device_id` segment out of paths shaped like
-/// `/devices/<id>/items[/...]`.
-///
-/// CopyPaste-hzmb: this extractor is NO LONGER wired into the rate-limit layer.
-/// It used to be the key for the per-device `GovernorLayer`, but keying on the
-/// pre-auth URL `:device_id` lets an attacker rotate IDs to get a fresh bucket
-/// on every request, defeating the limit entirely. The rate-limit layer now
-/// keys on source IP (via `PerIp`) which the attacker cannot rotate. This
-/// struct is kept for tests that verify URL-segment parsing and for any future
-/// diagnostic middleware that needs to read the device_id from a request.
-///
-/// Returns a `GovernorError::Other` with 400 BAD_REQUEST if the URI does not
-/// start with `/devices/`, or 404 NOT_FOUND if the device id segment is empty.
-// CopyPaste-hzmb: no longer constructed in production code; retained for tests.
-#[allow(dead_code)] // retained for URL-parsing tests and future diagnostic use
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub struct DeviceIdKeyExtractor;
-
-impl KeyExtractor for DeviceIdKeyExtractor {
-    type Key = String;
-
-    fn extract<B>(&self, req: &Request<B>) -> Result<Self::Key, GovernorError> {
-        // Expected shape: "/devices/<id>/items" or "/devices/<id>/items/<item_id>".
-        // No allocation in the happy path beyond the returned `String`.
-        let path = req.uri().path();
-        // A path that doesn't start with "/devices/" is a client error (wrong
-        // route), not a server fault — return 400 rather than 500 so the caller
-        // gets an actionable status code and monitoring doesn't fire server-error
-        // alerts for misdirected requests.
-        let rest = path.strip_prefix("/devices/").ok_or(GovernorError::Other {
-            code: StatusCode::BAD_REQUEST,
-            msg: Some("request path does not contain a device id segment".into()),
-            headers: None,
-        })?;
-        let id = match rest.find('/') {
-            Some(end) => &rest[..end],
-            None => rest,
-        };
-        if id.is_empty() {
-            // Empty device id in a well-formed "/devices//" path — 404 because
-            // there is no device with an empty id, and the caller can determine
-            // what went wrong from the error message.
-            return Err(GovernorError::Other {
-                code: StatusCode::NOT_FOUND,
-                msg: Some("device id segment is empty".into()),
-                headers: None,
-            });
-        }
-        Ok(id.to_owned())
-    }
-}
 
 /// Build the complete relay router.
 ///
@@ -196,9 +143,8 @@ where
     // *before* this Tower layer, which is not possible in the current
     // architecture — IP keying is the correct defense-in-depth here.
     //
-    // DeviceIdKeyExtractor is kept for tests that verify URL-segment extraction
-    // logic (it is not removed from the file); it is no longer wired into the
-    // rate-limit layer.
+    // DeviceIdKeyExtractor lives inside #[cfg(test)] (URL-segment parsing tests);
+    // it is no longer wired into the production rate-limit layer.
     let per_item_ip_conf = Arc::new(
         GovernorConfigBuilder::default()
             .per_second(PER_DEVICE_PER_SECOND)
@@ -361,6 +307,52 @@ async fn list_devices_handler(
 mod tests {
     use super::*;
     use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower_governor::errors::GovernorError;
+    use tower_governor::key_extractor::KeyExtractor;
+
+    /// `KeyExtractor` that pulls the `:device_id` segment out of paths shaped
+    /// like `/devices/<id>/items[/...]`.
+    ///
+    /// CopyPaste-hzmb: no longer wired into the production rate-limit layer —
+    /// the layer now keys on source IP (`PeerIpKeyExtractor` / `SmartIpKeyExtractor`)
+    /// which an attacker cannot rotate, unlike a URL `:device_id` segment.
+    /// Retained here for URL-segment parsing tests and future diagnostic use.
+    ///
+    /// Returns `GovernorError::Other` 400 if the URI does not start with
+    /// `/devices/`, or 404 if the device-id segment is empty.
+    #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+    struct DeviceIdKeyExtractor;
+
+    impl KeyExtractor for DeviceIdKeyExtractor {
+        type Key = String;
+
+        fn extract<B>(&self, req: &Request<B>) -> Result<Self::Key, GovernorError> {
+            // Expected shape: "/devices/<id>/items" or "/devices/<id>/items/<item_id>".
+            let path = req.uri().path();
+            // A path that doesn't start with "/devices/" is a client error (wrong
+            // route) — return 400 so the caller gets an actionable status code.
+            let rest = path.strip_prefix("/devices/").ok_or(GovernorError::Other {
+                code: StatusCode::BAD_REQUEST,
+                msg: Some("request path does not contain a device id segment".into()),
+                headers: None,
+            })?;
+            let id = match rest.find('/') {
+                Some(end) => &rest[..end],
+                None => rest,
+            };
+            if id.is_empty() {
+                // Empty device id in "/devices//" — 404, there is no device with an
+                // empty id.
+                return Err(GovernorError::Other {
+                    code: StatusCode::NOT_FOUND,
+                    msg: Some("device id segment is empty".into()),
+                    headers: None,
+                });
+            }
+            Ok(id.to_owned())
+        }
+    }
 
     fn req(uri: &str) -> Request<Body> {
         Request::builder().uri(uri).body(Body::empty()).unwrap()

@@ -105,10 +105,11 @@ private const val PAIR_TOKEN_URGENT_THRESHOLD_SECONDS = 20
 
 /**
  * Side of the rendered QR image, in dp.
- * bro9: reduced from 240dp to 160dp — closer to styleguide's ~132px calm scale
- * while still scannable on a phone.
+ * 1jms.19: unified to 200dp to match DevicesActivity.DEVICES_QR_IMAGE_DP — both
+ * screens display the same pairing QR content and must render at the same size.
+ * (was 160dp per bro9; DevicesActivity was already 200dp — aligned upward.)
  */
-private const val QR_IMAGE_SIZE_DP = 160
+private const val QR_IMAGE_SIZE_DP = 200
 
 /**
  * Padding of the inset white QR plate, in dp (each side).
@@ -391,7 +392,9 @@ fun PairScreen(
     // Set at the end of runPairAndSync; cleared when the popup is dismissed.
     var pairedPeerForPopup by remember { mutableStateOf<PairedPeer?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
-    // QR blur+reveal: starts blurred; first tap reveals; regeneration re-blurs.
+    // CopyPaste-5917.36: QR blur+reveal — starts blurred (set in LaunchedEffect(Unit));
+    // first tap reveals. TTL auto-refresh (generateQr) intentionally does NOT reset this
+    // to false — reveal state is user-owned and must persist across token refreshes.
     var qrRevealed by remember { mutableStateOf(false) }
     val toastState = remember { GlassToastState() }
     val scope = rememberCoroutineScope()
@@ -556,6 +559,24 @@ fun PairScreen(
         // CopyPaste-tqt0: snapshot the retained QR payload now; its 6th-field
         // provisioning is applied below ONLY after the PAKE bootstrap succeeds.
         val provisioningRaw = pendingProvisioningRaw
+        // CopyPaste-1jms.13: resolve the human-readable device name BEFORE
+        // entering the coroutine, where `context` (LocalContext.current) is only
+        // accessible on the composition thread and ContentResolver is not
+        // capturable via a qualified-this label inside a nested coroutine.
+        // Settings.Global "device_name" is the user-editable Bluetooth/Nearby
+        // device name (set in system Settings → About device); falls back to
+        // Build.MODEL so pairing always carries a non-empty name.
+        val deviceNameForPairing: String = run {
+            val settingsName = try {
+                android.provider.Settings.Global.getString(
+                    context.contentResolver,
+                    "device_name",
+                )
+            } catch (_: Exception) { null }
+            settingsName?.takeIf { it.isNotBlank() }
+                ?: android.os.Build.MODEL
+                ?: "Android"
+        }
         scope.launch {
             syncing = true
             syncResult = null
@@ -565,7 +586,10 @@ fun PairScreen(
                 // success popup below can look the freshly-paired peer up by fingerprint.
                 var pairedFingerprint: String? = null
                 val message = withContext(Dispatchers.IO) {
-                    val cert = deviceKeyStore.getOrCreate()
+                    // CopyPaste-44rq.55: getOrCreate() zeroes cert.keyDer; re-fetch
+                    // via peek() to obtain the KEK-unwrapped key from AndroidKeyStore.
+                    deviceKeyStore.getOrCreate()
+                    val cert = deviceKeyStore.peek()!!
                     // Path A: advertise THIS device's inbound mTLS listener address
                     // so the macOS peer persists it and can dial back (macOS→Android
                     // direction). The listener is bound by [ClipboardService]; its
@@ -602,7 +626,10 @@ fun PairScreen(
                         localProvisioning = null,
                         // HB-1a (ABI 14): send THIS device's own metadata so the
                         // PC's device card shows real Android info.
-                        deviceName = android.os.Build.MODEL ?: "Android",
+                        // CopyPaste-1jms.13: deviceName = user-visible name (resolved
+                        // before scope.launch — see deviceNameForPairing above);
+                        // deviceModel = hardware model. Previously both were Build.MODEL.
+                        deviceName = deviceNameForPairing,
                         deviceModel = android.os.Build.MODEL ?: "Android",
                         osVersion = "Android " + android.os.Build.VERSION.RELEASE,
                         appVersion = BuildConfig.VERSION_NAME,
@@ -1341,8 +1368,12 @@ fun PairScreen(
                                             modifier = Modifier
                                                 .size(8.dp)
                                                 .clip(CircleShape)
-                                                // prld: offline = danger (not faint grey).
-                                                .background(c.danger),
+                                                // CopyPaste-5917.49: was c.danger (hardcoded red even
+                                                // when peer is reachable). PairScreen has no liveness
+                                                // signal for the peer, so use c.faint (neutral grey)
+                                                // to avoid misleading the user. Danger would only be
+                                                // appropriate when confirmed unreachable.
+                                                .background(c.faint),
                                         )
                                         if (pairedAddr.isNotBlank()) {
                                             Text(

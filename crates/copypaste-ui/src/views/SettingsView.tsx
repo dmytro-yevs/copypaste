@@ -26,6 +26,9 @@ import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { useUI } from "../store";
 import { PALETTE_KEYS, PALETTES } from "../lib/liquid-tokens";
 import { SKIN_IDS } from "../lib/skins";
+import { SectionHeader } from "../components/SectionHeader";
+import { SettingsRow } from "../components/SettingsRow";
+import { Toggle } from "../components/Toggle";
 // i2sr (PG-40): shared hybrid last-sync formatter (relative ≤24 h, absolute beyond).
 import { formatSyncTime } from "../lib/time";
 // Step arrays (moved from StepSlider.tsx — StepSlider component deleted in v0.5.3,
@@ -55,8 +58,11 @@ const DEFAULT_POPUP_SHORTCUT = "CmdOrCtrl+Shift+V";
 // NOTE: step values are BINARY (MiB/GiB, ×1024² / ×1024³) to match the core
 // defaults (DEFAULT_MAX_* below) which are also binary. Using decimal here
 // would make e.g. the 10 MiB default snap to a 10 MB (10_000_000) step and
-// silently persist a ~5% smaller cap — label drift. Labels keep "MB"/"GB"
-// (MB-as-MiB is the common app convention) while the values are binary.
+// silently persist a ~5% smaller cap — label drift. Labels use "MB"/"GB"
+// (the conventional macOS user-facing unit per Apple HIG — same binary values,
+// SI suffix). Android settings display "MiB/GiB" (IEC) for the same binary
+// values; the suffix convention differs per platform but the underlying bytes
+// are identical. bdac.62: intentional platform convention, not a bug.
 const TEXT_SIZE_STEPS_BYTES = [1,2,5,10,15,25,50,100].map((n) => n * 1024 * 1024) as unknown as readonly number[];
 const TEXT_SIZE_LABELS = ["1 MB","2 MB","5 MB","10 MB","15 MB","25 MB","50 MB","100 MB (max)"] as const;
 
@@ -88,96 +94,8 @@ const MAX_ITEMS_LABELS = ["100","250","500","1 000","2 500","5 000","10 000","Un
 const DEFAULT_MAX_ITEMS = 1000; // default UI display window
 
 // ---------------------------------------------------------------------------
-// Toggle — iOS-style switch using ide tokens
-// ---------------------------------------------------------------------------
-
-function Toggle({
-  checked,
-  onChange,
-  disabled,
-  "aria-label": ariaLabel,
-}: {
-  checked: boolean;
-  onChange: (val: boolean) => void;
-  disabled?: boolean;
-  "aria-label"?: string;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={ariaLabel}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={[
-        "relative inline-flex h-[18px] w-[34px] shrink-0 cursor-pointer items-center rounded-full",
-        "border focus:outline-none focus:ring-2 focus:ring-ide-accent/50 focus:ring-offset-1 focus:ring-offset-ide-bg",
-        "disabled:cursor-not-allowed disabled:opacity-40",
-        // §7: checked = accent fill only, no glow shadow.
-        checked
-          ? "border-ide-accent bg-ide-accent"
-          : "border-ide-border bg-ide-elevated",
-      ].join(" ")}
-    >
-      <span
-        className={[
-          "inline-block h-[12px] w-[12px] rounded-full bg-white shadow-ide-xs",
-          "transition-transform duration-[120ms] ease",
-          checked ? "translate-x-[18px]" : "translate-x-[2px]",
-        ].join(" ")}
-      />
-    </button>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Shared layout primitives
 // ---------------------------------------------------------------------------
-
-function SubsectionHeader({ label, hint }: { label: string; hint?: string }) {
-  // CopyPaste-hffp: tighter top margin in compact density to reduce whitespace.
-  // CopyPaste-gzli: widen density check to handle spacious as the largest margin step.
-  const density = useUI((s) => s.prefs.density ?? "comfortable");
-  const mt =
-    density === "compact"
-      ? "mt-5"
-      : density === "spacious"
-        ? "mt-9"
-        : "mt-7";
-  return (
-    <div className={`mb-1.5 ${mt} first:mt-0`}>
-      {/* §3: section labels = grey (text-ide-dim), NOT accent blue; 11px semibold uppercase. */}
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-ide-dim">{label}</div>
-      {hint && <div className="mt-0.5 text-[11px] text-ide-faint">{hint}</div>}
-    </div>
-  );
-}
-
-function SettingsRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  // CopyPaste-hffp: density-aware row height/padding — compact shrinks rows to match HistoryView.
-  // CopyPaste-gzli: spacious adds extra padding as the largest step.
-  const density = useUI((s) => s.prefs.density ?? "comfortable");
-  const rowCls =
-    density === "compact"
-      ? "flex min-h-[30px] items-center justify-between border-b border-ide-divider/70 px-3 py-1 last:border-b-0"
-      : density === "spacious"
-        ? "flex min-h-[42px] items-center justify-between border-b border-ide-divider/70 px-3 py-2.5 last:border-b-0"
-        : "flex min-h-[36px] items-center justify-between border-b border-ide-divider/70 px-3 py-2 last:border-b-0";
-  return (
-    <div className={rowCls}>
-      {/* W4-3: fixed min-width on label column prevents wrapping on narrow labels */}
-      <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">{label}</span>
-      <div className="flex items-center gap-2">{children}</div>
-    </div>
-  );
-}
 
 function Panel({ children }: { children: React.ReactNode }) {
   // HW-M3: overflow-hidden was clipping the absolutely-positioned InfoPopover (z-50).
@@ -374,11 +292,10 @@ function InfoPopover({ text }: { text: string }) {
 // Tab bar
 // ---------------------------------------------------------------------------
 
-type TabId = "general" | "display" | "sync" | "shortcuts" | "storage" | "advanced";
+// CopyPaste-44rq.30: "advanced" removed — was a "coming soon" stub with no real content.
+// File a new feature issue when Advanced tab content is ready to ship.
+type TabId = "general" | "display" | "sync" | "shortcuts" | "storage";
 
-// audit P2: the "Advanced" tab is a "coming soon" stub with no content — hide it
-// from the bar until it ships. The TabId/renderAdvanced plumbing stays so it can
-// be re-added by appending one entry here.
 const TABS: { id: TabId; label: string }[] = [
   { id: "general",   label: "General"   },
   { id: "display",   label: "Display"   },
@@ -748,7 +665,7 @@ export function SettingsView() {
   // Daemon default is true; mirror that here so new installs start in sync.
   const [autoApplySyncedClip, setAutoApplySyncedClip] = useState(true);
 
-  // Privacy & capture — daemon AppConfig fields (config.toml).
+  // Capture — daemon AppConfig fields (config.toml).
   // am9w: daemon defaults collect_public_ip to false (opt-out); mirror that here.
   const [collectPublicIp, setCollectPublicIp] = useState(false);
   const [pasteAsPlainText, setPasteAsPlainText] = useState(false);
@@ -973,7 +890,7 @@ export function SettingsView() {
         setSyncEnabledStub(!syncEnabledSupported);
         setSyncEnabled(rawCfg.sync_enabled ?? true);
 
-        // Privacy & capture — these AppConfig fields are not in the AppSettings
+        // Capture — these AppConfig fields are not in the AppSettings
         // interface (kept in lib/ipc.ts), so read them off the raw response with
         // a narrow typed view rather than `any`.
         const privacyCfg = rawCfg as {
@@ -1123,7 +1040,7 @@ export function SettingsView() {
     }
   }
 
-  // Privacy & capture fields that are not (yet) in the AppSettings interface in
+  // Capture fields that are not (yet) in the AppSettings interface in
   // lib/ipc.ts. set_config accepts them; we attach them via this typed shape so
   // every patch round-trips the current privacy state without using `any`.
   type PrivacyPatch = {
@@ -1721,17 +1638,19 @@ export function SettingsView() {
   function renderGeneral() {
     return (
       <div className="space-y-2">
+        {/* bdac.93: sub-group "General" — sync + private mode */}
+        <SectionHeader label="General" />
         <Panel>
           {/* j9xj (PG-30): master sync kill-switch — Android parity.
               Daemon implements AppConfig::sync_enabled (tke7/PG-30).
               When off, visually gates per-transport switches in the Sync tab. */}
-          <SettingsRow label="Enable sync">
+          <SettingsRow title="Enable sync">
             <div className="flex flex-col items-end gap-1">
               {/* 7set: warn when daemon doesn't acknowledge sync_enabled so the
                   user knows the toggle may have no effect on this daemon version. */}
               {syncEnabledStub && !offline && (
                 <span className="text-[11px] text-ide-warning" role="note">
-                  sync_enabled not supported by daemon — toggle may be ignored until daemon is updated.
+                  Sync control unavailable — please update the CopyPaste background service to enable this setting.
                 </span>
               )}
               <div className="flex items-center gap-1.5">
@@ -1746,11 +1665,13 @@ export function SettingsView() {
               </div>
             </div>
           </SettingsRow>
-          <SettingsRow label="Private mode">
+          <SettingsRow title="Private mode">
             <div className="flex items-center gap-2">
               {privateModeError !== null && (
                 <span className="text-[11px] text-ide-danger">{privateModeError}</span>
               )}
+              {/* bdac.47: InfoPopover added — Private mode had no description */}
+              <InfoPopover text="When on, this device stops recording new clipboard items and suppresses sync for the session. The notification's Pause action is a temporary per-session pause; Private mode persists across restarts." />
               <Toggle
                 checked={privateMode}
                 onChange={(v) => void handlePrivateMode(v)}
@@ -1758,7 +1679,12 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
-          <SettingsRow label="Play sound on copy">
+        </Panel>
+
+        {/* bdac.93: sub-group "Notifications" — sound + notify-on-copy */}
+        <SectionHeader label="Notifications" />
+        <Panel>
+          <SettingsRow title="Play sound on copy">
             <Toggle
               checked={prefs.playSoundOnCopy}
               onChange={(v) => {
@@ -1775,7 +1701,7 @@ export function SettingsView() {
               disabled={offline}
             />
           </SettingsRow>
-          <SettingsRow label="Show notification on copy">
+          <SettingsRow title="Show notification on copy">
             <div className="flex items-center gap-2">
               {/* vrur: warn when notify is enabled but OS has denied permission.
                   Shows inline so the user can act without leaving Settings. */}
@@ -1800,20 +1726,30 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
-          <SettingsRow label="Mask sensitive data">
-            <Toggle
-              checked={prefs.maskSensitive}
-              onChange={(v) => setPrefs({ maskSensitive: v })}
-            />
+        </Panel>
+
+        {/* bdac.93: sub-group "Privacy" — mask sensitive. Named "Privacy" (not
+            "Display") to avoid colliding with the "Display" appearance tab. */}
+        <SectionHeader label="Privacy" />
+        <Panel>
+          <SettingsRow title="Mask sensitive data">
+            <div className="flex items-center gap-1.5">
+              {/* bdac.50: added description for Mask sensitive data row */}
+              <InfoPopover text="Hide preview text for items flagged as sensitive (passwords, credit cards, tokens). Click an item in history to reveal its content." />
+              <Toggle
+                checked={prefs.maskSensitive}
+                onChange={(v) => setPrefs({ maskSensitive: v })}
+              />
+            </div>
           </SettingsRow>
         </Panel>
 
-        <SubsectionHeader
-          label="Privacy & capture"
+        <SectionHeader
+          label="Capture"
           hint="Control public-IP lookup, paste formatting, and which apps are never captured."
         />
         <Panel>
-          <SettingsRow label="Discover public IP">
+          <SettingsRow title="Discover public IP">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Allow a one-off STUN request to learn this device's public IP, shown in the device-info card. No data is sent to analytics." />
               <Toggle
@@ -1833,9 +1769,10 @@ export function SettingsView() {
           </SettingsRow>
           {/* CMP-023: paste_as_plain_text is a macOS capture-path concept.
               Android has no parity yet (no analogous platform hook). */}
-          <SettingsRow label="Paste as plain text">
+          <SettingsRow title="Paste as plain text">
             <div className="flex items-center gap-1.5">
-              <InfoPopover text="Strip rich formatting (RTF/HTML) when pasting — writes plain text only. macOS only; no Android parity." />
+              {/* bdac.95: removed "macOS only; no Android parity" — Android also implements pasteAsPlainText */}
+              <InfoPopover text="Strip rich formatting (RTF/HTML) when pasting — writes plain text only." />
               <Toggle
                 checked={pasteAsPlainText}
                 onChange={(v) => {
@@ -1854,7 +1791,7 @@ export function SettingsView() {
               Default = OFF (content protection ON = PG-25 behaviour). When enabled
               the NSWindow.sharingType is set to .readOnly so screenshots & screen
               recordings can capture CopyPaste windows. */}
-          <SettingsRow label="Allow screenshots / screen recording">
+          <SettingsRow title="Allow screenshots / screen recording">
             <div className="flex flex-col items-end gap-1">
               {allowScreenshots && (
                 <span className="text-[11px] text-ide-warning" role="note">
@@ -1932,14 +1869,14 @@ export function SettingsView() {
           </div>
         </Panel>
 
-        <SubsectionHeader label="Daemon" />
+        <SectionHeader label="Background service" />
         <Panel>
-          <SettingsRow label="Version">
+          <SettingsRow title="Version">
             <span className="text-[13px] text-ide-text">
               {offline ? "Not running" : (daemonVersion ?? "unknown")}
             </span>
           </SettingsRow>
-          <SettingsRow label="Restart">
+          <SettingsRow title="Restart">
             <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
           </SettingsRow>
         </Panel>
@@ -1959,7 +1896,7 @@ export function SettingsView() {
             CopyPaste-hn5v: full palette + density + theme controls.
             Palette picker re-themes the whole app live via App.tsx
             data-palette attribute sync (already wired). */}
-        <SubsectionHeader label="Appearance" />
+        <SectionHeader label="Appearance" />
         <Panel>
           {/* Palette picker — grid of 10 swatches */}
           <div className="border-b border-ide-divider/70 px-3 py-3 last:border-b-0">
@@ -1992,7 +1929,7 @@ export function SettingsView() {
                       style={{ background: def.accent }}
                       aria-hidden="true"
                     />
-                    <span className="max-w-full truncate text-center text-[10px] leading-tight text-ide-dim group-hover:text-ide-text">
+                    <span className="max-w-full truncate text-center text-[10.5px] leading-tight text-ide-dim group-hover:text-ide-text">
                       {def.name}
                     </span>
                   </button>
@@ -2004,7 +1941,7 @@ export function SettingsView() {
           {/* W-F4: Skin picker — Visual style segmented control (Classic / Quiet / Vapor).
               Mirrors the density/theme segmented control pattern exactly.
               Labels are Title-Cased skin ids. Updates live via setPrefs({skin}). */}
-          <SettingsRow label="Visual style">
+          <SettingsRow title="Visual style">
             <div
               data-testid="skin-picker"
               className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5"
@@ -2033,7 +1970,7 @@ export function SettingsView() {
           </SettingsRow>
 
           {/* Density segmented control — compact / comfortable / spacious */}
-          <SettingsRow label="Row density">
+          <SettingsRow title="Row density">
             {/* bpax/itsu: styleguide §form-controls segmented control — mute/.18 group bg,
                 selected = white/.90 + e1 shadow, 7px inner radius.
                 itsu: hairline border + mute token (was faint, now mute per spec) */}
@@ -2058,7 +1995,7 @@ export function SettingsView() {
           </SettingsRow>
 
           {/* Color theme — matches styleguide §form-controls segmented control */}
-          <SettingsRow label="Color theme">
+          <SettingsRow title="Color theme">
             <div className="flex items-center gap-2">
               <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />
               {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
@@ -2089,7 +2026,7 @@ export function SettingsView() {
           </SettingsRow>
 
           {/* Translucency — kept here so all visual appearance controls are together */}
-          <SettingsRow label="Translucency / vibrancy">
+          <SettingsRow title="Translucency">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />
               <Toggle
@@ -2102,7 +2039,7 @@ export function SettingsView() {
           {/* Reduce motion — switches aurora from cinematic to calm profile.
               "calm" slows the aurora (--speed: 1.45) and dims it (--motion-opacity: .55).
               OS prefers-reduced-motion still zeroes the aurora automatically via CSS. */}
-          <SettingsRow label="Reduce motion">
+          <SettingsRow title="Reduce motion">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Slow and dim the aurora background animation. The OS 'Reduce Motion' accessibility setting stops it entirely regardless of this toggle." />
               <Toggle
@@ -2113,10 +2050,10 @@ export function SettingsView() {
           </SettingsRow>
 
           {/* n9gp (PG-34): sensitive-reveal warning toggle — Android parity.
-              When on (default), a "Sensitive — click to reveal" overlay appears
+              When on (default), a "Sensitive — preview hidden · click to reveal" overlay appears
               before the blur is lifted. When off, clicking the blur reveals
               immediately without the extra confirmation step. */}
-          <SettingsRow label="Warn before revealing sensitive">
+          <SettingsRow title="Warn before revealing sensitive">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Show a confirmation overlay before revealing blurred sensitive content. Matches the Android warning sheet behaviour. Turn off if you find the extra step redundant." />
               <Toggle
@@ -2127,10 +2064,10 @@ export function SettingsView() {
           </SettingsRow>
         </Panel>
 
-        <SubsectionHeader label="History list" />
+        <SectionHeader label="History list" />
         <Panel>
           {/* M4: split previewLines — main window has its own independent setting */}
-          <SettingsRow label="Preview lines">
+          <SettingsRow title="Preview lines">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Number of text lines shown per clip in the main history window. Independent from the popup setting." />
               <SliderRow
@@ -2146,7 +2083,7 @@ export function SettingsView() {
           {/* Image preview height controls the thumbnail bounding box in both
               the history list and the popup. Moved here from "Popup appearance"
               so users looking for list image sizing find it in the list section. */}
-          <SettingsRow label="Image preview height">
+          <SettingsRow title="Image preview height">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Max height (px) of image thumbnails in the history list and the popup. The image scales to fit within 340 × height, aspect-preserving, never upscaled." />
               <SliderRow
@@ -2159,14 +2096,25 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
+          {/* bdac.91: Group by device — persists the sort mode chosen in the History toolbar.
+              Android parity: Android Settings.kt:627 sortByDevice, default false. */}
+          <SettingsRow title="Group by device">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="Group clipboard items by the device they came from, with your device shown first. You can also toggle this from the History toolbar when multiple devices are paired." />
+              <Toggle
+                checked={prefs.sortByDevice ?? false}
+                onChange={(v) => setPrefs({ sortByDevice: v })}
+              />
+            </div>
+          </SettingsRow>
           {/* M5: historySize removed — history uses lazy pagination now */}
           {/* M6: previewDelay removed — replaced by explicit Eye preview button */}
         </Panel>
 
-        <SubsectionHeader label="Popup appearance" hint="How the popup looks when triggered." />
+        <SectionHeader label="Popup appearance" hint="How the popup looks when triggered." />
         <Panel>
           {/* M4: popup gets its own independent preview-lines setting */}
-          <SettingsRow label="Preview lines">
+          <SettingsRow title="Preview lines">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Number of text lines shown per clip in the Quick-Paste popup. Independent from the main window setting." />
               <SliderRow
@@ -2209,26 +2157,21 @@ export function SettingsView() {
             </div>
           )}
 
-        {/* ── Local sync (P2P) ── */}
-        {/* j9xj (PG-30): per-transport controls are visually disabled when the
+        {/* ── General sync ── */}
+        {/* bdac.78: "Sync on Wi-Fi only" and "Auto-apply synced clipboard" apply
+            to ALL transports (P2P + cloud), not just P2P — moved here from the
+            P2P sub-section to match the canonical grouping:
+              (1) General — wifi-only, auto-apply
+              (2) Sync (LAN) — p2p_enabled, LAN visibility
+              (3) Cloud sync — credentials
+            j9xj (PG-30): per-transport controls are visually disabled when the
             master syncEnabled kill-switch is off (they still show their state). */}
-        <SubsectionHeader
-          label="Local sync (P2P)"
-          hint="Same network, no account needed."
+        <SectionHeader
+          label="General sync"
+          hint="Applies to all sync transports."
         />
         <Panel>
-          <SettingsRow label="Enable P2P (LAN) sync">
-            <div className="flex items-center gap-2">
-              <LimitsMsg field="p2p_enabled" />
-              <Toggle
-                checked={config.p2p_enabled}
-                onChange={(v) => void handleP2pToggle(v)}
-                disabled={offline || syncRestarting || !syncEnabled}
-                aria-label="P2P sync"
-              />
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Sync on Wi-Fi only">
+          <SettingsRow title="Sync on Wi-Fi only">
             <div className="flex items-center gap-2">
               <LimitsMsg field="sync_on_wifi_only" />
               <Toggle
@@ -2238,19 +2181,7 @@ export function SettingsView() {
               />
             </div>
           </SettingsRow>
-          <SettingsRow label="Visible on local network">
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="When off, this device stops advertising via mDNS-SD and will not appear in the device list on other Macs on the same network. Paired peers with a known address can still connect directly." />
-              <LimitsMsg field="lan_visibility" />
-              <Toggle
-                checked={lanVisibility}
-                onChange={(v) => void handleLanVisibilityToggle(v)}
-                disabled={offline || !syncEnabled}
-                aria-label="LAN visibility"
-              />
-            </div>
-          </SettingsRow>
-          <SettingsRow label="Auto-apply synced clipboard">
+          <SettingsRow title="Auto-apply synced clipboard">
             <div className="flex flex-col items-end gap-1">
               {/* wrfv: visible inline notice so the user knows synced clips will
                   silently overwrite the active clipboard (the actual write is
@@ -2279,13 +2210,46 @@ export function SettingsView() {
           </SettingsRow>
         </Panel>
 
-        {/* ── Cloud sync (Supabase) ── */}
-        <SubsectionHeader
-          label="Cloud sync (Supabase)"
+        {/* ── Sync (LAN) ── */}
+        <SectionHeader
+          label="Sync (LAN)"
+          hint="Same network, no account needed."
+        />
+        <Panel>
+          <SettingsRow title="Enable P2P (LAN) sync">
+            <div className="flex items-center gap-2">
+              {/* bdac.44: InfoPopover added — P2P row had no description */}
+              <InfoPopover text="Direct device-to-device sync over your local network. Requires a paired device on the Devices screen. Disable for cloud-only sync." />
+              <LimitsMsg field="p2p_enabled" />
+              <Toggle
+                checked={config.p2p_enabled}
+                onChange={(v) => void handleP2pToggle(v)}
+                disabled={offline || syncRestarting || !syncEnabled}
+                aria-label="P2P sync"
+              />
+            </div>
+          </SettingsRow>
+          <SettingsRow title="Visible on local network">
+            <div className="flex items-center gap-1.5">
+              <InfoPopover text="When off, this device stops advertising via mDNS-SD and will not appear in the device list on other Macs on the same network. Paired peers with a known address can still connect directly." />
+              <LimitsMsg field="lan_visibility" />
+              <Toggle
+                checked={lanVisibility}
+                onChange={(v) => void handleLanVisibilityToggle(v)}
+                disabled={offline || !syncEnabled}
+                aria-label="LAN visibility"
+              />
+            </div>
+          </SettingsRow>
+        </Panel>
+
+        {/* ── Cloud sync ── */}
+        <SectionHeader
+          label="Cloud sync"
           hint="Syncs over the internet via your Supabase project."
         />
         <Panel>
-          <SettingsRow label="Supabase URL">
+          <SettingsRow title="Supabase URL">
             <input
               type="url"
               className={inputCls}
@@ -2297,7 +2261,8 @@ export function SettingsView() {
               spellCheck={false}
             />
           </SettingsRow>
-          <SettingsRow label="Supabase anon key">
+          {/* bdac.80: standardized to "Anon key" (sentence case, drop redundant "Supabase" prefix — section header already provides context) */}
+          <SettingsRow title="Anon key">
             <div className="flex flex-col items-end gap-0.5">
               <input
                 type="password"
@@ -2322,7 +2287,7 @@ export function SettingsView() {
                These are WRITE-ONLY — the daemon never returns them; only the
                supabase_email_set / supabase_password_set presence flags come back.
                Inputs are cleared after a successful Save. Password is always masked. */}
-          <SettingsRow label="Supabase email">
+          <SettingsRow title="Supabase email">
             <div className="flex flex-col items-end gap-0.5">
               <input
                 type="email"
@@ -2343,7 +2308,7 @@ export function SettingsView() {
               )}
             </div>
           </SettingsRow>
-          <SettingsRow label="Supabase password">
+          <SettingsRow title="Supabase password">
             <div className="flex flex-col items-end gap-0.5">
               <input
                 type="password"
@@ -2364,7 +2329,7 @@ export function SettingsView() {
               )}
             </div>
           </SettingsRow>
-          <SettingsRow label="Relay URL">
+          <SettingsRow title="Relay URL">
             <div className="flex items-center gap-1.5">
               <InfoPopover text="Optional HTTP relay for store-and-forward sync when devices aren't on the same network. Leave blank to use direct P2P / cloud sync only. Saved with the cloud-sync settings." />
               <input
@@ -2380,7 +2345,7 @@ export function SettingsView() {
             </div>
           </SettingsRow>
           {/* M7: "Set" button removed — passphrase saves on Enter or focus-out */}
-          <SettingsRow label="Sync passphrase">
+          <SettingsRow title="Sync passphrase">
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-1.5">
                 <InfoPopover text="Enter the same passphrase on every device to enable encrypted sync. Saves automatically when you press Enter or move focus away." />
@@ -2456,7 +2421,7 @@ export function SettingsView() {
         {/* Sync status detail */}
         {syncStatus !== null && (
           <>
-            <SubsectionHeader label="Status" />
+            <SectionHeader label="Status" />
             <Panel>
               <div className="px-3 py-2 space-y-1">
                 <StatusRow label="Passphrase set" ok={syncStatus.passphrase_set} />
@@ -2480,11 +2445,15 @@ export function SettingsView() {
     );
   }
 
+  // bdac.59: The "Shortcuts" tab is macOS-only. Android has no equivalent because
+  // global keyboard shortcuts are not available on Android (no system-level hotkey
+  // registration API). If Android gains a quick-paste gesture/shortcut in the future,
+  // a corresponding settings entry should be added to Android's SettingsActivity.
   function renderShortcuts() {
     return (
       <div className="space-y-2">
         <Panel>
-          <SettingsRow label="Open popup">
+          <SettingsRow title="Open popup">
             <div className="flex flex-col items-end gap-1">
               <div className="flex items-center gap-2">
                 <InfoPopover text="Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden." />
@@ -2561,7 +2530,7 @@ export function SettingsView() {
       const idx = steps.indexOf(value);
       const safeIdx = idx < 0 ? 0 : idx;
       return (
-        <SettingsRow label={label}>
+        <SettingsRow title={label}>
           <div className="flex items-center gap-2">
             <SliderRow
               min={0}
@@ -2654,7 +2623,8 @@ export function SettingsView() {
               void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: v }, () => setSensitiveTtlSecs(prev));
             }}
           />
-          <SettingsRow label="Image quality (1–100)">
+          {/* bdac.68: removed "(1–100)" from label — range shown by the slider control itself */}
+          <SettingsRow title="Image quality">
             <div className="flex items-center gap-2">
               <SliderRow
                 min={1}
@@ -2698,8 +2668,8 @@ export function SettingsView() {
         </Panel>
 
         {/* 85n9: Backup / Restore panel */}
-        <SubsectionHeader
-          label="Backup & Restore"
+        <SectionHeader
+          label="Backup & restore"
           hint="Export your clipboard history as a JSON file, or restore it from a previous backup."
         />
         <Panel>
@@ -2748,10 +2718,10 @@ export function SettingsView() {
             </div>
           </div>
 
-          {/* Import row */}
+          {/* Import row — bdac.73: renamed "Restore backup" → "Import history" for parity with Android */}
           <div className="px-3 py-2">
             <div className="flex items-center justify-between gap-3">
-              <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">Restore backup</span>
+              <span className="min-w-[160px] shrink-0 text-[13px] text-ide-text">Import history</span>
               <div className="flex flex-col items-end gap-1">
                 {importMsg !== null && (
                   <span className={`text-[12px] ${importMsg.isError ? "text-ide-danger" : "text-ide-success"}`}>
@@ -2770,7 +2740,7 @@ export function SettingsView() {
                   ].join(" ")}
                   style={{ borderRadius: "var(--skin-r-ctl)" }}
                 >
-                  {importInProgress ? "Importing…" : "Import from file…"}
+                  {importInProgress ? "Importing…" : "Import…"}
                   <input
                     type="file"
                     accept="application/json"
@@ -2785,12 +2755,12 @@ export function SettingsView() {
           </div>
         </Panel>
 
-        <SubsectionHeader label="Data" />
+        <SectionHeader label="Data" />
         <Panel>
           {/* gq51: Database stats — shown when the daemon reports them.
               Falls back gracefully when db_stats is not available (older daemon). */}
           {dbStats !== null && (
-            <SettingsRow label="Database">
+            <SettingsRow title="Database">
               <span className="text-[13px] text-ide-dim tabular-nums">
                 {dbStats.item_count} item{dbStats.item_count === 1 ? "" : "s"}
                 {" — "}
@@ -2803,7 +2773,7 @@ export function SettingsView() {
             </SettingsRow>
           )}
           {/* gq51: Vacuum button — compacts the SQLite WAL to reclaim disk space */}
-          <SettingsRow label="Compact database">
+          <SettingsRow title="Compact database">
             <div className="flex items-center gap-3">
               {vacuumMsg !== null && (
                 <span
@@ -2826,7 +2796,7 @@ export function SettingsView() {
               </button>
             </div>
           </SettingsRow>
-          <SettingsRow label="Clear clipboard history">
+          <SettingsRow title="Clear clipboard history">
             <div className="flex items-center gap-3">
               {deleteMsg !== null && (
                 <span
@@ -2858,16 +2828,6 @@ export function SettingsView() {
     );
   }
 
-  function renderAdvanced() {
-    return (
-      <div className="space-y-2">
-        <div className="surface-card px-3 py-3 text-[13px] text-ide-dim" style={{ borderRadius: "var(--skin-r-ctl)" }}>
-          Advanced daemon and storage limits will appear here in a future release.
-        </div>
-      </div>
-    );
-  }
-
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
@@ -2878,7 +2838,7 @@ export function SettingsView() {
       {staleDaemon !== null && (
         <div className="mb-4 flex items-start justify-between gap-3 border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning" style={{ borderRadius: "var(--skin-r-ctl)" }}>
           <span>
-            A previous CopyPaste daemon is still running after an update
+            A previous CopyPaste background service is still running after an update
             {staleDaemon !== "unknown" ? ` (build ${staleDaemon})` : ""}. Restart
             it to use the latest version.
           </span>
@@ -2901,13 +2861,14 @@ export function SettingsView() {
         </div>
       )}
 
-      {/* Offline banner */}
+      {/* Offline banner — sticky so it stays visible when the user scrolls past it,
+          providing context for why all controls are disabled (bdac.12). */}
       {loadState === "offline" && (
-        <div className="surface-card mb-4 flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs" style={{ borderRadius: "var(--skin-r-card)" }}>
-          <span>Daemon not running — clipboard sync paused.</span>
+        <div className="surface-card mb-4 flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs" style={{ borderRadius: "var(--skin-r-card)", position: "sticky", top: 0, zIndex: 10 }}>
+          <span>Background service not running — clipboard sync paused.</span>
           <div className="flex shrink-0 items-center gap-2">
             <RestartDaemonButton
-              label="Restart daemon"
+              label="Restart"
               onRestarted={() => setReloadKey((k) => k + 1)}
             />
             <button
@@ -2950,10 +2911,10 @@ export function SettingsView() {
       {/* tk2j: Error banner — daemon is reachable but settings could not be loaded */}
       {loadState === "error" && (
         <div className="surface-card mb-4 flex items-center justify-between gap-3 px-3 py-2 text-[13px] text-ide-dim shadow-ide-xs" style={{ borderRadius: "var(--skin-r-card)" }}>
-          <span>Failed to load settings — the daemon is running but returned an error.</span>
+          <span>Failed to load settings — the background service is running but returned an error.</span>
           <div className="flex shrink-0 items-center gap-2">
             <RestartDaemonButton
-              label="Restart daemon"
+              label="Restart"
               onRestarted={() => setReloadKey((k) => k + 1)}
             />
             <button
@@ -2994,7 +2955,6 @@ export function SettingsView() {
               {activeTab === "sync"      && <div role="tabpanel" id="tabpanel-sync"      aria-labelledby="tab-sync">{renderSync()}</div>}
               {activeTab === "shortcuts" && <div role="tabpanel" id="tabpanel-shortcuts" aria-labelledby="tab-shortcuts">{renderShortcuts()}</div>}
               {activeTab === "storage"   && <div role="tabpanel" id="tabpanel-storage"   aria-labelledby="tab-storage">{renderStorage()}</div>}
-              {activeTab === "advanced"  && <div role="tabpanel" id="tabpanel-advanced"  aria-labelledby="tab-advanced">{renderAdvanced()}</div>}
             </div>
           </div>
         </div>
@@ -3013,13 +2973,14 @@ export function SettingsView() {
         }}
         onCancel={() => setDeleteConfirm(false)}
       />
-      {/* vcnv: Restore confirmation modal — prevents accidental replacement of
-          the live database without an explicit user intent signal. */}
+      {/* vcnv: Import confirmation modal — prevents accidental replacement of
+          the live database without an explicit user intent signal.
+          bdac.73: updated title/label to match "Import history" rename. */}
       <ConfirmModal
         open={importPending !== null}
-        title="Restore clipboard backup?"
-        body={`This will import ${importPending?.length ?? 0} item${(importPending?.length ?? 0) === 1 ? "" : "s"} from the backup file into your clipboard history. Duplicate items will be skipped. Existing items are not deleted.`}
-        confirmLabel="Restore"
+        title="Import clipboard history?"
+        body={`This will import ${importPending?.length ?? 0} item${(importPending?.length ?? 0) === 1 ? "" : "s"} from the file into your clipboard history. Duplicate items will be skipped. Existing items are not deleted.`}
+        confirmLabel="Import"
         onConfirm={() => { void handleConfirmImport(); }}
         onCancel={() => setImportPending(null)}
       />

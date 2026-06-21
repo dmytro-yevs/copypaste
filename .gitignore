@@ -66,3 +66,6 @@ rust_out
 .docker-cargo/
 .docker-target/
 .docker-check.log
+*.jks
+*.keystore
+/.audit/

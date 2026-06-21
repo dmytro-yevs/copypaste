@@ -78,6 +78,12 @@ export function AccessibilityBanner({
     <div
       className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
       style={{ borderRadius: "var(--skin-r-card)" }}
+      // A11Y-2 / CopyPaste-5917.3: assertive live region so screen readers announce
+      // the permission warning immediately when it appears, without waiting for
+      // the user to navigate to it. "polite" is already used for the granted
+      // confirmation above; warning state is urgent enough to interrupt.
+      role="alert"
+      aria-live="assertive"
     >
       <span>
         Accessibility permission is required for the global paste shortcut

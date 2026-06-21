@@ -35,14 +35,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Battery5Bar
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.PhonelinkSetup
-import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.outlined.Battery5Bar
+import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.PhonelinkSetup
+import androidx.compose.material.icons.outlined.Tune
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -54,7 +53,12 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -120,6 +124,10 @@ class OnboardingActivity : ComponentActivity() {
      */
     private var requestInFlight = false
 
+    // OEM autostart hint: set in openOemAutoStart() and observed in the composable
+    // to show a GlassToast (replaces android.widget.Toast.makeText).
+    internal var oemToastMsg by mutableStateOf<String?>(null)
+
     private val notifLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -173,7 +181,9 @@ class OnboardingActivity : ComponentActivity() {
                     onRequestBattery = { requestBatteryOptimizationExemption() },
                     onOpenOemAutoStart = { openOemAutoStart() },
                     onExportLogs = { LogExportHelper.shareLogsZip(this@OnboardingActivity) },
-                    onDone = { finish() }
+                    onDone = { finish() },
+                    oemHint = oemToastMsg,
+                    onOemHintConsumed = { oemToastMsg = null },
                 )
             }
         }
@@ -279,7 +289,7 @@ class OnboardingActivity : ComponentActivity() {
             } else {
                 getString(R.string.oem_autostart_toast_generic)
             }
-            android.widget.Toast.makeText(this, hint, android.widget.Toast.LENGTH_LONG).show()
+            oemToastMsg = hint
         }
     }
 
@@ -313,7 +323,7 @@ private fun CrashDetectedDialog(
         title = { Text(stringResource(R.string.crash_detected_title)) },
         text = { Text(stringResource(R.string.crash_detected_message)) },
         confirmButton = {
-            Button(onClick = onExport) {
+            CopyPasteButton(onClick = onExport, variant = ButtonVariant.PRIMARY) {
                 Text(stringResource(R.string.crash_detected_export))
             }
         },
@@ -334,6 +344,8 @@ fun OnboardingScreen(
     onOpenOemAutoStart: () -> Unit,
     onExportLogs: () -> Unit,
     onDone: () -> Unit,
+    oemHint: String? = null,
+    onOemHintConsumed: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
     val c = LocalIdeColors.current
@@ -342,6 +354,16 @@ fun OnboardingScreen(
     val reduced = rememberReducedMotion()
     val slowDur = motionDuration(Motion.Slow)
     val baseDur = motionDuration(Motion.Base)
+
+    val toastState = remember { GlassToastState() }
+    val toastScope = rememberCoroutineScope()
+    // Show OEM autostart hint as a GlassToast whenever the Activity sets oemHint.
+    LaunchedEffect(oemHint) {
+        if (oemHint != null) {
+            toastState.show(oemHint, GlassToastKind.INFO, durationMs = 3_500L)
+            onOemHintConsumed()
+        }
+    }
 
     // Skin-gated background: read tok.background and tok.glow to decide which
     // canvas to apply. CLASSIC/VAPOR use translucent + aurora/tint-blob;
@@ -412,11 +434,12 @@ fun OnboardingScreen(
         else                                             -> Modifier
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         containerColor = scaffoldContainerColor,
         modifier = scaffoldModifier,
         topBar = {
-            CopyPasteTopBar(title = "Set up CopyPaste")
+            CopyPasteTopBar(title = stringResource(R.string.onboarding_setup_title))
         }
     ) { innerPadding ->
         Column(
@@ -435,7 +458,7 @@ fun OnboardingScreen(
                 label = "onboardIntroAlpha",
             )
             Text(
-                text = "CopyPaste needs a few permissions to monitor and sync your clipboard.",
+                text = stringResource(R.string.onboarding_intro),
                 style = MaterialTheme.typography.bodyLarge,
                 color = c.text,
                 modifier = Modifier.alpha(introAlpha),
@@ -443,12 +466,11 @@ fun OnboardingScreen(
 
             // 1. Notification permission
             PermissionCard(
-                icon = Icons.Filled.Notifications,
-                title = "Notifications",
-                description = "Required on Android 13+ so the clipboard-monitoring " +
-                        "foreground service can show its status notification (Pause/Resume).",
+                icon = Icons.Outlined.Notifications,
+                title = stringResource(R.string.onboarding_notifications_title),
+                description = stringResource(R.string.onboarding_notifications_desc),
                 granted = notifGranted,
-                buttonLabel = if (notifGranted) "Granted" else "Grant",
+                buttonLabel = if (notifGranted) stringResource(R.string.status_granted) else stringResource(R.string.btn_grant),
                 onClick = onRequestNotification,
                 required = true,
                 enterDelayMs = if (reduced) 0 else (baseDur / 4),
@@ -463,16 +485,18 @@ fun OnboardingScreen(
                 ctx = ctx,
                 enterDelayMs = if (reduced) 0 else (baseDur / 2),
                 entered = entered,
+                onToastRequest = { msg ->
+                    toastScope.launch { toastState.show(msg, GlassToastKind.SUCCESS) }
+                },
             )
 
             // 3. Battery Optimization
             PermissionCard(
-                icon = Icons.Filled.Battery5Bar,
-                title = "Battery Optimization Exemption",
-                description = "Prevents Android from killing the sync service when the " +
-                        "phone is idle. Recommended for reliable Supabase polling.",
+                icon = Icons.Outlined.Battery5Bar,
+                title = stringResource(R.string.onboarding_battery_title),
+                description = stringResource(R.string.onboarding_battery_desc),
                 granted = batteryExempt,
-                buttonLabel = if (batteryExempt) "Exempt" else "Request Exemption",
+                buttonLabel = if (batteryExempt) stringResource(R.string.btn_exempt) else stringResource(R.string.btn_request_exemption),
                 onClick = onRequestBattery,
                 required = false,
                 enterDelayMs = if (reduced) 0 else (baseDur * 3 / 4),
@@ -481,27 +505,21 @@ fun OnboardingScreen(
 
             // 4. OEM autostart (shown only on devices where we have a known screen)
             if (hasOemScreen) {
-                val oemDesc = buildString {
-                    append(
-                        "Many phone makers (Xiaomi, Huawei, Samsung, Oppo, Vivo, OnePlus, etc.) " +
-                        "have extra battery-saver layers that kill background apps regardless of " +
-                        "Android's own battery optimisation. You must manually whitelist CopyPaste " +
-                        "in the manufacturer's autostart / protected-apps screen so it survives " +
-                        "when the screen is off."
-                    )
-                    if (oemLabel != null) {
-                        append("\n\nOn this device: $oemLabel")
-                    }
+                val oemBaseDesc = stringResource(R.string.onboarding_oem_desc_base_onboarding)
+                val oemDesc = if (oemLabel != null) {
+                    stringResource(R.string.onboarding_oem_desc_device, oemBaseDesc, oemLabel)
+                } else {
+                    oemBaseDesc
                 }
                 PermissionCard(
-                    icon = Icons.Filled.PhonelinkSetup,
-                    title = "OEM Autostart / Protected Apps",
+                    icon = Icons.Outlined.PhonelinkSetup,
+                    title = stringResource(R.string.onboarding_oem_title),
                     description = oemDesc,
                     // We cannot reliably detect whether autostart is enabled without
                     // root, so this card is never shown as "granted" — the user must
                     // manually verify in the OEM screen.
                     granted = false,
-                    buttonLabel = "Open OEM Settings",
+                    buttonLabel = stringResource(R.string.onboarding_oem_button),
                     onClick = onOpenOemAutoStart,
                     required = false,
                     alwaysShowButton = true,
@@ -512,11 +530,11 @@ fun OnboardingScreen(
 
             // 5. Foreground service (install-time)
             PermissionCard(
-                icon = Icons.Filled.Tune,
-                title = "Foreground Service",
-                description = "Granted automatically at install — no action needed.",
+                icon = Icons.Outlined.Tune,
+                title = stringResource(R.string.onboarding_fg_service_title),
+                description = stringResource(R.string.onboarding_fg_service_desc),
                 granted = true,
-                buttonLabel = "Granted",
+                buttonLabel = stringResource(R.string.status_granted),
                 onClick = {},
                 required = false,
                 enterDelayMs = if (reduced) 0 else (baseDur * 5 / 4),
@@ -542,7 +560,7 @@ fun OnboardingScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.BugReport,
+                            imageVector = Icons.Outlined.BugReport,
                             contentDescription = null,
                             tint = c.dim,
                         )
@@ -589,7 +607,7 @@ fun OnboardingScreen(
                         .fillMaxWidth()
                         .alpha(ctaAlpha),
                 ) {
-                    Text("Continue to CopyPaste")
+                    Text(stringResource(R.string.btn_continue_to_copypaste))
                 }
             } else {
                 CopyPasteButton(
@@ -599,11 +617,13 @@ fun OnboardingScreen(
                         .fillMaxWidth()
                         .alpha(ctaAlpha),
                 ) {
-                    Text("Skip for now")
+                    Text(stringResource(R.string.btn_skip_for_now))
                 }
             }
         }
     }
+    GlassToastHost(state = toastState)
+    } // end Box
 }
 
 @Composable
@@ -730,6 +750,7 @@ private fun AdbBackgroundCaptureCard(
     ctx: android.content.Context,
     enterDelayMs: Int = 0,
     entered: Boolean = true,
+    onToastRequest: (String) -> Unit = {},
 ) {
     val c = LocalIdeColors.current
     val reduced = rememberReducedMotion()
@@ -786,6 +807,7 @@ private fun AdbBackgroundCaptureCard(
                 command = stringResource(R.string.bg_adb_cmd1),
                 toastText = stringResource(R.string.bg_adb_cmd_copied),
                 ctx = ctx,
+                onToastRequest = onToastRequest,
             )
             Spacer(modifier = Modifier.height(6.dp))
             // Command 2
@@ -794,6 +816,7 @@ private fun AdbBackgroundCaptureCard(
                 command = stringResource(R.string.bg_adb_cmd2),
                 toastText = stringResource(R.string.bg_adb_cmd_copied),
                 ctx = ctx,
+                onToastRequest = onToastRequest,
             )
             Spacer(modifier = Modifier.height(6.dp))
             // Command 3
@@ -802,6 +825,7 @@ private fun AdbBackgroundCaptureCard(
                 command = stringResource(R.string.bg_adb_cmd3),
                 toastText = stringResource(R.string.bg_adb_cmd_copied),
                 ctx = ctx,
+                onToastRequest = onToastRequest,
             )
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -848,6 +872,7 @@ private fun AdbCommandRow(
     command: String,
     toastText: String,
     ctx: android.content.Context,
+    onToastRequest: (String) -> Unit = {},
 ) {
     val c = LocalIdeColors.current
     Column {
@@ -869,8 +894,7 @@ private fun AdbCommandRow(
                     val cm = ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE)
                         as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("adb_cmd", command))
-                    android.widget.Toast.makeText(ctx, toastText, android.widget.Toast.LENGTH_SHORT)
-                        .show()
+                    onToastRequest(toastText)
                 }
                 .padding(vertical = 4.dp),
         )

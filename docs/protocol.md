@@ -58,14 +58,18 @@ All methods are defined in [`crates/copypaste-ipc/src/methods.rs`](../crates/cop
 | Method | Description |
 |---|---|
 | `list` | Fetch a paginated list of clipboard items |
+| `history_page` | Fetch one paginated page of history (`{limit, offset}`) → `{items, total, own_device_id}` |
 | `search` | Full-text search over clipboard items |
-| `copy` | Copy a clipboard item back to the system clipboard by id |
-| `delete` | Delete a single clipboard item by id |
+| `copy` | Copy a clipboard item back to the system clipboard by id (legacy integer-index form) |
+| `copy_item` | Copy a clipboard item back to the system clipboard by stable UUID (`{id}`) |
+| `delete` | Delete a single clipboard item by id (legacy form) |
+| `delete_item` | Delete a single clipboard item by stable UUID (`{id}`) |
 | `delete_all` | Delete all clipboard items (clear history) |
 | `count` | Return the total count of stored clipboard items |
 | `stats` | Return aggregate statistics about the clipboard database |
 | `pin_item` | Pin or unpin a clipboard item (`{id, pinned: bool}`) |
-| `add_file_item` | Ingest a file directly into clipboard history from the UI (`{filename, mime, data_b64}`) |
+| `reorder_pinned` | Reorder pinned items (`{ids: [String]}` — full ordered list of pinned UUIDs) |
+| `add_file_item` | Ingest a file directly into clipboard history from the UI (`{filename, mime, data_b64}`) → `{id}` |
 
 ### Daemon health
 
@@ -93,8 +97,21 @@ All methods are defined in [`crates/copypaste-ipc/src/methods.rs`](../crates/cop
 |---|---|
 | `get_config` | Read the current daemon configuration object |
 | `set_config` | Write / merge a partial daemon configuration object |
-| `get_sync_status` | Query the current cloud-sync state |
+| `set_sync_passphrase` | Store the shared sync passphrase and derive the sync key (`{passphrase}`) |
+| `rotate_sync_key` | Rotate the sync key to a new passphrase (`{passphrase}`) → `{ok, rotated}` |
+| `revoke_and_rotate` | Revoke a peer and rotate the sync key atomically (`{fingerprint, passphrase}`) → `{revoked_at, rotated}` |
+| `store_cloud_password` | Store the Supabase GoTrue password directly in the Keychain (`{password}`) → `{persisted}` |
+| `get_sync_status` | Query the current cloud-sync state → `{passphrase_set, supabase_configured, signed_in, last_sync_ms, badge_state, …}` |
 | `cloud_test_connection` | Run a live connection diagnostic against the configured cloud backend |
+| `cloud_sign_in` | Sign in to the cloud sync account (requires `cloud-sync` feature; returns `not_implemented` otherwise) |
+| `cloud_sign_out` | Sign out of the cloud sync account (requires `cloud-sync` feature; returns `not_implemented` otherwise) |
+
+### Own device identity
+
+| Method | Description |
+|---|---|
+| `get_own_fingerprint` | Return this device's mTLS certificate fingerprint (hex SHA-256) → `{fingerprint}` |
+| `get_own_device_info` | Return rich identity for this device: name, model, OS, version, IPs, fingerprint |
 
 ### Pairing (QR)
 
@@ -107,17 +124,41 @@ All methods are defined in [`crates/copypaste-ipc/src/methods.rs`](../crates/cop
 | Method | Description |
 |---|---|
 | `list_discovered` | List peers visible via mDNS-SD, each tagged `paired` or not |
-| `pair_with_discovered` | Begin SAS pairing as initiator with a discovered peer |
-| `pair_get_sas` | Poll the SAS pairing state machine (`{state, sas?, role?}`) |
+| `rescan_discovered` | Force an mDNS-SD rescan and return the fresh discovered device list |
+| `pair_with_discovered` | Begin SAS pairing as initiator with a discovered peer (`{device_id}`) |
+| `pair_get_sas` | Poll the SAS pairing state machine → `{state, sas?, role?}` |
 | `pair_confirm_sas` | Deliver the local user's SAS accept/reject decision (`{accept: bool}`) |
 | `pair_abort` | Abort in-flight discovery pairing and reset to `idle` |
+| `pair_peer_with_password` | Pair with a peer using a shared password (`{peer_fingerprint, password}`) |
+| `poll_peer_events` | Drain pending peer connect/disconnect events → `{events: [{kind, fingerprint}]}` |
+
+### Peer management
+
+| Method | Description |
+|---|---|
+| `list_peers` | List all paired devices → `{peers: [PairedDevice]}` with online status, last-seen, latency |
+| `unpair_peer` | Remove a paired peer from the local trust store (`{fingerprint}`) |
+| `revoke_peer` | Revoke a paired peer with a logged revocation timestamp (`{fingerprint}`) → `{revoked_at}` |
+| `revoke_all_peers` | Revoke ALL paired peers in one call → `{revoked: u32}` |
+
+### Item media access
+
+| Method | Description |
+|---|---|
+| `get_item_image` | Fetch full image bytes for a `content_type == "image"` item (`{id}`) → `{data_uri}` |
+| `get_item_file` | Fetch full binary payload for a `content_type == "file"` item (`{id}`) → `{filename, mime, data_b64}` |
+| `get_item_thumbnail` | Fetch pre-computed thumbnail for a clipboard image (`{id}`) → `{thumbnail: String \| null}` |
+| `get_app_icon` | Resolve a macOS app bundle ID to a 32×32 PNG icon (`{bundle_id}`) → `{png_b64: String \| null}` |
 
 ### Database maintenance
 
 | Method | Description |
 |---|---|
-| `vacuum` | Run `VACUUM` (and optionally `REINDEX`) on the encrypted database |
-| `reset_database` | Wipe and recreate the database (requires `{confirm: true}`) — usable in degraded mode |
+| `db_stats` | Return lightweight storage statistics → `{item_count, size_bytes}` |
+| `vacuum` | Run `VACUUM` (and optionally `REINDEX`) on the encrypted database (`{reindex_only?, dry_run?}`) → `{ok, size_before, size_after, reclaimed}` |
+| `reset_database` | Wipe and recreate the database (requires `{confirm: true}`) — usable in degraded mode → `{reset, ready}` |
+| `db_backup` | Create an encrypted SQLCipher backup (`{dest_path}`) → `{ok, dest_path, size_bytes}` |
+| `db_restore` | Restore the database from an encrypted backup (requires `{confirm: true, src_path, force?}`) → `{ok, ready}` |
 
 ## Client guidance
 

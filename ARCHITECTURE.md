@@ -54,7 +54,8 @@ SQLite (WAL mode)  [copypaste-core/storage/]
   devices / settings
         │
         ▼
-Unix socket  [~/.local/share/copypaste/copypaste.sock]
+Unix socket  [macOS: ~/Library/Application Support/CopyPaste/daemon.sock
+              Linux: ~/.local/share/copypaste/daemon.sock]
   JSON-RPC-like: { id, method, params } → { id, ok, data?, error? }
   Methods: list | count | delete | search | status | copy | export
         │
@@ -110,20 +111,38 @@ copypaste-daemon
 - Lower latency than TCP loopback for short-lived CLI invocations.
 - Simpler: no TLS, no HTTP framing; newline-delimited JSON is sufficient.
 
-## SQLite Schema (v11)
+## SQLite Schema (v13)
 
 ```sql
+-- All columns present on a fully-migrated (v13) database:
 clipboard_items  (id PK, item_id, content_type, content BLOB, content_nonce BLOB,
                   blob_ref, is_sensitive, is_synced, lamport_ts, wall_time, expires_at,
-                  app_bundle_id)
-clipboard_fts    USING fts5(id UNINDEXED, content_text)   -- plaintext search index
+                  app_bundle_id,
+                  content_hash TEXT,               -- v2: SHA-256 dedup hash
+                  origin_device_id TEXT NOT NULL,  -- v3: LWW merge tiebreak
+                  key_version INTEGER NOT NULL,    -- v4: HKDF key generation (1 or 2)
+                  pinned INTEGER NOT NULL,         -- v7: explicit pin flag (0/1)
+                  pin_order REAL,                  -- v8: drag-to-reorder sort key (pinned only)
+                  thumb BLOB,                      -- v9: encrypted image thumbnail
+                  deleted INTEGER NOT NULL)        -- v10: soft-delete tombstone (0/1)
+clipboard_fts    USING fts5(id UNINDEXED, content_text)   -- plaintext search index (non-sensitive only)
 devices          (id PK, name, platform, public_key, fingerprint, verified, last_seen)
 settings         (key PK, value)
 pending_uploads  (item_id PK, tus_url, bytes_uploaded, total_bytes, chunk_format_version,
                   created_at, expires_at)
+migration_state  (key PK, key_version_in_progress, last_processed_id, started_at, completed_at)
+                  -- v6: resumable v4 key-rotation sweep tracking
+revoked_devices  (fingerprint PK, name TEXT, revoked_at INTEGER)
+                  -- v12: device-revocation audit log
 ```
 
-Indexes: `idx_clipboard_wall_time` (DESC), `idx_clipboard_expires` (partial, WHERE NOT NULL).
+Indexes: `idx_clipboard_wall_time` (DESC), `idx_clipboard_expires` (partial, WHERE NOT NULL),
+`idx_clipboard_content_hash` (partial, WHERE NOT NULL), `idx_clipboard_key_version` (partial,
+WHERE key_version < 2), `idx_dedup_hash_minute` (UNIQUE, content_hash + wall_time/60 bucket),
+`idx_clipboard_item_id` (UNIQUE), `idx_clipboard_pinned` (partial, WHERE pinned = 1),
+`idx_clipboard_unpinned_len` (covering, LENGTH(content) WHERE pinned = 0),
+`idx_clipboard_deleted` (partial, WHERE deleted = 1),
+`idx_revoked_devices_revoked_at` (DESC).
 WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 
 ## Phase Roadmap

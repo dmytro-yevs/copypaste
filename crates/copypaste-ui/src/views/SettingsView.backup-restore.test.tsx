@@ -181,8 +181,8 @@ describe("85n9 Backup & Restore panel", () => {
     expect(screen.getByText(/Export backup/i)).toBeInTheDocument();
     expect(screen.getByTestId("export-button")).toBeInTheDocument();
 
-    // Import row.
-    expect(screen.getByText(/Restore backup/i)).toBeInTheDocument();
+    // Import row — label renamed to "Import history" (bdac.73).
+    expect(screen.getByText(/Import history/i)).toBeInTheDocument();
     expect(screen.getByTestId("import-file-input")).toBeInTheDocument();
 
     // Include-sensitive checkbox defaults to unchecked.
@@ -283,8 +283,9 @@ describe("85n9 Backup & Restore panel", () => {
       fireEvent.change(fileInput, { target: { files: [file] } });
     });
 
-    // vcnv: a confirmation modal appears before the import — click "Restore" to proceed.
-    const restoreBtn = await screen.findByRole("button", { name: /restore/i });
+    // vcnv: a confirmation modal appears before the import — click "Import" to proceed.
+    // Confirm button renamed from "Restore" to "Import" (bdac.73).
+    const restoreBtn = await screen.findByRole("button", { name: /import/i });
     await act(async () => {
       fireEvent.click(restoreBtn);
     });

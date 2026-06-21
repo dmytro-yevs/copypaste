@@ -210,8 +210,14 @@ private val ClassicSkinTokens = SkinTokens(
     material           = SkinMaterial.GLASS,
     glassBlurDp        = 28.dp,
     glassBlurStrongDp  = 40.dp,   // CopyPaste-fuxf: mirrors GlassTier.STRONG.blur / web glassBlurStrong
-    saturation         = 1.45f,
-    fillAlpha          = 0.62f,
+    saturation         = 1.80f,   // Android ColorMatrix scale; web CSS saturate(145%) uses a different scale — see Components.kt
+    // CopyPaste-bdac.25: aligned to web SKINS.classic.fillAlpha = 0.40 (canonical).
+    // The old 0.62 value was a stale draft (same note in skins.ts: "0.62 was a stale
+    // draft value"). The Skin-axis fillAlpha drives the tint/saturation overlay alpha,
+    // separate from GlassTier's own lightAlphaTop/Bottom gradient which stays at
+    // 0.64→0.46 (GLASS) / 0.58→0.40 (CARD). Setting both to the same 0.40 canonical
+    // ensures Classic looks the same on Android as on macOS.
+    fillAlpha          = 0.40f,
     sheen              = 0.06f,
     sheenLight         = 0.45f,   // CopyPaste-0kbq: was hardcoded in LiquidGlassSurface
     tintAlpha          = 0f,

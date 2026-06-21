@@ -87,20 +87,28 @@ export default {
         "ide-md":    "var(--ide-e3)",
         "ide-popup": "var(--ide-e3)",
       },
-      // Motion tokens §8 — 4 durations
+      // Motion tokens §8 — 4 durations (legacy --motion-* parity)
       transitionDuration: {
         "instant": "90ms",
         "fast":    "130ms",
         "base":    "180ms",
         "slow":    "240ms",
+        // §8 Approved motion language (--mo-* tokens)
+        "mo-instant": "var(--mo-instant, 90ms)",
+        "mo-fast":    "var(--mo-fast, 130ms)",
+        "mo-base":    "var(--mo-base, 180ms)",
+        "mo-slow":    "var(--mo-slow, 240ms)",
         // Legacy
         ide: "120ms",
       },
       transitionTimingFunction: {
-        // §8 eases
+        // §8 eases (legacy)
         "out-expo":  "cubic-bezier(.16,1,.3,1)",
         "standard":  "cubic-bezier(.2,0,0,1)",
         "in-curve":  "cubic-bezier(.4,0,1,1)",
+        // §8 Approved motion language (--mo-ease-* tokens)
+        "mo-standard":   "var(--mo-ease-standard, cubic-bezier(.2,0,.2,1))",
+        "mo-emphasized": "var(--mo-ease-emphasized, cubic-bezier(.16,1,.3,1))",
         // Legacy
         ide: "ease",
       },
@@ -110,7 +118,16 @@ export default {
           "0%":   { opacity: "0", transform: "scale(0.97) translateY(4px)" },
           "100%": { opacity: "1", transform: "scale(1) translateY(0)" },
         },
-        // Toast slide-up §8
+        // §MO-6 Toast enter/exit
+        toastEnter: {
+          "0%":   { opacity: "0", transform: "translateX(-50%) translateY(8px) scale(.985)" },
+          "100%": { opacity: "1", transform: "translateX(-50%) translateY(0) scale(1)" },
+        },
+        toastExit: {
+          "0%":   { opacity: "1", transform: "translateX(-50%) translateY(0) scale(1)" },
+          "100%": { opacity: "0", transform: "translateX(-50%) translateY(7px) scale(.992)" },
+        },
+        // Legacy toast (kept for compat)
         toastIn: {
           "0%":   { opacity: "0", transform: "translateX(-50%) translateY(8px)" },
           "100%": { opacity: "1", transform: "translateX(-50%) translateY(0)" },
@@ -119,24 +136,47 @@ export default {
           "0%":   { opacity: "0", transform: "translateY(2px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
-        // Online pulse ring §7
-        pulsePing: {
-          "0%":   { transform: "scale(1)", opacity: "1" },
-          "75%, 100%": { transform: "scale(2.2)", opacity: "0" },
+        // §MO-1 Modal scrim + card
+        modalScrimIn:  { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
+        modalScrimOut: { "0%": { opacity: "1" }, "100%": { opacity: "0" } },
+        modalCardIn: {
+          "0%":   { opacity: "0", transform: "translateY(8px) scale(.985)" },
+          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
         },
-        // Liquid Glass aurora background animations (CopyPaste-52mz)
-        auroraSpin: {
-          "0%":   { transform: "rotate(-14deg) scale(1)",    filter: "blur(18px) hue-rotate(0deg)" },
-          "50%":  { transform: "rotate(18deg) scale(1.08)", filter: "blur(28px) hue-rotate(10deg)" },
-          "100%": { transform: "rotate(346deg) scale(1)",   filter: "blur(18px) hue-rotate(0deg)" },
+        modalCardOut: {
+          "0%":   { opacity: "1", transform: "translateY(0) scale(1)" },
+          "100%": { opacity: "0", transform: "translateY(8px) scale(.985)" },
         },
-        glowDrift: {
-          "from": { transform: "translate3d(-4%, 0, 0) rotate(-12deg) scale(1)" },
-          "to":   { transform: "translate3d(8%, -6%, 0) rotate(-8deg) scale(1.08)" },
+        // §MO-2 Page panel slide
+        panelSlideInRight: {
+          "0%":   { opacity: "0", transform: "translateX(20px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
         },
-        glassShine: {
-          "to": { transform: "translateX(120%)" },
+        panelSlideOutLeft: {
+          "0%":   { opacity: "1", transform: "translateX(0)" },
+          "100%": { opacity: "0", transform: "translateX(-20px)" },
         },
+        // §MO-4 Copy-flash (instant, 90ms)
+        copyFlash: {
+          "0%":   { outlineColor: "transparent", backgroundColor: "transparent" },
+          "45%":  { outlineColor: "var(--ide-success)", backgroundColor: "var(--ide-success-dim)" },
+          "100%": { outlineColor: "transparent", backgroundColor: "transparent" },
+        },
+        // §MO-5 Online pulse ONE-SHOT (2s forwards — not infinite)
+        onlinePulse: {
+          "0%":   { boxShadow: "0 0 0 0 var(--ide-success)", opacity: "1" },
+          "70%":  { boxShadow: "0 0 0 9px var(--ide-success)", opacity: "0" },
+          "100%": { boxShadow: "0 0 0 9px transparent", opacity: "0" },
+        },
+        // §MO-3 Row press scale
+        rowPress: {
+          "0%":   { transform: "scale(1)" },
+          "50%":  { transform: "scale(.992)" },
+          "100%": { transform: "scale(1)" },
+        },
+        // auroraSpin removed — perpetual spin was "loud/gimmicky" per spec.
+        // glowDrift removed — replaced with static ambient blob.
+        // glassShine removed — replaced with permanent ::before diagonal sheen (VISM-5).
         // Premium entrance animations (CopyPaste-52mz) — spring cubic-bezier, NOT bounce
         cardIn: {
           "0%":   { opacity: "0", transform: "scale(.96) translateY(10px)" },
@@ -152,21 +192,41 @@ export default {
         },
       },
       animation: {
-        "popup-enter":   "popupEnter 160ms cubic-bezier(.16,1,.3,1) both",
-        "toast-in":      "toastIn 180ms cubic-bezier(.16,1,.3,1) both",
-        "fade-in":       "fadeIn 130ms ease both",
-        "pulse-ping":    "pulsePing 2s cubic-bezier(0,0,0.2,1) infinite",
-        // Liquid Glass aurora + entrance (CopyPaste-52mz)
-        // Note: aurora speed is scaled by --speed CSS token inline via calc() in CSS;
-        // these Tailwind shorthands use the cinematic default durations.
-        "aurora-spin":   "auroraSpin 12.96s linear infinite",   /* 18s × 0.72 */
-        "glow-drift":    "glowDrift 8.64s ease-in-out infinite alternate", /* 12s × 0.72 */
-        "glass-shine":   "glassShine .83s cubic-bezier(.16,1,.3,1)",       /* 1.15s × 0.72 */
+        "popup-enter":         "popupEnter 160ms cubic-bezier(.16,1,.3,1) both",
+        // §MO-6 Toast
+        "toast-enter":         "toastEnter 180ms cubic-bezier(.16,1,.3,1) both",
+        "toast-exit":          "toastExit 180ms cubic-bezier(.16,1,.3,1) both",
+        "toast-in":            "toastIn 180ms cubic-bezier(.16,1,.3,1) both", /* legacy */
+        "fade-in":             "fadeIn 130ms ease both",
+        // §MO-1 Modal
+        "modal-scrim-enter":   "modalScrimIn 180ms cubic-bezier(.2,0,.2,1) both",
+        "modal-scrim-exit":    "modalScrimOut 180ms cubic-bezier(.2,0,.2,1) both",
+        "modal-card-enter":    "modalCardIn 240ms cubic-bezier(.16,1,.3,1) both",
+        "modal-card-exit":     "modalCardOut 240ms cubic-bezier(.16,1,.3,1) both",
+        // §MO-2 Page panel
+        "panel-enter-right":   "panelSlideInRight 240ms cubic-bezier(.16,1,.3,1) both",
+        "panel-exit-left":     "panelSlideOutLeft 240ms cubic-bezier(.16,1,.3,1) both",
+        // §MO-4 Copy-flash
+        "copy-flash":          "copyFlash 90ms cubic-bezier(.2,0,.2,1) both",
+        // §MO-5 Online pulse (ONE-SHOT, not infinite)
+        "online-pulse":        "onlinePulse 2s cubic-bezier(.2,0,.2,1) forwards",
+        // §MO-3 Row press
+        "row-press":           "rowPress 130ms cubic-bezier(.2,0,.2,1)",
+        // aurora-spin, glow-drift, glass-shine REMOVED (loud/gimmicky per spec)
+        // Entrance (CopyPaste-52mz)
         "card-in":       "cardIn 158ms cubic-bezier(.16,1,.3,1) both",    /* 220ms × 0.72 */
         "reveal-up":     "revealUp 130ms cubic-bezier(.16,1,.3,1) both",  /* 180ms × 0.72 */
         "list-item-in":  "listItemIn 101ms cubic-bezier(.16,1,.3,1) both", /* 140ms × 0.72 */
       },
     }
   },
+  // SCRL-2: dynamically-composed left-border accent classes used in LogView.tsx
+  // (LEVEL_BORDER map). Tailwind's static scanner cannot see these strings — they
+  // are concatenated at runtime — so they must be safelisted to survive production
+  // purging (bd CopyPaste-5917.81).
+  safelist: [
+    "border-l-ide-danger",
+    "border-l-ide-warning",
+  ],
   plugins: []
 };

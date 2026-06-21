@@ -30,6 +30,34 @@ object SyncThumbnailHelper {
     private const val TAG = "SyncThumbnailHelper"
 
     /**
+     * Compute the largest power-of-two [BitmapFactory.Options.inSampleSize] such
+     * that the decoded bitmap's longest side is at most [targetDim] px.
+     *
+     * The Android docs recommend powers of two for [inSampleSize]; other values
+     * are rounded down to the nearest power of two by the decoder anyway.
+     *
+     * Pure function — no Android runtime — safe to call in JVM unit tests.
+     *
+     * @param rawWidth   Width reported by the bounds-only pass (inJustDecodeBounds).
+     * @param rawHeight  Height reported by the bounds-only pass (inJustDecodeBounds).
+     * @param targetDim  Maximum dimension of the decoded bitmap (pixels).
+     * @return A power-of-two sample size ≥ 1.
+     */
+    internal fun computeInSampleSize(rawWidth: Int, rawHeight: Int, targetDim: Int): Int {
+        if (rawWidth <= 0 || rawHeight <= 0 || targetDim <= 0) return 1
+        val longest = maxOf(rawWidth, rawHeight)
+        if (longest <= targetDim) return 1
+        // Find the largest power-of-two divisor that still leaves the decoded
+        // image at least targetDim px on the longest side (to keep quality for
+        // the subsequent software scale-to-exact inside generateThumbnail).
+        var sampleSize = 1
+        while ((longest / (sampleSize * 2)) >= targetDim) {
+            sampleSize *= 2
+        }
+        return sampleSize
+    }
+
+    /**
      * Decode [imageBytes] as a Bitmap, generate a thumbnail via
      * [ImageThumbnailUtils.generateThumbnail], and pass the result to
      * [storeThumbnail].
@@ -39,6 +67,20 @@ object SyncThumbnailHelper {
      *
      * The decoded [android.graphics.Bitmap] is recycled before returning
      * regardless of outcome.
+     *
+     * ## Two-pass decode (CopyPaste-44rq.34)
+     * Large synced images (e.g. 4000×3000 px) were previously decoded at full
+     * resolution into heap before being software-scaled to 680 px. This caused
+     * OOM on devices with limited memory and wasted CPU time.
+     *
+     * The fix adds a bounds-only pass ([BitmapFactory.Options.inJustDecodeBounds])
+     * to read the image dimensions without allocating pixel memory, then computes
+     * an [BitmapFactory.Options.inSampleSize] that pre-downsamples in the codec
+     * to ≥ [ImageThumbnailUtils.THUMB_MAX_DIM] px (power-of-two).
+     * [ImageThumbnailUtils.generateThumbnail] performs the final precise scale.
+     *
+     * Output dimensions and visual quality are unchanged — only peak heap usage
+     * during thumbnail generation is reduced.
      *
      * @param imageBytes  Raw PNG/JPEG bytes of the full-res image.
      * @param storeThumbnail  Callback to persist the generated thumbnail bytes
@@ -50,8 +92,20 @@ object SyncThumbnailHelper {
     ): Boolean {
         if (imageBytes.isEmpty()) return false
 
+        // Pass 1: bounds-only — read image dimensions without allocating pixels.
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, bounds)
+
+        // Pass 2: decode at reduced resolution using computed inSampleSize.
+        val opts = BitmapFactory.Options().apply {
+            inSampleSize = computeInSampleSize(
+                bounds.outWidth,
+                bounds.outHeight,
+                ImageThumbnailUtils.THUMB_MAX_DIM,
+            )
+        }
         val bitmap = try {
-            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size, opts)
         } catch (t: Throwable) {
             Log.w(TAG, "generateAndStore: BitmapFactory decode threw: ${t.message}")
             null

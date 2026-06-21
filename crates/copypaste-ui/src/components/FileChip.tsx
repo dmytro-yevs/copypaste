@@ -1,5 +1,11 @@
 import { useRef, useState } from "react";
+// ICON-11: use lucide-react FileText so FileChip shares the same glyph family
+// as ContentIcon's "file" case (no more inline SVG divergence).
+import { FileText } from "lucide-react";
 import { api } from "../lib/ipc";
+// bdac.20: ActionButton replaces raw <button> elements for consistent
+// secondary variant styling and skin-aware --skin-r-ctl border-radius.
+import { ActionButton } from "./ActionButton";
 
 // ---------------------------------------------------------------------------
 // formatBytes — human-readable file size (exported for unit tests)
@@ -10,36 +16,6 @@ export function formatBytes(bytes: number): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-}
-
-// ---------------------------------------------------------------------------
-// File-type icon — a generic document SVG styled in amber/orange to distinguish
-// it from image (purple) and text (blue) content types.
-// ---------------------------------------------------------------------------
-
-function FileIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width="14"
-      height="14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className={className}
-    >
-      {/* Document outline with folded corner */}
-      <path d="M9.5 1.5H3.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V5.5L9.5 1.5Z" />
-      <path d="M9.5 1.5v4h4" />
-      {/* Three ruled lines */}
-      <line x1="5" y1="8" x2="11" y2="8" />
-      <line x1="5" y1="10.5" x2="11" y2="10.5" />
-      <line x1="5" y1="5.5" x2="8" y2="5.5" />
-    </svg>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -173,8 +149,14 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
       className="inline-flex items-center gap-2 border border-ide-divider/60 bg-ide-elevated/60 px-2 py-1"
       style={{ maxWidth: "100%", borderRadius: "var(--skin-r-chip)" }}
     >
-      {/* File icon — amber/orange to distinguish from image/text */}
-      <FileIcon className="shrink-0 text-ide-warning" />
+      {/* File icon — lucide FileText (ICON-11: unified glyph family with ContentIcon) */}
+      <FileText
+        width={14}
+        height={14}
+        strokeWidth={1.5}
+        aria-hidden={true}
+        className="shrink-0 text-ide-warning"
+      />
 
       {/* Filename + optional size */}
       <span className="flex min-w-0 flex-col">
@@ -185,7 +167,7 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
           {filename}
         </span>
         {resolvedSize !== null && (
-          <span className="text-[10px] text-ide-faint leading-snug">
+          <span className="text-[10.5px] text-ide-faint leading-snug">
             {formatBytes(resolvedSize)}
           </span>
         )}
@@ -199,48 +181,47 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
         <span className="text-[11px] text-ide-danger shrink-0">{openError}</span>
       )}
 
-      {/* Action buttons */}
+      {/* Action buttons — bdac.20: replaced raw <button> elements with ActionButton
+          (variant="secondary" size="sm") so skin-r-ctl radius, focus ring, and
+          disabled opacity come from a single source of truth. */}
       <span className="ml-auto flex shrink-0 items-center gap-1">
         {/* Open — write to temp file and open with OS default app (no save dialog) */}
-        <button
-          type="button"
+        <ActionButton
+          variant="secondary"
+          size="sm"
           aria-label="Open"
           title="Open with default app"
           disabled={opening}
+          pending={opening}
+          pendingLabel="Opening…"
           onClick={() => void handleOpen()}
-          className="relative flex items-center gap-1 border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
         >
-          {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
-          <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />
-          {opening ? "Opening…" : "Open"}
-        </button>
-        <button
-          type="button"
+          Open
+        </ActionButton>
+        <ActionButton
+          variant="secondary"
+          size="sm"
           aria-label="Save As"
           title="Save As…"
           disabled={saving}
+          pending={saving}
+          pendingLabel="Saving…"
           onClick={() => void handleSaveAs()}
-          className="relative flex items-center gap-1 border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
         >
-          {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
-          <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />
-          {saving ? "Saving…" : "Save As…"}
-        </button>
-        <button
-          type="button"
+          Save As…
+        </ActionButton>
+        <ActionButton
+          variant="secondary"
+          size="sm"
           aria-label="Copy"
           title="Copy to clipboard"
           disabled={copying}
+          pending={copying}
+          pendingLabel="…"
           onClick={() => void handleCopy()}
-          className="relative flex items-center gap-1 border border-ide-border bg-ide-elevated px-1.5 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:opacity-50"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
         >
-          {/* Transparent hit-target overlay expanding clickable area to ≥44×44px. */}
-          <span aria-hidden="true" style={{ position: "absolute", inset: "-10px" }} />
-          {copying ? "…" : "Copy"}
-        </button>
+          Copy
+        </ActionButton>
       </span>
     </span>
   );

@@ -184,20 +184,19 @@ function expectSkinRCard(el: HTMLElement, label: string) {
 // ---------------------------------------------------------------------------
 // §1–§7  SAS pairing modal controls
 // ---------------------------------------------------------------------------
-describe("W5 §1 SAS code copy button uses --skin-r-ctl", () => {
-  it("button wrapping the SAS code has borderRadius var(--skin-r-ctl)", async () => {
+describe("W5 §1 SAS code display uses --skin-r-ctl", () => {
+  it("div displaying the SAS code has borderRadius var(--skin-r-ctl)", async () => {
     const { container } = render(
       <DevicesView incomingPairing={RESPONDER_SAS} />
     );
     await screen.findByRole("dialog", { name: /pair/i });
 
-    // The SAS code is displayed inside a button with font-mono
+    // The SAS code is now displayed inside a non-interactive div (security fix
+    // CopyPaste-1jms.1 — replaced button with display-only div).
     const dialog = container.querySelector("[role='dialog']")!;
-    const sasBtn = Array.from(dialog.querySelectorAll("button")).find(
-      (btn) => btn.classList.contains("font-mono")
-    ) as HTMLElement | null;
-    expect(sasBtn, "SAS code copy button must exist").not.toBeNull();
-    expectSkinRCtl(sasBtn!, "SAS code copy button");
+    const sasDiv = dialog.querySelector("[data-testid='sas-code-display']") as HTMLElement | null;
+    expect(sasDiv, "SAS code display div must exist").not.toBeNull();
+    expectSkinRCtl(sasDiv!, "SAS code display div");
   });
 });
 
@@ -395,9 +394,10 @@ describe("W5 §9–§12 RevokeConfirmDialog controls use --skin-r-ctl", () => {
     await openRevokeDialog(container);
 
     const dialog = container.querySelector("[role='dialog'][aria-labelledby='revoke-modal-title']")!;
-    const btn = findButtonByText(dialog as HTMLElement, "Revoke & rotate");
-    expect(btn, "'Revoke & rotate' button must exist").not.toBeNull();
-    expectSkinRCtl(btn!, "RevokeConfirmDialog 'Revoke & rotate' button");
+    // bdac.83: button label is now "Revoke & rotate key" (Android parity).
+    const btn = findButtonByText(dialog as HTMLElement, "Revoke & rotate key");
+    expect(btn, "'Revoke & rotate key' button must exist").not.toBeNull();
+    expectSkinRCtl(btn!, "RevokeConfirmDialog 'Revoke & rotate key' button");
   });
 });
 
@@ -479,20 +479,24 @@ describe("W5 §17 QR container uses --skin-r-card", () => {
 
     const { container } = render(<DevicesView />);
 
-    // Wait for the QR section to render
+    // Wait for the QR section to render.
+    // The container now carries .qr-hidden (default blurred state) or .qr-visible
+    // instead of the legacy .qr-scan class (motion primitives §MO-7).
     await waitFor(() => {
-      const qrDivs = container.querySelectorAll(".qr-scan");
+      const qrDivs = container.querySelectorAll(".qr-hidden, .qr-visible");
       expect(qrDivs.length).toBeGreaterThanOrEqual(1);
     });
 
-    const qrContainer = container.querySelector(".qr-scan") as HTMLElement | null;
-    expect(qrContainer, "QR container (.qr-scan) must exist").not.toBeNull();
+    const qrContainer = container.querySelector(".qr-hidden, .qr-visible") as HTMLElement | null;
+    expect(qrContainer, "QR container (.qr-hidden or .qr-visible) must exist").not.toBeNull();
     expectSkinRCard(qrContainer!, "QR container");
   });
 });
 
-describe("W5 §18 QR reveal overlay button uses --skin-r-ctl", () => {
-  it("QR reveal button uses var(--skin-r-ctl)", async () => {
+// CopyPaste-5917.32: QR overlay button must use borderRadius:"inherit" (not --skin-r-ctl)
+// so it matches the QR container's --skin-r-card radius on all skins.
+describe("W5 §18 QR reveal overlay button inherits container card radius (CopyPaste-5917.32)", () => {
+  it("QR reveal button uses borderRadius:inherit (matches QR container --skin-r-card)", async () => {
     pairingQrSvg.mockResolvedValue({
       svg: "<svg><rect/></svg>",
       payload: "copypaste://pair?token=abc",
@@ -513,6 +517,9 @@ describe("W5 §18 QR reveal overlay button uses --skin-r-ctl", () => {
       "button[aria-label='Click to reveal QR code']"
     ) as HTMLElement | null;
     expect(revealBtn, "QR reveal button must exist").not.toBeNull();
-    expectSkinRCtl(revealBtn!, "QR reveal button");
+    expect(
+      revealBtn!.style.borderRadius,
+      "QR reveal button: must use inherit to match container card radius"
+    ).toBe("inherit");
   });
 });

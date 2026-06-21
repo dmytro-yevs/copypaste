@@ -151,6 +151,29 @@
   --ease-standard:  cubic-bezier(.2,0,0,1);
   --ease-in:        cubic-bezier(.4,0,1,1);
 
+  /* ── §8 Approved motion language (verbatim spec, CopyPaste-1f90) ─────────
+     Canonical token names for all new component motion classes. The --mo-*
+     family is intentionally separate from the legacy --motion-* so existing
+     consumers keep working; the spec calls for these exact identifiers.      */
+  --mo-instant:         90ms;
+  --mo-fast:            130ms;
+  --mo-base:            180ms;
+  --mo-slow:            240ms;
+  --mo-ease-standard:   cubic-bezier(.2,0,.2,1);
+  --mo-ease-emphasized: cubic-bezier(.16,1,.3,1);
+
+  /* ── §3 Success semantic alias (VISM-2) ─────────────────────────────────
+     Components that used undefined `var(--success)` now use --ide-success.
+     This alias makes old references to --success resolve correctly too.     */
+  --success:     var(--ide-success);
+  --success-soft: var(--ide-success-dim);
+
+  /* ── §3 Accent-strong (THM-1/2/3 on-accent token bridge) ────────────────
+     accent-strong for online-pulse ring and accent-line for card hover border. */
+  --accent-strong: var(--accent);
+  --accent-line:   rgba(var(--ide-accent-rgb), 0.40);
+  --surface-hover: var(--ide-hover);
+
   /* ── §L Liquid Glass token vocabulary (CopyPaste-52mz) ──────────────────
      NEW switchable layer — defaults to Graphite Mist (dark grey). These tokens
      are consumed by the palette layer (html[data-palette=...]) and by the aurora
@@ -210,6 +233,14 @@
   --row-h:     34px;
   --radius-lg: 18px;
   --radius-sm: 12px;
+
+  /* ── §3 Modal scrim token ────────────────────────────────────────────────
+     --ide-scrim: backdrop overlay color for modal dialogs. Dark theme uses a
+     55% black overlay (heavier = content clearly recedes); light theme softens
+     to 35% so the scrim doesn't look like a severe dark intrusion on a light
+     canvas. All modal backdrops MUST use var(--ide-scrim) — never bg-black/50
+     or a hardcoded rgba value. (CopyPaste-5917.78 / 5917.42 / 5917.106) */
+  --ide-scrim: rgba(0,0,0,.55);
 }
 
 /* ── Light theme token overrides ─────────────────────────────────────────────
@@ -255,10 +286,11 @@
   --ide-ghost:        rgba(60,60,67,0.55);
   --ide-ghost-deco:   rgba(60,60,67,0.32);
 
-  /* ── Brand — Apple systemBlue (light) ────────────────────────────────── */
-  --ide-accent-rgb:       0 122 255;
-  --ide-accent-hover-rgb: 0 99 209;
-  --ide-accent-dim:   rgba(0,122,255,0.12);
+  /* ── Brand — documented AA value for light theme (THM-1: #1A5FCC ≈5.2:1) ─ */
+  /* #007AFF fails WCAG AA on light panel (#F2F2F5); #1A5FCC clears 5.2:1. */
+  --ide-accent-rgb:       26 95 204;
+  --ide-accent-hover-rgb: 14 74 168;
+  --ide-accent-dim:   rgba(26,95,204,0.12);
 
   /* ── Semantic — Apple system colors (light) ──────────────────────────── */
   /* Darkened from Apple systemRed #FF3B30 (red-on-white 3.55:1 — fails AA, and
@@ -304,10 +336,11 @@
   --glass-blur: 28px;
   --glass-saturation: 1.3;
   --glow-strength: .32;  /* softer glow in light mode */
-  /* Accent: Apple systemBlue default; palette overrides this */
-  --accent:    #007aff;
-  --accent-2:  #0063d1;
+  /* Accent: #1A5FCC (THM-1 — AA-documented value, ≈5.2:1 on #F2F2F5, not #007AFF) */
+  --accent:    #1a5fcc;
+  --accent-2:  #0e4ab8;
   --accent-3:  #5ac8fa;
+  /* THM-2/3: #1A5FCC is dark enough that #ffffff on it is ≥4.5:1 (≈5.2:1 confirmed) */
   --on-accent: #ffffff;
   /* Glass borders: dark on light [a5bn] */
   --glass-border:        rgba(20,30,48,.14);
@@ -322,6 +355,10 @@
   --icon-muted:     rgba(42,56,80,.66);
   --line:           rgba(20,30,48,.14);
   --line-strong:    rgba(20,30,48,.23);
+
+  /* Modal scrim — lighter in light theme; 35% black is softer over near-white
+     surfaces and matches the approved styleguide scrim token (0 0 0 / .35). */
+  --ide-scrim: rgba(0,0,0,.35);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -382,7 +419,7 @@ html[data-palette="graphite-mist"] {
   --bg-0: #07090f; --bg-1: #141924; --bg-2: #202330;
   --glow-a: #7f8da3; --glow-b: #5a6a83;
   --surface-rgb: 28, 31, 42; --surface-strong-rgb: 42, 46, 60;
-  --accent: #9db7df; --accent-2: #d5e2f7; --accent-3: #7c8ca6; --on-accent: #ffffff;
+  --accent: #9db7df; --accent-2: #d5e2f7; --accent-3: #7c8ca6; --on-accent: #080C16;
   --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
   --ide-accent-rgb:        157 183 223;  --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  213 226 247;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -421,7 +458,7 @@ html[data-palette="liquid-blue"] {
   --bg-0: #061123; --bg-1: #0b1f47; --bg-2: #12152d;
   --glow-a: #4d8dff; --glow-b: #9e7bff;
   --surface-rgb: 22, 30, 54; --surface-strong-rgb: 30, 42, 76;
-  --accent: #4d8dff; --accent-2: #7fc7ff; --accent-3: #9e7bff; --on-accent: #ffffff;
+  --accent: #4d8dff; --accent-2: #7fc7ff; --accent-3: #9e7bff; --on-accent: #080C16;
   --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
   --ide-accent-rgb:        77 141 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  127 199 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -459,7 +496,7 @@ html[data-palette="deep-sky"] {
   --bg-0: #021222; --bg-1: #073766; --bg-2: #101b31;
   --glow-a: #1fa4ff; --glow-b: #55e6ff;
   --surface-rgb: 16, 32, 56; --surface-strong-rgb: 24, 48, 82;
-  --accent: #1f9cff; --accent-2: #8cddff; --accent-3: #4d74ff; --on-accent: #ffffff;
+  --accent: #1f9cff; --accent-2: #8cddff; --accent-3: #4d74ff; --on-accent: #080C16;
   --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
   --ide-accent-rgb:        31 156 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  140 221 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -497,7 +534,7 @@ html[data-palette="nordic-cyan"] {
   --bg-0: #031216; --bg-1: #06333b; --bg-2: #0b1d2b;
   --glow-a: #24d6b5; --glow-b: #478cff;
   --surface-rgb: 15, 37, 49; --surface-strong-rgb: 21, 55, 70;
-  --accent: #25d5b4; --accent-2: #8af5e4; --accent-3: #5a9dff; --on-accent: #ffffff;
+  --accent: #25d5b4; --accent-2: #8af5e4; --accent-3: #5a9dff; --on-accent: #080C16;
   --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
   --ide-accent-rgb:        37 213 180;   --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  138 245 228;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -535,7 +572,7 @@ html[data-palette="aurora-violet"] {
   --bg-0: #11071f; --bg-1: #28114d; --bg-2: #14172d;
   --glow-a: #9a7cff; --glow-b: #ff7ad9;
   --surface-rgb: 29, 24, 54; --surface-strong-rgb: 48, 36, 82;
-  --accent: #9a7cff; --accent-2: #d4b6ff; --accent-3: #ff7ad9; --on-accent: #ffffff;
+  --accent: #9a7cff; --accent-2: #d4b6ff; --accent-3: #ff7ad9; --on-accent: #080C16;
   --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
   --ide-accent-rgb:        154 124 255;  --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  212 182 255;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -573,7 +610,7 @@ html[data-palette="amber-night"] {
   --bg-0: #171008; --bg-1: #3a220a; --bg-2: #1c1a22;
   --glow-a: #ff9f1c; --glow-b: #6ca0ff;
   --surface-rgb: 35, 29, 24; --surface-strong-rgb: 58, 43, 30;
-  --accent: #ffad33; --accent-2: #ffd28a; --accent-3: #6ca0ff; --on-accent: #000000;
+  --accent: #ffad33; --accent-2: #ffd28a; --accent-3: #6ca0ff; --on-accent: #080C16;
   --glass-border: rgba(255,255,255,.16); --glass-border-strong: rgba(255,255,255,.26);
   --ide-accent-rgb:        255 173 51;   --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  255 210 138;  --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -634,7 +671,7 @@ html[data-theme="light"][data-palette="cloud-silver"] {
   color-scheme: light;
   --bg-0: #edf2f8; --bg-1: #dce6f3; --bg-2: #f8fbff;
   --surface-rgb: 255, 255, 255; --surface-strong-rgb: 245, 248, 252;
-  --accent: #5b8def; --accent-2: #2f74e8; --accent-3: #9cb3d7; --on-accent: #ffffff;
+  --accent: #5b8def; --accent-2: #2f74e8; --accent-3: #9cb3d7; --on-accent: #080C16;
   --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
   --ide-accent-rgb:        91 141 239;   --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  47 116 232;   --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -676,7 +713,7 @@ html[data-theme="light"][data-palette="frost-blue"] {
   color-scheme: light;
   --bg-0: #edf7ff; --bg-1: #d9ecff; --bg-2: #f8fcff;
   --surface-rgb: 255, 255, 255; --surface-strong-rgb: 238, 247, 255;
-  --accent: #2777ff; --accent-2: #005fe3; --accent-3: #72b8ff; --on-accent: #ffffff;
+  --accent: #2777ff; --accent-2: #005fe3; --accent-3: #72b8ff; --on-accent: #080C16;
   --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
   --ide-accent-rgb:        39 119 255;   --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  0 95 227;     --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -719,7 +756,7 @@ html[data-theme="light"][data-palette="porcelain"] {
   color-scheme: light;
   --bg-0: #f3f6fa; --bg-1: #e4ebf4; --bg-2: #fbfdff;
   --surface-rgb: 255, 255, 255; --surface-strong-rgb: 246, 250, 255;
-  --accent: #3c7dd9; --accent-2: #1e5fb9; --accent-3: #8fb8e8; --on-accent: #ffffff;
+  --accent: #3c7dd9; --accent-2: #1e5fb9; --accent-3: #8fb8e8; --on-accent: #080C16;
   --glass-border: rgba(20,30,48,.16); --glass-border-strong: rgba(20,30,48,.26);
   --ide-accent-rgb:        60 125 217;   --ide-accent:       rgb(var(--ide-accent-rgb));
   --ide-accent-hover-rgb:  30 95 185;    --ide-accent-hover: rgb(var(--ide-accent-hover-rgb));
@@ -919,8 +956,10 @@ body {
      Note: negative coords become edge-clipped by the fixed viewport, giving
      large saturated edge glows — this is intentional (matching Android's bleed). */
   background:
-    /* F — amber overlay mid-left (rendered first = bottom layer) */
-    radial-gradient(circle at 30% 60%, color-mix(in srgb, #d9a343 16%, transparent), transparent 65%),
+    /* F — warm overlay mid-left (rendered first = bottom layer); parameterized via
+         --ide-badge-warning so each palette drives its own warm tone (CopyPaste-bdac.33).
+         Default Graphite Mist / Liquid Blue: rgb(217 163 67) = #d9a343 — visually identical. */
+    radial-gradient(circle at 30% 60%, color-mix(in srgb, var(--ide-badge-warning) 16%, transparent), transparent 65%),
     /* E — accent overlay centre-left */
     radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 65%),
     /* D — glowB bottom-left corner */
@@ -1285,16 +1324,12 @@ html[data-skin="vapor"][data-theme="light"] {
 
 /* ── Dark glass surfaces — token-driven fill ─────────────────────────────────
    Fill uses --surface-rgb + --glass-opacity from the active skin (via bridge).
-   The diagonal sheen is the first gradient layer (no pseudo-element = zero
-   z-index pitfalls). Top-edge specular highlight via inset box-shadow. */
+   The permanent diagonal sheen lives in ::before (VISM-5). Top-edge specular
+   highlight via inset box-shadow. */
 
 .surface-glass,
 .ide-translucent {
-  /* [rgwb] Gradient unification: reduced the alpha spread between stops so nested
-     glass boxes share a cohesive tonal family instead of each fighting for a
-     distinct gradient. chrome tier: flat ~0.62 fill. The diagonal sheen is removed
-     from the fill layers (it now lives only in the ::after hover sweep). */
-  background: rgba(var(--surface-rgb), var(--glass-opacity, .62));
+  background: rgba(var(--surface-rgb), var(--glass-opacity, .40));
   border: 1px solid var(--glass-border, rgba(255,255,255,.16));
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.14),
@@ -1302,10 +1337,8 @@ html[data-skin="vapor"][data-theme="light"] {
 }
 
 .surface-card {
-  /* [rgwb] card tier: very slightly higher fill (+0.06) than chrome so elevation
-     reads through difference, but not a competing gradient box.
-     Increased shadow subtly to give depth via shadow instead of gradient contrast. */
-  background: rgba(var(--surface-rgb), calc(var(--glass-opacity, .62) + .06));
+  /* card tier: slightly higher fill (+0.06) than chrome so elevation reads. */
+  background: rgba(var(--surface-rgb), calc(var(--glass-opacity, .40) + .06));
   border: 1px solid var(--glass-border, rgba(255,255,255,.16));
   box-shadow:
     inset 0 1px 0 rgba(255,255,255,.16),
@@ -1313,10 +1346,7 @@ html[data-skin="vapor"][data-theme="light"] {
 }
 
 .surface-glass-strong {
-  /* audit P0-2 (dark parity): floating modals need higher opacity so secondary
-     text hits contrast. Use --surface-strong-rgb at near-opaque fill.
-     [rgwb] Kept opaque-ish fill but removed strong gradient so it reads as the
-     same material family. Shadow provides the elevation depth cue. */
+  /* floating modals: near-opaque for text contrast. */
   background: rgba(var(--surface-strong-rgb), .90);
   border: 1px solid var(--glass-border-strong, rgba(255,255,255,.26));
   box-shadow:
@@ -1324,40 +1354,30 @@ html[data-skin="vapor"][data-theme="light"] {
     0 16px 48px rgba(0,0,0,.38);
 }
 
-/* ── Hover shine (glassShine) ────────────────────────────────────────────────
-   A swept diagonal highlight runs across the surface on hover — the "liquid"
-   premium feel. Uses ::after on the glass surfaces. The transition uses
-   --speed so cinematic profile gives a smooth 1.15 s sweep. */
+/* ── VISM-5: Permanent diagonal sheen on glass surfaces (::before) ───────────
+   Subtle, static linear-gradient sheen — the "liquid" quality per the approved
+   preview. NOT animated. Goes in ::before so ::after can be used by components
+   for overlays (e.g. QR grid). Clipped to border-radius via inherit. */
 
-.surface-glass::after,
-.surface-card::after,
-.surface-glass-strong::after,
-.ide-translucent::after {
+.surface-glass::before,
+.surface-card::before,
+.surface-glass-strong::before,
+.ide-translucent::before {
   content: "";
   position: absolute;
   inset: 0;
   pointer-events: none;
-  /* border-radius: inherit ensures the shine is clipped to the card's rounded
-     corners — no square overlay edges [rgwb fix 3]. */
   border-radius: inherit;
-  /* [rgwb] Narrowed the bright band (10% wide vs old 30%) and halved opacity
-     so this reads as a soft material sheen, not a moving bright line. */
-  background: linear-gradient(110deg,
-    transparent 0 42%,
-    rgba(255,255,255,.09) 48%,
-    rgba(255,255,255,.12) 50%,
-    rgba(255,255,255,.09) 52%,
-    transparent 58% 100%);
-  transform: translateX(-120%);
-  /* opacity reduced from 0.45 to 0.18 [rgwb] */
-  opacity: calc(.18 * var(--motion-opacity, 1));
-}
-
-.surface-glass:hover::after,
-.surface-card:hover::after,
-.surface-glass-strong:hover::after,
-.ide-translucent:hover::after {
-  animation: glassShine calc(1.15s * var(--speed, .72)) var(--ease-out-expo, cubic-bezier(.16,1,.3,1));
+  /* Gentle 120° diagonal highlight — top-left bright corner fades to transparent.
+     Alpha is deliberately subtle: reads as material sheen, not an overlay. */
+  background: linear-gradient(
+    120deg,
+    rgba(255,255,255,.10) 0%,
+    rgba(255,255,255,.05) 30%,
+    transparent 60%
+  );
+  /* z-index below content but above backdrop blur */
+  z-index: 0;
 }
 
 /* ── Apple light/greyish glass: frosted near-white over the tinted grey canvas,
@@ -1415,8 +1435,9 @@ html[data-skin="vapor"][data-theme="light"] {
      Opacity boosted from 26/30/24% → 36/42/32% (CopyPaste-bexa) so the frosted
      glass surfaces have vivid enough aurora to blur through. */
   background:
-    /* F — amber overlay mid-left */
-    radial-gradient(circle at 30% 60%, color-mix(in srgb, #d9a343 16%, transparent), transparent 65%),
+    /* F — warm overlay mid-left; parameterized via --ide-badge-warning (CopyPaste-bdac.33).
+         Default: rgb(217 163 67) = #d9a343 — visually identical to the prior hardcoded value. */
+    radial-gradient(circle at 30% 60%, color-mix(in srgb, var(--ide-badge-warning) 16%, transparent), transparent 65%),
     /* E — accent overlay centre-left */
     radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--accent, #007aff) 18%, transparent), transparent 65%),
     /* D — green bottom-left (new — was missing) */
@@ -1568,6 +1589,14 @@ select:focus {
 select:disabled {
   cursor: not-allowed;
   opacity: 0.40;
+}
+
+/* bdac.21: Light-mode chevron uses --ide-faint light value (#6c6c72) instead of
+   the dark-mode value (#82868f) baked into the default data-URI above. CSS
+   background-image data-URIs cannot reference CSS custom properties directly, so a
+   separate :root[data-theme="light"] override provides the correct encoded colour. */
+:root[data-theme="light"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236c6c72' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C%2Fsvg%3E");
 }
 
 /* ── Checkbox ────────────────────────────────────────────────────────────── */
@@ -1804,92 +1833,298 @@ button,
 }
 
 /* ── Aurora background — STATIC (no animation) ────────────────────────────
-   [calm] auroraSpin and glowDrift both removed. The background orbs are now
-   fixed in place. Colour atmosphere is preserved; zero idle animation. */
+   auroraSpin and glowDrift removed. Background orbs are fixed in place.
+   Colour atmosphere is preserved; zero idle looping animation.              */
 
-/* glowDrift and auroraSpin keyframes removed [calm]. */
+/* ═══════════════════════════════════════════════════════════════════════════
+   §MO  APPROVED MOTION LANGUAGE — keyframes + utility classes
+        (CopyPaste-1f90 epic; spec items 1-10)
+   ─────────────────────────────────────────────────────────────────────────
+   All classes below use --mo-* duration/easing tokens from :root.
+   NO laser scan-lines, NO aurora spins, NO infinite shimmer loops.
+   ALL motion wrapped in @media (prefers-reduced-motion: reduce) at bottom.
+   ══════════════════════════════════════════════════════════════════════════ */
 
-/* ── Glass hover-shine sweep ─────────────────────────────────────────────────
-   [rgwb] Toned down: opacity halved (0.45 → 0.18) so it reads as a soft sheen,
-   not a moving bright line crossing the card. The gradient band is also much
-   narrower (transparent bands widened) to reduce the "line" visual. */
-
-@keyframes glassShine {
-  to { transform: translateX(120%); }
+/* ── §MO-1 Modal scrim + card ───────────────────────────────────────────── */
+@keyframes modalScrimIn  { from { opacity: 0; } to { opacity: 1; } }
+@keyframes modalScrimOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes modalCardIn {
+  from { opacity: 0; transform: translateY(8px) scale(.985); }
+  to   { opacity: 1; transform: translateY(0)   scale(1);    }
+}
+@keyframes modalCardOut {
+  from { opacity: 1; transform: translateY(0)   scale(1);    }
+  to   { opacity: 0; transform: translateY(8px) scale(.985); }
 }
 
-/* ── Premium entrance animations (CopyPaste-52mz) ────────────────────────────
-   cardIn:      card lifts from below with scale + opacity. Spring cubic-bezier.
-   revealUp:    section/row reveals from a slight downward offset (no scale).
-   listItemIn:  staggered list item fade+rise — pair with animation-delay per item.
+.modal-scrim-enter { animation: modalScrimIn  var(--mo-base) var(--mo-ease-standard) both; }
+.modal-scrim-exit  { animation: modalScrimOut var(--mo-base) var(--mo-ease-standard) both; }
+.modal-card-enter  { animation: modalCardIn   var(--mo-slow) var(--mo-ease-emphasized) both; }
+.modal-card-exit   { animation: modalCardOut  var(--mo-slow) var(--mo-ease-emphasized) both; }
 
-   All use --speed scalar so cinematic (0.72) is snappier than calm (1.45).
-   NOT cheap bounce — spring is the out-expo-family (.16,1,.3,1). */
+/* ── §MO-2 Page/panel transition (translateX ±18–24px + opacity) ─────────── */
+@keyframes panelSlideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0);    }
+}
+@keyframes panelSlideOutLeft {
+  from { opacity: 1; transform: translateX(0);    }
+  to   { opacity: 0; transform: translateX(-20px); }
+}
+@keyframes panelSlideInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0);     }
+}
+@keyframes panelSlideOutRight {
+  from { opacity: 1; transform: translateX(0);    }
+  to   { opacity: 0; transform: translateX(20px); }
+}
 
+.panel-enter-right { animation: panelSlideInRight  var(--mo-slow) var(--mo-ease-emphasized) both; }
+.panel-exit-left   { animation: panelSlideOutLeft  var(--mo-slow) var(--mo-ease-emphasized) both; }
+.panel-enter-left  { animation: panelSlideInLeft   var(--mo-slow) var(--mo-ease-emphasized) both; }
+.panel-exit-right  { animation: panelSlideOutRight var(--mo-slow) var(--mo-ease-emphasized) both; }
+
+/* ── §MO-3 Row hover + press ─────────────────────────────────────────────── */
+/* hover: background switches to surface-hover via transition (fast, standard) */
+@keyframes rowPress {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(.992); }
+  100% { transform: scale(1); }
+}
+
+.row-interactive {
+  transition: background-color var(--mo-fast) var(--mo-ease-standard);
+}
+.row-interactive:hover {
+  background-color: var(--surface-hover, var(--ide-hover));
+}
+.row-press {
+  animation: rowPress var(--mo-fast) var(--mo-ease-standard);
+}
+
+/* ── §MO-4 Copy-flash (instant keyframe, 90ms) ───────────────────────────── */
+/* 45% snapshot: accent outline + success-soft bg; back to base. No long shimmer. */
+@keyframes copyFlash {
+  0%  { outline: 2px solid transparent; background-color: transparent; }
+  45% {
+    outline: 2px solid var(--ide-success);
+    background-color: var(--ide-success-dim, rgba(95,173,101,.10));
+  }
+  100% { outline: 2px solid transparent; background-color: transparent; }
+}
+
+.copy-flash {
+  animation: copyFlash var(--mo-instant) var(--mo-ease-standard) both;
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+
+/* ── §MO-5 Online-pulse (ONE-SHOT, triggered on connect/recent-sync) ─────── */
+/* box-shadow ring 0→9px→transparent over 2s. NOT infinite — apply class once. */
+@keyframes onlinePulse {
+  0%   { box-shadow: 0 0 0 0   var(--ide-success); opacity: 1; }
+  70%  { box-shadow: 0 0 0 9px var(--ide-success); opacity: 0; }
+  100% { box-shadow: 0 0 0 9px transparent;         opacity: 0; }
+}
+
+.online-pulse {
+  animation: onlinePulse 2s var(--mo-ease-standard) forwards;
+  /* Remove class after animation ends via JS to allow re-trigger on next connect */
+}
+
+/* ── §MO-5b Syncing-dot (CONTINUOUS while state="syncing") ────────────────── */
+/* 1jms.27: gentle opacity breathe distinguishes "syncing" from "synced" without
+   a loud loop. 1.4 s cycle at --mo-ease-standard is calm and premium. The dot
+   stays green (bg-ide-success) — only the rhythmic opacity changes.
+   @media prefers-reduced-motion: held at full opacity (no animation). */
+@keyframes syncingBreath {
+  0%, 100% { opacity: 1;    }
+  50%       { opacity: 0.35; }
+}
+
+.syncing-dot {
+  animation: syncingBreath 1.4s var(--mo-ease-standard) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .syncing-dot { animation: none; }
+}
+
+/* ── §MO-6 Toast enter/exit ──────────────────────────────────────────────── */
+@keyframes toastEnter {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px) scale(.985); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0)   scale(1);    }
+}
+@keyframes toastExit {
+  from { opacity: 1; transform: translateX(-50%) translateY(0)   scale(1);    }
+  to   { opacity: 0; transform: translateX(-50%) translateY(7px) scale(.992); }
+}
+
+/* Legacy toastIn (same base keyframe — kept for compat) */
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0);   }
+}
+
+.toast-enter { animation: toastEnter var(--mo-base) var(--mo-ease-emphasized) both; }
+.toast-exit  { animation: toastExit  var(--mo-base) var(--mo-ease-emphasized) both; }
+/* Legacy alias */
+.toast-in    { animation: toastIn 180ms cubic-bezier(.16,1,.3,1) both; }
+
+/* ── §MO-7 QR code hidden/reveal state ──────────────────────────────────── */
+/* Default hidden — blurred + faded + slightly scaled up.
+   Overlay: backdrop-blur(12px). NO laser scan-line (removed). */
+
+.qr-hidden .qr-grid {
+  filter: blur(7px);
+  opacity: .46;
+  transform: scale(1.015);
+  transition:
+    filter    var(--mo-slow) var(--mo-ease-emphasized),
+    opacity   var(--mo-slow) var(--mo-ease-emphasized),
+    transform var(--mo-slow) var(--mo-ease-emphasized);
+}
+
+.qr-visible .qr-grid {
+  filter: blur(0);
+  opacity: 1;
+  transform: scale(1);
+  transition:
+    filter    var(--mo-slow) var(--mo-ease-emphasized),
+    opacity   var(--mo-slow) var(--mo-ease-emphasized),
+    transform var(--mo-slow) var(--mo-ease-emphasized);
+}
+
+.qr-overlay {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    backdrop-filter var(--mo-slow) var(--mo-ease-emphasized),
+    opacity         var(--mo-slow) var(--mo-ease-emphasized);
+}
+
+/* qr-scan and scan-line keyframes removed per spec (NO laser scan-line). */
+/* Legacy .qr-scan kept as position:relative container only — no animation. */
+.qr-scan { position: relative; overflow: hidden; }
+
+/* ── §MO-8 Segmented control glide layer ───────────────────────────────── */
+/* Single gliding background layer moves via translateX per index (JS sets
+   --seg-index on the container). Active text gets accent colour. */
+
+.segmented-track {
+  position: relative;
+}
+
+.segmented-glider {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  /* Width is set by JS to match the active segment width */
+  transition: transform var(--mo-base) var(--mo-ease-emphasized);
+  /* Visual treatment: glass card fill for the active pill */
+  background: rgba(var(--surface-rgb), calc(var(--glass-opacity, .40) + .12));
+  border: 1px solid var(--glass-border, rgba(255,255,255,.16));
+  border-radius: var(--skin-r-ctl, 9px);
+  pointer-events: none;
+}
+
+.segmented-item {
+  position: relative;
+  z-index: 1;
+  transition: color var(--mo-base) var(--mo-ease-emphasized);
+}
+
+.segmented-item[aria-selected="true"],
+.segmented-item.active {
+  color: var(--ide-accent);
+}
+
+/* ── §MO-9 Switch / toggle track + knob ─────────────────────────────────── */
+/* Track bg changes (fast, standard). Knob translateX(20px) (fast, standard).
+   .on state → accent-strong bg. No glow halo. */
+
+.switch-track {
+  transition: background-color var(--mo-fast) var(--mo-ease-standard);
+  background-color: var(--ide-raised, rgba(255,255,255,.10));
+}
+
+.switch-track.on {
+  background-color: var(--accent-strong, var(--ide-accent));
+}
+
+.switch-knob {
+  transition: transform var(--mo-fast) var(--mo-ease-standard);
+  transform: translateX(0);
+}
+
+.switch-track.on .switch-knob {
+  transform: translateX(20px);
+}
+
+/* ── §MO-10 Card hover lift (desktop pointer only) ──────────────────────── */
+/* translateY(-2px), border accent-line, shadow lift. base/emphasized timing.
+   Scoped to hover+fine-pointer media to avoid sticky states on touch. */
+
+@media (hover: hover) and (pointer: fine) {
+  .card-hover {
+    transition:
+      transform    var(--mo-base) var(--mo-ease-emphasized),
+      border-color var(--mo-base) var(--mo-ease-emphasized),
+      box-shadow   var(--mo-base) var(--mo-ease-emphasized);
+  }
+
+  .card-hover:hover {
+    transform:    translateY(-2px);
+    border-color: var(--accent-line, rgba(var(--ide-accent-rgb), .40));
+    box-shadow:
+      0 8px 24px rgba(0,0,0,.22),
+      0 2px 8px  rgba(0,0,0,.16),
+      inset 0 1px 0 rgba(255,255,255,.12);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §MO-LEGACY  Pre-existing entrance + micro-interaction animations
+   (kept for backward-compat; see original CopyPaste-52mz / CopyPaste-965s)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* Popup entrance §4 */
+@keyframes popupEnter {
+  from { opacity: 0; transform: scale(0.97) translateY(4px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* fadeIn — light fade+rise used by inline fadeIn references */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(3px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* Premium entrance animations (CopyPaste-52mz) */
 @keyframes cardIn {
-  from {
-    opacity: 0;
-    transform: scale(.96) translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+  from { opacity: 0; transform: scale(.96) translateY(10px); }
+  to   { opacity: 1; transform: scale(1)   translateY(0);    }
 }
 
 @keyframes revealUp {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0);   }
 }
 
 @keyframes listItemIn {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0);   }
 }
 
-/* Reduced-motion: honour the OS preference */
-@media (prefers-reduced-motion: reduce) {
-  .popup-enter {
-    animation: none !important;
-  }
-  * {
-    transition-duration: 1ms !important;
-    animation-duration: 1ms !important;
-  }
-}
+/* glassShine removed — static ::before sheen replaces the hover sweep (VISM-5). */
 
-/* ── Popup entrance animation class ─────────────────────────────────────── */
+/* ── Animation utility classes ─────────────────────────────────────────── */
 .popup-enter {
   animation: popupEnter 160ms cubic-bezier(.16,1,.3,1) both;
 }
 
-/* ── Toast animation class ───────────────────────────────────────────────── */
-.toast-in {
-  animation: toastIn 180ms cubic-bezier(.16,1,.3,1) both;
-}
-
-/* ── Premium entrance animation utility classes (CopyPaste-52mz) ─────────── */
-/* Use .card-in on glass card surfaces, .reveal-up on section headers,
-   .list-item-in on list rows with animation-delay for stagger.
-   [rgwb fix 3] .card-in sets overflow:hidden + position:relative so the
-   scale/opacity entrance is clipped to the card's border-radius. Without this,
-   the scale(0.96) keyframe from could bleed a rectangular outline at frame 0. */
 .card-in {
   animation: cardIn calc(220ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
-  /* Defensive clip: ensures entrance scale transform doesn't show square edge.
-     If the element already has overflow:hidden (via .surface-card) this is a no-op. */
   position: relative;
   overflow: hidden;
 }
@@ -1902,21 +2137,20 @@ button,
   animation: listItemIn calc(140ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
 }
 
-/* ── Component micro-interaction utilities (Liquid Glass, CopyPaste-965s) ───
-   [calm] All LOOPING / idle animations removed. Only one-shot entrance and
-   hover affordances remain (glassShine on hover, togglePop on toggle,
-   tabIndicator on tab switch). Classes kept as no-ops so existing markup
-   compiles without change.
+/* ── Skin row-treatment markers (HistoryView.tsx) ──────────────────────────── */
+/* skin-row-inset: vapor skin — each row is a self-contained rounded card.
+   Subtle elevated fill so the inset card reads against the panel surface. */
+.skin-row-inset {
+  background: rgba(var(--ide-elevated-rgb), calc(var(--glass-opacity, 0.08) + 0.08));
+}
 
-   Removed looping animations:
-     statusPing (2.4 s infinite) — status-ping class now a static dot
-     iconFloat  (4 s infinite)   — icon-float class becomes no-op
-     networkRing (2.7 s infinite) — network-rings class becomes no-op
-     qrScan    (2.5 s infinite)  — qr-scan class no longer draws a scan line
-     navActivePulse (3.2 s infinite) — nav-active-glow becomes no-op
-     badgeFloat (3.4 s infinite) — badge-float becomes no-op
-     progressPulse (2.6 s infinite) — progress-pulse becomes no-op           */
+/* skin-row-line: quiet skin — flat dividers, no card depth.
+   No extra background; the divider border (border-b) provides the row separation. */
+.skin-row-line {
+  /* intentionally blank — row separation comes from the border-b Tailwind class */
+}
 
+/* ── Component micro-interaction utilities (legacy no-ops for removed anim) ─ */
 /* Live presence dot — static ring, no looping animation. */
 .status-ping { position: relative; }
 .status-ping::after {
@@ -1925,15 +2159,14 @@ button,
   inset: -5px;
   border-radius: 50%;
   border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
-  /* [calm] ping animation removed — ring is static */
   opacity: 0.4;
   pointer-events: none;
 }
 
-/* Floating glyph — no-op (animation removed). */
-.icon-float { /* [calm] iconFloat infinite removed */ }
+/* Floating glyph — no-op (iconFloat infinite removed). */
+.icon-float { /* no idle animation */ }
 
-/* Discovery network rings — static subtle rings, no animation. */
+/* Discovery network rings — static, no looping animation. */
 .network-rings { position: relative; }
 .network-rings::before,
 .network-rings::after {
@@ -1942,48 +2175,82 @@ button,
   inset: -6px;
   border-radius: 50%;
   border: 1px solid color-mix(in srgb, var(--accent-2) 20%, transparent);
-  /* [calm] networkRing infinite removed — rings are static */
   opacity: 0.35;
   pointer-events: none;
 }
-
-/* QR scan sweep — container only, no animated scan line. */
-.qr-scan { position: relative; overflow: hidden; }
-/* [calm] qr-scan::after scan-line pseudo-element removed entirely */
 
 /* Sidebar active nav-item — static accent glow, no breathing. */
 .nav-active-glow {
   box-shadow: 0 8px 24px color-mix(in srgb, var(--accent) 28%, transparent),
               inset 0 1px 0 rgba(255,255,255,.30);
-  /* [calm] navActivePulse infinite removed */
 }
 
-/* Badge — no float. */
-.badge-float { /* [calm] badgeFloat infinite removed */ }
+/* No-op stubs for removed looping animations (markup compiles without change). */
+.badge-float    { /* badgeFloat infinite removed */ }
+.progress-pulse { /* progressPulse infinite removed */ }
 
-/* Progress bar — no brightness pulse. */
-.progress-pulse { /* [calm] progressPulse infinite removed */ }
-
-/* Toggle thumb spring pop (toggle on togglePop class to the thumb on change). */
-.toggle-pop { animation: togglePop calc(.36s * var(--speed, .72)) cubic-bezier(.2,1.24,.28,1); }
+/* Toggle thumb spring pop — calm ease (no >1 overshoot: MOT-12) */
+.toggle-pop { animation: togglePop calc(.36s * var(--speed, .72)) cubic-bezier(.2,0,.2,1); }
 @keyframes togglePop {
-  0% { transform: scale(.86); }
-  60% { transform: scale(1.12); }
+  0%   { transform: scale(.86); }
   100% { transform: scale(1); }
 }
 
-/* Tab active indicator grow. */
-.tab-indicator { animation: tabIndicator calc(.42s * var(--speed, .72)) cubic-bezier(.2,1.24,.28,1) both; transform-origin: center; }
+/* Tab active indicator grow */
+.tab-indicator {
+  animation: tabIndicator calc(.42s * var(--speed, .72)) cubic-bezier(.2,1.24,.28,1) both;
+  transform-origin: center;
+}
 @keyframes tabIndicator {
   from { transform: scaleX(.4); opacity: 0; }
-  to { transform: scaleX(1); opacity: 1; }
+  to   { transform: scaleX(1);  opacity: 1; }
 }
 
-/* Terminal cursor blink (logs). */
-.cursor-blink { animation: cursorBlink 1.1s steps(1) infinite; }
+/* Terminal cursor blink (logs) — ~530 ms = standard OS cadence (MOT-13) */
+.cursor-blink { animation: cursorBlink 530ms steps(1) infinite; }
 @keyframes cursorBlink {
-  0%, 49% { opacity: 1; }
+  0%, 49%  { opacity: 1; }
   50%, 100% { opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   §MO-RM  REDUCED-MOTION — gate ALL motion behind OS preference
+   Applies to every §MO class + legacy animations above.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  /* Disable all keyframe animations */
+  .modal-scrim-enter, .modal-scrim-exit,
+  .modal-card-enter, .modal-card-exit,
+  .panel-enter-right, .panel-exit-left,
+  .panel-enter-left, .panel-exit-right,
+  .row-press, .copy-flash, .online-pulse,
+  .toast-enter, .toast-exit, .toast-in,
+  .popup-enter, .card-in, .reveal-up, .list-item-in,
+  .toggle-pop, .tab-indicator,
+  .cursor-blink {
+    animation: none !important;
+  }
+  /* Disable all transitions on interactive elements */
+  .row-interactive,
+  .segmented-glider, .segmented-item,
+  .switch-track, .switch-knob {
+    transition: none !important;
+  }
+  /* QR reveal is instant */
+  .qr-hidden .qr-grid,
+  .qr-visible .qr-grid,
+  .qr-overlay {
+    transition: none !important;
+  }
+  /* Card hover — no transform on reduced motion */
+  .card-hover:hover {
+    transform: none !important;
+  }
+  /* Blanket fallback for anything not explicitly listed */
+  * {
+    transition-duration: 1ms !important;
+    animation-duration:  1ms !important;
+  }
 }
 
 /* ── Content-type chip (shared across popup + history) ───────────────────── */

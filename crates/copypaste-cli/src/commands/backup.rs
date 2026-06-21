@@ -6,99 +6,12 @@
 //! and can produce a consistent in-process SQLCipher copy via `VACUUM INTO`.
 //!
 //! The shell-script helpers (`locate_script`, `build_backup_args`,
-//! `build_restore_args`) are retained for diagnostics and external tooling
-//! but are no longer called by the CLI dispatch path.
+//! `build_restore_args`) are kept in the test module to verify the shell
+//! interface without being reachable from the CLI dispatch path.
 
 use anyhow::{anyhow, Context, Result};
 use copypaste_ipc::{METHOD_DB_BACKUP, METHOD_DB_RESTORE};
-use std::path::{Path, PathBuf};
-
-// These helpers are used only in the test module below. The binary no longer
-// calls them (it routes through the daemon IPC verbs instead), but we keep
-// them so the script-plumbing tests continue to verify the shell interface.
-#[allow(dead_code)]
-/// Locate a script in `scripts/` next to the running binary or the repo root.
-///
-/// Resolution order:
-///   1. `$COPYPASTE_SCRIPTS_DIR/<name>` (test / packaging override).
-///   2. `<exe-dir>/../../scripts/<name>` (cargo target/debug layout).
-///   3. `<exe-dir>/../scripts/<name>`.
-///   4. `<cwd>/scripts/<name>` (when invoked from the repo root).
-///
-/// Returns the first existing path; otherwise an error explaining where
-/// we looked so a packager can diagnose a broken install.
-pub(crate) fn locate_script(name: &str) -> Result<PathBuf> {
-    let mut tried: Vec<PathBuf> = Vec::new();
-
-    if let Ok(dir) = std::env::var("COPYPASTE_SCRIPTS_DIR") {
-        let p = PathBuf::from(dir).join(name);
-        if p.is_file() {
-            return Ok(p);
-        }
-        tried.push(p);
-    }
-
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            // target/debug/copypaste → ../../scripts
-            let p1 = exe_dir.join("../../scripts").join(name);
-            if p1.is_file() {
-                return Ok(p1);
-            }
-            tried.push(p1);
-
-            // target/release/copypaste or /usr/local/bin/copypaste → ../scripts
-            let p2 = exe_dir.join("../scripts").join(name);
-            if p2.is_file() {
-                return Ok(p2);
-            }
-            tried.push(p2);
-        }
-    }
-
-    let cwd_path = PathBuf::from("scripts").join(name);
-    if cwd_path.is_file() {
-        return Ok(cwd_path);
-    }
-    tried.push(cwd_path);
-
-    Err(anyhow!(
-        "script `{name}` not found. Looked in:\n  {}",
-        tried
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join("\n  ")
-    ))
-}
-
-/// Build the argument list passed to `backup-db.sh`. Pure function so we
-/// can unit-test the wiring without spawning a subprocess.
-#[allow(dead_code)]
-pub(crate) fn build_backup_args(output: Option<&str>, dry_run: bool) -> Vec<String> {
-    let mut args: Vec<String> = Vec::new();
-    if let Some(dir) = output {
-        args.push("--output-dir".to_string());
-        args.push(dir.to_string());
-    }
-    if dry_run {
-        args.push("--dry-run".to_string());
-    }
-    args
-}
-
-/// Build the argument list passed to `restore-db.sh`.
-#[allow(dead_code)]
-pub(crate) fn build_restore_args(backup_path: &str, force: bool, dry_run: bool) -> Vec<String> {
-    let mut args: Vec<String> = vec![backup_path.to_string()];
-    if force {
-        args.push("--force".to_string());
-    }
-    if dry_run {
-        args.push("--dry-run".to_string());
-    }
-    args
-}
+use std::path::Path;
 
 /// Back up the live clipboard database via the daemon's `db_backup` IPC verb.
 ///
@@ -244,6 +157,92 @@ pub fn run_restore(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+
+    // These helpers are used only in this test module. The binary routes
+    // through daemon IPC verbs instead, but we keep the helpers here so the
+    // script-plumbing tests continue to verify the shell interface.
+
+    /// Locate a script in `scripts/` next to the running binary or the repo root.
+    ///
+    /// Resolution order:
+    ///   1. `$COPYPASTE_SCRIPTS_DIR/<name>` (test / packaging override).
+    ///   2. `<exe-dir>/../../scripts/<name>` (cargo target/debug layout).
+    ///   3. `<exe-dir>/../scripts/<name>`.
+    ///   4. `<cwd>/scripts/<name>` (when invoked from the repo root).
+    ///
+    /// Returns the first existing path; otherwise an error explaining where
+    /// we looked so a packager can diagnose a broken install.
+    fn locate_script(name: &str) -> Result<PathBuf> {
+        let mut tried: Vec<PathBuf> = Vec::new();
+
+        if let Ok(dir) = std::env::var("COPYPASTE_SCRIPTS_DIR") {
+            let p = PathBuf::from(dir).join(name);
+            if p.is_file() {
+                return Ok(p);
+            }
+            tried.push(p);
+        }
+
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                // target/debug/copypaste → ../../scripts
+                let p1 = exe_dir.join("../../scripts").join(name);
+                if p1.is_file() {
+                    return Ok(p1);
+                }
+                tried.push(p1);
+
+                // target/release/copypaste or /usr/local/bin/copypaste → ../scripts
+                let p2 = exe_dir.join("../scripts").join(name);
+                if p2.is_file() {
+                    return Ok(p2);
+                }
+                tried.push(p2);
+            }
+        }
+
+        let cwd_path = PathBuf::from("scripts").join(name);
+        if cwd_path.is_file() {
+            return Ok(cwd_path);
+        }
+        tried.push(cwd_path);
+
+        Err(anyhow!(
+            "script `{name}` not found. Looked in:\n  {}",
+            tried
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>()
+                .join("\n  ")
+        ))
+    }
+
+    /// Build the argument list passed to `backup-db.sh`. Pure function so we
+    /// can unit-test the wiring without spawning a subprocess.
+    fn build_backup_args(output: Option<&str>, dry_run: bool) -> Vec<String> {
+        let mut args: Vec<String> = Vec::new();
+        if let Some(dir) = output {
+            args.push("--output-dir".to_string());
+            args.push(dir.to_string());
+        }
+        if dry_run {
+            args.push("--dry-run".to_string());
+        }
+        args
+    }
+
+    /// Build the argument list passed to `restore-db.sh`.
+    fn build_restore_args(backup_path: &str, force: bool, dry_run: bool) -> Vec<String> {
+        let mut args: Vec<String> = vec![backup_path.to_string()];
+        if force {
+            args.push("--force".to_string());
+        }
+        if dry_run {
+            args.push("--dry-run".to_string());
+        }
+        args
+    }
 
     /// `backup` with no flags must pass an empty arg list — the script
     /// then uses its own defaults (output dir = `<repo>/backups`).

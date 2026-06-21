@@ -1,6 +1,15 @@
-# CopyPaste Design System v2 — "Quiet Precision"
+> **[SUPERSEDED — HISTORICAL REFERENCE ONLY]**
+> This document describes the "Quiet Precision" (dark Darcula-blue) design era.
+> It has been superseded by the **Liquid Glass** direction.
+> Current approved styleguide: [`docs/liquid-glass-styleguide.html`](../liquid-glass-styleguide.html)
+> Current cross-platform contract: [`docs/PARITY-SPEC.md`](../PARITY-SPEC.md)
+> Do **not** use these tokens or specs for new work — refer to PARITY-SPEC instead.
 
-Status: APPROVED DIRECTION (user: "відполірувати настільки, щоб в рамочку хотіли ставити; максимально зручний інтерфейс"). Target: Raycast-grade instant feel, Linear-grade restraint, Things-grade warmth. Keep Darcula-blue base; tighten everything to exact values. These tokens are the new source of truth.
+---
+
+# CopyPaste Design System v2 — "Quiet Precision" *(historical)*
+
+Status: ~~APPROVED DIRECTION~~ **SUPERSEDED** — see banner above. Original intent: "відполірувати настільки, щоб в рамочку хотіли ставити; максимально зручний інтерфейс". Target was Raycast-grade instant feel, Linear-grade restraint, Things-grade warmth. Keep Darcula-blue base; tighten everything to exact values. These tokens are the new source of truth.
 
 ## 0. Token-drift fix (DO FIRST — free, unblocks everything)
 

@@ -35,13 +35,27 @@ class DeviceKeyStore(context: Context) {
     suspend fun getOrCreate(): DeviceCert = withContext(Dispatchers.IO) {
         settings.p2pIdentity?.toDeviceCert() ?: run {
             val cert = generateDeviceCert()
-            // CopyPaste-ah3i: convert to P2pIdentity, persist (the setter wraps
-            // keyDer with the AndroidKeyStore KEK), then immediately zero the
+            // CopyPaste-ah3i / CopyPaste-1jms.11: convert to P2pIdentity, persist
+            // (the setter wraps keyDer with the AndroidKeyStore KEK), then zero the
             // plaintext private-key ByteArray so it does not linger on the heap.
+            //
+            // CopyPaste-1jms.11: pass a COPY of keyDer to Settings so that
+            // zeroKeyMaterial() below cannot corrupt any ByteArray reference that
+            // Settings (or wrapKey) might still hold. The original identity.keyDer is
+            // zeroed; the cert returned to the caller retains its own keyDer (List<UByte>
+            // from FFI) which is a separate allocation and is unaffected.
             val identity = cert.toP2pIdentity()
-            settings.p2pIdentity = identity
-            // Zero the keyDer copy now that the wrapped form is stored.
+            settings.p2pIdentity = identity.copy(keyDer = identity.keyDer.copyOf())
+            // Zero the original keyDer now that the wrapped copy is stored.
             identity.zeroKeyMaterial()
+            // CopyPaste-44rq.55: also zero cert.keyDer (the List<UByte> from the
+            // UniFFI FFI allocation). Since DeviceCert.keyDer is `var` we can
+            // replace it with a zeroed list before returning so the private key
+            // does not linger in the original FFI-allocated List object on the heap.
+            // Callers that need keyDer after first-use MUST call peek() to re-fetch
+            // the KEK-unwrapped key from AndroidKeyStore — settings.p2pIdentity
+            // was persisted just above and is immediately available via peek().
+            cert.keyDer = List(cert.keyDer.size) { 0.toUByte() }
             cert
         }
     }

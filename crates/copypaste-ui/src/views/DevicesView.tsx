@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { ConfirmModal } from "../components/ConfirmModal";
 import { Briefcase, RefreshCw, Zap, AlertCircle } from "lucide-react";
+// 5917.19: GlassToast system — routes "Revoke all" confirmation/feedback through
+// the shared toast provider instead of a raw <span> in the actions bar.
+import { useToast, ToastProvider } from "../components/Toast";
 import {
   api,
   ipcErrorMessage,
@@ -20,7 +23,8 @@ import { ViewShell } from "../components/ViewShell";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
 import {
-  // StatusDot, DeviceMetaGrid, extractIp used internally by ThisDeviceCard/PeerRow
+  // DeviceMetaGrid, extractIp used internally by ThisDeviceCard/PeerRow
+  StatusDot,
   MetaRow,
   ThisDeviceCard,
   PeerRow,
@@ -78,6 +82,12 @@ const SAS_POLL_MS = 700;
  */
 const DISCOVERED_POLL_MS = 3000;
 
+// bdac.9: watchdog timeout for the SAS pairing modal. If no terminal state
+// (confirmed/rejected/aborted/timed_out) is reached within this window, the
+// modal shows a friendly error instead of spinning forever. 30 s is generous
+// (typical LAN handshake < 5 s) but accommodates slow mDNS discovery.
+const SAS_WATCHDOG_MS = 30_000;
+
 /**
  * Modal that drives the SAS pairing handshake for a single peer. Works for
  * BOTH the initiator (user clicked "Pair") and the responder (incoming pairing
@@ -115,7 +125,9 @@ function SasPairingModal({
   );
   const [error, setError] = useState<string | null>(null);
   const [confirmPending, setConfirmPending] = useState(false);
-  const [sasCopied, setSasCopied] = useState(false);
+  // bdac.9: ref holds the watchdog handle so the cleanup callback can cancel it
+  // regardless of effect re-runs. Initialised null; set on each poll-effect mount.
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // True once the handshake ended without a local confirm (trailing `idle`
   // from the daemon's standing responder). Neutral terminal close state — not
   // an error, not a success. Distinct from the daemon's `aborted` wire state.
@@ -135,10 +147,9 @@ function SasPairingModal({
     unmountedRef.current = false;
     return () => { unmountedRef.current = true; };
   }, []);
-  // Focus trap — traps Tab/Shift+Tab inside the dialog panel and restores focus on close.
+  // modalRef and copiedTimer are declared here; useFocusTrap is called after
+  // handleClose is defined below (it depends on handleClose for the onEscape option).
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef);
-  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const terminal =
     ended ||
@@ -224,27 +235,45 @@ function SasPairingModal({
       }
     };
 
+    // bdac.9: watchdog — arm once on mount; cleared if a terminal state is
+    // reached first. Uses watchdogRef so the cleanup below can always access
+    // the latest handle without re-closing over a stale value.
+    watchdogRef.current = setTimeout(() => {
+      if (!cancelled) {
+        setError(
+          "Pairing timed out. Check that both devices are on the same network and try again."
+        );
+      }
+    }, SAS_WATCHDOG_MS);
+
     void poll();
     return () => {
       cancelled = true;
       if (timer !== null) clearTimeout(timer);
+      if (watchdogRef.current !== null) {
+        clearTimeout(watchdogRef.current);
+        watchdogRef.current = null;
+      }
     };
   }, [onPaired, initialStatus]);
 
-  useEffect(() => {
-    return () => {
-      if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-    };
-  }, []);
-
-  // Close the modal. Aborts the pairing unless it already succeeded.
+  // Close the modal. Always resets the daemon pairing state machine via
+  // pairAbort — on abort/cancel (non-terminal) this cancels the in-flight
+  // pairing; on terminal confirmed/aborted states it resets the machine so a
+  // subsequent LAN pairing attempt is not blocked. The daemon handles
+  // pair_abort gracefully from any state. (bd CopyPaste-1jms.3, 1jms.12)
   const handleClose = useCallback(() => {
-    if (!confirmedRef.current) {
-      // Best-effort abort; ignore failure (modal is closing regardless).
-      void api.pairAbort().catch(() => {});
-    }
+    // Best-effort reset; ignore failure (modal is closing regardless).
+    void api.pairAbort().catch(() => {});
     onClose();
   }, [onClose]);
+
+  // Focus trap — traps Tab/Shift+Tab inside the dialog panel and restores focus on close.
+  // A11Y-3 / CopyPaste-5917.6: Escape key closes the modal (matching ConfirmModal pattern).
+  // A11Y-11 / CopyPaste-5917.30: onEscape wired through useFocusTrap so no separate listener needed.
+  // Declared here (after handleClose) because useFocusTrap stores onEscape in a ref internally
+  // so the hook always sees the latest value without re-registering the listener.
+  useFocusTrap(modalRef, { onEscape: handleClose });
 
   const handleConfirm = useCallback(
     async (accept: boolean) => {
@@ -258,7 +287,10 @@ function SasPairingModal({
         await api.pairConfirmSas(accept);
         if (unmountedRef.current) return;
         if (!accept) {
-          // User said it doesn't match — close immediately.
+          // User said it doesn't match — reset the state machine and close.
+          // pairAbort resets to idle so a subsequent pairing is not blocked.
+          // (bd CopyPaste-1jms.3)
+          void api.pairAbort().catch(() => {});
           onClose();
           return;
         }
@@ -277,21 +309,6 @@ function SasPairingModal({
     [onClose]
   );
 
-  const handleCopySas = useCallback(() => {
-    if (status.sas === undefined) return;
-    const sas = status.sas;
-    navigator.clipboard.writeText(sas).then(
-      () => {
-        setSasCopied(true);
-        if (copiedTimer.current !== null) clearTimeout(copiedTimer.current);
-        copiedTimer.current = setTimeout(() => setSasCopied(false), 1500);
-      },
-      () => {
-        // Clipboard denied — non-fatal; the code is visible on screen.
-      }
-    );
-  }, [status.sas]);
-
   // Resolve the display name for the modal title. Initiator: the full
   // DiscoveredDevice. Responder/incoming-pairing: an explicit displayName prop
   // (from the App-level incoming-pairing event) or the peer meta the daemon
@@ -307,16 +324,22 @@ function SasPairingModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="modal-scrim-enter fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ background: "var(--ide-scrim)" }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="sas-modal-title"
+      // A11Y-3 / CopyPaste-5917.6: Escape dismisses; backdrop click cancels
+      // (matching the ConfirmModal pattern).
+      onClick={(e) => { if (e.target === e.currentTarget) handleClose(); }}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); handleClose(); } }}
     >
       {/* surface-glass-strong = floating frosted-glass pairing dialog.
+          modal-card-enter: approved motion entrance (§MO-1).
           W-C4: radius and shadow are skin-driven so quiet/vapor skins adapt. */}
       <div
         ref={modalRef}
-        className="surface-glass-strong w-full max-w-sm p-5"
+        className="modal-card-enter surface-glass-strong w-full max-w-sm p-5"
         style={{ borderRadius: "var(--skin-r-modal)", boxShadow: "var(--skin-shadow-float)" }}
       >
         <p id="sas-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
@@ -336,8 +359,9 @@ function SasPairingModal({
         {/* Connecting / initiating */}
         {!ended && status.state === "initiating" && error === null && (
           <div className="flex items-center gap-2 py-4">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
-            <p className="text-[12px] text-ide-dim">Connecting...</p>
+            {/* animate-spin + motion-reduce:animate-none — respects reduced-motion (MOT-18) */}
+            <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent" />
+            <p className="text-[12px] text-ide-dim">Connecting…</p>
           </div>
         )}
 
@@ -354,7 +378,8 @@ function SasPairingModal({
           status.state !== "aborted" &&
           status.state !== "timed_out" && (
             <div className="flex items-center gap-2 py-4">
-              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
+              {/* animate-spin + motion-reduce:animate-none — respects reduced-motion (MOT-18) */}
+              <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent" />
               <p className="text-[12px] text-ide-dim">Waiting for the other device…</p>
             </div>
           )}
@@ -365,16 +390,17 @@ function SasPairingModal({
             <p className="mb-2 text-[12px] text-ide-dim">
               Confirm this code matches the one shown on the other device.
             </p>
-            <button
-              type="button"
-              onClick={handleCopySas}
-              title={sasCopied ? "Copied!" : "Click to copy"}
-              className="mx-auto block bg-ide-panel/60 px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text hover:bg-ide-hover focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
-              style={{ borderRadius: "var(--skin-r-ctl)" }}
+            {/* Security: SAS code is display-only. userSelect:none + no click-to-copy
+                prevents any clipboard reader from grabbing the live PAKE secret.
+                (bd CopyPaste-1jms.1) */}
+            <div
+              className="mx-auto block bg-ide-panel/60 px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text text-center"
+              style={{ borderRadius: "var(--skin-r-ctl)", userSelect: "none" }}
+              aria-label={`Security code: ${status.sas}`}
+              data-testid="sas-code-display"
             >
               {status.sas}
-              {sasCopied && <span className="ml-2 text-[12px] text-ide-success">✓</span>}
-            </button>
+            </div>
             {/* Peer metadata grid — rendered from whatever the daemon knows at
                 SAS time (mDNS: name, IPs, fingerprint). All rows are optional;
                 nothing renders when a field is absent (responder path). */}
@@ -401,15 +427,20 @@ function SasPairingModal({
                 Doesn't match
               </button>
               {/* wv57: aria-label so screen readers announce "Codes match" even when
-                  the visible text is replaced by "..." while the confirm is in flight. */}
+                  the visible text is replaced by a spinner while the confirm is in flight.
+                  5917.16: use an inline spinner (animate-spin) instead of "..." text so
+                  there is a clear loading indicator during the pending state. */}
               <button
                 onClick={() => void handleConfirm(true)}
                 disabled={confirmPending}
                 aria-label="Codes match — confirm pairing"
-                className="bg-ide-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex items-center gap-1.5 bg-ide-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
                 style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
-                {confirmPending ? "..." : "Match"}
+                {confirmPending && (
+                  <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-white/40 border-t-white" />
+                )}
+                {confirmPending ? "Confirming…" : "Match"}
               </button>
             </div>
           </div>
@@ -418,18 +449,21 @@ function SasPairingModal({
         {/* Waiting after the user accepted, for the peer to also accept */}
         {!ended && status.state === "awaiting_sas" && status.sas === undefined && (
           <div className="flex items-center gap-2 py-4">
-            <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-ide-faint border-t-ide-accent" />
-            <p className="text-[12px] text-ide-dim">Waiting for the other device...</p>
+            {/* animate-spin + motion-reduce:animate-none — respects reduced-motion (MOT-18) */}
+            <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent" />
+            <p className="text-[12px] text-ide-dim">Waiting for the other device…</p>
           </div>
         )}
 
-        {/* Terminal success */}
+        {/* Terminal success — use handleClose so pairAbort resets the daemon
+            state machine, unblocking a subsequent LAN pairing attempt.
+            (bd CopyPaste-1jms.12) */}
         {status.state === "confirmed" && (
           <div className="py-3">
             <p className="text-[13px] font-medium text-ide-success">Paired ✓</p>
             <div className="mt-3 flex justify-end">
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
                 style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
@@ -439,7 +473,9 @@ function SasPairingModal({
           </div>
         )}
 
-        {/* Terminal failure */}
+        {/* Terminal failure — use handleClose so pairAbort resets the daemon
+            state machine, unblocking a subsequent LAN pairing attempt.
+            (bd CopyPaste-1jms.3) */}
         {(status.state === "rejected" ||
           status.state === "aborted" ||
           status.state === "timed_out") && (
@@ -453,7 +489,7 @@ function SasPairingModal({
             </p>
             <div className="mt-3 flex justify-end">
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
                 style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
@@ -474,7 +510,7 @@ function SasPairingModal({
             </p>
             <div className="mt-3 flex justify-end">
               <button
-                onClick={onClose}
+                onClick={handleClose}
                 className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
                 style={{ borderRadius: "var(--skin-r-ctl)" }}
               >
@@ -586,20 +622,27 @@ function RevokeConfirmDialog({
   onRevokeAndRotate: (fp: string) => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(dialogRef);
+  // A11Y-4 / CopyPaste-5917.9: Escape dismisses the revoke dialog.
+  // A11Y-11 / CopyPaste-5917.30: routed through useFocusTrap to avoid a separate listener.
+  useFocusTrap(dialogRef, { onEscape: onCancel });
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-6"
+      className="modal-scrim-enter fixed inset-0 z-50 flex items-center justify-center p-6"
+      style={{ background: "var(--ide-scrim)" }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="revoke-modal-title"
+      // A11Y-4 / CopyPaste-5917.9: Escape + backdrop click cancel the dialog.
+      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+      onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}
     >
       {/* surface-glass-strong = floating frosted-glass revoke dialog.
+          modal-card-enter: approved motion entrance (§MO-1).
           W-C4: radius and shadow are skin-driven so quiet/vapor skins adapt. */}
       <div
         ref={dialogRef}
-        className="surface-glass-strong w-full max-w-sm p-5"
+        className="modal-card-enter surface-glass-strong w-full max-w-sm p-5"
         style={{ borderRadius: "var(--skin-r-modal)", boxShadow: "var(--skin-shadow-float)" }}
       >
         <p id="revoke-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
@@ -614,6 +657,9 @@ function RevokeConfirmDialog({
 
         <label className="mb-1 block text-[11px] font-medium text-ide-faint">
           New sync passphrase (for rotation)
+          {/* CopyPaste-5917.25: clarify this field is only used by Revoke & rotate,
+              not by the plain Revoke only action. */}
+          <span className="ml-1.5 font-normal text-ide-faint/70">— only used by "Revoke &amp; rotate"</span>
         </label>
         <input
           type="password"
@@ -658,7 +704,8 @@ function RevokeConfirmDialog({
             className="bg-ide-danger px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:cursor-not-allowed disabled:opacity-40"
             style={{ borderRadius: "var(--skin-r-ctl)" }}
           >
-            {revokeBusy ? "..." : "Revoke & rotate"}
+            {/* bdac.83: aligned to Android label "Revoke & rotate key" for platform parity */}
+            {revokeBusy ? "…" : "Revoke & rotate key"}
           </button>
         </div>
       </div>
@@ -676,10 +723,10 @@ const QR_TTL_SECS = 120;
 const QR_REFRESH_MARGIN_SECS = 15;
 
 // ---------------------------------------------------------------------------
-// Main view
+// Main view (inner — requires ToastProvider ancestor)
 // ---------------------------------------------------------------------------
 
-export function DevicesView({
+function DevicesViewInner({
   incomingPairing = null,
 }: {
   /**
@@ -728,8 +775,8 @@ export function DevicesView({
   // New sync-key passphrase entered in the "Revoke & rotate" path.
   const [rotatePassphrase, setRotatePassphrase] = useState("");
   const [revokeBusy, setRevokeBusy] = useState(false);
-  const [globalMsg, setGlobalMsg] = useState<{ text: string; isError: boolean } | null>(null);
-  const globalMsgTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 5917.19: feedback routed through GlassToast instead of a raw <span>.
+  const { show: showToast } = useToast();
 
   // --- LAN discovery + SAS pairing ---
   const [discovered, setDiscovered] = useState<DiscoveredDevice[]>([]);
@@ -884,7 +931,12 @@ export function DevicesView({
 
       // Refresh QR_REFRESH_MARGIN_SECS before expiry so the user always has
       // a scannable code — single-use tokens expire after QR_TTL_SECS.
+      // 1jms.7: immediately zero the countdown when the refresh fires so the
+      // displayed countdown accurately reflects the token lifetime. The daemon
+      // replaces pending_qr_token the moment generateQr() resolves, so showing
+      // "15" while the token is already queued for replacement is misleading.
       if (remaining <= QR_REFRESH_MARGIN_SECS) {
+        setQrSecsLeft(0);
         void generateQr();
       }
     };
@@ -1007,12 +1059,17 @@ export function DevicesView({
       );
       setDiscovered(unpaired);
     } catch (e) {
-      // Discovery is best-effort (e.g. P2P disabled). Don't surface as a hard
-      // error — just show an empty list. A real daemon-offline state is already
-      // handled by the peers loader above.
+      // Daemon-offline is already surfaced by the peers loader above — stay silent here.
       if (e instanceof IpcError && e.code === "daemon_offline") {
         setDiscovered([]);
+        return;
       }
+      // All other errors (e.g. P2P disabled, socket timeout) are surfaced inline so
+      // the user understands why the discovered list is empty (CopyPaste-44rq.27).
+      setDiscovered([]);
+      const msg = `Could not load nearby devices: ${ipcErrorMessage(e, "unexpected error")}`;
+      setDiscoverError(msg);
+      console.error("[DevicesView] loadDiscovered error:", e);
     }
   }, []);
 
@@ -1095,14 +1152,6 @@ export function DevicesView({
     return () => { peerActionCancelledRef.current = true; };
   }, []);
 
-  // Clear handler-scheduled message timer on unmount so a late tick never
-  // calls setState on an unmounted component (UI memory leak).
-  useEffect(() => {
-    return () => {
-      if (globalMsgTimer.current !== null) clearTimeout(globalMsgTimer.current);
-    };
-  }, []);
-
   // --- Row helpers ---
   const setRowPending = (fingerprint: string, pending: boolean) => {
     setRowState((prev) => ({
@@ -1175,12 +1224,10 @@ export function DevicesView({
         ...prev,
         [fingerprint]: { revokedAt: revoked_at, pending: false, error: null },
       }));
-      if (globalMsgTimer.current !== null) clearTimeout(globalMsgTimer.current);
-      setGlobalMsg({
-        text: "Revoked & rotated sync key — re-provision remaining devices",
-        isError: false,
+      showToast("Revoked & rotated sync key — re-provision remaining devices", {
+        kind: "success",
+        duration: 5000,
       });
-      globalMsgTimer.current = setTimeout(() => setGlobalMsg(null), 5000);
       await loadPeers();
     } catch (err) {
       if (peerActionCancelledRef.current) return;
@@ -1197,33 +1244,20 @@ export function DevicesView({
     try {
       const result = await api.revokeAllPeers();
       const n = result.revoked ?? 0;
-      if (globalMsgTimer.current !== null) clearTimeout(globalMsgTimer.current);
-      setGlobalMsg({ text: `Revoked ${n} device${n === 1 ? "" : "s"}`, isError: false });
-      globalMsgTimer.current = setTimeout(() => setGlobalMsg(null), 3000);
+      showToast(`Revoked ${n} device${n === 1 ? "" : "s"}`, { kind: "success", duration: 3000 });
       await loadPeers();
     } catch (err) {
       const msg = ipcErrorMessage(err, "Revoke all failed");
-      if (globalMsgTimer.current !== null) clearTimeout(globalMsgTimer.current);
-      setGlobalMsg({ text: msg, isError: true });
-      globalMsgTimer.current = setTimeout(() => setGlobalMsg(null), 4000);
+      showToast(msg, { kind: "error", duration: 4000 });
     } finally {
       setRevokeAllPending(false);
     }
   };
 
   // --- Actions bar ---
+  // 5917.19: globalMsg span removed — feedback now goes through GlassToast (showToast above).
   const actions = (
     <div className="flex items-center gap-2">
-      {globalMsg !== null && (
-        <span
-          className={[
-            "text-[12px]",
-            globalMsg.isError ? "text-ide-danger" : "text-ide-success",
-          ].join(" ")}
-        >
-          {globalMsg.text}
-        </span>
-      )}
       {/* uw45: replaced tiny inline Yes/No with a proper modal confirmation */}
       <button
         onClick={() => setRevokeAllConfirm(true)}
@@ -1231,7 +1265,7 @@ export function DevicesView({
         className="border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
         style={{ borderRadius: "var(--skin-r-ctl)" }}
       >
-        {revokeAllPending ? "Revoking..." : "Revoke all"}
+        {revokeAllPending ? "Revoking…" : "Revoke all"}
       </button>
       <ConfirmModal
         open={revokeAllConfirm}
@@ -1268,15 +1302,17 @@ export function DevicesView({
     );
   }
 
-  // --- Not-ready state (daemon up, still initialising) ---
+  // --- Not-ready state (daemon up, still initializing) ---
+  // bdac.84: "initialising" → "initializing" (American English); body uses
+  // plain user-facing language rather than "service" jargon.
   if (loadState === "not_ready") {
     return (
       <ViewShell title="Devices" actions={actions}>
         <EmptyState
           className="h-full"
           icon={<Zap width={28} height={28} strokeWidth={1.5} />}
-          title="Starting up…"
-          body="The clipboard service is initialising. Device list will appear in a moment."
+          title="Starting…"
+          body="CopyPaste is starting up. Your devices will appear in a moment."
         />
       </ViewShell>
     );
@@ -1316,15 +1352,17 @@ export function DevicesView({
     <ViewShell title="Devices" actions={actions}>
       {/* ── Devices section header — with online count ──────────── */}
       {/* The online count uses the live presence store when available (updated
-          ~every 1 s from peer events); falls back to peer.online from the last
-          10 s list_peers poll when the store has no entry yet. */}
+          ~every 5 s (idle: 30 s) by App.tsx's startPeerPresencePolling() loop);
+          falls back to peer.online from the last 10 s list_peers poll when the
+          store has no entry yet. */}
       {/* zxv2: SectionHeader replaces raw <p> tag; faint=true keeps the
           DevicesView style (text-ide-faint vs SubsectionHeader's text-ide-dim). */}
       <div className="mb-2 flex items-center justify-between">
-        <SectionHeader label="Paired Devices" faint />
+        {/* bdac.48: sentence case to match other section headers */}
+        <SectionHeader label="Paired devices" faint />
         {loadState === "ready" && peers.length > 0 && (
-          <span className="text-[11px] text-ide-faint">
-            <span className="inline-block w-2 h-2 rounded-full bg-ide-success mr-1 align-middle" />
+          <span className="inline-flex items-center gap-1 text-[11px] text-ide-faint">
+            <StatusDot online={true} />
             {peers.filter((p) => {
               const live = presenceOnline[p.fingerprint];
               return live !== undefined ? live : p.online === true;
@@ -1342,8 +1380,14 @@ export function DevicesView({
       >
         {/* This device — always first */}
         {ownState.status === "loading" && (
-          <div className="px-3 py-2.5">
-            <p className="text-[13px] text-ide-faint animate-pulse">Loading...</p>
+          /* Skeleton matches ThisDeviceCard layout: avatar block + two text rows.
+             animate-pulse communicates loading shape without layout jump (CopyPaste-5917.22). */
+          <div className="flex items-center gap-3 px-3 py-2.5 animate-pulse" aria-busy="true" aria-label="Loading device…">
+            <div className="shrink-0 w-[38px] h-[38px] rounded-xl bg-ide-divider" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="h-[13px] w-32 rounded bg-ide-divider" />
+              <div className="h-[11px] w-20 rounded bg-ide-divider" />
+            </div>
           </div>
         )}
         {ownState.status === "offline" && (
@@ -1357,8 +1401,13 @@ export function DevicesView({
 
         {/* Paired peers */}
         {loadState === "loading" && (
-          <div className="px-3 py-2.5">
-            <p className="text-[13px] text-ide-faint animate-pulse">Loading peers...</p>
+          /* Skeleton matches PeerRow layout: avatar block + two text rows (CopyPaste-5917.22). */
+          <div className="flex items-center gap-3 px-3 py-2.5 animate-pulse" aria-busy="true" aria-label="Loading peers…">
+            <div className="shrink-0 w-[38px] h-[38px] rounded-xl bg-ide-divider" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="h-[13px] w-36 rounded bg-ide-divider" />
+              <div className="h-[11px] w-24 rounded bg-ide-divider" />
+            </div>
           </div>
         )}
         {loadState === "ready" && peers.length === 0 && (
@@ -1447,8 +1496,8 @@ export function DevicesView({
             aria-hidden="true"
             className="network-rings shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl text-ide-accent"
             style={{
-              background: "color-mix(in srgb, var(--accent) 15%, rgba(var(--surface-strong-rgb, 0 0 0) / .35))",
-              border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--line, rgba(255,255,255,.08)))",
+              background: "color-mix(in srgb, var(--accent) 15%, var(--ide-elevated))",
+              border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--ide-border))",
             }}
           >
             {/* Wifi-style discovery icon (inline SVG, lucide signal shape) */}
@@ -1482,35 +1531,43 @@ export function DevicesView({
         style={{ borderRadius: "var(--skin-r-card)" }}
       >
         {qrState.status === "loading" && (
-          <p className="text-[12px] text-ide-dim animate-pulse">Generating...</p>
+          // Static muted text — no animate-pulse (MOT-21)
+          <p className="text-[12px] text-ide-dim">Generating…</p>
         )}
 
         {qrState.status === "ready" && (
           <div className="flex items-start gap-5">
             {/* QR code — SVG comes from our own Tauri backend and never
                 contains remote markup — dangerouslySetInnerHTML is safe here.
-                Privacy-first: blurred by default, revealed on click (spec §10).
-                qr-scan: adds an animated scan-line via CSS ::after (styleguide §qr). */}
+                Privacy-first: .qr-hidden by default (§MO-7 CSS primitive), revealed
+                only on intentional click (spec §10 / CopyPaste-1jms.2).
+                qrBlur state is INDEPENDENT of QR generation — regenerating the token
+                does NOT reset to hidden so the user's reveal decision is preserved. */}
+            {/* 5917.85: framed/card treatment — surface-card token supplies
+                border + background consistent with other QR surfaces. bg-white
+                is preserved inside so the QR module is always black-on-white. */}
             <div
-              className="qr-scan relative shrink-0 bg-white p-2 overflow-hidden"
+              className={[
+                "relative shrink-0 surface-card p-2 overflow-hidden",
+                qrBlur === "blurred" ? "qr-hidden" : "qr-visible",
+              ].join(" ")}
               style={{ width: 190, height: 190, borderRadius: "var(--skin-r-card)" }}
             >
+              {/* qr-grid: the blurred/revealed target (§MO-7) */}
               <div
-                className={[
-                  "[&>svg]:block [&>svg]:h-full [&>svg]:w-full transition-[filter] duration-200",
-                  qrBlur === "blurred" ? "blur-md" : "",
-                ].join(" ")}
+                className="qr-grid [&>svg]:block [&>svg]:h-full [&>svg]:w-full"
                 style={{ width: "100%", height: "100%" }}
                 // eslint-disable-next-line react/no-danger
                 dangerouslySetInnerHTML={{ __html: qrState.qr.svg }}
               />
-              {/* Blur overlay — click-to-reveal affordance */}
+              {/* qr-overlay: backdrop-blur frosted reveal affordance (§MO-7).
+                  Shown only when blurred; fades out on reveal via CSS transition. */}
               {qrBlur === "blurred" && (
                 <button
                   type="button"
                   onClick={handleQrReveal}
-                  className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
+                  className="qr-overlay absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
+                  style={{ borderRadius: "inherit" }}
                   aria-label="Click to reveal QR code"
                 >
                   <span className="text-[11px] font-medium text-ide-dim select-none">
@@ -1520,9 +1577,18 @@ export function DevicesView({
               )}
             </div>
             <div className="min-w-0 flex-1 space-y-2">
-              {/* Payload only visible when QR is revealed */}
+              {/* Payload only visible when QR is revealed — display-only, never
+                  copyable. The QR SVG above is the canonical pairing channel;
+                  the raw payload string must not be extractable via clipboard.
+                  userSelect:none prevents select-all clipboard capture.
+                  (bd CopyPaste-1jms.5) */}
               {qrBlur === "revealed" && (
-                <p className="select-all break-all font-mono text-[10px] text-ide-faint">
+                <p
+                  className="break-all font-mono text-[10.5px] text-ide-faint"
+                  style={{ userSelect: "none" }}
+                  data-testid="qr-payload-text"
+                  aria-hidden="true"
+                >
                   {qrState.qr.payload}
                 </p>
               )}
@@ -1538,7 +1604,7 @@ export function DevicesView({
                       <div className="w-full h-0.5 rounded-full bg-ide-elevated overflow-hidden">
                         <div
                           data-testid="qr-drain-bar"
-                          // progress-pulse: subtle brightness breathe (styleguide §progress)
+                          // progress-pulse: no-op stub (brightness pulse removed, MOT-7); class kept for selector compat
                           className={[
                             "progress-pulse h-full rounded-full transition-[width] duration-1000 ease-linear",
                             qrSecsLeft <= 20 ? "bg-ide-warning" : "bg-ide-accent",
@@ -1579,7 +1645,8 @@ export function DevicesView({
         )}
 
         {qrState.status === "idle" && (
-          <p className="text-[12px] text-ide-dim animate-pulse">Generating pairing code...</p>
+          // Static muted text — no animate-pulse (MOT-21)
+          <p className="text-[12px] text-ide-dim">Generating pairing code…</p>
         )}
       </section>
 
@@ -1636,5 +1703,23 @@ export function DevicesView({
         />
       )}
     </ViewShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DevicesView — public export wraps the inner component in ToastProvider so
+// useToast() calls inside DevicesViewInner have a provider in the tree.
+// Pattern mirrors HistoryView (CopyPaste-5917.102 / 5917.19).
+// ---------------------------------------------------------------------------
+
+export function DevicesView({
+  incomingPairing = null,
+}: {
+  incomingPairing?: PairSasStatus | null;
+} = {}) {
+  return (
+    <ToastProvider>
+      <DevicesViewInner incomingPairing={incomingPairing} />
+    </ToastProvider>
   );
 }

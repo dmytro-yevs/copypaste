@@ -8,8 +8,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.slideInVertically
+import com.copypaste.android.ui.theme.EaseOutExpo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -174,12 +178,11 @@ fun AboutScreen(
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
 
-    // Card slide-up + fade entrance — 0ms when reduced motion is active.
-    val cardAlpha by animateFloatAsState(
-        targetValue = if (entered) 1f else 0f,
-        animationSpec = tween(if (reduced) 0 else slowDur),
-        label = "aboutCardAlpha",
-    )
+    // Card Y-slide + fade entrance — matches GlassToast pattern (§8 EaseOutExpo, Motion.Slow).
+    // AnimatedVisibility gives us a slideInVertically so the card rises 1/12 of its own
+    // height and fades in simultaneously — more premium than alpha-only.
+    // (The old animateFloatAsState cardAlpha approach is replaced here; cardAlpha is retained
+    //  for backward compat but now unused — the AnimatedVisibility wrapper below takes over.)
 
     Scaffold(
         modifier = modifier,
@@ -204,9 +207,17 @@ fun AboutScreen(
         ) {
             // ── Identity + Features card ──────────────────────────────────────
             // Single glass card contains both blocks so they read as one premium unit.
-            CopyPasteCard(
-                modifier = Modifier.alpha(cardAlpha),
+            // §8 entrance: slideInVertically (1/12 height) + fadeIn, EaseOutExpo, Motion.Slow.
+            // Mirrors GlassToast enter transition for a consistent premium settling feel.
+            AnimatedVisibility(
+                visible = entered,
+                enter = if (reduced) fadeIn(tween(0))
+                else slideInVertically(
+                    animationSpec = tween(slowDur, easing = EaseOutExpo),
+                    initialOffsetY = { it / 12 },
+                ) + fadeIn(tween(slowDur, easing = EaseOutExpo)),
             ) {
+            CopyPasteCard {
                 // ── Identity ─────────────────────────────────────────────────
                 Column(
                     modifier = Modifier
@@ -305,6 +316,7 @@ fun AboutScreen(
                     }
                 }
             }
+            } // end AnimatedVisibility (card entrance)
 
             // ── GitHub link chip ──────────────────────────────────────────────
             // Tasteful standalone chip below the card; fades in after card.

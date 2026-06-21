@@ -508,16 +508,6 @@ export interface SyncStatus {
    * Absent on daemons predating this field; fall back to local derivation then.
    */
   badge_state?: SyncBadgeState | null;
-  // NOTE: degraded state is intentionally NOT modeled here. get_sync_status does
-  // not report it — the daemon exposes degraded/ready ONLY via `status` (see
-  // DaemonStatus / probeStatus). The fields below are kept for SettingsView
-  // compatibility; the daemon no longer emits them (always undefined at runtime).
-  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
-  keychain_locked?: boolean;
-  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
-  db_unavailable?: boolean;
-  /** @deprecated Never emitted by daemon; kept for SettingsView compat. */
-  degraded_reason?: string | null;
 }
 
 
@@ -974,6 +964,50 @@ export function isImageType(ct: string): boolean {
  */
 export function ipcErrorMessage(err: unknown, fallback: string): string {
   return err instanceof IpcError ? err.message : fallback;
+}
+
+/**
+ * Map a caught error to a safe, user-facing string that NEVER leaks socket
+ * paths, usernames, or internal Rust error strings into the DOM.
+ *
+ * Rules:
+ *  - Known IPC error codes → canonical friendly copy.
+ *  - Unknown IpcError      → "Something went wrong." (code is logged, not rendered).
+ *  - Non-IpcError          → "Something went wrong." (never serialises raw transport
+ *                            strings that may contain socket paths or usernames).
+ *
+ * Use this wherever `err.message` or `String(err)` would otherwise be rendered
+ * as visible text. Console-logging the raw error for diagnostics is fine —
+ * just never put it in the DOM.
+ */
+export function friendlyIpcError(err: unknown): string {
+  if (!(err instanceof IpcError)) {
+    // Non-IpcError (e.g. TypeError, transport string) — never leak internals.
+    return "Something went wrong.";
+  }
+  switch (err.code) {
+    case "daemon_offline":
+      return "The background service is not running.";
+    case "ipc_not_ready":
+    case "IPC_NOT_READY":
+      return "The background service is starting up. Please wait a moment.";
+    case "not_found":
+    case "NotFound":
+      return "The requested item was not found.";
+    case "permission_denied":
+    case "PermissionDenied":
+      return "Permission denied.";
+    case "migration_in_progress":
+      return "A database migration is in progress. Please wait.";
+    case "version_mismatch":
+      return "The app and background service are on incompatible versions. Please restart.";
+    case "rate_limited":
+      return "Too many requests. Please wait and try again.";
+    default:
+      // Unknown code — return generic copy. Do NOT include err.message: it may
+      // contain socket paths or other internal strings.
+      return "Something went wrong.";
+  }
 }
 
 /**

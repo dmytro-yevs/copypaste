@@ -46,9 +46,9 @@ confirmation, on each device.
 - **Android** — arm64-v8a; UniFFI bindings ship as an `.aar`.
 
 Windows is **frozen** as of 2026-05-23 — see
-[`docs/adr/ADR-012-windows-frozen-homebrew-only.md`](docs/adr/ADR-012-windows-frozen-homebrew-only.md)
-and [`docs/release/v0.3-plan.md`](docs/release/v0.3-plan.md). Windows users
-can run the daemon under WSL2 or wait for the freeze to be lifted; no ETA.
+[`docs/adr/ADR-012-windows-frozen-homebrew-only.md`](docs/adr/ADR-012-windows-frozen-homebrew-only.md).
+Windows users can run the daemon under WSL2 or wait for the freeze to be
+lifted; no ETA.
 
 ## Architecture
 
@@ -103,16 +103,138 @@ cd ../..
 
 ### UDL / Rust API contract
 
-| UDL function | Rust signature |
-|---|---|
-| `encrypt_text(bytes sequence<u8>, key sequence<u8>)` | `fn encrypt_text(bytes: &[u8], key: &[u8]) -> Result<EncryptedBlob, CopypasteError>` |
-| `decrypt_text(ciphertext sequence<u8>, nonce sequence<u8>, key sequence<u8>)` | `fn decrypt_text(ciphertext: &[u8], nonce: &[u8], key: &[u8]) -> Result<Vec<u8>, CopypasteError>` |
-| `is_sensitive(text string)` | `fn is_sensitive(text: String) -> bool` |
-| `sensitive_kind(text string)` | `fn sensitive_kind(text: String) -> Option<String>` |
-| `open_database(path string, key sequence<u8>)` | `fn open_database(path: String, key: &[u8]) -> Result<u64, CopypasteError>` |
-| `close_database(handle u64)` | `fn close_database(handle: u64)` |
+The full UDL surface is defined in
+[`crates/copypaste-android/uniffi/copypaste_android.udl`](crates/copypaste-android/uniffi/copypaste_android.udl).
+As of ABI 18 the namespace exposes **55 functions** across the following categories:
 
-Error variants with associated data (`DecryptionFailed { message }`, `DatabaseError { message }`) are declared as `[Error] interface` in the UDL, matching the Rust struct-variant form.
+**Crypto / sensitive detection (5 functions)**
+
+| UDL function | Description |
+|---|---|
+| `encrypt_text(item_id, bytes, key, key_version)` | XChaCha20-Poly1305 encrypt — binds `item_id` + `key_version` in AAD |
+| `decrypt_text(item_id, ciphertext, nonce, key, key_version)` | Decrypt a single item |
+| `decrypt_text_batch(items, key)` | Batch decrypt; skips (does not throw on) individual AEAD failures |
+| `is_sensitive(text)` | Returns `true` when confidence ≥ 0.70 |
+| `sensitive_kind(text)` | Returns pattern label (e.g. `"AwsKey"`) or `null` when not sensitive |
+
+**Sensitive capture helpers (3 functions)**
+
+| UDL function | Description |
+|---|---|
+| `sensitive_capture_decision(text, now_unix_ms, sensitive_ttl_secs)` | One-call verdict: `{is_sensitive, kind, expires_at_ms}` |
+| `sensitive_expires_at_ms(now_unix_ms, sensitive_ttl_secs)` | Compute auto-wipe expiry; `null` when TTL is 0 |
+| `detect_sensitive_spans(text)` | All sensitive match spans for in-list masking |
+
+**Storage (5 functions)**
+
+| UDL function | Description |
+|---|---|
+| `open_database(path, key)` → `u64` | Open the SQLCipher DB; returns an opaque handle |
+| `close_database(handle)` | Release the handle |
+| `add_clipboard_item(db_path, key, text)` → `String` | Store a text item (uses default TTL) |
+| `store_clipboard_item(db_path, key, text, sensitive_ttl_secs)` → `String` | Store with explicit TTL |
+| `get_history_count(db_path, key)` → `u64` | Count stored items |
+
+**History / search (2 functions)**
+
+| UDL function | Description |
+|---|---|
+| `fts_search(db_path, key, query, limit)` → `sequence<SearchResultItem>` | FTS5-indexed search (O(log N), metadata only) |
+| `get_history_page(db_path, key, limit, offset)` → `sequence<HistoryItem>` | Lamport-ordered page (pinned first) |
+
+**Cloud sync crypto (5 functions)**
+
+| UDL function | Description |
+|---|---|
+| `derive_cloud_sync_key(passphrase)` → `sequence<u8>` | Argon2id KDF → 32-byte sync key |
+| `cloud_encrypt(item_id, plaintext, sync_key_bytes)` | AEAD encrypt for cross-device sync |
+| `cloud_decrypt(item_id, blob, sync_key_bytes)` | AEAD decrypt |
+| `relay_inbox_id(sync_key)` → `String` | Deterministic shared relay inbox UUID |
+| `relay_public_key_b64(sync_key)` → `String` | Relay registration public key (base64) |
+| `relay_registration_pop(sync_key, device_id)` | HMAC-SHA256 proof-of-possession for relay registration |
+
+**Text classification (1 function)**
+
+| UDL function | Description |
+|---|---|
+| `classify_text_kind(text)` → `String` | Returns `"TEXT"`, `"URL"`, `"EMAIL"`, `"PHONE"`, `"COLOR"`, `"JSON"`, `"CODE"`, `"NUMBER"`, or `"PATH"` |
+
+**Private mode (2 functions)**
+
+| UDL function | Description |
+|---|---|
+| `set_private_mode(enabled)` | Seed/update the Rust-side private-mode flag |
+| `get_private_mode()` → `bool` | Read the current Rust-side private-mode flag |
+
+**Key rotation / revocation (2 functions)**
+
+| UDL function | Description |
+|---|---|
+| `revoke_device_and_rotate_key(db_path, key, fingerprint, name, new_passphrase)` | Revoke peer + rotate sync key atomically; returns new 32-byte key |
+| `rotate_sync_key(new_passphrase)` | Rotate sync key without revoking a peer |
+
+**QR pairing (2 functions)**
+
+| UDL function | Description |
+|---|---|
+| `build_pairing_qr(fingerprint, device_id, device_name, addr_hint)` → `PairingQrPayload` | Build QR payload (display side) |
+| `parse_pairing_qr(payload)` → `ScannedPairing` | Parse scanned QR (scan side) |
+
+**STUN / network (1 function)**
+
+| UDL function | Description |
+|---|---|
+| `resolve_stun_public_ip()` → `String?` | Discover public WAN IPv4 via STUN (blocking) |
+
+**Version / ABI (3 functions)**
+
+| UDL function | Description |
+|---|---|
+| `core_version()` → `String` | Rust crate version string |
+| `uniffi_abi_version()` → `u32` | Current ABI integer (bump on any UDL/contract break) |
+| `check_compatibility(kotlin_abi_version)` | Throws `VersionError::Incompatible` on mismatch |
+
+**P2P cert + pairing (5 functions)**
+
+| UDL function | Description |
+|---|---|
+| `generate_device_cert()` → `DeviceCert` | Generate self-signed mTLS cert + device UUID |
+| `bootstrap_pair_initiator(addr_hint, cert_der, key_der, pake_password, sync_addr, local_provisioning, …)` → `BootstrapResult` | PAKE pairing, initiator side |
+| `sync_with_peer(peer_addr, peer_fingerprint, session_key, cert_der, key_der, local_items, revoked_fingerprints, device_id)` → `P2pSyncResult` | One P2P sync session |
+| `start_p2p_listener(listen_port, cert_der, key_der, allowed_fingerprints, …)` → `P2pListenerHandle` | Bind inbound mTLS listener |
+| `poll_p2p_listener(listener_id)` → `sequence<SyncedItem>` | Drain inbound items since last poll |
+| `update_p2p_listener_peers(listener_id, allowed, revoked, session_keys)` | Live roster/denylist refresh |
+| `stop_p2p_listener(listener_id)` | Cancel and deregister listener |
+
+**LAN discovery + SAS pairing (7 functions)**
+
+| UDL function | Description |
+|---|---|
+| `start_discovery(device_id, device_name, sync_port, bport, cert_der, key_der, …)` | Start mDNS-SD discovery + standing SAS responder |
+| `stop_discovery()` | Stop discovery + responder |
+| `list_discovered(paired_fingerprints)` → `sequence<DiscoveredPeer>` | Snapshot discovered LAN peers |
+| `pair_with_discovered(device_id, cert_der, key_der, sync_addr, local_provisioning, …)` | Begin initiator SAS pairing with discovered peer |
+| `pair_get_sas()` → `PairStatus` | Poll pairing state machine |
+| `pair_confirm_sas(accept)` | Deliver accept/reject SAS decision |
+| `pair_abort()` | Cancel in-flight pairing |
+| `pair_reset()` | Reset state machine to `idle` |
+
+**Config (2 functions)**
+
+| UDL function | Description |
+|---|---|
+| `default_config()` → `Config` | Canonical defaults (pure, no I/O) |
+| `clamp_config(cfg)` → `Config` | Enforce floors/ceilings (pure, no I/O) |
+
+**Device revocation audit (3 functions)**
+
+| UDL function | Description |
+|---|---|
+| `revoke_device_audit(db_path, key, fingerprint, name)` → `u64` | Record revocation and remove from devices table |
+| `list_revoked_fingerprints(db_path, key)` → `sequence<String>` | List revoked device fingerprints |
+| `list_revoked_peers(db_path, key)` → `sequence<RevokedPeer>` | Richer audit listing with timestamps |
+
+Error types: `CopypasteError` (`EncryptionFailed`, `DecryptionFailed(reason)`, `DatabaseError(reason)`, `InvalidKeyLength`, `P2pError(reason)`, `Panicked(reason)`) and `VersionError` (`Incompatible(rust_abi, kotlin_abi)`).
 
 ## Building
 

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Copy, Check } from "lucide-react";
 import {
   formatWallTime,
   formatEpochSecs,
@@ -7,6 +8,8 @@ import {
 } from "../lib/ipc";
 // i2sr (PG-40): hybrid relative/absolute formatter for last-sync timestamps.
 import { formatSyncTime } from "../lib/time";
+// bdac.14: shared button so danger-tint style comes from one source of truth.
+import { ActionButton } from "./ActionButton";
 
 // ---------------------------------------------------------------------------
 // Shared device-card sub-components (CopyPaste-zxv2)
@@ -134,10 +137,12 @@ function FingerprintRow({ fingerprint }: { fingerprint: string | null }) {
 
   if (!fingerprint) return null;
 
-  // Truncate: first 8 chars + ellipsis + last 8 chars.
+  // bdac.52: PARITY-SPEC §7 canonical format = first 16 chars + "…" + last 8 chars
+  // (matches Android DevicesActivity.kt: fp.take(16) + "…" + fp.takeLast(8)).
+  // Previous macOS format was 8+8 (16 chars total); canonical is 16+8 (24 chars).
   const truncated =
-    fingerprint.length > 20
-      ? `${fingerprint.slice(0, 8)}…${fingerprint.slice(-8)}`
+    fingerprint.length > 24
+      ? `${fingerprint.slice(0, 16)}…${fingerprint.slice(-8)}`
       : fingerprint;
 
   const handleCopy = () => {
@@ -159,9 +164,14 @@ function FingerprintRow({ fingerprint }: { fingerprint: string | null }) {
         title={`Copy full fingerprint: ${fingerprint}`}
         aria-label={`Fingerprint: ${truncated} — click to copy`}
         onClick={handleCopy}
-        className="text-left text-[11px] text-ide-faint font-mono break-all tabular-nums hover:text-ide-accent cursor-pointer focus:outline-none"
+        className="inline-flex items-center gap-1 text-left text-[11px] text-ide-faint font-mono break-all tabular-nums hover:text-ide-accent cursor-pointer focus:outline-none"
       >
-        {copied ? "Copied!" : truncated}
+        <span>{copied ? "Copied!" : truncated}</span>
+        {/* Subtle copy-affordance icon — transitions to a check on success */}
+        {copied
+          ? <Check width={10} height={10} strokeWidth={2} aria-hidden="true" className="shrink-0 text-ide-success" />
+          : <Copy width={10} height={10} strokeWidth={1.5} aria-hidden="true" className="shrink-0 opacity-40 group-hover:opacity-70" />
+        }
       </button>
     </>
   );
@@ -181,7 +191,7 @@ export function ThisDeviceCard({ info }: { info: OwnDeviceInfo }) {
           {info.device_name ?? "This Device"}
         </p>
         {/* nmea: pill with hairline border matching accent tint; badge-float adds subtle levitate */}
-        <span className="badge-float shrink-0 rounded-full border border-ide-accent/30 px-1.5 py-0.5 text-[10px] font-medium bg-ide-accent/14 text-ide-accent">
+        <span className="badge-float shrink-0 rounded-full border border-ide-accent/30 px-1.5 py-0.5 text-[10.5px] font-medium bg-ide-accent/14 text-ide-accent">
           This Mac
         </span>
       </div>
@@ -285,9 +295,10 @@ export function PeerRow({
 
   return (
     // card-in: glass entrance fade-up (styleguide §device-card)
+    // card-hover: approved motion primitive for device card hover lift (§MO-10, desktop-only via media).
     // g4ze: changed from flex items-start justify-between to flex-col so the
     // action footer sits BELOW the metadata, not floated to the right.
-    <div className="card-in px-3 pt-2.5 pb-2 hover:bg-ide-hover">
+    <div className="card-in card-hover px-3 pt-2.5 pb-2 hover:bg-ide-hover">
       {/* Content area — full width */}
       <div className="min-w-0">
         {/* Name + online dot + transport chip */}
@@ -302,7 +313,7 @@ export function PeerRow({
           {/* nmea: transport chip — full-radius pill with hairline border; badge-float adds levitate */}
           <span
             className={[
-              "badge-float shrink-0 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+              "badge-float shrink-0 px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wide",
               transportClass,
             ].join(" ")}
           >
@@ -317,7 +328,7 @@ export function PeerRow({
         <span
           data-testid="trust-badge"
           style={{ borderRadius: "var(--skin-r-chip)" }}
-          className="mt-1 inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-ide-success/14 text-ide-success border border-ide-success/30"
+          className="mt-1 inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 text-[10.5px] font-medium bg-ide-success/14 text-ide-success border border-ide-success/30"
         >
           {/* Tiny filled circle — visual indicator matching the styleguide presence dot */}
           <span className="inline-block w-1 h-1 rounded-full bg-ide-success" aria-hidden="true" />
@@ -339,13 +350,6 @@ export function PeerRow({
           />
         </DeviceMetaGrid>
 
-        {/* Sync line: "Synced X ago" from last_sync_at */}
-        {lastSyncStr && (
-          <p className="mt-0.5 text-[11px] text-ide-faint tabular-nums">
-            Synced {lastSyncStr}
-          </p>
-        )}
-
         {/* Revoked / error states — kept on their own line for visual weight */}
         {revokedAt !== null && (
           <p className="mt-0.5 text-[11px] text-ide-accent">
@@ -359,30 +363,33 @@ export function PeerRow({
 
       {/* g4ze: Action footer — full-width row below metadata with hairline border-t.
            Both buttons are flex-1 equal width, matching Android's weight(1f) pattern.
-           spec §7: both destructive actions use danger-tint fill (bg-ide-danger/15).
-           W-C7: border-radius uses --skin-r-ctl (9px classic, 7px quiet, 12px vapor)
-           via inline style so the skin axis drives the shape without hardcoding rounded-ide. */}
+           bdac.14: use ActionButton(variant="danger") so the danger-tint style comes
+           from a single source of truth in ActionButton.tsx (spec §7). ActionButton
+           already applies --skin-r-ctl via inline style, so the W-C7 skin-radius
+           requirement is satisfied without an extra inline style here. */}
       <div className="mt-2 flex gap-1.5 border-t border-ide-border/20 pt-2">
-        {/* wv57: aria-label is always set so screen readers can identify the action
-            even when the visible text is replaced by "..." during in-flight ops. */}
-        <button
+        <ActionButton
+          variant="danger"
+          size="sm"
           onClick={() => onUnpair(peer.fingerprint)}
           disabled={isPending}
+          pending={isPending}
           aria-label={`Unpair ${peer.name || peer.fingerprint.slice(0, 8)}`}
-          style={{ borderRadius: "var(--skin-r-ctl)" }}
-          className="flex-1 bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex-1"
         >
-          {isPending ? "..." : "Unpair"}
-        </button>
-        <button
+          Unpair
+        </ActionButton>
+        <ActionButton
+          variant="danger"
+          size="sm"
           onClick={() => onRevoke(peer.fingerprint)}
           disabled={isPending}
+          pending={isPending}
           aria-label={`Revoke ${peer.name || peer.fingerprint.slice(0, 8)}`}
-          style={{ borderRadius: "var(--skin-r-ctl)" }}
-          className="flex-1 bg-ide-danger/15 px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-danger/25 disabled:cursor-not-allowed disabled:opacity-40"
+          className="flex-1"
         >
-          {isPending ? "..." : "Revoke"}
-        </button>
+          Revoke
+        </ActionButton>
       </div>
     </div>
   );

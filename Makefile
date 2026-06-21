@@ -31,7 +31,7 @@ clippy:
 	cargo clippy --workspace -- -D warnings
 
 install-daemon:
-	./launch/install.sh
+	./scripts/install-daemon.sh
 
 ## Install pre-built binary + LaunchAgent (macOS)
 install:

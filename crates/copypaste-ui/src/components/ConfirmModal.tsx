@@ -44,7 +44,9 @@ function ConfirmModalInner({
 
   return (
     <div
-      className="fixed inset-0 z-[9998] flex items-center justify-center bg-black/50 p-6"
+      // modal-scrim-enter: approved motion entrance for modal backdrop (§MO-1).
+      className="modal-scrim-enter fixed inset-0 z-[9998] flex items-center justify-center p-6"
+      style={{ background: "var(--ide-scrim)" }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-modal-title"
@@ -53,10 +55,11 @@ function ConfirmModalInner({
       // Escape key also cancels.
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}
     >
-      {/* surface-glass-strong = floating frosted-glass material — skin-driven radius + shadow */}
+      {/* surface-glass-strong = floating frosted-glass material — skin-driven radius + shadow.
+          modal-card-enter: approved motion entrance for modal card (§MO-1). */}
       <div
         ref={dialogRef}
-        className="surface-glass-strong w-full max-w-sm p-5"
+        className="modal-card-enter surface-glass-strong w-full max-w-sm p-5"
         style={{ borderRadius: "var(--skin-r-modal)", boxShadow: "var(--skin-shadow-float)" }}
       >
         <p id="confirm-modal-title" className="mb-2 text-[13px] font-semibold text-ide-text">
@@ -99,6 +102,7 @@ function ConfirmModalInner({
 /**
  * Mounted via a React portal so it renders outside the view shell DOM tree.
  * Pass `open={false}` to unmount; pass `open={true}` to render the modal.
+ * The modal plays modal-scrim-enter / modal-card-enter on mount.
  */
 export function ConfirmModal(props: ConfirmModalProps & { open: boolean }) {
   const { open, ...rest } = props;

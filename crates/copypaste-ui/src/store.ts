@@ -100,7 +100,7 @@ export interface UIPrefs {
    */
   historyDisplayLimit: number;
   /**
-   * When true (default), show a "Sensitive — click to reveal" confirmation overlay
+   * When true (default), show a "Sensitive — preview hidden · click to reveal" confirmation overlay
    * before revealing a sensitive item in the history list or detail modal. When
    * false, sensitive items are still blurred by maskSensitive but tapping/clicking
    * the blur reveals them immediately without an extra confirmation step.
@@ -119,6 +119,13 @@ export interface UIPrefs {
    * once W-F1 lands.
    */
   skin: SkinId;
+  /**
+   * When true, the History list groups items by the device they originated from,
+   * with the local device shown first. Matches Android's "Group by device" pref
+   * (Settings.kt:627 / strings.xml:483). Default false (sort by recency).
+   * Android parity: Android default is also false (off-by-default).
+   */
+  sortByDevice: boolean;
 }
 
 const DEFAULT_PREFS: UIPrefs = {
@@ -138,10 +145,12 @@ const DEFAULT_PREFS: UIPrefs = {
   motionReduced: false,
   // 1000 items is a sensible default — fast to render, shows plenty of history.
   historyDisplayLimit: 1000,
-  // Show the "Sensitive — click to reveal" overlay by default (Android parity).
+  // Show the "Sensitive — preview hidden · click to reveal" overlay by default (Android parity).
   showSensitiveWarnings: true,
   // Classic is the default skin — reproduces today's Liquid Glass look exactly.
   skin: "classic",
+  // Off by default — matches Android's default (sortByDevice is opt-in on both platforms).
+  sortByDevice: false,
 };
 
 function loadPrefs(): UIPrefs {

@@ -1,12 +1,20 @@
 /**
- * ContentIcon + KindChip — shared content-type icon components (CopyPaste-tsb).
+ * ContentIcon + KindChip + ContentIconTile — shared content-type icon
+ * components (CopyPaste-tsb, CopyPaste-5917).
  *
  * Unifies the two divergent content-type icon implementations that previously
  * lived in Popup.tsx (ContentChip) and HistoryView.tsx (ContentIcon + KindChip).
  * Per-view agents (History/Popup) will migrate to import from here.
  *
- * ContentIcon  — the type glyph only (lucide-react, stroke 1.5, currentColor)
- * KindChip     — the tinted full-word TYPE/URL/IMAGE/CODE pill
+ * ContentIcon      — the type glyph only (lucide-react, stroke 1.5, currentColor)
+ * ContentIconTile  — glyph in a square tile (mute/16 bg, spec §ICON-3)
+ * KindChip         — the tinted full-word TYPE/URL/IMAGE/CODE pill
+ *
+ * Icon set: ALL icons come from lucide-react (ICON-11 — single glyph family).
+ *
+ * Canonical PATH / NUMBER glyphs (ICON-4 — for Android parity):
+ *   PATH   → lucide FolderOpen  (Android: Icons.Outlined.FolderOpen — replaces AttachFile)
+ *   NUMBER → lucide Hash        (Android: Icons.Outlined.Tag → replace with Hash-equivalent)
  */
 
 import {
@@ -93,12 +101,12 @@ export interface ContentIconProps {
  *   email  → <Mail>       text-ide-success
  *   phone  → <Phone>      text-ide-success
  *   color  → <Palette>    text-ide-warning
- *   number → <Hash>       text-ide-warning
- *   path   → <FolderOpen> text-ide-warning
+ *   number → <Hash>       text-ide-warning  (canonical: lucide Hash — ICON-4)
+ *   path   → <FolderOpen> text-ide-warning  (canonical: lucide FolderOpen — ICON-4)
  *   json   → <Braces>     text-ide-danger
  *   file   → <FileText>   text-ide-dim
  *
- * All icons: strokeWidth=1.5, aria-hidden=true.
+ * All icons: strokeWidth=1.5, aria-hidden=true. All from lucide-react (ICON-11).
  */
 export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
   const kind = classify(contentType);
@@ -147,6 +155,63 @@ export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
 }
 
 // ---------------------------------------------------------------------------
+// ContentIconTile — glyph inside a rounded square tile (ICON-3)
+// ---------------------------------------------------------------------------
+
+export interface ContentIconTileProps extends ContentIconProps {
+  /**
+   * Tile size in px (the square container). Default: 26.
+   * The glyph size is derived from the icon's own `size` prop; tile padding
+   * centres it. Override `size` separately when you need a non-default glyph.
+   */
+  tileSize?: number;
+  /** Extra class names forwarded to the tile wrapper. */
+  className?: string;
+  /** Forwarded to the tile wrapper span for accessibility. */
+  "aria-label"?: string;
+  /** Forwarded to the tile wrapper span for tooltip. */
+  title?: string;
+  /** Forwarded to the tile wrapper span (e.g. role="img"). */
+  role?: string;
+}
+
+/**
+ * A square tile that wraps <ContentIcon> with the spec-required mute/16
+ * background (ICON-3: spec requires mute/16, NOT faint/16).
+ *
+ * Usage in HistoryView rows (migrate from the inline bg-ide-faint/16 div):
+ *   <ContentIconTile contentType={entry.content_type} />
+ */
+export function ContentIconTile({
+  contentType,
+  size = 14,
+  tileSize = 26,
+  className,
+  "aria-label": ariaLabel,
+  title,
+  role,
+}: ContentIconTileProps) {
+  return (
+    <span
+      className={[
+        "flex shrink-0 items-center justify-center rounded-[7px]",
+        // ICON-3: tile background must be mute/16, NOT faint/16.
+        "bg-ide-mute/16",
+        className ?? "",
+      ]
+        .join(" ")
+        .trim()}
+      style={{ width: tileSize, height: tileSize }}
+      aria-label={ariaLabel}
+      title={title}
+      role={role}
+    >
+      <ContentIcon contentType={contentType} size={size} />
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // KindChip — the tinted full-word pill
 // ---------------------------------------------------------------------------
 
@@ -163,8 +228,11 @@ export interface KindChipProps {
 /**
  * Derive a fallback kind label from content_type when the daemon does not
  * emit `kind`. Mirrors the daemon's fixed labels for UI consistency.
+ *
+ * Exported so callers (e.g. HistoryView) can share this logic without
+ * duplicating the content-type → label mapping (CopyPaste-bdac.29).
  */
-function kindFallback(contentType: string): string {
+export function kindFallback(contentType: string): string {
   if (contentType === "url") return "URL";
   if (contentType === "image" || contentType.startsWith("image/")) return "IMAGE";
   if (
@@ -179,9 +247,9 @@ function kindFallback(contentType: string): string {
 /**
  * Full-word type chip with semantic IDE token colors.
  *
- * Canonical kind→color table (spec §6):
- *   TEXT                        → accent (blue)
- *   URL                         → info (teal)
+ * Canonical kind→color table (spec §6, ICON-2 update):
+ *   TEXT                        → faint (grey) — ICON-2: was accent/blue; spec .b-text wants faint
+ *   URL                         → sky (teal)
  *   EMAIL / PHONE               → success (green)
  *   COLOR / NUMBER / PATH       → warning (amber)
  *   JSON                        → danger (red)
@@ -213,7 +281,8 @@ export function KindChip({ contentType, kind }: KindChipProps) {
       ? "text-ide-violet border-ide-violet/45 bg-ide-violet/14"
       : label === "FILE"
       ? "text-ide-dim border-ide-dim/45 bg-ide-dim/14"
-      : /* TEXT / fallback */ "text-ide-accent border-ide-accent/45 bg-ide-accent/14";
+      : /* TEXT / fallback — ICON-2: faint/grey, not accent/blue (spec .b-text) */
+        "text-ide-faint border-ide-faint/45 bg-ide-faint/14";
 
   return (
     <span
@@ -222,7 +291,7 @@ export function KindChip({ contentType, kind }: KindChipProps) {
         // rounded-ide-sm removed; border-radius set via inline style below.
         "flex shrink-0 items-center border px-1 py-px",
         // audit P1-3: bumped 9px → 10px for legibility.
-        "text-[10px] font-semibold leading-none tracking-wide uppercase",
+        "text-[10.5px] font-semibold leading-none tracking-wide uppercase",
         colorClass,
       ].join(" ")}
       aria-label={`Type: ${label}`}

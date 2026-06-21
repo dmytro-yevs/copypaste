@@ -8,7 +8,7 @@
  */
 import { describe, it, expect, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
-import { ContentIcon, KindChip } from "./ContentIcon";
+import { ContentIcon, KindChip, kindFallback } from "./ContentIcon";
 import { useUI } from "../store";
 import { act } from "react";
 
@@ -98,10 +98,12 @@ describe("ContentIcon", () => {
 // ---------------------------------------------------------------------------
 
 describe("KindChip", () => {
-  it("renders TEXT label with accent class", () => {
+  it("renders TEXT label with faint class (ICON-2: spec .b-text wants faint/grey, not accent/blue)", () => {
     const { getByText } = render(<KindChip contentType="text" />);
     const el = getByText("TEXT");
-    expect(el.className).toContain("text-ide-accent");
+    // ICON-2: TEXT badge uses faint/grey — plain text should not look accent-highlighted.
+    expect(el.className).toContain("text-ide-faint");
+    expect(el.className).not.toContain("text-ide-accent");
   });
 
   it("renders URL label with sky class", () => {
@@ -136,6 +138,49 @@ describe("KindChip", () => {
     );
     const el = getByText("IMAGE");
     expect(el.className).toContain("text-ide-sky");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// kindFallback — exported helper (CopyPaste-bdac.29)
+// ---------------------------------------------------------------------------
+
+describe("kindFallback", () => {
+  it("returns 'URL' for 'url'", () => {
+    expect(kindFallback("url")).toBe("URL");
+  });
+
+  it("returns 'IMAGE' for 'image'", () => {
+    expect(kindFallback("image")).toBe("IMAGE");
+  });
+
+  it("returns 'IMAGE' for 'image/png' (MIME prefix)", () => {
+    expect(kindFallback("image/png")).toBe("IMAGE");
+  });
+
+  it("returns 'CODE' for 'code'", () => {
+    expect(kindFallback("code")).toBe("CODE");
+  });
+
+  it("returns 'CODE' for 'text/x-python'", () => {
+    expect(kindFallback("text/x-python")).toBe("CODE");
+  });
+
+  it("returns 'CODE' for 'application/json'", () => {
+    expect(kindFallback("application/json")).toBe("CODE");
+  });
+
+  it("returns 'TEXT' for 'text' (plain text fallback)", () => {
+    expect(kindFallback("text")).toBe("TEXT");
+  });
+
+  it("returns 'TEXT' for 'file' (no matching branch)", () => {
+    // 'file' does not match url/image/code branches — falls through to TEXT
+    expect(kindFallback("file")).toBe("TEXT");
+  });
+
+  it("returns 'TEXT' for unknown/json string", () => {
+    expect(kindFallback("json")).toBe("TEXT");
   });
 });
 

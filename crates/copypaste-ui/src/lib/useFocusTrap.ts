@@ -19,13 +19,22 @@ const FOCUSABLE_SELECTORS = [
  *
  * While mounted:
  *   - Traps Tab / Shift+Tab so focus cycles within the container.
+ *   - If `onEscape` is provided, calls it when the Escape key is pressed
+ *     (A11Y-11 / CopyPaste-5917.30): callers don't each need to re-wire Escape.
  *
  * On unmount:
  *   - Restores focus to the element that was focused before the trap activated.
  */
-export function useFocusTrap(ref: RefObject<HTMLElement | null>) {
+export function useFocusTrap(
+  ref: RefObject<HTMLElement | null>,
+  { onEscape }: { onEscape?: () => void } = {}
+) {
   // Capture the element that had focus when the modal opened.
   const previousFocusRef = useRef<Element | null>(null);
+  // Keep onEscape in a ref so the keydown handler always sees the latest value
+  // without needing to re-register the listener on every render.
+  const onEscapeRef = useRef(onEscape);
+  onEscapeRef.current = onEscape;
 
   useEffect(() => {
     previousFocusRef.current = document.activeElement;
@@ -45,6 +54,15 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>) {
     }
 
     function handleKeyDown(e: KeyboardEvent) {
+      // Escape — delegate to caller if a handler was provided (A11Y-11).
+      if (e.key === 'Escape') {
+        if (onEscapeRef.current) {
+          e.preventDefault();
+          onEscapeRef.current();
+        }
+        return;
+      }
+
       if (e.key !== 'Tab') return;
       const focusableEls = Array.from(
         container!.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTORS)

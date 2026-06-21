@@ -32,7 +32,7 @@ describe("SettingsView resilience (daemon down)", () => {
     // The daemon-unavailable state must be surfaced (not a blank screen).
     await waitFor(() => {
       expect(
-        screen.getByText(/Daemon not running — clipboard sync paused/i),
+        screen.getByText(/Background service not running — clipboard sync paused/i),
       ).toBeInTheDocument();
     });
 
@@ -62,7 +62,7 @@ describe("SettingsView resilience (daemon down)", () => {
     // Still resilient after retry (daemon still down): banner persists, no throw.
     await waitFor(() => {
       expect(
-        screen.getByText(/Daemon not running — clipboard sync paused/i),
+        screen.getByText(/Background service not running — clipboard sync paused/i),
       ).toBeInTheDocument();
     });
     expect(screen.queryByText(/Something went wrong/i)).not.toBeInTheDocument();
@@ -90,7 +90,7 @@ describe("ErrorBoundary", () => {
     // shows a generic fallback instead of the thrown message.
     expect(screen.queryByText(/kaboom from render/i)).not.toBeInTheDocument();
     expect(
-      screen.getByText(/The daemon may be unavailable, or this screen failed to load/i),
+      screen.getByText(/The background service may be unavailable, or this screen failed to load/i),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Retry/i })).toBeInTheDocument();
   });
@@ -717,7 +717,7 @@ describe("CopyPaste-tk2j: error handling — non-offline IpcError is NOT shown a
     );
 
     await waitFor(() => {
-      expect(screen.getByText(/Daemon not running — clipboard sync paused/i)).toBeInTheDocument();
+      expect(screen.getByText(/Background service not running — clipboard sync paused/i)).toBeInTheDocument();
     });
   });
 });

@@ -172,6 +172,9 @@ class ClipboardService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // CopyPaste-44rq.1: publish the live instance so the static suppress/restore
+        // helpers can call removeCaptureOverlay / addCaptureOverlay on it.
+        instance = java.lang.ref.WeakReference(this)
         settings = Settings(this)
         repository = ClipboardRepository(this)
 
@@ -345,8 +348,12 @@ class ClipboardService : Service() {
         }
         scope.launch {
             try {
+                // CopyPaste-44rq.55: getOrCreate() zeroes cert.keyDer before returning;
+                // peek() re-fetches the KEK-unwrapped identity (including keyDer) from
+                // AndroidKeyStore so the keyDer is available for mTLS. The identity was
+                // just stored by getOrCreate(), so peek() is guaranteed non-null here.
                 val cert = withContext(Dispatchers.IO) {
-                    deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate()
+                    deviceKeyStore.peek() ?: deviceKeyStore.getOrCreate().let { deviceKeyStore.peek()!! }
                 }
                 // ydhw: reactive wait for the inbound listener port rather than a
                 // hard 3s deadline. startInboundP2pListener binds asynchronously on
@@ -732,6 +739,10 @@ class ClipboardService : Service() {
     }
 
     override fun onDestroy() {
+        // CopyPaste-44rq.1: clear the instance reference so suppress/restore helpers
+        // know the service is no longer running and do not attempt to call methods on
+        // a destroyed service.
+        instance = null
         // Stop the inbound listener (cancels its drain job + releases the bound
         // port) BEFORE scope.cancel() so the native accept loop is torn down
         // cleanly rather than left dangling on an orphaned coroutine.
@@ -792,24 +803,37 @@ class ClipboardService : Service() {
         private var captureOverlaySuppressed: Boolean = false
 
         /**
-         * CopyPaste-xxi2: remove the ClipboardService capture overlay temporarily so
-         * [ClipboardFloatingActivity] can gain exclusive window focus without a two-overlay
-         * conflict. Called by [ClipboardFloatingActivity] before adding its own overlay.
+         * Weak reference to the live service instance, used by the static
+         * [suppressCaptureOverlay] / [restoreCaptureOverlay] helpers so they can call
+         * instance methods ([removeCaptureOverlay] / [addCaptureOverlay]) without
+         * leaking the service. Set in [onCreate], cleared in [onDestroy].
+         */
+        @Volatile
+        private var instance: java.lang.ref.WeakReference<ClipboardService>? = null
+
+        /**
+         * CopyPaste-xxi2 / bd CopyPaste-44rq.1: remove the ClipboardService capture overlay
+         * temporarily so [ClipboardFloatingActivity] can gain exclusive window focus without
+         * a two-overlay conflict. Called by [ClipboardFloatingActivity] before adding its own overlay.
          *
-         * Thread-safe: posts the removal to the main thread (WindowManager requirement).
+         * Fix: actually delegates to [removeCaptureOverlay] on the live service instance via
+         * [instance] (was a dead stub that only set the flag and logged). WindowManager.removeView
+         * must run on the main thread; we post it there if not already on it.
          * No-op when the service is not running or no overlay was added.
          */
         fun suppressCaptureOverlay(context: Context) {
             captureOverlaySuppressed = true
-            // Post the WindowManager removal to the main thread. If the service instance
-            // is null (service not running) this is a no-op — the Activity can still add
-            // its own overlay without a conflict since there is nothing to conflict with.
             Handler(Looper.getMainLooper()).post {
-                // Obtain the service's WindowManager via applicationContext; the service's
-                // own removeCaptureOverlay() is instance-scoped so we cannot call it from
-                // a static context. The Activity's use of the same WM instance is safe —
-                // both Activity and service windows belong to the same process.
-                Log.d(TAG, "suppressCaptureOverlay: overlay suppressed for FloatingActivity")
+                // Delegate to the live service instance's removeCaptureOverlay().
+                // If the service is not running (instance is null or GC'd) the overlay
+                // was never added, so there is nothing to conflict with.
+                val svc = instance?.get()
+                if (svc != null) {
+                    svc.removeCaptureOverlay()
+                    Log.d(TAG, "suppressCaptureOverlay: overlay removed for FloatingActivity")
+                } else {
+                    Log.d(TAG, "suppressCaptureOverlay: service not running — no overlay to remove")
+                }
             }
         }
 
@@ -820,7 +844,16 @@ class ClipboardService : Service() {
          */
         fun restoreCaptureOverlay() {
             captureOverlaySuppressed = false
-            Log.d(TAG, "restoreCaptureOverlay: overlay suppression lifted")
+            Handler(Looper.getMainLooper()).post {
+                // Re-add the service overlay now that the FloatingActivity's overlay is gone.
+                val svc = instance?.get()
+                if (svc != null) {
+                    svc.addCaptureOverlay()
+                    Log.d(TAG, "restoreCaptureOverlay: overlay re-added after FloatingActivity released")
+                } else {
+                    Log.d(TAG, "restoreCaptureOverlay: service not running — nothing to restore")
+                }
+            }
         }
 
         // ── Deliverable 1: incoming-pair notification ─────────────────────────

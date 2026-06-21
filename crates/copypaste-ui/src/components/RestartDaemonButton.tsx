@@ -15,7 +15,7 @@ type Phase = "idle" | "restarting" | "ok" | "error";
  * recovery is never silent.
  */
 export function RestartDaemonButton({
-  label = "Restart daemon",
+  label = "Restart background service",
   className,
   onRestarted,
 }: {
@@ -33,7 +33,7 @@ export function RestartDaemonButton({
     try {
       await restartDaemon();
       setPhase("ok");
-      setMessage("Daemon restarted — using the latest installed build.");
+      setMessage("Background service restarted.");
       onRestarted?.();
     } catch (err) {
       setPhase("error");

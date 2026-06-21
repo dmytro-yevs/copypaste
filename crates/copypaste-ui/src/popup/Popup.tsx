@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Search, Clipboard, SearchX, PlugZap, Star, StarOff } from "lucide-react";
-import { api, HistoryEntry, ipcErrorMessage, IpcError, isIpcNotReady, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
+import { api, HistoryEntry, friendlyIpcError, IpcError, isIpcNotReady, isImageType, pasteAsPlainText, playCopySound, showCopyNotification, sourceAppLabel } from "../lib/ipc";
 import { applySpanMasking, shouldMask } from "../lib/masking";
 import { fuzzyMatch } from "../lib/fuzzy";
 import { formatRelativeTime } from "../lib/time";
@@ -152,10 +152,13 @@ export function Popup() {
         } else if (isIpcNotReady(e)) {
           setError("ipc_not_ready");
         } else {
-          setError(e.message ?? "Error");
+          // ERR-1: never render raw e.message — it may contain the socket path.
+          // Log to console for diagnostics; show a generic friendly message in the DOM.
+          console.error("[Popup] history load error:", e);
+          setError("error_unknown");
         }
       } else {
-        setError("Failed to load history");
+        setError("error_unknown");
       }
     } finally {
       setLoading(false);
@@ -384,7 +387,8 @@ export function Popup() {
           void showCopyNotification(contentType, preview);
         }
       } catch (e) {
-        const msg = ipcErrorMessage(e, String(e));
+        // ERR-1: friendlyIpcError never leaks socket paths or raw transport strings.
+        const msg = friendlyIpcError(e);
         console.error("popup copy/paste failed", e);
         // Surface the error while the popup is still visible.
         setError(`Copy failed: ${msg}`);
@@ -408,7 +412,8 @@ export function Popup() {
         await hide();
         await pasteAsPlainText(preview);
       } catch (e) {
-        const msg = e instanceof IpcError ? e.message : String(e);
+        // ERR-1: friendlyIpcError never leaks socket paths or raw transport strings.
+        const msg = friendlyIpcError(e);
         console.error("popup paste-as-plain-text failed", e);
         setError(`Paste as plain text failed: ${msg}`);
         isHidingRef.current = false;
@@ -572,7 +577,7 @@ export function Popup() {
           <EmptyState
             icon={<PlugZap size={28} strokeWidth={1.5} aria-hidden />}
             title="Clipboard service offline"
-            body="The daemon is not running. Restart it from Settings."
+            body="The background service is not running. Restart it from Settings."
             action={<RestartDaemonButton onRestarted={() => void refresh()} />}
           />
         ) : error === "ipc_not_ready" ? (
@@ -590,8 +595,8 @@ export function Popup() {
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
             }
-            title="Error"
-            body={error}
+            title="Something went wrong"
+            body="The clipboard service could not be reached. Please try again."
           />
         )
       ) : filtered.length === 0 ? (
@@ -685,13 +690,17 @@ export function Popup() {
             <span>close</span>
           </span>
           {/* Settings gear — opens the main window Settings view. Inline SVG to
-              match the popup's existing inline-icon style (Lucide "settings"). */}
+              match the popup's existing inline-icon style (Lucide "settings").
+              CopyPaste-5917.101: visual size is h-7 w-7 (28px) to keep the footer
+              at its designed compact height; the expanded hit area is achieved via
+              a negative-inset ::after pseudo-element (position:relative + ::after
+              inset:-8px) matching the approved .icon-btn pattern. */}
           <button
             type="button"
             aria-label="Open settings"
             title="Open settings"
             onClick={() => void openSettings()}
-            className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded hover:bg-ide-hover transition-colors"
+            className="relative flex h-7 w-7 items-center justify-center rounded hover:bg-ide-hover transition-colors"
             style={{ border: "none", background: "none", cursor: "pointer", color: "var(--ide-ghost)" }}
           >
             <svg
@@ -953,7 +962,7 @@ const PopupRow = React.memo(function PopupRow({
             // CopyPaste-kp6f: borderRadius via skin token (--skin-r-chip) as
             // inline style — not the static rounded-ide-sm Tailwind class — so
             // quiet/vapor get their canonical chip corner radius.
-            className="flex shrink-0 items-center gap-1 text-[10px] leading-none px-1 py-0.5"
+            className="flex shrink-0 items-center gap-1 text-[10.5px] leading-none px-1 py-0.5"
             style={{
               color: "var(--ide-ghost)",
               background: "var(--ide-hover)",
@@ -1011,7 +1020,7 @@ const PopupRow = React.memo(function PopupRow({
               e.stopPropagation();
               onPin();
             }}
-            className="absolute inset-0 flex items-center justify-center rounded hover:bg-ide-hover text-ide-dim hover:text-white transition-opacity opacity-0 group-hover:opacity-100"
+            className="absolute inset-0 flex items-center justify-center rounded hover:bg-ide-hover text-ide-dim hover:text-ide-text transition-opacity opacity-0 group-hover:opacity-100"
             style={{ border: "none", background: "none", cursor: "pointer", zIndex: 2 }}
           >
             {item.pinned ? (

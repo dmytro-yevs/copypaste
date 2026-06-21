@@ -34,9 +34,12 @@ between requests, and how stale items should be evicted.
 
 **Use an in-memory `HashMap<DeviceId, RelayItem>` behind an
 `Arc<Mutex<RelayStore>>`, with a background `tokio` task that prunes
-items whose `inserted_at_unix + RELAY_TTL_SECS <= now_unix` every 60 s.**
+items whose `inserted_at_unix + RELAY_TTL_SECS <= now_unix` every 60 s,
+with optional SQLite write-through persistence (added post-R1b).**
 
-- No on-disk storage. `RelayStore` lives entirely in process memory.
+- Primary read path is in-memory; the `RelayStore` is loaded from SQLite at startup
+  when a `db_path` is configured and all writes are flushed to SQLite synchronously.
+  When no `db_path` is set the store operates as `:memory:` (original behaviour).
 - TTL is `RelayConfig::sync_ttl_secs`, configured via the
   `RELAY_SYNC_TTL_SECS` env var (default `86_400` s = 24 h).
 - The evictor is implemented in [`src/store.rs`](../../crates/copypaste-relay/src/store.rs)
@@ -45,6 +48,10 @@ items whose `inserted_at_unix + RELAY_TTL_SECS <= now_unix` every 60 s.**
 - Eviction uses a **server-recorded `inserted_at_unix`** rather than the
   client-supplied `wall_time`, so a malicious client cannot extend the
   lifetime of its data by sending a future timestamp.
+
+**Note (change since R1b):** The `db.rs` scaffold that existed as dead code at
+the time this ADR was written has since been wired into `main.rs`. SQLite
+write-through is now available as an opt-in durability layer (see Follow-ups).
 
 ## Alternatives Considered
 
@@ -58,10 +65,10 @@ items whose `inserted_at_unix + RELAY_TTL_SECS <= now_unix` every 60 s.**
     libsqlite3 / libsqlcipher).
   - Adds disk-IO latency and a failure mode (disk-full / corrupt-DB)
     that the rest of the relay design has no answer for.
-  - A `db.rs` scaffold already exists in-tree (commit pre-dating this
-    ADR) but was never wired into `main.rs`. **It is now dead code and
-    can be removed** in a follow-up; this ADR explicitly chooses not
-    to wire it in.
+  - A `db.rs` scaffold existed in-tree (commit pre-dating this ADR) and has
+    since been wired into `main.rs` as an opt-in write-through layer
+    (post-R1b). The hot read path remains in-memory; SQLite provides durability
+    across restarts when `db_path` is configured.
 
 ### B. Redis / external KV store
 - Pros: durable, shareable across relay replicas, native TTLs.

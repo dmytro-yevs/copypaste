@@ -16,6 +16,7 @@ import { ViewShell } from "../components/ViewShell";
 import {
   api,
   ipcErrorMessage,
+  friendlyIpcError,
   IpcError,
   isImageType,
   pasteAsPlainText,
@@ -26,7 +27,8 @@ import {
   type HistoryEntry,
   type HistoryPage,
 } from "../lib/ipc";
-import { applySpanMasking, shouldMask } from "../lib/masking";
+import { applySpanMasking, maskPlaceholder, shouldMask } from "../lib/masking";
+import { fuzzyMatch } from "../lib/fuzzy";
 import { formatRelativeTime } from "../lib/time";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
@@ -35,57 +37,19 @@ import { SKINS } from "../lib/skins";
 import { ImageThumb, clearImageCache } from "../components/ImageThumb";
 import { AppIcon } from "../components/AppIcon";
 import { FileChip } from "../components/FileChip";
-import { ContentIcon } from "../components/ContentIcon";
+import { ContentIconTile, kindFallback } from "../components/ContentIcon";
+import { DeviceBadge } from "../components/DeviceBadge";
+import { IconActionButton } from "../components/IconActionButton";
 import { useFocusTrap } from "../lib/useFocusTrap";
 import { Star, StarOff } from "lucide-react";
 import { ConfirmModal } from "../components/ConfirmModal";
-
-// ---------------------------------------------------------------------------
-// Toast — §8 slide-up, neutral panel + 6px semantic dot, one at a time
-// ---------------------------------------------------------------------------
-
-type ToastKind = "success" | "error";
-
-function Toast({ message, kind }: { message: string; kind: ToastKind }) {
-  return (
-    <div
-      // surface-glass-strong = the canonical floating frosted-glass material:
-      // translucent fill + backdrop-blur + specular highlight + float shadow,
-      // themed for light/dark. Replaces the hardcoded dark-only rgba(35,37,45,0.92).
-      className="surface-glass-strong toast-in fixed bottom-3 left-1/2 z-50 pointer-events-none"
-      role={kind === "error" ? "alert" : "status"}
-      aria-live={kind === "error" ? "assertive" : "polite"}
-      style={{
-        // translate is baked into the toast-in animation start; keep it in
-        // final state so the element stays centred after the animation settles.
-        transform: "translateX(-50%)",
-        // kp6f: use skin card-radius token instead of hardcoded 10
-        borderRadius: "var(--skin-r-card, 10px)",
-        padding: "6px 14px 6px 10px",
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        whiteSpace: "nowrap",
-      }}
-    >
-      {/* 6px semantic dot */}
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: "50%",
-          flexShrink: 0,
-          background: kind === "error" ? "var(--ide-danger)" : "var(--ide-success)",
-        }}
-      />
-      {/* Token colour (was hardcoded white) so the toast text stays WCAG-legible
-          on the now theme-aware glass — white was invisible on the light material. */}
-      <span className="text-[12px] text-ide-text">
-        {message}
-      </span>
-    </div>
-  );
-}
+// CopyPaste-5917.102: replaced the local Toast duplicate with the shared
+// GlassToast system. useToast() wires all showToast() calls to the provider;
+// ToastProvider is mounted as a self-contained wrapper inside HistoryView's
+// return so no App-level changes are needed.
+import { useToast, ToastProvider, type ToastKind } from "../components/Toast";
+// CopyPaste-bdac.23: ActionButton replaces raw <button> elements in BulkActionBar.
+import { ActionButton } from "../components/ActionButton";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -109,28 +73,10 @@ function parseFilename(preview: string): string {
 }
 
 
-// ContentIcon is imported from ../components/ContentIcon (shared component).
+// ContentIconTile is imported from ../components/ContentIcon (shared component).
 // KindChip (the text pill) was replaced with the icon-tile pattern in zzv5.
-
-/**
- * Derive a human-readable kind label from the daemon kind string + content_type.
- * Mirrors the KindChip kindFallback logic so aria-labels stay consistent with
- * what the old text pill showed.
- * Named getKindLabel (not kindLabel) to avoid shadowing the local `kindLabel`
- * const inside HistoryRow (which is a simple string for the row aria-label).
- */
-function getKindLabel(kind: string | undefined, contentType: string): string {
-  if (kind) return kind;
-  if (contentType === "url") return "URL";
-  if (contentType === "image" || contentType.startsWith("image/")) return "IMAGE";
-  if (
-    contentType === "code" ||
-    contentType.startsWith("text/x-") ||
-    contentType.startsWith("application/")
-  )
-    return "CODE";
-  return "TEXT";
-}
+// CopyPaste-5917.82: migrated from inline bg-ide-faint/16 span to ContentIconTile (mute/16).
+// CopyPaste-bdac.29: getKindLabel removed; use imported kindFallback from ContentIcon instead.
 
 // ---------------------------------------------------------------------------
 // Pin indicator (filled amber star — dm51: ★ styleguide §pin)
@@ -180,56 +126,8 @@ function SyncBlockedIndicator() {
 }
 
 // ---------------------------------------------------------------------------
-// Origin-device badge — shown on each row indicating which device captured it
+// Origin-device badge — imported from components/DeviceBadge (CopyPaste-bdac.31)
 // ---------------------------------------------------------------------------
-
-/**
- * Return a compact label for an origin device.
- * - Empty / unknown → null (badge not shown)
- * - Matches own device → "This device"
- * - Known device name → that name (e.g. "MacBook Pro")
- * - Otherwise → first 8 chars of UUID as a fallback
- */
-function deviceLabel(
-  originId: string | undefined,
-  ownId: string,
-  originName?: string | null
-): string | null {
-  if (!originId) return null;
-  if (originId === "") return null;
-  if (ownId && originId === ownId) return "This device";
-  // Prefer the human-readable name from the daemon's devices table.
-  if (originName) return originName;
-  // Fallback: compact UUID prefix (first 8 chars is enough to distinguish devices).
-  return originId.slice(0, 8);
-}
-
-function DeviceBadge({
-  originId,
-  ownId,
-  originName,
-}: {
-  originId: string | undefined;
-  ownId: string;
-  originName?: string | null;
-}) {
-  const label = deviceLabel(originId, ownId, originName);
-  if (!label) return null;
-  const isOwn = label === "This device";
-  return (
-    <span
-      className={[
-        "flex shrink-0 items-center text-[10px] px-1 py-0.5 rounded border leading-none",
-        isOwn
-          ? "border-ide-accent/40 bg-ide-accent/10 text-ide-accent"
-          : "border-ide-divider/60 bg-ide-elevated/50 text-ide-faint",
-      ].join(" ")}
-      title={originId}
-    >
-      {label}
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Row height model (shared by the row and the virtualizer)
@@ -347,7 +245,7 @@ interface RowProps {
   maskSensitive: boolean;
   /**
    * n9gp (PG-34): when true (default), sensitive-item blur requires a click on
-   * the "Sensitive — click to reveal" overlay before lifting. When false, the
+   * the "Sensitive — preview hidden · click to reveal" overlay before lifting. When false, the
    * first click directly reveals the content (no extra confirmation step).
    * Mirrors Android's show_sensitive_warnings pref.
    */
@@ -431,8 +329,27 @@ const HistoryRow = React.memo(function HistoryRow({
   const isImage = isImageType(entry.content_type);
   const isFile = entry.content_type === "file";
 
-  // Per-row reveal toggle: user clicks the blurred text to temporarily show it.
+  // Per-row reveal toggle: user clicks the placeholder to temporarily show it.
   const [revealed, setRevealed] = useState(false);
+
+  // SCRH-7: re-hide sensitive content when the window loses focus so plaintext
+  // is not left visible if the user walks away from the machine.
+  useEffect(() => {
+    if (!entry.is_sensitive || !maskSensitive) return;
+    const handleBlur = () => setRevealed(false);
+    window.addEventListener("blur", handleBlur);
+    return () => window.removeEventListener("blur", handleBlur);
+  }, [entry.is_sensitive, maskSensitive]);
+
+  // CopyPaste-5917.56: auto re-blur after 10 s whenever the content is revealed.
+  // Mirrors Android's show_sensitive_warnings flow: once revealed the secret is
+  // readable for a short window, then hidden again automatically so an unattended
+  // screen does not leave sensitive content permanently exposed.
+  useEffect(() => {
+    if (!revealed) return;
+    const t = setTimeout(() => setRevealed(false), 10_000);
+    return () => clearTimeout(t);
+  }, [revealed]);
 
   // §8 copy-success flash: true for ~90ms after a successful copy.
   const [copyFlash, setCopyFlash] = useState(false);
@@ -440,10 +357,16 @@ const HistoryRow = React.memo(function HistoryRow({
   // Whether this row should be visually blurred right now.
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
 
+  // DOM-safe preview: when the item is blurred (sensitive + not revealed), we
+  // MUST NOT put the real plaintext in the DOM — CSS blur is insufficient
+  // (screen readers, devtools, clipboard scanners all read text nodes).
+  // Render the placeholder instead; real text only appears after explicit reveal.
   let preview: string;
-  if (entry.is_sensitive) {
-    // Keep the actual text for blur-reveal; text-substitution is the fallback
-    // when the CSS blur path isn't active (e.g. screen readers / selection).
+  if (blurred) {
+    // Placeholder in the DOM — real preview is never rendered until revealed.
+    preview = maskPlaceholder();
+  } else if (entry.is_sensitive) {
+    // Revealed: show the actual text (user explicitly clicked reveal).
     preview = entry.preview || "•••••• (sensitive)";
   } else if (maskSensitive && entry.sensitive_spans && entry.sensitive_spans.length > 0) {
     // Redact only sensitive spans, show the rest.
@@ -476,9 +399,12 @@ const HistoryRow = React.memo(function HistoryRow({
     } else {
       onSelect();
       onCopy();
-      // §8: flash success bg for ~90ms (var(--motion-instant)).
+      // §8: flash success bg for ~200ms — within the nbase(180ms)–nslow(240ms) range
+      // that makes the confirmation perceptible without being loud. The original
+      // 90ms (motion-instant) was below the conscious-perception threshold (~100-150ms).
+      // CopyPaste-5917.51: bumped from 90ms to 200ms.
       setCopyFlash(true);
-      setTimeout(() => setCopyFlash(false), 90);
+      setTimeout(() => setCopyFlash(false), 200);
     }
   };
 
@@ -512,7 +438,8 @@ const HistoryRow = React.memo(function HistoryRow({
     ...(rowTreatment === "inset"
       ? {
           // Card surface: rounded corners + subtle translucent fill driven by tokens.
-          borderRadius: "var(--skin-r-card, 16px)",
+          // CopyPaste-bdac.54: fallback corrected to 12px (Classic skin canonical value).
+          borderRadius: "var(--skin-r-card, 12px)",
           // Per-row spacing: marginBottom so absolutely-positioned rows get visual separation.
           // (flex gap on the absolutely-positioned VirtualList container is a no-op.)
           marginBottom: "var(--skin-row-gap, 3px)",
@@ -534,6 +461,8 @@ const HistoryRow = React.memo(function HistoryRow({
         `group relative flex cursor-pointer select-none items-center gap-2 px-3 ${rowPadding} ${rowMinH}`,
         // Liquid-glass entrance stagger — .list-item-in is from index.css (listItemIn keyframe).
         applyStagger ? "list-item-in" : "",
+        // row-interactive: approved motion primitive for hover bg transition (§MO-3).
+        "row-interactive",
         "text-[13px]",
         // W-C3 skin row treatment — three visual languages, orthogonal to palette/theme.
         // 10lk: driven by rowTreatment token (SKINS[skin].rowTreatment), not skin name.
@@ -568,9 +497,9 @@ const HistoryRow = React.memo(function HistoryRow({
               "transition-[transform,border-color,background] duration-[280ms] ease-out",
               "hover:[transform:translateX(5px)_scale(1.008)]",
             ].join(" "),
-        // §8 copy-flash: success tint for ~90ms after copy. Applied before pinned so
-        // the flash is visible (pinned adds bg-ide-warningDim which would cover it).
-        copyFlash ? "!bg-ide-success/10" : "",
+        // §8 copy-flash: .copy-flash approved motion primitive (§MO-4, 90ms keyframe).
+        // Applied before pinned so the flash is visible.
+        copyFlash ? "copy-flash" : "",
         // v0.5.3: warningDim tint for pinned rows — border-l-2 gives a clear
         // amber left edge; bg-ide-warningDim (no opacity modifier) at its native
         // 0.10 alpha is visible without overwhelming.
@@ -600,11 +529,18 @@ const HistoryRow = React.memo(function HistoryRow({
       onDrop={dragHandleProps?.onDrop}
       onDragEnd={dragHandleProps?.onDragEnd}
     >
-      {/* Drag handle — only on pinned rows, visible on hover */}
+      {/* Drag handle — only on pinned rows, visible on hover.
+          CopyPaste-5917.21: added role/tabIndex/aria-label for keyboard/AT discoverability.
+          Full keyboard DnD (arrow keys) is out-of-scope here; the a11y attributes
+          make the handle visible in the accessibility tree and focusable for AT.
+          Reorder via keyboard is tracked as a follow-up (full arrow-key DnD). */}
       {dragHandleProps !== undefined && (
         <span
           data-drag-handle
-          className="flex w-3 shrink-0 items-center justify-center opacity-0 group-hover:opacity-40 hover:!opacity-80 transition-opacity"
+          role="button"
+          tabIndex={0}
+          aria-label="Drag to reorder (mouse only)"
+          className="flex w-3 shrink-0 items-center justify-center opacity-0 group-hover:opacity-40 hover:!opacity-80 transition-opacity focus:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent"
           style={{ cursor: "grab" }}
           title="Drag to reorder"
         >
@@ -627,11 +563,15 @@ const HistoryRow = React.memo(function HistoryRow({
           checked={multiSelected}
           onChange={() => {/* controlled via onClick above */}}
           className={[
-            "h-4 w-4 rounded accent-ide-accent cursor-pointer",
+            // accent-ide-accent removed: the custom index.css checkbox (appearance:none +
+            // background:var(--ide-accent) on :checked + ::after checkmark) drives the visual.
+            // Keeping accent-color (via the utility) would let native accent-color compete
+            // with the appearance:none custom styles — one or the other, not both. (CopyPaste-5917.104)
+            "h-4 w-4 rounded cursor-pointer",
             selectionMode ? "opacity-80" : "opacity-0 group-hover:opacity-60 focus:opacity-80",
           ].join(" ")}
           tabIndex={0}
-          aria-label={`Select ${entry.preview.slice(0, 30)}`}
+          aria-label={entry.is_sensitive && maskSensitive ? "Select (sensitive item)" : `Select ${entry.preview.slice(0, 30)}`}
         />
       </span>
 
@@ -658,17 +598,19 @@ const HistoryRow = React.memo(function HistoryRow({
           title equal to the kind name so screen-readers and tooltips still
           convey the type (e.g. "URL", "EMAIL", "TEXT"). */}
       <span className="flex shrink-0 items-center gap-1">
-        <span
-          // s7ia: removed .icon-float — that class ran a 4s infinite iconFloat
-          // transform animation on every visible row tile (15+ GPU compositor
-          // layers simultaneously). The aurora background provides sufficient motion.
-          className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[7px] bg-ide-faint/16"
-          aria-label={getKindLabel(entry.kind, entry.content_type)}
-          title={getKindLabel(entry.kind, entry.content_type)}
+        {/* s7ia: removed .icon-float — that class ran a 4s infinite iconFloat
+            transform animation on every visible row tile (15+ GPU compositor
+            layers simultaneously). The aurora background provides sufficient motion.
+            CopyPaste-5917.82 (ICON-3): migrated from inline bg-ide-faint/16 span to
+            ContentIconTile so the tile uses the spec-required mute/16 token. */}
+        <ContentIconTile
+          contentType={entry.content_type}
+          size={14}
+          tileSize={26}
+          aria-label={entry.kind ?? kindFallback(entry.content_type)}
+          title={entry.kind ?? kindFallback(entry.content_type)}
           role="img"
-        >
-          <ContentIcon contentType={entry.content_type} size={14} />
-        </span>
+        />
         {/* q8v1: COLOR-kind items get a live swatch of the actual color value */}
         {entry.kind === "COLOR" && (() => {
           // Extract a CSS color from the preview (e.g. "#D9A343", "rgb(255,0,0)")
@@ -718,12 +660,13 @@ const HistoryRow = React.memo(function HistoryRow({
           }
         >
           {blurred ? (
-            // Blur overlay: visually hides the text; click reveals for this row only.
-            // title gives a screen-reader / tooltip hint. user-select:none prevents
-            // accidental selection revealing the text via copy.
-            // n9gp (PG-34): when showSensitiveWarnings is true (default) the tooltip
-            // reinforces the "confirmation required" expectation; when false it signals
-            // direct reveal with no extra step (title is suppressed).
+            // Placeholder — the real plaintext is NOT in the DOM when blurred.
+            // `preview` is already set to maskPlaceholder() above, so no real
+            // content leaks to screen readers, devtools, or clipboard scanners.
+            // CSS blur is intentionally absent: blurring placeholder text is
+            // useless and would look odd. The click handler reveals real content.
+            // n9gp (PG-34): title reinforces "confirmation required" when
+            // showSensitiveWarnings is true; suppressed when false.
             <span
               title={showSensitiveWarnings ? "Click to reveal sensitive content" : undefined}
               onClick={(e) => {
@@ -731,11 +674,12 @@ const HistoryRow = React.memo(function HistoryRow({
                 setRevealed(true);
               }}
               style={{
-                filter: "blur(6px)",
                 userSelect: "none",
                 cursor: "pointer",
                 display: "inline-block",
                 maxWidth: "100%",
+                opacity: 0.55,
+                fontStyle: "italic",
               }}
             >
               {preview}
@@ -762,11 +706,14 @@ const HistoryRow = React.memo(function HistoryRow({
       )}
 
       {/* Right-side slot: device badge + source-app chip + timestamp (always visible) + icon action buttons (on hover).
-          All live in the same fixed-width flex container so showing/hiding the
-          buttons never shifts the layout — the slot width is constant. */}
+          SCRH-3: was a fixed minWidth:"4.5rem" shrink-0 container which clipped when all
+          three badge/chip/timestamp elements were present. Changed to flex-wrap so the
+          contents wrap to a second line rather than overflowing or clipping. The outer
+          element stays shrink-0 to prevent the preview text column from being squeezed,
+          but max-w-[10rem] caps the slot so it doesn't swallow excessive row width. */}
       <div
-        className="flex shrink-0 items-center justify-end gap-1"
-        style={{ minWidth: "4.5rem" }}
+        className="flex shrink-0 flex-wrap items-center justify-end gap-1"
+        style={{ maxWidth: "10rem" }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Origin-device badge: "This device", device name, or compact UUID prefix */}
@@ -777,7 +724,7 @@ const HistoryRow = React.memo(function HistoryRow({
           const appLabel = sourceAppLabel(entry.app_bundle_id);
           return appLabel ? (
             <span
-              className="flex shrink-0 items-center gap-1 text-[10px] text-ide-faint px-1 py-0.5 rounded border border-ide-divider/60 bg-ide-elevated/50 leading-none"
+              className="flex shrink-0 items-center gap-1 text-[10.5px] text-ide-faint px-1 py-0.5 rounded border border-ide-divider/60 bg-ide-elevated/50 leading-none"
               title={entry.app_bundle_id ?? undefined}
             >
               <AppIcon bundleId={entry.app_bundle_id} size={14} />
@@ -796,28 +743,28 @@ const HistoryRow = React.memo(function HistoryRow({
         {!selectionMode && (
           <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
             {/* M10: Eye — show details modal */}
-            <IconActionBtn
+            <IconActionButton
               aria-label="Preview"
               title="Preview"
               onClick={onPreview}
             >
               <IconEye />
-            </IconActionBtn>
-            <IconActionBtn
+            </IconActionButton>
+            <IconActionButton
               aria-label={entry.pinned ? "Unpin" : "Pin"}
               title={entry.pinned ? "Unpin" : "Pin"}
               onClick={onPin}
             >
               {entry.pinned ? <IconPinOff /> : <IconPin />}
-            </IconActionBtn>
-            <IconActionBtn
+            </IconActionButton>
+            <IconActionButton
               aria-label="Delete"
               title="Delete"
               danger
               onClick={onDelete}
             >
               <IconTrash />
-            </IconActionBtn>
+            </IconActionButton>
           </div>
         )}
       </div>
@@ -868,37 +815,7 @@ const HistoryRow = React.memo(function HistoryRow({
   return true;
 });
 
-function IconActionBtn({
-  "aria-label": ariaLabel,
-  title,
-  danger,
-  onClick,
-  children,
-}: {
-  "aria-label": string;
-  title: string;
-  danger?: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      aria-label={ariaLabel}
-      title={title}
-      className={[
-        "relative flex h-5 w-5 items-center justify-center rounded",
-        "border border-transparent hover:border-ide-border hover:bg-ide-elevated",
-        danger ? "text-ide-danger" : "text-ide-dim hover:text-ide-text",
-      ].join(" ")}
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-    >
-      {/* Transparent hit-target overlay expanding clickable area to ≥44×44px
-          without affecting the 20px visual button size or row layout. */}
-      <span aria-hidden="true" style={{ position: "absolute", inset: "-12px" }} />
-      {children}
-    </button>
-  );
-}
+// IconActionBtn removed — use imported IconActionButton (CopyPaste-bdac.26).
 
 // ---------------------------------------------------------------------------
 // Bulk action bar — shown when ≥1 item is multi-selected
@@ -942,65 +859,67 @@ function BulkActionBar({
 
       <span className="text-ide-divider">|</span>
 
-      {/* Select-all toggle */}
-      {/* kp6f: borderRadius uses var(--skin-r-ctl) inline instead of rounded-ide class */}
-      <button
-        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
-        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+      {/* Select-all toggle — CopyPaste-bdac.23: ActionButton(secondary,sm).
+          CopyPaste-5917.18: aria-pressed conveys toggle state to screen readers. */}
+      <ActionButton
+        variant="secondary"
+        size="sm"
+        aria-pressed={allSelected}
         onClick={allSelected ? onClearSelection : onSelectAll}
         disabled={isBusy}
       >
         {allSelected ? "Deselect all" : "Select all"}
-      </button>
+      </ActionButton>
 
-      {/* Bulk actions */}
-      <button
-        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
-        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+      {/* Bulk actions — CopyPaste-bdac.23: ActionButton replaces raw <button>. */}
+      <ActionButton
+        variant="secondary"
+        size="sm"
         onClick={onBulkCopy}
         disabled={isBusy}
         title="Copy selected items (concatenated with newlines)"
+        aria-label="Copy selected items"
       >
         Copy
-      </button>
-      <button
-        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
-        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+      </ActionButton>
+      <ActionButton
+        variant="secondary"
+        size="sm"
         onClick={onBulkPin}
         disabled={isBusy}
       >
         Pin
-      </button>
-      <button
-        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-text hover:bg-ide-hover disabled:opacity-50"
-        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+      </ActionButton>
+      <ActionButton
+        variant="secondary"
+        size="sm"
         onClick={onBulkUnpin}
         disabled={isBusy}
       >
         Unpin
-      </button>
-      <button
-        className="border border-ide-danger/40 bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-danger hover:bg-ide-hover disabled:opacity-50"
-        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+      </ActionButton>
+      <ActionButton
+        variant="danger"
+        size="sm"
         onClick={onBulkDelete}
         disabled={isBusy}
       >
         Delete
-      </button>
+      </ActionButton>
 
       {/* Spacer */}
       <span className="flex-1" />
 
-      {/* Clear selection */}
-      <button
-        className="border border-ide-border bg-ide-elevated px-2 py-0.5 text-[11px] text-ide-dim hover:bg-ide-hover disabled:opacity-50"
-        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+      {/* Clear selection — CopyPaste-bdac.23: ActionButton(secondary,sm). */}
+      <ActionButton
+        variant="secondary"
+        size="sm"
         onClick={onClearSelection}
         disabled={isBusy}
         title="Clear selection (Escape)"
       >
         Clear
-      </button>
+      </ActionButton>
     </div>
   );
 }
@@ -1106,7 +1025,7 @@ function DetailsModal({
 }: {
   entry: HistoryEntry;
   maskSensitive: boolean;
-  /** n9gp (PG-34): when false, the "Sensitive — click to reveal" overlay is skipped;
+  /** n9gp (PG-34): when false, the "Sensitive — preview hidden · click to reveal" overlay is skipped;
    *  clicking the blurred pre directly unblurs without an extra confirmation step. */
   showSensitiveWarnings: boolean;
   onClose: () => void;
@@ -1117,6 +1036,17 @@ function DetailsModal({
   // Per-modal reveal: user must click "Reveal" to see sensitive plaintext.
   const [revealed, setRevealed] = useState(false);
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
+
+  // SCRH-7: re-blur (hide sensitive plaintext) when the window loses focus.
+  // This prevents "reveal once, walk away" — anyone who picks up the machine
+  // sees the placeholder, not the secret. Only applies when the item is
+  // sensitive and masking is on; benign for non-sensitive items.
+  useEffect(() => {
+    if (!entry.is_sensitive || !maskSensitive) return;
+    const handleBlur = () => setRevealed(false);
+    window.addEventListener("blur", handleBlur);
+    return () => window.removeEventListener("blur", handleBlur);
+  }, [entry.is_sensitive, maskSensitive]);
 
   // Focus trap — traps Tab/Shift+Tab inside the dialog panel and restores focus on close.
   const modalRef = useRef<HTMLDivElement>(null);
@@ -1140,9 +1070,9 @@ function DetailsModal({
       aria-labelledby="details-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-      // Modal scrim: intentionally dark + light blur (not surface-glass) — this is
-      // a modal overlay (dims everything behind), not a translucent panel surface.
-      style={{ background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)" }}
+      // Modal scrim: uses --ide-scrim token so dark theme (55%) and light theme (35%)
+      // apply the correct overlay opacity — not surface-glass (CopyPaste-5917.42 / 5917.106).
+      style={{ background: "var(--ide-scrim)", backdropFilter: "blur(4px)" }}
     >
       <div
         ref={modalRef}
@@ -1207,32 +1137,42 @@ function DetailsModal({
             </div>
           ) : (
             <div className="relative">
+              {/* SCRH-8 DOM-leak fix: the real plaintext MUST NOT appear in the DOM
+                  while blurred. We render the placeholder string instead, and only
+                  swap in entry.preview after an explicit reveal action. CSS blur
+                  alone is insufficient — screen readers, devtools, and clipboard
+                  scanners all read raw text nodes regardless of visual styling. */}
               <pre
                 className="whitespace-pre-wrap break-words text-[13px] text-ide-text font-mono leading-relaxed select-text"
                 style={{
                   userSelect: blurred ? "none" : "text",
-                  filter: blurred ? "blur(6px)" : "none",
-                  // Prevent layout reflow when blur is toggled.
-                  transition: "filter 0.15s ease",
+                  // No CSS blur on the placeholder — it would look odd and is
+                  // redundant since the real text is not present anyway.
+                  opacity: blurred ? 0.55 : 1,
+                  fontStyle: blurred ? "italic" : "normal",
+                  transition: "opacity 0.15s ease",
                 }}
               >
-                {entry.preview}
+                {blurred ? maskPlaceholder() : entry.preview}
               </pre>
               {/* n9gp (PG-34): show the confirmation overlay only when
                   showSensitiveWarnings is true (default). When false, the user
-                  can click the blurred pre directly to reveal without an extra
+                  can click the placeholder pre directly to reveal without an extra
                   confirmation step (matches Android show_sensitive_warnings=false). */}
               {blurred && showSensitiveWarnings && (
-                // Reveal overlay — sits on top of the blurred pre so the user
-                // can click without accidentally selecting text through the blur.
+                // Reveal overlay — sits on top of the placeholder so the user
+                // gets a clear affordance without needing to read the italic hint.
                 <div
                   className="absolute inset-0 flex items-center justify-center"
                   style={{ cursor: "pointer" }}
                   onClick={() => setRevealed(true)}
                   title="Click to reveal sensitive content"
                 >
+                  {/* bdac.69: primary label aligned with Android cd_sensitive_item
+                      ("Sensitive content — preview hidden"). macOS adds the platform-
+                      specific action hint inline so users know a click reveals it. */}
                   <span className="rounded-md border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim shadow">
-                    Sensitive — click to reveal
+                    Sensitive — preview hidden · click to reveal
                   </span>
                 </div>
               )}
@@ -1399,6 +1339,24 @@ function VirtualList({
   const visible = items.slice(start, end);
   const padTop = offsets[start] ?? 0;
 
+  // CopyPaste-5917.33: aria-activedescendant must only reference an element that
+  // is actually present in the DOM. The virtual window only renders rows in the
+  // viewport ±overscan; if the active row has scrolled outside that window its
+  // DOM id does not exist and screen readers report an invalid reference.
+  // Derive whether the active row falls within [start, end) and clear the
+  // attribute when it is off-screen. Note: the scroll-into-view useEffect in
+  // HistoryView ensures the selected row is scrolled into view on keyboard nav,
+  // so in practice the row will be rendered shortly after selection — clearing
+  // here is a safety net for the brief window before the scroll resolves.
+  const activeIdInView = activeDescendantId
+    ? visible.some((it) => `clip-${it.id}` === activeDescendantId)
+    : false;
+  // Coerce null → undefined: the DOM aria-activedescendant prop accepts
+  // string | undefined, not null (activeDescendantId may be null).
+  const safeActiveDescendantId = activeIdInView
+    ? (activeDescendantId ?? undefined)
+    : undefined;
+
   const handleScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
       const el = e.target as HTMLDivElement;
@@ -1420,7 +1378,7 @@ function VirtualList({
       ref={listRef}
       role="listbox"
       aria-label="Clipboard history"
-      aria-activedescendant={activeDescendantId ?? undefined}
+      aria-activedescendant={safeActiveDescendantId}
       tabIndex={0}
       onKeyDown={onKeyDown}
       onScroll={handleScroll}
@@ -1469,20 +1427,18 @@ function VirtualList({
 // Main view
 // ---------------------------------------------------------------------------
 
-type LoadState = "loading" | "ready" | "offline" | "error";
+// bdac.6: "not_ready" is now a first-class state so ipc_not_ready errors render
+// the "Starting up…" EmptyState (matching DevicesView / Popup) instead of the
+// error/degraded UI. Previously missing from this union.
+type LoadState = "loading" | "ready" | "offline" | "not_ready" | "error";
 
 /** How many px from the bottom of the scroll container triggers load-more. */
 const LOAD_MORE_THRESHOLD_PX = 300;
 
-interface ToastState {
-  id: number;
-  message: string;
-  kind: ToastKind;
-}
-
-export function HistoryView() {
-  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, showSensitiveWarnings, playSoundOnCopy, notifyOnCopy, density, historyDisplayLimit, skin } =
+export function HistoryViewInner() {
+  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, showSensitiveWarnings, playSoundOnCopy, notifyOnCopy, density, historyDisplayLimit, skin, sortByDevice } =
     useUI((s) => s.prefs);
+  const setPrefs = useUI((s) => s.setPrefs);
 
   // M5: historySize removed from prefs; use a fixed initial page size.
   // The daemon server-side MAX_PAGE acts as an additional cap.
@@ -1495,7 +1451,10 @@ export function HistoryView() {
   // "all" | device UUID | "this" — filters the list to a specific origin device.
   const [deviceFilter, setDeviceFilter] = useState<string>("all");
   // "recency" (default daemon order) | "device" (group by origin device, then recency within group)
-  const [sortMode, setSortMode] = useState<"recency" | "device">("recency");
+  // Initialised from the persisted sortByDevice pref (bdac.91 — Android parity).
+  const [sortMode, setSortMode] = useState<"recency" | "device">(() =>
+    sortByDevice ? "device" : "recency"
+  );
   // Total count of stored items as reported by the daemon (all pages, not just
   // what is currently loaded). Initialised to null so the badge is hidden until
   // the first page arrives.
@@ -1507,7 +1466,6 @@ export function HistoryView() {
   const [ftsResults, setFtsResults] = useState<Set<string>>(new Set());
   const [ftsQuery, setFtsQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [toast, setToast] = useState<ToastState | null>(null);
   // Last error detail surfaced under the "error" load state — kept so the
   // failure path is LOUD (shows the real message, not a blank screen).
   const [errorDetail, setErrorDetail] = useState<string | null>(null);
@@ -1578,12 +1536,7 @@ export function HistoryView() {
   const searchRef = useRef<HTMLInputElement>(null);
   // Track current signature to avoid unnecessary re-renders on identical data.
   const sigRef = useRef<string>("");
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isKeyboardNavRef = useRef(false);
-  // Per-instance toast sequence counter — avoids the module-level mutable
-  // global that would be shared (and mutated) across multiple HistoryView
-  // instances rendered in the same JS module scope.
-  const toastSeqRef = useRef(0);
 
   // §8 Mount stagger: true only during the initial mount window (before the first
   // successful data render). Set to false after the first render completes so that
@@ -1606,23 +1559,15 @@ export function HistoryView() {
   // `null` = no selection (glide layer hidden).
   const [glideStyle, setGlideStyle] = useState<{ top: number; height: number } | null>(null);
 
+  // CopyPaste-5917.102: showToast now delegates to the shared GlassToast system
+  // via useToast(). The local Toast function and per-instance timer state are gone.
+  const { show: _toastShow } = useToast();
   const showToast = useCallback(
     (message: string, kind: ToastKind, durationMs = 2500) => {
-      const id = ++toastSeqRef.current;
-      setToast({ id, message, kind });
-      if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
-      toastTimerRef.current = setTimeout(() => setToast(null), durationMs);
+      _toastShow(message, { kind, duration: durationMs });
     },
-    []
+    [_toastShow]
   );
-
-  // Clear the pending toast auto-dismiss timer on unmount so it never calls
-  // setToast on an unmounted component (UI memory leak).
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current !== null) clearTimeout(toastTimerRef.current);
-    };
-  }, []);
 
   // F11: On unmount, commit any pending deferred delete immediately so items
   // are not silently left un-deleted if the user closes the popup mid-window.
@@ -1677,14 +1622,23 @@ export function HistoryView() {
           setLoadState("offline");
           return;
         }
-        // The daemon is reachable but history failed. Surface the real error and,
-        // when the daemon reports a degraded/not-ready DB, offer the reset escape
-        // hatch instead of a dead-end "Failed to load history" screen.
-        setErrorDetail(ipcErrorMessage(err, String(err)));
+        // bdac.6: Check ipc_not_ready BEFORE calling setErrorDetail so the
+        // "Starting up…" state never populates errorDetail with an unfriendly
+        // message. Matches the pattern in DevicesView (not_ready branch) and
+        // Popup (ipc_not_ready branch).
         const notReady =
           err instanceof IpcError &&
           (err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY");
-        let isDegraded = notReady;
+        if (notReady) {
+          setLoadState("not_ready");
+          return;
+        }
+        // The daemon is reachable but history failed. Surface a friendly error
+        // (ERR-2: never use String(err) or raw IpcError.message here — those can
+        // contain socket paths). Log the raw error to the console for diagnostics.
+        console.error("[HistoryView] load error:", err);
+        setErrorDetail(friendlyIpcError(err));
+        let isDegraded = false;
         // Confirm via status: the daemon explicitly reports `degraded`.
         try {
           const status = (await api.status()) as {
@@ -1790,7 +1744,11 @@ export function HistoryView() {
     let timer: ReturnType<typeof setInterval> | null = null;
 
     const intervalFor = () =>
-      loadStateRef.current === "offline" || loadStateRef.current === "error"
+      loadStateRef.current === "offline" ||
+      loadStateRef.current === "error" ||
+      // bdac.6: not_ready is also a transient error state; use backoff so we
+      // don't hammer the daemon while it is still initialising.
+      loadStateRef.current === "not_ready"
         ? BACKOFF_MS
         : ACTIVE_MS;
 
@@ -1901,14 +1859,32 @@ export function HistoryView() {
   // -------------------------------------------------------------------------
 
   const filtered = useMemo(() => {
-    // 1. Text search: client-side substring OR daemon FTS hit
-    let result = search.trim()
-      ? items.filter(
-          (it) =>
-            it.preview.toLowerCase().includes(search.trim().toLowerCase()) ||
-            (ftsQuery === search.trim() && ftsResults.has(it.id))
-        )
-      : items;
+    const q = search.trim();
+
+    // 1. Text search: SCRH-4 — use fuzzyMatch for subsequence matching + score sorting.
+    // FTS daemon hits are included as additional matches (no fuzzy score, treated as
+    // exact match with score 0 so they appear after scored fuzzy results).
+    let result: HistoryEntry[];
+    if (q) {
+      // Compute fuzzy scores for all items so we can sort by relevance.
+      // Items that match neither fuzzy nor FTS are filtered out.
+      const scored: Array<{ entry: HistoryEntry; score: number }> = [];
+      for (const it of items) {
+        const fuzzyResult = fuzzyMatch(q, it.preview);
+        if (fuzzyResult !== null) {
+          scored.push({ entry: it, score: fuzzyResult.score });
+        } else if (ftsQuery === q && ftsResults.has(it.id)) {
+          // FTS-only hit (daemon found it but client fuzzy didn't): include at score 0.
+          scored.push({ entry: it, score: 0 });
+        }
+      }
+      // Sort descending by score so the best fuzzy match rises to the top.
+      // Stable sort preserves the daemon's recency order within equal-score groups.
+      scored.sort((a, b) => b.score - a.score);
+      result = scored.map((s) => s.entry);
+    } else {
+      result = items;
+    }
 
     // 2. Device filter
     if (deviceFilter !== "all") {
@@ -1917,7 +1893,9 @@ export function HistoryView() {
 
     // 3. Sort mode: "device" groups by origin_device_id (own device first, then
     //    alphabetical by id), preserving the daemon's recency order within each group.
-    if (sortMode === "device") {
+    // When a search is active the fuzzy-score order takes precedence; the device
+    // grouping is skipped to avoid discarding the relevance ranking.
+    if (sortMode === "device" && !q) {
       // Stable sort: JS Array.sort is stable in all modern engines.
       result = [...result].sort((a, b) => {
         const aId = a.origin_device_id ?? "";
@@ -2028,22 +2006,13 @@ export function HistoryView() {
       setGlideStyle({ top, height });
       return;
     }
-    // Multi-select path: span from first to last selected row in filtered order.
-    const selectedIndices = filtered
-      .map((it, i) => (multiSelectedIds.has(it.id) ? i : -1))
-      .filter((i) => i >= 0);
-    if (selectedIndices.length === 0) { setGlideStyle(null); return; }
-    const firstIdx = selectedIndices[0];
-    const lastIdx = selectedIndices[selectedIndices.length - 1];
-    let top = 0;
-    for (let i = 0; i < firstIdx; i++) {
-      top += rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
-    }
-    let height = 0;
-    for (let i = firstIdx; i <= lastIdx; i++) {
-      height += rowHeightFor(filtered[i], previewSize, imageMaxHeight, density);
-    }
-    setGlideStyle({ top, height });
+    // CopyPaste-5917.75: multi-select path — hide the glide layer entirely.
+    // The old code drew a single contiguous rectangle from the first to the last
+    // selected row, which visually covered unselected interleaved rows and made
+    // them appear selected. Instead, rely solely on the per-row bg-ide-selection
+    // class (driven by the `multiSelected` prop on HistoryRow) to highlight only
+    // the actually-selected rows.
+    setGlideStyle(null);
   }, [selectedId, multiSelectedIds, filtered, previewSize, imageMaxHeight, density]);
 
   // Defined before handleKeyDown so the Enter-key path can route copies through
@@ -2139,6 +2108,15 @@ export function HistoryView() {
         } else {
           setSelectedId(null);
         }
+        return;
+      }
+
+      // CopyPaste-5917.65: Cmd+F / Ctrl+F focuses the search input and selects any
+      // existing text — matches macOS "Find" convention and Maccy's search flow.
+      if ((e.metaKey || e.ctrlKey) && e.key === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
         return;
       }
 
@@ -2400,7 +2378,9 @@ export function HistoryView() {
       showToast("Database reset — local history erased", "success");
       await load(false);
     } catch (err) {
-      const msg = ipcErrorMessage(err, String(err));
+      // ERR-2: friendlyIpcError never leaks socket paths or raw transport strings.
+      console.error("[HistoryView] database reset error:", err);
+      const msg = friendlyIpcError(err);
       setErrorDetail(`Reset failed: ${msg}`);
       showToast(`Reset failed: ${msg}`, "error");
     } finally {
@@ -2421,7 +2401,9 @@ export function HistoryView() {
       showToast(`Cleared ${result.deleted} item${result.deleted === 1 ? "" : "s"}`, "success");
       void load(true);
     } catch (err) {
-      const msg = ipcErrorMessage(err, String(err));
+      // ERR-2: friendlyIpcError never leaks socket paths or raw transport strings.
+      console.error("[HistoryView] clear-all error:", err);
+      const msg = friendlyIpcError(err);
       showToast(`Clear failed: ${msg}`, "error");
       setClearAllConfirmOpen(false);
     } finally {
@@ -2448,7 +2430,9 @@ export function HistoryView() {
           await api.addFileItem(bytes, file.name, file.type || "application/octet-stream");
           showToast(`Added "${file.name}"`, "success");
         } catch (err) {
-          const msg = err instanceof IpcError ? err.message : String(err);
+          // ERR-2: friendlyIpcError never leaks socket paths or raw transport strings.
+          console.error("[HistoryView] add file error:", err);
+          const msg = friendlyIpcError(err);
           showToast(`Failed to add "${file.name}": ${msg}`, "error");
         }
       }
@@ -2507,7 +2491,9 @@ export function HistoryView() {
                 added++;
               } catch (err) {
                 failed++;
-                const msg = err instanceof Error ? err.message : String(err);
+                // ERR-2: friendlyIpcError never leaks socket paths or raw transport strings.
+                console.error("[HistoryView] drag-drop file error:", err);
+                const msg = friendlyIpcError(err);
                 showToast(`Drop failed for "${p.split("/").pop()}": ${msg}`, "error");
               }
             }
@@ -2600,7 +2586,12 @@ export function HistoryView() {
           type="button"
           title={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           aria-label={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
-          onClick={() => setSortMode((m) => (m === "recency" ? "device" : "recency"))}
+          onClick={() => {
+            const next = sortMode === "recency" ? "device" : "recency";
+            setSortMode(next);
+            // Persist the choice so Settings > Display > History list > "Group by device" stays in sync.
+            setPrefs({ sortByDevice: next === "device" });
+          }}
           className={[
             // kp6f: removed rounded-ide; borderRadius applied via inline style
             "flex h-7 items-center gap-1 border px-2 text-[11px]",
@@ -2676,8 +2667,15 @@ export function HistoryView() {
   let body: React.ReactNode;
 
   if (loadState === "loading") {
+    // CopyPaste-bdac.92: replaced plain text with an animated spinner consistent
+    // with DevicesView (animate-spin border ring, motion-reduce-safe). No shared
+    // Spinner component exists; inline pattern mirrors DevicesView exactly.
     body = (
-      <div className="flex h-full items-center justify-center text-[13px] text-ide-dim">
+      <div className="flex h-full items-center justify-center gap-2 text-[13px] text-ide-dim">
+        <span
+          className="inline-block h-4 w-4 animate-spin motion-reduce:animate-none rounded-full border-2 border-ide-faint border-t-ide-accent"
+          aria-hidden="true"
+        />
         Loading…
       </div>
     );
@@ -2695,8 +2693,23 @@ export function HistoryView() {
           </span>
         }
         title="Clipboard service offline"
-        body="The daemon is not running."
+        body="The background service is not running."
         action={<div className="mt-1"><RestartDaemonButton onRestarted={() => void load()} /></div>}
+      />
+    );
+  } else if (loadState === "not_ready") {
+    // bdac.6: mirrors DevicesView not_ready branch — friendly "Starting up…"
+    // instead of the error/degraded state. No errorDetail is ever set here.
+    body = (
+      <EmptyState
+        className="h-full reveal-up"
+        icon={
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        }
+        title="Starting up…"
+        body="The clipboard service is initialising. History will appear in a moment."
       />
     );
   } else if (loadState === "error") {
@@ -2722,16 +2735,19 @@ export function HistoryView() {
             {/* 5j9x: replaced misclick-prone inline Yes/No with a ConfirmModal.
                 Clicking the button opens the modal; the modal calls handleResetConfirmed
                 only after the user explicitly confirms. */}
+            {/* CopyPaste-5917.39: replaced rounded-ide with skin-token radius so
+                Vapor (12px) and Quiet (7px) skins render the correct shape. */}
             <button
               onClick={() => setResetConfirm(true)}
-              className="rounded-ide border border-ide-danger/60 bg-ide-elevated px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-hover"
+              className="border border-ide-danger/60 bg-ide-elevated px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-hover"
+              style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
             >
               Reset database (erases local history)
             </button>
           </>
         )}
         {!degraded && (
-          <RestartDaemonButton label="Restart daemon" onRestarted={() => void load()} />
+          <RestartDaemonButton label="Restart background service" onRestarted={() => void load()} />
         )}
       </div>
     );
@@ -2798,6 +2814,25 @@ export function HistoryView() {
             ? { padding: "var(--skin-row-gap, 0px)" }
             : {}}
         >
+        {/* SCRH-9: Show a subtle hint when the display-limit pref caps the visible list so
+            the user isn't confused about why fewer items appear than the total-count badge
+            shows. The sentinel value 100000 is used for "Unlimited" in settings. */}
+        {(() => {
+          const limit = historyDisplayLimit ?? 1000;
+          const isTruncated = limit < 100000 && filtered.length > limit;
+          if (!isTruncated) return null;
+          return (
+            <div
+              className="shrink-0 border-b border-ide-divider/40 px-3 py-1 text-[11px] text-ide-faint text-center"
+              aria-live="polite"
+              data-testid="history-display-limit-hint"
+            >
+              Showing first {limit.toLocaleString()} of {filtered.length.toLocaleString()} results
+              {" — "}
+              <span className="text-ide-dim">adjust the display limit in Settings › Storage</span>
+            </div>
+          );
+        })()}
         <VirtualList
           // Cap the rendered list to the persisted display-limit preference.
           // Sentinel 100000 means "Unlimited" (effectively uncapped for any realistic history).
@@ -2914,7 +2949,9 @@ export function HistoryView() {
         {fileDragOver && (
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-ide border-2 border-dashed border-ide-accent bg-ide-accent/5"
+            // CopyPaste-5917.39: replaced rounded-ide with skin-token radius (card).
+            className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-ide-accent bg-ide-accent/5"
+            style={{ borderRadius: "var(--skin-r-card, 12px)" }}
           >
             <div className="flex flex-col items-center gap-2 text-ide-accent">
               <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -2928,24 +2965,23 @@ export function HistoryView() {
         )}
         {body}
       </div>
-      {toast !== null && <Toast key={toast.id} message={toast.message} kind={toast.kind} />}
       {/* F11: Undo-delete toast — shown while a deferred delete is pending */}
       {undoPending !== null && (
         <div
           // surface-glass-strong = same floating frosted-glass material as Toast,
           // theme-aware (replaces the hardcoded dark-only rgba fill + blur).
-          className="surface-glass-strong toast-in fixed bottom-3 left-1/2 z-[9999] pointer-events-auto"
+          // SCRH-12: z-40 keeps the undo toast BELOW the DetailsModal (z-50) so
+          // an open modal is never occluded by a transient notification.
+          // (Previously z-[9999] rendered this toast on top of everything.)
+          // CopyPaste-bdac.58: padding now via Tailwind classes (pl-2.5 pr-3.5 py-1.5)
+          // instead of hardcoded inline "6px 14px 6px 10px" so density tokens apply.
+          className="surface-glass-strong toast-enter fixed bottom-3 left-1/2 z-40 pointer-events-auto flex items-center gap-2.5 whitespace-nowrap pl-2.5 pr-3.5 py-1.5"
           role="status"
           aria-live="polite"
           style={{
             transform: "translateX(-50%)",
-            // kp6f: use skin card-radius token instead of hardcoded 10
-            borderRadius: "var(--skin-r-card, 10px)",
-            padding: "6px 14px 6px 10px",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            whiteSpace: "nowrap",
+            // CopyPaste-bdac.54: fallback corrected to 12px (Classic skin canonical value).
+            borderRadius: "var(--skin-r-card, 12px)",
           }}
         >
           <span
@@ -2954,7 +2990,8 @@ export function HistoryView() {
               height: 6,
               borderRadius: "50%",
               flexShrink: 0,
-              background: "var(--ide-danger, #e06c75)",
+              // CopyPaste-bdac.30: fallback matches dark-mode --ide-danger token (#E05C5C).
+              background: "var(--ide-danger, #e05c5c)",
             }}
           />
           <span className="text-[12px] text-ide-text">
@@ -3021,5 +3058,17 @@ export function HistoryView() {
         onCancel={() => setClearAllConfirmOpen(false)}
       />
     </ViewShell>
+  );
+}
+
+// CopyPaste-5917.102: HistoryView wraps HistoryViewInner in ToastProvider so
+// useToast() calls inside the inner component have a provider in the tree.
+// This self-contained approach avoids touching App.tsx while removing the
+// local Toast duplicate.
+export function HistoryView() {
+  return (
+    <ToastProvider>
+      <HistoryViewInner />
+    </ToastProvider>
   );
 }

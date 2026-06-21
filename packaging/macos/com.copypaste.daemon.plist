@@ -24,7 +24,7 @@
     </array>
 
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
 
     <!--
         Respawn only on crash; a clean exit (user invoked `daemon stop` or

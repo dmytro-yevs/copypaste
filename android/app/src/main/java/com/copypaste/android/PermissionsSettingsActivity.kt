@@ -18,6 +18,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -28,21 +29,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Battery5Bar
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.PhonelinkSetup
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.Battery5Bar
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.PhonelinkSetup
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -51,6 +59,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTheme
@@ -95,6 +105,10 @@ class PermissionsSettingsActivity : ComponentActivity() {
      */
     private var requestInFlight = false
 
+    // OEM autostart hint: set in openOemAutoStart() and observed in the composable
+    // to show a GlassToast (replaces android.widget.Toast.makeText).
+    internal var oemToastMsg by mutableStateOf<String?>(null)
+
     private val notifLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -129,6 +143,8 @@ class PermissionsSettingsActivity : ComponentActivity() {
                     onRequestBattery = { requestBatteryOptimizationExemption() },
                     onOpenOemAutoStart = { openOemAutoStart() },
                     onBack = { finish() },
+                    oemHint = oemToastMsg,
+                    onOemHintConsumed = { oemToastMsg = null },
                 )
             }
         }
@@ -206,7 +222,7 @@ class PermissionsSettingsActivity : ComponentActivity() {
             } else {
                 getString(R.string.oem_autostart_toast_generic)
             }
-            android.widget.Toast.makeText(this, hint, android.widget.Toast.LENGTH_LONG).show()
+            oemToastMsg = hint
         }
     }
 
@@ -222,8 +238,20 @@ fun PermissionsScreen(
     onRequestBattery: () -> Unit,
     onOpenOemAutoStart: () -> Unit,
     onBack: () -> Unit,
+    oemHint: String? = null,
+    onOemHintConsumed: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
+
+    val toastState = remember { GlassToastState() }
+    val toastScope = rememberCoroutineScope()
+    // Show OEM autostart hint as a GlassToast whenever the Activity sets oemHint.
+    LaunchedEffect(oemHint) {
+        if (oemHint != null) {
+            toastState.show(oemHint, GlassToastKind.INFO, durationMs = 3_500L)
+            onOemHintConsumed()
+        }
+    }
 
     // Re-evaluated every recomposition (triggered by refreshTrigger / onResume).
     val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -277,6 +305,7 @@ fun PermissionsScreen(
         else                                              -> c.bg
     }
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
         modifier = scaffoldModifier,
         containerColor = scaffoldContainerColor,
@@ -306,7 +335,7 @@ fun PermissionsScreen(
 
             // 1. Notifications
             PermissionStatusCard(
-                icon = Icons.Filled.Notifications,
+                icon = Icons.Outlined.Notifications,
                 title = "Notifications",
                 description = "Required on Android 13+ so the clipboard-monitoring " +
                         "foreground service can show its status notification (Pause/Resume).",
@@ -320,11 +349,14 @@ fun PermissionsScreen(
             BgCaptureStatusCard(
                 readLogsGranted = readLogsGranted,
                 overlayGranted = overlayGranted,
+                onToastRequest = { msg ->
+                    toastScope.launch { toastState.show(msg, GlassToastKind.SUCCESS) }
+                },
             )
 
             // 3. Battery Optimization exemption
             PermissionStatusCard(
-                icon = Icons.Filled.Battery5Bar,
+                icon = Icons.Outlined.Battery5Bar,
                 title = "Battery Optimization Exemption",
                 description = "Prevents Android from killing the sync service when the " +
                         "phone is idle. Recommended for reliable Supabase polling.",
@@ -349,7 +381,7 @@ fun PermissionsScreen(
                     }
                 }
                 PermissionStatusCard(
-                    icon = Icons.Filled.PhonelinkSetup,
+                    icon = Icons.Outlined.PhonelinkSetup,
                     title = "OEM Autostart / Protected Apps",
                     description = oemDesc,
                     // Cannot reliably detect this without root; never shown "granted".
@@ -362,7 +394,7 @@ fun PermissionsScreen(
 
             // 5. Foreground service (install-time, info only)
             PermissionStatusCard(
-                icon = Icons.Filled.Tune,
+                icon = Icons.Outlined.Tune,
                 title = "Foreground Service",
                 description = "Granted automatically at install — no action needed. Lets the " +
                         "clipboard-monitoring service run in the background.",
@@ -374,6 +406,8 @@ fun PermissionsScreen(
             )
         }
     }
+    GlassToastHost(state = toastState)
+    } // end Box
 }
 
 /**
@@ -386,6 +420,7 @@ fun PermissionsScreen(
 private fun BgCaptureStatusCard(
     readLogsGranted: Boolean,
     overlayGranted: Boolean,
+    onToastRequest: (String) -> Unit = {},
 ) {
     // CopyPaste-xi8h: use LocalIdeColors so colors adapt to light/dark palettes.
     val c = LocalIdeColors.current
@@ -427,18 +462,21 @@ private fun BgCaptureStatusCard(
                 label = stringResource(R.string.bg_adb_cmd1_label),
                 command = stringResource(R.string.bg_adb_cmd1),
                 toastText = stringResource(R.string.bg_adb_cmd_copied),
+                onToastRequest = onToastRequest,
             )
             Spacer(modifier = Modifier.height(4.dp))
             AdbCommandBlock(
                 label = stringResource(R.string.bg_adb_cmd2_label),
                 command = stringResource(R.string.bg_adb_cmd2),
                 toastText = stringResource(R.string.bg_adb_cmd_copied),
+                onToastRequest = onToastRequest,
             )
             Spacer(modifier = Modifier.height(4.dp))
             AdbCommandBlock(
                 label = stringResource(R.string.bg_adb_cmd3_label),
                 command = stringResource(R.string.bg_adb_cmd3),
                 toastText = stringResource(R.string.bg_adb_cmd_copied),
+                onToastRequest = onToastRequest,
             )
         }
     }
@@ -446,8 +484,8 @@ private fun BgCaptureStatusCard(
 
 /**
  * A small monospace code block displaying [command] with a tap-to-copy
- * interaction. On tap it writes [command] to the system clipboard and shows
- * a short [android.widget.Toast] with [toastText].
+ * interaction. On tap it writes [command] to the system clipboard and calls
+ * [onToastRequest] with [toastText] so the parent screen can show a GlassToast.
  *
  * Used below the Accessibility card so power-users / testers can copy the
  * exact `adb shell settings put secure enabled_accessibility_services …`
@@ -458,6 +496,7 @@ internal fun AdbCommandBlock(
     label: String,
     command: String,
     toastText: String,
+    onToastRequest: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
     // CopyPaste-xi8h: use LocalIdeColors so colors adapt to light/dark palettes.
@@ -482,7 +521,7 @@ internal fun AdbCommandBlock(
                 .clickable {
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     cm.setPrimaryClip(ClipData.newPlainText("adb_a11y_command", command))
-                    android.widget.Toast.makeText(ctx, toastText, android.widget.Toast.LENGTH_SHORT).show()
+                    onToastRequest(toastText)
                 }
                 .padding(vertical = 4.dp),
         )
@@ -553,7 +592,7 @@ private fun PermissionStatusCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Icon(
-                        imageVector = if (granted) Icons.Filled.CheckCircle
+                        imageVector = if (granted) Icons.Outlined.CheckCircle
                                       else Icons.Filled.ErrorOutline,
                         contentDescription = null,
                         tint = if (granted) c.success else c.danger,
@@ -575,11 +614,12 @@ private fun PermissionStatusCard(
 
             if (!infoOnly) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Button(
+                CopyPasteButton(
                     onClick = onClick,
                     // Stay enabled even when granted so the user can re-open the window.
                     enabled = true,
-                    modifier = Modifier.align(Alignment.End)
+                    variant = ButtonVariant.PRIMARY,
+                    modifier = Modifier.align(Alignment.End),
                 ) {
                     Text(buttonLabel)
                 }

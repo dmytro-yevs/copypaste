@@ -97,11 +97,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -188,6 +184,8 @@ import com.copypaste.android.ui.theme.IdeColors
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.Motion
 // Liquid glass / palette tokens for aurora backdrop and cinematic motion.
+import com.copypaste.android.ui.theme.CopyPasteButton
+import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.LocalPalette
@@ -200,6 +198,8 @@ import com.copypaste.android.ui.theme.SkinNavActive
 import com.copypaste.android.ui.theme.SkinRowTreatment
 import com.copypaste.android.ui.theme.SkinTokens
 import com.copypaste.android.ui.theme.skinTokens
+// CopyPaste-5917.84: canonical content-type → icon mapping (NavIcons.kt single source of truth)
+import com.copypaste.android.ui.theme.contentIconFor
 import kotlinx.coroutines.delay
 import java.text.DateFormat
 import java.util.Date
@@ -313,32 +313,68 @@ private fun splitUrl(raw: String): Pair<String, String> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Grant FLAG_GRANT_READ_URI_PERMISSION for [uri] to EVERY package that can
- * receive a paste, instead of a single hardcoded "com.android.systemui".
+ * CopyPaste-5917.73 (security hardening): Grant FLAG_GRANT_READ_URI_PERMISSION for
+ * [uri] only to apps that can plausibly receive a paste, not to every installed package.
  *
- * The pasting app varies by OEM/launcher (Gboard, SystemUI clipboard overlay,
- * Samsung clipboard, the target app itself), so a single-package grant left
- * paste broken on many devices. We enumerate installed packages and grant read
- * to each; failures per package are ignored (a package we cannot grant to was
- * never going to read the URI anyway).
+ * The previous implementation called `getInstalledPackages(0)` and granted to every
+ * app on the device (~100-400 packages), which is far broader than needed and
+ * constitutes a URI permission leak. This version narrows to:
+ *   1. Apps returned by queryIntentActivities for ACTION_PASTE (standard clipboard consumers)
+ *   2. Apps returned by queryIntentActivities for ACTION_SEND with [mime] (share targets)
+ *   3. A known-OEM hardlist: AOSP SystemUI, MIUI Home, Samsung clipboard — the OEMs
+ *      whose clipboard hosts do NOT register intent filters but still need the URI.
+ *
+ * Grant failures per package are silently ignored (a package that rejects the grant
+ * was never going to read the URI anyway).
+ *
+ * Protection is STRENGTHENED (never weakened): the set of granted packages is a strict
+ * subset of what the old all-packages loop granted. Paste still works on AOSP, MIUI,
+ * and Samsung via the OEM hardlist + query results.
+ *
+ * @param mime MIME type of the payload (e.g. "image/png", "application/octet-stream")
+ *             — used to build the ACTION_SEND intent for querying share targets.
  */
-private fun grantUriToAll(ctx: Context, uri: Uri) {
+private fun grantUriToAll(ctx: Context, uri: Uri, mime: String = "*/*") {
     val pm = ctx.packageManager
-    val packages = try {
-        pm.getInstalledPackages(0)
+    // Collect candidate packages: clipboard-paste handlers + share targets + OEM hardlist.
+    val candidates = mutableSetOf<String>()
+
+    // 1. Apps that handle ACTION_PASTE (standard clipboard overlay, e.g. AOSP SystemUI).
+    try {
+        val pasteIntent = Intent(Intent.ACTION_PASTE)
+        @Suppress("DEPRECATION") // MATCH_ALL is API 23+; fine for our minSdk
+        val pasteReceivers = pm.queryIntentActivities(pasteIntent, PackageManager.MATCH_ALL)
+        for (ri in pasteReceivers) candidates.add(ri.activityInfo.packageName)
     } catch (e: Exception) {
-        android.util.Log.w("HistoryActivity", "grantUriToAll: package enumeration failed: ${e.message}")
-        emptyList<android.content.pm.PackageInfo>()
+        android.util.Log.w("HistoryActivity", "grantUriToAll: ACTION_PASTE query failed: ${e.message}")
     }
-    for (pkg in packages) {
+
+    // 2. Apps that handle ACTION_SEND for this MIME type (share-target clipboard hosts).
+    try {
+        val sendIntent = Intent(Intent.ACTION_SEND).setType(mime)
+        @Suppress("DEPRECATION")
+        val sendReceivers = pm.queryIntentActivities(sendIntent, PackageManager.MATCH_ALL)
+        for (ri in sendReceivers) candidates.add(ri.activityInfo.packageName)
+    } catch (e: Exception) {
+        android.util.Log.w("HistoryActivity", "grantUriToAll: ACTION_SEND query failed: ${e.message}")
+    }
+
+    // 3. Known OEM clipboard hosts that don't register standard intent filters
+    //    but need the URI to be readable (MIUI, Samsung, AOSP hardlist).
+    candidates.addAll(
+        listOf(
+            "com.android.systemui",          // AOSP clipboard overlay
+            "com.miui.home",                 // MIUI clipboard host (Xiaomi)
+            "com.samsung.android.app.clipboard", // Samsung clipboard manager
+            "com.huawei.android.launcher",   // Huawei launcher clipboard
+        )
+    )
+
+    for (pkg in candidates) {
         try {
-            ctx.grantUriPermission(
-                pkg.packageName,
-                uri,
-                Intent.FLAG_GRANT_READ_URI_PERMISSION,
-            )
+            ctx.grantUriPermission(pkg, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
         } catch (_: Exception) {
-            // Some system packages reject the grant; harmless — skip them.
+            // Some packages reject the grant; harmless — they were never going to read the URI.
         }
     }
 }
@@ -559,11 +595,9 @@ fun HistoryScreen(
     // §8 glass toast (replaces Material Snackbar): bottom-center glass surface
     // with a leading semantic dot + slide-up. Driven through GlassToastState the
     // same way SnackbarHostState was (scope.launch { toastState.show(...) }).
+    // GlassToast now supports action buttons, so the UNDO affordance is handled
+    // here too (replaces the previous separate SnackbarHostState / SnackbarHost).
     val toastState = remember { GlassToastState() }
-    // CopyPaste-kaf6: SnackbarHostState for the 5-second undo snackbar after
-    // a single-item delete. GlassToast does not support action buttons, so we
-    // use the Material3 Snackbar channel for the UNDO affordance specifically.
-    val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
@@ -582,8 +616,6 @@ fun HistoryScreen(
     // CopyPaste-7m6r: loadErrorTemplate / clearAllErrorTemplate removed — error strings
     // are now routed through ErrorMessages.friendlyOperationError (no raw-msg formatting).
     val sensitiveTapMsg = stringResource(R.string.sensitive_tap_hint)
-    val itemDeletedMsg = stringResource(R.string.snackbar_item_deleted)
-    val undoLabel = stringResource(R.string.snackbar_undo)
 
     // ── In-app file picker (HB-11) ───────────────────────────────────────────
     // Opens the system file picker via ACTION_OPEN_DOCUMENT. On a successful pick
@@ -903,31 +935,27 @@ fun HistoryScreen(
                         selectedIds = emptySet()
                     }
                     // CopyPaste-2ifa + CopyPaste-kaf6: confirmed single delete:
-                    // show a 5-second undo Snackbar and only actually delete if
-                    // the user does not tap UNDO within that window.
+                    // show a 5-second GlassToast with an UNDO action button. If the
+                    // user taps UNDO within that window the toast dismisses immediately
+                    // and the delete is skipped; otherwise the delete is committed after
+                    // show() returns (macOS parity — 5-second undo window).
                     ConfirmAction.DELETE_SINGLE -> {
                         val idToDelete = pendingDeleteId
                         pendingDeleteId = null
                         if (idToDelete != null) {
-                            // Snackbar runs indefinitely; a parallel coroutine dismisses it
-                            // after 5 seconds so the undo window matches macOS parity exactly.
                             scope.launch {
-                                val result = snackbarHostState.showSnackbar(
-                                    message = itemDeletedMsg,
-                                    actionLabel = undoLabel,
-                                    duration = androidx.compose.material3.SnackbarDuration.Indefinite,
+                                var undone = false
+                                toastState.show(
+                                    message = ctx.getString(R.string.snackbar_item_deleted),
+                                    kind = GlassToastKind.INFO,
+                                    durationMs = 5_000L,
+                                    action = ctx.getString(R.string.snackbar_undo) to { undone = true },
                                 )
-                                if (result == SnackbarResult.ActionPerformed) {
-                                    // UNDO pressed — do NOT delete.
-                                } else {
-                                    // Dismissed or timed out — commit the delete.
+                                // show() suspends for durationMs (or until action dismisses it early).
+                                // If the action was clicked, undone=true and we skip the delete.
+                                if (!undone) {
                                     viewModel.deleteItem(idToDelete)
                                 }
-                            }
-                            // Auto-dismiss the undo window after 5 seconds (macOS parity).
-                            scope.launch {
-                                delay(5_000L)
-                                snackbarHostState.currentSnackbarData?.dismiss()
                             }
                         }
                     }
@@ -964,10 +992,6 @@ fun HistoryScreen(
             else                                          -> modifier // FLAT: solid, no canvas
         },
         containerColor = if (translucent) Color.Transparent else c.bg,
-        // CopyPaste-kaf6: SnackbarHost for the 5-second undo affordance after single-item
-        // delete. The GlassToastHost (further below in the Box) handles all other toasts;
-        // this host is solely for the UNDO-capable delete Snackbar.
-        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             if (selectionMode) {
                 val bulkCopiedMsg = stringResource(R.string.snackbar_bulk_copied)
@@ -1265,10 +1289,14 @@ fun HistoryScreen(
                     // §8 a11y: suppress enter/exit animation when reduced-motion is active.
                     AnimatedVisibility(
                         visible = searchExpanded,
+                        // MOT-20: use EaseOutExpo tween (not spring default) to match the rest of the app's
+                        // motion language (toast slide-in, list row entrance, etc.).
                         enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None
-                                else expandVertically() + fadeIn(),
+                                else expandVertically(animationSpec = tween(Motion.Base, easing = EaseOutExpo)) +
+                                     fadeIn(animationSpec = tween(Motion.Fast, easing = EaseOutExpo)),
                         exit  = if (reducedMotion) androidx.compose.animation.ExitTransition.None
-                                else shrinkVertically() + fadeOut(),
+                                else shrinkVertically(animationSpec = tween(Motion.Base, easing = EaseOutExpo)) +
+                                     fadeOut(animationSpec = tween(Motion.Fast, easing = EaseOutExpo)),
                     ) {
                         Column(modifier = Modifier.fillMaxWidth()) {
                             TextField(
@@ -1616,12 +1644,8 @@ fun HistoryScreen(
                                 }
                                 if (uri != null) {
                                     val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
-                                    // CopyPaste-ekcv: grant to all installed packages, not just
-                                    // "com.android.systemui". On OEMs where the clipboard host is
-                                    // not com.android.systemui (MIUI uses com.miui.home, Samsung
-                                    // uses com.samsung.android.app.clipboard, etc.) a hardcoded
-                                    // grant fails silently and the paste app cannot read the URI.
-                                    grantUriToAll(ctx, uri)
+                                    // CopyPaste-5917.73: narrowed grant — image/png targets only.
+                                    grantUriToAll(ctx, uri, "image/png")
                                     cm.setPrimaryClip(clip)
                                 }
                             }
@@ -1641,9 +1665,8 @@ fun HistoryScreen(
                                 }
                                 if (uri != null) {
                                     val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
-                                    // CopyPaste-ekcv: same fix — grant to all packages rather than
-                                    // hardcoding com.android.systemui (fails on OEM ROM variants).
-                                    grantUriToAll(ctx, uri)
+                                    // CopyPaste-5917.73: narrowed grant — octet-stream targets only.
+                                    grantUriToAll(ctx, uri, "application/octet-stream")
                                     cm.setPrimaryClip(clip)
                                 }
                             }
@@ -1927,14 +1950,15 @@ private fun ConfirmationDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, color = c.text) },
         text = { Text(message, color = c.dim) },
+        // CopyPaste-bdac.8: use canonical CopyPasteButton (was TextButton — wrong radius/ripple).
         confirmButton = {
-            TextButton(onClick = onConfirm) {
-                Text(stringResource(R.string.dialog_confirm), color = c.danger)
+            CopyPasteButton(onClick = onConfirm, variant = ButtonVariant.DANGER) {
+                Text(stringResource(R.string.dialog_confirm))
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.dialog_cancel), color = c.dim)
+            CopyPasteButton(onClick = onDismiss, variant = ButtonVariant.GHOST) {
+                Text(stringResource(R.string.dialog_cancel))
             }
         },
     )
@@ -2161,7 +2185,7 @@ private fun chipColorFor(kind: String, c: IdeColors): Color = when (kind) {
     "PATH"    -> c.warning
     "JSON"    -> c.danger
     "CODE"    -> c.violet
-    "IMAGE"   -> c.info    // izio: was violet, now sky/info (parity web .b-image)
+    "IMAGE"   -> c.violet  // 1jms.14: PARITY-SPEC §6 canonical: IMAGE → violet (not sky/info)
     "FILE"    -> c.faint   // izio: was dim, now faint (parity web .b-file)
     "PRIVATE" -> c.danger
     else      -> c.faint   // unknown text kinds default to the TEXT slot
@@ -2281,21 +2305,17 @@ private fun parseHexColor(snippet: String): Color? {
  */
 @Composable
 private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
-    // CopyPaste-sw6u: each content kind now maps to a distinct semantic icon
-    // (was: CODE/EMAIL/PHONE/COLOR/NUMBER/JSON all fell back to ContentCopy).
+    // CopyPaste-5917.84: delegate to contentIconFor() (NavIcons.kt — single source of truth).
+    // PATH=FolderOpen, NUMBER=Tag — previously PATH mapped to AttachFile (wrong icon).
+    // Android-only extras not in the canonical set are handled first:
+    //   URL     → OpenInNew  (launch icon, vs Link in the canonical web set)
+    //   FILE    → InsertDriveFile (synced file item, not a text type)
+    //   PRIVATE → Lock       (sensitive/private item guard)
     val icon = when (chipLabel) {
         "URL"     -> Icons.AutoMirrored.Outlined.OpenInNew
-        "IMAGE"   -> Icons.Outlined.Image
-        "CODE"    -> Icons.Outlined.Code          // dm51 styleguide: code-bracket icon
-        "EMAIL"   -> Icons.Outlined.Email         // dm51: envelope
-        "PHONE"   -> Icons.Outlined.Phone         // dm51: phone handset
-        "COLOR"   -> Icons.Outlined.Palette       // dm51: colour wheel — superseded by swatch for COLOR rows
-        "NUMBER"  -> Icons.Outlined.Tag           // dm51: hash/tag for numeric literals
-        "PATH"    -> Icons.Outlined.AttachFile
-        "JSON"    -> Icons.Outlined.DataObject    // dm51: braces/data-object for JSON
         "FILE"    -> Icons.AutoMirrored.Outlined.InsertDriveFile
         "PRIVATE" -> Icons.Outlined.Lock
-        else      -> Icons.Outlined.ContentCopy   // TEXT / fallback
+        else      -> contentIconFor(chipLabel)   // canonical: PATH=FolderOpen, NUMBER=Tag, etc.
     }
 
     Box(
@@ -2309,7 +2329,8 @@ private fun ContentIconTile(chipLabel: String, colors: IdeColors) {
     ) {
         Icon(
             imageVector = icon,
-            contentDescription = null,
+            // CopyPaste-5917.15: announce content kind to TalkBack (was null).
+            contentDescription = chipLabel,
             tint = colors.faint,
             modifier = Modifier.size(12.dp),
         )
@@ -2468,12 +2489,9 @@ private fun HistoryList(
                             if (uri != null) {
                                 val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste image", uri)
                                 clip.addItem(ClipData.Item(uri))
-                                // AB-12: broad URI read grant. Granting only to
-                                // "com.android.systemui" failed on OEMs where the
-                                // pasting app differs. Broaden the grant to every
-                                // package that can handle the URI so paste works
-                                // regardless of which app consumes the clip.
-                                grantUriToAll(ctx, uri)
+                                // CopyPaste-5917.73: narrowed grant — image/png targets only
+                                // (was all-packages; now limited to clipboard/share handlers + OEM hardlist).
+                                grantUriToAll(ctx, uri, "image/png")
                                 // Register the expected URI BEFORE setPrimaryClip so
                                 // the capture listeners recognise this as an internal
                                 // copy-from-history echo and do NOT re-store it as a
@@ -2511,8 +2529,8 @@ private fun HistoryList(
                             }
                             if (uri != null) {
                                 val clip = ClipData.newUri(ctx.contentResolver, "CopyPaste file", uri)
-                                // AB-12: broad URI read grant (see image case above).
-                                grantUriToAll(ctx, uri)
+                                // CopyPaste-5917.73: narrowed grant — octet-stream targets only.
+                                grantUriToAll(ctx, uri, "application/octet-stream")
                                 // Register the expected URI BEFORE setPrimaryClip (same
                                 // guard as image copy-back above and text expectClip).
                                 ClipboardRepository.expectImageUri(uri)
@@ -2815,12 +2833,13 @@ private fun HistoryRow(
         finishedListener = { copyFlashTrigger = 0 },
     )
 
-    // §8 press-scale: 0.98 on press, instant out-expo spring back.
+    // §8 press-scale: 0.992 on press (approved motion spec), instant out-expo spring back.
+    // 0.992 vs old 0.98: subtler squeeze — keeps content readable during tap feedback.
     // When reduced-motion is active we hold the scale at 1f (no animation).
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val rowScale by animateFloatAsState(
-        targetValue = if (reducedMotion) 1.0f else if (isPressed) 0.98f else 1.0f,
+        targetValue = if (reducedMotion) 1.0f else if (isPressed) 0.992f else 1.0f,
         animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant, easing = EaseOutExpo),
         label = "rowPressScale",
     )
@@ -3005,9 +3024,8 @@ private fun HistoryRow(
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
                 )
                 Spacer(Modifier.width(8.dp))
-                // egsf: 26dp icon-tile (RadiusChip 7, mute@0.16 bg, faint glyph) — parity .ci
-                ContentIconTile(chipLabel = chipLabel, colors = c)
-                Spacer(Modifier.width(8.dp))
+                // CopyPaste-5917.61: image rows omit the 26dp icon-tile (the thumbnail IS the
+                // preview — the tile was redundant before the chip). Only chip + thumbnail.
                 if (!selectionMode && item.pinned) {
                     Icon(
                         imageVector = Icons.Outlined.Star,
@@ -3021,16 +3039,45 @@ private fun HistoryRow(
                 ContentTypeChip(label = chipLabel, color = chipColor)
                 if (!selectionMode && item.tooLargeToSync) TooLargeBadge()
                 Spacer(Modifier.width(8.dp))
-                Image(
-                    bitmap = bmp,
-                    contentDescription = stringResource(R.string.cd_image_thumbnail),
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .widthIn(max = 340.dp)
-                        .heightIn(max = imageMaxHeightDp.dp)
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(c.elevated),
-                )
+                // CopyPaste-44rq.42: mirror PreviewOverlay masking — blur thumbnail on
+                // API 31+ when sensitive/masked; hide entirely (placeholder) on pre-31
+                // to avoid leaking image content via a no-op blur.
+                if (masked && !canBlur) {
+                    // Pre-API-31: Modifier.blur is a no-op, so replace the bitmap
+                    // with a lock placeholder to prevent leaking the sensitive image.
+                    Box(
+                        modifier = Modifier
+                            .widthIn(max = 340.dp)
+                            .heightIn(max = imageMaxHeightDp.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(c.dangerDim),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Lock,
+                            contentDescription = stringResource(R.string.sensitive_preview_mask),
+                            tint = c.danger,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                } else {
+                    Image(
+                        bitmap = bmp,
+                        contentDescription = stringResource(R.string.cd_image_thumbnail),
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .widthIn(max = 340.dp)
+                            .heightIn(max = imageMaxHeightDp.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(c.elevated)
+                            // CopyPaste-44rq.42: blur on API 31+ when sensitive + masked;
+                            // unmasked images render at full quality.
+                            .then(
+                                if (masked) Modifier.blur(20.dp, BlurredEdgeTreatment.Rectangle)
+                                else Modifier
+                            ),
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 // §5 relative timestamp with tabular-nums via fontFeatureSettings
                 Text(
@@ -3426,10 +3473,14 @@ private fun DeviceFilterRow(
     onSelect: (String) -> Unit,
 ) {
     val c = LocalIdeColors.current
+    // CopyPaste-5917.64: was always c.panel (opaque). Use transparent when translucent
+    // is enabled so the glass top-bar visual tier continues through the filter strip.
+    val translucent = rememberTranslucency()
+    val stripBg = if (translucent) Color.Transparent else c.panel
     LazyRow(
         modifier = Modifier
             .fillMaxWidth()
-            .background(c.panel)
+            .background(stripBg)
             .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -3552,7 +3603,7 @@ private fun OriginDeviceBadge(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §8 ScaleIconButton — icon button with press-scale 0.98.
+// §8 ScaleIconButton — icon button with press-scale 0.992 (approved motion spec).
 // Touch target is ≥48dp (M3 IconButton default) to meet Android a11y minimum.
 // Callers must NOT pass Modifier.size(<48.dp) — use the modifier slot only
 // for positioning (padding, weight, etc.).
@@ -3569,7 +3620,7 @@ private fun ScaleIconButton(
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (reducedMotion) 1.0f else if (isPressed) 0.98f else 1.0f,
+        targetValue = if (reducedMotion) 1.0f else if (isPressed) 0.992f else 1.0f,
         animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant, easing = EaseOutExpo),
         label = "btnScale",
     )
@@ -3582,30 +3633,4 @@ private fun ScaleIconButton(
     ) {
         content()
     }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Type icon (legacy — used only when chip is not available in older paths)
-// ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun TypeIcon(
-    contentType: String,
-    isSensitive: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    val c = LocalIdeColors.current
-    val (icon, tint) = when {
-        isSensitive                -> Icons.Outlined.Lock to c.danger
-        contentTypeIsImage(contentType) -> Icons.Outlined.Image to c.violet
-        contentTypeIsText(contentType) -> Icons.Outlined.ContentCopy to c.accent
-        contentType == "url"       -> Icons.Outlined.ContentCopy to c.info
-        else                       -> Icons.Outlined.ContentCopy to c.dim
-    }
-    Icon(
-        imageVector = icon,
-        contentDescription = null,
-        tint = tint,
-        modifier = modifier,
-    )
 }

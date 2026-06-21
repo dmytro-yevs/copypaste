@@ -122,10 +122,23 @@ class Settings(context: Context) {
      *
      * Used as the `Authorization: Bearer <token>` for the relay poll/subscribe
      * routes. Never logged.
+     *
+     * bd CopyPaste-44rq.53: wrapped with the AndroidKeyStore KEK (AES-GCM-256)
+     * instead of being stored as plaintext SharedPreferences. Existing installs
+     * are migrated transparently on first read via [readWrappedSecret].
      */
     var relayToken: String
-        get() = prefs.getString("relay_token", "") ?: ""
-        set(v) = prefs.edit().putString("relay_token", v).apply()
+        get() = readWrappedSecret(
+            KEY_RELAY_TOKEN_WRAPPED_B64,
+            KEY_RELAY_TOKEN_IV_B64,
+            KEY_LEGACY_RELAY_TOKEN_PLAIN,
+        )
+        set(v) = writeWrappedSecret(
+            KEY_RELAY_TOKEN_WRAPPED_B64,
+            KEY_RELAY_TOKEN_IV_B64,
+            KEY_LEGACY_RELAY_TOKEN_PLAIN,
+            v,
+        )
 
     /**
      * The `relayUrl` that [relayToken] was issued for. When the configured
@@ -164,11 +177,28 @@ class Settings(context: Context) {
      * (X25519 size) but in CopyPaste's 3-path model it only STORES it — actual
      * payload crypto uses the cross-device cloud sync key, not relay ECDH — so a
      * persisted random 32-byte value is sufficient and stable across launches.
-     * Minted lazily on first relay registration. Never used as encryption key.
+     * Minted lazily on first relay registration.
+     *
+     * CopyPaste-44rq.57: although this value is not itself an encryption key, it
+     * acts as a stable per-device identity token for relay registration. Its
+     * exposure would allow an attacker to re-register on behalf of this device.
+     * KEK-wrapped (same as [relayToken] / [cloudSyncPassphrase] / [supabasePassword])
+     * for consistency with the pattern used by every other secret in this class.
+     * The plaintext pref key "relay_registration_key_b64" becomes the legacy key
+     * so existing installs auto-migrate on first read via [readWrappedSecret].
      */
     var relayRegistrationKeyB64: String
-        get() = prefs.getString("relay_registration_key_b64", "") ?: ""
-        set(v) = prefs.edit().putString("relay_registration_key_b64", v).apply()
+        get() = readWrappedSecret(
+            KEY_RELAY_REG_KEY_WRAPPED_B64,
+            KEY_RELAY_REG_KEY_IV_B64,
+            KEY_LEGACY_RELAY_REG_KEY_PLAIN,
+        )
+        set(v) = writeWrappedSecret(
+            KEY_RELAY_REG_KEY_WRAPPED_B64,
+            KEY_RELAY_REG_KEY_IV_B64,
+            KEY_LEGACY_RELAY_REG_KEY_PLAIN,
+            v,
+        )
 
     var syncEnabled: Boolean
         get() = prefs.getBoolean("sync_enabled", true)
@@ -497,9 +527,45 @@ class Settings(context: Context) {
     val dbPath: String
         get() = appContext.getDatabasePath("copypaste.db").absolutePath
 
+    /**
+     * CopyPaste-bdac.32: this flag controls whether a toast is shown when a
+     * sensitive item is captured but its upload is suppressed (not when the
+     * user taps to reveal). It is distinct from the macOS `showSensitiveWarnings`
+     * reveal-guard (which is a confirmation overlay before unblurring).
+     *
+     * Renamed from `showSensitiveWarnings` (which had wrong semantics — the same
+     * pref-key name as macOS but completely different behaviour). The legacy
+     * `"show_sensitive_warnings"` pref key is retained for read-migration so
+     * existing users keep their setting.
+     *
+     * Default: true (notify = safe default — user knows when upload was skipped).
+     */
+    var notifyOnSensitiveSkip: Boolean
+        get() = prefs.getBoolean("notify_on_sensitive_skip",
+            // Migrate: read from the old key on first access if new key absent.
+            prefs.getBoolean("show_sensitive_warnings", true))
+        set(v) {
+            prefs.edit()
+                .putBoolean("notify_on_sensitive_skip", v)
+                .remove("show_sensitive_warnings") // scrub legacy key on write
+                .apply()
+        }
+
+    /**
+     * When true (default), show a tap-to-reveal confirmation before unblurring a
+     * sensitive item in the history list. Mirrors macOS `prefs.showSensitiveWarnings`
+     * (SettingsView.tsx:2055-2063 "Warn before revealing sensitive").
+     *
+     * CopyPaste-bdac.32: this is the CORRECT meaning of `showSensitiveWarnings` —
+     * a reveal-guard that requires the user to explicitly confirm before seeing the
+     * sensitive content. Added as a new independent property now that the old
+     * `showSensitiveWarnings` has been correctly renamed to [notifyOnSensitiveSkip].
+     *
+     * Default: true (reveal-guard ON = safe state, matches macOS default).
+     */
     var showSensitiveWarnings: Boolean
-        get() = prefs.getBoolean("show_sensitive_warnings", true)
-        set(v) = prefs.edit().putBoolean("show_sensitive_warnings", v).apply()
+        get() = prefs.getBoolean("show_sensitive_warnings_reveal_guard", true)
+        set(v) = prefs.edit().putBoolean("show_sensitive_warnings_reveal_guard", v).apply()
 
     /**
      * When true (default), preview text for items flagged as sensitive is
@@ -534,23 +600,6 @@ class Settings(context: Context) {
     var previewLines: Int
         get() = prefs.getInt("preview_lines", 1).coerceIn(1, 6)
         set(v) = prefs.edit().putInt("preview_lines", v.coerceIn(1, 6)).apply()
-
-    /**
-     * Number of preview lines in the Quick-Paste popup (PARITY-SPEC PG-59, web M4 split).
-     *
-     * Mirrors the web `previewLinesPopup` setting (store.ts): how many lines of preview
-     * text are shown per clip in the popup / overlay panel, independently from the main
-     * history list ([previewLines]). 1 line (default) = single-line ellipsis; >1 =
-     * multi-line clamp. Range 1–6 (matches web's clamp).
-     *
-     * NOTE (PG-59): Android does not yet have a Quick-Paste popup surface. This property
-     * is defined for parity completeness so the setting key is reserved and the Settings
-     * UI (SettingsActivity, owned by another agent) can wire a slider row in the
-     * "Popup appearance" subsection once the popup composable exists.
-     */
-    var previewLinesPopup: Int
-        get() = prefs.getInt("preview_lines_popup", 1).coerceIn(1, 6)
-        set(v) = prefs.edit().putInt("preview_lines_popup", v.coerceIn(1, 6)).apply()
 
     /**
      * When true (default), the foreground service is actively monitoring the
@@ -606,8 +655,7 @@ class Settings(context: Context) {
      * Persisted as the enum name string so new variants can be added without
      * a migration. Falls back to [Density.DEFAULT] on an unrecognised value.
      *
-     * TODO(daemon): no daemon config field exists for this knob yet; it is stored
-     * via the Settings prefs mechanism only — mirrors how the web app does it.
+     * Local pref only — mirrors macOS UIPrefs.density, not synced to daemon.
      */
     var density: Density
         get() = when (prefs.getString("density", Density.DEFAULT.name)) {
@@ -716,19 +764,30 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putInt("image_max_height", v.coerceIn(1, 200)).apply()
 
     /**
-     * Maximum number of history items to display and retain on-device.
+     * DEPRECATED — use [maxHistoryItems] instead.
      *
-     * Mirrors Maccy's `historySize` preference. The list scrolls vertically
-     * without a row-count cap. Range 1–999.
+     * This was a separate "display cap" pref (Maccy `historySize`, default 200)
+     * that coexisted with the on-disk retention cap [maxHistoryItems] (default 1000).
+     * Having two overlapping history-size knobs confused users (SET-8/bdac.40).
      *
-     * Note: [maxHistoryItems] (above) controls the on-disk retention cap used
-     * by the capture pipeline. [historySize] is the display cap consumed by the
-     * history list to limit how many items are fetched for rendering. Both
-     * default to sensible values independently so upgrading users are unaffected.
+     * Resolution: [maxHistoryItems] is the single authoritative cap — it controls
+     * both on-disk retention (via [ClipboardRepository.applyHistoryCap]) and the
+     * displayed item count. [historySize] is retained as a no-op alias so any
+     * callers from older builds do not crash; the getter always returns
+     * [maxHistoryItems] so both prefs converge to the same value on read.
+     *
+     * Do NOT add new callers. The "history_size" SharedPreferences key is
+     * intentionally NOT written on new saves — stale values are ignored.
      */
+    @Deprecated(
+        message = "Use maxHistoryItems instead. historySize was a redundant display-only cap; " +
+            "maxHistoryItems is the single authoritative on-disk + display cap (SET-8/bdac.40).",
+        replaceWith = ReplaceWith("maxHistoryItems"),
+    )
     var historySize: Int
-        get() = prefs.getInt("history_size", 200).coerceIn(1, 999)
-        set(v) = prefs.edit().putInt("history_size", v.coerceIn(1, 999)).apply()
+        get() = maxHistoryItems.coerceIn(1, Int.MAX_VALUE)
+        @Suppress("DEPRECATION") // setter retained for binary compat only; routes to maxHistoryItems
+        set(v) { maxHistoryItems = v }
 
     /**
      * Delay in milliseconds before auto-collapsing an expanded action row.
@@ -937,6 +996,21 @@ class Settings(context: Context) {
     var p2pSyncEnabled: Boolean
         get() = prefs.getBoolean(KEY_P2P_SYNC_ENABLED, true)
         set(v) = prefs.edit().putBoolean(KEY_P2P_SYNC_ENABLED, v).apply()
+
+    /**
+     * CopyPaste-44rq.24: When true (default), a synced clipboard item from a peer is
+     * automatically applied to the local clipboard without user confirmation.
+     * When false the user must manually tap a synced item to paste it.
+     *
+     * Mirrors macOS SettingsView.tsx:2189-2215 "Auto-apply synced clipboard" toggle
+     * (`auto_apply_synced_clip` daemon config field). Pref-only on Android until the
+     * daemon IPC exposes a config knob for it.
+     *
+     * Key: "auto_apply_synced_clip". Default: true (matches macOS default).
+     */
+    var autoApplySyncedClip: Boolean
+        get() = prefs.getBoolean("auto_apply_synced_clip", true)
+        set(v) = prefs.edit().putBoolean("auto_apply_synced_clip", v).apply()
 
     /**
      * PG-29 (CopyPaste-yqn5): Whether this device is visible on the LAN via mDNS-SD
@@ -1545,7 +1619,10 @@ class Settings(context: Context) {
         captureEnabled: Boolean,
         privateMode: Boolean,
         syncEnabled: Boolean,
-        showSensitiveWarnings: Boolean,
+        // CopyPaste-bdac.32: renamed from showSensitiveWarnings (wrong semantics).
+        // This flag = "notify user when a sensitive item was captured but skipped",
+        // distinct from the reveal-guard (showSensitiveWarnings above this function).
+        notifyOnSensitiveSkip: Boolean,
         maskSensitiveContent: Boolean,
         translucency: Boolean,
         /** User-controlled reduce-motion toggle; mirrors web data-motion=calm. Default false = cinematic. */
@@ -1583,7 +1660,9 @@ class Settings(context: Context) {
             .putBoolean("capture_enabled", captureEnabled)
             .putBoolean("private_mode", privateMode)
             .putBoolean("sync_enabled", syncEnabled)
-            .putBoolean("show_sensitive_warnings", showSensitiveWarnings)
+            // CopyPaste-bdac.32: write new key; legacy "show_sensitive_warnings" is
+            // migrated on first read of notifyOnSensitiveSkip (getter above).
+            .putBoolean("notify_on_sensitive_skip", notifyOnSensitiveSkip)
             .putBoolean("mask_sensitive_content", maskSensitiveContent)
             .putBoolean("translucency", translucency)
             .putBoolean("motion_reduced", motionReduced)
@@ -1822,6 +1901,20 @@ class Settings(context: Context) {
         private const val KEY_LEGACY_SUPABASE_PW_PLAIN = "supabase_password"
         private const val KEY_SUPABASE_PW_WRAPPED_B64 = "supabase_password_wrapped_b64"
         private const val KEY_SUPABASE_PW_IV_B64 = "supabase_password_iv_b64"
+
+        // bd CopyPaste-44rq.53: KEK-wrapped relay bearer token.
+        // The plaintext SharedPreferences key "relay_token" becomes the legacy key
+        // so existing installs auto-migrate to KEK-wrapped storage on first read.
+        private const val KEY_LEGACY_RELAY_TOKEN_PLAIN = "relay_token"
+        private const val KEY_RELAY_TOKEN_WRAPPED_B64 = "relay_token_wrapped_b64"
+        private const val KEY_RELAY_TOKEN_IV_B64 = "relay_token_iv_b64"
+
+        // CopyPaste-44rq.57: KEK-wrapped relay registration key (was plaintext).
+        // The plaintext key "relay_registration_key_b64" becomes the legacy key
+        // so existing installs auto-migrate to KEK-wrapped storage on first read.
+        private const val KEY_LEGACY_RELAY_REG_KEY_PLAIN = "relay_registration_key_b64"
+        private const val KEY_RELAY_REG_KEY_WRAPPED_B64 = "relay_reg_key_wrapped_b64"
+        private const val KEY_RELAY_REG_KEY_IV_B64 = "relay_reg_key_iv_b64"
 
         // KEK-wrapped, directly-provisioned 32-byte cloud sync key. Carried over
         // QR pairing (see PairActivity) so a scanning phone can decrypt cloud rows

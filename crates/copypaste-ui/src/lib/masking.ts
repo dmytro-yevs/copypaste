@@ -20,6 +20,23 @@ export function shouldMask(
 }
 
 /**
+ * Returns the DOM-safe placeholder string that REPLACES the real plaintext
+ * while a sensitive item is not yet revealed.
+ *
+ * The caller MUST NOT put the real text in the DOM when `shouldMask` is true
+ * and the user has not explicitly revealed it. CSS blur alone is insufficient
+ * (screen readers, devtools, and clipboard scanners read raw text nodes).
+ * Render this placeholder instead and swap in the real preview only after an
+ * intentional reveal action.
+ */
+export function maskPlaceholder(): string {
+  // bdac.69: canonical label aligned with Android cd_sensitive_item string
+  // ("Sensitive content — preview hidden"). macOS label includes the platform-
+  // specific reveal affordance inline ("click to reveal").
+  return "Sensitive — preview hidden · click to reveal";
+}
+
+/**
  * Redact the sensitive ranges in `spans` from `text`, replacing each range with
  * bullet characters.
  *

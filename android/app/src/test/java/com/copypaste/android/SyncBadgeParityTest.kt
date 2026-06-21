@@ -36,7 +36,10 @@ import org.junit.Test
 class SyncBadgeParityTest {
 
     private val NOW_MS = 1_000_000L
-    private val RECENT_MS = RECENT_SYNC_MS // from MainApplication constants
+    // Inline the value (5 min) rather than referencing RECENT_SYNC_MS from DevicesActivity —
+    // DevicesActivity imports Android Activity classes that are unavailable in pure JVM unit tests.
+    // Matches the pattern in SyncBadgeStateTest and the macOS SyncStatusChip constant.
+    private val RECENT_MS = 5 * 60 * 1_000L
 
     // ── IpcSyncBadgeState → display model ────────────────────────────────────
 

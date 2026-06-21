@@ -98,7 +98,8 @@ describe("CopyPaste-7set: sync_enabled toggle reconciliation", () => {
     await waitFor(() => {
       const body = document.body.textContent ?? "";
       // Must mention that the toggle may not be applied yet or daemon is a stub.
-      expect(body).toMatch(/sync.*stub|stub.*sync|no effect|daemon.*sync_enabled|sync_enabled.*daemon|sync.*not.*supported|sync.*ignored/i);
+      // bdac.64: text reworded from "sync_enabled not supported" to "Sync control unavailable".
+      expect(body).toMatch(/sync.*stub|stub.*sync|no effect|daemon.*sync_enabled|sync_enabled.*daemon|sync.*not.*supported|sync.*ignored|sync.*unavailable|unavailable.*sync/i);
     });
   });
 

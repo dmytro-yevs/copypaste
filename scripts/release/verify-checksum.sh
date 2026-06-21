@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# verify-checksum.sh — emit SHA256SUMS for all release artefacts in target/release/.
+# verify-checksum.sh — emit SHA256SUMS for all release artefacts in dist/.
 #
 # Usage: scripts/release/verify-checksum.sh [output-dir]
-#   output-dir  defaults to target/release
+#   output-dir  defaults to dist
 #
 # Captures: *.dmg, *.tar.gz, *.zip, *.deb, *.rpm, *.AppImage, *.msi
 # Writes:   <output-dir>/SHA256SUMS  (one "<hash>  <basename>" per artefact)
@@ -14,7 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
-OUT_DIR="${1:-target/release}"
+OUT_DIR="${1:-dist}"
 if [[ ! -d "$OUT_DIR" ]]; then
     echo "ERROR: output dir not found: $OUT_DIR" >&2
     exit 1

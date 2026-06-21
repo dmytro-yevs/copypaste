@@ -1,5 +1,8 @@
 package com.copypaste.android
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -8,6 +11,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -101,15 +106,47 @@ class LogcatCaptureService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
+        // CopyPaste-44rq.4: promote to foreground service so Android cannot silently
+        // kill this service under memory pressure on API 26+. Without startForeground()
+        // the logcat-tail loop is killed aggressively (START_STICKY restart is not
+        // guaranteed under Doze / OEM aggressive-kill policies). IMPORTANCE_MIN keeps
+        // the notification silent and out of the status bar — same strategy as
+        // ClipboardService.CHANNEL_COPY_EVENT. We use ServiceCompat.startForeground
+        // so the type constant is passed correctly on API 29+ (required on API 34+)
+        // while remaining compatible with older APIs.
+        try {
+            ensureLogcatChannel(this)
+            ServiceCompat.startForeground(
+                this,
+                NOTIFICATION_ID_LOGCAT,
+                buildLogcatNotification(this),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    // specialUse is the correct type for clipboard utilities per Play policy.
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                } else {
+                    0
+                },
+            )
+        } catch (e: Exception) {
+            // If startForeground is rejected (e.g. from a restricted background context
+            // on API 34+), log and stop — a silent background service is worse than no
+            // service (provides a false sense of capture). The ClipboardService's own
+            // foreground path remains the primary capture mechanism.
+            AppLogger.w(TAG, "startForeground rejected (${e.javaClass.simpleName}: ${e.message}) — stopping")
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (logcatJob?.isActive == true) return START_STICKY
         logcatJob = scope.launch { runLogcatLoop() }
-        AppLogger.i(TAG, "Logcat capture loop started")
+        AppLogger.i(TAG, "Logcat capture loop started (FGS)")
         return START_STICKY
     }
 
     override fun onDestroy() {
         logcatJob?.cancel()
         scope.cancel()
+        // CopyPaste-44rq.4: remove the foreground notification when the service stops.
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         AppLogger.i(TAG, "LogcatCaptureService destroyed")
         super.onDestroy()
     }
@@ -287,6 +324,47 @@ class LogcatCaptureService : Service() {
     companion object {
         private const val TAG = "LogcatCaptureService"
 
+        // CopyPaste-44rq.4: FGS notification channel and id.
+        // IMPORTANCE_MIN = silent, no heads-up, no status-bar icon — same policy as
+        // ClipboardService.CHANNEL_COPY_EVENT so the capture notification is unobtrusive.
+        private const val CHANNEL_LOGCAT_CAPTURE = "copypaste_logcat_capture"
+        private const val NOTIFICATION_ID_LOGCAT = 1005
+
+        /** Ensure the low-importance notification channel exists (idempotent). */
+        private fun ensureLogcatChannel(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            val nm = context.getSystemService(NotificationManager::class.java) ?: return
+            if (nm.getNotificationChannel(CHANNEL_LOGCAT_CAPTURE) != null) return
+            nm.createNotificationChannel(
+                NotificationChannel(
+                    CHANNEL_LOGCAT_CAPTURE,
+                    context.getString(R.string.notif_channel_logcat_capture_name),
+                    NotificationManager.IMPORTANCE_MIN,
+                ).apply {
+                    description = context.getString(R.string.notif_channel_logcat_capture_description)
+                    setShowBadge(false)
+                    enableVibration(false)
+                    setSound(null, null)
+                },
+            )
+        }
+
+        /** Build the persistent FGS notification for the logcat capture service. */
+        private fun buildLogcatNotification(context: Context): Notification =
+            NotificationCompat.Builder(context, CHANNEL_LOGCAT_CAPTURE)
+                .setSmallIcon(android.R.drawable.ic_menu_edit)
+                .setContentTitle(context.getString(R.string.notif_logcat_capture_title))
+                .setContentText(context.getString(R.string.notif_logcat_capture_content))
+                .setPriority(NotificationCompat.PRIORITY_MIN)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setOngoing(true)
+                .setShowWhen(false)
+                .setOnlyAlertOnce(true)
+                // VISIBILITY_SECRET: hides notification content on the lock screen
+                // so clipboard-related text never appears in the lock-screen shade.
+                .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+                .build()
+
         /**
          * The logcat DEBUG marker emitted by android/os/ClipboardService.java in AOSP
          * when setPrimaryClip is called. Used on API <= 28 only (direct-read path).
@@ -353,21 +431,23 @@ class LogcatCaptureService : Service() {
             val shouldRun = hasReadLogsPermission(context) && settings.logcatCaptureEnabled
             val intent = Intent(context, LogcatCaptureService::class.java)
             if (shouldRun) {
-                // CopyPaste-ki0n: this is a plain background service (not an FGS).
-                // syncState is called from CopyPasteApp.onCreate, which on a
-                // process restart triggered by a background event (boot, WorkManager,
-                // sync push) has no visible Activity. startService() from a
-                // non-foreground context throws IllegalStateException on API 26+.
-                // We cannot promote to startForegroundService (this service never
-                // calls startForeground), so swallow the background-start exception:
-                // capture self-recovers on the next foreground launch, and crashing
-                // app init here would be far worse.
+                // CopyPaste-44rq.4: this is now a foreground service (FGS).
+                // Use startForegroundService() on API 26+ so the service has
+                // 5 seconds to call startForeground() before the ANR timer fires.
+                // From a background context (boot, WorkManager, sync push) on
+                // API 31+ this may throw ForegroundServiceStartNotAllowedException;
+                // swallow it — capture self-recovers on the next foreground launch,
+                // and crashing app init is worse than a missed background start.
                 try {
-                    context.startService(intent)
-                } catch (e: IllegalStateException) {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(intent)
+                    } else {
+                        context.startService(intent)
+                    }
+                } catch (e: Exception) {
                     AppLogger.w(
                         TAG,
-                        "startService blocked (background context) — will retry on foreground: ${e.message}"
+                        "startForegroundService blocked (background context) — will retry on foreground: ${e.message}"
                     )
                 }
             } else {

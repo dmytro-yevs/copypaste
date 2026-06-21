@@ -114,7 +114,7 @@ enum Commands {
         /// Path to JSON file
         file: String,
     },
-    /// Enable or disable private/pause mode (daemon stops recording new clipboard changes)
+    /// Enable or disable private mode (daemon stops recording new clipboard changes)
     Private {
         #[command(subcommand)]
         action: PrivateAction,

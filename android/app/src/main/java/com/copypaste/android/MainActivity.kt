@@ -67,6 +67,7 @@ import com.copypaste.android.ui.theme.SkinNavActive
 import com.copypaste.android.ui.theme.skinTokens
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.glassFloatShadow
+import com.copypaste.android.ui.theme.glassFloatShadowExplicit
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
@@ -446,8 +447,10 @@ private fun FloatingTabBar(
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 10.dp)
             .padding(bottom = navBarBottomPadding)
-            // Styleguide: box-shadow 0 18px 45px rgba(0,0,0,.20) — soft float shadow.
-            .then(if (translucent) Modifier.glassFloatShadow(GlassTier.GLASS, 28.dp) else Modifier),
+            // VISA-12: styleguide floating-pill shadow is 0 18dp 45dp rgba(0,0,0/.20).
+            // GlassTier.GLASS defaults are 8dp/24dp (chrome chrome), which is too subtle
+            // for a detached pill — use glassFloatShadowExplicit with the spec values.
+            .then(if (translucent) Modifier.glassFloatShadowExplicit(yOffset = 18.dp, blurRadius = 45.dp, radius = 28.dp) else Modifier),
     ) {
         Row(
             modifier = Modifier
@@ -489,16 +492,20 @@ private fun FloatingTabBar(
                 val pillColor = if (isSelected) activePillBg else Color.Transparent
                 val showRing = isSelected && tok.navActive == SkinNavActive.GLASS_RING
 
+                // VISA-10: pill radius reads tok.radiusCard instead of hardcoded 18.dp so
+                // the active-pill corners scale with the active skin
+                // (Classic=12dp, Quiet=10dp, Vapor=16dp).
+                val pillRadius = tok.radiusCard
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .scale(scale)
-                        .clip(RoundedCornerShape(18.dp))
+                        .clip(RoundedCornerShape(pillRadius))
                         .background(pillColor)
                         .then(
                             // GLASS_RING: 1dp accent outline ring on the selected tab (Vapor nav spec).
                             // Classic and Quiet do not add a border — Classic is visually byte-identical.
-                            if (showRing) Modifier.border(1.dp, c.accent, RoundedCornerShape(18.dp))
+                            if (showRing) Modifier.border(1.dp, c.accent, RoundedCornerShape(pillRadius))
                             else Modifier
                         )
                         .clickable(

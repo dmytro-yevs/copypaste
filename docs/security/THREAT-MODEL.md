@@ -1,6 +1,6 @@
-# CopyPaste Threat Model — v0.2.0-beta
+# CopyPaste Threat Model — v0.3.0
 
-- **Version:** 0.2.0-beta
+- **Version:** 0.3.0
 - **Date:** 2026-05-23
 - **Status:** Living document — re-review on every minor release
 - **Methodology:** STRIDE per asset + trust-boundary analysis
@@ -14,10 +14,10 @@
 
 ### 1.1 In scope
 
-This threat model covers the **v0.2.0-beta** surface of CopyPaste:
+This threat model covers the **v0.3.0** surface of CopyPaste:
 
 - The `copypaste-daemon` process (clipboard capture, storage, sync).
-- The local on-disk **SQLCipher database** (`agentdb.rvf` / clipboard store).
+- The local on-disk **SQLCipher database** (`clipboard.db` / clipboard store).
 - The OS **Keychain / Secret Service** entries holding the daemon's
   per-installation secrets (`db_key`, mTLS private key, device identity key).
 - The **Unix-domain socket IPC** between the Tauri UI and daemon.

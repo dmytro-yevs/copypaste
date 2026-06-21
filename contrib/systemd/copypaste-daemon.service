@@ -9,7 +9,7 @@ Type=simple
 ExecStart=%h/.local/bin/copypaste-daemon
 Restart=on-failure
 RestartSec=5s
-Environment=RUST_LOG=info
+Environment=COPYPASTE_LOG=info
 
 # Security hardening
 NoNewPrivileges=true

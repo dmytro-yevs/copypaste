@@ -104,7 +104,7 @@ describe("§7.1 StatusDot — online pulse ring", () => {
     expect(pings.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("does NOT render pulse ring for offline peer", async () => {
+  it("does NOT render pulse ring for offline peer row dot", async () => {
     listPeers.mockResolvedValue({
       peers: [{ ...BASE_PEER, online: false }],
     });
@@ -112,15 +112,12 @@ describe("§7.1 StatusDot — online pulse ring", () => {
     const { container } = render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
-    // At least ThisDeviceCard has a pulse ring (always online)
-    // But the offline peer's dot must NOT have an extra ping around it
-    // We check that the number of pulse rings equals exactly the "This Mac" card dot
-    // (no peer pulse ring added)
+    // CopyPaste-5917.28: the section header now uses StatusDot online={true} in the
+    // online-count badge (always shown when peers.length > 0), contributing 1 pulse ring.
+    // ThisDeviceCard adds 1 more. The offline peer row must NOT add a third.
+    // Expected: exactly 2 pings (header badge + ThisDeviceCard); no ping from offline peer row.
     const pings = container.querySelectorAll(".animate-pulse-ping");
-    // The "This Mac" card always shows an online pulse ring
-    // An offline peer must NOT add another
-    // Count peer rows - only 1 peer, offline -> only 1 ping (from ThisDeviceCard)
-    expect(pings.length).toBe(1);
+    expect(pings.length).toBe(2);
   });
 
   it("pulse ring has motion-reduce:animate-none gate", async () => {
@@ -190,9 +187,10 @@ describe("§7.3 Fingerprint display", () => {
     render(<DevicesView />);
     await screen.findByText("Test Mac");
 
-    // cg2h: shows first 8 + "…" + last 8 chars; full hex must NOT appear verbatim.
+    // cg2h + bdac.52: shows first 16 + "…" + last 8 chars (PARITY-SPEC §7,
+    // matching Android); full hex must NOT appear verbatim.
     const fp = BASE_OWN_INFO.fingerprint;
-    const truncated = `${fp.slice(0, 8)}…${fp.slice(-8)}`;
+    const truncated = `${fp.slice(0, 16)}…${fp.slice(-8)}`;
     expect(screen.getByText(truncated)).toBeInTheDocument();
     // Full 64-char hex must NOT appear as a raw text node.
     expect(screen.queryByText(fp)).toBeNull();
@@ -236,7 +234,7 @@ describe("§7.3 Fingerprint display", () => {
 // §7.4 Per-peer sync line
 // ---------------------------------------------------------------------------
 describe("§7.4 Per-peer sync line", () => {
-  it("shows 'Synced ...' line in PeerRow when last_sync_at is set", async () => {
+  it("shows 'Last sync' label in PeerRow metadata grid when last_sync_at is set (SCRD-2: duplicate para removed)", async () => {
     listPeers.mockResolvedValue({
       peers: [{ ...BASE_PEER, last_sync_at: 1700001000 }],
     });
@@ -244,9 +242,15 @@ describe("§7.4 Per-peer sync line", () => {
     render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
-    // The dedicated sync line "Synced X" should appear (starts with "Synced ")
-    const syncEls = screen.queryAllByText(/^Synced /i);
-    expect(syncEls.length).toBeGreaterThanOrEqual(1);
+    // The sync time appears exactly once via the MetaRow "Last sync" grid label.
+    // SCRD-2: the duplicate standalone "Synced X" paragraph below the grid was
+    // removed — this test verifies the grid entry is present and the paragraph is absent.
+    const lastSyncLabels = screen.queryAllByText("Last sync");
+    expect(lastSyncLabels.length).toBeGreaterThanOrEqual(1);
+
+    // The duplicate "Synced X" paragraph must not exist.
+    const syncedParas = screen.queryAllByText(/^Synced /i);
+    expect(syncedParas).toHaveLength(0);
   });
 });
 

@@ -21,7 +21,7 @@ type NavItem = {
 
 // §jxbx: All nav items use the same icon/text classes driven by active state.
 // Active: differs by skin — classic: fill+glow, quiet: tint, vapor: glass+ring.
-// Inactive: muted ide-dim text; hover lifts with translateX + surface bg tint.
+// Inactive: muted ide-dim text; hover shows surface bg tint (no translateX: MOT-16).
 const NAV: NavItem[] = [
   { id: "history",  label: "History",  Icon: HistoryIcon  },
   { id: "devices",  label: "Devices",  Icon: DevicesIcon  },
@@ -114,18 +114,16 @@ export function Sidebar() {
                   "list-item-in",
                   "flex items-center gap-2.5 px-2.5 py-[7px] text-left text-[13px]",
                   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ide-accent",
-                  // Transitions: background, color, transform, box-shadow all use motion tokens.
-                  // spring cubic-bezier for transform; ease-out for colour/bg.
-                  "transition-[transform,background,color,box-shadow]",
+                  // Transitions: background, color, box-shadow use motion tokens (MOT-16: no transform).
+                  "transition-[background,color,box-shadow]",
                   "duration-200",
                   active
                     ? buildActiveClass(skin)
                     : [
-                        // §jxbx-3/4: inactive — dim text, hover surface bg + translateX(4px).
-                        // hover:translate-x-1 = 4px in Tailwind default scale.
+                        // §jxbx-3/4: inactive — dim text, hover surface bg + opacity tint.
+                        // No translateX: items would appear to leave the sidebar (MOT-16).
                         "text-ide-dim",
                         "hover:bg-ide-hover hover:text-ide-text",
-                        "hover:translate-x-1",
                       ].join(" "),
                 ].join(" ")}
                 style={{
@@ -149,7 +147,7 @@ export function Sidebar() {
         {/* Footer: app name + sync status chip */}
         <div className="mt-auto flex items-center justify-between px-3 py-2.5">
           {/* ide-faint is WCAG AA 4.5:1 on panel; drop the /60 opacity that was ~1.8:1 */}
-          <span className="text-[10px] font-medium uppercase tracking-widest text-ide-faint">CopyPaste</span>
+          <span className="text-[10.5px] font-medium uppercase tracking-widest text-ide-faint">CopyPaste</span>
           <SyncStatusChip />
         </div>
       </div>

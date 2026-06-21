@@ -3,7 +3,7 @@
  * 1. Sidebar container: surface-glass + radial accent tint + card-in entrance.
  * 2. Active nav item: accent gradient bg + nav-active-glow + on-accent text.
  * 3. Inactive nav item: ide-dim text, no active gradient classes.
- * 4. Hover nav item: transition classes + translateX utility present.
+ * 4. Hover nav item: transition classes + background hover (no translateX — MOT-16).
  * 5. Nav items: list-item-in stagger entrance class + animationDelay inline style.
  * 6. ViewShell header: card-in entrance class.
  * 7. ViewShell content panel: reveal-up entrance class.
@@ -127,7 +127,7 @@ describe("§jxbx-3  Sidebar — inactive nav item styling", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §4  Hover nav item — transition + translateX
+// §4  Hover nav item — transition + background hover (no translateX, MOT-16)
 // ---------------------------------------------------------------------------
 describe("§jxbx-4  Sidebar — hover transition classes", () => {
   it("nav buttons have a transition class for smooth hover", () => {
@@ -142,15 +142,17 @@ describe("§jxbx-4  Sidebar — hover transition classes", () => {
     }
   });
 
-  it("nav buttons have hover:translate-x-1 or hover:translate-x class", () => {
+  it("nav buttons use background hover (no translateX — MOT-16 calm motion)", () => {
     const { container } = render(<Sidebar />);
     const buttons = container.querySelectorAll("button");
     const inactiveBtns = Array.from(buttons).filter(
       (btn) => !btn.className.includes("nav-active-glow")
     );
     for (const btn of inactiveBtns) {
-      // Tailwind class for translateX(4px) is hover:translate-x-1 (4px) or similar
-      expect(btn.className).toMatch(/hover:translate-x/);
+      // MOT-16: translateX hover removed (items appeared to leave the sidebar).
+      // Hover is now background-only: hover:bg-ide-hover + hover:text-ide-text.
+      expect(btn.className).not.toMatch(/hover:translate-x/);
+      expect(btn.className).toMatch(/hover:bg-ide-hover/);
     }
   });
 });

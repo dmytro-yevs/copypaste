@@ -28,7 +28,8 @@ describe("AboutView visual structure (JetBrains tokens)", () => {
   it("renders the app name and description", () => {
     render(<AboutView />);
     expect(screen.getByText("CopyPaste")).toBeInTheDocument();
-    expect(screen.getByText(/Encrypted clipboard manager for macOS/i)).toBeInTheDocument();
+    // bdac.79: canonical tagline has no platform suffix (matches Android about_tagline).
+    expect(screen.getByText(/Encrypted clipboard manager/i)).toBeInTheDocument();
   });
 
   it("renders a version string in the identity section", async () => {

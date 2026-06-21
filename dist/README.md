@@ -49,7 +49,7 @@ CopyPaste-v0.2.0-beta.1-android-arm64.apk.sha256
 |-----------------------------------------|---------------------------------------------|
 | `scripts/release/_sign-and-dmg.sh`      | `CopyPaste-v<ver>-macos-<arch>.dmg` + sha   |
 | `scripts/release/build-dmg-ci.sh`       | `CopyPaste-v<ver>-macos-<arch>.dmg` + sha   |
-| `scripts/build-android-apk.sh`          | `CopyPaste-v<ver>-android-arm64.apk` + sha  |
+| `.github/workflows/release.yml`          | `CopyPaste-v<ver>-android-arm64.apk` + sha  |
 
 Per-arch staging binaries (raw `copypaste-daemon`, `copypaste`, `*.so`)
 go under `builds/<platform>-<arch>/`, not `dist/`. Those are inputs to the

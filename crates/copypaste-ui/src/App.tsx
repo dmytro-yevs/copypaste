@@ -539,9 +539,9 @@ export default function App() {
               style={{ borderRadius: "var(--skin-r-card)" }}
             >
               <span>
-                CopyPaste app and background daemon are on incompatible versions
-                {protocolMismatch !== null ? ` (daemon protocol v${protocolMismatch})` : ""}.
-                Restart the app or the daemon to resolve.
+                CopyPaste app and background service are on incompatible versions
+                {protocolMismatch !== null ? ` (service protocol v${protocolMismatch})` : ""}.
+                Restart the app or the background service to resolve.
               </span>
               <button
                 type="button"
@@ -560,7 +560,7 @@ export default function App() {
               style={{ borderRadius: "var(--skin-r-card)" }}
             >
               <span>
-                CopyPaste was updated but an older background daemon is still
+                CopyPaste was updated but an older background service is still
                 running
                 {staleDaemon !== "unknown" ? ` (build ${staleDaemon})` : ""}.
                 Restart it to use the new version.

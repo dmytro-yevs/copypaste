@@ -41,7 +41,6 @@ jobs:
   nightly-macos:
     name: Nightly macOS (arm64)
     runs-on: macos-14
-    continue-on-error: true
     outputs:
       status: ${{ steps.outcome.outputs.status }}
       artifact: ${{ steps.outcome.outputs.artifact }}
@@ -115,7 +114,9 @@ jobs:
     # If not available the job will fail with "No hosted runner matching" — in that
     # case change to `ubuntu-latest` (slower but always available). Human decision.
     runs-on: ubuntu-latest-xlarge
-    continue-on-error: true
+    # continue-on-error removed (bd CopyPaste-ojas.12): it was masking real Android
+    # build failures. nightly-summary uses `if: always()` so it still posts even
+    # when this job fails — no need for continue-on-error on the build job itself.
     outputs:
       status: ${{ steps.outcome.outputs.status }}
       artifact: ${{ steps.outcome.outputs.artifact }}

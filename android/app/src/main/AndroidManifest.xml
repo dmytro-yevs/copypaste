@@ -305,10 +305,22 @@
             best-effort fallback — the primary background capture mechanism is
             the adb READ_LOGS path. See LogcatCaptureService.kt for
             full documentation of capabilities and limitations per Android version.
+
+            CopyPaste-44rq.4: promoted to foreground service (FGS) with
+            foregroundServiceType="specialUse" so Android cannot silently kill
+            the logcat-tail loop under memory pressure on API 26+. Play policy
+            directs clipboard managers to use specialUse for niche FGS types.
         -->
         <service
             android:name=".LogcatCaptureService"
-            android:exported="false" />
+            android:exported="false"
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+            <!-- Required by Play policy for FGS_SPECIAL_USE -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Optional power-user logcat-based clipboard change detection via adb-granted READ_LOGS" />
+        </service>
 
         <!-- WorkManager: Supabase poll worker registered at runtime when backend = SUPABASE.
              ServiceRestartWorker is also registered at runtime by WorkManager. -->

@@ -23,21 +23,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Battery5Bar
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Layers
-import androidx.compose.material.icons.filled.PhonelinkSetup
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Button
+import androidx.compose.material.icons.outlined.Battery5Bar
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Layers
+import androidx.compose.material.icons.outlined.PhonelinkSetup
+import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import com.copypaste.android.ui.GlassToastHost
+import com.copypaste.android.ui.GlassToastKind
+import com.copypaste.android.ui.GlassToastState
+import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -45,16 +51,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.IdeBg
-import com.copypaste.android.ui.theme.IdeBorder
-import com.copypaste.android.ui.theme.IdeDanger
-import com.copypaste.android.ui.theme.IdeDim
-import com.copypaste.android.ui.theme.IdeSuccess
-import com.copypaste.android.ui.theme.IdeText
-import com.copypaste.android.ui.theme.IdeWarning
+import com.copypaste.android.ui.theme.LocalIdeColors
 
 /**
  * "Background Capture" setup wizard — implements the ClipCascade-style combo
@@ -110,6 +112,10 @@ class BackgroundCaptureSetupActivity : ComponentActivity() {
      */
     private var requestInFlight = false
 
+    // OEM autostart hint: set in openOemAutoStart() and observed in the composable
+    // to show a GlassToast (replaces android.widget.Toast.makeText).
+    internal var oemToastMsg by mutableStateOf<String?>(null)
+
     private val settingsLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -136,7 +142,14 @@ class BackgroundCaptureSetupActivity : ComponentActivity() {
                     onRequestOverlay = { requestOverlayPermission() },
                     onRequestBattery = { requestBatteryExemption() },
                     onOpenOemAutoStart = { openOemAutoStart() },
+                    // ANDO-6: persist acknowledgement flag then refresh so the card hides.
+                    onAcknowledgeOem = {
+                        OemAutoStartHelper.setOemAcknowledged(this)
+                        refreshState()
+                    },
                     onBack = { finish() },
+                    oemHint = oemToastMsg,
+                    onOemHintConsumed = { oemToastMsg = null },
                 )
             }
         }
@@ -192,7 +205,7 @@ class BackgroundCaptureSetupActivity : ComponentActivity() {
             } else {
                 getString(R.string.oem_autostart_toast_generic)
             }
-            android.widget.Toast.makeText(this, hint, android.widget.Toast.LENGTH_LONG).show()
+            oemToastMsg = hint
         }
     }
 
@@ -236,9 +249,23 @@ fun BackgroundCaptureSetupScreen(
     onRequestOverlay: () -> Unit,
     onRequestBattery: () -> Unit,
     onOpenOemAutoStart: () -> Unit,
+    onAcknowledgeOem: () -> Unit = {},
     onBack: () -> Unit,
+    oemHint: String? = null,
+    onOemHintConsumed: () -> Unit = {},
 ) {
+    // ANDO-3: read the active ramp (light/dark) instead of hardcoding dark Ide* constants.
+    val c = LocalIdeColors.current
     val ctx = LocalContext.current
+
+    val toastState = remember { GlassToastState() }
+    // Show OEM autostart hint as a GlassToast whenever the Activity sets oemHint.
+    LaunchedEffect(oemHint) {
+        if (oemHint != null) {
+            toastState.show(oemHint, GlassToastKind.INFO, durationMs = 3_500L)
+            onOemHintConsumed()
+        }
+    }
 
     // ── Live status — re-evaluated on every recomposition (NOT memoized). ────
     // This is the correct pattern per the PermissionsSettingsActivity (line 232+).
@@ -263,9 +290,12 @@ fun BackgroundCaptureSetupScreen(
     val oemResolvable = OemAutoStartHelper.getOemIntentCandidates(ctx)
         .any { OemAutoStartHelper.isResolvable(ctx, it) }
     val oemLabel = OemAutoStartHelper.oemSettingsLabel(ctx)
+    // ANDO-6: hide the OEM card after the user acknowledges they've enabled autostart.
+    val oemAcknowledged = OemAutoStartHelper.isOemAcknowledged(ctx)
 
+    Box(Modifier.fillMaxSize()) {
     Scaffold(
-        containerColor = IdeBg,
+        containerColor = c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_bg_capture_setup),
@@ -294,7 +324,7 @@ fun BackgroundCaptureSetupScreen(
 
             // ── Step 1: SYSTEM_ALERT_WINDOW ────────────────────────────────────
             BgCaptureCard(
-                icon = Icons.Filled.Layers,
+                icon = Icons.Outlined.Layers,
                 title = stringResource(R.string.bg_capture_overlay_title),
                 description = stringResource(R.string.bg_capture_overlay_desc),
                 granted = overlayGranted,
@@ -308,7 +338,7 @@ fun BackgroundCaptureSetupScreen(
 
             // ── Step 2: Battery Optimization exemption ─────────────────────────
             BgCaptureCard(
-                icon = Icons.Filled.Battery5Bar,
+                icon = Icons.Outlined.Battery5Bar,
                 title = stringResource(R.string.bg_capture_battery_title),
                 description = stringResource(R.string.bg_capture_battery_desc),
                 granted = batteryExempt,
@@ -321,7 +351,8 @@ fun BackgroundCaptureSetupScreen(
             )
 
             // ── Step 3: OEM autostart ──────────────────────────────────────────
-            if (oemResolvable) {
+            if (oemResolvable && !oemAcknowledged) {
+                // ANDO-6: card is hidden once the user acknowledges via "Done — I've enabled it".
                 val oemDesc = buildString {
                     append(stringResource(R.string.bg_capture_oem_desc_base))
                     if (oemLabel != null) {
@@ -330,7 +361,7 @@ fun BackgroundCaptureSetupScreen(
                     }
                 }
                 BgCaptureCard(
-                    icon = Icons.Filled.PhonelinkSetup,
+                    icon = Icons.Outlined.PhonelinkSetup,
                     title = stringResource(R.string.bg_capture_oem_title),
                     description = oemDesc,
                     // OEM autostart state cannot be reliably detected without root.
@@ -338,24 +369,37 @@ fun BackgroundCaptureSetupScreen(
                     buttonLabel = stringResource(R.string.bg_capture_oem_button),
                     onClick = onOpenOemAutoStart,
                     required = false,
+                    onAcknowledge = onAcknowledgeOem,
+                    acknowledgeLabel = stringResource(R.string.bg_capture_oem_ack),
+                )
+            } else if (oemAcknowledged) {
+                // User has confirmed they enabled OEM autostart — show a compact granted card.
+                BgCaptureCard(
+                    icon = Icons.Outlined.PhonelinkSetup,
+                    title = stringResource(R.string.bg_capture_oem_title),
+                    description = stringResource(R.string.bg_capture_oem_ack_done),
+                    granted = true,
+                    buttonLabel = stringResource(R.string.bg_capture_oem_button),
+                    onClick = onOpenOemAutoStart,
+                    required = false,
                 )
             } else {
                 // Stock Android / Pixel: no OEM power-management layer present.
-                CopyPasteCard(accent = IdeBorder) {
+                CopyPasteCard(accent = c.border) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             Icon(
-                                imageVector = Icons.Filled.PhonelinkSetup,
+                                imageVector = Icons.Outlined.PhonelinkSetup,
                                 contentDescription = null,
-                                tint = IdeDim,
+                                tint = c.dim,
                             )
                             Text(
                                 text = stringResource(R.string.bg_capture_oem_title),
                                 style = MaterialTheme.typography.titleMedium,
-                                color = IdeText,
+                                color = c.text,
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -363,28 +407,28 @@ fun BackgroundCaptureSetupScreen(
                         Text(
                             text = stringResource(R.string.bg_capture_oem_not_needed),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = IdeDim,
+                            color = c.dim,
                         )
                     }
                 }
             }
 
             // ── Step 4: Final instruction (text-only) ──────────────────────────
-            CopyPasteCard(accent = IdeBorder) {
+            CopyPasteCard(accent = c.border) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Icon(
-                            imageVector = Icons.Filled.PlayArrow,
+                            imageVector = Icons.Outlined.PlayArrow,
                             contentDescription = null,
-                            tint = IdeWarning,
+                            tint = c.warning,
                         )
                         Text(
                             text = stringResource(R.string.bg_capture_restart_title),
                             style = MaterialTheme.typography.titleMedium,
-                            color = IdeText,
+                            color = c.text,
                             modifier = Modifier.weight(1f),
                         )
                     }
@@ -392,24 +436,30 @@ fun BackgroundCaptureSetupScreen(
                     Text(
                         text = stringResource(R.string.bg_capture_restart_desc),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = IdeDim,
+                        color = c.dim,
                     )
                 }
             }
         }
     }
+    GlassToastHost(state = toastState)
+    } // end Box
 }
 
 /**
  * Status card for the Background Capture Setup screen.
  *
  * [granted] semantics:
- *  - `true`  → IdeSuccess border + CheckCircle icon.
- *  - `false` → IdeDanger border + ErrorOutline icon (when [required]).
- *  - `null`  → IdeBorder (neutral) — OEM autostart: state not queryable.
+ *  - `true`  → success border + CheckCircle icon.
+ *  - `false` → danger border + ErrorOutline icon (when [required]).
+ *  - `null`  → neutral border — OEM autostart: state not queryable.
  *
  * The button is always enabled so the user can revisit the system Settings
  * screen at any time (matches PermissionsSettingsActivity design).
+ *
+ * [onAcknowledge] / [acknowledgeLabel] — optional secondary action shown when the
+ * card state is not deterministic (OEM autostart). Tapping it persists the
+ * acknowledgement flag so the card hides on the next recomposition (ANDO-6).
  */
 @Composable
 private fun BgCaptureCard(
@@ -420,11 +470,16 @@ private fun BgCaptureCard(
     buttonLabel: String,
     onClick: () -> Unit,
     required: Boolean,
+    onAcknowledge: (() -> Unit)? = null,
+    acknowledgeLabel: String? = null,
 ) {
+    // ANDO-3: use LocalIdeColors.current so the card renders correctly in light themes.
+    val c = LocalIdeColors.current
+
     val borderColor = when {
-        granted == true              -> IdeSuccess
-        granted == false && required -> IdeDanger
-        else                         -> IdeBorder
+        granted == true              -> c.success
+        granted == false && required -> c.danger
+        else                         -> c.border
     }
 
     CopyPasteCard(accent = borderColor) {
@@ -436,19 +491,19 @@ private fun BgCaptureCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (granted == true) IdeSuccess else IdeDim,
+                    tint = if (granted == true) c.success else c.dim,
                 )
                 Text(
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
-                    color = IdeText,
+                    color = c.text,
                     modifier = Modifier.weight(1f),
                 )
                 if (required) {
                     Text(
                         text = stringResource(R.string.label_required),
                         style = MaterialTheme.typography.labelSmall,
-                        color = IdeDanger,
+                        color = c.danger,
                     )
                 }
             }
@@ -465,10 +520,10 @@ private fun BgCaptureCard(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(
-                        imageVector = if (granted) Icons.Filled.CheckCircle
+                        imageVector = if (granted) Icons.Outlined.CheckCircle
                                       else Icons.Filled.ErrorOutline,
                         contentDescription = null,
-                        tint = if (granted) IdeSuccess else IdeDanger,
+                        tint = if (granted) c.success else c.danger,
                     )
                     Text(
                         text = if (granted)
@@ -476,7 +531,7 @@ private fun BgCaptureCard(
                         else
                             stringResource(R.string.status_not_granted),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) IdeSuccess else IdeDanger,
+                        color = if (granted) c.success else c.danger,
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
@@ -485,15 +540,28 @@ private fun BgCaptureCard(
             Text(
                 text = description,
                 style = MaterialTheme.typography.bodyMedium,
-                color = IdeDim,
+                color = c.dim,
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Button(
+            CopyPasteButton(
                 onClick = onClick,
                 enabled = true, // always enabled — user can revisit at any time
+                variant = ButtonVariant.PRIMARY,
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(buttonLabel)
+            }
+            // ANDO-6: secondary "Done" button for OEM cards whose state is not queryable.
+            if (onAcknowledge != null && acknowledgeLabel != null) {
+                Spacer(modifier = Modifier.height(6.dp))
+                CopyPasteButton(
+                    onClick = onAcknowledge,
+                    enabled = true,
+                    variant = ButtonVariant.SECONDARY,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(acknowledgeLabel)
+                }
             }
         }
     }

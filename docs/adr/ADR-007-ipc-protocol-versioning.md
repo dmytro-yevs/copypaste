@@ -44,12 +44,16 @@ Every `Request` and `Response` on the IPC wire carries an integer
 * On `Response`, the field is **always** serialised, even on error paths.
   Clients use it to detect a daemon-side downgrade or rollback.
 * Requests outside the supported window are rejected with
-  `error_code = "invalid_argument"` and a human-readable message naming the
-  unsupported version and the daemon's supported range. (We considered a
-  dedicated `version_mismatch` code and reserved it for future use, but
-  reusing `invalid_argument` keeps the client-side branching surface small
-  for v1 — clients only need one "stop and prompt the user to upgrade"
-  handler, keyed on the message prefix `unsupported protocol version`.)
+  `error_code = "version_mismatch"` (constant `ERR_CODE_VERSION_MISMATCH` in
+  `crates/copypaste-ipc/src/response.rs`) and a human-readable message naming
+  the unsupported version and the daemon's supported range. Clients MUST branch
+  on the `"version_mismatch"` code — do NOT match on the message text, which
+  may change. A dedicated code (not the generic `"invalid_argument"`) was chosen
+  so clients can distinguish a protocol-version gate from other argument errors
+  without prefix-scanning the message string. This was confirmed in the
+  implementation (see ipc.rs comments: "ADR-007: version gate must use
+  ERR_CODE_VERSION_MISMATCH so the CLI checks for 'version_mismatch'
+  specifically").
 
 ### Versioning policy
 
@@ -82,9 +86,8 @@ it was built against MUST NOT silently continue:
 3. Read-only requests (`status`, `list`) MAY continue at the client's
    discretion if the response shape is still parseable.
 
-A client receiving `error_code = "invalid_argument"` with a message
-beginning `unsupported protocol version` MUST NOT retry — this is a hard
-mismatch that requires a daemon or client upgrade.
+A client receiving `error_code = "version_mismatch"` MUST NOT retry — this is a
+hard mismatch that requires a daemon or client upgrade.
 
 ## TypeScript client implementation
 

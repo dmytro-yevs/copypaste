@@ -54,6 +54,12 @@ pub enum SchemaError {
 ///     enumeration (sync catchup). The UI list queries filter `deleted = 0`;
 ///     `get_item_by_item_id` intentionally does NOT filter so the merge layer
 ///     can see tombstones and apply LWW correctly.
+///   * 10 → 11 (CopyPaste-pvp4): added a partial covering index
+///     (`idx_clipboard_unpinned_len`) on `LENGTH(COALESCE(content, ''))` for
+///     unpinned rows so `prune_to_cap`'s per-write size gate can compute the
+///     running `SUM(LENGTH(content))` as an index-only scan rather than a
+///     full-table scan that reads every encrypted BLOB. No data change; index
+///     only. See [`V11_INDEX`].
 ///   * 11 → 12 (CopyPaste-61fu): moved `revoked_devices` audit table creation
 ///     from an ad-hoc `CREATE TABLE IF NOT EXISTS` call in `devices::ensure_revoked_devices_table`
 ///     into the versioned migration chain. Previously the table was created lazily
