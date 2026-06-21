@@ -6,23 +6,39 @@
 #          CopyPaste-8n7b: android-validate job gates both publish jobs; publish-macos
 #          now requires build-android+android-validate so GH release is not created
 #          before all builds and Android lint/unit-tests pass.
+#          CopyPaste-ecx9: Apple Developer ID codesign + notarization wired in,
+#          gated on secrets (graceful no-op when absent so unsigned builds still pass).
 #
 # Triggered on tag push matching v*.*.* (or workflow_dispatch).
 # Builds macOS arm64 DMG via W1.4 release scripts (build-dmg-ci.sh, verify-checksum.sh).
 # Builds Android arm64-v8a .so via cargo-ndk then produces a release APK via Gradle
 # (release-signed when signing secrets are present, else debug-signed fallback).
-# Uses ad-hoc codesigning (no Developer ID) — see ADR for beta distribution policy.
+#
+# macOS signing behaviour (CopyPaste-ecx9):
+#   When MACOS_CERTIFICATE_BASE64 + MACOS_CERTIFICATE_PASSWORD are set, the .app is
+#   re-signed with the Developer ID Application certificate and submitted to Apple's
+#   notary service (notarytool). The notarization ticket is stapled to the DMG so
+#   Gatekeeper accepts it on any Mac without quarantine warnings, and the app passes
+#   App Store review if submitted.  When secrets are ABSENT (forks / unsigned CI), the
+#   build falls through to the existing ad-hoc path and still succeeds — no build is
+#   ever broken by missing signing credentials.
 #
 # Required GitHub repository secrets:
-#   macOS DMG       — (none) — ad-hoc signing requires no certificates.
-#   Android release — OPTIONAL. When all four are present the Android job builds a
-#                     release-SIGNED APK; when ABSENT (forks/local) it falls back to
-#                     a debug-signed APK and the build still succeeds (never fails):
-#                       ANDROID_KEYSTORE_BASE64   — base64 of the release keystore (.jks)
-#                       ANDROID_KEYSTORE_PASSWORD — keystore (store) password
-#                       ANDROID_KEY_ALIAS         — signing key alias
-#                       ANDROID_KEY_PASSWORD      — key password
-#                     See docs/release/android-signing.md for how to generate + set them.
+#   macOS Developer ID signing (OPTIONAL — ad-hoc fallback when absent):
+#     MACOS_CERTIFICATE_BASE64   — base64-encoded .p12 Developer ID Application cert
+#     MACOS_CERTIFICATE_PASSWORD — .p12 export password
+#     MACOS_NOTARIZE_APPLE_ID    — Apple ID used to create the App Store Connect API key
+#     MACOS_NOTARIZE_TEAM_ID     — 10-character Apple Developer Team ID
+#     MACOS_NOTARIZE_APP_PASSWORD— app-specific password for notarytool
+#                                  (generated at appleid.apple.com → Security → App Passwords)
+#   See docs/release/macos-signing.md for setup instructions.
+#
+#   Android release (OPTIONAL — debug-signed fallback when absent):
+#     ANDROID_KEYSTORE_BASE64   — base64 of the release keystore (.jks)
+#     ANDROID_KEYSTORE_PASSWORD — keystore (store) password
+#     ANDROID_KEY_ALIAS         — signing key alias
+#     ANDROID_KEY_PASSWORD      — key password
+#   See docs/release/android-signing.md for how to generate + set them.
 #
 # Pinned action versions (no @master or @v0 refs):
 #   actions/checkout@v4
@@ -156,6 +172,195 @@ jobs:
           else
             echo "::error::scripts/release/build-dmg-ci.sh missing — W1.4 not delivered yet"
             exit 1
+          fi
+
+      # CopyPaste-ecx9 — Developer ID codesign + notarization.
+      # Gated on MACOS_CERTIFICATE_BASE64 being set: when the secret is absent
+      # (forks, unsigned CI) this step is skipped entirely and the existing
+      # ad-hoc-signed DMG from build-dmg-ci.sh is used as-is.  The build NEVER
+      # fails due to missing signing secrets — unsigned builds remain valid.
+      #
+      # When secrets are present:
+      #  1. Import the .p12 Developer ID certificate into a temporary keychain.
+      #  2. Re-sign the .app bundle with the Developer ID Application identity,
+      #     hardened runtime, and entitlements (deep sign, recursive).
+      #  3. Re-package the DMG (the bundle was signed after DMG creation, so we
+      #     unpack, sign the .app inside, and repack).
+      #  4. Submit the DMG to Apple notary via notarytool (synchronous wait).
+      #  5. Staple the notarization ticket to the DMG so Gatekeeper accepts it
+      #     offline (e.g. after Homebrew Cask install).
+      #  6. Delete the temporary keychain so the certificate is not persisted on
+      #     the runner.
+      - name: Import Developer ID certificate (if secret present)
+        id: cert
+        env:
+          MACOS_CERTIFICATE_BASE64: ${{ secrets.MACOS_CERTIFICATE_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE_BASE64" ]; then
+            echo "::notice::MACOS_CERTIFICATE_BASE64 not set — skipping Developer ID signing (ad-hoc build)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Decode the .p12 into a temp file.
+          CERT_P12="$RUNNER_TEMP/developer_id.p12"
+          echo "$MACOS_CERTIFICATE_BASE64" | base64 --decode > "$CERT_P12"
+
+          # Create an isolated keychain so the cert doesn't persist on the runner.
+          KEYCHAIN="$RUNNER_TEMP/copypaste-release.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -hex 16)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          # Import the certificate.
+          security import "$CERT_P12" \
+            -k "$KEYCHAIN" \
+            -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S "apple-tool:,apple:" \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+
+          # Add to search list so codesign picks it up.
+          security list-keychains -d user -s "$KEYCHAIN" "$(security list-keychains -d user | tr -d '"')"
+
+          # Find the Developer ID Application identity in the imported cert.
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | grep 'Developer ID Application' \
+            | awk -F'"' '{print $2}' | head -1)"
+          if [ -z "$IDENTITY" ]; then
+            echo "::error::No 'Developer ID Application' identity found in the imported certificate."
+            exit 1
+          fi
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "keychain=$KEYCHAIN" >> "$GITHUB_OUTPUT"
+          echo "keychain_password=$KEYCHAIN_PASSWORD" >> "$GITHUB_OUTPUT"
+          echo "signed=true" >> "$GITHUB_OUTPUT"
+          echo "Developer ID identity: $IDENTITY"
+
+      - name: Re-sign app with Developer ID (if certificate imported)
+        if: steps.cert.outputs.signed == 'true'
+        env:
+          IDENTITY: ${{ steps.cert.outputs.identity }}
+          RELEASE_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          # The DMG was already created by build-dmg-ci.sh. We need to:
+          #  a) Mount / extract the .app from the DMG,
+          #  b) Re-sign it with the Developer ID,
+          #  c) Repackage as a new DMG, replacing the ad-hoc-signed one.
+          #
+          # build-dmg-ci.sh also leaves dist/CopyPaste.app in place (it is
+          # staged before DMG creation). Re-sign the staged .app and rebuild.
+          ENTITLEMENTS="scripts/macos/entitlements.plist"
+          APP="dist/CopyPaste.app"
+
+          if [ ! -d "$APP" ]; then
+            # Fall back: mount the DMG and extract the .app.
+            DMG="$(ls dist/*.dmg | head -1)"
+            MOUNT_POINT="$(mktemp -d)"
+            hdiutil attach "$DMG" -mountpoint "$MOUNT_POINT" -nobrowse -quiet
+            cp -R "$MOUNT_POINT/CopyPaste.app" dist/
+            hdiutil detach "$MOUNT_POINT" -quiet || true
+          fi
+
+          echo "==> Re-signing inner binaries with Developer ID..."
+          for bin in copypaste-daemon copypaste copypaste-relay; do
+            BIN_PATH="$APP/Contents/MacOS/$bin"
+            if [ -f "$BIN_PATH" ]; then
+              case "$bin" in
+                copypaste-daemon) BIN_ID="com.copypaste.daemon" ;;
+                copypaste)        BIN_ID="com.copypaste.cli"    ;;
+                copypaste-relay)  BIN_ID="com.copypaste.relay"  ;;
+                *)                BIN_ID="com.copypaste.$bin"   ;;
+              esac
+              codesign --force \
+                --sign "$IDENTITY" \
+                --identifier "$BIN_ID" \
+                --options runtime \
+                --timestamp \
+                "$BIN_PATH"
+            fi
+          done
+
+          echo "==> Re-signing .app bundle with Developer ID..."
+          codesign --force --deep \
+            --sign "$IDENTITY" \
+            --options runtime \
+            --entitlements "$ENTITLEMENTS" \
+            --timestamp \
+            "$APP"
+
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "Developer ID signature verified."
+
+          # Rebuild the DMG with the re-signed .app.
+          VERSION="${RELEASE_VERSION#v}"
+          ARCH="arm64"
+          OLD_DMG="$(ls dist/*.dmg | head -1)"
+          NEW_DMG="dist/CopyPaste-v${VERSION}-macos-${ARCH}-signed.dmg"
+
+          STAGING="$(mktemp -d)"
+          cp -R "$APP" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+
+          RW_DMG="${NEW_DMG%.dmg}-rw.dmg"
+          hdiutil create \
+            -volname "CopyPaste v${VERSION}" \
+            -srcfolder "$STAGING" \
+            -ov -format UDRW \
+            "$RW_DMG"
+          hdiutil convert "$RW_DMG" -format UDZO -o "$NEW_DMG" -ov
+          rm -f "$RW_DMG" "$STAGING" -rf
+
+          # Replace the ad-hoc DMG with the signed one.
+          rm -f "$OLD_DMG" "${OLD_DMG}.sha256"
+          mv "$NEW_DMG" "$OLD_DMG"
+          shasum -a 256 "$OLD_DMG" > "${OLD_DMG}.sha256"
+          echo "Signed DMG: $OLD_DMG"
+
+      - name: Notarize DMG (if certificate imported)
+        if: steps.cert.outputs.signed == 'true'
+        env:
+          MACOS_NOTARIZE_APPLE_ID: ${{ secrets.MACOS_NOTARIZE_APPLE_ID }}
+          MACOS_NOTARIZE_TEAM_ID: ${{ secrets.MACOS_NOTARIZE_TEAM_ID }}
+          MACOS_NOTARIZE_APP_PASSWORD: ${{ secrets.MACOS_NOTARIZE_APP_PASSWORD }}
+        run: |
+          DMG="$(ls dist/*.dmg | head -1)"
+          echo "==> Submitting $DMG to Apple notary service..."
+          # notarytool submit waits for the result (--wait). On failure it prints
+          # the log URL; we fetch and print it for diagnosis.
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$MACOS_NOTARIZE_APPLE_ID" \
+            --team-id "$MACOS_NOTARIZE_TEAM_ID" \
+            --password "$MACOS_NOTARIZE_APP_PASSWORD" \
+            --wait \
+            --output-format plist \
+            > /tmp/notarize-result.plist 2>&1 || {
+              echo "::error::Notarization failed. Result:"
+              cat /tmp/notarize-result.plist || true
+              exit 1
+            }
+
+          echo "Notarization result:"
+          cat /tmp/notarize-result.plist
+
+          echo "==> Stapling notarization ticket to DMG..."
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          echo "Notarization ticket stapled and validated."
+
+      - name: Delete temporary keychain (cleanup)
+        if: always() && steps.cert.outputs.signed == 'true'
+        env:
+          KEYCHAIN: ${{ steps.cert.outputs.keychain }}
+        run: |
+          # Always delete the temp keychain — even if previous steps failed —
+          # so the Developer ID certificate is never persisted on the runner.
+          if [ -n "$KEYCHAIN" ] && security list-keychains | grep -qF "$KEYCHAIN"; then
+            security delete-keychain "$KEYCHAIN" || true
+            echo "Temporary keychain deleted."
           fi
 
       - name: Strip quarantine xattr (postbuild)

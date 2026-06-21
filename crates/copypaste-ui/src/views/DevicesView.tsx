@@ -778,8 +778,13 @@ export function DevicesView({
       setQrSecsLeft(qr.expires_in_secs > 0 ? qr.expires_in_secs : QR_TTL_SECS);
     } catch (err) {
       if (qrCancelledRef.current) return;
-      const message = err instanceof Error ? err.message : "Failed to generate pairing code";
-      const next: QrState = { status: "error", message };
+      // Log the raw error for diagnostics but NEVER store it in state — it may
+      // contain the daemon Unix socket path (/Users/<username>/…) which would
+      // leak the local username into the DOM, screen recordings, and the
+      // accessibility tree (CopyPaste-tzzu).
+      // eslint-disable-next-line no-console
+      console.error("[DevicesView] QR generation failed:", err);
+      const next: QrState = { status: "error", message: "Could not generate pairing code. Make sure the daemon is running and try again." };
       setQrState(next);
       qrStateRef.current = next;
     } finally {

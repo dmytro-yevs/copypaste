@@ -97,33 +97,39 @@ key file is stored separately.
 
 ## Restore
 
-> **Stop the daemon first.** The restore script does **not** touch the daemon
-> lifecycle — that's the caller's job, to keep the script composable.
+The restore script stops the daemon automatically before replacing the DB
+(and optionally restarts it after). You no longer need to stop it manually.
 
 ```bash
-# 1. Stop the daemon
-launchctl bootout "gui/$(id -u)/com.copypaste.daemon" 2>/dev/null || true
-
-# 2. Restore. Existing live DB is renamed aside with a timestamp suffix.
+# Restore. Script stops the daemon, restores, and restarts it automatically.
+# Existing live DB is renamed aside with a timestamp suffix.
 ./scripts/restore-db.sh ./backups/copypaste-20260523-101500.db.enc
 
 # Use --force to delete the existing live DB instead of renaming it aside.
 ./scripts/restore-db.sh ./backups/copypaste-20260523-101500.db.enc --force
 
-# 3. Start the daemon back up
-launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/com.copypaste.daemon.plist
+# Caller manages daemon lifecycle (no automatic stop/restart):
+./scripts/restore-db.sh ./backups/copypaste-20260523-101500.db.enc --no-stop --no-restart
+
+# See what would happen without touching anything:
+./scripts/restore-db.sh ./backups/copypaste-20260523-101500.db.enc --dry-run
 ```
 
 ### What the script does
 
-1. **Verifies the current `db_key` opens the backup** via a quick
+1. **Stops the daemon** (via `launchctl bootout`, falling back to `pkill`)
+   so the SQLite write lock is released before touching the DB file.
+   Skip with `--no-stop` if you are managing daemon lifecycle yourself.
+2. **Verifies the current `db_key` opens the backup** via a quick
    `PRAGMA key; SELECT count(*) FROM sqlite_master` smoke test. If the key
    doesn't match, restore is **aborted** — your live data is not touched.
-2. Renames the existing live DB to
+3. Renames the existing live DB to
    `clipboard.db.before-restore-YYYYMMDD-HHMMSS` (along with any `-wal` /
    `-shm` sidecars). Use `--force` to delete instead.
-3. Copies the backup into place as `clipboard.db`.
-4. `chmod 600`.
+4. Copies the backup into place as `clipboard.db`.
+5. `chmod 600`.
+6. **Restarts the daemon** if it was stopped by this script.
+   Skip with `--no-restart`.
 
 ### Key-mismatch failure mode
 
