@@ -22,8 +22,10 @@ import java.io.File
 class OwnQrSectionBlurTest {
 
     private fun devicesSource(): String {
-        val f = File("src/main/java/com/copypaste/android/DevicesActivity.kt")
-        assertTrue("DevicesActivity.kt not found at ${f.absolutePath}", f.exists())
+        // OwnQrSection / generateQr() were split out of DevicesActivity.kt into QrHelper.kt.
+        // Read QrHelper.kt which is the new home for OwnQrSection and all QR blur logic.
+        val f = File("src/main/java/com/copypaste/android/QrHelper.kt")
+        assertTrue("QrHelper.kt not found at ${f.absolutePath}", f.exists())
         return f.readText()
     }
 

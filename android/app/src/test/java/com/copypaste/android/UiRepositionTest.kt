@@ -23,7 +23,9 @@ class UiRepositionTest {
 
     @Test
     fun aboutIsLastRowOfGeneralSection() {
-        val src = source("SettingsActivity.kt")
+        // The General tab content was split out of SettingsActivity.kt into GeneralTab.kt.
+        // Read GeneralTab.kt which is the new home for the About nav row.
+        val src = source("GeneralTab.kt")
         // An About nav row must exist inside the General tab.
         val aboutIdx = src.indexOf("AboutActivity::class.java")
         assertTrue("About nav row not found in SettingsActivity", aboutIdx >= 0)
