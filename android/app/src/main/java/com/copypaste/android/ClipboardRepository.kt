@@ -937,6 +937,12 @@ class ClipboardRepository(context: Context) {
      *
      * After inserting, calls [pruneToLimits] to enforce the storage-quota cap
      * (SIZE only — no count cap).
+     *
+     * [sourceApp] is the package name of the app that set the clipboard (e.g.
+     * "com.agilebits.onepassword"). When non-null and present in
+     * [KNOWN_SENSITIVE_PACKAGES], the item is stored with isSensitive forced to
+     * true at read time (parseItem), regardless of the content classifier verdict.
+     * Conservative: only ever overrides sensitivity to TRUE, never false.
      */
     suspend fun storeItem(
         plaintext: String,
@@ -947,6 +953,7 @@ class ClipboardRepository(context: Context) {
         lamportTs: Long = 0L,
         wallTimeMs: Long = System.currentTimeMillis(),
         originDeviceId: String = "",
+        sourceApp: String? = null,
     ): String = withContext(Dispatchers.IO) {
         if (plaintext.isBlank()) return@withContext ""
 
@@ -1032,7 +1039,7 @@ class ClipboardRepository(context: Context) {
             throw IllegalStateException("UnsatisfiedLinkError: ${e.message}", e)
         }
 
-        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId, keyVersion = keyVersion)
+        val encoded = encodeItem(blob, textBytes.size, contentType = contentType, lamportTs = lamportTs, wallTimeMs = wallTimeMs, originDeviceId = originDeviceId, keyVersion = keyVersion, sourceApp = sourceApp)
         synchronized(idsWriteLock) {
             // Append the id, removing any prior occurrence first so the index
             // stays canonical (no duplicate ids). A synced item re-stored under
@@ -1696,8 +1703,8 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Encode a stored item as a pipe-delimited string (v4 format, 8 fields):
-     * <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|<deleted>|<originDeviceId>
+     * Encode a stored item as a pipe-delimited string (v5 format, 10 fields):
+     * <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|<deleted>|<originDeviceId>|<keyVersion>|<sourceApp>
      *
      * The lamportTs field (index 5) was added for LWW cloud sync. Legacy rows
      * (only 5 fields) are read back with lamportTs=0.
@@ -1711,6 +1718,15 @@ class ClipboardRepository(context: Context) {
      * (parity with macOS HistoryView device filter + DeviceBadge). Legacy rows
      * (fewer than 8 fields) parse as originDeviceId=null (back-compat). Blank
      * string is stored for locally-captured items with no known device id.
+     *
+     * The keyVersion field (index 8) identifies the AEAD key generation used to
+     * encrypt the payload.
+     *
+     * The sourceApp field (index 9) stores the package name of the source app (e.g.
+     * "com.agilebits.onepassword"). Legacy rows (fewer than 10 fields) parse as
+     * sourceApp=null (back-compat), which leaves isSensitive unaffected — old blobs
+     * are never force-marked sensitive by this field. Blank string is stored for
+     * locally-captured items with no known source app.
      */
     private fun encodeItem(
         blob: EncryptedBlob,
@@ -1724,11 +1740,15 @@ class ClipboardRepository(context: Context) {
         // encryptText and must be threaded back into decryptText at read time.
         // Default 2 = ITEM_KEY_VERSION_CURRENT (matches the daemon).
         keyVersion: UByte = 2u,
+        // Field 9 (index 9): source app package name. Null/blank = unknown.
+        // When present and in KNOWN_SENSITIVE_PACKAGES, parseItem() forces
+        // isSensitive=true regardless of the content classifier verdict.
+        sourceApp: String? = null,
     ): String {
         val nonce64 = Base64.encodeToString(blob.nonce, Base64.NO_WRAP)
         val ct64 = Base64.encodeToString(blob.ciphertext, Base64.NO_WRAP)
         val deletedFlag = if (deleted) 1 else 0
-        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs|$deletedFlag|$originDeviceId|$keyVersion"
+        return "$wallTimeMs|$contentType|$plaintextLen|$nonce64|$ct64|$lamportTs|$deletedFlag|$originDeviceId|$keyVersion|${sourceApp ?: ""}"
     }
 
     /**
@@ -1810,11 +1830,22 @@ class ClipboardRepository(context: Context) {
             null
         }
 
-        val sensitive = plaintext != null && try {
+        val contentSensitive = plaintext != null && try {
             isSensitive(plaintext)
         } catch (_: UnsatisfiedLinkError) {
             false
         }
+
+        // Field 9 (index 9): sourceApp — package name of the capturing app (v5 format).
+        // Absent in legacy blobs (< 10 fields) → null → no effect on sensitivity verdict.
+        // SECURITY: only ever override sensitivity to TRUE, never false. A known password-
+        // manager source always produces a sensitive item regardless of the content
+        // classifier — the content may not match patterns (e.g. TOTP codes, short pins).
+        val sourceApp = parts.getOrNull(9)?.takeIf { it.isNotBlank() }
+        val sourceAppForcedSensitive = sourceApp != null && sourceApp in KNOWN_SENSITIVE_PACKAGES
+
+        // Sensitivity is the logical OR of the content classifier AND the source-app override.
+        val sensitive = contentSensitive || sourceAppForcedSensitive
 
         val snippet = if (plaintext == null) UNABLE_TO_PREVIEW else previewFromPlaintext(plaintext)
 
@@ -1822,6 +1853,8 @@ class ClipboardRepository(context: Context) {
         // Fully-sensitive items use full-blur masking in HistoryActivity; they don't
         // need span masking. Only compute spans when we have plaintext AND the item is
         // NOT fully sensitive (span masking is the partial-masking path).
+        // When sourceApp forced sensitivity, clear sensitiveSpans — the full item is
+        // sensitive, not individual spans within it. This matches the full-blur path.
         val sensitiveSpans: List<IntRange> = if (!sensitive && plaintext != null && snippet.isNotBlank()) {
             try {
                 sensitiveSpanRanges(detectSensitiveSpans(snippet))
@@ -1898,6 +1931,58 @@ class ClipboardRepository(context: Context) {
 
     companion object {
         private const val TAG = "ClipboardRepository"
+
+        /**
+         * Package names of apps whose clipboard content must always be treated as
+         * sensitive (isSensitive=true), regardless of the content-classifier verdict.
+         *
+         * Rationale (CopyPaste-44rq.48 / PRIV-7): password managers copy secrets
+         * (passwords, TOTP codes, card numbers, PINs) whose content may not match
+         * the content-classifier's patterns — the text is short, opaque, or already
+         * redacted. Marking ALL clipboard events from these apps as sensitive ensures
+         * the item is masked in history and subject to the sensitive-TTL auto-wipe,
+         * matching macOS's excluded_app_bundle_ids parity behaviour.
+         *
+         * Security: this set only ever UPGRADES sensitivity to true — it never
+         * downgrades an item that the content classifier already marked sensitive.
+         *
+         * To add a new entry: append the exact Android package name and file a bd
+         * issue documenting the rationale (e.g. "com.example.pwmanager").
+         */
+        val KNOWN_SENSITIVE_PACKAGES: Set<String> = setOf(
+            // 1Password
+            "com.agilebits.onepassword",
+            // Bitwarden
+            "com.x8bit.bitwarden",
+            // LastPass
+            "com.lastpass.lpandroid",
+            "com.lastpass.passwordmanager",
+            // Dashlane
+            "com.dashlane",
+            // Keeper
+            "com.callpod.android_apps.keeper",
+            // Enpass
+            "io.enpass.app",
+            "io.enpass.beta",
+            // KeePassDX
+            "com.kunzisoft.keepass.free",
+            "com.kunzisoft.keepass.libre",
+            "com.kunzisoft.keepass.pro",
+            // NordPass
+            "com.nordpass.android.app.password.manager",
+            // Apple Keychain / iCloud Keychain (via Apple Passwords app on Android)
+            "com.apple.passwordmanager",
+            // RoboForm
+            "com.siber.roboform",
+            // Password Safe (pwsafe)
+            "com.passwdsafe",
+            // Strongbox
+            "net.strongapp.passwordmanager",
+            // Buttercup
+            "com.buttercup.mobile",
+            // ProtonPass
+            "me.proton.pass.mobile",
+        )
 
         /**
          * Compute the next Lamport timestamp, mirroring `next_lamport_ts` in

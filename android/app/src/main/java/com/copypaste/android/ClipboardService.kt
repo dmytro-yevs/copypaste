@@ -1002,7 +1002,7 @@ class ClipboardService : Service() {
             // Phase 3: text (most common path).
             val text = clip.getItemAt(0)?.text?.toString()
             if (!text.isNullOrBlank()) {
-                scope.launch { captureClip(context, text, settings, repository, syncManager) }
+                scope.launch { captureClip(context, text, settings, repository, syncManager, sourceApp = sourcePackage) }
             } else {
                 Log.d(TAG, "dispatchClipData: clip has no usable text/URI — skipping")
             }
@@ -1027,6 +1027,10 @@ class ClipboardService : Service() {
             settings: Settings,
             repository: ClipboardRepository,
             syncManager: SyncManager,
+            // CopyPaste-44rq.48: package name of the source app (from resolveSourcePackage).
+            // Null = unknown source. Threaded into repository.storeItem so known password-
+            // manager packages force isSensitive=true at read time via parseItem.
+            sourceApp: String? = null,
         ) {
             if (text.isBlank()) return
 
@@ -1097,7 +1101,7 @@ class ClipboardService : Service() {
             // Persist to the SharedPreferences repository — the single source the
             // UI reads. storeItem performs cross-listener dedup (HIGH-3) so a
             // single copy seen by multiple owners is stored (and counted) once.
-            val storedId = repository.storeItem(text, key, lamportTs = lamportTs, originDeviceId = settings.deviceId)
+            val storedId = repository.storeItem(text, key, lamportTs = lamportTs, originDeviceId = settings.deviceId, sourceApp = sourceApp)
             if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
                 bumpTodayCounter(context)
