@@ -1,0 +1,14 @@
+diff a/crates/copypaste-ui/src/components/ErrorBoundary.tsx b/crates/copypaste-ui/src/components/ErrorBoundary.tsx	(rejected hunks)
+@@ -60,8 +60,11 @@ export class ErrorBoundary extends Component<
+         <button
+           type="button"
+           onClick={this.handleRetry}
++          // Use the skin radius token so the button adapts to classic/quiet/vapor
++          // instead of the static 9px that rounded-ide hard-codes.
++          style={{ borderRadius: "var(--skin-r-ctl)" }}
+           className={[
+-            "mt-1 rounded-ide border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
++            "mt-1 border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
+             "hover:bg-ide-hover",
+           ].join(" ")}
+         >
