@@ -803,23 +803,37 @@ fn sanitize_label(s: &str) -> String {
 
 /// Build the opaque mDNS instance label from a `device_id`.
 ///
-/// Uses the first 8 chars of `device_id` prefixed with `"cp-"` so the label
-/// is stable across restarts of the same device but carries no human-readable
-/// name. This replaces the old `"{device_name}.{id_short}"` scheme that leaked
-/// PII to any passive LAN observer.
+/// Computes SHA-256 over the `device_id` string and uses the first 8 hex
+/// characters of the digest prefixed with `"cp-"`. This ensures:
+///
+/// * The raw `device_id` prefix is NOT present in the label — a passive LAN
+///   observer cannot distinguish `cp-5f4dcc3b` (hash of "password") from any
+///   other device label without already knowing the target `device_id`.
+/// * The label is deterministic for a given `device_id`, so it remains stable
+///   across daemon restarts on the same device.
+/// * Different `device_id` values produce different labels (no trivial collision
+///   in the 8-hex-char output space for realistic device counts).
 ///
 /// The result is guaranteed to be ≤ `DNS_LABEL_MAX` (63) characters.
+/// ("cp-" = 3 chars) + (8 hex digits) = 11 chars total.
 ///
-/// TODO(CopyPaste-sh9a): For stronger unlinkability across network changes or
-/// device resets, rotate the ephemeral prefix (e.g. derive from a daily HKDF
-/// epoch tied to the static key) so a passive LAN observer cannot durably track
-/// the same device by its `did` across sessions.
+/// CopyPaste-rt50 root cause: the previous implementation used
+/// `device_id.chars().take(8)`, which directly exposed the first 8 characters
+/// of the stable device fingerprint — allowing a passive LAN observer to durably
+/// track a device across network changes by its mDNS instance name.
+///
+/// TODO(CopyPaste-sh9a): For stronger unlinkability across sessions, derive the
+/// label from a daily HKDF epoch (HKDF(static_key, salt='copypaste/label/' +
+/// floor(now/86400))) so it rotates once per day without requiring re-pairing.
 fn opaque_instance_label(device_id: &str) -> String {
-    // "cp-" (3) + up to 8 id chars = 11 chars max, well within DNS_LABEL_MAX.
-    // The compile-time assertion below references DNS_LABEL_MAX so the
-    // constant is not considered dead code by the compiler.
+    use sha2::Digest as _;
+    // "cp-" (3) + 8 hex digits = 11 chars, well within DNS_LABEL_MAX.
     const _: () = assert!(3 + 8 <= DNS_LABEL_MAX);
-    let id_short: String = device_id.chars().take(8).collect();
+    let digest = sha2::Sha256::digest(device_id.as_bytes());
+    // Take the first 4 bytes (8 hex chars) of the SHA-256 digest.
+    // This is not a cryptographic secret — it is a one-way transform to prevent
+    // the raw device_id prefix from appearing in unauthenticated mDNS frames.
+    let id_short = hex::encode(&digest[..4]);
     format!("cp-{id_short}")
 }
 
@@ -1152,15 +1166,31 @@ mod tests {
         );
     }
 
-    // ── id_short slicing (LOW: panic on non-ASCII device_id) ─────────────────
+    // ── opaque_instance_label: raw-prefix privacy (CopyPaste-rt50) ──────────
 
+    /// The label must NOT start with the raw device_id prefix.
+    ///
+    /// Before CopyPaste-rt50 the label was `"cp-{first8charsOfDeviceId}"`, letting
+    /// a passive LAN observer durably track the device. After the fix the label is
+    /// `"cp-{first8hexCharsOfSha256(device_id)}"` — the raw prefix never appears.
     #[test]
-    fn id_short_handles_non_ascii_device_id_without_panic() {
-        // Reproduces the byte-slice panic: a multibyte codepoint at byte 8.
-        // The fix slices by chars, so this must not panic and must yield 8 chars.
-        let device_id = "日本語テスト識別子"; // each char is 3 bytes in UTF-8
-        let id_short: String = device_id.chars().take(8).collect();
-        assert_eq!(id_short.chars().count(), 8);
+    fn opaque_instance_label_does_not_expose_raw_device_id_prefix() {
+        let device_id = "aabbccdddeadbeef0011223344556677";
+        let label = opaque_instance_label(device_id);
+        // The raw first-8-chars prefix must NOT appear in the label.
+        let raw_prefix = &device_id[..8]; // "aabbccdd"
+        assert!(
+            !label.contains(raw_prefix),
+            "label must not contain the raw device_id prefix '{raw_prefix}', got: {label}"
+        );
+        // The label still has the 'cp-' prefix and is exactly 11 chars.
+        assert!(label.starts_with("cp-"), "label must start with 'cp-': {label}");
+        assert_eq!(label.len(), 11, "label must be exactly 11 chars: {label}");
+        // All chars after 'cp-' are lowercase hex digits.
+        assert!(
+            label[3..].chars().all(|c| c.is_ascii_hexdigit()),
+            "label suffix must be lowercase hex: {label}"
+        );
     }
 
     // ── IP address sorting ────────────────────────────────────────────────────
