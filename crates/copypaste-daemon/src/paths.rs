@@ -349,6 +349,23 @@ mod tests {
         assert!(!p.as_os_str().is_empty());
     }
 
+    /// CopyPaste-c4q2.2: `socket_path()` is the canonical daemon-side resolver.
+    /// The `COPYPASTE_SOCKET` env override must win over any platform default.
+    /// ipc.rs call sites that inline this logic should use `crate::paths::socket_path()`.
+    #[test]
+    fn socket_path_env_override_wins() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        // SAFETY: serialised via TEST_ENV_LOCK.
+        unsafe { std::env::set_var("COPYPASTE_SOCKET", "/tmp/override-canonical.sock") };
+        let p = socket_path();
+        unsafe { std::env::remove_var("COPYPASTE_SOCKET") };
+        assert_eq!(
+            p,
+            std::path::PathBuf::from("/tmp/override-canonical.sock"),
+            "COPYPASTE_SOCKET override must win over platform default"
+        );
+    }
+
     #[test]
     fn db_path_ends_with_clipboard_db() {
         assert!(db_path().ends_with("clipboard.db"));

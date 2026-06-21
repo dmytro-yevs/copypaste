@@ -317,7 +317,7 @@ fn test_only_allows_local_http(_s: &str) -> bool {
 /// - `alice@example.com` → `a***@example.com`
 /// - `a@example.com`     → `*@example.com`
 /// - `not-an-email`      → `<redacted>`
-fn redact_email(email: &str) -> String {
+pub(crate) fn redact_email(email: &str) -> String {
     match email.split_once('@') {
         Some((local, domain)) if !local.is_empty() && !domain.is_empty() => {
             let first = local.chars().next().unwrap_or('*');
