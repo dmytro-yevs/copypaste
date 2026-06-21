@@ -47,10 +47,7 @@ use super::PeerSinks;
 ///
 /// Returns `true` if a live session entry was found and removed; `false` if the
 /// peer had no active sink (was already disconnected or never connected).
-pub async fn send_unpair_and_close_session(
-    peer_sinks: &PeerSinks,
-    canonical_fp: &str,
-) -> bool {
+pub async fn send_unpair_and_close_session(peer_sinks: &PeerSinks, canonical_fp: &str) -> bool {
     let mut sinks = peer_sinks.lock().await;
     match sinks.remove(canonical_fp) {
         None => {

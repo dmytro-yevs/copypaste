@@ -119,10 +119,7 @@ async fn export_empty_db() {
     let items = resp["data"]["items"]
         .as_array()
         .expect("data.items must be an array");
-    assert!(
-        items.is_empty(),
-        "fresh DB must export zero items: {resp}"
-    );
+    assert!(items.is_empty(), "fresh DB must export zero items: {resp}");
     assert_eq!(
         resp["data"]["skipped_non_text"], 0,
         "fresh DB must report skipped_non_text == 0: {resp}"
@@ -143,8 +140,13 @@ async fn export_response_fields_present() {
 
     assert_eq!(resp["ok"], true, "expected ok=true: {resp}");
 
-    let data = resp["data"].as_object().expect("data must be a JSON object");
-    assert!(data.contains_key("items"), "data must contain 'items': {resp}");
+    let data = resp["data"]
+        .as_object()
+        .expect("data must be a JSON object");
+    assert!(
+        data.contains_key("items"),
+        "data must contain 'items': {resp}"
+    );
     assert!(
         data.contains_key("skipped_non_text"),
         "data must contain 'skipped_non_text': {resp}"
@@ -197,8 +199,15 @@ async fn export_import_roundtrip() {
 
     // Each exported item must carry the fields the CLI import path requires.
     for (idx, item) in exported.iter().enumerate() {
-        let obj = item.as_object().expect("each exported item must be an object");
-        for field in &["content_type", "content_bytes_b64", "created_at_ms", "is_sensitive"] {
+        let obj = item
+            .as_object()
+            .expect("each exported item must be an object");
+        for field in &[
+            "content_type",
+            "content_bytes_b64",
+            "created_at_ms",
+            "is_sensitive",
+        ] {
             assert!(
                 obj.contains_key(*field),
                 "exported item[{idx}] missing field '{field}': {item}"
@@ -283,7 +292,10 @@ async fn export_limit_param() {
     )
     .await;
 
-    assert_eq!(exp_resp["ok"], true, "export with limit must succeed: {exp_resp}");
+    assert_eq!(
+        exp_resp["ok"], true,
+        "export with limit must succeed: {exp_resp}"
+    );
     let exported = exp_resp["data"]["items"]
         .as_array()
         .expect("items must be array");
@@ -351,7 +363,10 @@ async fn reset_database_requires_confirm() {
         r#"{"id":"rdb3","method":"db_stats","protocol_version":1,"params":{}}"#,
     )
     .await;
-    assert_eq!(stats_resp["ok"], true, "db_stats must succeed: {stats_resp}");
+    assert_eq!(
+        stats_resp["ok"], true,
+        "db_stats must succeed: {stats_resp}"
+    );
     assert_eq!(
         stats_resp["data"]["item_count"], 1,
         "item must still be present after rejected reset: {stats_resp}"
@@ -413,7 +428,10 @@ async fn reset_database_clears_items() {
         r#"{"id":"rdb-post-stats","method":"db_stats","protocol_version":1,"params":{}}"#,
     )
     .await;
-    assert_eq!(post_stats["ok"], true, "db_stats must succeed after reset: {post_stats}");
+    assert_eq!(
+        post_stats["ok"], true,
+        "db_stats must succeed after reset: {post_stats}"
+    );
     assert_eq!(
         post_stats["data"]["item_count"], 0,
         "item_count must be 0 after reset_database: {post_stats}"

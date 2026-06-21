@@ -181,8 +181,7 @@ pub fn compute_android_sync_badge_state(
             return "syncing".to_string();
         }
         // 3. Recent successful sync with at least one peer → "synced" (Connected, green).
-        let recent_enough =
-            last_activity_ms > 0 && (now_ms - last_activity_ms) <= recent_sync_ms;
+        let recent_enough = last_activity_ms > 0 && (now_ms - last_activity_ms) <= recent_sync_ms;
         if online_count > 0 && recent_enough {
             return "synced".to_string();
         }
@@ -204,14 +203,10 @@ mod sync_badge_tests {
     const RECENT_MS: i64 = 5 * 60 * 1_000; // 5 min
     const NOW: i64 = 1_000_000_000;
 
-    fn badge(
-        count: i64,
-        last_ms: i64,
-        internet: bool,
-        auth_err: bool,
-        syncing: bool,
-    ) -> String {
-        compute_android_sync_badge_state(count, last_ms, RECENT_MS, internet, auth_err, syncing, NOW)
+    fn badge(count: i64, last_ms: i64, internet: bool, auth_err: bool, syncing: bool) -> String {
+        compute_android_sync_badge_state(
+            count, last_ms, RECENT_MS, internet, auth_err, syncing, NOW,
+        )
     }
 
     #[test]

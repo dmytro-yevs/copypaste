@@ -166,8 +166,7 @@ mod tests {
         // local SQLCipher history retention; the relay is an ephemeral transit
         // buffer. See docs/relay-api.md and ADR-009 for the design rationale.
         assert_eq!(
-            cfg.sync_ttl_secs,
-            86_400,
+            cfg.sync_ttl_secs, 86_400,
             "relay TTL default must be 86400 s (24 h); \
              this is intentionally shorter than the daemon's 30-day local history TTL"
         );

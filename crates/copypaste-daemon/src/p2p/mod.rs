@@ -197,7 +197,6 @@ pub struct P2pState {
 /// duplicate that would double-fan-out every item (fix/p2p-c-review #4).
 pub type PeerSinks = Arc<Mutex<HashMap<DeviceFingerprint, mpsc::Sender<PeerFrame>>>>;
 
-
 /// Catch-up provider: produces the current local history as `WireItem`s already
 /// re-keyed under the **per-peer** sync key (CopyPaste-716), so a freshly-
 /// connected peer receives every item that predates the link (fanout is
@@ -628,16 +627,16 @@ pub async fn start_p2p(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::connector::dialable_peers_from_path;
     use super::init::load_peers_from_path_into;
     use super::unpair::evict_peer_local;
+    use super::*;
 
+    use crate::keychain;
     use copypaste_p2p::transport::{PairedPeers, PeerTransport};
     use copypaste_sync::protocol::WireItem;
-    use tokio::net::TcpListener;
     use std::time::Duration;
-    use crate::keychain;
+    use tokio::net::TcpListener;
 
     // ── W2.2 integration tests ────────────────────────────────────────────────
 
@@ -2190,10 +2189,7 @@ mod tests {
 
         // If lan_visibility=false gate is correct, no task bound probe_port.
         // We should be able to rebind it right away.
-        let rebind = tokio::net::TcpListener::bind(
-            format!("127.0.0.1:{probe_port}"),
-        )
-        .await;
+        let rebind = tokio::net::TcpListener::bind(format!("127.0.0.1:{probe_port}")).await;
         assert!(
             rebind.is_ok(),
             "CopyPaste-1htb: ephemeral port must be free when lan_visibility=false \
@@ -2236,10 +2232,7 @@ mod tests {
             !beyond,
             "CopyPaste-1hw5: fingerprint must be rejected after burst capacity exhausted"
         );
-        assert!(
-            rl.total_drops() > 0,
-            "rate limiter must record the drop"
-        );
+        assert!(rl.total_drops() > 0, "rate limiter must record the drop");
     }
 
     // ── CopyPaste-1jms.8 + CopyPaste-qw1k: revocation session teardown ─────────
@@ -2264,10 +2257,10 @@ mod tests {
         // Raw loopback TCP — no TLS needed; we're testing the channel/pump logic.
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let (server_tcp, peer_tcp) = tokio::join!(
-            async { listener.accept().await.unwrap().0 },
-            async { tokio::net::TcpStream::connect(addr).await.unwrap() }
-        );
+        let (server_tcp, peer_tcp) =
+            tokio::join!(async { listener.accept().await.unwrap().0 }, async {
+                tokio::net::TcpStream::connect(addr).await.unwrap()
+            });
 
         // "Local" side: the daemon that owns the sink and calls revoke.
         let server_framed = Framed::new(server_tcp, LengthDelimitedCodec::new());
@@ -2323,8 +2316,8 @@ mod tests {
         // session was torn down. When the frame arrives we assert it is Unpair.
         match frame_opt {
             Some(Ok(bytes)) => {
-                let frame: PeerFrame = serde_json::from_slice(&bytes)
-                    .expect("frame must deserialize as PeerFrame");
+                let frame: PeerFrame =
+                    serde_json::from_slice(&bytes).expect("frame must deserialize as PeerFrame");
                 assert!(
                     matches!(frame, PeerFrame::Control(ControlMsg::Unpair)),
                     "CopyPaste-1jms.8: peer must receive ControlMsg::Unpair, got {frame:?}"

@@ -70,8 +70,8 @@ pub use ffi_sensitive::{
     sensitive_expires_at_ms, sensitive_kind, SensitiveCaptureDecision, SensitiveSpan,
 };
 pub use ffi_system::{
-    classify_text_kind, compute_android_sync_badge_state, get_private_mode,
-    resolve_stun_public_ip, set_private_mode,
+    classify_text_kind, compute_android_sync_badge_state, get_private_mode, resolve_stun_public_ip,
+    set_private_mode,
 };
 
 // When using UDL-based scaffolding, uniffi::Error and uniffi::Record proc-macro
@@ -125,7 +125,9 @@ mod tests {
     // public FFI surface (not re-exported from lib.rs). Import them locally so
     // they remain reachable after the split without polluting the FFI API.
     use base64::Engine as _;
-    use copypaste_core::{decrypt_from_cloud, detect, encrypt_for_cloud, is_sensitive_for_autowipe};
+    use copypaste_core::{
+        decrypt_from_cloud, detect, encrypt_for_cloud, is_sensitive_for_autowipe,
+    };
 
     fn test_key() -> Vec<u8> {
         vec![7u8; 32]

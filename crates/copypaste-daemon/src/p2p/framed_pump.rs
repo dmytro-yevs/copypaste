@@ -9,8 +9,8 @@ use tokio::sync::mpsc;
 use copypaste_p2p::transport::{DeviceFingerprint, PairedPeers};
 use copypaste_sync::protocol::{ControlMsg, PeerFrame, WireItem};
 
-use super::{PeerRttMs, PendingPings};
 use super::unpair::evict_peer_local;
+use super::{PeerRttMs, PendingPings};
 
 /// Maximum time a single outbound `framed.send().await` may block before the
 /// pump tears the connection down.

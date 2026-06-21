@@ -139,7 +139,10 @@ mod tests {
         };
         let s = serde_json::to_string(&cfg).unwrap();
         assert!(s.contains("\"relay_url\""), "relay_url must be present");
-        assert!(s.contains("\"sync_enabled\""), "sync_enabled must be present");
+        assert!(
+            s.contains("\"sync_enabled\""),
+            "sync_enabled must be present"
+        );
         // p2p_enabled is None → must not appear so it is not misread as false.
         assert!(
             !s.contains("\"p2p_enabled\""),

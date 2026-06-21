@@ -10,11 +10,11 @@ use tokio_util::sync::CancellationToken;
 use copypaste_p2p::transport::{DeviceFingerprint, PairedPeers, PeerTransport};
 use copypaste_sync::protocol::{PeerFrame, WireItem};
 
-use super::{CatchupProvider, PeerEvent, PeerRttMs, PeerSinks};
 use super::fanout::push_catchup;
 use super::framed_pump::run_peer_connection;
 use super::ping::ping_loop;
 use super::unpair::stamp_peer_sync;
+use super::{CatchupProvider, PeerEvent, PeerRttMs, PeerSinks};
 
 /// Accept incoming mTLS connections.
 ///

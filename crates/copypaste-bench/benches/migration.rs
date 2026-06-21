@@ -38,14 +38,12 @@
 //! `Database::conn()` (public) and issue raw SQL INSERTs, mirroring the pattern
 //! used in `migration_v4`'s own unit tests.
 
-use copypaste_core::{
-    build_item_aad, encrypt_item_with_aad, Database, AAD_SCHEMA_VERSION,
-};
 use copypaste_core::crypto::chunks::{encrypt_chunks, EncryptedChunk};
 use copypaste_core::image::{chunks_to_blob, IMAGE_CHUNK_SIZE};
 use copypaste_core::storage::migration_v4::{
     migrate_v1_to_v2_keys, repair_mislabeled_kv2_blob_rows,
 };
+use copypaste_core::{build_item_aad, encrypt_item_with_aad, Database, AAD_SCHEMA_VERSION};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rusqlite::params;
 
@@ -161,9 +159,8 @@ fn bench_migrate_v1_text(c: &mut Criterion) {
                     db
                 },
                 |db| {
-                    let rotated =
-                        migrate_v1_to_v2_keys(black_box(&db), &V1_KEY, &V2_KEY)
-                            .expect("migrate_v1_to_v2_keys");
+                    let rotated = migrate_v1_to_v2_keys(black_box(&db), &V1_KEY, &V2_KEY)
+                        .expect("migrate_v1_to_v2_keys");
                     black_box(rotated);
                 },
             );
@@ -216,8 +213,7 @@ fn bench_migration_noop_scan(c: &mut Criterion) {
                 // for migrate_v1_to_v2_keys to do.
                 let aad = build_item_aad("bench-noop-item", AAD_SCHEMA_VERSION);
                 let plaintext = b"already v2";
-                let (nonce, ct) =
-                    encrypt_item_with_aad(plaintext, &V2_KEY, &aad).expect("encrypt");
+                let (nonce, ct) = encrypt_item_with_aad(plaintext, &V2_KEY, &aad).expect("encrypt");
                 let nonce_bytes = nonce.to_vec();
                 for i in 0..count {
                     let row_id = format!("v2-{i}");
@@ -233,9 +229,8 @@ fn bench_migration_noop_scan(c: &mut Criterion) {
                         .expect("insert v2 text row");
                 }
                 b.iter(|| {
-                    let rotated =
-                        migrate_v1_to_v2_keys(black_box(&db), &V1_KEY, &V2_KEY)
-                            .expect("migrate noop");
+                    let rotated = migrate_v1_to_v2_keys(black_box(&db), &V1_KEY, &V2_KEY)
+                        .expect("migrate noop");
                     black_box(rotated);
                 });
             },
@@ -251,9 +246,8 @@ fn bench_migration_noop_scan(c: &mut Criterion) {
                 // Seed correctly-encrypted kv=2 image rows (v2 key, not v1).
                 let file_id = [0xCDu8; 16];
                 let plaintext = b"PNG_";
-                let chunks =
-                    encrypt_chunks(plaintext, &V2_KEY, &file_id, IMAGE_CHUNK_SIZE)
-                        .expect("encrypt chunks v2");
+                let chunks = encrypt_chunks(plaintext, &V2_KEY, &file_id, IMAGE_CHUNK_SIZE)
+                    .expect("encrypt chunks v2");
                 let blob = chunks_to_blob(&chunks).expect("blob");
                 let meta_json = format!(
                     r#"{{"width":2,"height":2,"original_size":4,"chunk_count":{},"file_id":{:?}}}"#,

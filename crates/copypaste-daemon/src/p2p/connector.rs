@@ -17,11 +17,11 @@ use copypaste_p2p::{
 };
 use copypaste_sync::protocol::{ControlMsg, PeerFrame, WireItem};
 
-use super::{CatchupProvider, PeerEvent, PeerRttMs, PeerSinks};
 use super::fanout::push_catchup;
 use super::framed_pump::{run_peer_connection_client, WRITE_TIMEOUT};
 use super::ping::ping_loop;
 use super::unpair::stamp_peer_sync;
+use super::{CatchupProvider, PeerEvent, PeerRttMs, PeerSinks};
 
 /// How often the [`peer_connector_loop`] wakes to check for paired-but-not-
 /// connected peers to dial.

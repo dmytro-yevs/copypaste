@@ -171,8 +171,7 @@ pub fn open_pool_with_cache_mb(
     {
         let probe = rusqlite::Connection::open(path)?;
         probe.execute_batch(pragma_str.as_str())?;
-        let user_version: i64 =
-            probe.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+        let user_version: i64 = probe.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if user_version == 0 {
             return Err(PoolError::SchemaNotInitialized);
         }

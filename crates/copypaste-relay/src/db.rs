@@ -46,9 +46,9 @@
 
 use std::path::Path;
 
-use rusqlite::{params, Connection};
 #[cfg(test)]
 use rusqlite::OptionalExtension;
+use rusqlite::{params, Connection};
 
 /// Sentinel path that selects an in-memory database (no on-disk persistence).
 /// This is the relay's default so existing tests and ephemeral deploys behave

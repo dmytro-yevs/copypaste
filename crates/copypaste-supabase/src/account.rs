@@ -104,8 +104,8 @@ pub fn supabase_project_ref(url: &str) -> Option<String> {
 /// assert!(id.starts_with("abc|"));
 /// ```
 pub fn supabase_account_id(url: &str, user_id: &str) -> String {
-    let project = supabase_project_ref(url)
-        .unwrap_or_else(|| url.trim_end_matches('/').to_ascii_lowercase());
+    let project =
+        supabase_project_ref(url).unwrap_or_else(|| url.trim_end_matches('/').to_ascii_lowercase());
     format!("{project}|{user_id}")
 }
 
@@ -253,10 +253,14 @@ mod tests {
 
     #[test]
     fn no_mismatch_for_matching_accounts() {
-        let device_a =
-            supabase_account_id("https://proj.supabase.co", "00000000-0000-0000-0000-000000000001");
-        let device_b =
-            supabase_account_id("https://proj.supabase.co", "00000000-0000-0000-0000-000000000001");
+        let device_a = supabase_account_id(
+            "https://proj.supabase.co",
+            "00000000-0000-0000-0000-000000000001",
+        );
+        let device_b = supabase_account_id(
+            "https://proj.supabase.co",
+            "00000000-0000-0000-0000-000000000001",
+        );
         assert!(
             !detect_account_mismatch(&device_a, &device_b),
             "identical account/project must not report a mismatch"
