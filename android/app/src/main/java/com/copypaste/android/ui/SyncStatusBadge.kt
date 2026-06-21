@@ -3,6 +3,7 @@ package com.copypaste.android.ui
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.provider.Settings as AndroidSettings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
@@ -66,6 +67,41 @@ import com.copypaste.android.ui.theme.skinTokens
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
+
+/**
+ * CopyPaste-5917.13 (A11Y-5): returns true when the user has enabled "Remove animations"
+ * in Android Accessibility settings OR set Animator Duration Scale to 0 in Developer
+ * Options (ANIMATOR_DURATION_SCALE == 0.0). In either case the pulse animation in
+ * [SyncStatusBadge] is suppressed; the dot colour still conveys sync status.
+ *
+ * Pure function — testable without Compose runtime (pass a mock [scale] value).
+ * Scale values: 0.0 = animations off; 0.5 / 1.0 / 1.5 / 2.0 = speed multipliers.
+ */
+internal fun isReducedMotion(animatorDurationScale: Float): Boolean = animatorDurationScale == 0f
+
+/**
+ * Compose-aware wrapper around [isReducedMotion]. Reads
+ * [android.provider.Settings.Global.ANIMATOR_DURATION_SCALE] from the current
+ * [LocalContext]. Any ContentObserver-based live-update is intentionally omitted
+ * to avoid complexity — the scale rarely changes mid-session; recompose on next
+ * connect event picks up any change.
+ */
+@Composable
+internal fun rememberReducedMotion(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        val scale = try {
+            AndroidSettings.Global.getFloat(
+                context.contentResolver,
+                AndroidSettings.Global.ANIMATOR_DURATION_SCALE,
+                1f,
+            )
+        } catch (_: Exception) {
+            1f
+        }
+        isReducedMotion(scale)
+    }
+}
 
 /**
  * Online-devices badge — Android parity for the macOS sidebar sync-status chip
@@ -139,6 +175,11 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     // IpcSyncBadgeState.toSyncBadgeState) so the dot actually moves during sync.
     val isSyncing by DevicesOnlineState.isSyncing.collectAsState()
 
+    // CopyPaste-5917.52: true when FgsSyncLoop reported a hard sync error (auth
+    // failure, relay unreachable, persistent P2P dial failure). Drives DaemonUnreachable
+    // (red dot) via resolveSyncBadgeState — the production path for that state.
+    val isSyncError by DevicesOnlineState.isSyncError.collectAsState()
+
     // Fallback: count configured sync targets when DevicesScreen hasn't run yet.
     var configuredCount by remember { mutableIntStateOf(0) }
 
@@ -192,6 +233,7 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
             lastActivityMs = lastActivityMs,
             recentSyncMs = RECENT_SYNC_MS,
             hasInternet = hasInternet,
+            isSyncError = isSyncError,
         )
     }
 
@@ -204,15 +246,21 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
         SyncBadgeState.DaemonUnreachable -> c.danger
     }
 
+    // CopyPaste-5917.13 (A11Y-5): gate the pulse on the system reduce-motion preference.
+    // When "Remove animations" is enabled (ANIMATOR_DURATION_SCALE == 0) the dot is
+    // static at scale 1f; dot colour still conveys sync status (WCAG 1.4.1 parity).
+    val reducedMotion = rememberReducedMotion()
+
     // §9 + §11: ONE-SHOT pulse on the dot on each new connect event.
     // Fires a single 1.0→1.35→1.0 scale ping when connected transitions false→true
     // (per connect event, not a perpetual loop). macOS does not loop the status dot.
     // Implementation: LaunchedEffect(connected) detects the rising edge and runs a
     // sequential Animatable forward→reverse ping, then settles at 1f.
+    // Suppressed entirely when reducedMotion=true (CopyPaste-5917.13).
     val pulseAnimatable = remember { Animatable(1f) }
     LaunchedEffect(connected) {
-        if (!connected) {
-            // Disconnected — snap back to resting scale immediately (no animation).
+        if (!connected || reducedMotion) {
+            // Disconnected or reduce-motion — snap back to resting scale immediately.
             pulseAnimatable.snapTo(1f)
             return@LaunchedEffect
         }
@@ -548,21 +596,23 @@ private fun hasInternetConnectivity(context: Context): Boolean {
  * 1. If [liveOnlineCount] > 0 AND [lastActivityMs] is within [recentSyncMs]
  *    → [SyncBadgeState.Connected] (green).
  * 2. If OS has no internet → [SyncBadgeState.NetworkOffline] (red — clear root cause).
- * 3. Otherwise (OS online, sync stale or count == 0) → [SyncBadgeState.Idle] (grey).
+ * 3. If [isSyncError] is true AND OS has internet → [SyncBadgeState.DaemonUnreachable]
+ *    (red — backend auth failure, relay unreachable, persistent P2P dial failure).
+ *    CopyPaste-5917.52: this is the production path for DaemonUnreachable — wired via
+ *    [DevicesOnlineState.setSyncError] so the state is reachable without a daemon IPC
+ *    socket. The IpcSyncBadgeState path remains as a future upgrade.
+ * 4. Otherwise (OS online, sync stale or count == 0) → [SyncBadgeState.Idle] (grey).
  *    This matches the macOS SyncStatusChip "idle" state: the daemon is reachable
  *    but no recent sync round-trip has succeeded — peers may simply be offline.
  *    Showing grey (not red) avoids false-alarm on a fresh install or while all
  *    peers are simply powered off.
- *
- * Note: [SyncBadgeState.DaemonUnreachable] is NOT returned from this function —
- * it is only reachable via [IpcSyncBadgeState.OFFLINE] / [IpcSyncBadgeState.ERROR]
- * when an authoritative IPC badge_state is available.
  */
 internal fun resolveSyncBadgeState(
     liveOnlineCount: Int,
     lastActivityMs: Long,
     recentSyncMs: Long,
     hasInternet: Boolean,
+    isSyncError: Boolean = false,
     nowMs: Long = System.currentTimeMillis(),
 ): SyncBadgeState {
     val recentEnough = lastActivityMs > 0L && (nowMs - lastActivityMs) <= recentSyncMs
@@ -570,10 +620,13 @@ internal fun resolveSyncBadgeState(
     if (liveOnlineCount > 0 && recentEnough) return SyncBadgeState.Connected
     // Secondary: OS offline is a clear root cause.
     if (!hasInternet) return SyncBadgeState.NetworkOffline
-    // OS online but sync hasn't worked recently → idle (grey), not red.
+    // CopyPaste-5917.52: FgsSyncLoop reported a hard sync failure and OS is online
+    // → DaemonUnreachable (red). This is the production path for DaemonUnreachable.
+    if (isSyncError) return SyncBadgeState.DaemonUnreachable
+    // OS online, no hard error, sync hasn't worked recently → idle (grey), not red.
     // Mirrors macOS: IPC reachable but badge_state "idle" → grey dot (not DANGER).
-    // A hard-failure (auth error, relay down) requires an authoritative IPC
-    // badge_state of OFFLINE/ERROR to show red; absence of recent sync alone is not.
+    // A hard-failure requires either isSyncError=true (above) or an authoritative
+    // IpcSyncBadgeState of OFFLINE/ERROR; absence of recent sync alone is not enough.
     return SyncBadgeState.Idle
 }
 

@@ -164,16 +164,64 @@ class SyncBadgeStateTest {
 
     /**
      * OS offline states remain non-Connected, and Idle is distinct from both red states.
-     * (resolveSyncBadgeState never returns DaemonUnreachable — only IpcSyncBadgeState does.)
      */
     @Test
     fun `Error states are not Connected`() {
         // OS offline → NetworkOffline (red)
         val offline = resolveSyncBadgeState(0, 0L, recentSyncMs, hasInternet = false)
-        // OS online, no sync → Idle (grey) — not red, not Connected
+        // OS online, no sync, no error → Idle (grey) — not red, not Connected
         val idle = resolveSyncBadgeState(0, 0L, recentSyncMs, hasInternet = true)
         assertTrue(offline !is SyncBadgeState.Connected)
         assertTrue(idle !is SyncBadgeState.Connected)
         assertTrue(idle is SyncBadgeState.Idle)
+    }
+
+    /**
+     * CopyPaste-5917.52: isSyncError=true + hasInternet=true → DaemonUnreachable (red).
+     * This is the production path for DaemonUnreachable — driven by FgsSyncLoop hard errors.
+     * Previously DaemonUnreachable was only reachable via IpcSyncBadgeState (IPC path not yet wired).
+     */
+    @Test
+    fun `DaemonUnreachable when isSyncError true and OS has internet`() {
+        val state = resolveSyncBadgeState(
+            liveOnlineCount = 0,
+            lastActivityMs = 0L,
+            recentSyncMs = recentSyncMs,
+            hasInternet = true,
+            isSyncError = true,
+        )
+        assertEquals(SyncBadgeState.DaemonUnreachable, state)
+    }
+
+    /**
+     * CopyPaste-5917.52: when OS is offline, NetworkOffline takes priority over isSyncError
+     * (the root cause is the OS being offline, not a daemon error — clearer for the user).
+     */
+    @Test
+    fun `NetworkOffline takes priority over isSyncError when OS is offline`() {
+        val state = resolveSyncBadgeState(
+            liveOnlineCount = 0,
+            lastActivityMs = 0L,
+            recentSyncMs = recentSyncMs,
+            hasInternet = false,
+            isSyncError = true,
+        )
+        assertEquals(SyncBadgeState.NetworkOffline, state)
+    }
+
+    /**
+     * CopyPaste-5917.52: recent sync takes priority over isSyncError (recovered mid-session).
+     */
+    @Test
+    fun `Connected takes priority over isSyncError when sync is recent`() {
+        val nowMs = System.currentTimeMillis()
+        val state = resolveSyncBadgeState(
+            liveOnlineCount = 1,
+            lastActivityMs = nowMs - 30_000L,
+            recentSyncMs = recentSyncMs,
+            hasInternet = true,
+            isSyncError = true,
+        )
+        assertEquals(SyncBadgeState.Connected, state)
     }
 }
