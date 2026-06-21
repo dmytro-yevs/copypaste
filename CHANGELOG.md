@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-21
+
+Version reset to 0.3.0. This release bundles the full product-completeness,
+quality, and platform-parity audit-remediation campaign: 820 tracked issues
+closed across all crates, including a P0 data-loss fix (encryption key never
+silently regenerated), sensitive items removed from the FTS index, PII-scrubbed
+logging, private-mode capture gating, PAKE-gated pairing, tombstone-safe cloud
+sync, relay/p2p reliability hardening (backoff jitter, device-id validation,
+resumable watermark, durable retry queue, cert-expiry enforcement), daemon-mediated
+DB backup/restore IPC verbs, search field parity + type filter, Android P2P/mTLS
+LAN sync, macOS/Android UX parity, and a full regression-test backfill.
+CI green: `cargo fmt --all --check`, `cargo clippy --workspace --all-targets
+-D warnings`, `cargo test --workspace`.
+
 ## [0.7.5] - 2026-06-20
 
 Production-audit remediation pass (`o7me`). 0 P0; all 13 P1 and audit-derived
