@@ -792,6 +792,8 @@ class FgsSyncLoop(
             // (a) Local denylist: never dial a peer we revoked.
             if (peerFingerprint in revoked) {
                 Log.i(TAG, "P2P dial: skipping revoked peer ${peerFingerprint.take(8)}")
+                // CopyPaste-ah3i: zero sessionKey even on early skip to minimize heap exposure.
+                sessionKey.fill(0)
                 continue
             }
 
@@ -820,7 +822,11 @@ class FgsSyncLoop(
                 }
             }
 
-            if (!P2pDialerGate.shouldDial(peerAddr, peerFingerprint, sessionKey)) continue
+            if (!P2pDialerGate.shouldDial(peerAddr, peerFingerprint, sessionKey)) {
+                // CopyPaste-ah3i: zero sessionKey on gate skip to minimize heap exposure.
+                sessionKey.fill(0)
+                continue
+            }
 
             // P2P outbound high-water cursor: only send items NEWER than the
             // last successfully-synced wall_time for this peer.  On the first
@@ -1017,6 +1023,11 @@ class FgsSyncLoop(
                 // path: success, exception, and CancellationException (rethrown above
                 // before this finally, but the inner try also has its own cancel path).
                 if (wakeLock?.isHeld == true) wakeLock.release()
+                // CopyPaste-ah3i: zero the unwrapped PAKE session key bytes now that
+                // syncWithPeer has consumed them (or we skipped/failed). The bytes were
+                // passed into Rust via syncWithPeer; zeroing here shrinks the window
+                // during which a heap dump could recover the plaintext session key.
+                sessionKey.fill(0)
             }
         }
     }
