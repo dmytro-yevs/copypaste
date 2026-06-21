@@ -115,7 +115,7 @@ fn der_skip_tlv(der: &[u8]) -> Option<&[u8]> {
     body.get(len..)
 }
 
-/// Skip a DER element that starts with context-specific [0] tag (0xa0..=0xbf),
+/// Skip a DER element that starts with context-specific \[0\] tag (0xa0..=0xbf),
 /// returning a slice *of the contents* (stripping the outer tag+length).
 fn der_skip_tag_len(der: &[u8]) -> Option<&[u8]> {
     der_skip_tlv(der)

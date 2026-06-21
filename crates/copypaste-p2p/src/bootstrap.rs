@@ -511,7 +511,7 @@ pub struct BootstrapPairing {
 
 /// A bootstrap TLS responder listener bound to an ephemeral port.
 ///
-/// Construct with [`BootstrapResponder::bind`], read [`BootstrapResponder::addr`]
+/// Construct with [`BootstrapResponder::bind`], read [`local_addr`](Self::local_addr)
 /// into the QR `addr_hint`, then call [`BootstrapResponder::run`] to accept one
 /// connection and drive the responder side of the PAKE handshake over it.
 pub struct BootstrapResponder {
@@ -764,8 +764,8 @@ impl BootstrapResponder {
     /// channel-binding tag verify), then derives the 6-digit SAS and invokes
     /// `confirm(sas, peer_fingerprint)`. If the user rejects (returns `false`) the
     /// pairing aborts with an error (keys drop/zeroize). Otherwise both sides
-    /// exchange a NEW frame 10a ([`SAS_ACCEPT`]/[`SAS_REJECT`]) and proceed to
-    /// the metadata exchange / `Ok` ONLY if BOTH bytes are [`SAS_ACCEPT`].
+    /// exchange a NEW frame 10a (`SAS_ACCEPT`/`SAS_REJECT`) and proceed to
+    /// the metadata exchange / `Ok` ONLY if BOTH bytes are `SAS_ACCEPT`.
     ///
     /// The `peer_fingerprint` argument is the TLS peer certificate fingerprint
     /// observed during the bootstrap handshake (the same value stored in
@@ -1111,8 +1111,8 @@ pub async fn run_initiator(
 /// channel-binding tag verify), then derives the 6-digit SAS and invokes
 /// `confirm(sas, peer_fingerprint)`. On reject (`false`) the pairing aborts
 /// with an error so the session key drops/zeroizes. Otherwise both sides exchange
-/// frame 10a ([`SAS_ACCEPT`]/[`SAS_REJECT`]) and the pairing succeeds ONLY if
-/// BOTH bytes are [`SAS_ACCEPT`].
+/// frame 10a (`SAS_ACCEPT`/`SAS_REJECT`) and the pairing succeeds ONLY if
+/// BOTH bytes are `SAS_ACCEPT`.
 ///
 /// The `peer_fingerprint` argument is the TLS peer certificate fingerprint
 /// observed during the bootstrap handshake (the same value stored in

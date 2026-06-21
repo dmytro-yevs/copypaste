@@ -148,7 +148,7 @@ impl DialBackoff {
         self.record_failure_with_rng(now, &mut rand::thread_rng())
     }
 
-    /// Test-seam variant of [`record_failure`] that accepts an explicit RNG so
+    /// Test-seam variant of [`record_failure`](Self::record_failure) that accepts an explicit RNG so
     /// jitter behaviour can be verified deterministically in unit tests.
     pub(crate) fn record_failure_with_rng<R: rand::Rng>(
         &mut self,

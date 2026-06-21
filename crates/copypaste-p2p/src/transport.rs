@@ -69,7 +69,7 @@ pub const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 /// Maximum size of a single length-delimited data-plane frame (16 MiB).
 ///
-/// The data plane carries serialized [`WireItem`]s. The largest payload is an
+/// The data plane carries serialized `WireItem`s. The largest payload is an
 /// image item whose ciphertext the relay caps at 10 MiB
 /// (`RELAY_MAX_ITEM_BYTES`); base64/JSON framing of that blob plus item
 /// metadata can roughly inflate it, so we size the ceiling to match
@@ -527,7 +527,7 @@ impl PeerTransport {
     ///
     /// Wraps [`Self::connect`] with up to [`MAX_CONNECT_ATTEMPTS`] attempts
     /// (one initial + N-1 retries), separated by [`CONNECT_RETRY_DELAY`].
-    /// Only **transient** errors are retried — see [`is_transient_io_error`]
+    /// Only **transient** errors are retried — see `is_transient_transport_error`
     /// for the exhaustive list. Permanent errors (unknown-peer, TLS config,
     /// cert problems, handshake timeout) propagate on the first failure so
     /// callers don't waste time retrying a fundamentally broken setup.
@@ -536,7 +536,7 @@ impl PeerTransport {
     /// and the peer's TCP listener actually accepting connections, and
     /// transient LAN blips (cable bounce, brief Wi-Fi roaming). For
     /// long-haul relay reconnects with exponential backoff, see
-    /// [`copypaste_sync::backoff::BackoffScheduler`].
+    /// `copypaste_sync::backoff::BackoffScheduler`.
     pub async fn connect_with_retry(
         &self,
         addr: SocketAddr,

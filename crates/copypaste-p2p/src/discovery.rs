@@ -120,11 +120,11 @@ pub struct DiscoveryService {
     /// Per-source-IP token bucket guarding inbound `ServiceResolved` events
     /// from mDNS flood (THREAT-MODEL OI-3). See [`MdnsRateLimiter`].
     rate_limiter: Arc<MdnsRateLimiter>,
-    /// Abort handle for the background browse task spawned by [`start`].
+    /// Abort handle for the background browse task spawned by [`DiscoveryService::start`].
     /// Retained so [`Drop`] can abort it, preventing the browse loop from
     /// outliving the service across P2P toggle / reconfigure cycles.
     browse_abort: Arc<Mutex<Option<AbortHandle>>>,
-    /// Clone of the mDNS [`ServiceDaemon`] created in [`start`]. Retained so
+    /// Clone of the mDNS [`ServiceDaemon`] created in [`DiscoveryService::start`]. Retained so
     /// [`Drop`] can shut it down, releasing the mDNS socket.
     daemon: Arc<Mutex<Option<ServiceDaemon>>>,
 }
@@ -379,14 +379,14 @@ impl DiscoveryService {
     /// restarted later by calling [`start`](Self::start) again.
     ///
     /// Used by the hot-apply path in `set_config` when `lan_visibility` is
-    /// toggled off; [`Drop`] also calls this via [`shutdown_inner`].
+    /// toggled off; [`Drop`] also calls this via `shutdown_inner`.
     pub fn stop(&self) {
         self.shutdown_inner();
     }
 
     /// Abort the retained browse task and shut down the retained mDNS daemon,
     /// if any. Idempotent: safe to call when nothing is running. Used both by
-    /// [`start`] (restart-in-place) and [`Drop`].
+    /// [`start`](Self::start) (restart-in-place) and [`Drop`].
     fn shutdown_inner(&self) {
         if let Some(abort) = lock_safe(&self.browse_abort).take() {
             abort.abort();
