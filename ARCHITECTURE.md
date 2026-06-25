@@ -114,10 +114,10 @@ copypaste-daemon
 - Lower latency than TCP loopback for short-lived CLI invocations.
 - Simpler: no TLS, no HTTP framing; newline-delimited JSON is sufficient.
 
-## SQLite Schema (v13)
+## SQLite Schema (v14)
 
 ```sql
--- All columns present on a fully-migrated (v13) database:
+-- All columns present on a fully-migrated (v14) database:
 clipboard_items  (id PK, item_id, content_type, content BLOB, content_nonce BLOB,
                   blob_ref, is_sensitive, is_synced, lamport_ts, wall_time, expires_at,
                   app_bundle_id,
@@ -145,6 +145,7 @@ WHERE key_version < 2), `idx_dedup_hash_minute` (UNIQUE, content_hash + wall_tim
 `idx_clipboard_item_id` (UNIQUE), `idx_clipboard_pinned` (partial, WHERE pinned = 1),
 `idx_clipboard_unpinned_len` (covering, LENGTH(content) WHERE pinned = 0),
 `idx_clipboard_deleted` (partial, WHERE deleted = 1),
+`idx_clipboard_history_page` (partial on deleted=0, covers pinned DESC + pin_order + wall_time DESC — v14),
 `idx_revoked_devices_revoked_at` (DESC).
 WAL mode + 8 MB cache. Schema versioned via `PRAGMA user_version`.
 

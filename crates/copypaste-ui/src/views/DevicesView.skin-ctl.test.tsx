@@ -221,13 +221,19 @@ describe("W5 §2 SAS peer metadata card uses --skin-r-card", () => {
     // Wait for the metadata card to appear (requires pairGetSas to return peer_device_name)
     await waitFor(() => {
       const dialog = container.querySelector("[role='dialog']")!;
-      const metaCard = dialog.querySelector(".surface-card");
+      // bdac.100: .surface-card now also appears on the SAS code box (data-testid="sas-code-display").
+      // Select the peer metadata card specifically — it is NOT the code display.
+      const metaCard = dialog.querySelector(
+        ".surface-card:not([data-testid='sas-code-display'])"
+      );
       expect(metaCard).not.toBeNull();
     });
 
-    // The peer metadata card is the surface-card div inside the SAS modal
+    // The peer metadata card is the surface-card div that is NOT the code display
     const dialog = container.querySelector("[role='dialog']")!;
-    const metaCard = dialog.querySelector(".surface-card") as HTMLElement | null;
+    const metaCard = dialog.querySelector(
+      ".surface-card:not([data-testid='sas-code-display'])"
+    ) as HTMLElement | null;
     expect(metaCard, "peer metadata card must exist").not.toBeNull();
     expectSkinRCard(metaCard!, "SAS peer metadata card");
   });

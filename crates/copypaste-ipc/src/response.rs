@@ -37,6 +37,10 @@ pub const ERR_CODE_RATE_LIMITED: &str = "rate_limited";
 /// Daemon socket is missing or refused connection. Emitted by the UI/CLI
 /// client when the daemon is not running.
 pub const ERR_CODE_DAEMON_OFFLINE: &str = "daemon_offline";
+/// Request payload exceeded the daemon's accepted size limit and was rejected
+/// before full buffering. Emitted by the IPC read path; clients should surface
+/// "payload too large, reduce size" rather than a generic error.
+pub const ERR_CODE_REQUEST_TOO_LARGE: &str = "request_too_large";
 
 /// A single JSON-RPC-style response emitted by the daemon for a matching
 /// [`crate::Request`].

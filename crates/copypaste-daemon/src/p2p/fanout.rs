@@ -25,6 +25,7 @@ pub(super) async fn outbound_loop(
     mut outbound_rx: mpsc::Receiver<WireItem>,
     peer_sinks: PeerSinks,
     sync_crypto: Option<crate::sync_orch::SyncCrypto>,
+    core_config: std::sync::Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
     shutdown: CancellationToken,
 ) {
     tracing::debug!("P2P outbound fanout loop running");
@@ -62,6 +63,32 @@ pub(super) async fn outbound_loop(
             item_opt = outbound_rx.recv(), if !outbound_closed => {
                 match item_opt {
                     Some(item) => {
+                        // CopyPaste-7ub: honour `sync_on_wifi_only` on the P2P
+                        // outbound path, exactly like the relay (relay/push.rs)
+                        // and cloud paths. When the user opted into Wi-Fi-only
+                        // sync and the device is on cellular, skip the fanout —
+                        // the item is already persisted locally and the
+                        // sync-on-connect catch-up replay reconciles it with
+                        // peers once back on Wi-Fi. Read the flag live so a
+                        // runtime `set_config` change takes effect immediately.
+                        let sync_on_wifi_only = core_config
+                            .read()
+                            .map(|g| g.sync_on_wifi_only)
+                            .unwrap_or(false);
+                        if sync_on_wifi_only {
+                            // fail-open: if the Wi-Fi probe errors, assume Wi-Fi.
+                            let on_wifi = tokio::task::spawn_blocking(crate::platform::is_on_wifi)
+                                .await
+                                .unwrap_or(true);
+                            if crate::sync_common::should_skip_on_cellular(sync_on_wifi_only, on_wifi)
+                            {
+                                tracing::debug!(
+                                    "P2P outbound: sync_on_wifi_only=true and not on Wi-Fi — \
+                                     skipping fanout (catch-up replay reconciles on reconnect)"
+                                );
+                                continue;
+                            }
+                        }
                         fanout_to_peers(&item, &peer_sinks, sync_crypto.as_ref()).await;
                     }
                     None => {

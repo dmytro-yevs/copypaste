@@ -176,9 +176,13 @@ fn token_rejected_when_last_byte_differs_xbbt() {
         )
         .expect("register");
 
-    assert_eq!(token.len(), 32, "relay tokens are 32 hex chars");
+    assert_eq!(
+        token.len(),
+        64,
+        "relay tokens are 64 hex chars (CopyPaste-qvtg.3)"
+    );
 
-    // Mutate the last character of the 32-char hex token.
+    // Mutate the last character of the 64-char hex token.
     let mut bad_token = token.clone();
     {
         let bytes = unsafe { bad_token.as_bytes_mut() };

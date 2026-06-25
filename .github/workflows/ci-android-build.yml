@@ -123,6 +123,21 @@ jobs:
           # re-running cargo inside CI where ANDROID_NDK_HOME is already set.
           ./gradlew assembleDebug -x buildCargoNdk
 
+      - name: Gradle assembleRelease (CopyPaste-8n7b)
+        working-directory: android
+        # CopyPaste-8n7b: gate main/PRs on the release variant compile so
+        # duplicate strings, missing release resources, and release-only Kotlin
+        # errors are caught before a tag push triggers the release pipeline.
+        # The debug keystore fallback (generated above) satisfies the signing
+        # config when ANDROID_KEYSTORE_BASE64 is absent (ANDROID_ALLOW_DEBUG_RELEASE
+        # lets build.gradle.kts use the debug key for the release buildType).
+        # -x buildCargoNdk: .so was already placed in jniLibs by the build step
+        # above; do not re-run cargo-ndk.
+        env:
+          ANDROID_ALLOW_DEBUG_RELEASE: "1"
+        run: |
+          ./gradlew assembleRelease -x buildCargoNdk
+
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:

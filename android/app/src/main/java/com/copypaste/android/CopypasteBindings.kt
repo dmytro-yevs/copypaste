@@ -641,6 +641,36 @@ fun getHistoryPage(
 }
 
 /**
+ * CopyPaste-bdac.42: Run `PRAGMA incremental_vacuum(0)` on the SQLCipher database at
+ * [dbPath] to reclaim ALL free pages (WAL-safe). Mirrors the macOS daemon's `ni` IPC
+ * verb (METHOD_VACUUM), which the macOS Settings → Storage → Compact button triggers.
+ *
+ * [dbPath]: absolute path to the SQLCipher database file.
+ * [key]: the 32-byte device encryption key (from [Settings.encryptionKey]).
+ *
+ * Throws [CopypasteException.DatabaseError] on I/O failure.
+ * Throws [CopypasteException.InvalidKeyLength] when [key] is not 32 bytes.
+ * Returns normally in stub mode (native library absent; no-op).
+ */
+@Throws(CopypasteException::class)
+fun dbVacuum(dbPath: String, key: ByteArray) {
+    if (!isNativeLibraryLoaded) {
+        Log.w(TAG, "dbVacuum: stub — native library not loaded; no-op")
+        return
+    }
+    try {
+        uniffi.copypaste_android.dbVacuum(
+            dbPath = dbPath,
+            key = key.toUByteList(),
+        )
+    } catch (e: uniffi.copypaste_android.CopypasteException) {
+        throw e.toAppException { CopypasteException.DatabaseError(it ?: "dbVacuum failed") }
+    } catch (e: Exception) {
+        throw CopypasteException.DatabaseError(e.message ?: "dbVacuum failed")
+    }
+}
+
+/**
  * Classify [text] and return its stable uppercase kind label (e.g. "URL", "CODE")
  * (PG-16 / 89ve). Delegates to the canonical Rust classifier — single source of truth.
  * Returns "TEXT" in stub mode or on a caught panic.

@@ -12,55 +12,23 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-// §5 PARITY-SPEC: row/action icons use the thin Outlined family (closer to SF Symbols).
-import androidx.compose.material.icons.automirrored.outlined.ArrowBack
-// CopyPaste-1fji: Star/StarBorder replaces BookmarkAdded/BookmarkBorder per dm51 styleguide
-// (web uses lucide Star/StarOff; Material Outlined Star/StarBorder is the Android equivalent).
-import androidx.compose.material.icons.outlined.Star
-import androidx.compose.material.icons.outlined.StarBorder
-import androidx.compose.material.icons.outlined.CheckBox
-import androidx.compose.material.icons.outlined.CheckBoxOutlineBlank
-import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.MoreVert
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Devices
-import androidx.compose.material.icons.outlined.SwapVert
-import androidx.compose.material3.TextField
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -68,8 +36,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -81,23 +47,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.statusBars
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.RectangleShape
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ContentValues
@@ -109,27 +64,17 @@ import androidx.core.content.FileProvider
 import java.io.File
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.TextStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.CopyPasteTheme
-import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.ideTextFieldColors
 import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.GlassTier
 import com.copypaste.android.ui.theme.rememberReducedMotion
 // PARITY-SPEC §1: read the ACTIVE (light-first) ramp via LocalIdeColors.current.*
 // instead of the hardcoded dark Ide* constants, so the whole History screen
@@ -139,10 +84,6 @@ import com.copypaste.android.ui.theme.IdeColors
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.Motion
 // Liquid glass / palette tokens for aurora backdrop and cinematic motion.
-import com.copypaste.android.ui.theme.CopyPasteButton
-import com.copypaste.android.ui.theme.ButtonVariant
-import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.paletteAurora
@@ -241,6 +182,11 @@ fun HistoryScreen(
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
+    // Single shared ClipboardRepository instance for all coroutine lambdas in this
+    // composable (file picker, bulk-copy, save/open file, preview overlay actions).
+    // Previously constructed 4× inline inside coroutine launches; now created once
+    // and captured by all lambdas. Behaviour is identical — same constructor args.
+    val repository = remember { ClipboardRepository(ctx) }
     // PARITY-SPEC §1: the active (light-first) ramp — read once at screen scope and
     // reuse for every token below so the chrome (scaffold, top bar, dialogs) themes
     // light/dark in lockstep with CopyPasteTheme.
@@ -269,7 +215,6 @@ fun HistoryScreen(
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val repository = ClipboardRepository(ctx)
                 val syncManager = try {
                     SyncManager(
                         RelayClient(settings.relayUrl),
@@ -443,7 +388,7 @@ fun HistoryScreen(
     // snippet matches synchronously, and (b) compute full-content matches in the
     // background (debounced) and union them in once ready. Result: typing feels
     // immediate and deep matches surface shortly after.
-    val searchRepository = remember { ClipboardRepository(ctx) }
+    // searchRepository reuses the single shared `repository` instance defined above.
     var fullMatchIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var fullMatchQuery by remember { mutableStateOf("") }
 
@@ -463,7 +408,7 @@ fun HistoryScreen(
         delay(250)
         val key = settings.encryptionKey
         val ids = sortedItems.map { it.id }
-        fullMatchIds = searchRepository.searchIds(ids, q, key)
+        fullMatchIds = repository.searchIds(ids, q, key)
         fullMatchQuery = q
     }
 
@@ -677,7 +622,6 @@ fun HistoryScreen(
                     onCopySelected = {
                         val ids = selectedIds
                         scope.launch {
-                            val repository = ClipboardRepository(ctx)
                             val key = settings.encryptionKey
                             // Preserve display order: walk sortedItems (pinned-first then
                             // by recency) and retain only selected text items that are
@@ -711,356 +655,38 @@ fun HistoryScreen(
                     },
                 )
             } else {
-                // HW-A8 / search-overlay fix: the recent-searches list used to be a
-                // Popup (DropdownMenu) anchored to the narrow actions Box, so it
-                // overlaid and blocked the history list and never dismissed. It is
-                // now an INLINE full-width search Row + suggestions Column rendered
-                // in the topBar Column, so it pushes content down via innerPadding
-                // instead of floating over it.
-                val searchFocusRequester = remember { FocusRequester() }
-                val keyboardController = LocalSoftwareKeyboardController.current
-                val clearRecentLabel = stringResource(R.string.action_clear_recent_searches)
-
-                // §2/P0 + P1#3: route the History header through the canonical
-                // glass surface (real API-31 RenderEffect blur, flat §2 tint
-                // fallback < 31) instead of the solid c.panel Column background.
-                LiquidGlassSurface(
-                    shape = RectangleShape,
+                HistoryNormalTopBar(
+                    c = c,
                     translucent = translucent,
                     dark = dark,
-                    solid = MaterialTheme.colorScheme.surface,
-                    contentColor = c.text,
-                ) {
-                  Column {
-                    TopAppBar(
-                        title = {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                // CopyPaste-mpp6: headlineSmall (18sp/SemiBold) to match CopyPasteTopBar
-                                // and styleguide Heading/18/600 — was titleLarge (14sp/Medium).
-                                Text(
-                                    text = stringResource(R.string.title_history),
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    color = c.text,
-                                )
-                                // Clip count badge — shows the full stored total (not just
-                                // the loaded page count) for macOS parity. Driven by
-                                // ClipboardViewModel.totalCount which reads totalItemCount()
-                                // without decrypting items.
-                                if (totalCount > 0) {
-                                    // §9: total badge unified at 10sp + 1dp bordered
-                                    // (parity with origin/device badges).
-                                    Box(
-                                        modifier = Modifier
-                                            .background(
-                                                color = c.elevated,
-                                                shape = RoundedCornerShape(6.dp),
-                                            )
-                                            .border(
-                                                width = 1.dp,
-                                                color = c.border,
-                                                shape = RoundedCornerShape(6.dp),
-                                            )
-                                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                                    ) {
-                                        Text(
-                                            text = "$totalCount",
-                                            style = TextStyle(
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                fontFeatureSettings = "tnum",
-                                            ),
-                                            color = c.faint,
-                                            maxLines = 1,
-                                        )
-                                    }
-                                }
-                            }
-                        },
-                        navigationIcon = {
-                            if (showBackButton) {
-                                IconButton(onClick = onBack) {
-                                    Icon(
-                                        Icons.AutoMirrored.Outlined.ArrowBack,
-                                        contentDescription = stringResource(R.string.cd_back),
-                                        tint = c.dim,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
-                        },
-                        actions = {
-                            // HB-11: in-app file picker — lets the user pick a file
-                            // directly from the history screen and send it to the Mac.
-                            IconButton(onClick = {
-                                filePickLauncher.launch(arrayOf("*/*"))
-                            }) {
-                                Icon(
-                                    Icons.Outlined.AttachFile,
-                                    contentDescription = stringResource(R.string.cd_attach_file),
-                                    tint = c.dim,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                            // Search toggle icon — toggles the inline full-width search Row below.
-                            IconButton(onClick = { searchExpanded = !searchExpanded }) {
-                                Icon(
-                                    if (searchExpanded) Icons.Outlined.Close else Icons.Outlined.Search,
-                                    contentDescription = stringResource(
-                                        if (searchExpanded) R.string.cd_search_close
-                                        else R.string.cd_search_open
-                                    ),
-                                    tint = if (searchExpanded) c.accent else c.dim,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                            IconButton(onClick = { viewModel.loadItems() }) {
-                                Icon(
-                                    Icons.Outlined.Refresh,
-                                    contentDescription = stringResource(R.string.cd_refresh),
-                                    tint = c.dim,
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                            // Reorder toggle — only shown when there are ≥2 pinned items
-                            val pinnedCount = items.count { it.pinned }
-                            if (pinnedCount >= 2) {
-                                IconButton(onClick = { reorderMode = !reorderMode }) {
-                                    Icon(
-                                        Icons.Outlined.SwapVert,
-                                        contentDescription = stringResource(R.string.cd_reorder_handle),
-                                        tint = if (reorderMode) c.accent else c.dim,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
-                            if (items.isNotEmpty()) {
-                                Box {
-                                    IconButton(onClick = { overflowExpanded = true }) {
-                                        Icon(
-                                            Icons.Outlined.MoreVert,
-                                            contentDescription = stringResource(R.string.cd_more_options),
-                                            tint = c.dim,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                    }
-                                    DropdownMenu(
-                                        expanded = overflowExpanded,
-                                        onDismissRequest = { overflowExpanded = false },
-                                    ) {
-                                        // CopyPaste-un29: "Group by device" toggle — macOS parity.
-                                        // Toggles between device-grouped sort (own device first,
-                                        // then peers alphabetically) and the default recency sort.
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    stringResource(
-                                                        if (sortByDevice) R.string.action_sort_by_recency
-                                                        else R.string.action_sort_by_device
-                                                    ),
-                                                    color = if (sortByDevice) c.accent else c.text,
-                                                )
-                                            },
-                                            leadingIcon = {
-                                                Icon(
-                                                    Icons.Outlined.Devices,
-                                                    null,
-                                                    tint = if (sortByDevice) c.accent else c.dim,
-                                                )
-                                            },
-                                            onClick = {
-                                                overflowExpanded = false
-                                                sortByDevice = !sortByDevice
-                                                settings.sortByDevice = sortByDevice
-                                            },
-                                        )
-                                        HorizontalDivider(color = c.divider, thickness = 1.dp)
-                                        val unpinnedCount = items.count { !it.pinned }
-                                        if (unpinnedCount > 0) {
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        stringResource(R.string.action_clear_unpinned),
-                                                        color = c.text,
-                                                    )
-                                                },
-                                                leadingIcon = {
-                                                    Icon(Icons.Outlined.Delete, null, tint = c.dim)
-                                                },
-                                                onClick = {
-                                                    overflowExpanded = false
-                                                    pendingConfirm = ConfirmAction.CLEAR_UNPINNED
-                                                },
-                                            )
-                                        }
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    stringResource(R.string.dialog_clear_all_title),
-                                                    color = c.danger,
-                                                )
-                                            },
-                                            leadingIcon = {
-                                                Icon(Icons.Outlined.Delete, null, tint = c.danger)
-                                            },
-                                            onClick = {
-                                                overflowExpanded = false
-                                                pendingConfirm = ConfirmAction.CLEAR_ALL
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            // Glass backdrop carries the fill (LiquidGlassSurface).
-                            containerColor             = Color.Transparent,
-                            titleContentColor          = c.text,
-                            actionIconContentColor     = c.dim,
-                            navigationIconContentColor = c.dim,
-                        ),
-                        windowInsets = TopAppBarDefaults.windowInsets,
-                    )
-
-                    // Full-width inline search field + suggestions, in normal layout
-                    // flow (NOT a Popup) so they push the list down via innerPadding.
-                    // §8 a11y: suppress enter/exit animation when reduced-motion is active.
-                    AnimatedVisibility(
-                        visible = searchExpanded,
-                        // MOT-20: use EaseOutExpo tween (not spring default) to match the rest of the app's
-                        // motion language (toast slide-in, list row entrance, etc.).
-                        enter = if (reducedMotion) androidx.compose.animation.EnterTransition.None
-                                else expandVertically(animationSpec = tween(Motion.Base, easing = EaseOutExpo)) +
-                                     fadeIn(animationSpec = tween(Motion.Fast, easing = EaseOutExpo)),
-                        exit  = if (reducedMotion) androidx.compose.animation.ExitTransition.None
-                                else shrinkVertically(animationSpec = tween(Motion.Base, easing = EaseOutExpo)) +
-                                     fadeOut(animationSpec = tween(Motion.Fast, easing = EaseOutExpo)),
-                    ) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            TextField(
-                                value = searchQuery,
-                                onValueChange = { searchQuery = it },
-                                placeholder = {
-                                    Text(
-                                        text = stringResource(R.string.history_search_placeholder),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = c.faint,
-                                    )
-                                },
-                                singleLine = true,
-                                colors = ideTextFieldColors(),
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(color = c.text),
-                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-                                keyboardActions = KeyboardActions(onSearch = {
-                                    val q = searchQuery.trim()
-                                    if (q.isNotEmpty()) {
-                                        // Persist to recent-5, dedup, newest first.
-                                        val updated = (listOf(q) + recentSearches.filter { it != q })
-                                            .take(5)
-                                        recentSearches = updated
-                                        settings.recentSearches = updated
-                                    }
-                                    keyboardController?.hide()
-                                }),
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Outlined.Search, null,
-                                        tint = c.dim, modifier = Modifier.size(16.dp),
-                                    )
-                                },
-                                trailingIcon = {
-                                    if (searchQuery.isNotEmpty()) {
-                                        IconButton(onClick = { searchQuery = "" }) {
-                                            Icon(
-                                                Icons.Outlined.Close,
-                                                contentDescription = stringResource(R.string.cd_search_close),
-                                                tint = c.dim,
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                        }
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .focusRequester(searchFocusRequester),
-                            )
-                            // Inline recent-searches list — full width, in flow.
-                            if (searchQuery.isEmpty() && recentSearches.isNotEmpty()) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 12.dp, vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(
-                                        text = stringResource(R.string.history_recent_searches),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = c.faint,
-                                    )
-                                    Text(
-                                        text = clearRecentLabel,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = c.accent,
-                                        modifier = Modifier
-                                            .semantics { role = Role.Button }
-                                            .clickable(onClickLabel = clearRecentLabel) {
-                                                recentSearches = emptyList()
-                                                settings.recentSearches = emptyList()
-                                            },
-                                    )
-                                }
-                                recentSearches.forEach { recent ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable {
-                                                searchQuery = recent
-                                                keyboardController?.hide()
-                                            }
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            Icons.Outlined.Search, null,
-                                            tint = c.dim, modifier = Modifier.size(14.dp),
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Text(
-                                            recent,
-                                            color = c.text,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                  } // Column
-                } // LiquidGlassSurface (glass header)
-
-                // Request keyboard focus once search bar becomes visible.
-                LaunchedEffect(searchExpanded) {
-                    if (searchExpanded) {
-                        searchFocusRequester.requestFocus()
-                    } else {
-                        keyboardController?.hide()
-                    }
-                }
-
-                // ── Device filter chips — shown only when > 1 origin device present ──
-                // Mirrors macOS HistoryView: filter strip is hidden for a single device.
-                if (originDeviceIds.size > 1) {
-                    DeviceFilterRow(
-                        deviceIds = originDeviceIds,
-                        selected = deviceFilter,
-                        ownDeviceId = ownDeviceId,
-                        peers = pairedPeers,
-                        onSelect = { deviceFilter = it },
-                    )
-                }
+                    reducedMotion = reducedMotion,
+                    totalCount = totalCount,
+                    showBackButton = showBackButton,
+                    onBack = onBack,
+                    items = items,
+                    sortByDevice = sortByDevice,
+                    onSortByDeviceChange = { sortByDevice = it },
+                    settings = settings,
+                    searchExpanded = searchExpanded,
+                    onSearchExpandedChange = { searchExpanded = it },
+                    searchQuery = searchQuery,
+                    onSearchQueryChange = { searchQuery = it },
+                    recentSearches = recentSearches,
+                    onRecentSearchesChange = { recentSearches = it },
+                    reorderMode = reorderMode,
+                    onReorderModeChange = { reorderMode = it },
+                    overflowExpanded = overflowExpanded,
+                    onOverflowExpandedChange = { overflowExpanded = it },
+                    onClearUnpinned = { pendingConfirm = ConfirmAction.CLEAR_UNPINNED },
+                    onClearAll = { pendingConfirm = ConfirmAction.CLEAR_ALL },
+                    onFilePick = { filePickLauncher.launch(arrayOf("*/*")) },
+                    onLoadItems = { viewModel.loadItems() },
+                    originDeviceIds = originDeviceIds,
+                    deviceFilter = deviceFilter,
+                    onDeviceFilterChange = { deviceFilter = it },
+                    ownDeviceId = ownDeviceId,
+                    peers = pairedPeers,
+                )
             }
         },
     ) { innerPadding ->
@@ -1126,7 +752,6 @@ fun HistoryScreen(
                     },
                     onSaveFile = { id ->
                         scope.launch {
-                            val repository = ClipboardRepository(ctx)
                             val saved = withContext(Dispatchers.IO) {
                                 try {
                                     // MediaStore.Downloads requires API 29+; devices below that are unsupported.
@@ -1170,7 +795,6 @@ fun HistoryScreen(
                         // Uses the same file_copy FileProvider path as the copy-back flow.
                         // fr44: filename is sanitized and dangerous extensions are blocked.
                         scope.launch {
-                            val repository = ClipboardRepository(ctx)
                             // CopyPaste-ev7z: return safeName from the IO block so the extension
                             // check uses the SANITIZED name, not the raw peer-supplied filename.
                             // Triple: (opened, safeName|errorMsg, uriString|"")
@@ -1260,11 +884,11 @@ fun HistoryScreen(
         val previewItem = remember(previewItemId, sortedItems) {
             previewItemId?.let { id -> sortedItems.find { it.id == id } }
         }
-        val previewRepository = remember { ClipboardRepository(ctx) }
+        // previewRepository reuses the single shared `repository` instance defined above.
         PreviewOverlay(
             phase = previewPhase,
             item = previewItem,
-            repository = previewRepository,
+            repository = repository,
             settings = settings,
             maskSensitive = settings.maskSensitiveContent,
             onDismiss = {
@@ -1277,7 +901,7 @@ fun HistoryScreen(
                     val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
                     when {
                         item.isImage -> {
-                            val imageBytes = withContext(Dispatchers.IO) { previewRepository.getImageBytes(item.id) }
+                            val imageBytes = withContext(Dispatchers.IO) { repository.getImageBytes(item.id) }
                             if (imageBytes != null) {
                                 val uri = withContext(Dispatchers.IO) {
                                     try {
@@ -1296,11 +920,11 @@ fun HistoryScreen(
                             }
                         }
                         item.isFile -> {
-                            val fileBytes = withContext(Dispatchers.IO) { previewRepository.getFileBytes(item.id) }
+                            val fileBytes = withContext(Dispatchers.IO) { repository.getFileBytes(item.id) }
                             if (fileBytes != null) {
                                 val uri = withContext(Dispatchers.IO) {
                                     try {
-                                        val (fileName, _) = previewRepository.getFileMeta(item.id)
+                                        val (fileName, _) = repository.getFileMeta(item.id)
                                         val safeName = fileName?.takeIf { it.isNotBlank() } ?: "${item.id}.bin"
                                         val dir = File(ctx.cacheDir, "file_copy").also { it.mkdirs() }
                                         val file = File(dir, safeName)
@@ -1318,7 +942,7 @@ fun HistoryScreen(
                         }
                         else -> {
                             val fullText = withContext(Dispatchers.IO) {
-                                previewRepository.loadFullPlaintext(item.id, settings.encryptionKey)
+                                repository.loadFullPlaintext(item.id, settings.encryptionKey)
                             } ?: item.snippet
                             ClipboardRepository.expectClip(fullText)
                             cm.setPrimaryClip(ClipData.newPlainText("CopyPaste", fullText))
@@ -1341,7 +965,6 @@ fun HistoryScreen(
             onSaveFile = {
                 val id = previewItemId ?: return@PreviewOverlay
                 scope.launch {
-                    val repository = ClipboardRepository(ctx)
                     val saved = withContext(Dispatchers.IO) {
                         try {
                             // MediaStore.Downloads requires API 29+; devices below that are unsupported.
@@ -1382,7 +1005,6 @@ fun HistoryScreen(
                 // Same implementation as the list-row open action.
                 // fr44: filename sanitized; dangerous extensions routed to share chooser.
                 scope.launch {
-                    val repository = ClipboardRepository(ctx)
                     // CopyPaste-ev7z: return safeName from the IO block so the extension
                     // check uses the SANITIZED name (same fix as the list-row onOpenFile above).
                     val (opened, safeNameOrError, uriStr) = withContext(Dispatchers.IO) {

@@ -4,6 +4,9 @@ pub mod items;
 pub mod migration_v4;
 pub mod pool;
 mod schema;
+// CopyPaste-ojas.17: export the live schema version so tests (and any external
+// consumer) read the single source of truth instead of redeclaring a constant
+// that silently goes stale on a schema bump.
 pub use db::{Database, DbError, MigrationState};
 pub use devices::{
     ensure_revoked_devices_table, list_revoked_devices, revoke_device, revoke_devices,
@@ -22,3 +25,4 @@ pub use migration_v4::{
     MigrationV4Error,
 };
 pub use pool::{open_pool, open_pool_with_cache_mb, DbRead, PoolError, ReadHandle, SqlitePool};
+pub use schema::SCHEMA_VERSION;

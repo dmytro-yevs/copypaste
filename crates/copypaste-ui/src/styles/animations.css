@@ -1,41 +1,4 @@
 
-/* ── Keyframe animations ─────────────────────────────────────────────────── */
-
-/* Popup entrance §4 */
-@keyframes popupEnter {
-  from {
-    opacity: 0;
-    transform: scale(0.97) translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
-}
-
-/* Toast slide-up §8 */
-@keyframes toastIn {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
-}
-
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 /* ── Aurora background — STATIC (no animation) ────────────────────────────
    auroraSpin and glowDrift removed. Background orbs are fixed in place.
    Colour atmosphere is preserved; zero idle looping animation.              */

@@ -385,6 +385,13 @@ export interface PairedDevice {
    * Absent when no live P2P connection exists or the daemon has not yet measured it.
    */
   latency_ms?: number;
+  /**
+   * CopyPaste-1jms.30: trust level as reported by the daemon's list_peers response.
+   * "verified" = peer completed SAS confirmation; any other value (or absent) = not
+   * SAS-verified. Optional for back-compat with daemon builds predating this field.
+   * Mirrors Android's trustLabel(peer): Verified iff sasVerified, else Unverified.
+   */
+  trust?: string;
 }
 
 /**

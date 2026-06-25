@@ -1,8 +1,8 @@
 use crate::protocol::{
     Request, Response, CURRENT_PROTOCOL_VERSION, ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR,
     ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_NOT_FOUND,
-    ERR_CODE_NOT_IMPLEMENTED, ERR_CODE_RATE_LIMITED, ERR_CODE_VERSION_MISMATCH,
-    MIN_SUPPORTED_PROTOCOL_VERSION,
+    ERR_CODE_NOT_IMPLEMENTED, ERR_CODE_RATE_LIMITED, ERR_CODE_REQUEST_TOO_LARGE,
+    ERR_CODE_VERSION_MISMATCH, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 // CopyPaste-merc: canonical badge-state computation lives in copypaste-ipc so it
 // is shared across crates. The daemon calls this once per get_sync_status request
@@ -74,10 +74,99 @@ pub const BUILD_VERSION: &str = match option_env!("COPYPASTE_BUILD_VERSION") {
     None => env!("CARGO_PKG_VERSION"),
 };
 
-/// Maximum size of a single IPC request line. Clients exceeding this receive
-/// an error response and have their connection closed. Prevents OOM from a
-/// malicious or buggy client sending an unbounded stream without newlines.
+/// Maximum size of a single IPC request line for the few methods that carry a
+/// genuinely large inbound payload (`import`, `add_file_item`). Clients
+/// exceeding this receive an error response and have their connection closed.
+/// Prevents OOM from a malicious or buggy client sending an unbounded stream
+/// without newlines.
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+
+/// Default per-request size cap applied to EVERY method that is not on the
+/// large-payload allow-list ([`IpcServer::allows_large_payload`]).
+///
+/// CopyPaste-c4q2.28: applying the 16 MiB [`MAX_REQUEST_BYTES`] cap to every
+/// method let a hostile same-UID client send ~15.9 MiB for a `status`/`list`/
+/// `delete` call; the daemon buffered the whole payload before rejecting it.
+/// Worst case `MAX_CONCURRENT_CONNECTIONS` × 16 MiB ≈ 1 GiB of peak buffered
+/// RAM. The IPC read path now reads at most this many bytes before it has
+/// classified the method, and only `import` / `add_file_item` are allowed to
+/// grow to [`MAX_REQUEST_BYTES`]. 64 KiB is comfortably larger than any
+/// non-bulk request (the largest, a fully-populated `set_config`, is < 2 KiB).
+const SMALL_REQUEST_BYTES: usize = 64 * 1024;
+
+/// Extract the value of a top-level string field (`"key":"value"`) from a
+/// possibly-truncated JSON request prefix, scanning raw bytes.
+///
+/// CopyPaste-c4q2.28 uses this to classify a request's `method` BEFORE the
+/// whole (potentially huge) line has been buffered — `serde_json` cannot help
+/// because the buffer may be cut mid-object. Well-behaved clients
+/// (`copypaste-ipc::Request`) serialise `id` and `method` ahead of `params`, so
+/// both are present in the first [`SMALL_REQUEST_BYTES`]. Returns `None` if the
+/// key/value is absent or malformed in the prefix (the caller then treats the
+/// request as non-large and rejects it). Only the first match is used; values
+/// with JSON escapes are not expected for `method`/`id` and are not decoded.
+fn extract_json_string_field(prefix: &[u8], key: &str) -> Option<String> {
+    let needle = format!("\"{key}\"");
+    let start = prefix
+        .windows(needle.len())
+        .position(|w| w == needle.as_bytes())?;
+    let mut i = start + needle.len();
+    let skip_ws = |i: &mut usize| {
+        while *i < prefix.len() && prefix[*i].is_ascii_whitespace() {
+            *i += 1;
+        }
+    };
+    skip_ws(&mut i);
+    if i >= prefix.len() || prefix[i] != b':' {
+        return None;
+    }
+    i += 1;
+    skip_ws(&mut i);
+    if i >= prefix.len() || prefix[i] != b'"' {
+        return None;
+    }
+    i += 1;
+    let value_start = i;
+    while i < prefix.len() && prefix[i] != b'"' {
+        i += 1;
+    }
+    if i >= prefix.len() {
+        return None; // closing quote not in the buffered prefix
+    }
+    std::str::from_utf8(&prefix[value_start..i])
+        .ok()
+        .map(str::to_owned)
+}
+
+/// Best-effort echo of the request `id` from a (possibly truncated) prefix so an
+/// oversized-request error can still be correlated by the client's id-matching
+/// guard. Falls back to `"0"` when the id is not recoverable.
+fn echo_id_from_prefix(prefix: &[u8]) -> String {
+    extract_json_string_field(prefix, "id").unwrap_or_else(|| "0".to_string())
+}
+
+/// Send a bounded `request_too_large` error response, then the caller closes the
+/// connection. The write is wrapped in [`IPC_WRITE_TIMEOUT`] (c4q2.24) so a slow
+/// reader cannot pin the connection even on this terminal path.
+async fn send_request_too_large<W>(writer: &mut W, prefix: &[u8], limit_bytes: usize, detail: &str)
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let limit_human = if limit_bytes >= 1024 * 1024 {
+        format!("{} MiB", limit_bytes / (1024 * 1024))
+    } else {
+        format!("{} KiB", limit_bytes / 1024)
+    };
+    let resp = Response::err_with_code(
+        echo_id_from_prefix(prefix),
+        ERR_CODE_REQUEST_TOO_LARGE,
+        format!("request too large: IPC request exceeds the {limit_human} limit. {detail}"),
+    );
+    if let Ok(mut out) = serde_json::to_string(&resp) {
+        out.push('\n');
+        let _ = tokio::time::timeout(IPC_WRITE_TIMEOUT, writer.write_all(out.as_bytes())).await;
+    }
+}
 
 /// Per-request read timeout (CopyPaste-cce1).
 ///
@@ -90,6 +179,22 @@ const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 /// When the deadline fires we drop the connection without sending a response;
 /// the client's next read returns EOF, which its retry logic must handle.
 pub const IPC_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Per-response write deadline (CopyPaste-c4q2.24).
+///
+/// The read path has [`IPC_READ_TIMEOUT`], but a bare `writer.write_all(...)`
+/// on the write path can block indefinitely: once the kernel's Unix-socket send
+/// buffer fills (~128 KiB on macOS), `write_all` parks until the peer drains its
+/// recv buffer. A client that sends a valid request and then never reads the
+/// reply would pin its connection slot — and the `conn_semaphore` permit — for
+/// the lifetime of the daemon. With [`MAX_CONCURRENT_CONNECTIONS`] such clients,
+/// IPC stops accepting connections and the UI/CLI become inaccessible (a
+/// same-UID local DoS).
+///
+/// 10 s is far more than any legitimate client needs to drain a single response
+/// (the largest, a full `history_page`, is a few MiB). On timeout we log a warn
+/// and drop the connection, reclaiming the semaphore permit.
+pub const IPC_WRITE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Server-side cap on paginated reads (`list`, `history_page`). A client
 /// may request more, but the server silently clamps to this value. Protects
@@ -143,7 +248,7 @@ pub(crate) use config::read_config;
 pub(crate) use config::update_core_config;
 pub use config::AppConfig;
 // Helpers used directly in impl IpcServer dispatch code (non-test):
-use config::{merge_config, redact_config_secrets, write_config};
+use config::{build_config_response, merge_config, write_config};
 // Helpers only called from the inline test module; #[cfg(test)] keeps the
 // import from triggering -D warnings in non-test compilation.
 #[cfg(test)]
@@ -501,6 +606,20 @@ pub struct IpcServer {
     /// queueing or blocking. `Arc`-wrapped so it can be shared with the spawned
     /// connection tasks without lifetime issues.
     conn_semaphore: Arc<tokio::sync::Semaphore>,
+
+    /// Live relay orchestrator handle (CopyPaste-44rq.67).
+    ///
+    /// `daemon::run` starts the relay (if `relay_url` is configured) and stores
+    /// the resulting [`crate::relay::RelayHandle`] here so the `set_config`
+    /// handler can shut it down at runtime when the user clears the relay URL
+    /// (`set_config { relay_url: "" }`). Dropping/`shutdown()`-ing the handle
+    /// stops the push + receive loops within one poll cycle, so the user can
+    /// disable relay sync without restarting the daemon. `None` when no relay is
+    /// running (not configured, failed to start, or already cleared).
+    ///
+    /// tokio `Mutex` because the `set_config` handler `.await`s while holding it.
+    #[cfg(feature = "relay-sync")]
+    relay_handle: Arc<tokio::sync::Mutex<Option<crate::relay::RelayHandle>>>,
 }
 
 /// Wire-serialisable peer event record returned by `poll_peer_events`.
@@ -790,6 +909,10 @@ impl IpcServer {
             in_memory_cloud_password: Arc::new(std::sync::Mutex::new(None)),
             // CopyPaste-6ot5: start with the full connection cap available.
             conn_semaphore: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_CONNECTIONS)),
+            // CopyPaste-44rq.67: empty until daemon::run starts the relay and
+            // wires the shared slot via `with_relay_handle`.
+            #[cfg(feature = "relay-sync")]
+            relay_handle: Arc::new(tokio::sync::Mutex::new(None)),
         }
     }
 
@@ -800,6 +923,22 @@ impl IpcServer {
     /// allowing concurrent reads without blocking the writer.
     pub fn with_read_pool(mut self, pool: Arc<copypaste_core::SqlitePool>) -> Self {
         self.read_pool = Some(pool);
+        self
+    }
+
+    /// Share the live relay-handle slot with `daemon::run` (CopyPaste-44rq.67).
+    ///
+    /// `daemon::run` owns the same `Arc` and writes the started
+    /// [`crate::relay::RelayHandle`] into it after `start_relay` succeeds; the
+    /// `set_config` handler reads it to shut the relay down when the user clears
+    /// the relay URL. Passing the shared slot (rather than the default
+    /// per-server empty one) is what connects the two.
+    #[cfg(feature = "relay-sync")]
+    pub fn with_relay_handle(
+        mut self,
+        slot: Arc<tokio::sync::Mutex<Option<crate::relay::RelayHandle>>>,
+    ) -> Self {
+        self.relay_handle = slot;
         self
     }
 
@@ -2086,6 +2225,20 @@ impl IpcServer {
         )
     }
 
+    /// Returns true if `method` may carry an inbound payload larger than
+    /// [`SMALL_REQUEST_BYTES`] (up to [`MAX_REQUEST_BYTES`]).
+    ///
+    /// CopyPaste-c4q2.28: only bulk-ingest methods legitimately send megabytes
+    /// of request body — `import` (whole-history restore) and `add_file_item`
+    /// (base64-encoded file bytes from the desktop UI). Every other method's
+    /// request is small (ids, flags, short strings); capping them at
+    /// [`SMALL_REQUEST_BYTES`] removes the RAM-amplification vector without
+    /// affecting any real client. Response size is unrelated — this bounds only
+    /// the inbound request line.
+    fn allows_large_payload(method: &str) -> bool {
+        method == copypaste_ipc::METHOD_IMPORT || method == copypaste_ipc::METHOD_ADD_FILE_ITEM
+    }
+
     /// Run the IPC accept loop until `shutdown` is cancelled.
     ///
     /// D2: accepts a [`CancellationToken`] so the daemon can stop the server
@@ -2241,13 +2394,17 @@ impl IpcServer {
 
         loop {
             buf.clear();
-            // Bound the read: at most MAX_REQUEST_BYTES + 1 so we can distinguish
-            // "exactly the limit" from "exceeded the limit".
-            let mut limited = (&mut reader).take((MAX_REQUEST_BYTES as u64) + 1);
-            // CopyPaste-cce1: enforce a per-request read deadline so a stalled
-            // client cannot hold its connection slot (and, transitively, the DB
-            // Mutex) indefinitely. When the deadline fires we drop the connection
-            // without sending a response; the client sees EOF on its next read.
+            // CopyPaste-c4q2.28: two-pass, method-aware size cap. Phase 1 reads
+            // at most SMALL_REQUEST_BYTES + 1 so an unclassified request can
+            // never make the daemon buffer more than ~64 KiB. Only after the
+            // method is known (and is on the large-payload allow-list) do we
+            // extend the cap to MAX_REQUEST_BYTES in phase 2.
+            //
+            // CopyPaste-cce1: each read is wrapped in IPC_READ_TIMEOUT so a
+            // stalled client cannot hold its connection slot (and the DB Mutex)
+            // indefinitely. On deadline we drop the connection; the client sees
+            // EOF on its next read.
+            let mut limited = (&mut reader).take((SMALL_REQUEST_BYTES as u64) + 1);
             let n =
                 match tokio::time::timeout(IPC_READ_TIMEOUT, limited.read_until(b'\n', &mut buf))
                     .await
@@ -2271,48 +2428,76 @@ impl IpcServer {
                 return Ok(());
             }
 
-            // Oversized request: read more than MAX_REQUEST_BYTES without
-            // finding a newline. Reject with a clear error response, then close.
-            // CopyPaste-aazu: previously the connection was closed silently,
-            // which the CLI surfaced as a confusing EOF. Now we send a
-            // machine-readable "request_too_large" error before closing so
-            // callers (CLI / Android) can surface a human-readable message.
-            if n > MAX_REQUEST_BYTES {
-                let limit_mib = MAX_REQUEST_BYTES / (1024 * 1024);
-                tracing::warn!(
-                    bytes_read = n,
-                    limit = MAX_REQUEST_BYTES,
-                    "ipc request exceeded {MAX_REQUEST_BYTES} bytes; rejecting and closing"
-                );
-                // CopyPaste-cbfl: try to echo the request id from the head of
-                // the truncated buffer so the CLI id-matching guard can still
-                // correlate this error with the request that triggered it.
-                // We probe only the first 4 KiB — enough for any realistic JSON
-                // header, cheap enough to scan synchronously.
-                let echo_id = std::str::from_utf8(&buf[..buf.len().min(4096)])
-                    .ok()
-                    .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok())
-                    .and_then(|v| {
-                        v["id"]
-                            .as_str()
-                            .map(|s| s.to_string())
-                            .or_else(|| v["id"].as_i64().map(|n| n.to_string()))
-                            .or_else(|| v["id"].as_u64().map(|n| n.to_string()))
-                    })
-                    .unwrap_or_else(|| "0".to_string());
-                let resp = Response::err_with_code(
-                    echo_id,
-                    "request_too_large",
-                    format!(
-                        "request too large: IPC request exceeds the {limit_mib} MiB limit. \
-                         For large imports split the payload into smaller batches."
-                    ),
-                );
-                if let Ok(mut out) = serde_json::to_string(&resp) {
-                    out.push('\n');
-                    let _ = writer.write_all(out.as_bytes()).await;
+            // If phase 1 did not terminate on a newline, the request is larger
+            // than the small per-method cap. Classify the method from the
+            // buffered prefix: only the large-payload allow-list may continue;
+            // everything else is rejected here, having buffered ≤ 64 KiB.
+            if buf.last() != Some(&b'\n') {
+                let method = extract_json_string_field(&buf, "method");
+                let large_ok = method
+                    .as_deref()
+                    .map(Self::allows_large_payload)
+                    .unwrap_or(false);
+                if !large_ok {
+                    tracing::warn!(
+                        bytes_read = n,
+                        limit = SMALL_REQUEST_BYTES,
+                        method = method.as_deref().unwrap_or("<unknown>"),
+                        "ipc request exceeded the per-method size cap; rejecting and closing"
+                    );
+                    send_request_too_large(
+                        &mut writer,
+                        &buf,
+                        SMALL_REQUEST_BYTES,
+                        "Only bulk methods (import, add_file_item) may exceed it.",
+                    )
+                    .await;
+                    return Ok(());
                 }
-                return Ok(());
+
+                // Phase 2: large-payload method — read the remainder up to the
+                // MAX_REQUEST_BYTES total cap (still under the read deadline).
+                let remaining = (MAX_REQUEST_BYTES as u64 + 1).saturating_sub(buf.len() as u64);
+                let mut limited2 = (&mut reader).take(remaining);
+                let n2 = match tokio::time::timeout(
+                    IPC_READ_TIMEOUT,
+                    limited2.read_until(b'\n', &mut buf),
+                )
+                .await
+                {
+                    Ok(Ok(n2)) => n2,
+                    Ok(Err(e)) => {
+                        tracing::warn!("ipc read error (large payload): {e}");
+                        return Ok(());
+                    }
+                    Err(_elapsed) => {
+                        tracing::warn!(
+                            timeout_secs = IPC_READ_TIMEOUT.as_secs(),
+                            "ipc read timeout (large payload): dropping stalled client connection"
+                        );
+                        return Ok(());
+                    }
+                };
+                // Clean EOF mid-stream — client closed without finishing.
+                if n2 == 0 {
+                    return Ok(());
+                }
+                // Still no newline after consuming the full MAX cap → oversized.
+                if buf.last() != Some(&b'\n') {
+                    tracing::warn!(
+                        bytes_read = buf.len(),
+                        limit = MAX_REQUEST_BYTES,
+                        "ipc request exceeded {MAX_REQUEST_BYTES} bytes; rejecting and closing"
+                    );
+                    send_request_too_large(
+                        &mut writer,
+                        &buf,
+                        MAX_REQUEST_BYTES,
+                        "For large imports split the payload into smaller batches.",
+                    )
+                    .await;
+                    return Ok(());
+                }
             }
 
             // Trim trailing \n (and any stray \r) before dispatch.
@@ -2331,7 +2516,12 @@ impl IpcServer {
                     let resp = Response::err("0", format!("invalid UTF-8: {e}"));
                     if let Ok(mut out) = serde_json::to_string(&resp) {
                         out.push('\n');
-                        let _ = writer.write_all(out.as_bytes()).await;
+                        // Bounded write (CopyPaste-c4q2.24).
+                        let _ = tokio::time::timeout(
+                            IPC_WRITE_TIMEOUT,
+                            writer.write_all(out.as_bytes()),
+                        )
+                        .await;
                     }
                     continue;
                 }
@@ -2340,11 +2530,24 @@ impl IpcServer {
             let resp = self.dispatch(line).await;
             let mut out = serde_json::to_string(&resp)?;
             out.push('\n');
-            if let Err(e) = writer.write_all(out.as_bytes()).await {
-                // Client disconnected mid-response — log and exit cleanly,
-                // do not panic the spawned task.
-                tracing::debug!("ipc write failed (client disconnected): {e}");
-                return Ok(());
+            // CopyPaste-c4q2.24: bound the write with IPC_WRITE_TIMEOUT so a
+            // client that stops draining its recv buffer cannot pin this
+            // connection slot (and its semaphore permit) indefinitely.
+            match tokio::time::timeout(IPC_WRITE_TIMEOUT, writer.write_all(out.as_bytes())).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    // Client disconnected mid-response — log and exit cleanly,
+                    // do not panic the spawned task.
+                    tracing::debug!("ipc write failed (client disconnected): {e}");
+                    return Ok(());
+                }
+                Err(_elapsed) => {
+                    tracing::warn!(
+                        timeout_secs = IPC_WRITE_TIMEOUT.as_secs(),
+                        "ipc write timeout: dropping slow-draining client connection"
+                    );
+                    return Ok(());
+                }
             }
         }
     }
@@ -2809,41 +3012,31 @@ impl IpcServer {
                         .collect();
 
                     if rows.is_empty() {
-                        return Ok::<_, rusqlite::Error>(vec![]);
+                        // anyhow error so both rusqlite::Error and the core
+                        // ItemsError from soft_delete_item_in_tx convert via `?`.
+                        return Ok::<_, anyhow::Error>(vec![]);
                     }
 
-                    // Soft-delete all in a single transaction: set deleted=1,
-                    // wipe content/nonce/thumb, bump lamport_ts + wall_time for LWW.
+                    // CopyPaste-jvzm.3: soft-delete every item in ONE transaction
+                    // by reusing the canonical core tombstone definition
+                    // (soft_delete_item_in_tx) instead of hand-rolling the
+                    // UPDATE + FTS + pending_uploads cleanup here — so the batch
+                    // path can never drift from the single-item path (and now
+                    // also resets is_synced=0, which the old inline copy missed).
+                    // The previous O(n) "FTS orphan purge" cross-table scan is
+                    // dropped: the per-item FTS DELETE inside the helper already
+                    // keeps the index consistent.
                     let tx = conn.unchecked_transaction()?;
                     for (id, prev_lamport) in &rows {
                         let new_lamport =
                             copypaste_core::next_lamport_ts(*prev_lamport, now_ms);
-                        tx.execute(
-                            "UPDATE clipboard_items
-                             SET deleted = 1, content = NULL, content_nonce = NULL,
-                                 thumb = NULL, lamport_ts = ?2, wall_time = ?3
-                             WHERE id = ?1",
-                            rusqlite::params![id, new_lamport, now_ms],
-                        )?;
-                        // Clean up FTS index and pending-upload rows inline
-                        // (delete_pending_uploads_for_ids is crate-private).
-                        tx.execute(
-                            "DELETE FROM clipboard_fts WHERE id = ?1",
-                            rusqlite::params![id],
-                        )?;
-                        tx.execute(
-                            "DELETE FROM pending_uploads WHERE item_id = \
-                             (SELECT item_id FROM clipboard_items WHERE id = ?1)",
-                            rusqlite::params![id],
+                        copypaste_core::storage::items::soft_delete_item_in_tx(
+                            &tx,
+                            id,
+                            new_lamport,
+                            now_ms,
                         )?;
                     }
-                    // Belt-and-suspenders: prune any FTS orphans left over from
-                    // older daemon versions that did not clean FTS on soft-delete.
-                    tx.execute(
-                        "DELETE FROM clipboard_fts WHERE rowid NOT IN \
-                         (SELECT rowid FROM clipboard_items)",
-                        [],
-                    )?;
                     tx.commit()?;
 
                     // Return the IDs so the async caller can re-read tombstones
@@ -3879,21 +4072,24 @@ impl IpcServer {
                 // the UI settings form and the CLI's read-merge-write in
                 // `cloud setup`; neither needs the raw GoTrue password or email
                 // back (the CLI re-supplies both on every `set_config`, the UI
-                // does not surface them at all). `redact_config_secrets`
-                // replaces them with boolean presence flags. The Supabase
-                // anon/public key is, by design, a publishable key and is kept
-                // so the UI can prefill the settings field.
+                // does not surface them at all). `build_config_response` maps
+                // the internal config to a typed `AppConfigResponse` that has no
+                // field for either secret — only `*_set` presence flags — so a
+                // leak is structurally impossible. The Supabase anon/public key
+                // is, by design, a publishable key and is kept so the UI can
+                // prefill the settings field.
                 //
                 // Fix HIGH #3: read_config() does blocking fs I/O (reads
                 // config.json + config.toml); run it on the blocking thread
                 // pool so the async worker is never stalled by disk I/O.
                 let join = tokio::task::spawn_blocking(read_config).await;
                 match join {
-                    Ok(cfg) => match serde_json::to_value(&cfg) {
-                        Ok(mut v) => {
-                            redact_config_secrets(&mut v);
-                            Response::ok(req.id, v)
-                        }
+                    // Build the typed, redacted wire response. `AppConfigResponse`
+                    // has no field that can carry a credential, so secrets cannot
+                    // leak here even if a new secret field is later added to the
+                    // internal `AppConfig` (CopyPaste-c4q2.18).
+                    Ok(cfg) => match serde_json::to_value(build_config_response(&cfg)) {
+                        Ok(v) => Response::ok(req.id, v),
                         Err(e) => Response::err(req.id, e.to_string()),
                     },
                     Err(e) => Response::err_with_code(
@@ -3920,6 +4116,18 @@ impl IpcServer {
                 // the NEXT daemon restart. `None` means the caller did not send
                 // the field — no change, no notice needed.
                 let requested_p2p_enabled = incoming.p2p_enabled;
+                // CopyPaste-44rq.67: capture whether the caller explicitly
+                // cleared the relay URL (the empty-string sentinel) BEFORE
+                // `incoming` is moved into the blocking task, so the running
+                // relay orchestrator can be shut down after the persist succeeds.
+                // `None` (omitted) is NOT a clear — only `Some("")`/whitespace.
+                #[cfg(feature = "relay-sync")]
+                let relay_cleared = matches!(
+                    incoming.relay_url.as_deref(),
+                    Some(s) if s.trim().is_empty()
+                );
+                #[cfg(feature = "relay-sync")]
+                let relay_handle_for_clear = self.relay_handle.clone();
                 // MERGE, don't overwrite. `get_config` redacts the secret
                 // fields (`supabase_password`, `supabase_email`) to `*_set`
                 // booleans and drops the real values, so a UI/CLI
@@ -4044,6 +4252,27 @@ impl IpcServer {
                                 p2p_enabled = enabled,
                                 "p2p_enabled persisted — change takes effect on next daemon restart"
                             );
+                        }
+                        // CopyPaste-44rq.67: the user cleared the relay URL —
+                        // tear down the running orchestrator now (config.toml was
+                        // already set to relay_url=None above). Taking the handle
+                        // out of the slot and calling `shutdown()` stops the push
+                        // and receive loops within one poll cycle, so relay sync
+                        // is disabled at runtime without a daemon restart. Unlike
+                        // p2p_enabled (which needs a restart), the relay handle is
+                        // explicitly shareable for exactly this purpose.
+                        #[cfg(feature = "relay-sync")]
+                        if relay_cleared {
+                            if let Some(handle) = relay_handle_for_clear.lock().await.take() {
+                                tracing::info!(
+                                    "relay_url cleared — shutting down relay orchestrator"
+                                );
+                                handle.shutdown();
+                            } else {
+                                tracing::debug!(
+                                    "relay_url cleared but no relay orchestrator was running"
+                                );
+                            }
                         }
                         Response::ok(req.id, serde_json::json!({"saved": true}))
                     }
@@ -8445,6 +8674,26 @@ mod tests {
         assert!(!compute_peer_online(None, None, 1_000_000));
     }
 
+    /// CopyPaste-1jms.25: the peer-card fallback threshold MUST equal the sync
+    /// badge chip's recency window so the two "recently heard from?" signals
+    /// agree. Guards against the constants drifting apart again.
+    #[test]
+    fn online_threshold_matches_sync_badge_recent_window() {
+        assert_eq!(
+            ONLINE_THRESHOLD_SECS,
+            (copypaste_ipc::SYNC_BADGE_RECENT_MS / 1_000) as i64,
+            "peer-card online window must match the sync-chip recency window"
+        );
+        // Concrete regression of the formerly-contradictory case: a peer last
+        // heard from 75 s ago is now ONLINE in the fallback (it was offline under
+        // the old 60 s window while the chip still showed it as recent).
+        let now = 1_000_000_i64;
+        assert!(
+            compute_peer_online(None, Some(now - 75), now),
+            "a 75s-stale peer must be online (within the shared 5-min window)"
+        );
+    }
+
     /// Create a temp directory and immediately force its permissions to 0o700.
     ///
     /// `tempfile::TempDir::new()` calls `mkdir(path, 0o700)`, but the kernel
@@ -8464,21 +8713,46 @@ mod tests {
         dir
     }
 
-    /// `get_config` must never ship the GoTrue password or email over IPC.
-    /// `redact_config_secrets` strips both and replaces them with `*_set`
-    /// presence flags, while leaving the publishable anon key intact.
+    /// CopyPaste-c4q2.24: both IPC directions must be deadline-bounded so a
+    /// stalled/hostile same-UID client cannot pin a connection slot (and its
+    /// semaphore permit) forever. The write deadline must be > 0 and should not
+    /// exceed the read deadline (a slow drain is a harder failure than a slow
+    /// send and warrants a tighter bound). A full 64-connection buffer-fill DoS
+    /// reproduction is kernel-send-buffer-dependent and ~10 s+ wall time, so it
+    /// is covered by manual QA (see the bd issue) rather than a flaky unit test;
+    /// this guards the intent of the constants.
     #[test]
-    fn redact_config_secrets_strips_password_and_email() {
-        let mut v = serde_json::json!({
-            "p2p_enabled": true,
-            "supabase_url": "https://x.supabase.co",
-            "supabase_anon_key": "eyJpublishable",
-            "supabase_email": "user@example.com",
-            "supabase_password": "hunter2",
-        });
-        redact_config_secrets(&mut v);
+    fn ipc_write_timeout_is_bounded_and_not_longer_than_read() {
+        assert!(
+            IPC_WRITE_TIMEOUT > std::time::Duration::ZERO,
+            "write path must have a non-zero deadline"
+        );
+        assert!(
+            IPC_WRITE_TIMEOUT <= IPC_READ_TIMEOUT,
+            "write deadline ({:?}) should not exceed read deadline ({:?})",
+            IPC_WRITE_TIMEOUT,
+            IPC_READ_TIMEOUT
+        );
+    }
+
+    /// `get_config` must never ship the GoTrue password or email over IPC.
+    /// `build_config_response` maps both to `*_set` presence flags and exposes
+    /// no field that could carry the plaintext, while leaving the publishable
+    /// anon key intact (CopyPaste-c4q2.18).
+    #[test]
+    fn build_config_response_strips_password_and_email() {
+        let cfg = AppConfig {
+            p2p_enabled: Some(true),
+            supabase_url: Some("https://x.supabase.co".into()),
+            supabase_anon_key: Some("eyJpublishable".into()),
+            supabase_email: Some("user@example.com".into()),
+            supabase_password: Some("hunter2".into()),
+            ..AppConfig::default()
+        };
+        // Serialise the typed response exactly as the get_config handler does.
+        let v = serde_json::to_value(build_config_response(&cfg)).unwrap();
         let obj = v.as_object().unwrap();
-        // Secrets are gone from the wire.
+        // Secrets cannot appear — the response type has no field for them.
         assert!(!obj.contains_key("supabase_password"));
         assert!(!obj.contains_key("supabase_email"));
         // Presence flags reflect that both were set.
@@ -8673,15 +8947,16 @@ mod tests {
         );
     }
 
-    /// When the credentials are absent (null), the presence flags must be
+    /// When the credentials are absent (None), the presence flags must be
     /// `false` and no secret key should appear on the wire.
     #[test]
-    fn redact_config_secrets_reports_unset_when_null() {
-        let mut v = serde_json::json!({
-            "supabase_email": serde_json::Value::Null,
-            "supabase_password": serde_json::Value::Null,
-        });
-        redact_config_secrets(&mut v);
+    fn build_config_response_reports_unset_when_none() {
+        let cfg = AppConfig {
+            supabase_email: None,
+            supabase_password: None,
+            ..AppConfig::default()
+        };
+        let v = serde_json::to_value(build_config_response(&cfg)).unwrap();
         let obj = v.as_object().unwrap();
         assert_eq!(obj["supabase_password_set"], serde_json::json!(false));
         assert_eq!(obj["supabase_email_set"], serde_json::json!(false));
@@ -9589,8 +9864,6 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = safe_tempdir();
         let sock = dir.path().join("hardening_chmod.sock");
-        // Hold TEST_ENV_LOCK to serialise the libc::umask(0o177) inside
-        // IpcServer::bind with concurrent tests that create directories.
         let _env = EnvGuard::set_all(
             &[
                 "COPYPASTE_DATA_DIR",
@@ -9600,10 +9873,10 @@ mod tests {
             ],
             dir.path(),
         );
-        // Use IpcServer::bind directly so that bind_with_stale_cleanup runs
-        // and sets umask(0o177) for the socket creation — this is the security
-        // invariant under test. start_test_server bypasses the umask to avoid
-        // process-wide races; this test specifically needs it.
+        // Use IpcServer::bind directly so that bind_with_stale_cleanup runs and
+        // fchmods the bound socket fd to 0600 (CopyPaste-c4q2.26 replaced the
+        // former process-wide umask(0o177) with a per-fd fchmod). This asserts
+        // the on-disk socket mode security invariant.
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
         let server = IpcServer::new(
             db,
@@ -9622,6 +9895,37 @@ mod tests {
             "socket {} has mode {:o}, expected 0600",
             sock.display(),
             mode
+        );
+    }
+
+    /// CopyPaste-c4q2.26: binding the IPC socket must NOT mutate the process-wide
+    /// `umask`. The old implementation set `umask(0o177)` around `bind`, which
+    /// could clamp files created by concurrent startup threads to 0600. The fix
+    /// tightens the socket via a per-inode `chmod`, leaving `umask` untouched.
+    /// This guards against re-introducing the global side effect.
+    #[tokio::test]
+    async fn bind_does_not_mutate_process_umask() {
+        // Serialise with the process-wide env/umask lock: reading the umask
+        // requires a set+restore, which would otherwise race other tests.
+        let _lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+
+        // Read the current umask without leaving it changed.
+        let before = unsafe { libc::umask(0o022) };
+        unsafe { libc::umask(before) };
+
+        let dir = safe_tempdir();
+        let sock = dir.path().join("umask_probe.sock");
+        let listener = bind_with_stale_cleanup(&sock).expect("bind must succeed");
+        drop(listener);
+
+        let after = unsafe { libc::umask(0o022) };
+        unsafe { libc::umask(after) };
+        assert_eq!(
+            before, after,
+            "bind_with_stale_cleanup must not leave the process umask mutated \
+             (before={before:#o}, after={after:#o})"
         );
     }
 
@@ -9694,6 +9998,82 @@ mod tests {
             );
             assert_eq!(resp["data"]["status"], "running");
         }
+    }
+
+    /// CopyPaste-c4q2.28: a NON-bulk method (here `status`) whose request body
+    /// exceeds the per-method small cap (`SMALL_REQUEST_BYTES`, 64 KiB) must be
+    /// rejected with `request_too_large` — the daemon must NOT buffer up to
+    /// 16 MiB for it. This is the RAM-amplification guard.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipc_non_bulk_method_over_small_cap_rejected() {
+        let dir = safe_tempdir();
+        let sock = dir.path().join("small_cap.sock");
+        start_test_server(&sock).await;
+
+        // Valid JSON with method=status and ~256 KiB of padding params — well
+        // over SMALL_REQUEST_BYTES but far under MAX_REQUEST_BYTES.
+        let pad = "A".repeat(256 * 1024);
+        let body = format!(r#"{{"id":"big-status","method":"status","params":{{"pad":"{pad}"}}}}"#);
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        let _ = stream.write_all(body.as_bytes()).await;
+        let _ = stream.write_all(b"\n").await;
+
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = tokio::time::timeout(std::time::Duration::from_secs(5), lines.next_line())
+            .await
+            .expect("daemon must respond, not hang")
+            .expect("read must succeed")
+            .expect("must receive a rejection line");
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(
+            resp["ok"], false,
+            "oversized status must be rejected: {resp}"
+        );
+        assert_eq!(
+            resp["error_code"], "request_too_large",
+            "must be tagged request_too_large: {resp}"
+        );
+        assert!(
+            resp["error"].as_str().unwrap_or("").contains("too large"),
+            "error must mention 'too large': {resp}"
+        );
+    }
+
+    /// CopyPaste-c4q2.28 (companion): a bulk method (`import`) with a body LARGER
+    /// than the small cap but valid must pass the size gate (phase-2 read) and be
+    /// dispatched — i.e. it must NOT be rejected as `request_too_large`.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn ipc_bulk_import_over_small_cap_accepted() {
+        let dir = safe_tempdir();
+        let sock = dir.path().join("bulk_ok.sock");
+        start_test_server(&sock).await;
+
+        // ~128 KiB of base64 content — over SMALL_REQUEST_BYTES, valid import.
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let content = b64.encode(vec![0x7Au8; 128 * 1024]);
+        let body = format!(
+            r#"{{"id":"imp-ok","method":"import","params":{{"items":[{{"content_type":"text","content_bytes_b64":"{content}","created_at_ms":1700000000}}]}}}}"#,
+        );
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(body.as_bytes()).await.unwrap();
+        stream.write_all(b"\n").await.unwrap();
+
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = tokio::time::timeout(std::time::Duration::from_secs(5), lines.next_line())
+            .await
+            .expect("daemon must respond, not hang")
+            .expect("read must succeed")
+            .expect("must receive a response line");
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+        // The size gate must have let this through: it is dispatched to the
+        // import handler, not rejected for being too large.
+        assert_ne!(
+            resp["error_code"], "request_too_large",
+            "valid bulk import over the small cap must pass the size gate: {resp}"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -13177,12 +13557,15 @@ mod tests {
         std::fs::create_dir_all(&cfg_home).unwrap();
 
         let peers_json = cfg_home.join("peers.json");
-        // last_sync_at = now − 120 s  → stale (threshold is 60 s).
+        // CopyPaste-1jms.25: derive the stale offset from ONLINE_THRESHOLD_SECS
+        // (which now equals SYNC_BADGE_RECENT_MS / 1000) so this test tracks the
+        // shared recency window instead of a hard-coded 120 s that silently broke
+        // when the window widened from 60 s to 300 s.
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs() as i64;
-        let stale = now_secs - 120;
+        let stale = now_secs - (ONLINE_THRESHOLD_SECS + 60);
         let peers = serde_json::json!([
             {
                 "name": "Tablet",
@@ -13941,6 +14324,95 @@ mod tests {
         );
 
         // Restore env.
+        unsafe { std::env::remove_var("COPYPASTE_CONFIG_DIR") };
+        drop(env_lock);
+    }
+
+    // ── CopyPaste-44rq.67: relay_url clear-sentinel handling ────────────────
+
+    /// `merge_config` must PRESERVE the empty-string "clear" sentinel rather than
+    /// `.or()`-falling back to the existing URL, so `update_core_config` can see
+    /// `Some("")` and clear the relay. A normal value wins; `None` preserves.
+    #[test]
+    fn merge_config_preserves_relay_clear_sentinel() {
+        let with_url = || AppConfig {
+            relay_url: Some("https://relay.example.com".to_owned()),
+            ..AppConfig::default()
+        };
+        // Clear sentinel must survive the merge (not be replaced by existing URL).
+        let cleared = merge_config(
+            with_url(),
+            AppConfig {
+                relay_url: Some(String::new()),
+                ..AppConfig::default()
+            },
+        );
+        assert_eq!(
+            cleared.relay_url.as_deref(),
+            Some(""),
+            "empty sentinel must be preserved so update_core_config can clear"
+        );
+        // Omitted (None) preserves the existing URL.
+        let preserved = merge_config(with_url(), AppConfig::default());
+        assert_eq!(
+            preserved.relay_url.as_deref(),
+            Some("https://relay.example.com")
+        );
+        // A real value wins.
+        let replaced = merge_config(
+            with_url(),
+            AppConfig {
+                relay_url: Some("https://new.example.com".to_owned()),
+                ..AppConfig::default()
+            },
+        );
+        assert_eq!(
+            replaced.relay_url.as_deref(),
+            Some("https://new.example.com")
+        );
+    }
+
+    /// `update_core_config` must set `core.relay_url = None` when the incoming
+    /// `relay_url` is the empty-string sentinel, persist a real URL when set, and
+    /// leave it unchanged when omitted (`None`).
+    #[test]
+    fn update_core_config_clears_relay_url_on_empty_sentinel() {
+        let env_lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let dir = safe_tempdir();
+        unsafe { std::env::set_var("COPYPASTE_CONFIG_DIR", dir.path()) };
+
+        // Set a real URL.
+        let set = AppConfig {
+            relay_url: Some("https://relay.example.com".to_owned()),
+            ..AppConfig::default()
+        };
+        let core1 = update_core_config(&set).expect("set relay_url");
+        assert_eq!(
+            core1.relay_url.as_deref(),
+            Some("https://relay.example.com")
+        );
+
+        // Omit it — must be preserved.
+        let core2 = update_core_config(&AppConfig::default()).expect("omit relay_url");
+        assert_eq!(
+            core2.relay_url.as_deref(),
+            Some("https://relay.example.com"),
+            "None must preserve the stored relay_url"
+        );
+
+        // Clear sentinel — must wipe to None.
+        let clear = AppConfig {
+            relay_url: Some(String::new()),
+            ..AppConfig::default()
+        };
+        let core3 = update_core_config(&clear).expect("clear relay_url");
+        assert_eq!(
+            core3.relay_url, None,
+            "empty-string sentinel must clear core.relay_url"
+        );
+
         unsafe { std::env::remove_var("COPYPASTE_CONFIG_DIR") };
         drop(env_lock);
     }

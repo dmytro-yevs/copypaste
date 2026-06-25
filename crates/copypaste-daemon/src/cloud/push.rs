@@ -794,3 +794,67 @@ pub(crate) async fn push_item_with_retries(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use copypaste_core::ClipboardItem;
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
+
+    fn text_item(lamport: i64) -> ClipboardItem {
+        // new_text defaults is_sensitive=false, deleted=false.
+        ClipboardItem::new_text(vec![1, 2, 3], vec![0u8; 24], lamport)
+    }
+
+    /// CopyPaste-20yw / P1-1: a SENSITIVE item must never be enqueued for cloud
+    /// upload — `prepare_and_enqueue_item` returns false and leaves the retry
+    /// queue empty, BEFORE any key/decrypt/network work. This is a real guard
+    /// test: the positive control below proves removing the guard would let the
+    /// item through (the previous coverage was a tautology elsewhere).
+    #[tokio::test]
+    async fn cloud_push_skips_sensitive_item() {
+        let sync_key = Arc::new(Mutex::new(None));
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+        let mut queue = VecDeque::new();
+        let mut warned = false;
+
+        let mut item = text_item(1);
+        item.is_sensitive = true;
+        // Even a sensitive TOMBSTONE must be skipped (the sensitive guard runs
+        // before the deleted fast-path).
+        item.deleted = true;
+
+        let enqueued =
+            prepare_and_enqueue_item(item, &sync_key, &local_key, &mut queue, &mut warned).await;
+
+        assert!(!enqueued, "sensitive item must not be enqueued");
+        assert!(
+            queue.is_empty(),
+            "sensitive item must not enter the retry queue"
+        );
+    }
+
+    /// Positive control: a NON-sensitive tombstone (deleted) item is enqueued
+    /// directly (no key/crypto needed). This proves the zero above is the
+    /// sensitive guard at work, not a broken setup — and that removing the guard
+    /// would make the sensitive tombstone above take this same path and fail the
+    /// assertion.
+    #[tokio::test]
+    async fn cloud_push_enqueues_non_sensitive_tombstone() {
+        let sync_key = Arc::new(Mutex::new(None));
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+        let mut queue = VecDeque::new();
+        let mut warned = false;
+
+        let mut item = text_item(2);
+        item.is_sensitive = false;
+        item.deleted = true;
+
+        let enqueued =
+            prepare_and_enqueue_item(item, &sync_key, &local_key, &mut queue, &mut warned).await;
+
+        assert!(enqueued, "non-sensitive tombstone must be enqueued");
+        assert_eq!(queue.len(), 1, "tombstone must enter the retry queue");
+    }
+}

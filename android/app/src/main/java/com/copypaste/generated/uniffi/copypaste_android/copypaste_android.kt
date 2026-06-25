@@ -796,6 +796,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -833,6 +835,8 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_core_version(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_db_vacuum(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     fun uniffi_copypaste_android_fn_func_decrypt_text(`itemId`: RustBuffer.ByValue,`ciphertext`: RustBuffer.ByValue,`nonce`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`keyVersion`: Byte,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_decrypt_text_batch(`items`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1051,6 +1055,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_core_version(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_db_vacuum(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_decrypt_text(
     ): Short
     fun uniffi_copypaste_android_checksum_func_decrypt_text_batch(
@@ -1183,6 +1189,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_core_version() != 36895.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_db_vacuum() != 40581.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_decrypt_text() != 25650.toShort()) {
@@ -3364,6 +3373,21 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
 }
     )
     }
+    
+
+        /**
+         * Run `PRAGMA incremental_vacuum(0)` on the SQLCipher database at `db_path`
+         * to reclaim all free pages (WAL-safe). Mirrors the macOS `ni` IPC verb.
+         * Throws `InvalidKeyLength` if `key` != 32 bytes, `DatabaseError` on I/O
+         * failure. With `android-uniffi-live` feature off, returns successfully (no-op).
+         */
+    @Throws(CopypasteException::class) fun `dbVacuum`(`dbPath`: kotlin.String, `key`: List<kotlin.UByte>)
+        = 
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_db_vacuum(
+        FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),_status)
+}
+    
     
 
     @Throws(CopypasteException::class) fun `decryptText`(`itemId`: kotlin.String, `ciphertext`: List<kotlin.UByte>, `nonce`: List<kotlin.UByte>, `key`: List<kotlin.UByte>, `keyVersion`: kotlin.UByte): List<kotlin.UByte> {

@@ -59,6 +59,10 @@ pub enum ErrorCode {
     /// writes until it completes. Clients should back off and retry shortly
     /// rather than treat this as a hard failure.
     MigrationInProgress,
+    /// Request payload exceeded the daemon's accepted size limit and was
+    /// rejected before full buffering. Clients should surface "payload too
+    /// large, reduce size" rather than a generic error.
+    RequestTooLarge,
 }
 
 impl ErrorCode {
@@ -78,6 +82,7 @@ impl ErrorCode {
             Self::RateLimited => "rate_limited",
             Self::DaemonOffline => "daemon_offline",
             Self::MigrationInProgress => "migration_in_progress",
+            Self::RequestTooLarge => "request_too_large",
         }
     }
 
@@ -101,6 +106,7 @@ impl ErrorCode {
             "rate_limited" => Some(Self::RateLimited),
             "daemon_offline" => Some(Self::DaemonOffline),
             "migration_in_progress" => Some(Self::MigrationInProgress),
+            "request_too_large" => Some(Self::RequestTooLarge),
             _ => None,
         }
     }
@@ -132,6 +138,7 @@ mod tests {
             ErrorCode::RateLimited,
             ErrorCode::DaemonOffline,
             ErrorCode::MigrationInProgress,
+            ErrorCode::RequestTooLarge,
         ];
         for code in all {
             let s = code.as_str();
@@ -185,7 +192,7 @@ mod tests {
             ERR_CODE_AUTH_FAILED, ERR_CODE_DAEMON_OFFLINE, ERR_CODE_INTERNAL_ERROR,
             ERR_CODE_INVALID_ARGUMENT, ERR_CODE_IPC_NOT_READY, ERR_CODE_MIGRATION_IN_PROGRESS,
             ERR_CODE_NOT_FOUND, ERR_CODE_NOT_IMPLEMENTED, ERR_CODE_RATE_LIMITED,
-            ERR_CODE_VERSION_MISMATCH,
+            ERR_CODE_REQUEST_TOO_LARGE, ERR_CODE_VERSION_MISMATCH,
         };
         assert_eq!(ErrorCode::NotFound.as_str(), ERR_CODE_NOT_FOUND);
         assert_eq!(ErrorCode::AuthFailed.as_str(), ERR_CODE_AUTH_FAILED);
@@ -206,6 +213,10 @@ mod tests {
         );
         assert_eq!(ErrorCode::RateLimited.as_str(), ERR_CODE_RATE_LIMITED);
         assert_eq!(ErrorCode::DaemonOffline.as_str(), ERR_CODE_DAEMON_OFFLINE);
+        assert_eq!(
+            ErrorCode::RequestTooLarge.as_str(),
+            ERR_CODE_REQUEST_TOO_LARGE
+        );
     }
 
     /// The `migration_in_progress` wire code (emitted by the daemon's v4
@@ -220,6 +231,21 @@ mod tests {
         assert_eq!(
             format!("{}", ErrorCode::MigrationInProgress),
             "migration_in_progress"
+        );
+    }
+
+    /// CopyPaste-c4q2.27: the daemon's IPC read path emits `request_too_large`
+    /// for oversized payloads; the typed enum must parse it so CLI/UI can show
+    /// a "payload too large" message instead of a generic error.
+    #[test]
+    fn request_too_large_parses_and_displays() {
+        assert_eq!(
+            ErrorCode::parse("request_too_large"),
+            Some(ErrorCode::RequestTooLarge)
+        );
+        assert_eq!(
+            format!("{}", ErrorCode::RequestTooLarge),
+            "request_too_large"
         );
     }
 
@@ -257,6 +283,7 @@ mod tests {
                 ErrorCode::RateLimited => "rate_limited",
                 ErrorCode::DaemonOffline => "daemon_offline",
                 ErrorCode::MigrationInProgress => "migration_in_progress",
+                ErrorCode::RequestTooLarge => "request_too_large",
             };
             [
                 (ErrorCode::NotFound, "not_found"),
@@ -269,6 +296,7 @@ mod tests {
                 (ErrorCode::RateLimited, "rate_limited"),
                 (ErrorCode::DaemonOffline, "daemon_offline"),
                 (ErrorCode::MigrationInProgress, "migration_in_progress"),
+                (ErrorCode::RequestTooLarge, "request_too_large"),
             ]
         };
 

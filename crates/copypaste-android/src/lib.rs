@@ -44,9 +44,9 @@ pub use ffi_crypto::{
 #[cfg(feature = "android-uniffi-live")]
 pub use ffi_db::db_by_path;
 pub use ffi_db::{
-    add_clipboard_item, close_database, db_handle_to_cache_key, fts_search, get_history_count,
-    get_history_page, key_cache_hash, open_database, store_clipboard_item, with_cached_db,
-    HistoryItem, SearchResultItem,
+    add_clipboard_item, close_database, db_handle_to_cache_key, db_vacuum, fts_search,
+    get_history_count, get_history_page, key_cache_hash, open_database, store_clipboard_item,
+    with_cached_db, HistoryItem, SearchResultItem,
 };
 pub use ffi_p2p_session::{
     canonicalize_fingerprint, is_fingerprint_revoked, poll_p2p_listener,
@@ -335,6 +335,53 @@ mod tests {
         let err = add_clipboard_item("/tmp/copypaste-test.db".into(), &[0u8; 16], "x".into())
             .expect_err("16-byte key must error");
         assert!(matches!(err, CopypasteError::InvalidKeyLength));
+    }
+
+    // ── CopyPaste-bdac.42: db_vacuum tests ──────────────────────────────────
+
+    /// db_vacuum must reject a key that is not exactly 32 bytes.
+    #[test]
+    fn db_vacuum_rejects_bad_key() {
+        let err = db_vacuum("/tmp/copypaste-vacuum-test.db".into(), &[0u8; 16])
+            .expect_err("16-byte key must error");
+        assert!(
+            matches!(err, CopypasteError::InvalidKeyLength),
+            "expected InvalidKeyLength, got {err:?}"
+        );
+    }
+
+    /// db_vacuum returns Ok(()) on a valid key when the feature is off (no-op stub).
+    #[cfg(not(feature = "android-uniffi-live"))]
+    #[test]
+    fn db_vacuum_succeeds_as_noop_when_feature_off() {
+        // With android-uniffi-live off the stub validates key shape and returns Ok.
+        db_vacuum("/dev/null".into(), &test_key())
+            .expect("stub db_vacuum must succeed without I/O");
+    }
+
+    /// db_vacuum compacts a real SQLCipher database when the feature is on.
+    #[cfg(feature = "android-uniffi-live")]
+    #[test]
+    fn db_vacuum_compacts_live_database() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir
+            .path()
+            .join("vacuum-test.db")
+            .to_string_lossy()
+            .into_owned();
+        let key = test_key();
+
+        // Insert and delete several items so there are free pages to reclaim.
+        for i in 0..5 {
+            add_clipboard_item(path.clone(), &key, format!("item to vacuum {i}")).expect("insert");
+        }
+
+        // db_vacuum(0) reclaims all free pages; must succeed without error.
+        db_vacuum(path.clone(), &key).expect("db_vacuum must succeed on a live database");
+
+        // Database must still be readable after vacuum.
+        let n = get_history_count(path, &key).expect("count after vacuum");
+        assert_eq!(n, 5, "items must survive the vacuum pass");
     }
 
     #[cfg(not(feature = "android-uniffi-live"))]

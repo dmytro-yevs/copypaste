@@ -3,7 +3,7 @@
 Base URL: `http://localhost:8080` (default; operator-configurable via `RELAY_PORT` and `RELAY_BIND_ADDR`)
 
 **Authentication:** `Authorization: Bearer <auth_token>` where `auth_token` is
-the **opaque random 32-hex-character token** returned by `POST /devices` at
+the **opaque random 64-hex-character token** returned by `POST /devices` at
 registration. The token is 16 bytes of `OsRng` entropy encoded as hex — it is
 **not** derived from the public key or any other secret. Tokens are compared
 constant-time via `subtle::ConstantTimeEq` (no timing oracle). The `Bearer`
@@ -66,7 +66,7 @@ stored PoP.
 ```json
 {
   "device_id": "<uuid-v4>",
-  "auth_token": "<32 hex chars — random, opaque>",
+  "auth_token": "<64 hex chars — random, opaque>",
   "expires_at": "<RFC-3339 UTC timestamp — 1 year from registration>"
 }
 ```
@@ -91,17 +91,20 @@ Free tier: 5 new device records per source IP. Co-registrations (same
 
 ## GET /devices
 
-List registered device IDs.
+List the device IDs **belonging to the authenticated account** (caller-scoped).
 
-**Requires bearer authentication.** The token is verified against all registered
-devices; any valid token from any registered device is accepted. Returns only
-opaque device IDs — no tokens, keys, or names are included (tokens would allow
-hijacking; other fields are accessible via `GET /devices/{device_id}`).
+**Requires bearer authentication.** The bearer is verified (constant-time)
+against the registered token sets to identify which account it belongs to, then
+the response contains **only that account's own device ID(s)** — never any other
+account's device UUID. This is deliberate: a relay device ID is an inbox UUID,
+so returning the full device list would enable cross-account inbox-UUID
+enumeration (CopyPaste-7185). No tokens, keys, or names are included; other
+fields for a device you own are available via `GET /devices/{device_id}`.
 
-**Response 200:**
+**Response 200:** (exactly the caller's own device ID — always a single-element array)
 ```json
 {
-  "devices": ["<uuid>", "<uuid>", ...]
+  "devices": ["<your-uuid>"]
 }
 ```
 
@@ -113,7 +116,11 @@ hijacking; other fields are accessible via `GET /devices/{device_id}`).
 
 Retrieve public information about a registered device.
 
-**Unauthenticated.**
+**Requires bearer authentication.** The token must belong to `device_id`. The
+relay verifies the bearer before returning any device data to prevent
+enumeration: an invalid token yields `401`, not `404` (CopyPaste-44rq.52 —
+previously unauthenticated, leaking `device_name`, `public_key_b64`, and
+timestamps to any caller who had observed a `device_id` from traffic).
 
 **Response 200:**
 ```json
@@ -126,7 +133,9 @@ Retrieve public information about a registered device.
 }
 ```
 
-**Errors:** `404` — device not found.
+**Errors:**
+- `401` — missing or invalid bearer token (returned before any device lookup)
+- `404` — device not found (only returned after successful auth)
 
 ---
 
@@ -176,6 +185,7 @@ sender is not notified. This is a silent prune, not a rejection.
 increasing per device); used as the `since_id` cursor in pull requests.
 
 **Errors:**
+- `400` — `content_b64` is invalid base64, or `content_type` is not one of `"text"`, `"image"`, `"file"`
 - `401` — missing or invalid bearer token (also returned if the device was evicted between auth and store)
 - `413` — decoded payload exceeds per-tier item-size limit (`ITEM_SIZE_EXCEEDED`) or encoded body exceeds the global body cap (`PAYLOAD_TOO_LARGE`)
 - `429` — per-device or per-IP rate limit
@@ -196,7 +206,7 @@ Poll for new items in a device's inbox. Supports cursor-based pagination.
 | `since_id` | i64 | absent | Composite-cursor companion to `since`. When provided, items qualify iff `(wall_time, id) > (since, since_id)` — a strictly monotonic order that avoids duplicate-or-drop when multiple items share the same `wall_time`. Absent → legacy `wall_time`-only floor (backward-compatible). |
 | `limit` | usize | 200 | Maximum items to return; capped at 500 server-side regardless of the supplied value. |
 
-**Response 200** — a JSON array of items:
+**Response 200** — a JSON array of items, plus a `Relay-Watermark` header:
 ```json
 [
   {
@@ -208,6 +218,14 @@ Poll for new items in a device's inbox. Supports cursor-based pagination.
 ]
 ```
 
+**`Relay-Watermark` response header (CopyPaste-tspz):** the relay always
+returns a `Relay-Watermark: <wall_time>,<id>` header with the effective next
+cursor position after this page. If the page is non-empty this is the last
+item's `(wall_time, id)`; if the page is empty it echoes back the incoming
+`(since, since_id)` (or `0,0` as a floor). Clients interrupted mid-drain (e.g.
+by a 401 token expiry) can persist this header and use it as `?since=&since_id=`
+on reconnect to resume without re-fetching already-ingested items.
+
 Paginate by passing the last returned `(wall_time, id)` back as `since` and
 `since_id`. An empty array means the inbox is fully consumed up to the given
 cursor.
@@ -216,7 +234,7 @@ cursor.
 response at 128 MiB (across all items in the page) to bound store-mutex hold
 time. This limits individual items returned, not their count.
 
-**Errors:** `401`, `404`.
+**Errors:** `401` — missing or invalid bearer token.
 
 ---
 
@@ -274,7 +292,9 @@ idle-timeout proxies and load balancers. The relay monitors for client disconnec
 (`tx.closed()`) and tears down the producer task immediately on disconnect,
 releasing the broadcast receiver and store reference.
 
-**Errors:** `401`, `404`.
+**Errors:**
+- `401` — missing or invalid bearer token (also if device was evicted between auth and stream open)
+- `429` — per-device concurrent SSE connection limit (max 8 per device) exceeded; client should back off and reconnect (code: `TOO_MANY_CONNECTIONS`)
 
 ---
 
@@ -355,8 +375,14 @@ unparseable values fall back to defaults.
   silently pruned on each push. Pruning is by server-assigned `id`, not by the
   client-supplied `wall_time`. See `state.rs` `push_item_decoded`
   (CopyPaste-1uqb).
-- **Sensitivity:** sensitive items do sync through the relay (encrypted). The
-  receiving daemon re-evaluates sensitivity from decrypted plaintext.
+- **Sensitivity:** items flagged sensitive are **never uploaded** to the relay
+  (nor to cloud or P2P peers). The producing daemon filters them out on every
+  outbound path *before* any ciphertext leaves the device — see the
+  `is_sensitive` guards in `relay/push.rs`, `cloud/push.rs`, `cloud/backlog.rs`,
+  `sync_orch/catchup.rs`, and `sync_orch/mod.rs` (CopyPaste-jbao). As a
+  defence-in-depth backstop the receiving daemon also re-evaluates sensitivity
+  from decrypted plaintext on ingest, so an item that somehow arrived is still
+  subject to the local auto-wipe TTL.
 - **Persistence:** the relay stores device records, token sets, and inbox items
   in a plain SQLite database (not SQLCipher — the relay never holds keys). Set
   `RELAY_DB_PATH` to a file path to survive restarts; default `:memory:` is

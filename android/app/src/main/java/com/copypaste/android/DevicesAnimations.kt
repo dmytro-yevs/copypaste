@@ -1,11 +1,12 @@
 package com.copypaste.android
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.repeatable
 import androidx.compose.animation.core.tween
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -15,8 +16,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,15 +56,16 @@ internal fun rememberReducedMotion(): Boolean {
 }
 
 /**
- * Online presence indicator: a solid success-green dot with a smooth expanding
- * ping ring when [online] is true and reduced-motion is off.
+ * Online presence indicator: a solid success-green dot with a one-shot expanding
+ * ping ring fired on the offline→online transition (§MO-5).
  *
  * Animation mirrors the styleguide `statusPing` keyframe:
- *   scale 0.45 → 1.8, alpha 0.7 → 0, ease-out, 2.4 s × motionScale loop.
+ *   scale 0.45 → 1.8, alpha 0.7 → 0, ease-out, 2.4 s × motionScale — ONE iteration.
  * Ring is drawn BEHIND the solid dot so the dot stays crisply visible.
  *
- * Gate: animated only when [online] == true and the system "remove animations"
- * scale is not 0 (matches §7 / §8 "Respect prefers-reduced-motion").
+ * Gate: the ring fires ONCE when [online] transitions false→true and the system
+ * "remove animations" scale is not 0 (§7 / §8 "Respect prefers-reduced-motion").
+ * Steady-state online shows a static dot only — no looping ring.
  */
 @Composable
 internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
@@ -70,48 +75,80 @@ internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
     // PG-37 parity: offline status dot uses danger (red) to match the macOS
     // DeviceCard offline indicator (was c.faint/grey, which diverged).
     val dotColor = if (online) c.success else c.danger
-    val animate = shouldPulse(online = online, reducedMotion = reducedMotion)
 
     // Duration mirrors styleguide 2.4s × motionScale (cinematic = 1.3 → ~3.1 s).
     val pingDurationMs = (2400 * tokens.motionScale).toInt()
 
-    // Always create transition unconditionally (Compose rules — no conditional @Composable).
-    // Gate the visible ring via graphicsLayer alpha = 0 when not animating.
-    val pulseTransition = rememberInfiniteTransition(label = "pulse")
-    // Scale: 0.45 → 1.8 (styleguide statusPing scale(.45) → scale(1.8))
-    val pulseScale by pulseTransition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1.8f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = pingDurationMs, easing = EaseOutExpo),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "pulseScale",
-    )
-    // Alpha: 0.7 → 0 (styleguide statusPing opacity .7 → 0)
-    val pulseAlpha by pulseTransition.animateFloat(
-        initialValue = 0.7f,
-        targetValue = 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = pingDurationMs, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "pulseAlpha",
-    )
+    // Animatables hold the ring's current scale and alpha between recompositions.
+    // Starting at the "rest" (invisible) values so no ring shows on initial composition.
+    val pulseScale = remember { Animatable(0.45f) }
+    val pulseAlpha = remember { Animatable(0f) }
+
+    // §MO-5: track the previous online value to detect the offline→online leading edge.
+    var prevOnline by remember { mutableStateOf(online) }
+
+    // One-shot pulse: launch when `online` changes, fire only on false→true transition.
+    LaunchedEffect(online) {
+        val startPulse = shouldStartOneShotPulse(
+            wasOnline = prevOnline,
+            isNowOnline = online,
+            reducedMotion = reducedMotion,
+        )
+        prevOnline = online
+
+        if (startPulse) {
+            // Reset to start values before animating so re-triggers (device goes
+            // offline and back online) always play from the beginning.
+            pulseScale.snapTo(0.45f)
+            pulseAlpha.snapTo(0.7f)
+            // Run scale and alpha in parallel — both complete after pingDurationMs.
+            // repeatable(iterations=1) = exactly one play-through, then stops.
+            coroutineScope {
+                launch {
+                    pulseScale.animateTo(
+                        targetValue = 1.8f,
+                        animationSpec = repeatable(
+                            iterations = 1,
+                            animation = tween(durationMillis = pingDurationMs, easing = EaseOutExpo),
+                            repeatMode = RepeatMode.Restart,
+                        ),
+                    )
+                }
+                launch {
+                    pulseAlpha.animateTo(
+                        targetValue = 0f,
+                        animationSpec = repeatable(
+                            iterations = 1,
+                            animation = tween(
+                                durationMillis = pingDurationMs,
+                                easing = FastOutSlowInEasing,
+                            ),
+                            repeatMode = RepeatMode.Restart,
+                        ),
+                    )
+                }
+            }
+        } else if (!online) {
+            // Peer went offline: immediately hide the ring (snap, no animation).
+            pulseAlpha.snapTo(0f)
+            pulseScale.snapTo(0.45f)
+        }
+    }
 
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
-        // Expanding ring — hidden (alpha=0) when not animating so the composable
-        // tree is stable and the InfiniteTransition is never conditionally created.
+        // Expanding ring — driven by Animatable values; invisible at rest (alpha = 0).
         Box(
             modifier = Modifier
                 .size(10.dp)
                 .graphicsLayer {
-                    alpha = if (animate) pulseAlpha else 0f
-                    scaleX = pulseScale
-                    scaleY = pulseScale
+                    alpha = pulseAlpha.value
+                    scaleX = pulseScale.value
+                    scaleY = pulseScale.value
                 }
                 .clip(CircleShape)
-                .background(c.success),
+                // CopyPaste-bdac.102: ring must match the dot colour so an offline (red)
+                // dot does not produce a green ring.  dotColor already encodes online/offline.
+                .background(dotColor),
         )
         // Solid dot always on top.
         Box(

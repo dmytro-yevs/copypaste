@@ -1054,27 +1054,23 @@ class SyncManager(
      * empty ct_b64 is treated as a pin-metadata-only update — the receiver's
      * `applyAuthoritativePinState` handles this without overwriting the item body.
      *
-     * Supabase does not have a direct "update pin" column path from this layer yet
-     * (the SupabaseClient.push only creates rows). For the Supabase path we skip
-     * pin-only mutations — the NEXT fresh-capture push will carry the updated pin
-     * state as part of a full push. Tombstones (deletes) ARE pushed to Supabase
-     * via the `deleted=true` Supabase row update path (not yet implemented here —
-     * see note below). For now, tombstones push to relay; Supabase support for
-     * UI-mutation tombstones is the remaining gap.
+     * Both transports are fully supported. [SupabaseClient.pushMutationRow] PATCHes
+     * the existing row (filtered by item_id) to set `deleted`/`pinned`/`pin_order`
+     * and bumps `lamport_ts` — mirroring the daemon's `cloud.rs` `mark_deleted` /
+     * `update_pin_state` paths. A successful push on either transport marks the
+     * record delivered; the queue entry is removed only after at least one transport
+     * confirms success.
      *
      * ## Per-transport behaviour
      *
      * | Op         | Relay | Supabase |
      * |------------|-------|----------|
-     * | DELETE     | yes   | gap†     |
-     * | BULK_DELETE| yes   | gap†     |
-     * | CLEAR      | yes   | gap†     |
-     * | PIN        | yes   | gap†     |
-     * | UNPIN      | yes   | gap†     |
-     * | REORDER    | yes   | gap†     |
-     *
-     * † Supabase tombstone/pin-update push requires a new SupabaseClient.pushTombstone
-     * method (not yet implemented). Relay covers the majority of the use case.
+     * | DELETE     | yes   | yes      |
+     * | BULK_DELETE| yes   | yes      |
+     * | CLEAR      | yes   | yes      |
+     * | PIN        | yes   | yes      |
+     * | UNPIN      | yes   | yes      |
+     * | REORDER    | yes   | yes      |
      *
      * ## Idempotency
      *

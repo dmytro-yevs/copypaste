@@ -540,6 +540,14 @@
     <string name="setting_sync_backend_relay">Relay</string>
     <string name="setting_sync_backend_supabase">Supabase</string>
 
+    <!-- CopyPaste-1jms.33: PairActivity — post-PAKE peer-review card strings -->
+    <string name="pair_review_title">Peer device</string>
+    <string name="pair_review_subtitle">Verify the device details before confirming</string>
+    <string name="pair_review_no_meta">No device metadata received</string>
+    <string name="pair_btn_verify">Pair &amp; verify…</string>
+    <string name="pair_btn_confirm_sync">Confirm &amp; sync</string>
+    <string name="pair_verifying">Verifying peer…</string>
+
     <!-- CopyPaste-bdac.42: Storage vacuum + Sync test-connection (macOS parity) -->
     <string name="setting_compact_db_label">Compact database</string>
     <string name="setting_compact_db_subtitle">Run VACUUM to reclaim space after deletions. Safe to run at any time.</string>
@@ -579,4 +587,9 @@
     <string name="btn_grant">Grant</string>
     <string name="btn_exempt">Exempt</string>
     <string name="btn_request_exemption">Request Exemption</string>
+
+    <!-- CopyPaste-bdac.42: SettingsActivity — Storage tab vacuum toast feedback -->
+    <string name="toast_compact_db_ok">Database compacted successfully</string>
+    <string name="toast_compact_db_fail">Compact failed — see logs for details</string>
+
 </resources>

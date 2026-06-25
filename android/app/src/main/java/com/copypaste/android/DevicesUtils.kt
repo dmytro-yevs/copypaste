@@ -85,6 +85,50 @@ internal fun shouldPulse(online: Boolean, reducedMotion: Boolean): Boolean =
     online && !reducedMotion
 
 /**
+ * True when the PulseDot should START a one-shot pulse (§MO-5).
+ *
+ * The pulse fires exactly once on the LEADING EDGE of the offline→online
+ * transition. Subsequent frames where [isNowOnline] stays true (already-online
+ * steady state) return false so the animation does not re-trigger.
+ *
+ * Gate: reduced-motion suppresses the pulse entirely per §8.
+ */
+internal fun shouldStartOneShotPulse(
+    wasOnline: Boolean,
+    isNowOnline: Boolean,
+    reducedMotion: Boolean,
+): Boolean = !wasOnline && isNowOnline && !reducedMotion
+
+/**
+ * CopyPaste-bdac.102: the semantic colour role for the [PulseDot] glyph (dot and ring).
+ *
+ * The ring must always use the SAME colour as the solid dot — encoding this as an
+ * enum rather than a CompositionLocal value makes the invariant unit-testable on a
+ * plain JVM without a Compose runtime.
+ *
+ *  ONLINE  → success green  (c.success)
+ *  OFFLINE → danger red     (c.danger)
+ *
+ * Both the ring [Modifier.background] and the dot [Modifier.background] in
+ * [PulseDot] derive their colour from [dotColor], which maps to [PulseDotColorRole]
+ * via [pulseDotColorRole].
+ */
+internal enum class PulseDotColorRole { ONLINE, OFFLINE }
+
+/**
+ * Return the semantic colour role for the PulseDot based on [online].
+ *
+ * Extracted as a pure function so unit tests can confirm:
+ *   - online  → ONLINE  (ring + dot use success/green)
+ *   - offline → OFFLINE (ring + dot use danger/red)
+ *
+ * The callers ([PulseDot] ring and dot backgrounds) derive their colour from
+ * [PulseDotColorRole] via the `dotColor` variable — ensuring both are identical.
+ */
+internal fun pulseDotColorRole(online: Boolean): PulseDotColorRole =
+    if (online) PulseDotColorRole.ONLINE else PulseDotColorRole.OFFLINE
+
+/**
  * True when the aurora animated canvas should be painted as the screen backdrop.
  *
  * Gating rules (A-C2):
@@ -255,8 +299,72 @@ internal const val PEER_POLL_MS = 10_000L
 /** Poll cadence for refreshing the LAN-discovered peer list (~2 s). */
 internal const val DISCOVERED_POLL_MS = 2_000L
 
+/**
+ * CopyPaste-pkd0: which UI rows to render for the discovered-peers (LAN) section.
+ *
+ * Pure tristate — the decision on what to show in the discovered-peers section is
+ * expressed here without any Compose dependency so it can be unit-tested on a plain
+ * JVM.  [DevicesActivity.DevicesScreen] maps this to its concrete row list.
+ *
+ *  HIDDEN      — P2P is disabled; the section is completely suppressed.
+ *  EMPTY_STATE — P2P is enabled but no peers are visible yet; show the label +
+ *                "Searching for nearby devices…" empty-state row.
+ *  SHOW_PEERS  — P2P is enabled and at least one unmatched peer is present; show
+ *                the label + one row per peer.
+ */
+internal enum class DiscoveredSectionPresence { HIDDEN, EMPTY_STATE, SHOW_PEERS }
+
+/**
+ * Decide which LAN-discovery section rows to emit.
+ *
+ * @param p2pEnabled     mirrors [Settings.p2pSyncEnabled]; false → HIDDEN.
+ * @param discoveredCount number of discovered (unpaired) peers from [listDiscovered].
+ *
+ * Extracted as a pure function so the pkd0 regression (section silently dropped
+ * from DevicesScreen by the redesign) has a lightweight, always-runnable guard.
+ */
+internal fun discoveredSectionPresence(
+    p2pEnabled: Boolean,
+    discoveredCount: Int,
+): DiscoveredSectionPresence = when {
+    !p2pEnabled -> DiscoveredSectionPresence.HIDDEN
+    discoveredCount == 0 -> DiscoveredSectionPresence.EMPTY_STATE
+    else -> DiscoveredSectionPresence.SHOW_PEERS
+}
+
 /** Poll cadence for the SAS pairing state machine (~500 ms). */
 internal const val SAS_POLL_MS = 500L
+
+/**
+ * CopyPaste-1jms.33: format the peer's device metadata returned by the PAKE bootstrap
+ * (BootstrapResult.peerModel/peerOs/peerAppVersion) into a list of label→value pairs
+ * for display on the post-PAKE peer-review card.
+ *
+ * Rules:
+ *  - Only non-null, non-blank values are included.
+ *  - Order: Model → OS → Version (mirrors the macOS pairing-confirmation modal and
+ *    the SAS dialog [SasPeerMetadataCard] / the post-pair success popup [PairedSuccessPopup]).
+ *  - An empty list means the peer sent no metadata (pre-ABI-14 daemon or no metadata
+ *    available) — callers must handle this gracefully (no crash, no empty section).
+ *
+ * Extracted as a pure function so unit tests can verify the include/exclude logic and
+ * ordering without any Compose runtime or Android SDK.
+ *
+ * @param peerModel     peer's hardware model (e.g. "MacBook Air (M3)")
+ * @param peerOs        peer's OS string (e.g. "macOS 15.3")
+ * @param peerAppVersion peer's app version string (e.g. "0.5.3")
+ * @return ordered list of (label-key, value) where label-key is a strings.xml key
+ *         name (e.g. "meta_label_model") — callers resolve it via [stringResource].
+ */
+internal fun peerMetaReviewRows(
+    peerModel: String?,
+    peerOs: String?,
+    peerAppVersion: String?,
+): List<Pair<String, String>> = buildList {
+    peerModel?.takeIf { it.isNotBlank() }?.let { add("meta_label_model" to it) }
+    peerOs?.takeIf { it.isNotBlank() }?.let { add("meta_label_os" to it) }
+    peerAppVersion?.takeIf { it.isNotBlank() }?.let { add("meta_label_version" to it) }
+}
 
 /**
  * Fixed bootstrap (SAS-pairing) listener port this device advertises in its mDNS

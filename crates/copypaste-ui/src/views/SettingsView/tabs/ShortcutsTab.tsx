@@ -35,10 +35,13 @@ export function ShortcutsTab({
   return (
     <div className="space-y-2">
       <Panel>
-        <SettingsRow title="Open popup">
+        {/* bdac.104: InfoPopover moved to info= slot (label column) */}
+        <SettingsRow
+          title="Open popup"
+          info={<InfoPopover text="Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden." />}
+        >
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
-              <InfoPopover text="Click then press a combo. OS-reserved keys (Cmd+Space etc.) cannot be overridden." />
               <ShortcutCapture
                 value={pendingShortcut}
                 onChange={setPendingShortcut}

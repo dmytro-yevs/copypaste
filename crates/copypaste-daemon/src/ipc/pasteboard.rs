@@ -272,28 +272,17 @@ pub(crate) fn parse_file_meta(meta_json: &str) -> Result<FileMeta, String> {
     })
 }
 
-/// Map the daemon's internal `content_type` string to a macOS UTI suitable
-/// for `setData:forType:`. Audit HIGH #2: bare `"image"` is not a UTI and
-/// macOS refuses to set the pasteboard data for it.
+/// Map the daemon's internal `content_type` string to a macOS UTI suitable for
+/// `setData:forType:`.
 ///
-/// Heuristic: anything already shaped like a UTI (`public.*`, `com.*`,
-/// `org.*`) is passed through; bare `"image"` defaults to `public.png`;
-/// `"text"` to `public.utf8-plain-text`; everything else gets
-/// `public.data` so the write doesn't silently no-op.
+/// CopyPaste-c4q2.10: the mapping table is now owned by `copypaste-ipc`
+/// ([`copypaste_ipc::map_content_type_to_uti`]) so it is a single, tested source
+/// of truth shared with any client that needs a UTI. This is a thin re-export so
+/// existing in-crate callers (`use super::map_content_type_to_uti`) keep working.
+/// Gated to macOS to match the prior definition (the only caller is the macOS
+/// paste-back path); the shared `copypaste-ipc` function itself is unconditional.
 #[cfg(target_os = "macos")]
-pub(crate) fn map_content_type_to_uti(content_type: &str) -> String {
-    if content_type.starts_with("public.")
-        || content_type.starts_with("com.")
-        || content_type.starts_with("org.")
-    {
-        return content_type.to_string();
-    }
-    match content_type {
-        "image" => "public.png".to_string(),
-        "text" => "public.utf8-plain-text".to_string(),
-        _ => "public.data".to_string(),
-    }
-}
+pub(crate) use copypaste_ipc::map_content_type_to_uti;
 
 // ---------------------------------------------------------------------------
 // File copy-back helpers

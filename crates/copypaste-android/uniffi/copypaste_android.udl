@@ -536,6 +536,27 @@ namespace copypaste_android {
   /// failure. With `android-uniffi-live` feature off, always returns empty.
   [Throws=CopypasteError]
   sequence<HistoryItem> get_history_page(string db_path, [ByRef] sequence<u8> key, u32 limit, u32 offset);
+
+  // ── CopyPaste-bdac.42: DB vacuum — macOS parity (Settings → Storage → Compact) ──
+  // Mirrors the macOS daemon's `ni` IPC verb (METHOD_VACUUM). Runs
+  // `PRAGMA incremental_vacuum(0)` to reclaim ALL free pages in the SQLCipher
+  // database in a WAL-safe, bounded-increment way. The `0` budget reclaims every
+  // free page in one user-initiated call (vs. the periodic small-budget sweep the
+  // daemon runs after every TTL cleanup). This is the Android parity of the
+  // macOS Settings → Storage → Compact button (ticket gq51). With feature
+  // `android-uniffi-live` off, validates the key shape and returns successfully
+  // (no-op stub) — the button is still shown enabled so the UI is consistent
+  // across feature builds.
+  //
+  // GRADLE-REQUIRED: `onVacuumDatabase` in SettingsActivity.kt wires this call
+  // via `dbVacuum(dbPath, encryptionKey)` on the IO dispatcher.
+
+  /// Run `PRAGMA incremental_vacuum(0)` on the SQLCipher database at `db_path`
+  /// to reclaim all free pages (WAL-safe). Mirrors the macOS `ni` IPC verb.
+  /// Throws `InvalidKeyLength` if `key` != 32 bytes, `DatabaseError` on I/O
+  /// failure. With `android-uniffi-live` feature off, returns successfully (no-op).
+  [Throws=CopypasteError]
+  void db_vacuum(string db_path, [ByRef] sequence<u8> key);
 };
 
 [Error]

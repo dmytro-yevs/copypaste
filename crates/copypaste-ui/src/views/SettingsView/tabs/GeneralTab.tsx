@@ -38,7 +38,7 @@ export type GeneralTabProps = {
   newExcludedApp: string;
   setNewExcludedApp: (v: string) => void;
   daemonVersion: string | null;
-  limitsMsg: Record<string, string | null>;
+  limitsMsg: Record<string, { ok: boolean; message: string } | null>;
   buildConfigPatch: (overrides: Partial<AppSettings> & PrivacyPatch) => AppSettings & PrivacyPatch;
   handleSyncEnabledToggle: (v: boolean) => void;
   handlePrivateMode: (v: boolean) => void;
@@ -48,13 +48,13 @@ export type GeneralTabProps = {
   setReloadKey: React.Dispatch<React.SetStateAction<number>>;
 };
 
-function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, string | null> }) {
-  const msg = limitsMsg[field];
-  if (!msg) return null;
-  const isError = msg !== "Saved";
+// bdac.106: branch on .ok (typed signal) — no string comparison.
+function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, { ok: boolean; message: string } | null> }) {
+  const entry = limitsMsg[field];
+  if (!entry) return null;
   return (
-    <span className={`text-[11px] ${isError ? "text-ide-danger" : "text-ide-success"}`}>
-      {msg}
+    <span className={`text-[11px] ${entry.ok ? "text-ide-success" : "text-ide-danger"}`}>
+      {entry.message}
     </span>
   );
 }
@@ -96,7 +96,11 @@ export function GeneralTab({
         {/* j9xj (PG-30): master sync kill-switch — Android parity.
             Daemon implements AppConfig::sync_enabled (tke7/PG-30).
             When off, visually gates per-transport switches in the Sync tab. */}
-        <SettingsRow title="Enable sync">
+        {/* bdac.104: InfoPopover moved to info= slot (label column) for all rows */}
+        <SettingsRow
+          title="Enable sync"
+          info={<InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />}
+        >
           <div className="flex flex-col items-end gap-1">
             {/* 7set: warn when daemon doesn't acknowledge sync_enabled so the
                 user knows the toggle may have no effect on this daemon version. */}
@@ -106,7 +110,6 @@ export function GeneralTab({
               </span>
             )}
             <div className="flex items-center gap-1.5">
-              <InfoPopover text="Master switch for all sync transports (P2P, cloud, relay). When off, no data leaves this device. Matches Android sync_enabled parity." />
               <LimitsMsg field="sync_enabled" limitsMsg={limitsMsg} />
               <Toggle
                 checked={syncEnabled}
@@ -117,13 +120,16 @@ export function GeneralTab({
             </div>
           </div>
         </SettingsRow>
-        <SettingsRow title="Private mode">
+        {/* bdac.47: InfoPopover added — Private mode had no description */}
+        {/* bdac.107: Title Case — "Private Mode" matches all other row titles */}
+        <SettingsRow
+          title="Private Mode"
+          info={<InfoPopover text="When on, this device stops recording new clipboard items and suppresses sync for the session. The notification's Pause action is a temporary per-session pause; Private Mode persists across restarts." />}
+        >
           <div className="flex items-center gap-2">
             {privateModeError !== null && (
               <span className="text-[11px] text-ide-danger">{privateModeError}</span>
             )}
-            {/* bdac.47: InfoPopover added — Private mode had no description */}
-            <InfoPopover text="When on, this device stops recording new clipboard items and suppresses sync for the session. The notification's Pause action is a temporary per-session pause; Private mode persists across restarts." />
             <Toggle
               checked={privateMode}
               onChange={(v) => void handlePrivateMode(v)}
@@ -184,15 +190,15 @@ export function GeneralTab({
           "Display") to avoid colliding with the "Display" appearance tab. */}
       <SectionHeader label="Privacy" />
       <Panel>
-        <SettingsRow title="Mask sensitive data">
-          <div className="flex items-center gap-1.5">
-            {/* bdac.50: added description for Mask sensitive data row */}
-            <InfoPopover text="Hide preview text for items flagged as sensitive (passwords, credit cards, tokens). Click an item in history to reveal its content." />
-            <Toggle
-              checked={prefs.maskSensitive}
-              onChange={(v) => setPrefs({ maskSensitive: v })}
-            />
-          </div>
+        {/* bdac.50: InfoPopover added for Mask sensitive data; bdac.104: moved to info= slot */}
+        <SettingsRow
+          title="Mask sensitive data"
+          info={<InfoPopover text="Hide preview text for items flagged as sensitive (passwords, credit cards, tokens). Click an item in history to reveal its content." />}
+        >
+          <Toggle
+            checked={prefs.maskSensitive}
+            onChange={(v) => setPrefs({ maskSensitive: v })}
+          />
         </SettingsRow>
       </Panel>
 
@@ -201,49 +207,53 @@ export function GeneralTab({
         hint="Control public-IP lookup, paste formatting, and which apps are never captured."
       />
       <Panel>
-        <SettingsRow title="Discover public IP">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Allow a one-off STUN request to learn this device's public IP, shown in the device-info card. No data is sent to analytics." />
-            <Toggle
-              checked={collectPublicIp}
-              onChange={(v) => {
-                // Mirror sound/notify: persist only once fully loaded, revert on failure.
-                setCollectPublicIp(v);
-                if (loadState === "ready") {
-                  void api
-                    .setConfig(buildConfigPatch({ collect_public_ip: v }) as unknown as Parameters<typeof api.setConfig>[0])
-                    .catch(() => setCollectPublicIp(!v));
-                }
-              }}
-              disabled={offline}
-            />
-          </div>
+        {/* bdac.104: InfoPopovers moved to info= slot (label column) */}
+        <SettingsRow
+          title="Discover public IP"
+          info={<InfoPopover text="Allow a one-off STUN request to learn this device's public IP, shown in the device-info card. No data is sent to analytics." />}
+        >
+          <Toggle
+            checked={collectPublicIp}
+            onChange={(v) => {
+              // Mirror sound/notify: persist only once fully loaded, revert on failure.
+              setCollectPublicIp(v);
+              if (loadState === "ready") {
+                void api
+                  .setConfig(buildConfigPatch({ collect_public_ip: v }) as unknown as Parameters<typeof api.setConfig>[0])
+                  .catch(() => setCollectPublicIp(!v));
+              }
+            }}
+            disabled={offline}
+          />
         </SettingsRow>
         {/* CMP-023: paste_as_plain_text is a macOS capture-path concept.
             Android has no parity yet (no analogous platform hook). */}
-        <SettingsRow title="Paste as plain text">
-          <div className="flex items-center gap-1.5">
-            {/* bdac.95: removed "macOS only; no Android parity" — Android also implements pasteAsPlainText */}
-            <InfoPopover text="Strip rich formatting (RTF/HTML) when pasting — writes plain text only." />
-            <Toggle
-              checked={pasteAsPlainText}
-              onChange={(v) => {
-                setPasteAsPlainText(v);
-                if (loadState === "ready") {
-                  void api
-                    .setConfig(buildConfigPatch({ paste_as_plain_text: v }) as unknown as Parameters<typeof api.setConfig>[0])
-                    .catch(() => setPasteAsPlainText(!v));
-                }
-              }}
-              disabled={offline}
-            />
-          </div>
+        {/* bdac.95: removed "macOS only; no Android parity" — Android also implements pasteAsPlainText */}
+        <SettingsRow
+          title="Paste as plain text"
+          info={<InfoPopover text="Strip rich formatting (RTF/HTML) when pasting — writes plain text only." />}
+        >
+          <Toggle
+            checked={pasteAsPlainText}
+            onChange={(v) => {
+              setPasteAsPlainText(v);
+              if (loadState === "ready") {
+                void api
+                  .setConfig(buildConfigPatch({ paste_as_plain_text: v }) as unknown as Parameters<typeof api.setConfig>[0])
+                  .catch(() => setPasteAsPlainText(!v));
+              }
+            }}
+            disabled={offline}
+          />
         </SettingsRow>
         {/* CopyPaste-6uy9: allow-screenshots toggle. Tauri-direct (not daemon).
             Default = OFF (content protection ON = PG-25 behaviour). When enabled
             the NSWindow.sharingType is set to .readOnly so screenshots & screen
             recordings can capture CopyPaste windows. */}
-        <SettingsRow title="Allow screenshots / screen recording">
+        <SettingsRow
+          title="Allow screenshots / screen recording"
+          info={<InfoPopover text="When off (default), CopyPaste is excluded from screenshots and screen recordings (macOS NSWindowSharingNone / Android FLAG_SECURE). Enable only if you need to record or share your screen while using CopyPaste. The preference is applied immediately to all open windows." />}
+        >
           <div className="flex flex-col items-end gap-1">
             {allowScreenshots && (
               <span className="text-[11px] text-ide-warning" role="note">
@@ -253,14 +263,11 @@ export function GeneralTab({
             {allowScreenshotsError !== null && (
               <span className="text-[11px] text-ide-danger">{allowScreenshotsError}</span>
             )}
-            <div className="flex items-center gap-1.5">
-              <InfoPopover text="When off (default), CopyPaste is excluded from screenshots and screen recordings (macOS NSWindowSharingNone / Android FLAG_SECURE). Enable only if you need to record or share your screen while using CopyPaste. The preference is applied immediately to all open windows." />
-              <Toggle
-                checked={allowScreenshots}
-                onChange={(v) => void handleAllowScreenshots(v)}
-                aria-label="Allow screenshots and screen recording"
-              />
-            </div>
+            <Toggle
+              checked={allowScreenshots}
+              onChange={(v) => void handleAllowScreenshots(v)}
+              aria-label="Allow screenshots and screen recording"
+            />
           </div>
         </SettingsRow>
         <div className="border-b border-ide-divider/70 px-3 py-2 last:border-b-0">
@@ -301,7 +308,7 @@ export function GeneralTab({
               {excludedApps.map((bundleId) => (
                 <span
                   key={bundleId}
-                  className="inline-flex items-center gap-1 border border-ide-border bg-ide-bg px-2 py-1 text-[12px] text-ide-dim"
+                  className="inline-flex items-center gap-1 border border-ide-border bg-ide-elevated/40 px-2 py-1 text-[12px] text-ide-dim"
                   style={{ borderRadius: "var(--skin-r-ctl)" }}
                 >
                   {bundleId}
@@ -323,12 +330,20 @@ export function GeneralTab({
 
       <SectionHeader label="Background service" />
       <Panel>
-        <SettingsRow title="Version">
+        {/* bdac.107: description added for Version row (Background service section) */}
+        <SettingsRow
+          title="Version"
+          description="Current daemon and app version."
+        >
           <span className="text-[13px] text-ide-text">
             {offline ? "Not running" : (daemonVersion ?? "unknown")}
           </span>
         </SettingsRow>
-        <SettingsRow title="Restart">
+        {/* bdac.107: "Restart" → "Restart service" — unambiguous; description added */}
+        <SettingsRow
+          title="Restart service"
+          description="Restart the background clipboard service."
+        >
           <RestartDaemonButton onRestarted={() => setReloadKey((k) => k + 1)} />
         </SettingsRow>
       </Panel>

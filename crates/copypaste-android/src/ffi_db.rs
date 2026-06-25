@@ -680,3 +680,54 @@ pub fn get_history_page(
         Ok(Vec::new())
     })
 }
+
+// ---------------------------------------------------------------------------
+// CopyPaste-bdac.42: DB vacuum — macOS parity (Settings → Storage → Compact)
+//
+// Runs `PRAGMA incremental_vacuum(0)` to reclaim ALL free pages in the
+// SQLCipher database (bounded incremental, WAL-safe, equivalent to a full
+// VACUUM but without the blocking full-table rebuild). Mirrors the macOS
+// daemon's `ni` IPC verb (`METHOD_VACUUM`) which the macOS UI triggers on
+// Settings → Storage → Compact. The `0` budget tells SQLite to reclaim every
+// free page in one call — appropriate for an explicit user-initiated action
+// (as opposed to the periodic incremental sweep with a small page budget that
+// runs after every TTL cleanup in the daemon).
+//
+// The Android UI wires this via `onVacuumDatabase` in StorageTab so the user
+// can trigger the same compaction as on macOS. The operation is safe to run
+// at any time and is a no-op on databases that do not use `auto_vacuum = INCREMENTAL`
+// (pre-migration DBs), so calling it on an older database never causes errors.
+// ---------------------------------------------------------------------------
+
+/// Run `PRAGMA incremental_vacuum(0)` on the encrypted SQLCipher database at
+/// `db_path` to reclaim ALL free pages (WAL-safe, mirrors the macOS `ni` IPC
+/// verb). Returns `Ok(())` on success. With `android-uniffi-live` feature off,
+/// validates the key shape and returns `Ok(())` (no-op stub).
+#[cfg(feature = "android-uniffi-live")]
+pub fn db_vacuum(db_path: String, key: &[u8]) -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let key_arr: Zeroizing<[u8; 32]> = Zeroizing::new(
+            key.try_into()
+                .map_err(|_| CopypasteError::InvalidKeyLength)?,
+        );
+        // Use with_cached_db to reuse the existing connection; vacuum is safe
+        // on a cached connection (it runs PRAGMA incremental_vacuum(0) in-place).
+        with_cached_db(&db_path, &key_arr, |db| {
+            copypaste_core::incremental_vacuum(db, 0).map_err(|e| CopypasteError::DatabaseError {
+                reason: e.to_string(),
+            })
+        })
+    })
+}
+
+/// Stub (feature off): validates the key shape and returns `Ok(())` (no-op).
+#[cfg(not(feature = "android-uniffi-live"))]
+pub fn db_vacuum(db_path: String, key: &[u8]) -> Result<(), CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let _ = db_path;
+        let _: [u8; 32] = key
+            .try_into()
+            .map_err(|_| CopypasteError::InvalidKeyLength)?;
+        Ok(())
+    })
+}

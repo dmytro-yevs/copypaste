@@ -44,7 +44,7 @@ export type SyncTabProps = {
   savedMsg: boolean;
   saveError: string | null;
   syncStatus: SyncStatus | null;
-  limitsMsg: Record<string, string | null>;
+  limitsMsg: Record<string, { ok: boolean; message: string } | null>;
   inputCls: string;
   btnCls: string;
   btnStyle: React.CSSProperties;
@@ -57,13 +57,13 @@ export type SyncTabProps = {
   handleSaveConfig: () => void;
 };
 
-function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, string | null> }) {
-  const msg = limitsMsg[field];
-  if (!msg) return null;
-  const isError = msg !== "Saved";
+// bdac.106: branch on .ok (typed signal) — no string comparison.
+function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, { ok: boolean; message: string } | null> }) {
+  const entry = limitsMsg[field];
+  if (!entry) return null;
   return (
-    <span className={`text-[11px] ${isError ? "text-ide-danger" : "text-ide-success"}`}>
-      {msg}
+    <span className={`text-[11px] ${entry.ok ? "text-ide-success" : "text-ide-danger"}`}>
+      {entry.message}
     </span>
   );
 }
@@ -154,7 +154,11 @@ export function SyncTab({
             />
           </div>
         </SettingsRow>
-        <SettingsRow title="Auto-apply synced clipboard">
+        {/* bdac.104: InfoPopover moved to info= slot (label column) */}
+        <SettingsRow
+          title="Auto-apply synced clipboard"
+          info={<InfoPopover text="When on, incoming synced items from other devices are automatically written to the local clipboard so it stays up-to-date. When off, synced items are saved to history but never applied to the active clipboard — paste manually from the history list." />}
+        >
           <div className="flex flex-col items-end gap-1">
             {/* wrfv: visible inline notice so the user knows synced clips will
                 silently overwrite the active clipboard (the actual write is
@@ -170,7 +174,6 @@ export function SyncTab({
               </span>
             )}
             <div className="flex items-center gap-1.5">
-              <InfoPopover text="When on, incoming synced items from other devices are automatically written to the local clipboard so it stays up-to-date. When off, synced items are saved to history but never applied to the active clipboard — paste manually from the history list." />
               <LimitsMsg field="auto_apply_synced_clip" limitsMsg={limitsMsg} />
               <Toggle
                 checked={autoApplySyncedClip}
@@ -189,10 +192,13 @@ export function SyncTab({
         hint="Same network, no account needed."
       />
       <Panel>
-        <SettingsRow title="Enable P2P (LAN) sync">
+        {/* bdac.44: InfoPopover added — P2P row had no description */}
+        {/* bdac.104: InfoPopover moved to info= slot (label column) */}
+        <SettingsRow
+          title="Enable P2P (LAN) sync"
+          info={<InfoPopover text="Direct device-to-device sync over your local network. Requires a paired device on the Devices screen. Disable for cloud-only sync." />}
+        >
           <div className="flex items-center gap-2">
-            {/* bdac.44: InfoPopover added — P2P row had no description */}
-            <InfoPopover text="Direct device-to-device sync over your local network. Requires a paired device on the Devices screen. Disable for cloud-only sync." />
             <LimitsMsg field="p2p_enabled" limitsMsg={limitsMsg} />
             <Toggle
               checked={config.p2p_enabled}
@@ -202,9 +208,12 @@ export function SyncTab({
             />
           </div>
         </SettingsRow>
-        <SettingsRow title="Visible on local network">
+        {/* bdac.104: InfoPopover moved to info= slot (label column) */}
+        <SettingsRow
+          title="Visible on local network"
+          info={<InfoPopover text="When off, this device stops advertising via mDNS-SD and will not appear in the device list on other Macs on the same network. Paired peers with a known address can still connect directly." />}
+        >
           <div className="flex items-center gap-1.5">
-            <InfoPopover text="When off, this device stops advertising via mDNS-SD and will not appear in the device list on other Macs on the same network. Paired peers with a known address can still connect directly." />
             <LimitsMsg field="lan_visibility" limitsMsg={limitsMsg} />
             <Toggle
               checked={lanVisibility}
@@ -302,25 +311,29 @@ export function SyncTab({
             )}
           </div>
         </SettingsRow>
-        <SettingsRow title="Relay URL">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Optional HTTP relay for store-and-forward sync when devices aren't on the same network. Leave blank to use direct P2P / cloud sync only. Saved with the cloud-sync settings." />
-            <input
-              type="url"
-              className={inputCls}
-              placeholder="https://relay.example.com"
-              value={relayUrl}
-              onChange={(e) => setRelayUrl(e.target.value)}
-              disabled={offline}
-              autoComplete="off"
-              spellCheck={false}
-            />
-          </div>
+        {/* bdac.104: InfoPopover moved to info= slot (label column) */}
+        <SettingsRow
+          title="Relay URL"
+          info={<InfoPopover text="Optional HTTP relay for store-and-forward sync when devices aren't on the same network. Leave blank to use direct P2P / cloud sync only. Saved with the cloud-sync settings." />}
+        >
+          <input
+            type="url"
+            className={inputCls}
+            placeholder="https://relay.example.com"
+            value={relayUrl}
+            onChange={(e) => setRelayUrl(e.target.value)}
+            disabled={offline}
+            autoComplete="off"
+            spellCheck={false}
+          />
         </SettingsRow>
-        <SettingsRow title="Sync passphrase">
+        {/* bdac.104: InfoPopover moved to info= slot (label column) */}
+        <SettingsRow
+          title="Sync passphrase"
+          info={<InfoPopover text="Enter the same passphrase on every device to enable encrypted sync. Click 'Set passphrase' or press Enter to save." />}
+        >
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-1.5">
-              <InfoPopover text="Enter the same passphrase on every device to enable encrypted sync. Click 'Set passphrase' or press Enter to save." />
               <input
                 type="password"
                 className={inputCls}

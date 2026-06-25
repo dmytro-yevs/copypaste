@@ -3,8 +3,9 @@
  * notification permission is denied, SettingsView must surface an in-app
  * warning so the user understands why notifications are silently missing.
  *
- * Strategy: mock `Notification.permission` to "denied" (OS-denied) and assert
- * that a warning is visible in the General tab when notifyOnCopy is true.
+ * CopyPaste-1jms.29 fix: SettingsView now calls isNotificationPermissionGranted()
+ * (Tauri check_notification_permission command) rather than Notification.permission.
+ * Tests stub invoke("check_notification_permission") accordingly.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -28,12 +29,14 @@ import { ErrorBoundary } from "../components/ErrorBoundary";
 // Daemon stub that reports notify_on_copy: true (enabled)
 // ---------------------------------------------------------------------------
 
-function makeOnlineInvoke(notifyOnCopy = true) {
+function makeOnlineInvoke(notifyOnCopy = true, notifPermGranted = false) {
   return (cmd: string, args: { method?: string; params?: unknown }) => {
     if (cmd === "get_popup_shortcut") return Promise.resolve("CmdOrCtrl+Shift+V");
     if (cmd === "get_default_popup_shortcut") return Promise.resolve("CmdOrCtrl+Shift+V");
     if (cmd === "app_version") return Promise.resolve("0.7.5");
     if (cmd === "check_accessibility_permission") return Promise.resolve(true);
+    // CopyPaste-1jms.29: authoritative macOS notification permission signal.
+    if (cmd === "check_notification_permission") return Promise.resolve(notifPermGranted);
 
     const method = (args as { method?: string } | undefined)?.method;
     switch (method) {
@@ -79,9 +82,9 @@ afterEach(() => {
 
 describe("CopyPaste-vrur: notification permission denial warning in SettingsView", () => {
   it("shows a warning when notify_on_copy is enabled but OS permission is denied", async () => {
-    // Simulate OS-denied notification permission.
-    vi.stubGlobal("Notification", { permission: "denied" });
-    invoke.mockImplementation(makeOnlineInvoke(true));
+    // check_notification_permission returns false = macOS denied.
+    // Notification.permission is not consulted (CopyPaste-1jms.29).
+    invoke.mockImplementation(makeOnlineInvoke(true, false));
 
     render(
       <ErrorBoundary label="Settings">
@@ -102,8 +105,8 @@ describe("CopyPaste-vrur: notification permission denial warning in SettingsView
   });
 
   it("does NOT show the warning when notify_on_copy is disabled", async () => {
-    vi.stubGlobal("Notification", { permission: "denied" });
-    invoke.mockImplementation(makeOnlineInvoke(false));
+    // check_notification_permission returns false (denied), but notify is off — no warning.
+    invoke.mockImplementation(makeOnlineInvoke(false, false));
 
     render(
       <ErrorBoundary label="Settings">
@@ -121,8 +124,8 @@ describe("CopyPaste-vrur: notification permission denial warning in SettingsView
   });
 
   it("does NOT show the warning when notification permission is granted", async () => {
-    vi.stubGlobal("Notification", { permission: "granted" });
-    invoke.mockImplementation(makeOnlineInvoke(true));
+    // check_notification_permission returns true = macOS granted.
+    invoke.mockImplementation(makeOnlineInvoke(true, true));
 
     render(
       <ErrorBoundary label="Settings">

@@ -73,3 +73,28 @@ artefact — only the matching `*.dmg` / `*.zip` / `*.apk` is.
 cd dist
 shasum -a 256 --check CopyPaste-v0.2.0-beta.1-macos-arm64.dmg.sha256
 ```
+
+## Stale local artefacts & cleanup (CopyPaste-d41w.10 / d41w.18)
+
+The whole of `dist/` is **git-ignored** (`/dist/` in the root `.gitignore`) —
+only this `README.md` is tracked. Everything else here is a **local-only**
+build output and is never committed, so it cannot pollute the repository.
+
+Over time the directory accumulates stale artefacts from old versions and
+build-time staging dirs (observed: ~222 MB — e.g. `CopyPaste-v0.5.2-*.dmg`,
+`CopyPaste-v0.6.1.apk`, `CopyPaste-0.1.0-alpha.1.dmg`, `_stale-*/`, `apk-*/`,
+`CopyPaste.app/`). They are safe to delete at any time; the release scripts
+regenerate the current artefacts on demand.
+
+Reclaim the disk locally (keeps this README, removes everything else):
+
+```sh
+# from the repo root — preview first:
+git clean -ndX dist/
+# then actually remove the ignored artefacts under dist/:
+git clean -fdX dist/
+```
+
+`git clean -X` only removes **git-ignored** files, so tracked files (this
+README) and your other work are never touched. Prefer it over a blind
+`rm -rf dist/*`.

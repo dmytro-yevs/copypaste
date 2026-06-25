@@ -611,6 +611,31 @@ fun SettingsScreen(
                             onImportHistory = {
                                 importLauncher.launch(arrayOf("application/json", "*/*"))
                             },
+                            // CopyPaste-bdac.42: Compact database — macOS parity (ni/VACUUM).
+                            // Calls dbVacuum (PRAGMA incremental_vacuum(0)) on the SQLCipher DB.
+                            // Uses the same device key as all other FFI DB calls. The db path
+                            // mirrors the conventional FFI live-DB location. With the native
+                            // library absent the call is a validated no-op (stub mode, still Ok).
+                            onVacuumDatabase = {
+                                scope.launch(Dispatchers.IO) {
+                                    val dbPath = ctx.getDatabasePath("copypaste.db").absolutePath
+                                    val ok = runCatching {
+                                        val key = settings.encryptionKey
+                                        dbVacuum(dbPath, key)
+                                    }.isSuccess
+                                    if (ok) {
+                                        toastState.show(
+                                            ctx.getString(R.string.toast_compact_db_ok),
+                                            GlassToastKind.SUCCESS,
+                                        )
+                                    } else {
+                                        toastState.show(
+                                            ctx.getString(R.string.toast_compact_db_fail),
+                                            GlassToastKind.DANGER,
+                                        )
+                                    }
+                                }
+                            },
                         )
                     }
                     TAB_SYNC -> SyncTab(

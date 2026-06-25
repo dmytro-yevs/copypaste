@@ -293,10 +293,7 @@ internal fun SyncTab(
                         color = LocalIdeColors.current.text,
                     )
                     Text(
-                        text = if (onTestConnection != null)
-                            stringResource(R.string.setting_test_connection_subtitle)
-                        else
-                            "Not available on this build (see Sync Diagnostics above for live status)",
+                        text = stringResource(R.string.setting_test_connection_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = LocalIdeColors.current.dim,
                     )

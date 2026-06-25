@@ -126,32 +126,14 @@ fn sigkill_recovers_lamport() {
     // which is worse than leaving the assertion absent.
 }
 
-/// System sleep → wake → WS reconnects.
-///
-/// Acceptance:
-/// 1. Daemon connected to mock relay.
-/// 2. Inject a "sleep" event (NSWorkspaceWillSleepNotification on macOS, or a
-///    synthetic in-process event for the unit-test variant).
-/// 3. After "wake", assert the WS client opened a new connection within N seconds.
-///
-/// # Why ignored
-///
-/// The sleep/wake hook surface (NSWorkspaceWillSleepNotification injection or
-/// a synthetic in-process event) is not yet exposed for tests. Implementing
-/// the body before the hook surface exists would require a real `pmset sleepnow`
-/// call, which is destructive in CI.  Tracked as wave3.2-followup.
-#[test]
-#[ignore = "requires pmset sleep injection or NSWorkspace mock; see wave3.2-followup"]
-fn wake_from_sleep_reconnects() {
-    // Intentionally left without a body: running an empty ignored test is a safe
-    // placeholder.  A `todo!()` here would panic under `--include-ignored`, which
-    // is misleading — the test is not "failing", it is "not yet implemented".
-    //
-    // wave3.2-followup: wire up the sleep/wake hook surface, then:
-    //   1. Connect the daemon to a mock relay.
-    //   2. Inject a synthetic sleep event.
-    //   3. Assert the WS client opens a new connection within N seconds of wake.
-}
+// CopyPaste-ojas.17: removed the empty, assertion-free `#[ignore]` stub
+// `wake_from_sleep_reconnects` (sleep→wake→WS-reconnect). It asserted nothing
+// and so was misleading coverage. The sleep/wake hook surface it needs
+// (NSWorkspace injection / synthetic event) is not yet exposed — that future
+// work is tracked in bd (wave3.2-followup), not as a fake test here. The
+// `sigkill_recovers_lamport` integration test below remains (it has real
+// process-termination assertions and is `#[ignore]`-gated only because it needs
+// a built daemon binary).
 
 /// Smoke test that always runs: the helper paths used by the ignored tests
 /// resolve sensibly. Keeps this file from silently rotting if the surrounding

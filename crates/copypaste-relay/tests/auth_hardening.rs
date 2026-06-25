@@ -149,9 +149,9 @@ async fn relay_bearer_token_is_random_not_derived_from_pubkey() {
     let t1 = b1["auth_token"].as_str().expect("missing auth_token");
     let t2 = b2["auth_token"].as_str().expect("missing auth_token");
 
-    // Tokens must be 32 hex chars (16 bytes of entropy).
-    assert_eq!(t1.len(), 32, "token length unexpected: {t1}");
-    assert_eq!(t2.len(), 32, "token length unexpected: {t2}");
+    // CopyPaste-qvtg.3: tokens must be 64 hex chars (32 bytes / 256-bit entropy).
+    assert_eq!(t1.len(), 64, "token length unexpected: {t1}");
+    assert_eq!(t2.len(), 64, "token length unexpected: {t2}");
     assert!(t1.chars().all(|c| c.is_ascii_hexdigit()));
     assert!(t2.chars().all(|c| c.is_ascii_hexdigit()));
 

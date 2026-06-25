@@ -4,6 +4,10 @@
 
 ## [0.3.0] - 2026-06-22
 
+> **Note:** This entry appears above 0.7.x entries because it is a re-launch
+> published on 2026-06-22 — after the 0.7.x series — to an out-of-band 0.3.x
+> branch. Ordering here is by release date (newest first), not by semver.
+
 Re-launch of 0.3.0 (the prior 0.3.0 build was withdrawn).
 
 - Restore liquid-glass design — fix invisible glass and design-token drift.

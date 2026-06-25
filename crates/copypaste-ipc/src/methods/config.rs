@@ -144,6 +144,120 @@ pub struct AppConfig {
     pub auto_apply_synced_clip: Option<bool>,
 }
 
+/// Redacted, **read-only** wire type returned by `get_config`.
+///
+/// `get_config` and `set_config` are deliberately asymmetric:
+///
+/// - [`AppConfig`] is the **inbound** (`set_config`) payload. It carries
+///   plaintext `supabase_email` / `supabase_password` because credentials must
+///   travel *into* the daemon to be persisted.
+/// - `AppConfigResponse` is the **outbound** (`get_config`) payload. It has **no
+///   field capable of holding a secret** — credentials are represented solely by
+///   the `supabase_email_set` / `supabase_password_set` presence booleans.
+///
+/// This asymmetry makes credential leakage through `get_config` a *compile-time
+/// impossibility*: there is simply no field on this struct to put a secret in.
+/// It replaces the daemon's former approach of serialising the whole internal
+/// `AppConfig` and string-stripping the secret keys after the fact
+/// (`redact_config_secrets`), which silently leaked any *new* secret field that
+/// the author forgot to add to the strip list (CopyPaste-c4q2.18).
+///
+/// The daemon builds this by **exhaustively destructuring** its internal config
+/// (no `..` rest pattern), so adding a new field to the internal `AppConfig`
+/// fails to compile until the author consciously decides whether it is a secret
+/// (map to a `*_set` bool / drop it) or a plain setting (forward it here).
+///
+/// All non-secret fields mirror [`AppConfig`] verbatim — same names, same
+/// `Option` semantics, same `skip_serializing_if` — so the on-the-wire JSON is
+/// byte-compatible with the previous redacted output (CLI reads it as raw JSON;
+/// the UI's TypeScript `AppConfig` type already models the `*_set` flags).
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AppConfigResponse {
+    /// See [`AppConfig::p2p_enabled`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p2p_enabled: Option<bool>,
+
+    /// See [`AppConfig::supabase_url`]. Non-secret; surfaced verbatim.
+    #[serde(default)]
+    pub supabase_url: Option<String>,
+
+    /// See [`AppConfig::supabase_anon_key`]. Publishable; surfaced verbatim.
+    #[serde(default)]
+    pub supabase_anon_key: Option<String>,
+
+    /// See [`AppConfig::relay_url`]. Non-secret base URL; surfaced verbatim.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_url: Option<String>,
+
+    /// `true` when a GoTrue account email is stored. The email itself is never
+    /// returned — only this presence flag.
+    pub supabase_email_set: bool,
+
+    /// `true` when a GoTrue account password is stored. The password itself is
+    /// never returned — only this presence flag.
+    pub supabase_password_set: bool,
+
+    /// See [`AppConfig::max_text_size_bytes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_text_size_bytes: Option<u64>,
+
+    /// See [`AppConfig::max_image_size_bytes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_image_size_bytes: Option<u64>,
+
+    /// See [`AppConfig::max_file_size_bytes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_file_size_bytes: Option<u64>,
+
+    /// See [`AppConfig::storage_quota_bytes`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_quota_bytes: Option<u64>,
+
+    /// See [`AppConfig::sensitive_ttl_secs`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sensitive_ttl_secs: Option<u64>,
+
+    /// See [`AppConfig::image_quality`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image_quality: Option<u8>,
+
+    /// See [`AppConfig::sync_on_wifi_only`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_on_wifi_only: Option<bool>,
+
+    /// See [`AppConfig::sound_on_copy`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sound_on_copy: Option<bool>,
+
+    /// See [`AppConfig::notify_on_copy`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notify_on_copy: Option<bool>,
+
+    /// See [`AppConfig::collect_public_ip`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collect_public_ip: Option<bool>,
+
+    /// See [`AppConfig::paste_as_plain_text`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paste_as_plain_text: Option<bool>,
+
+    /// See [`AppConfig::excluded_app_bundle_ids`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excluded_app_bundle_ids: Option<Vec<String>>,
+
+    /// See [`AppConfig::lan_visibility`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lan_visibility: Option<bool>,
+
+    /// See [`AppConfig::sync_enabled`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_enabled: Option<bool>,
+
+    /// See [`AppConfig::auto_apply_synced_clip`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_apply_synced_clip: Option<bool>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -260,5 +374,66 @@ mod tests {
         let s = serde_json::to_string(&original).unwrap();
         let back: AppConfig = serde_json::from_str(&s).unwrap();
         assert_eq!(original, back);
+    }
+
+    // ── AppConfigResponse (read-only / redacted) tests (CopyPaste-c4q2.18) ──
+
+    #[test]
+    fn app_config_response_has_no_secret_fields_on_the_wire() {
+        // The whole point of AppConfigResponse: there is no field that can carry
+        // a plaintext credential, so get_config can never leak one. Confirm the
+        // serialised form never contains the secret KEY names regardless of the
+        // presence flags.
+        let resp = AppConfigResponse {
+            supabase_email_set: true,
+            supabase_password_set: true,
+            supabase_url: Some("https://x.supabase.co".to_owned()),
+            ..Default::default()
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        assert!(
+            !s.contains("supabase_email\""),
+            "must not emit a supabase_email field: {s}"
+        );
+        assert!(
+            !s.contains("supabase_password\""),
+            "must not emit a supabase_password field: {s}"
+        );
+        assert!(
+            s.contains("supabase_email_set"),
+            "must emit the email presence flag: {s}"
+        );
+        assert!(
+            s.contains("supabase_password_set"),
+            "must emit the password presence flag: {s}"
+        );
+    }
+
+    #[test]
+    fn app_config_response_presence_flags_default_false() {
+        // A default (no credentials stored) response reports both flags false and
+        // always emits them (no skip_serializing_if) so clients can rely on them.
+        let resp = AppConfigResponse::default();
+        let v = serde_json::to_value(&resp).unwrap();
+        assert_eq!(v["supabase_email_set"], serde_json::json!(false));
+        assert_eq!(v["supabase_password_set"], serde_json::json!(false));
+    }
+
+    #[test]
+    fn app_config_response_roundtrips() {
+        let resp = AppConfigResponse {
+            p2p_enabled: Some(true),
+            supabase_url: Some("https://x.supabase.co".to_owned()),
+            supabase_anon_key: Some("anon".to_owned()),
+            relay_url: Some("https://relay.example.com".to_owned()),
+            supabase_email_set: true,
+            supabase_password_set: false,
+            sensitive_ttl_secs: Some(30),
+            sync_enabled: Some(true),
+            ..Default::default()
+        };
+        let s = serde_json::to_string(&resp).unwrap();
+        let back: AppConfigResponse = serde_json::from_str(&s).unwrap();
+        assert_eq!(resp, back);
     }
 }

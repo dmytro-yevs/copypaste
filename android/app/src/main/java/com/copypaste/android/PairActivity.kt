@@ -47,9 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.BlurredEdgeTreatment
@@ -71,7 +69,6 @@ import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
-import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.RadiusChip
@@ -91,6 +88,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import uniffi.copypaste_android.BootstrapResult
 import uniffi.copypaste_android.ScannedPairing
 import uniffi.copypaste_android.bootstrapPairInitiator
 // syncWithPeer is the package-local wrapper in CopypasteBindings.kt (ABI-9
@@ -221,141 +219,6 @@ class PairActivity : ComponentActivity() {
 // CopyPaste-jkbo: encodeQrBitmap was a private duplicate of the same function in
 // DevicesActivity. Both are now replaced by the package-level [encodeQrBitmap] in
 // QrUtils.kt — call sites in this file reference it directly (same package).
-
-/**
- * Build the human-readable label shown after a successful scan, e.g.
- * `"Pixel 8 (a1b2c3…)"`. Pure (no Android/FFI deps) so it is unit-testable on
- * the JVM. A blank device name falls back to the literal "device".
- */
-internal fun formatScannedInfo(deviceName: String, fingerprint: String): String =
-    "${deviceName.ifBlank { "device" }} ($fingerprint)"
-
-/**
- * Sync-account provisioning extracted from the optional 6th field of a CPPAIR1/CPPAIR2
- * payload (H4: QR full provisioning). All fields are non-secret:
- * - [relayUrl]: HTTP relay base URL.
- * - [supabaseUrl]: Supabase project URL.
- * - [supabaseAnonKey]: Supabase publishable anon JWT (safe per Supabase docs).
- */
-/** Holds the optional sync-provisioning data embedded in a CPPAIR2 QR payload. */
-internal data class QrProvisioningData(
-    val relayUrl: String?,
-    val supabaseUrl: String?,
-    val supabaseAnonKey: String?,
-)
-
-/**
- * Extract sync-provisioning from the optional 6th field of a bare CPPAIR2 payload.
- *
- * CPPAIR2 wire format (body after magic prefix):
- *   [0] fp_b64url  [1] token_b64url  [2] device_id_b64url  [3] name_b64url
- *   [4] addr_b64url  [5] prov_b64url (optional)
- *
- * All 6 body fields are base64url (no dots), so `split(".", limit=7)` on the
- * full string cleanly isolates the provisioning field at index 6 (0-based,
- * counting the magic prefix at index 0).
- *
- * For CPPAIR1 payloads provisioning is not supported — addr_hint in v1 is the
- * raw address string and may contain IPv4 dots that collide with the delimiter.
- *
- * Returns `null` when the field is absent, empty, or cannot be decoded. A
- * decode failure here is always silent: provisioning is advisory and must never
- * break pairing.
- *
- * Pure Kotlin; no FFI dependency, so it works even in stub mode.
- */
-internal fun extractQrProvisioning(barePayload: String): QrProvisioningData? {
-    // Only handle CPPAIR2; CPPAIR1 addr_hint contains IPv4 dots that make
-    // field 5 ambiguous without knowing the addr_hint length.
-    val bare = barePayload.trim()
-    if (!bare.startsWith("CPPAIR2.")) return null
-    // Full string: CPPAIR2 . fp . tok . id . name . addr_b64 [. prov_b64]
-    // Indices:        0       1    2    3    4       5           6
-    val parts = bare.split(".", limit = 7)
-    if (parts.size < 7) return null  // no provisioning field present
-    val provB64 = parts[6].trim()
-    if (provB64.isEmpty()) return null
-    return try {
-        // base64url: replace url-safe chars to standard before decoding.
-        val bytes = android.util.Base64.decode(
-            provB64.replace('-', '+').replace('_', '/'),
-            android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
-        )
-        val json = String(bytes, Charsets.UTF_8)
-        QrProvisioningData(
-            relayUrl = extractJsonString(json, "ru"),
-            supabaseUrl = extractJsonString(json, "su"),
-            supabaseAnonKey = extractJsonString(json, "sk"),
-        )
-    } catch (_: Exception) {
-        null // Corrupt/unknown field �� silently ignore; pairing is unaffected.
-    }
-}
-
-/**
- * Minimal JSON string extractor for a flat `{"k":"v",...}` object.
- * Returns the string value for [key], or `null` when absent or not a string.
- * Handles `\"` and `\\` escapes; sufficient for URLs and JWTs.
- */
-private fun extractJsonString(json: String, key: String): String? {
-    val needle = "\"$key\":\""
-    val start = json.indexOf(needle).takeIf { it >= 0 } ?: return null
-    val valueStart = start + needle.length
-    val sb = StringBuilder()
-    var i = valueStart
-    while (i < json.length) {
-        when (val c = json[i]) {
-            '"' -> return sb.toString().takeIf { it.isNotEmpty() }
-            '\\' -> {
-                i++
-                if (i >= json.length) return null
-                when (json[i]) {
-                    '"' -> sb.append('"')
-                    '\\' -> sb.append('\\')
-                    'n' -> sb.append('\n')
-                    'r' -> sb.append('\r')
-                    't' -> sb.append('\t')
-                    else -> { sb.append('\\'); sb.append(json[i]) }
-                }
-            }
-            else -> sb.append(c)
-        }
-        i++
-    }
-    return null // Unterminated string
-}
-
-/**
- * Apply [prov] to [settings] using fill-missing semantics: only write a field when
- * the corresponding settings value is currently blank. Never overwrites an existing
- * local configuration — the user may have set up their own relay/Supabase/passphrase.
- *
- * Returns a list of field names that were actually written (for logging).
- * Call only from a background thread (Settings uses SharedPreferences I/O).
- */
-internal fun applyQrProvisioning(prov: QrProvisioningData, settings: Settings): List<String> {
-    val applied = mutableListOf<String>()
-    prov.relayUrl?.takeIf { it.isNotBlank() }?.let { url ->
-        if (settings.relayUrl.isBlank()) {
-            settings.relayUrl = url
-            applied += "relayUrl"
-        }
-    }
-    prov.supabaseUrl?.takeIf { it.isNotBlank() }?.let { url ->
-        if (settings.supabaseUrl.isBlank()) {
-            settings.supabaseUrl = url
-            applied += "supabaseUrl"
-        }
-    }
-    prov.supabaseAnonKey?.takeIf { it.isNotBlank() }?.let { anon ->
-        if (settings.supabaseAnonKey.isBlank()) {
-            settings.supabaseAnonKey = anon
-            applied += "supabaseAnonKey"
-        }
-    }
-    return applied
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PairScreen(
@@ -382,15 +245,20 @@ fun PairScreen(
     var scannedPeer by remember { mutableStateOf<ScannedPairing?>(null) }
     // CopyPaste-tqt0: the raw scanned/deep-linked QR payload, retained so its 6th-field
     // relay/Supabase provisioning can be applied AFTER the user confirms pairing (inside
-    // runPairAndSync, only once the PAKE bootstrap succeeds) — NOT at scan/parse time. A
+    // finalizeSync, only once the PAKE bootstrap succeeds) — NOT at scan/parse time. A
     // hostile cppair:// could otherwise silently seed attacker-controlled URLs on a fresh
     // install before any consent.
     var pendingProvisioningRaw by remember { mutableStateOf<String?>(null) }
     var syncing by remember { mutableStateOf(false) }
     var syncResult by remember { mutableStateOf<String?>(null) }
     // Holds the just-paired peer to display in the compact success popup.
-    // Set at the end of runPairAndSync; cleared when the popup is dismissed.
+    // Set at the end of finalizeSync; cleared when the popup is dismissed.
     var pairedPeerForPopup by remember { mutableStateOf<PairedPeer?>(null) }
+    // CopyPaste-1jms.33: holds the BootstrapResult from the PAKE exchange so the
+    // peer-review card can display model/OS/appVersion BEFORE the user clicks
+    // "Confirm & sync".  Non-null means PAKE succeeded; null means not yet run or
+    // the user discarded the result.  Cleared on finalizeSync completion or cancel.
+    var pendingBootstrap by remember { mutableStateOf<BootstrapResult?>(null) }
     var remainingSeconds by remember { mutableStateOf(0) }
     // CopyPaste-5917.36: QR blur+reveal — starts blurred (set in LaunchedEffect(Unit));
     // first tap reveals. TTL auto-refresh (generateQr) intentionally does NOT reset this
@@ -442,12 +310,15 @@ fun PairScreen(
             // Surface the peer identity and retain it so the user can confirm,
             // then drive the PAKE bootstrap + one sync (initiator side).
             scannedPeer = info
+            // CopyPaste-1jms.33: new scan resets the PAKE result so the review card
+            // starts fresh (no stale metadata from a previous bootstrap attempt).
+            pendingBootstrap = null
             syncResult = null
             scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
             // CopyPaste-tqt0: retain the raw QR payload but DO NOT apply its 6th-field
             // relay/Supabase provisioning yet. Applying at scan time let a hostile QR
             // seed attacker-controlled URLs into Settings on a fresh install before the
-            // user consented. Provisioning is now applied inside runPairAndSync, only
+            // user consented. Provisioning is now applied inside finalizeSync, only
             // after the PAKE bootstrap (SAS confirmation) succeeds.
             pendingProvisioningRaw = contents
         } catch (e: Exception) {
@@ -540,7 +411,7 @@ fun PairScreen(
     // (it is loopback only when the Mac has no LAN interface at all).
     //
     // REMAINING Android work for UNATTENDED background sync (Android→macOS):
-    // this `runPairAndSync` only performs ONE sync at pairing time. To sync in
+    // this `finalizeSync` only performs ONE sync at pairing time. To sync in
     // the background after pairing, add a periodic caller (e.g. in FgsSyncLoop,
     // gated on a non-blank `settings.pairedPeerSyncAddr` /
     // `settings.pairedPeerFingerprint`) that, on each tick, loads the device
@@ -554,18 +425,31 @@ fun PairScreen(
     // current flow only has it transiently from `bootstrapPairInitiator`. Persist
     // `bootstrap.sessionKey` securely at pairing time so the background caller can
     // reuse it. Requires an on-device verification (phone + Mac on same Wi-Fi).
-    fun runPairAndSync(peer: ScannedPairing) {
+    // ── CopyPaste-1jms.33: two-phase pairing flow ────────────────────────────
+    //
+    // Phase 1 — runBootstrap: runs the PAKE exchange and stores the result in
+    // [pendingBootstrap].  The peer's model/OS/appVersion are now visible in the
+    // UI so the user can verify them BEFORE confirming the sync.
+    //
+    // Phase 2 — finalizeSync: uses the cached [BootstrapResult] to apply
+    // provisioning, run the initial sync and commit the peer to the roster.
+    //
+    // The PAKE crypto flow is unchanged — only the UI confirmation step is split.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Phase 1: run the PAKE bootstrap and surface the peer's device metadata.
+     *
+     * On success [pendingBootstrap] is set; the UI switches to the review card
+     * which shows model/OS/appVersion and a "Confirm & sync" button.
+     * On failure [errorMessage] is set (sanitized) and [pendingBootstrap] stays null.
+     */
+    fun runBootstrap(peer: ScannedPairing) {
         if (syncing) return
-        // CopyPaste-tqt0: snapshot the retained QR payload now; its 6th-field
-        // provisioning is applied below ONLY after the PAKE bootstrap succeeds.
-        val provisioningRaw = pendingProvisioningRaw
         // CopyPaste-1jms.13: resolve the human-readable device name BEFORE
         // entering the coroutine, where `context` (LocalContext.current) is only
         // accessible on the composition thread and ContentResolver is not
         // capturable via a qualified-this label inside a nested coroutine.
-        // Settings.Global "device_name" is the user-editable Bluetooth/Nearby
-        // device name (set in system Settings → About device); falls back to
-        // Build.MODEL so pairing always carries a non-empty name.
         val deviceNameForPairing: String = run {
             val settingsName = try {
                 android.provider.Settings.Global.getString(
@@ -581,11 +465,7 @@ fun PairScreen(
             syncing = true
             syncResult = null
             try {
-                val key = settings.encryptionKey
-                // Captured inside the IO block (where `bootstrap` is in scope) so the
-                // success popup below can look the freshly-paired peer up by fingerprint.
-                var pairedFingerprint: String? = null
-                val message = withContext(Dispatchers.IO) {
+                val bootstrap = withContext(Dispatchers.IO) {
                     // CopyPaste-44rq.55: getOrCreate() zeroes cert.keyDer; re-fetch
                     // via peek() to obtain the KEK-unwrapped key from AndroidKeyStore.
                     deviceKeyStore.getOrCreate()
@@ -594,9 +474,6 @@ fun PairScreen(
                     // so the macOS peer persists it and can dial back (macOS→Android
                     // direction). The listener is bound by [ClipboardService]; its
                     // OS-assigned port is published in [ClipboardService.activeListenerPort].
-                    // When the listener is not running yet (port == 0) or this device
-                    // has no LAN IPv4, fall back to "" — the old behavior, where only
-                    // the Android→macOS dial works until the listener comes up.
                     val listenerPort = ClipboardService.activeListenerPort
                     val lanIp = lanIpv4Address()
                     val ownSyncAddr = if (listenerPort > 0 && lanIp != null) {
@@ -611,40 +488,60 @@ fun PairScreen(
                     }
                     // ABI 18 (PG-28): collect own WAN address via STUN so the
                     // peer's device record shows a reachable external candidate.
-                    // Gated behind the user's collect_public_ip setting.
                     val ownPublicIp = StunUtils.queryPublicIp(settings.collectPublicIp)
-                    val bootstrap = bootstrapPairInitiator(
+                    bootstrapPairInitiator(
                         addrHint = peer.addrHint,
                         certDer = cert.certDer,
                         keyDer = cert.keyDer,
                         pakePassword = peer.pakePassword,
-                        // Advertise our dialable listener address so the peer dials back.
                         syncAddr = ownSyncAddr,
-                        // A phone scanning a configured PC carries nothing of its
-                        // own — it RECEIVES the PC's sync provisioning in the
-                        // response (bootstrap.peerProvisioning), applied below.
                         localProvisioning = null,
                         // HB-1a (ABI 14): send THIS device's own metadata so the
                         // PC's device card shows real Android info.
-                        // CopyPaste-1jms.13: deviceName = user-visible name (resolved
-                        // before scope.launch — see deviceNameForPairing above);
-                        // deviceModel = hardware model. Previously both were Build.MODEL.
                         deviceName = deviceNameForPairing,
                         deviceModel = android.os.Build.MODEL ?: "Android",
                         osVersion = "Android " + android.os.Build.VERSION.RELEASE,
                         appVersion = BuildConfig.VERSION_NAME,
                         localIp = lanIp,
-                        // ABI 18 (PG-28): STUN-derived WAN address.
                         publicIp = ownPublicIp,
                     )
+                }
+                // PAKE succeeded — surface the peer metadata in the review card.
+                pendingBootstrap = bootstrap
+            } catch (e: Exception) {
+                // CopyPaste-jwga: never surface raw exception text to users.
+                errorMessage = ErrorMessages.friendlyPairingError(e)
+            } finally {
+                syncing = false
+            }
+        }
+    }
 
+    /**
+     * Phase 2: apply provisioning, run the initial P2P sync, and commit the peer
+     * to the roster. Called after the user reviews the peer metadata and clicks
+     * "Confirm & sync".
+     *
+     * [bootstrap] is the result from [runBootstrap] — already validated by PAKE.
+     * Does NOT re-run the PAKE exchange. The crypto flow is identical to the
+     * former single-phase [runPairAndSync], minus the bootstrap step.
+     */
+    fun finalizeSync(peer: ScannedPairing, bootstrap: BootstrapResult) {
+        if (syncing) return
+        // CopyPaste-tqt0: snapshot the retained QR payload now; its 6th-field
+        // provisioning is applied below ONLY after the PAKE bootstrap succeeds.
+        val provisioningRaw = pendingProvisioningRaw
+        scope.launch {
+            syncing = true
+            try {
+                val key = settings.encryptionKey
+                var pairedFingerprint: String? = null
+                val message = withContext(Dispatchers.IO) {
+                    val cert = deviceKeyStore.peek()!!
                     // QR full-provisioning: if the paired PC carried its sync
                     // config in the pairing payload, fill any field this device
                     // has not already configured. NEVER overwrite an existing
-                    // local value (mirror the daemon's fill-missing rule) — the
-                    // user may have set up their own Supabase/relay/passphrase.
-                    // Runs inside withContext(Dispatchers.IO) so the wrapped-key
-                    // write + SharedPreferences IO stay off the main thread.
+                    // local value (mirror the daemon's fill-missing rule).
                     bootstrap.peerProvisioning?.let { prov ->
                         val applied = mutableListOf<String>()
                         prov.supabaseUrl?.takeIf { it.isNotBlank() }?.let { url ->
@@ -668,7 +565,6 @@ fun PairScreen(
                         // The derived 32-byte cloud sync key: store via the direct
                         // key path (KEK-wrapped) so the phone can decrypt cloud
                         // rows without the passphrase. Only when none is set yet.
-                        // Convert the FFI List<UByte> to ByteArray.
                         prov.derivedSyncKey?.takeIf { it.isNotEmpty() }?.let { keyUBytes ->
                             if (settings.cloudSyncKeyDirect == null) {
                                 val keyBytes = ByteArray(keyUBytes.size) { keyUBytes[it].toByte() }
@@ -676,7 +572,6 @@ fun PairScreen(
                                 applied += "derivedSyncKey"
                             }
                         }
-                        // Log WHAT was provisioned, never the key bytes.
                         if (applied.isNotEmpty()) {
                             android.util.Log.i(
                                 "PairActivity",
@@ -689,12 +584,8 @@ fun PairScreen(
                             )
                         }
                     }
-                    // CopyPaste-tqt0: NOW (post-bootstrap = the user confirmed pairing and
-                    // PAKE/SAS succeeded) apply the QR's 6th-field relay/Supabase provisioning.
-                    // Fill-missing only (applyQrProvisioning never overwrites a configured
-                    // field). This is the off-LAN / relay-only path; the PAKE-response
-                    // provisioning above covers the on-LAN bootstrap case. Deferring to here
-                    // ensures a hostile cppair:// cannot seed Settings without consent.
+                    // CopyPaste-tqt0: NOW (post-PAKE = the user confirmed pairing)
+                    // apply the QR's 6th-field relay/Supabase provisioning.
                     provisioningRaw?.let { raw ->
                         val prov = extractQrProvisioning(raw)
                         val applied = prov?.let { applyQrProvisioning(it, settings) } ?: emptyList()
@@ -707,8 +598,6 @@ fun PairScreen(
                     }
                     val localItems = repository.localItemsForSync(key)
                     // Denylist: never ingest items from a peer this device revoked.
-                    // Pass the local denylist into the ABI-9 syncWithPeer and skip a
-                    // dial entirely if THIS peer is itself revoked.
                     val revoked = runCatching { listRevokedFingerprints(settings.dbPath, key) }
                         .getOrElse { e ->
                             android.util.Log.w("PairActivity", "listRevokedFingerprints failed: ${e.message}")
@@ -724,12 +613,7 @@ fun PairScreen(
                         revokedFingerprints = revoked,
                         deviceId = settings.deviceId,
                     )
-                    // HB-7b: route each received item BY CONTENT TYPE, mirroring
-                    // FgsSyncLoop.storeSyncedItem. The old code force-decoded EVERY
-                    // item as UTF-8 text, so image/file frames became garbage and
-                    // were dropped (a cause of "received N stored 0"). All items
-                    // persist under the peer's STABLE item_id (overrideId) so a
-                    // later re-sync reuses it instead of minting a duplicate.
+                    // HB-7b: route each received item BY CONTENT TYPE.
                     var stored = 0
                     for (item in result.items) {
                         val plaintextBytes =
@@ -787,12 +671,7 @@ fun PairScreen(
                         }
                         if (didStore) stored += 1
                     }
-                    // Persist (APPEND) the peer into the multi-peer roster for
-                    // future syncs — a second pairing must NOT discard the first.
-                    // The session key is KEK-wrapped before it touches the roster
-                    // JSON so the background dialer in FgsSyncLoop can re-open a
-                    // sync session unattended without re-running the PAKE bootstrap
-                    // / re-scanning a QR.
+                    // Persist (APPEND) the peer into the multi-peer roster.
                     val rawSessionKey =
                         ByteArray(bootstrap.sessionKey.size) { bootstrap.sessionKey[it].toByte() }
                     val (wrappedB64, ivB64) = settings.wrapSessionKey(rawSessionKey)
@@ -807,27 +686,19 @@ fun PairScreen(
                             lastSyncMs = nowMs,
                             pairedAtMs = nowMs,
                             // HB-1b (ABI 14): persist the peer's device metadata
-                            // received over the authenticated tunnel so Wave 3
-                            // renders the device card.
+                            // received over the authenticated tunnel.
                             peerModel = bootstrap.peerModel,
                             peerOs = bootstrap.peerOs,
                             peerAppVersion = bootstrap.peerAppVersion,
                             peerLocalIp = bootstrap.peerLocalIp,
                             peerPublicIp = bootstrap.peerPublicIp,
-                            // CopyPaste-3k6m (ABI 17): persist the peer's stable device UUID so
-                            // OriginDeviceFilter resolves clipboard item names by UUID.
-                            // Primary: from the bootstrap tunnel's PeerMeta (ABI 17).
-                            // Fallback: the ScannedPairing.deviceId from the QR payload carries the
-                            // same UUID, so pairs made before the macOS daemon sends it in PeerMeta
-                            // still populate this field immediately at pair time.
+                            // CopyPaste-3k6m (ABI 17): persist the peer's stable device UUID.
                             peerDeviceId = bootstrap.peerDeviceId?.takeIf { it.isNotBlank() }
                                 ?: peer.deviceId.takeIf { it.isNotBlank() },
                         )
                     )
                     pairedFingerprint = bootstrap.peerFingerprint
                     val peerCount = settings.pairedPeers.size
-                    // HB-7a (ABI 14): surface the per-reason drop counters so a
-                    // "received N stored 0" outcome reveals WHY items dropped.
                     val skipped = "skipped: legacy ${result.itemsSkippedLegacy} / " +
                         "decrypt ${result.itemsSkippedDecryptFail} / " +
                         "type ${result.itemsSkippedUnknownType} / " +
@@ -835,14 +706,12 @@ fun PairScreen(
                     "Paired with ${peer.deviceName.ifBlank { "device" }} — received ${result.itemsReceived} item(s), stored $stored ($skipped), sent ${result.itemsSent}. ($peerCount paired device(s))"
                 }
                 // Surface the just-persisted peer for the compact success popup.
-                // Look it up from the roster by fingerprint so all ABI-14 fields
-                // (model/OS/version/IPs) are present for the card.
                 pairedPeerForPopup = settings.pairedPeers
                     .firstOrNull { it.fingerprint == pairedFingerprint }
                 syncResult = message
                 scannedPeer = null
-                // CopyPaste-tqt0: provisioning has been applied (post-confirmation);
-                // drop the retained raw payload so it cannot leak into a later pairing.
+                pendingBootstrap = null
+                // CopyPaste-tqt0: provisioning has been applied; drop the retained payload.
                 pendingProvisioningRaw = null
             } catch (e: Exception) {
                 // CopyPaste-jwga: never surface raw exception text to users.
@@ -904,12 +773,15 @@ fun PairScreen(
                 parsePairing(payload)
             }
             scannedPeer = info
+            // CopyPaste-1jms.33: new scan resets the PAKE result so the review card
+            // starts fresh (no stale metadata from a previous bootstrap attempt).
+            pendingBootstrap = null
             syncResult = null
             scannedInfo = formatScannedInfo(info.deviceName, info.fingerprint)
             // CopyPaste-tqt0: retain the raw deep-link payload but DO NOT apply its
             // 6th-field provisioning here. A crafted cppair:// link must not be able to
             // write relay/Supabase URLs into Settings before the user confirms pairing.
-            // Applied inside runPairAndSync once the PAKE bootstrap succeeds.
+            // Applied inside finalizeSync once the PAKE bootstrap succeeds.
             pendingProvisioningRaw = payload
         } catch (e: Exception) {
             // CopyPaste-jwga: never surface raw exception text to users.
@@ -1188,17 +1060,15 @@ fun PairScreen(
             } // end if (scannedPeer == null) — closes the QR card block
 
             // ── Deliverable 3: rich scanned-peer confirmation card ────────────
-            // Shown INSTEAD of the own-QR once a peer has been scanned. Surfaces
-            // all available fields from ScannedPairing: device name, address
-            // (host:port from addrHint), and fingerprint. Model/OS/appVersion are
-            // not available until after the PAKE meta-exchange (BootstrapResult
-            // fields); they will be shown on the post-pair success screen once
-            // runPairAndSync() completes and stores them in the peer roster.
-            // TODO(post-PAKE-meta): show peerModel/peerOs/peerAppVersion here
-            //   once the BootstrapResult is threaded back to the UI after
-            //   bootstrapPairInitiator completes. Those fields live in
-            //   BootstrapResult.peerModel/peerOs/peerAppVersion (ABI 14) but
-            //   runPairAndSync currently only persists them to Settings.pairedPeers.
+            // Shown INSTEAD of the own-QR once a peer has been scanned.
+            //
+            // CopyPaste-1jms.33 — two-phase flow:
+            //   Phase 1 (pendingBootstrap == null): card shows name/address/fingerprint
+            //     (from ScannedPairing — available immediately after scan).
+            //     Button: "Pair & verify…" → runs PAKE bootstrap.
+            //   Phase 2 (pendingBootstrap != null): card additionally shows the peer's
+            //     model/OS/appVersion (from BootstrapResult — available after PAKE).
+            //     Button: "Confirm & sync" → finalizes sync and roster commit.
             scannedPeer?.let { peer ->
                 // 6i0w: replace raw Material Card with CopyPasteCard (glass surface).
                 CopyPasteCard {
@@ -1288,19 +1158,75 @@ fun PairScreen(
                                 }
                             },
                         )
-                        // NOTE: model/OS/appVersion become available after the PAKE
-                        // bootstrap completes — see TODO above.
+
+                        // CopyPaste-1jms.33: after PAKE bootstrap completes, show the
+                        // peer's model/OS/appVersion in the card before the user
+                        // confirms sync — matching macOS pairing-confirmation parity.
+                        // peerMetaReviewRows() is a pure helper (DevicesUtils.kt) that
+                        // filters out null/blank fields so no empty rows appear.
+                        pendingBootstrap?.let { bs ->
+                            val metaRows = peerMetaReviewRows(
+                                peerModel = bs.peerModel,
+                                peerOs = bs.peerOs,
+                                peerAppVersion = bs.peerAppVersion,
+                            )
+                            if (metaRows.isNotEmpty()) {
+                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    metaRows.forEach { (labelKey, value) ->
+                                        // Resolve the string resource by name.
+                                        // The label keys map 1:1 to strings.xml entries
+                                        // (meta_label_model, meta_label_os, meta_label_version).
+                                        val label = when (labelKey) {
+                                            "meta_label_model" -> stringResource(R.string.meta_label_model)
+                                            "meta_label_os" -> stringResource(R.string.meta_label_os)
+                                            "meta_label_version" -> stringResource(R.string.meta_label_version)
+                                            else -> labelKey
+                                        }
+                                        MetaRow(label = label, value = value)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
-                // Adopt CopyPasteButton primary for the pairing action.
-                CopyPasteButton(
-                    enabled = !syncing,
-                    onClick = { runPairAndSync(peer) },
-                    variant = ButtonVariant.PRIMARY,
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(text = if (syncing) "Pairing…" else "Pair & sync")
+                // CopyPaste-1jms.33: two-phase button.
+                //   Phase 1 (pendingBootstrap == null): "Pair & verify…" — runs PAKE.
+                //   Phase 2 (pendingBootstrap != null): "Confirm & sync" — finalizes.
+                // Both phases use the PRIMARY variant; "Cancel" (ghost) lets the user
+                // discard a verified result and go back to re-scan.
+                if (pendingBootstrap == null) {
+                    CopyPasteButton(
+                        enabled = !syncing,
+                        onClick = { runBootstrap(peer) },
+                        variant = ButtonVariant.PRIMARY,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(text = if (syncing) stringResource(R.string.pair_verifying) else stringResource(R.string.pair_btn_verify))
+                    }
+                } else {
+                    val bs = pendingBootstrap!!
+                    CopyPasteButton(
+                        enabled = !syncing,
+                        onClick = { finalizeSync(peer, bs) },
+                        variant = ButtonVariant.PRIMARY,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(text = if (syncing) stringResource(R.string.pair_verifying) else stringResource(R.string.pair_btn_confirm_sync))
+                    }
+                    // Cancel: discard the verified result so the user can re-scan.
+                    CopyPasteButton(
+                        enabled = !syncing,
+                        onClick = {
+                            pendingBootstrap = null
+                            scannedPeer = null
+                            pendingProvisioningRaw = null
+                        },
+                        variant = ButtonVariant.GHOST,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(text = stringResource(R.string.dialog_cancel))
+                    }
                 }
             }
 
@@ -1413,168 +1339,3 @@ fun PairScreen(
     GlassToastHost(state = toastState)
     } // end Box
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Post-pairing success popup
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Compact AlertDialog shown immediately after QR pairing succeeds.
- *
- * Renders the just-paired device as a tidy card — name + status dot (always
- * "Paired ✓" since we just finished), model/OS if the peer sent them over the
- * authenticated tunnel (ABI 14 peerModel/peerOs), and a short fingerprint.
- * The full verbose sync summary is intentionally omitted here (it remains in
- * [syncResult] for debug logging); this card surfaces only what the user cares
- * about: "which device did I just pair with?"
- *
- * Dismisses via "Done" → [onDismiss], which clears [pairedPeerForPopup] and
- * calls [onBack] to return to the Devices list.
- */
-@Composable
-private fun PairedSuccessPopup(
-    peer: PairedPeer,
-    onDismiss: () -> Unit,
-) {
-    // voyf: read theme-adaptive ramp — no hardcoded Ide* constants.
-    val c = LocalIdeColors.current
-    GlassAlertDialog(
-        onDismissRequest = onDismiss,
-        title = {
-            Text(
-                text = "Paired successfully",
-                style = MaterialTheme.typography.titleMedium,
-                // voyf: theme-adaptive success token.
-                color = c.success,
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // ── Avatar + name + status row ────────────────────────────────
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    // lclr: 38dp avatar tile in success-tint (peer is now online/paired).
-                    val displayName = peer.name.ifBlank { "Paired device" }
-                    Box(
-                        modifier = Modifier
-                            .size(38.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(c.successDim),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(
-                            text = displayName.take(1).uppercase(),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = c.success,
-                        )
-                    }
-                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            // prld: status dot 8dp (not 10dp), success color for paired state.
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .clip(CircleShape)
-                                    .background(c.success),
-                            )
-                            Text(
-                                text = displayName,
-                                style = MaterialTheme.typography.titleSmall,
-                                // voyf: theme-adaptive text token.
-                                color = c.text,
-                            )
-                        }
-                        Text(
-                            text = "Paired ✓",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = c.success,
-                        )
-                    }
-                }
-
-                Spacer(Modifier.height(4.dp))
-
-                // ── Device metadata rows (only non-blank fields) ─────────────
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                    peer.peerModel?.takeIf { it.isNotBlank() }?.let {
-                        PopupMetaRow(label = "Model", value = it)
-                    }
-                    peer.peerOs?.takeIf { it.isNotBlank() }?.let {
-                        PopupMetaRow(label = "OS", value = it)
-                    }
-                    peer.peerAppVersion?.takeIf { it.isNotBlank() }?.let {
-                        PopupMetaRow(label = "Version", value = it)
-                    }
-                    // 10hh: mono truncated fingerprint — 16…8 (via formatPeerFingerprint).
-                    val shortFp = formatPeerFingerprint(peer.fingerprint)
-                    PopupMetaRow(label = "Fingerprint", value = shortFp)
-                }
-            }
-        },
-        confirmButton = {
-            CopyPasteButton(onClick = onDismiss, variant = ButtonVariant.PRIMARY) {
-                // voyf: PRIMARY variant uses accent color — drop explicit color override.
-                Text("Done")
-            }
-        },
-    )
-}
-
-/** Single label+value row for [PairedSuccessPopup]. */
-@Composable
-private fun PopupMetaRow(label: String, value: String) {
-    // voyf: read theme-adaptive ramp — no hardcoded Ide* constants.
-    val c = LocalIdeColors.current
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodySmall,
-            // voyf: theme-adaptive dim token.
-            color = c.dim,
-            modifier = Modifier.width(72.dp),
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.bodySmall,
-            // voyf: theme-adaptive text token.
-            color = c.text,
-        )
-    }
-}
-
-/**
- * Best-effort lookup of this device's site-local IPv4 address (e.g. 192.168.x.x,
- * 10.x.x.x), used to build the inbound listener's advertised `sync_addr` at pair
- * time so the macOS peer can dial back over the LAN.
- *
- * Enumerates active, non-loopback interfaces and returns the first site-local
- * IPv4 (skipping link-local 169.254.x.x and IPv6). Returns null when no such
- * address exists (no Wi-Fi / cellular-only), in which case the caller falls back
- * to advertising no address (Android→macOS dial only).
- *
- * No WifiManager dependency: NetworkInterface enumeration works for both Wi-Fi
- * and other LAN interfaces without the ACCESS_WIFI_STATE permission.
- *
- * `internal` so the discovery pairing path ([DevicesActivity]) reuses the SAME
- * helper for HB-1a `local_ip` instead of duplicating the enumeration.
- */
-internal fun lanIpv4Address(): String? {
-    return try {
-        java.net.NetworkInterface.getNetworkInterfaces()?.toList()
-            ?.asSequence()
-            ?.filter { runCatching { it.isUp && !it.isLoopback }.getOrDefault(false) }
-            ?.flatMap { it.inetAddresses.toList().asSequence() }
-            ?.filterIsInstance<java.net.Inet4Address>()
-            ?.firstOrNull { it.isSiteLocalAddress }
-            ?.hostAddress
-    } catch (e: Exception) {
-        android.util.Log.w("PairActivity", "lanIpv4Address lookup failed: ${e.message}")
-        null
-    }
-}
-

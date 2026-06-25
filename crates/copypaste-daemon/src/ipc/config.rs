@@ -5,173 +5,96 @@
 
 use std::os::unix::fs::PermissionsExt as _;
 
-/// Persistent application configuration stored at
-/// `dirs::config_dir()/copypaste/config.json`.
+/// Persistent application configuration stored at `config.json`.
 ///
-/// # X5 Canonical cloud-config field set
+/// CopyPaste-c4q2.25: this used to be a daemon-local **shadow** struct,
+/// field-identical to (and easy to drift from) the canonical IPC wire type.
+/// The shadow has been retired — `AppConfig` is now a re-export of
+/// [`copypaste_ipc::AppConfig`], the single source of truth for the
+/// `get_config`/`set_config` field set. Adding a setting is now a one-place
+/// change in `copypaste-ipc`; the daemon picks it up automatically.
 ///
-/// These are the **authoritative** field names used by every platform. The macOS
-/// daemon owns this struct; Android's `Settings.kt` mirrors the same names via
-/// `SharedPreferences` keys. Any naming deviation on the Android side should be
-/// aligned to these names, not the reverse.
-///
-/// | Field               | `get_config` IPC shape                  | Notes                                          |
-/// |---------------------|-----------------------------------------|------------------------------------------------|
-/// | `supabase_url`      | verbatim `String \| null`               | HTTPS required; trailing `/` stripped on write |
-/// | `supabase_anon_key` | verbatim `String \| null`               | Publishable JWT; safe to surface in UI         |
-/// | `supabase_email`    | **omitted**; `supabase_email_set: bool`    | GoTrue account email; redacted on read         |
-/// | `supabase_password` | **omitted**; `supabase_password_set: bool` | GoTrue account password; redacted on read      |
-///
-/// The sync passphrase is **not** stored here. It is set via the
-/// `set_sync_passphrase` IPC method and held in the macOS Keychain (or the
-/// file-store fallback on unsigned builds). Android stores it under
-/// `cloud_sync_passphrase` in `SharedPreferences` — that name deviates; the
-/// Android side should be updated to call the FFI layer's `set_sync_passphrase`
-/// instead of storing it locally, to match macOS semantics.
-///
-/// `get_config` never returns `supabase_email` or `supabase_password` in plain
-/// text: it replaces them with `supabase_email_set: bool` and
-/// `supabase_password_set: bool`. `set_config` accepts plain-text values and
-/// persists them; `null` / absent means "preserve existing" — the merge policy
-/// in `merge_config` prevents a UI round-trip from wiping stored credentials.
-///
-/// The limit fields (`max_text_size_bytes`, `max_image_size_bytes`,
-/// `max_file_size_bytes`, `storage_quota_bytes`, `sensitive_ttl_secs`,
-/// `image_quality`, `sync_on_wifi_only`) are mirrored into the core
-/// `config.toml` on `set_config` and read back from it on `get_config`,
-/// so they survive daemon restarts and hot-reload into the running monitor.
-///
-/// Fix-5: `p2p_enabled` is `Option<bool>` so a `set_config` that omits it
-/// (`None`) preserves the stored value instead of silently disabling P2P.
-#[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct AppConfig {
-    /// Whether P2P sync is enabled. `None` = not specified by the caller
-    /// (preserve the stored value). `Some(true/false)` = explicit toggle.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub p2p_enabled: Option<bool>,
-    /// Supabase project URL (e.g. `https://xxxx.supabase.co`). See X5 table
-    /// above. Env override: `SUPABASE_URL`.
-    #[serde(default)]
-    pub supabase_url: Option<String>,
-    /// Supabase publishable anon/public JWT. Safe to surface in UI. Env
-    /// override: `SUPABASE_ANON_KEY`.
-    #[serde(default)]
-    pub supabase_anon_key: Option<String>,
-    /// HTTP relay base URL for store-and-forward sync fan-out (e.g.
-    /// `https://relay.example.com`). Non-secret: surfaced verbatim by
-    /// `get_config`. `None` / absent on `set_config` preserves the stored value
-    /// (see `merge_config`). Mirrored into the core `config.toml`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub relay_url: Option<String>,
-    /// GoTrue account email for the `authenticated` scope sign-in. Persisted
-    /// (not env-only) so the documented `copypaste cloud setup` flow yields a
-    /// daemon that authenticates and passes the `authenticated`-only RLS
-    /// policies — anon-key-only requests are rejected by RLS and sync silently
-    /// fails. Stored in the same `0600` `config.json` as `supabase_anon_key`.
-    /// Redacted to `supabase_email_set: bool` by `get_config`. Env override:
-    /// `SUPABASE_EMAIL`.
-    #[serde(default)]
-    pub supabase_email: Option<String>,
-    /// GoTrue account password. See [`Self::supabase_email`]. Never logged; the
-    /// `Debug` derive is acceptable because the daemon does not debug-print the
-    /// whole config (only individual non-secret fields are surfaced over IPC).
-    /// Redacted to `supabase_password_set: bool` by `get_config`. Env override:
-    /// `SUPABASE_PASSWORD`.
-    #[serde(default)]
-    pub supabase_password: Option<String>,
+/// `copypaste_core::AppConfig` (config.toml / crypto / limit fields) remains a
+/// **separate** internal type; `read_config`/`update_core_config` bridge the two
+/// (the limit fields are mirrored into config.toml, credentials stay in
+/// config.json). `get_config` never returns the credentials — see
+/// [`build_config_response`].
+pub use copypaste_ipc::AppConfig;
 
-    // ── Limit fields — persisted to config.toml via set_config ──────────────
-    // `None` means "use whatever is already in config.toml" (presence-optional
-    // so a UI that only touches p2p_enabled never accidentally resets quotas).
-    /// Maximum size of a single captured text item (bytes).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_text_size_bytes: Option<u64>,
-    /// Maximum size of a captured image (bytes).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_image_size_bytes: Option<u64>,
-    /// Maximum size of a captured file reference (bytes).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max_file_size_bytes: Option<u64>,
-    /// Maximum total byte size of unpinned clipboard items in the local DB.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub storage_quota_bytes: Option<u64>,
-    /// Auto-wipe TTL for sensitive items (seconds).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sensitive_ttl_secs: Option<u64>,
-    /// Image quality (1–100; 100 = lossless).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image_quality: Option<u8>,
-    /// If true, skip cloud/P2P sync when not on Wi-Fi.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sync_on_wifi_only: Option<bool>,
-    /// Play a soft system sound when the daemon captures a new clipboard item.
-    /// `None` = not specified (preserve existing). macOS only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sound_on_copy: Option<bool>,
-    /// Show a notification banner when the daemon captures a new clipboard item.
-    /// `None` = not specified (preserve existing). macOS only.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub notify_on_copy: Option<bool>,
-    /// Whether the daemon may make a one-off STUN request to discover this
-    /// device's public IP. `None` = not specified (preserve existing).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub collect_public_ip: Option<bool>,
-    /// When `true`, paste-back strips all rich types and writes plain text only.
-    /// `None` = not specified (preserve existing).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub paste_as_plain_text: Option<bool>,
-    /// Bundle IDs of apps whose clipboard copies are silently skipped (macOS).
-    /// `None` = not specified (preserve existing); `Some(vec)` replaces the list.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub excluded_app_bundle_ids: Option<Vec<String>>,
-    /// Whether this device advertises via mDNS-SD and browses for LAN peers.
-    /// `false` = invisible on the local network. `None` = preserve existing
-    /// (default `true` on first install).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub lan_visibility: Option<bool>,
+/// Build the redacted, read-only [`copypaste_ipc::AppConfigResponse`] that
+/// `get_config` returns from the daemon's internal [`AppConfig`].
+///
+/// This is the type-safe replacement for the former
+/// `redact_config_secrets(&mut serde_json::Value)`, which serialised the whole
+/// internal config and string-stripped the secret KEYS afterwards — a fragile
+/// denylist that silently leaked any *new* secret field the author forgot to add
+/// to it (CopyPaste-c4q2.18).
+///
+/// Two safety properties:
+///
+/// 1. **No secret can be represented in the output.** `AppConfigResponse` has no
+///    `supabase_email` / `supabase_password` field at all — only the
+///    `*_set` presence booleans. Leaking a credential here is a compile-time
+///    impossibility, not a runtime denylist.
+///
+/// 2. **New fields cannot be silently forwarded.** The internal `AppConfig` is
+///    destructured *exhaustively* below (no `..` rest pattern). Adding a field to
+///    `AppConfig` breaks this function's compile until the author consciously
+///    decides whether it is a secret (drop it / map to a `*_set` flag) or a plain
+///    setting (forward it). That decision is exactly the acceptance criterion of
+///    CopyPaste-c4q2.18.
+pub(crate) fn build_config_response(cfg: &AppConfig) -> copypaste_ipc::AppConfigResponse {
+    // EXHAUSTIVE destructure — do NOT add `..`. A new field on `AppConfig` must
+    // force a compile error here so its IPC exposure is a deliberate choice.
+    let AppConfig {
+        p2p_enabled,
+        supabase_url,
+        supabase_anon_key,
+        relay_url,
+        // ── Secrets: deliberately consumed into presence flags only, never
+        //    forwarded as plaintext. ──
+        supabase_email,
+        supabase_password,
+        max_text_size_bytes,
+        max_image_size_bytes,
+        max_file_size_bytes,
+        storage_quota_bytes,
+        sensitive_ttl_secs,
+        image_quality,
+        sync_on_wifi_only,
+        sound_on_copy,
+        notify_on_copy,
+        collect_public_ip,
+        paste_as_plain_text,
+        excluded_app_bundle_ids,
+        lan_visibility,
+        sync_enabled,
+        auto_apply_synced_clip,
+    } = cfg;
 
-    /// Master switch for all sync transports (relay, cloud, P2P).
-    /// `false` = no data is sent to or received from any remote device.
-    /// `None` = preserve existing (default `true` on first install).
-    /// See bd CopyPaste-tke7 / PG-30.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub sync_enabled: Option<bool>,
-
-    /// Universal Clipboard: when `true`, the daemon immediately writes a
-    /// freshly-synced item to the local pasteboard.  `false` = store-only.
-    /// `None` = preserve existing (default `true`).
-    /// See bd CopyPaste-58ou / PG-31.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_apply_synced_clip: Option<bool>,
-}
-
-/// Strip account credentials from a serialised [`AppConfig`] before it leaves
-/// the daemon over IPC. Removes `supabase_password` and `supabase_email` and
-/// replaces each with a `*_set` boolean presence flag. The anon/public key is
-/// left intact (it is a publishable key the UI prefills). No-op for non-object
-/// values. See the `get_config` handler for the rationale.
-pub(crate) fn redact_config_secrets(value: &mut serde_json::Value) {
-    let Some(obj) = value.as_object_mut() else {
-        return;
-    };
-    let password_set = obj
-        .get("supabase_password")
-        .map(|p| !p.is_null())
-        .unwrap_or(false);
-    let email_set = obj
-        .get("supabase_email")
-        .map(|e| !e.is_null())
-        .unwrap_or(false);
-    obj.remove("supabase_password");
-    obj.remove("supabase_email");
-    obj.insert(
-        "supabase_password_set".into(),
-        serde_json::Value::Bool(password_set),
-    );
-    obj.insert(
-        "supabase_email_set".into(),
-        serde_json::Value::Bool(email_set),
-    );
+    copypaste_ipc::AppConfigResponse {
+        p2p_enabled: *p2p_enabled,
+        supabase_url: supabase_url.clone(),
+        supabase_anon_key: supabase_anon_key.clone(),
+        relay_url: relay_url.clone(),
+        supabase_email_set: supabase_email.is_some(),
+        supabase_password_set: supabase_password.is_some(),
+        max_text_size_bytes: *max_text_size_bytes,
+        max_image_size_bytes: *max_image_size_bytes,
+        max_file_size_bytes: *max_file_size_bytes,
+        storage_quota_bytes: *storage_quota_bytes,
+        sensitive_ttl_secs: *sensitive_ttl_secs,
+        image_quality: *image_quality,
+        sync_on_wifi_only: *sync_on_wifi_only,
+        sound_on_copy: *sound_on_copy,
+        notify_on_copy: *notify_on_copy,
+        collect_public_ip: *collect_public_ip,
+        paste_as_plain_text: *paste_as_plain_text,
+        excluded_app_bundle_ids: excluded_app_bundle_ids.clone(),
+        lan_visibility: *lan_visibility,
+        sync_enabled: *sync_enabled,
+        auto_apply_synced_clip: *auto_apply_synced_clip,
+    }
 }
 
 /// Resolve the base config directory that BOTH `config.json` and `peers.json`
@@ -361,8 +284,15 @@ pub(crate) fn update_core_config(
     if let Some(ref v) = incoming.excluded_app_bundle_ids {
         core.excluded_app_bundle_ids = v.clone();
     }
-    if let Some(ref v) = incoming.relay_url {
-        core.relay_url = Some(v.clone());
+    // CopyPaste-44rq.67: the empty string is the "clear the relay" sentinel.
+    // `None` means "field omitted → preserve"; `Some("")`/whitespace means the
+    // user explicitly cleared the URL and the relay must be disabled (set to
+    // `None` in config.toml so the daemon stops syncing through it). Mirrors
+    // `crate::relay::relay_url_is_clear`.
+    match incoming.relay_url.as_deref() {
+        None => {}                                               // omitted → preserve
+        Some(s) if s.trim().is_empty() => core.relay_url = None, // sentinel → clear
+        Some(v) => core.relay_url = Some(v.to_owned()),          // normal set
     }
     if let Some(v) = incoming.lan_visibility {
         core.lan_visibility = v;
@@ -414,7 +344,15 @@ pub(crate) fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfi
         p2p_enabled: incoming.p2p_enabled.or(existing.p2p_enabled),
         supabase_url: incoming.supabase_url.or(existing.supabase_url),
         supabase_anon_key: incoming.supabase_anon_key.or(existing.supabase_anon_key),
-        relay_url: incoming.relay_url.or(existing.relay_url),
+        // CopyPaste-44rq.67: preserve the empty-string "clear" sentinel rather
+        // than letting `.or()` fall back to the existing URL — `update_core_config`
+        // relies on seeing `Some("")` to set `core.relay_url = None`. A normal
+        // value takes precedence over existing; `None` (omitted) preserves.
+        relay_url: match incoming.relay_url.as_deref() {
+            Some(s) if s.trim().is_empty() => Some(String::new()),
+            Some(_) => incoming.relay_url,
+            None => existing.relay_url,
+        },
         supabase_email: incoming.supabase_email.or(existing.supabase_email),
         supabase_password: incoming.supabase_password.or(existing.supabase_password),
         sound_on_copy: incoming.sound_on_copy.or(existing.sound_on_copy),

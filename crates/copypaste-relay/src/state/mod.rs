@@ -465,7 +465,8 @@ mod tests {
                 valid_pop_b64(),
             )
             .unwrap();
-        assert_eq!(token.len(), 32);
+        // CopyPaste-qvtg.3: 32-byte (256-bit) token → 64 hex chars.
+        assert_eq!(token.len(), 64);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
         assert!(expires_at > 0);
     }

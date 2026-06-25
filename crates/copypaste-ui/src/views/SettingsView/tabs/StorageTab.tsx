@@ -42,24 +42,25 @@ export type StorageTabProps = {
   vacuumBusy: boolean;
   vacuumMsg: { text: string; isError: boolean } | null;
   deleteMsg: { text: string; isError: boolean } | null;
-  limitsMsg: Record<string, string | null>;
+  limitsMsg: Record<string, { ok: boolean; message: string } | null>;
   btnCls: string;
   btnStyle: React.CSSProperties;
   saveLimitsField: (field: string, patch: Record<string, unknown>, onRevert?: () => void) => Promise<void>;
-  showLimitsMsg: (field: string, msg: string | null, durationMs: number) => void;
+  // bdac.106: ok param distinguishes success from error without string matching.
+  showLimitsMsg: (field: string, msg: string | null, durationMs: number, ok?: boolean) => void;
   handleExport: () => void;
   handleImportFile: (e: React.ChangeEvent<HTMLInputElement>) => void;
   handleVacuum: () => void;
   setDeleteConfirm: (v: boolean) => void;
 };
 
-function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, string | null> }) {
-  const msg = limitsMsg[field];
-  if (!msg) return null;
-  const isError = msg !== "Saved";
+// bdac.106: branch on .ok (typed signal) — no string comparison.
+function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, { ok: boolean; message: string } | null> }) {
+  const entry = limitsMsg[field];
+  if (!entry) return null;
   return (
-    <span className={`text-[11px] ${isError ? "text-ide-danger" : "text-ide-success"}`}>
-      {msg}
+    <span className={`text-[11px] ${entry.ok ? "text-ide-success" : "text-ide-danger"}`}>
+      {entry.message}
     </span>
   );
 }
@@ -267,7 +268,7 @@ export function StorageTab({
           onRelease={(v) => {
             // Persist on commit (mouse-up / key-up) and show inline feedback.
             setPrefs({ historyDisplayLimit: v });
-            showLimitsMsg("max_items", "Saved", 1500);
+            showLimitsMsg("max_items", "Saved", 1500, true);
           }}
         />
         <div className="border-b border-ide-divider/70 px-3 pb-2 text-[11px] text-ide-faint">

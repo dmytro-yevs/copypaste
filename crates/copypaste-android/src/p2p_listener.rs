@@ -742,6 +742,46 @@ mod tests {
         }
     }
 
+    /// Variant of `dial_and_send` that transmits raw serialised bytes rather than
+    /// a `WireItem`.  Useful for injecting control frames such as
+    /// `PeerFrame::Control(ControlMsg::Unpair)` that are not `WireItem`s.
+    ///
+    /// After sending the bytes the dialer holds the link open for `hold_ms`
+    /// milliseconds so the listener's read loop has time to process the frame
+    /// before the connection drops.
+    fn dial_and_send_bytes(
+        addr: std::net::SocketAddr,
+        listener_fp: String,
+        client_cert_der: Vec<u8>,
+        client_key_der: Vec<u8>,
+        payload: Vec<u8>,
+        hold_ms: u64,
+    ) -> Result<(), String> {
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("client runtime");
+            rt.block_on(async move {
+                let peers = PairedPeers::new();
+                peers.add(listener_fp.clone(), "listener");
+                let transport = ClientTransport::from_cert(client_cert_der, client_key_der, peers);
+                let mut framed = transport
+                    .connect(addr, &listener_fp)
+                    .await
+                    .map_err(|e| format!("connect failed: {e}"))?;
+                framed
+                    .send(Bytes::from(payload))
+                    .await
+                    .map_err(|e| format!("send failed: {e}"))?;
+                tokio::time::sleep(Duration::from_millis(hold_ms)).await;
+                Ok::<(), String>(())
+            })
+        })
+        .join()
+        .expect("client thread")
+    }
+
     /// Allowlist pinning + loopback handshake: a dialer whose fingerprint IS in
     /// the allowlist completes the handshake; the listener decrypts its framed
     /// item and surfaces it via `poll`.
@@ -957,6 +997,123 @@ mod tests {
         assert!(
             got.is_empty(),
             "a revoked/unpinned dialer's item must NOT be received after a live roster update"
+        );
+    }
+
+    /// PG-1 (CopyPaste-7d8x): inbound `PeerFrame::Control(ControlMsg::Unpair)` evicts
+    /// the peer from the live allowlist.
+    ///
+    /// # What this tests
+    ///
+    /// The `run_connection` inbound read loop parses every frame as a `PeerFrame`
+    /// (not a bare `WireItem`). When a `ControlMsg::Unpair` frame arrives the handler:
+    ///   1. Removes the peer from `peer_state.peers` (the interior-mutable `PairedPeers`
+    ///      shared with the `PeerTransport` verifier) so subsequent handshakes are rejected.
+    ///   2. Removes the peer from `peer_state.allowed`.
+    ///   3. Adds the peer to `peer_state.revoked` (defence-in-depth: the accept-time
+    ///      denylist check will also drop any reconnect).
+    ///   4. Closes the current connection.
+    ///
+    /// This test injects a serialised `PeerFrame::Control(ControlMsg::Unpair)` over a
+    /// live mTLS connection and then asserts the security outcome: a reconnect attempt
+    /// with the same cert is rejected (no item is received after the Unpair).
+    ///
+    /// Previously this test was requested-but-never-added when the code path was
+    /// first written. This is the instrumented regression test that closes the gap.
+    #[test]
+    fn inbound_unpair_control_frame_evicts_peer_from_allowlist() {
+        use copypaste_sync::protocol::{ControlMsg, PeerFrame};
+
+        let listener_cert = generate_device_cert().expect("listener cert");
+        let client_cert = generate_device_cert().expect("client cert");
+        let client_fp = client_cert.fingerprint.clone();
+        let listener_fp = listener_cert.fingerprint.clone();
+
+        let handle = start(
+            test_runtime(),
+            0,
+            listener_cert.cert_der.clone(),
+            listener_cert.key_der.clone(),
+            vec![client_fp.clone()],
+            Vec::new(), // no initial revocations
+            vec![PeerSessionKey {
+                fingerprint: client_fp.clone(),
+                session_key: TEST_SESSION_KEY.to_vec(),
+            }],
+            Vec::new(), // no catch-up history
+            "listener-device".to_string(),
+        )
+        .expect("listener starts");
+
+        let addr: std::net::SocketAddr = format!("127.0.0.1:{}", handle.actual_port)
+            .parse()
+            .expect("addr");
+
+        // Step 1: send a legitimate item to confirm the peer is initially allowed.
+        let shared = shared_test_key();
+        let first_item = make_wire_item(&shared, b"item before unpair");
+        dial_and_send(
+            addr,
+            listener_fp.clone(),
+            client_cert.cert_der.clone(),
+            client_cert.key_der.clone(),
+            first_item,
+        )
+        .expect("first connection (before Unpair) must succeed");
+
+        // Poll briefly to drain the first item.
+        std::thread::sleep(Duration::from_millis(400));
+        let before = poll(handle.listener_id).expect("poll before unpair");
+        assert_eq!(
+            before.len(),
+            1,
+            "listener must receive the pre-Unpair item (confirms peer WAS allowed)"
+        );
+
+        // Step 2: connect again and send a `PeerFrame::Control(ControlMsg::Unpair)` frame.
+        // The frame serialises to {"control":"unpair"} (ControlMsg is tagged "control",
+        // rename_all = "snake_case" → variant Unpair → "unpair").
+        let unpair_payload =
+            serde_json::to_vec(&PeerFrame::Control(ControlMsg::Unpair)).expect("serialise Unpair");
+        // The listener read loop must process the Unpair and close the link.
+        // hold_ms=400 gives the listener task time to process the frame.
+        let _ = dial_and_send_bytes(
+            addr,
+            listener_fp.clone(),
+            client_cert.cert_der.clone(),
+            client_cert.key_der.clone(),
+            unpair_payload,
+            400,
+        );
+
+        // Give the accept task and run_connection task time to complete the eviction.
+        std::thread::sleep(Duration::from_millis(400));
+
+        // Step 3: attempt a third connection with the same cert.
+        // Because run_connection evicted the peer from `peer_state.peers` (the interior-
+        // mutable PairedPeers shared with the PeerTransport verifier) AND added it to
+        // `peer_state.revoked`, this reconnect should be refused: either the TLS verifier
+        // rejects the handshake (unpinned) or the accept-time denylist check drops it.
+        let post_item = make_wire_item(&shared, b"item after unpair - must not be received");
+        // The reconnect may fail at TLS (unpinned) or succeed+then-be-dropped (denylist);
+        // either way, the security assertion is that NO item is received.
+        let _ = dial_and_send(
+            addr,
+            listener_fp,
+            client_cert.cert_der.clone(),
+            client_cert.key_der.clone(),
+            post_item,
+        );
+
+        std::thread::sleep(Duration::from_millis(400));
+        let after = poll(handle.listener_id).expect("poll after unpair");
+        stop(handle.listener_id).expect("stop");
+
+        assert!(
+            after.is_empty(),
+            "after an inbound Unpair control frame, the peer must be evicted — \
+             a subsequent connection from the same fingerprint must NOT deliver items \
+             (PG-1 / CopyPaste-7d8x)"
         );
     }
 }

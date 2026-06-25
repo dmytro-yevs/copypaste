@@ -73,11 +73,18 @@ pub(super) fn decrypt_relay_token(
 /// Load a previously-cached relay auth token, if any. Never errors hard — a
 /// missing/unreadable token just means "re-register".
 ///
-/// **Migration**: if the on-disk blob does not decrypt successfully (legacy
-/// plaintext format, wrong key, or truncated file), the raw content is
-/// returned as-is so the caller can continue using the in-memory token for
-/// this run. On the next successful registration the new encrypted format will
-/// overwrite the file.
+/// **Security (CopyPaste-qvtg.2):** the token file MUST authenticate under
+/// XChaCha20-Poly1305 (AEAD-at-rest). If decryption fails — legacy plaintext,
+/// wrong key, truncated/corrupt, or **a token planted by a local attacker with
+/// write access to the data dir** — this returns `None` (the daemon re-registers
+/// and writes a fresh encrypted token). It NEVER returns the raw file bytes.
+///
+/// The earlier "best-effort migration" path returned undecryptable file contents
+/// verbatim as the bearer token, with no deadline. That permanently degraded the
+/// at-rest protection to advisory and enabled a write-then-use TOCTOU: an
+/// attacker could plant a controlled token and the daemon would use it. The
+/// migration period is now over; re-registration is cheap and the only cost of
+/// rejecting a genuine legacy plaintext token.
 pub(super) fn load_cached_token(local_key: &zeroize::Zeroizing<[u8; 32]>) -> Option<String> {
     let path = token_path()?;
     let raw = std::fs::read_to_string(&path).ok()?;
@@ -85,19 +92,20 @@ pub(super) fn load_cached_token(local_key: &zeroize::Zeroizing<[u8; 32]>) -> Opt
     if trimmed.is_empty() {
         return None;
     }
-    // Try the encrypted format first. If decryption fails (legacy plaintext or
-    // corrupt file) fall back to the raw content so existing installs continue
-    // to work for this run; the file will be re-encrypted on the next store.
-    if let Some(token) = decrypt_relay_token(trimmed, local_key) {
-        return Some(token);
+    // ONLY accept a token that authenticates under AEAD. Anything else (legacy
+    // plaintext, corrupt, wrong key, or attacker-planted) is rejected: warn and
+    // return None so the caller re-registers and overwrites the file with a
+    // fresh encrypted token.
+    match decrypt_relay_token(trimmed, local_key) {
+        Some(token) => Some(token),
+        None => {
+            tracing::warn!(
+                "relay-sync: cached relay token failed AEAD decryption (legacy plaintext, \
+                 corrupt, or tampered) — ignoring it and re-registering"
+            );
+            None
+        }
     }
-    // Legacy plaintext: return the raw token (best-effort migration). The file
-    // will be overwritten with the encrypted format on the next successful
-    // registration, completing the migration transparently.
-    tracing::debug!(
-        "relay-sync: loaded legacy plaintext token; will re-encrypt on next registration"
-    );
-    Some(trimmed.to_owned())
 }
 
 /// Persist the relay auth token encrypted to a `0600` file. Best-effort: a

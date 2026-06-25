@@ -87,35 +87,21 @@ pub struct Request {
 // without parsing English error text. Keep this set small and additive — once
 // a code is shipped, never repurpose it.
 //
-// Cross-reference: these constants are intentional local copies — they must
-// stay byte-identical to the corresponding `copypaste_ipc::ERR_CODE_*`
-// constants (see `copypaste-ipc/src/response.rs`). See CopyPaste-c4q2.11 for
-// the plan to collapse them into a single source of truth.
-
-/// Requested resource (item id, peer, etc.) does not exist.
-pub const ERR_CODE_NOT_FOUND: &str = "not_found";
-/// Authentication failed — bad credentials, expired token, missing keychain entry.
-pub const ERR_CODE_AUTH_FAILED: &str = "auth_failed";
-/// Request was structurally valid JSON but violated parameter contract
-/// (missing field, wrong type, invalid format).
-pub const ERR_CODE_INVALID_ARGUMENT: &str = "invalid_argument";
-/// Method is recognised but not yet implemented (cloud-sync stubs, etc.).
-pub const ERR_CODE_NOT_IMPLEMENTED: &str = "not_implemented";
-/// Daemon is still booting — database/cloud not yet ready to serve requests.
-pub const ERR_CODE_IPC_NOT_READY: &str = "ipc_not_ready";
-/// Catch-all for unexpected daemon-side failures (I/O, panics, db errors).
-pub const ERR_CODE_INTERNAL_ERROR: &str = "internal_error";
-/// Client sent a `protocol_version` outside the daemon's supported range.
-/// Surface as an upgrade prompt — DO NOT retry the request. See ADR-007.
-pub const ERR_CODE_VERSION_MISMATCH: &str = "version_mismatch";
-/// The v4 key-rotation sweep is still in progress. Ingest paths return this
-/// error rather than writing new items to avoid mixing key versions during the
-/// sweep. Clients should back off and retry after a short delay.
-pub const ERR_CODE_MIGRATION_IN_PROGRESS: &str = "migration_in_progress";
-/// The request was refused because a conflicting operation is already in flight
-/// (e.g. a second discovery pairing while one is active). Single-active-pairing:
-/// the client should wait for the current operation to finish, then retry.
-pub const ERR_CODE_RATE_LIMITED: &str = "rate_limited";
+// CopyPaste-c4q2.30: these are RE-EXPORTED from `copypaste_ipc::response` rather
+// than re-declared locally, so the daemon and the shared crate cannot drift
+// (the previous local copies were a wire-contract bug waiting to happen — a
+// typo/rename on one side would silently desync clients). Only the `Response`
+// STRUCT stays local below (it diverges in its `not_implemented` message,
+// CopyPaste-c4q2.11); the string codes have a single source of truth.
+//
+// `ERR_CODE_DAEMON_OFFLINE` is intentionally NOT re-exported here: it is a
+// client-side (UI/CLI) view code the daemon never emits.
+pub use copypaste_ipc::response::{
+    ERR_CODE_AUTH_FAILED, ERR_CODE_INTERNAL_ERROR, ERR_CODE_INVALID_ARGUMENT,
+    ERR_CODE_IPC_NOT_READY, ERR_CODE_MIGRATION_IN_PROGRESS, ERR_CODE_NOT_FOUND,
+    ERR_CODE_NOT_IMPLEMENTED, ERR_CODE_RATE_LIMITED, ERR_CODE_REQUEST_TOO_LARGE,
+    ERR_CODE_VERSION_MISMATCH,
+};
 
 /// Daemon-side IPC response.
 ///

@@ -124,3 +124,41 @@ pub fn catchup_items(
     let raw = catchup_read_raw(db, device_id);
     rekey_catchup_items(raw, crypto, peer_fingerprint)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use copypaste_core::{insert_item, ClipboardItem, Database};
+
+    fn item(id: &str, sensitive: bool) -> ClipboardItem {
+        let mut it = ClipboardItem::new_text(vec![1, 2, 3], vec![0u8; 24], 1);
+        it.id = id.to_owned();
+        it.item_id = id.to_owned();
+        it.is_sensitive = sensitive;
+        it
+    }
+
+    /// CopyPaste-20yw / P1-1: the P2P catch-up read must OMIT sensitive items so
+    /// they never leave the device via the catch-up burst. Real guard test: a
+    /// sensitive and a non-sensitive item are stored, and only the non-sensitive
+    /// one appears in the wire set. Removing the `if item.is_sensitive` skip in
+    /// `catchup_read_raw` makes the secret item appear and fails this test.
+    #[test]
+    fn catchup_read_raw_omits_sensitive_items() {
+        let db = Database::open_in_memory().expect("in-memory DB");
+        insert_item(&db, &item("plain-1", false)).expect("insert plain");
+        insert_item(&db, &item("secret-1", true)).expect("insert secret");
+
+        let wire = catchup_read_raw(&db, "dev-a");
+        let ids: Vec<&str> = wire.iter().map(|w| w.item_id.as_str()).collect();
+
+        assert!(
+            ids.contains(&"plain-1"),
+            "non-sensitive item must be in the catch-up set: {ids:?}"
+        );
+        assert!(
+            !ids.contains(&"secret-1"),
+            "sensitive item must be omitted from the catch-up set: {ids:?}"
+        );
+    }
+}

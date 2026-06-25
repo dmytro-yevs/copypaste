@@ -276,6 +276,11 @@ pub async fn start_p2p(
     // so it can call `reload_sync_key` after a successful button-pair without
     // a daemon restart.  `None` when P2P is disabled.
     sync_crypto: Option<crate::sync_orch::SyncCrypto>,
+    // CopyPaste-7ub: the shared live core config (config.toml). The outbound
+    // fanout loop reads `sync_on_wifi_only` from it so P2P honours the
+    // "Wi-Fi only" privacy setting exactly like the relay and cloud paths
+    // (previously P2P transmitted on cellular regardless of the flag).
+    core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);
     let listener = TcpListener::bind(&bind_addr).await?;
@@ -317,7 +322,15 @@ pub async fn start_p2p(
         "P2P allowlist seeded from peers.json"
     );
     let transport = PeerTransport::from_cert(cert.cert_der, cert.key_der, peers.clone());
-    tracing::info!(fingerprint = %transport.fingerprint(), "P2P mTLS transport identity");
+    // CopyPaste-qvtg.1: log only the short fingerprint prefix at info — the full
+    // 64-char mTLS-pinning identity stays at debug so it does not leak into
+    // persistent log stores on every start.
+    let transport_fp = transport.fingerprint();
+    tracing::info!(
+        fingerprint_prefix = %transport_fp.get(..23).unwrap_or(transport_fp),
+        "P2P mTLS transport identity"
+    );
+    tracing::debug!(fingerprint = %transport_fp, "P2P mTLS transport identity (full)");
     let transport = Arc::new(transport);
 
     // ── peer sinks map ────────────────────────────────────────────────────────
@@ -491,12 +504,14 @@ pub async fn start_p2p(
         let peer_sinks = Arc::clone(&peer_sinks);
         let outbound_shutdown = shutdown_token.clone();
         let outbound_crypto = sync_crypto.clone();
+        let outbound_config = Arc::clone(&core_config);
         tokio::spawn(async move {
             fanout::outbound_loop(
                 new_item_rx,
                 outbound_rx,
                 peer_sinks,
                 outbound_crypto,
+                outbound_config,
                 outbound_shutdown,
             )
             .await;
@@ -1030,8 +1045,18 @@ mod tests {
             let (_outbound_tx, outbound_rx) = mpsc::channel::<WireItem>(8);
             let peer_sinks: PeerSinks = Arc::new(Mutex::new(HashMap::new()));
             let token = token.clone();
+            let core_config =
+                Arc::new(std::sync::RwLock::new(copypaste_core::AppConfig::default()));
             tokio::spawn(async move {
-                fanout::outbound_loop(new_item_rx, outbound_rx, peer_sinks, None, token).await;
+                fanout::outbound_loop(
+                    new_item_rx,
+                    outbound_rx,
+                    peer_sinks,
+                    None,
+                    core_config,
+                    token,
+                )
+                .await;
             })
         };
 

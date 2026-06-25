@@ -272,3 +272,70 @@ pub(super) async fn run_tombstone_backlog_sweep(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use copypaste_core::insert_item;
+
+    fn item(id: &str, sensitive: bool) -> ClipboardItem {
+        let mut it = ClipboardItem::new_text(vec![9, 9, 9], vec![0u8; 24], 1);
+        it.id = id.to_owned();
+        it.item_id = id.to_owned();
+        it.content_type = "text".to_owned();
+        it.is_sensitive = sensitive;
+        it.is_synced = false;
+        it
+    }
+
+    fn is_synced(db: &Database, id: &str) -> bool {
+        db.conn()
+            .query_row(
+                "SELECT is_synced FROM clipboard_items WHERE id = ?1",
+                rusqlite::params![id],
+                |r| r.get::<_, i64>(0),
+            )
+            .map(|v| v == 1)
+            .unwrap_or(false)
+    }
+
+    /// CopyPaste-20yw / P1-1: the cloud backlog sweep must never enqueue a
+    /// SENSITIVE item — it skips it and marks it synced so the sweep does not
+    /// revisit it. Real guard test: a sensitive item ends up is_synced=1 and is
+    /// NOT in the retry queue; a non-sensitive item with undecryptable content
+    /// (the positive control) is skipped WITHOUT being marked synced, proving the
+    /// sensitive guard (not the generic skip) is what marks-and-drops the secret.
+    /// Removing the guard routes the secret to the decrypt path → garbage fails →
+    /// it is NOT marked synced → this test fails.
+    #[tokio::test]
+    async fn cloud_backlog_skips_and_marks_sensitive_never_enqueues() {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("db")));
+        {
+            let g = db.lock().await;
+            insert_item(&g, &item("secret-1", true)).expect("insert secret");
+            insert_item(&g, &item("plain-1", false)).expect("insert plain");
+        }
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+        let mut queue = VecDeque::new();
+
+        run_backlog_sweep(&db, &local_key, &[7u8; 32], &mut queue).await;
+
+        let g = db.lock().await;
+        // Sensitive item: marked synced, never enqueued.
+        assert!(
+            is_synced(&g, "secret-1"),
+            "sensitive item must be marked synced by the sweep"
+        );
+        assert!(
+            !queue.iter().any(|(it, _)| it.id == "secret-1"),
+            "sensitive item must never be enqueued for cloud upload"
+        );
+        // Positive control: non-sensitive item with bogus content fails decrypt
+        // and is skipped WITHOUT being marked synced — distinct from the
+        // sensitive guard's mark-and-drop.
+        assert!(
+            !is_synced(&g, "plain-1"),
+            "non-sensitive undecryptable item must NOT be marked synced (distinguishes the guard)"
+        );
+    }
+}

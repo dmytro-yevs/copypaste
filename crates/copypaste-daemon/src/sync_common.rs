@@ -549,12 +549,31 @@ pub(crate) fn replace_cloud_item_by_item_id(
     if let Some(ref old_id) = old_id {
         tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![old_id])?;
     }
+    // CopyPaste-jvzm.1: clear any stale resumable-upload state for this item_id.
+    // A prior upload session (tus_url / bytes_uploaded) describes the OLD content;
+    // an LWW cloud/relay overwrite replaces that content, so resuming the old
+    // session would push wrong/partial bytes — and if the row were never cleaned
+    // it would be permanently stranded (never GC'd, possible infinite retry).
+    // `pending_uploads.item_id` is the PRIMARY KEY, so this is a point delete,
+    // mirroring the delete_expired / delete_item / prune_to_cap cleanup paths.
     tx.execute(
+        "DELETE FROM pending_uploads WHERE item_id = ?1",
+        params![item.item_id],
+    )?;
+    tx.execute(
+        // CopyPaste-jvzm.2: list ALL persisted columns explicitly, including
+        // `thumb` and `deleted`. Omitting them let SQLite apply column defaults
+        // (thumb=NULL, deleted=0) on every LWW replace, which (a) dropped an
+        // item's thumbnail and (b) — worse — silently un-deleted a tombstone
+        // arriving via this path (deleted=0), so a cloud/relay-delivered deletion
+        // would not stick. Setting them from the incoming item keeps the replace
+        // faithful and guards against silent schema-drift when new columns are
+        // added.
         "INSERT INTO clipboard_items
          (id, item_id, content_type, content, content_nonce, blob_ref,
           is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)",
+          content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
         params![
             item.id,
             item.item_id,
@@ -577,15 +596,49 @@ pub(crate) fn replace_cloud_item_by_item_id(
             item.key_version as i64,
             item.pinned as i64,
             item.pin_order,
+            item.thumb,
+            item.deleted as i64,
         ],
     )?;
     tx.commit()?;
     Ok(())
 }
 
+/// Shared "Wi-Fi only" outbound gate (CopyPaste-7ub).
+///
+/// Returns `true` when an outbound sync transmission should be SKIPPED because
+/// the user enabled `sync_on_wifi_only` and the device is not currently on
+/// Wi-Fi. Used by the P2P fanout path so it honours the privacy setting exactly
+/// like the relay (`relay/push.rs`) and cloud paths. Fail-open is the caller's
+/// responsibility: pass `on_wifi = true` when the platform Wi-Fi probe errors.
+pub fn should_skip_on_cellular(sync_on_wifi_only: bool, on_wifi: bool) -> bool {
+    sync_on_wifi_only && !on_wifi
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn should_skip_on_cellular_truth_table() {
+        // Only skip when the user opted into Wi-Fi-only AND we are off Wi-Fi.
+        assert!(
+            should_skip_on_cellular(true, false),
+            "wifi-only + cellular → skip"
+        );
+        assert!(
+            !should_skip_on_cellular(true, true),
+            "wifi-only + on wifi → send"
+        );
+        assert!(
+            !should_skip_on_cellular(false, false),
+            "flag off + cellular → send"
+        );
+        assert!(
+            !should_skip_on_cellular(false, true),
+            "flag off + on wifi → send"
+        );
+    }
 
     #[test]
     fn file_envelope_roundtrip() {
@@ -790,6 +843,136 @@ mod tests {
         assert_eq!(
             old_fts_after, 0,
             "old FTS row must be deleted by replace_cloud_item_by_item_id (e5oe)"
+        );
+    }
+
+    /// CopyPaste-jvzm.1: replacing a cloud item by item_id must also clear any
+    /// stale `pending_uploads` row for that item_id, so a prior resumable-upload
+    /// session cannot resume against the new content or be stranded forever.
+    #[test]
+    fn replace_cloud_item_clears_pending_uploads() {
+        use copypaste_core::{insert_item, Database};
+
+        let db = Database::open_in_memory().expect("in-memory DB");
+        let item_id = "pu-item-id";
+
+        let seed = ClipboardItem {
+            id: "pu-row-id".to_string(),
+            item_id: item_id.to_string(),
+            content_type: "file".to_string(),
+            content: Some(b"old ciphertext".to_vec()),
+            content_nonce: Some(vec![0u8; 24]),
+            blob_ref: None,
+            is_sensitive: false,
+            is_synced: false,
+            lamport_ts: 1,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+            origin_device_id: "device-a".to_string(),
+            key_version: 2,
+            pinned: false,
+            pin_order: None,
+            thumb: None,
+            deleted: false,
+        };
+        insert_item(&db, &seed).expect("insert seed");
+
+        // Simulate an in-progress resumable upload for this item.
+        db.conn()
+            .execute(
+                "INSERT INTO pending_uploads
+                 (item_id, tus_url, bytes_uploaded, total_bytes, created_at, expires_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                rusqlite::params![
+                    item_id,
+                    "https://relay.example.com/tus/abc",
+                    1024_i64,
+                    4096_i64,
+                    1_700_000_000_i64,
+                    1_700_900_000_i64,
+                ],
+            )
+            .expect("seed pending_uploads");
+        let before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM pending_uploads WHERE item_id = ?1",
+                rusqlite::params![item_id],
+                |r| r.get(0),
+            )
+            .expect("count before");
+        assert_eq!(before, 1, "pending_uploads row must exist before replace");
+
+        // LWW overwrite: same item_id, new content/row id.
+        let replacement = ClipboardItem {
+            id: "pu-row-id-v2".to_string(),
+            is_synced: true,
+            lamport_ts: 2,
+            wall_time: 1_700_000_001_000,
+            content: Some(b"new ciphertext".to_vec()),
+            content_nonce: Some(vec![1u8; 24]),
+            origin_device_id: "device-b".to_string(),
+            ..seed.clone()
+        };
+        replace_cloud_item_by_item_id(&db, &replacement).expect("replace");
+
+        let after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM pending_uploads WHERE item_id = ?1",
+                rusqlite::params![item_id],
+                |r| r.get(0),
+            )
+            .expect("count after");
+        assert_eq!(
+            after, 0,
+            "stale pending_uploads row must be cleared by replace_cloud_item_by_item_id"
+        );
+    }
+
+    /// CopyPaste-jvzm.2: the LWW replace INSERT must persist `deleted` and
+    /// `thumb` from the incoming item, not silently default them. Regression:
+    /// a cloud/relay-delivered tombstone (deleted=true) must STAY deleted after
+    /// the replace, and a thumbnail must survive.
+    #[test]
+    fn replace_cloud_item_preserves_deleted_and_thumb() {
+        use copypaste_core::{insert_item, Database};
+
+        let db = Database::open_in_memory().expect("in-memory DB");
+        let item_id = "jvzm2-iid";
+
+        // Seed a live (not deleted) item with a thumbnail.
+        let mut seed = ClipboardItem::new_text(vec![1, 2, 3], vec![0u8; 24], 1);
+        seed.id = "jvzm2-row-v1".to_string();
+        seed.item_id = item_id.to_string();
+        seed.thumb = Some(vec![0xAB; 8]);
+        insert_item(&db, &seed).expect("insert seed");
+
+        // LWW replace with a TOMBSTONE (deleted=true) carrying a new thumb.
+        let replacement = ClipboardItem {
+            id: "jvzm2-row-v2".to_string(),
+            deleted: true,
+            thumb: Some(vec![0xCD; 4]),
+            lamport_ts: 2,
+            ..seed.clone()
+        };
+        replace_cloud_item_by_item_id(&db, &replacement).expect("replace");
+
+        let (deleted, thumb_len): (i64, Option<i64>) = db
+            .conn()
+            .query_row(
+                "SELECT deleted, LENGTH(thumb) FROM clipboard_items WHERE item_id = ?1",
+                rusqlite::params![item_id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("query replaced row");
+        assert_eq!(deleted, 1, "tombstone must stay deleted after replace");
+        assert_eq!(
+            thumb_len,
+            Some(4),
+            "incoming thumbnail must be persisted by the replace"
         );
     }
 }

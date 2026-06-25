@@ -10,11 +10,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 // syncWithPeer resolves to the package-local ABI-9 wrapper in
 // CopypasteBindings.kt (ByteArray sessionKey + revokedFingerprints + deviceId),
 // not the generated uniffi.copypaste_android.syncWithPeer.
@@ -116,6 +118,20 @@ class FgsSyncLoop(
     private var fgsScope: CoroutineScope? = null
 
     /**
+     * CopyPaste-mip2: CONFLATED channel used as an opportunistic P2P wake signal.
+     *
+     * CONFLATED capacity means at most one pending signal is buffered; if the
+     * channel already has a signal queued the new signal is silently dropped —
+     * this is the desired debounce behaviour (N captures within a single inter-dial
+     * sleep result in exactly ONE extra dial, not N).
+     *
+     * Producers: [signalP2pWake] (called by ClipboardService on capture or mDNS
+     * peer discovery).  Consumer: the inner inter-dial sleep in [start] via
+     * `withTimeoutOrNull(chunk) { p2pWakeChannel.receive() }`.
+     */
+    private val p2pWakeChannel = Channel<Unit>(Channel.CONFLATED)
+
+    /**
      * CopyPaste-44rq.41: set to true inside [dialPairedPeer] whenever at least
      * one item was sent or received across any peer.  Read and reset by the
      * [start] loop immediately after each dial round to update
@@ -191,6 +207,17 @@ class FgsSyncLoop(
          * the two backoff mechanisms behave symmetrically.
          */
         private const val P2P_IDLE_THRESHOLD = 3
+
+        /**
+         * CopyPaste-mip2: debounce window for opportunistic P2P wake signals.
+         *
+         * When the wake channel receives a signal (clipboard capture or mDNS peer
+         * discovery), the inner P2P sleep exits early and re-dials.  A CONFLATED
+         * channel already collapses multiple concurrent signals into one, so this
+         * constant is informational only — it documents the intended semantics.
+         * The channel's capacity=CONFLATED property is the actual debounce.
+         */
+        private const val P2P_WAKE_DEBOUNCE_MS = 500L
 
         /**
          * CopyPaste-44rq.41: compute the effective P2P inter-dial sleep given
@@ -504,7 +531,18 @@ class FgsSyncLoop(
                 var remaining = nextDelay
                 while (remaining > 0 && isActive) {
                     val chunk = minOf(remaining, p2pChunk)
-                    delay(chunk)
+                    // CopyPaste-mip2: event-driven opportunistic dial.
+                    // Replace plain `delay` with a wake-interruptible wait:
+                    // the loop exits early when signalP2pWake() fires (clipboard
+                    // capture or mDNS peer discovery) OR falls through after the
+                    // timeout — keeping the periodic loop as the fallback.
+                    // The CONFLATED channel collapses bursts of signals into one;
+                    // P2P_WAKE_DEBOUNCE_MS documents the intended debounce semantics.
+                    if (withTimeoutOrNull(chunk) { p2pWakeChannel.receive() } != null) {
+                        // Woken early: a capture or mDNS event fired. Log and fall
+                        // through to the re-dial check below (remaining > 0).
+                        Log.d(TAG, "P2P inner sleep: woken early by signalP2pWake()")
+                    }
                     if (!isActive) break
                     remaining -= chunk
                     // Re-dial on each chunk boundary that is not the final poll
@@ -535,6 +573,33 @@ class FgsSyncLoop(
         job?.cancel()
         job = null
         fgsScope = null
+    }
+
+    /**
+     * CopyPaste-mip2: signal the P2P dial loop to wake up early.
+     *
+     * Called by [ClipboardService] on two events:
+     *   1. A NEW clipboard item was captured locally (text, image, or file).
+     *   2. An mDNS-discovered peer count goes from zero to non-zero (a peer came
+     *      online on the LAN).
+     *
+     * The underlying [p2pWakeChannel] is CONFLATED so rapid calls collapse into
+     * a single queued wakeup — the inner sleep in [start] exits at most once per
+     * signal burst, preventing runaway dial spam.
+     *
+     * Non-blocking: [Channel.trySend] never suspends.  Safe to call from any
+     * context (UI thread, IO thread, callback) without holding a lock.
+     *
+     * No-op when the loop has not started (stub mode / unit tests): the send
+     * is buffered in the CONFLATED channel and consumed the next time [start]
+     * calls receive() — or discarded if [stop] is called first and the channel
+     * is never drained.
+     */
+    fun signalP2pWake() {
+        // trySend on a CONFLATED channel always succeeds (the existing pending
+        // value is overwritten) — the result is always ChannelResult.success or
+        // the value-already-present no-op. Ignore the result intentionally.
+        p2pWakeChannel.trySend(Unit)
     }
 
     /**

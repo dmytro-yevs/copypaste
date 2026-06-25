@@ -114,6 +114,38 @@ class DevicesLiquidGlassTest {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // CopyPaste-bdac.102 PulseDot ring colour: ring must match dot colour
+    // ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Online peer: both the ring and the solid dot must use the ONLINE (success/green) role.
+     * Verifies the invariant that pulseDotColorRole(online=true) == ONLINE so neither
+     * element is hardcoded to a different colour.
+     */
+    @Test
+    fun `online dot colour role is ONLINE (success green)`() {
+        assertEquals(
+            "online peer: ring and dot must both use the ONLINE/success colour role",
+            PulseDotColorRole.ONLINE,
+            pulseDotColorRole(online = true),
+        )
+    }
+
+    /**
+     * Offline peer: both the ring and the solid dot must use the OFFLINE (danger/red) role.
+     * Before CopyPaste-bdac.102 the ring was hardcoded to c.success (green) even when the
+     * dot correctly used c.danger (red) — the ring would flash green for an offline peer.
+     */
+    @Test
+    fun `offline dot colour role is OFFLINE (danger red)`() {
+        assertEquals(
+            "offline peer: ring and dot must both use the OFFLINE/danger colour role — not success green",
+            PulseDotColorRole.OFFLINE,
+            pulseDotColorRole(online = false),
+        )
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // §7 PulseDot: online flag drives animation gate
     // ────────────────────────────────────────────────────────────────────────
 
@@ -122,6 +154,55 @@ class DevicesLiquidGlassTest {
         assertTrue("online peer must pulse", shouldPulse(online = true, reducedMotion = false))
         assertFalse("offline peer must not pulse", shouldPulse(online = false, reducedMotion = false))
         assertFalse("reduced-motion must suppress pulse", shouldPulse(online = true, reducedMotion = true))
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // §MO-5 PulseDot one-shot: fire only on offline→online leading edge
+    // ────────────────────────────────────────────────────────────────────────
+
+    /** offline→online transition with motion on → should start the one-shot pulse. */
+    @Test
+    fun `one-shot pulse fires on offline-to-online transition`() {
+        assertTrue(
+            "offline→online with motion enabled must start pulse",
+            shouldStartOneShotPulse(wasOnline = false, isNowOnline = true, reducedMotion = false),
+        )
+    }
+
+    /** online→online (already online) → must NOT fire again (would make it a loop). */
+    @Test
+    fun `one-shot pulse does not fire when already online`() {
+        assertFalse(
+            "online→online must not re-trigger pulse",
+            shouldStartOneShotPulse(wasOnline = true, isNowOnline = true, reducedMotion = false),
+        )
+    }
+
+    /** online→offline → no pulse. */
+    @Test
+    fun `one-shot pulse does not fire on online-to-offline transition`() {
+        assertFalse(
+            "online→offline must not trigger pulse",
+            shouldStartOneShotPulse(wasOnline = true, isNowOnline = false, reducedMotion = false),
+        )
+    }
+
+    /** offline→online but reduced-motion is active → no pulse (§MO-5 / §8). */
+    @Test
+    fun `one-shot pulse is suppressed under reduced motion`() {
+        assertFalse(
+            "offline→online under reduced-motion must not pulse",
+            shouldStartOneShotPulse(wasOnline = false, isNowOnline = true, reducedMotion = true),
+        )
+    }
+
+    /** offline→offline → no pulse. */
+    @Test
+    fun `one-shot pulse does not fire when staying offline`() {
+        assertFalse(
+            "offline→offline must not trigger pulse",
+            shouldStartOneShotPulse(wasOnline = false, isNowOnline = false, reducedMotion = false),
+        )
     }
 
     // ────────────────────────────────────────────────────────────────────────

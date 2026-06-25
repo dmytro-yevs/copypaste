@@ -17,7 +17,7 @@ pub const ITEM_KEY_VERSION_CURRENT: i64 = 2;
 
 pub use delete::{
     delete_expired, delete_fts, delete_item, delete_sensitive_expired, has_sensitive_items,
-    incremental_vacuum, prune_to_cap, soft_delete_item,
+    incremental_vacuum, prune_to_cap, soft_delete_item, soft_delete_item_in_tx,
 };
 pub use fts::{
     compute_content_hash, fetch_text_preview, fetch_text_previews_batch, get_device_names,

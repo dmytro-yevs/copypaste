@@ -483,7 +483,7 @@ function DevicesViewInner({
                 <button
                   type="button"
                   onClick={handleQrReveal}
-                  className="qr-overlay absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
+                  className="qr-overlay absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-ide-elevated/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-ide-accent"
                   style={{ borderRadius: "inherit" }}
                   aria-label="Click to reveal QR code"
                 >

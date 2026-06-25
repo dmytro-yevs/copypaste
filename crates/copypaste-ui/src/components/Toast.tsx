@@ -14,7 +14,7 @@ import ReactDOM from "react-dom";
 //   - aria-live="polite" (= LiveRegionMode.Polite)
 //   - surface-card glass class (floating frosted layer)
 //   - Auto-dismiss after `duration` ms (default 3 000)
-//   - Animated via CSS .toast-in (already defined in tailwind keyframes)
+//   - Animated via the CSS `.toast-enter` class (approved entrance motion §MO-6)
 //   - Stacked: newer toasts appear above older ones
 // ---------------------------------------------------------------------------
 
@@ -113,9 +113,10 @@ function ToastContainer({ toasts, onDismiss }: { toasts: ToastMessage[]; onDismi
   if (toasts.length === 0) return null;
   return ReactDOM.createPortal(
     <div
-      // Stack at bottom-center, same as iOS toast convention. z-[9998] keeps it
-      // below modals (z-50) but above all other content.
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[9998] flex flex-col gap-2 items-center pointer-events-none"
+      // Stack at bottom-center, same as iOS toast convention. z-40 keeps it
+      // below modals (z-50) but above regular content. Mirrors the undo-toast
+      // in HistoryView (SCRH-12) — transient notifications must not occlude dialogs.
+      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex flex-col gap-2 items-center pointer-events-none"
       aria-live="polite"
       aria-atomic="false"
     >

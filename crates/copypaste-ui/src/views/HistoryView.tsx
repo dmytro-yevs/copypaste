@@ -1,32 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-// getCurrentWebview is only available inside the Tauri runtime. Import it
-// lazily so the module can load in a plain browser without crashing at
-// import time (the symbol would be undefined / the package would throw).
-// We feature-detect at call-site via `window.__TAURI_INTERNALS__`.
-let _getCurrentWebview: typeof import("@tauri-apps/api/webview").getCurrentWebview | null = null;
-if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-  void import("@tauri-apps/api/webview").then((m) => {
-    _getCurrentWebview = m.getCurrentWebview;
-  });
-}
+import React, { useCallback, useEffect, useRef, useState } from "react";
 // h97m: listen for cross-view "history-refresh" events emitted after a
 // successful backup import so HistoryView re-fetches immediately.
-import { listen } from "@tauri-apps/api/event";
 import { ViewShell } from "../components/ViewShell";
 import {
   api,
   ipcErrorMessage,
   friendlyIpcError,
-  IpcError,
   isImageType,
   pasteAsPlainText,
   playCopySound,
   resetDatabase,
   showCopyNotification,
   type HistoryEntry,
-  type HistoryPage,
 } from "../lib/ipc";
-import { fuzzyMatch } from "../lib/fuzzy";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
 import { useUI } from "../store";
@@ -47,7 +33,6 @@ import { useToast, ToastProvider, type ToastKind } from "../components/Toast";
 // itemsSignature / _itemsSigCache extracted to HistoryView/historySignature.ts
 // Re-exported here so existing importers ("./HistoryView") keep working.
 export { itemsSignature, _itemsSigCache } from "./HistoryView/historySignature";
-import { itemsSignature as _itemsSignature } from "./HistoryView/historySignature";
 
 // HistoryRow + PinIndicator + SyncBlockedIndicator + Icon* micro-components + parseFilename/parseUrl
 // extracted to HistoryView/HistoryRow.tsx (CopyPaste-g06m.13 refactor).
@@ -75,54 +60,73 @@ import { DetailsModal } from "./HistoryView/DetailsModal";
 import { VirtualList } from "./HistoryView/VirtualList";
 
 // ---------------------------------------------------------------------------
+// Extracted hooks (CopyPaste-g06m.34 refactor)
+// ---------------------------------------------------------------------------
+import { useHistoryData } from "./HistoryView/hooks/useHistoryData";
+import { useHistoryFilter } from "./HistoryView/hooks/useHistoryFilter";
+import { useHistorySelection } from "./HistoryView/hooks/useHistorySelection";
+import { useFileDrop } from "./HistoryView/hooks/useFileDrop";
+
+// ---------------------------------------------------------------------------
 // Main view
 // ---------------------------------------------------------------------------
-
-// bdac.6: "not_ready" is now a first-class state so ipc_not_ready errors render
-// the "Starting up…" EmptyState (matching DevicesView / Popup) instead of the
-// error/degraded UI. Previously missing from this union.
-type LoadState = "loading" | "ready" | "offline" | "not_ready" | "error";
-
-// LOAD_MORE_THRESHOLD_PX imported from VirtualList above.
 
 export function HistoryViewInner() {
   const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, showSensitiveWarnings, playSoundOnCopy, notifyOnCopy, density, historyDisplayLimit, skin, sortByDevice } =
     useUI((s) => s.prefs);
   const setPrefs = useUI((s) => s.setPrefs);
 
-  // M5: historySize removed from prefs; use a fixed initial page size.
-  // The daemon server-side MAX_PAGE acts as an additional cap.
-  const PAGE_SIZE = 200;
+  // -------------------------------------------------------------------------
+  // Data loading, state, and side effects
+  // -------------------------------------------------------------------------
+  const {
+    items,
+    setItems,
+    ownDeviceId,
+    totalCount,
+    loadState,
+    errorDetail,
+    setErrorDetail,
+    degraded,
+    setDegraded,
+    isPrivateMode,
+    undoPending,
+    setUndoPending,
+    undoPendingRef,
+    sigRef,
+    load,
+    handleNearBottom,
+  } = useHistoryData();
 
-  const [items, setItems] = useState<HistoryEntry[]>([]);
-  // Own device UUID from the most-recent history_page response envelope.
-  // Empty string until the first successful load (back-compat with old daemons).
-  const [ownDeviceId, setOwnDeviceId] = useState<string>("");
-  // "all" | device UUID | "this" — filters the list to a specific origin device.
-  const [deviceFilter, setDeviceFilter] = useState<string>("all");
-  // "recency" (default daemon order) | "device" (group by origin device, then recency within group)
-  // Initialised from the persisted sortByDevice pref (bdac.91 — Android parity).
-  const [sortMode, setSortMode] = useState<"recency" | "device">(() =>
-    sortByDevice ? "device" : "recency"
-  );
-  // Total count of stored items as reported by the daemon (all pages, not just
-  // what is currently loaded). Initialised to null so the badge is hidden until
-  // the first page arrives.
-  const [totalCount, setTotalCount] = useState<number | null>(null);
-  // True while a load-more fetch is in flight — prevents concurrent requests.
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
-  const [search, setSearch] = useState("");
-  const [ftsResults, setFtsResults] = useState<Set<string>>(new Set());
-  const [ftsQuery, setFtsQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Last error detail surfaced under the "error" load state — kept so the
-  // failure path is LOUD (shows the real message, not a blank screen).
-  const [errorDetail, setErrorDetail] = useState<string | null>(null);
-  // True when the daemon is reachable but its database is not ready (degraded
-  // mode — e.g. the DB cannot be decrypted). Drives the "Reset database"
-  // recovery affordance below.
-  const [degraded, setDegraded] = useState(false);
+  // -------------------------------------------------------------------------
+  // Search, FTS, device filter, and sort
+  // -------------------------------------------------------------------------
+  const {
+    search,
+    setSearch,
+    deviceFilter,
+    setDeviceFilter,
+    sortMode,
+    toggleSortMode,
+    knownDeviceIds,
+    deviceOptionLabel,
+    filtered,
+  } = useHistoryFilter(items, ownDeviceId, sortByDevice, setPrefs);
+
+  // -------------------------------------------------------------------------
+  // Multi-select
+  // -------------------------------------------------------------------------
+  const {
+    selectionMode,
+    multiSelectedIds,
+    bulkBusy,
+    setBulkBusy,
+    clearSelection,
+    toggleMultiSelect,
+    selectAll,
+    allSelected,
+  } = useHistorySelection(filtered);
+
   // 5j9x: modal confirm state for the destructive database reset.
   // Replaced the misclick-prone inline Yes/No with a ConfirmModal.
   const [resetConfirm, setResetConfirm] = useState(false);
@@ -132,16 +136,6 @@ export function HistoryViewInner() {
   const [clearAllConfirmOpen, setClearAllConfirmOpen] = useState(false);
   const [clearAllBusy, setClearAllBusy] = useState(false);
 
-  // ---------------------------------------------------------------------------
-  // Multi-select state
-  // selectionMode: checkbox column is visible + bulk bar is shown
-  // multiSelectedIds: Set of item ids checked in the bulk-select UI
-  // bulkBusy: true while a bulk operation is in flight (disables buttons)
-  // ---------------------------------------------------------------------------
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [multiSelectedIds, setMultiSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkBusy, setBulkBusy] = useState(false);
-
   // M10: Details modal — entry to preview (null = closed)
   const [previewEntry, setPreviewEntry] = useState<HistoryEntry | null>(null);
 
@@ -149,43 +143,12 @@ export function HistoryViewInner() {
   // true = modal is open; false = modal is closed.
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
 
-  // xhns: private mode flag — loaded once on mount from the daemon.
-  // When true the empty-state shows a private-mode message, not "Copy something…".
-  const [isPrivateMode, setIsPrivateMode] = useState(false);
-
   // A1: Drag-to-reorder pinned items state
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; position: "above" | "below" } | null>(null);
 
-  // D3: OS-level file drag-drop state — true while files are hovering over the window
-  const [fileDragOver, setFileDragOver] = useState(false);
-
-  // Hidden file-input ref for D2 (browser-picker path)
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // F11: Undo-on-delete — item is removed optimistically from the UI; the
-  // actual api.deleteItem call is deferred 5 s. If the user hits "Undo" the
-  // delete is cancelled and we reload to restore the row.
-  const [undoPending, setUndoPending] = useState<{
-    id: string;
-    preview: string;
-    timer: ReturnType<typeof setTimeout>;
-  } | null>(null);
-  // Keep a ref so async callbacks read the current value without needing it
-  // in every dependency array.
-  const undoPendingRef = useRef<{
-    id: string;
-    preview: string;
-    timer: ReturnType<typeof setTimeout>;
-  } | null>(null);
-  useEffect(() => {
-    undoPendingRef.current = undoPending;
-  }, [undoPending]);
-
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  // Track current signature to avoid unnecessary re-renders on identical data.
-  const sigRef = useRef<string>("");
   const isKeyboardNavRef = useRef(false);
 
   // §8 Mount stagger: true only during the initial mount window (before the first
@@ -219,396 +182,12 @@ export function HistoryViewInner() {
     [_toastShow]
   );
 
-  // F11: On unmount, commit any pending deferred delete immediately so items
-  // are not silently left un-deleted if the user closes the popup mid-window.
-  useEffect(() => {
-    return () => {
-      const pending = undoPendingRef.current;
-      if (pending !== null) {
-        clearTimeout(pending.timer);
-        void api.deleteItem(pending.id).catch(() => {});
-      }
-    };
-  }, []);
-
-  // xhns: load private mode once on mount so the empty state can show the
-  // correct messaging. Best-effort — a failure leaves isPrivateMode=false
-  // (shows default empty state, never a blank/error screen).
-  useEffect(() => {
-    void api.getPrivateMode().then((result) => {
-      setIsPrivateMode(result.private_mode);
-    }).catch(() => {
-      // Non-fatal — keep the default (false).
-    });
-  }, []);
-
   // -------------------------------------------------------------------------
-  // Data loading — shared by initial mount, interval, and manual triggers.
+  // File picker (D2) and OS drag-drop (D3)
   // -------------------------------------------------------------------------
+  const { fileDragOver, fileInputRef, handleFileInputChange } = useFileDrop(load, showToast);
 
-  const load = useCallback(
-    async (silent = false) => {
-      if (!silent) setLoadState("loading");
-      try {
-        // PAGE_SIZE controls how many items to request initially; clamped by MAX_PAGE server-side.
-        const page = await api.historyPage(PAGE_SIZE, 0) as HistoryPage;
-        // Daemon returns pinned items first, then newest-first within each group.
-        const incoming = page.items;
-        const newSig = _itemsSignature(incoming);
-        if (newSig !== sigRef.current) {
-          sigRef.current = newSig;
-          setItems(incoming);
-        }
-        // Capture own device UUID for the device badge (back-compat: empty string on old daemons).
-        setOwnDeviceId(page.own_device_id ?? "");
-        // Always update the total from the daemon — it reflects the true DB count
-        // across all pages, not just the loaded slice.
-        setTotalCount(page.total);
-        setDegraded(false);
-        setErrorDetail(null);
-        setLoadState("ready");
-      } catch (err) {
-        if (err instanceof IpcError && err.code === "daemon_offline") {
-          setLoadState("offline");
-          return;
-        }
-        // bdac.6: Check ipc_not_ready BEFORE calling setErrorDetail so the
-        // "Starting up…" state never populates errorDetail with an unfriendly
-        // message. Matches the pattern in DevicesView (not_ready branch) and
-        // Popup (ipc_not_ready branch).
-        const notReady =
-          err instanceof IpcError &&
-          (err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY");
-        if (notReady) {
-          setLoadState("not_ready");
-          return;
-        }
-        // The daemon is reachable but history failed. Surface a friendly error
-        // (ERR-2: never use String(err) or raw IpcError.message here — those can
-        // contain socket paths). Log the raw error to the console for diagnostics.
-        console.error("[HistoryView] load error:", err);
-        setErrorDetail(friendlyIpcError(err));
-        let isDegraded = false;
-        // Confirm via status: the daemon explicitly reports `degraded`.
-        try {
-          const status = (await api.status()) as {
-            degraded?: boolean;
-            degraded_reason?: string | null;
-          };
-          if (status && status.degraded) {
-            isDegraded = true;
-            if (status.degraded_reason) {
-              setErrorDetail(`Database unavailable (${status.degraded_reason}).`);
-            }
-          }
-        } catch {
-          // Status probe failed too; fall back to the not-ready signal above.
-        }
-        setDegraded(isDegraded);
-        setLoadState("error");
-      }
-    },
-    []
-  );
-
-  // -------------------------------------------------------------------------
-  // Load-more — fetches the next page and appends it (de-duped by id).
-  // Only fires when:
-  //   1. We're in the "ready" state (no active load or error).
-  //   2. The loaded item count is less than the daemon-reported total.
-  //   3. No other load-more is already in flight.
-  //
-  // We use a mutable ref for the implementation so the stable `handleNearBottom`
-  // callback always calls the latest version without needing to re-subscribe the
-  // VirtualList's scroll handler on every render.
-  // -------------------------------------------------------------------------
-
-  const itemsLengthRef = useRef(0);
-  const totalCountRef = useRef<number | null>(null);
-  const loadingMoreRef = useRef(false);
-  const loadStateRef = useRef<LoadState>(loadState);
-
-  // Keep refs in sync on every render (no extra effect needed — render-time
-  // assignment is safe because these are not used during render itself).
-  itemsLengthRef.current = items.length;
-  totalCountRef.current = totalCount;
-  loadingMoreRef.current = loadingMore;
-  loadStateRef.current = loadState;
-
-  const loadMoreRef = useRef<(() => Promise<void>) | undefined>(undefined);
-  loadMoreRef.current = async () => {
-    const total = totalCountRef.current;
-    const loaded = itemsLengthRef.current;
-    // Guard: skip when all rows are already loaded or a fetch is in progress.
-    if (
-      total === null ||
-      loaded >= total ||
-      loadingMoreRef.current ||
-      loadStateRef.current !== "ready"
-    ) {
-      return;
-    }
-    setLoadingMore(true);
-    try {
-      const page = await api.historyPage(PAGE_SIZE, loaded);
-      if (page.items.length > 0) {
-        setItems((prev) => {
-          const existingIds = new Set(prev.map((it) => it.id));
-          const fresh = page.items.filter((it) => !existingIds.has(it.id));
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
-        });
-      }
-      // Update total in case new items arrived since the last poll.
-      setTotalCount(page.total);
-    } catch {
-      // Load-more failure is non-fatal: the user can scroll up and the next
-      // near-bottom event will retry automatically.
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  const handleNearBottom = useCallback(() => {
-    void loadMoreRef.current?.();
-  }, []);
-
-  // Initial load
-  useEffect(() => {
-    void load(false);
-  }, [load]);
-
-  // Auto-refresh while the window is visible; backed off when the daemon is
-  // unreachable so we don't hammer a dead daemon at full rate.
-  //
-  // loadState is intentionally read via the ref rather than being a dep: adding
-  // it to the dep array would restart (and therefore double-fire) the effect on
-  // every state-recovery transition (e.g. "offline" → "ready"), causing a
-  // duplicate silent load immediately after the one that just recovered.
-
-  useEffect(() => {
-    // s7ia B1: slowed from 1200→3000ms — cuts IPC calls from 50/min to 20/min
-    // with no UX regression (popup already uses 3 s; new clipboard captures are
-    // still seen within the next poll window).
-    const ACTIVE_MS = 3000;
-    const BACKOFF_MS = 5000;
-    let timer: ReturnType<typeof setInterval> | null = null;
-
-    const intervalFor = () =>
-      loadStateRef.current === "offline" ||
-      loadStateRef.current === "error" ||
-      // bdac.6: not_ready is also a transient error state; use backoff so we
-      // don't hammer the daemon while it is still initialising.
-      loadStateRef.current === "not_ready"
-        ? BACKOFF_MS
-        : ACTIVE_MS;
-
-    const stop = () => {
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
-    };
-
-    const start = () => {
-      stop();
-      timer = setInterval(() => void load(true), intervalFor());
-    };
-
-    const sync = () => {
-      if (document.visibilityState === "visible") {
-        void load(true); // refresh immediately on becoming visible
-        start();
-      } else {
-        stop();
-      }
-    };
-
-    sync();
-    document.addEventListener("visibilitychange", sync);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", sync);
-    };
-  }, [load]);
-
-  // h97m: Listen for the "history-refresh" event emitted by SettingsView after
-  // a successful backup import so this view refreshes immediately. Uses the
-  // same pattern as SettingsView's "private-mode-changed" listener.
-  useEffect(() => {
-    const hasTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-    let cancelled = false;
-    let unlisten: (() => void) | null = null;
-
-    if (hasTauri) {
-      // listen() returns a Promise<UnlistenFn>. Guard: it may resolve after the
-      // component unmounts, so check the cancelled flag before storing.
-      const p = listen<void>("history-refresh", () => {
-        void load(true);
-      });
-      // p may be undefined in test environments where the event module is only
-      // partially mocked; optional chaining guards against that.
-      void p?.then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      });
-    }
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [load]);
-
-  // -------------------------------------------------------------------------
-  // FTS effect — debounced daemon full-text search over the entire history
-  // -------------------------------------------------------------------------
-
-
-  useEffect(() => {
-    const q = search.trim();
-    if (!q) {
-      setFtsResults(new Set());
-      setFtsQuery("");
-      return;
-    }
-    const timer = setTimeout(async () => {
-      try {
-        const hits = await api.searchItems(q, 500);
-        setFtsResults(new Set(hits.map((h) => h.id)));
-        setFtsQuery(q);
-      } catch {
-        // FTS failure falls back gracefully to client-side filter
-      }
-    }, 250);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  // -------------------------------------------------------------------------
-  // Distinct device IDs+names seen in loaded items — drives the filter dropdown.
-  // v6ac: replaced knownDeviceIds (Set<string>) with knownDevices (Map<id,name>)
-  // so the dropdown shows human-readable names instead of hex UUID prefixes.
-  // The name is seeded from origin_device_name on the first item per device;
-  // the daemon always emits this field from its devices table.
-  // -------------------------------------------------------------------------
-  const knownDevices = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const it of items) {
-      if (it.origin_device_id && !map.has(it.origin_device_id)) {
-        // Prefer the daemon-emitted name; fall back to the compact UUID prefix.
-        map.set(it.origin_device_id, it.origin_device_name ?? it.origin_device_id.slice(0, 8));
-      }
-    }
-    return map;
-  }, [items]);
-  // Stable array of known device ids (same order as Map insertion = first-seen).
-  const knownDeviceIds = useMemo(() => Array.from(knownDevices.keys()), [knownDevices]);
-
-  // -------------------------------------------------------------------------
-  // Filtered + sorted list — union of client-side substring match, daemon FTS
-  // results, and device filter; sorted by the selected sort mode.
-  // -------------------------------------------------------------------------
-
-  const filtered = useMemo(() => {
-    const q = search.trim();
-
-    // 1. Text search: SCRH-4 — use fuzzyMatch for subsequence matching + score sorting.
-    // FTS daemon hits are included as additional matches (no fuzzy score, treated as
-    // exact match with score 0 so they appear after scored fuzzy results).
-    let result: HistoryEntry[];
-    if (q) {
-      // Compute fuzzy scores for all items so we can sort by relevance.
-      // Items that match neither fuzzy nor FTS are filtered out.
-      const scored: Array<{ entry: HistoryEntry; score: number }> = [];
-      for (const it of items) {
-        const fuzzyResult = fuzzyMatch(q, it.preview);
-        if (fuzzyResult !== null) {
-          scored.push({ entry: it, score: fuzzyResult.score });
-        } else if (ftsQuery === q && ftsResults.has(it.id)) {
-          // FTS-only hit (daemon found it but client fuzzy didn't): include at score 0.
-          scored.push({ entry: it, score: 0 });
-        }
-      }
-      // Sort descending by score so the best fuzzy match rises to the top.
-      // Stable sort preserves the daemon's recency order within equal-score groups.
-      scored.sort((a, b) => b.score - a.score);
-      result = scored.map((s) => s.entry);
-    } else {
-      result = items;
-    }
-
-    // 2. Device filter
-    if (deviceFilter !== "all") {
-      result = result.filter((it) => (it.origin_device_id ?? "") === deviceFilter);
-    }
-
-    // 3. Sort mode: "device" groups by origin_device_id (own device first, then
-    //    alphabetical by id), preserving the daemon's recency order within each group.
-    // When a search is active the fuzzy-score order takes precedence; the device
-    // grouping is skipped to avoid discarding the relevance ranking.
-    if (sortMode === "device" && !q) {
-      // Stable sort: JS Array.sort is stable in all modern engines.
-      result = [...result].sort((a, b) => {
-        const aId = a.origin_device_id ?? "";
-        const bId = b.origin_device_id ?? "";
-        if (aId === bId) return 0;
-        // Own device always sorts first.
-        if (ownDeviceId && aId === ownDeviceId) return -1;
-        if (ownDeviceId && bId === ownDeviceId) return 1;
-        return aId.localeCompare(bId);
-      });
-    }
-
-    return result;
-  }, [items, search, ftsResults, ftsQuery, deviceFilter, sortMode, ownDeviceId]);
-
-  // -------------------------------------------------------------------------
-  // Multi-select helpers
-  // -------------------------------------------------------------------------
-
-  /** Exit selection mode and clear all multi-select state. */
-  const clearSelection = useCallback(() => {
-    setSelectionMode(false);
-    setMultiSelectedIds(new Set());
-  }, []);
-
-  // Exit selection mode automatically when the last item is deselected.
-  // A useEffect watching the set size is race-free: it runs after React has
-  // committed the new multiSelectedIds state, so a concurrent toggleMultiSelect
-  // that re-adds an item before the effect fires will see size > 0 and won't
-  // flip selectionMode off.  The old Promise.resolve().then() micro-task hack
-  // ran before the next render and could interleave with a concurrent select.
-  useEffect(() => {
-    if (selectionMode && multiSelectedIds.size === 0) {
-      setSelectionMode(false);
-    }
-  }, [selectionMode, multiSelectedIds]);
-
-  /** Toggle a single item's multi-select state; activates selection mode on first check. */
-  const toggleMultiSelect = useCallback((id: string) => {
-    setSelectionMode(true);
-    setMultiSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  }, []);
-
-  /** Select all currently-visible (filtered) items. */
-  const selectAll = useCallback(() => {
-    setSelectionMode(true);
-    setMultiSelectedIds(new Set(filtered.map((it) => it.id)));
-  }, [filtered]);
-
-  const allSelected =
-    filtered.length > 0 && filtered.every((it) => multiSelectedIds.has(it.id));
-
-  // -------------------------------------------------------------------------
-  // Keyboard navigation
-  // -------------------------------------------------------------------------
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const selectedIdx = filtered.findIndex((it) => it.id === selectedId);
 
@@ -713,7 +292,7 @@ export function HistoryViewInner() {
         showToast(msg, "error");
       }
     },
-    [items, load, playSoundOnCopy, notifyOnCopy, showToast]
+    [items, load, playSoundOnCopy, notifyOnCopy, showToast, setItems, sigRef]
   );
 
   // F11: handleDelete/handleUndo must be declared before handleKeyDown so the
@@ -737,7 +316,7 @@ export function HistoryViewInner() {
       }, 5000);
       setUndoPending({ id, preview, timer });
     },
-    [selectedId]
+    [selectedId, undoPendingRef, setItems, setUndoPending]
   );
 
   const handleUndo = useCallback(() => {
@@ -746,7 +325,7 @@ export function HistoryViewInner() {
     clearTimeout(pending.timer);
     setUndoPending(null);
     void load(true);
-  }, [load]);
+  }, [load, undoPendingRef, setUndoPending]);
 
   const handleKeyDown = useCallback(
     async (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -813,7 +392,7 @@ export function HistoryViewInner() {
         handleDelete(selectedId, entry?.preview ?? "");
       }
     },
-    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy, handleDelete]
+    [filtered, selectedIdx, selectedId, selectionMode, clearSelection, selectAll, load, showToast, handleCopy, handleDelete, items]
   );
 
   // -------------------------------------------------------------------------
@@ -869,7 +448,7 @@ export function HistoryViewInner() {
         void load(true);
       }
     },
-    [items, load, showToast]
+    [items, load, showToast, setItems]
   );
 
   // -------------------------------------------------------------------------
@@ -909,7 +488,7 @@ export function HistoryViewInner() {
       // so the bulk action bar is never permanently disabled (V-13).
       setBulkBusy(false);
     }
-  }, [bulkBusy, multiSelectedIds, clearSelection, selectedId, load, showToast]);
+  }, [bulkBusy, multiSelectedIds, clearSelection, selectedId, load, showToast, sigRef]);
 
   const handleBulkPin = useCallback(
     async (targetPinned: boolean) => {
@@ -940,7 +519,7 @@ export function HistoryViewInner() {
         setBulkBusy(false);
       }
     },
-    [bulkBusy, multiSelectedIds, clearSelection, load, showToast]
+    [bulkBusy, multiSelectedIds, clearSelection, load, showToast, sigRef]
   );
 
   /**
@@ -1036,7 +615,7 @@ export function HistoryViewInner() {
     } finally {
       setResetting(false);
     }
-  }, [load, showToast]);
+  }, [load, showToast, setDegraded, setErrorDetail, setItems, sigRef]);
 
   // kayk: Clear all clipboard history — calls delete_all and reloads.
   // Wrapped behind ConfirmModal so it can't be triggered by a misclick.
@@ -1059,130 +638,11 @@ export function HistoryViewInner() {
     } finally {
       setClearAllBusy(false);
     }
-  }, [load, showToast]);
-
-  // -------------------------------------------------------------------------
-  // D2: File picker — read the chosen file via the browser File API and send
-  // to the daemon. No Rust-side file dialog needed; <input type="file"> gives
-  // us the bytes directly so we can base64-encode and call add_file_item.
-  // -------------------------------------------------------------------------
-
-  const handleFileInputChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
-      if (files.length === 0) return;
-      // Reset the input so the same file can be picked again if needed.
-      e.target.value = "";
-
-      for (const file of files) {
-        try {
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          await api.addFileItem(bytes, file.name, file.type || "application/octet-stream");
-          showToast(`Added "${file.name}"`, "success");
-        } catch (err) {
-          // ERR-2: friendlyIpcError never leaks socket paths or raw transport strings.
-          console.error("[HistoryView] add file error:", err);
-          const msg = friendlyIpcError(err);
-          showToast(`Failed to add "${file.name}": ${msg}`, "error");
-        }
-      }
-      void load(true);
-    },
-    [load, showToast]
-  );
-
-  // -------------------------------------------------------------------------
-  // D3: OS file drag-drop — subscribe to Tauri's webview onDragDropEvent.
-  // On 'enter': show drop-zone overlay. On 'drop': ingest each file via
-  // add_file_item. On 'leave'/'cancel': hide overlay.
-  // NOTE: dragDropEnabled must be true in tauri.conf.json (already set).
-  // -------------------------------------------------------------------------
-
-  useEffect(() => {
-    // Tauri-only: OS file drag-drop via the webview's onDragDropEvent API.
-    // In a plain browser `_getCurrentWebview` is null (set only when
-    // window.__TAURI_INTERNALS__ exists), so we skip the subscription entirely.
-    // The browser <input type="file"> path (D2) still works without Tauri.
-    if (_getCurrentWebview === null) return;
-
-    let unlisten: (() => void) | null = null;
-    let cancelled = false;
-
-    void _getCurrentWebview()
-      .onDragDropEvent((event) => {
-        if (cancelled) return;
-        const { type } = event.payload;
-
-        if (type === "enter") {
-          setFileDragOver(true);
-        } else if (type === "leave") {
-          setFileDragOver(false);
-        } else if (type === "drop") {
-          setFileDragOver(false);
-          const paths = "paths" in event.payload ? (event.payload.paths as string[]) : [];
-          if (paths.length === 0) return;
-
-          void (async () => {
-            let added = 0;
-            let failed = 0;
-            for (const p of paths) {
-              try {
-                // Read via fetch with a file:// URL — works inside Tauri webview.
-                const resp = await fetch(`file://${p}`);
-                if (!resp.ok) throw new Error(`fetch failed: ${resp.status}`);
-                const buf = await resp.arrayBuffer();
-                const bytes = new Uint8Array(buf);
-                const filename = p.split("/").pop() ?? "file";
-                // Infer MIME from the content-type header (best-effort).
-                const mime =
-                  resp.headers.get("content-type")?.split(";")[0]?.trim() ||
-                  "application/octet-stream";
-                await api.addFileItem(bytes, filename, mime);
-                added++;
-              } catch (err) {
-                failed++;
-                // ERR-2: friendlyIpcError never leaks socket paths or raw transport strings.
-                console.error("[HistoryView] drag-drop file error:", err);
-                const msg = friendlyIpcError(err);
-                showToast(`Drop failed for "${p.split("/").pop()}": ${msg}`, "error");
-              }
-            }
-            if (added > 0) {
-              showToast(
-                `Added ${added} file${added === 1 ? "" : "s"}${failed > 0 ? ` (${failed} failed)` : ""}`,
-                "success"
-              );
-              void load(true);
-            }
-          })();
-        }
-      })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlisten = fn;
-      })
-      .catch(() => {
-        // Best-effort — drag-drop is a convenience, never block on its failure.
-      });
-
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [load, showToast]);
+  }, [load, showToast, setItems, sigRef]);
 
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
-
-  // Build human-readable label for a device id in the filter dropdown.
-  // v6ac: uses knownDevices map (id→name) so the dropdown shows names, not hex IDs.
-  const deviceOptionLabel = (id: string): string => {
-    if (id === "all") return "All devices";
-    if (ownDeviceId && id === ownDeviceId) return "This device";
-    // Prefer the name we collected from origin_device_name; fall back to UUID prefix.
-    return knownDevices.get(id) ?? id.slice(0, 8);
-  };
 
   const actions = (
     <>
@@ -1236,12 +696,7 @@ export function HistoryViewInner() {
           type="button"
           title={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           aria-label={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
-          onClick={() => {
-            const next = sortMode === "recency" ? "device" : "recency";
-            setSortMode(next);
-            // Persist the choice so Settings > Display > History list > "Group by device" stays in sync.
-            setPrefs({ sortByDevice: next === "device" });
-          }}
+          onClick={toggleSortMode}
           className={[
             // kp6f: removed rounded-ide; borderRadius applied via inline style
             "flex h-7 items-center gap-1 border px-2 text-[11px]",

@@ -195,7 +195,7 @@ async fn test_register_device_success() {
     let (status, body, _) = register_device(app, DEVICE_A, &valid_pub_key()).await;
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(body["device_id"], DEVICE_A);
-    assert!(body["auth_token"].as_str().unwrap().len() == 32);
+    assert!(body["auth_token"].as_str().unwrap().len() == 64);
     assert!(body["expires_at"].as_str().is_some());
 }
 

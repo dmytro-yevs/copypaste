@@ -335,7 +335,7 @@ export function SasPairingModal({
                 prevents any clipboard reader from grabbing the live PAKE secret.
                 (bd CopyPaste-1jms.1) */}
             <div
-              className="mx-auto block bg-ide-panel/60 px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text text-center"
+              className="surface-card mx-auto block px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text text-center"
               style={{ borderRadius: "var(--skin-r-ctl)", userSelect: "none" }}
               aria-label={`Security code: ${status.sas}`}
               data-testid="sas-code-display"

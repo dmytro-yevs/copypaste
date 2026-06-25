@@ -211,10 +211,15 @@ enum Commands {
         #[command(subcommand)]
         action: CloudAction,
     },
-    /// Manage paired devices (list / revoke)
+    /// Manage paired devices (list / revoke / unpair / revoke-and-rotate)
     Device {
         #[command(subcommand)]
         action: DeviceAction,
+    },
+    /// LAN/SAS peer-pairing (list discovered, accept, confirm, abort)
+    Pair {
+        #[command(subcommand)]
+        action: PairAction,
     },
     /// Access media (image/file) clipboard items
     Media {
@@ -227,6 +232,27 @@ enum Commands {
         #[arg(required = true, num_args = 1..)]
         ids: Vec<String>,
     },
+}
+
+#[derive(Subcommand)]
+enum PairAction {
+    /// List CopyPaste devices visible on the local network via mDNS-SD
+    List,
+    /// Initiate SAS pairing with a discovered device
+    Accept {
+        /// Device ID as shown by `copypaste pair list`
+        device_id: String,
+    },
+    /// Show the current Short Authentication String (SAS) and pairing state
+    Sas,
+    /// Send the local SAS accept or reject decision to the daemon
+    Confirm {
+        /// Reject the pairing instead of accepting it
+        #[arg(long)]
+        reject: bool,
+    },
+    /// Abort the in-flight SAS pairing and reset to idle
+    Abort,
 }
 
 #[derive(Subcommand)]
@@ -255,6 +281,28 @@ enum CloudAction {
     Test,
     /// Print the idempotent provisioning SQL (schema + RLS) for the Supabase SQL Editor
     SetupSql,
+    /// Set (or replace) the sync passphrase — derives and stores the content-sync key
+    ///
+    /// Reads the passphrase without terminal echo. Set COPYPASTE_SYNC_PASSPHRASE
+    /// to skip the interactive prompt in non-TTY environments.
+    SetPassphrase {
+        /// Passphrase value. Omit and set COPYPASTE_SYNC_PASSPHRASE env var or
+        /// use the interactive prompt instead — passing as a flag leaks it into
+        /// shell history and the process list.
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
+    /// Rotate the content-sync key to one derived from a new passphrase
+    ///
+    /// After rotation, paired devices that have not re-provisioned the new key
+    /// can no longer decrypt new items. Set COPYPASTE_SYNC_PASSPHRASE to skip
+    /// the interactive prompt.
+    RotateKey {
+        /// New passphrase value. Prefer the env var or interactive prompt to
+        /// avoid shell-history leakage.
+        #[arg(long)]
+        passphrase: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -285,6 +333,32 @@ enum DeviceAction {
     },
     /// Revoke all paired devices at once
     RevokeAll {
+        /// Skip the interactive confirmation prompt
+        #[arg(long, short)]
+        force: bool,
+    },
+    /// Remove a paired device from the trust store (without key rotation)
+    ///
+    /// Use `revoke` for a stronger action that also logs a revocation
+    /// timestamp. Use `revoke-and-rotate` if you also want to rotate the
+    /// sync key so the removed device can no longer decrypt new items.
+    Unpair {
+        /// mTLS certificate fingerprint of the device to unpair (hex SHA-256)
+        fingerprint: String,
+        /// Skip the interactive confirmation prompt
+        #[arg(long, short)]
+        force: bool,
+    },
+    /// Revoke a paired device AND rotate the sync key in one atomic operation
+    ///
+    /// Reads the new passphrase without terminal echo. Set
+    /// COPYPASTE_SYNC_PASSPHRASE to skip the interactive prompt.
+    RevokeAndRotate {
+        /// mTLS certificate fingerprint of the device to revoke (hex SHA-256)
+        fingerprint: String,
+        /// New passphrase for the rotated sync key. Prefer env var or prompt.
+        #[arg(long)]
+        passphrase: Option<String>,
         /// Skip the interactive confirmation prompt
         #[arg(long, short)]
         force: bool,
@@ -398,6 +472,21 @@ fn main() {
                 commands::device::run_revoke(&socket, &fingerprint, force)
             }
             DeviceAction::RevokeAll { force } => commands::device::run_revoke_all(&socket, force),
+            DeviceAction::Unpair { fingerprint, force } => {
+                commands::device::run_unpair(&socket, &fingerprint, force)
+            }
+            DeviceAction::RevokeAndRotate {
+                fingerprint,
+                passphrase,
+                force,
+            } => commands::device::run_revoke_and_rotate(&socket, &fingerprint, passphrase, force),
+        },
+        Commands::Pair { action } => match action {
+            PairAction::List => commands::pair::run_list(&socket),
+            PairAction::Accept { device_id } => commands::pair::run_accept(&socket, &device_id),
+            PairAction::Sas => commands::pair::run_sas(&socket),
+            PairAction::Confirm { reject } => commands::pair::run_confirm(&socket, reject),
+            PairAction::Abort => commands::pair::run_abort(&socket),
         },
         Commands::Media { action } => match action {
             MediaAction::Get { id, output } => {
@@ -427,6 +516,12 @@ fn main() {
             CloudAction::Status => commands::cloud::status(&socket),
             CloudAction::Test => commands::cloud::test(&socket),
             CloudAction::SetupSql => commands::cloud::setup_sql(),
+            CloudAction::SetPassphrase { passphrase } => {
+                commands::sync::set_passphrase(&socket, passphrase)
+            }
+            CloudAction::RotateKey { passphrase } => {
+                commands::sync::rotate_key(&socket, passphrase)
+            }
         },
     };
 

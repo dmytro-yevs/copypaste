@@ -289,10 +289,11 @@ impl super::RelayStore {
         };
         let expires_at_unix = now_unix + 365 * 24 * 3600;
 
-        // Generate bearer token from 16 random bytes (NEVER derive from
+        // Generate bearer token from 32 random bytes (NEVER derive from
         // public key — that would let any client compute the secret).
-        // Output: 32 hex characters representing 16 bytes of entropy.
-        let mut token_bytes = [0u8; 16];
+        // CopyPaste-qvtg.3: 256-bit entropy (was 128-bit / 16 bytes). Output:
+        // 64 hex characters representing 32 bytes of OsRng entropy.
+        let mut token_bytes = [0u8; 32];
         OsRng.fill_bytes(&mut token_bytes);
         let bearer_token = super::hex_encode(&token_bytes);
 

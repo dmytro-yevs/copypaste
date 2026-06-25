@@ -16,7 +16,7 @@ wired in during v0.3, deleted, or explicitly frozen as strategic stubs.
 Created in 0.2-beta as a third `AppConfig` struct centralising
 paths/ports/log-level (`data_dir`, `socket_path`, `log_level`, `db_key_path`,
 `relay_port`, `mdns_service`). Originally motivated by `arch-5` in
-`docs/architectural-debt.md` ("merge `core::config` + `daemon::ipc`").
+`docs/architectural-debt.md` (file since deleted; item: "merge `core::config` + `daemon::ipc`").
 
 Current reality:
 
@@ -121,9 +121,9 @@ tested in CI so that the published API stays buildable.
 - `docs/audit/2026-05-23-cleanup-targets.md` Stage 4 entries for these two
   crates are now resolved; the audit doc itself need not be updated since it
   is a point-in-time snapshot.
-- `docs/architectural-debt.md` arch-5 row should be re-worded from "Single
-  AppConfig merge core::config + daemon::ipc" to its current intent (kept
-  open, deferred to v0.4).
+- `docs/architectural-debt.md` arch-5 row (file deleted; row no longer
+  actionable — arch-5 is re-scoped to daemon-internal consolidation, deferred
+  to v0.4).
 
 ## Alternatives Considered
 
@@ -146,10 +146,10 @@ tested in CI so that the published API stays buildable.
 - [ ] `v3-config-delete` — Remove `crates/copypaste-config/` directory and
   its workspace member entry in root `Cargo.toml`. Update `Cargo.lock`. Add
   CHANGELOG entry. Run `cargo test --workspace` to confirm green.
-- [ ] `v3-arch-5-rescope` — Update `docs/architectural-debt.md` arch-5 row
-  to reflect the re-scoped intent (consolidate the two daemon-internal
-  AppConfigs only; defer to v0.4).
-- [ ] (separate, audit Stage 2) — Strip `OsTag::Linux` and `OsTag::Ios`
-  variants from `crates/copypaste-telemetry/src/error.rs:79,85` as part of
-  the frozen-platform cleanup; bump telemetry crate version (breaking, no
-  production consumers).
+- [x] `v3-arch-5-rescope` — `docs/architectural-debt.md` was deleted; arch-5
+  re-scoped intent is captured in this ADR (consolidate the two daemon-internal
+  AppConfigs only; defer to v0.4). No separate file update possible.
+- [x] (separate, audit Stage 2) — `OsTag::Linux` and `OsTag::Ios` variants
+  were removed from `crates/copypaste-telemetry/src/error.rs`; the enum now
+  has `MacOs`, `Windows`, `Android`, `Unknown` only. Line references 79/85
+  are stale (file changed). Telemetry crate version was bumped accordingly.

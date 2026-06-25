@@ -160,6 +160,43 @@ pub const METHOD_GET_OWN_DEVICE_INFO: &str = "get_own_device_info";
 /// Response: `{ id: String }` — the stable clipboard item UUID.
 pub const METHOD_ADD_FILE_ITEM: &str = "add_file_item";
 
+// ── Content-type → macOS UTI mapping ─────────────────────────────────────────
+
+/// Map the IPC wire `content_type` string to a macOS UTI suitable for
+/// `setData:forType:` on `NSPasteboard`.
+///
+/// This is the single source of truth for the `content_type` → UTI contract.
+/// It lives in `copypaste-ipc` (not the daemon) so the mapping is shared and
+/// tested once: the daemon uses it on the paste-back path, and any future
+/// client/IPC method that needs to surface a UTI derives it from the same
+/// function rather than re-inventing the table (CopyPaste-c4q2.10).
+///
+/// The function is pure string logic with **no** OS dependency, so it is
+/// available on every platform (not `cfg(macos)`-gated) and unit-testable
+/// anywhere.
+///
+/// Heuristic (audit HIGH #2: a bare `"image"` is not a UTI and macOS refuses to
+/// set pasteboard data for it):
+/// - Anything already shaped like a UTI (`public.*`, `com.*`, `org.*`) passes
+///   through unchanged.
+/// - The bare wire values map: `"image"` → `public.png`,
+///   `"text"` → `public.utf8-plain-text`.
+/// - Everything else falls back to `public.data` so the write never silently
+///   no-ops.
+pub fn map_content_type_to_uti(content_type: &str) -> String {
+    if content_type.starts_with("public.")
+        || content_type.starts_with("com.")
+        || content_type.starts_with("org.")
+    {
+        return content_type.to_string();
+    }
+    match content_type {
+        "image" => "public.png".to_string(),
+        "text" => "public.utf8-plain-text".to_string(),
+        _ => "public.data".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -230,5 +267,37 @@ mod tests {
     #[test]
     fn stats_method_has_correct_wire_name() {
         assert_eq!(METHOD_STATS, "stats");
+    }
+
+    // ── map_content_type_to_uti (CopyPaste-c4q2.10) ─────────────────────────
+
+    #[test]
+    fn uti_maps_bare_wire_values() {
+        assert_eq!(map_content_type_to_uti("image"), "public.png");
+        assert_eq!(map_content_type_to_uti("text"), "public.utf8-plain-text");
+    }
+
+    #[test]
+    fn uti_passes_through_existing_utis() {
+        // Already-UTI shapes must pass through unchanged so a precise UTI from
+        // the capture side is never downgraded.
+        for uti in [
+            "public.utf8-plain-text",
+            "public.png",
+            "public.jpeg",
+            "com.adobe.pdf",
+            "org.gnu.gnu-zip-archive",
+        ] {
+            assert_eq!(map_content_type_to_uti(uti), uti);
+        }
+    }
+
+    #[test]
+    fn uti_unknown_falls_back_to_public_data() {
+        // Anything unrecognised maps to public.data so the pasteboard write
+        // never silently no-ops.
+        assert_eq!(map_content_type_to_uti("file"), "public.data");
+        assert_eq!(map_content_type_to_uti(""), "public.data");
+        assert_eq!(map_content_type_to_uti("video"), "public.data");
     }
 }

@@ -106,6 +106,14 @@ class ClipboardService : Service() {
     private var p2pListenerJob: kotlinx.coroutines.Job? = null
 
     /**
+     * CopyPaste-mip2: coroutine that watches [listDiscovered] and fires
+     * [FgsSyncLoop.signalP2pWake] the moment a paired peer is discovered on the LAN.
+     * Polls every [MDNS_PEER_WATCH_INTERVAL_MS]. Cancelled in [onDestroy].
+     * Null when P2P is disabled or the native library is absent.
+     */
+    private var mdnsPeerWatchJob: kotlinx.coroutines.Job? = null
+
+    /**
      * Coroutine that polls [pairGetSas] every ~1 s and posts a HIGH-priority
      * notification when this device transitions to `awaiting_sas` with
      * role="responder" (it received an incoming pairing request). Cancelled in
@@ -167,7 +175,13 @@ class ClipboardService : Service() {
 
         // BUG 1 fix: delegate to the shared MIME-dispatch helper so the
         // foreground-service path and the background-overlay path are identical.
-        dispatchClipData(clip, this@ClipboardService, settings, repository, syncManager, scope, sourcePackage)
+        // CopyPaste-mip2: pass the P2P wake signal so a fresh capture immediately
+        // triggers an opportunistic dial to the LAN peer.
+        dispatchClipData(
+            clip, this@ClipboardService, settings, repository, syncManager, scope,
+            sourcePackage,
+            onStored = { fgsSyncLoop.signalP2pWake() },
+        )
     }
 
     override fun onCreate() {
@@ -326,6 +340,13 @@ class ClipboardService : Service() {
         // Deliverable 1: poll for incoming (responder-role) pairing requests so
         // the user is notified even when DevicesActivity is not open.
         startPairResponderPoller()
+
+        // CopyPaste-mip2: watch for mDNS-discovered peers; signals an opportunistic
+        // P2P dial when a new peer appears on the LAN.  Gated on P2P being enabled
+        // (pointless to watch if we never dial) and the native library being loaded.
+        if (settings.syncEnabled && settings.p2pSyncEnabled) {
+            startMdnsPeerWatcher()
+        }
 
         return START_STICKY
     }
@@ -610,6 +631,54 @@ class ClipboardService : Service() {
     }
 
     /**
+     * CopyPaste-mip2: watch for newly-discovered mDNS peers and signal an
+     * opportunistic P2P dial the moment one appears on the LAN.
+     *
+     * Polls [listDiscovered] every [MDNS_PEER_WATCH_INTERVAL_MS].  Fires
+     * [FgsSyncLoop.signalP2pWake] on the FIRST tick where the discovered
+     * count transitions from zero to non-zero, and again on every subsequent
+     * increase (a new peer joined while another was already present).
+     *
+     * Rationale: [listDiscovered] is cheap (in-memory mDNS table read, no
+     * network I/O), so polling at 2 s does not drain the battery.  The CONFLATED
+     * channel in [FgsSyncLoop] absorbs any signal burst — at most one early dial
+     * fires per burst of discoveries.
+     *
+     * Idempotent: a no-op while [mdnsPeerWatchJob] is already running.
+     * All exceptions from [listDiscovered] are caught and logged — the watcher
+     * must never crash the FGS.
+     */
+    private fun startMdnsPeerWatcher() {
+        if (mdnsPeerWatchJob?.isActive == true) return
+        if (!isNativeLibraryLoaded) return
+
+        mdnsPeerWatchJob = scope.launch(Dispatchers.IO) {
+            var lastKnownCount = 0
+            while (isActive) {
+                try {
+                    val peers = settings.pairedPeers
+                    if (peers.isNotEmpty()) {
+                        val discovered = listDiscovered(peers.map { it.fingerprint })
+                        val count = discovered.size
+                        if (count > lastKnownCount) {
+                            // New peer(s) arrived — signal an immediate P2P dial.
+                            Log.d(TAG, "mDNS peer watcher: $count peer(s) discovered (was $lastKnownCount) — signalling P2P wake")
+                            fgsSyncLoop.signalP2pWake()
+                        }
+                        lastKnownCount = count
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // listDiscovered may throw if native side is not yet started.
+                    Log.v(TAG, "mDNS peer watcher: listDiscovered unavailable: ${e.message}")
+                }
+                delay(MDNS_PEER_WATCH_INTERVAL_MS)
+            }
+        }
+    }
+
+    /**
      * Called when the user swipes this app from the Recents list.
      *
      * We schedule a one-time expedited WorkManager request to restart the service.
@@ -760,6 +829,9 @@ class ClipboardService : Service() {
         // Stop the responder poller before the scope is cancelled.
         pairResponderPollJob?.cancel()
         pairResponderPollJob = null
+        // CopyPaste-mip2: stop the mDNS peer watcher before the scope is cancelled.
+        mdnsPeerWatchJob?.cancel()
+        mdnsPeerWatchJob = null
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         settings.stopObserving(prefsListener)
         removeCaptureOverlay()
@@ -869,6 +941,14 @@ class ClipboardService : Service() {
 
         /** Poll cadence for the responder-role SAS watcher in [startPairResponderPoller]. */
         private const val PAIR_RESPONDER_POLL_MS = 1_000L
+
+        /**
+         * CopyPaste-mip2: how often [startMdnsPeerWatcher] polls [listDiscovered] to
+         * detect newly-arrived LAN peers.  2 s is short enough that a freshly-booted
+         * macOS peer triggers an opportunistic dial within ~2 s of being advertised,
+         * while being light enough to run continuously without draining the battery.
+         */
+        private const val MDNS_PEER_WATCH_INTERVAL_MS = 2_000L
         /**
          * Notification channel for per-copy event toasts (A-SET-6 parity).
          * IMPORTANCE_MIN = no sound, no heads-up, no status-bar icon — just a
@@ -909,6 +989,53 @@ class ClipboardService : Service() {
          * budget (≈128 MB at ARGB_8888) and reject anything above it.
          */
         private const val MAX_IMAGE_PIXELS = 32L * 1024 * 1024
+
+        // ── CopyPaste-j2vf: port-poll pure helpers ───────────────────────────────
+        //
+        // startFgsDiscovery() waits for activeListenerPort to become non-zero
+        // (up to PORT_POLL_TIMEOUT_MS) before calling startDiscovery().
+        // Advertising syncPort=0 causes macOS peers to see "device unavailable".
+        //
+        // These two functions capture the two pure decisions in that loop so
+        // they can be verified without instantiating the Android service.
+
+        /** Maximum total wait for the inbound listener to bind (safety timeout). */
+        internal const val PORT_POLL_TIMEOUT_MS = 10_000L
+
+        /** Initial backoff (ms) between port-poll retries. */
+        internal const val PORT_POLL_INITIAL_BACKOFF_MS = 20L
+
+        /** Maximum backoff (ms) between port-poll retries. */
+        internal const val PORT_POLL_MAX_BACKOFF_MS = 500L
+
+        /**
+         * Compute the next exponential backoff delay (capped at [maxMs]).
+         *
+         * Mirrors the inline expression in [startFgsDiscovery]:
+         * `backoffMs = (backoffMs * 2).coerceAtMost(500L)`
+         *
+         * Pure: no side-effects, no system-clock reads.
+         *
+         * @param currentMs current backoff duration.
+         * @param maxMs     cap for the next backoff; must be > 0.
+         * @return          next backoff, doubling from [currentMs], capped at [maxMs].
+         */
+        internal fun portPollNextBackoffMs(currentMs: Long, maxMs: Long): Long =
+            (currentMs * 2L).coerceAtMost(maxMs)
+
+        /**
+         * True when [port] is non-zero and it is safe to advertise over mDNS.
+         *
+         * A syncPort=0 advertisement is WORSE than no advertisement: the macOS
+         * peer dials :0 and immediately fails with "device unavailable" (j2vf).
+         * This guard is the single place where that decision is expressed.
+         *
+         * Pure: no side-effects.
+         *
+         * @param port the value of [activeListenerPort] after the poll loop.
+         * @return true iff the port is ready to be published over mDNS.
+         */
+        internal fun shouldAdvertisePort(port: Int): Boolean = port > 0
 
         /**
          * Read up to [limit] bytes from [input], returning null when the stream
@@ -961,6 +1088,11 @@ class ClipboardService : Service() {
             // CopyPaste-x8a8: optional source-package for exclusion-list enforcement.
             // Null means "source unknown — do not suppress" (safe default).
             sourcePackage: String? = null,
+            // CopyPaste-mip2: optional callback fired when the item is actually stored.
+            // Used by the FGS to trigger an opportunistic P2P dial without modifying
+            // the capture pipeline's core logic.  Null = no signal (accessibility
+            // service caller, unit tests, etc.).
+            onStored: (() -> Unit)? = null,
         ) {
             // CopyPaste-x8a8: enforce the excludedAppBundleIds exclusion list.
             // Only suppress when we have a confirmed source package AND it appears
@@ -981,7 +1113,7 @@ class ClipboardService : Service() {
             if (imageMime != null) {
                 val uri = clip.getItemAt(0)?.uri
                 if (uri != null) {
-                    scope.launch { captureImageClip(context, uri, imageMime, settings, repository, syncManager) }
+                    scope.launch { captureImageClip(context, uri, imageMime, settings, repository, syncManager, onStored = onStored) }
                 } else {
                     Log.w(TAG, "dispatchClipData: image clip has no URI — skipping")
                 }
@@ -997,7 +1129,7 @@ class ClipboardService : Service() {
                     mime != null && !mime.startsWith("text/") && !mime.startsWith("image/")
                 }
                 if (fileMime != null) {
-                    scope.launch { captureFileClip(context, itemUri, fileMime, settings, repository) }
+                    scope.launch { captureFileClip(context, itemUri, fileMime, settings, repository, onStored = onStored) }
                     return
                 }
             }
@@ -1005,7 +1137,7 @@ class ClipboardService : Service() {
             // Phase 3: text (most common path).
             val text = clip.getItemAt(0)?.text?.toString()
             if (!text.isNullOrBlank()) {
-                scope.launch { captureClip(context, text, settings, repository, syncManager, sourceApp = sourcePackage) }
+                scope.launch { captureClip(context, text, settings, repository, syncManager, sourceApp = sourcePackage, onStored = onStored) }
             } else {
                 Log.d(TAG, "dispatchClipData: clip has no usable text/URI — skipping")
             }
@@ -1034,6 +1166,9 @@ class ClipboardService : Service() {
             // Null = unknown source. Threaded into repository.storeItem so known password-
             // manager packages force isSensitive=true at read time via parseItem.
             sourceApp: String? = null,
+            // CopyPaste-mip2: called (non-blocking) when the item is actually stored —
+            // used by the FGS to signal an opportunistic P2P wake.  Null = no signal.
+            onStored: (() -> Unit)? = null,
         ) {
             if (text.isBlank()) return
 
@@ -1107,6 +1242,9 @@ class ClipboardService : Service() {
             val storedId = repository.storeItem(text, key, lamportTs = lamportTs, originDeviceId = settings.deviceId, sourceApp = sourceApp)
             if (storedId.isNotEmpty()) {
                 Log.d(TAG, "Clipboard item stored successfully")
+                // CopyPaste-mip2: signal an opportunistic P2P dial so a LAN-only peer
+                // receives the fresh clip within ~500 ms instead of the next 30 s tick.
+                onStored?.invoke()
                 bumpTodayCounter(context)
                 refreshNotification(context)
                 if (settings.notifyOnCopy) postCopyNotification(context)
@@ -1156,6 +1294,8 @@ class ClipboardService : Service() {
             settings: Settings,
             repository: ClipboardRepository,
             syncManager: SyncManager,
+            // CopyPaste-mip2: called when the image is actually stored — for P2P wake.
+            onStored: (() -> Unit)? = null,
         ) {
             // Copy-from-history echo guard (parity with text path in captureClip).
             // When HistoryActivity copies an image back to the clipboard it calls
@@ -1290,6 +1430,8 @@ class ClipboardService : Service() {
                 return
             }
 
+            // CopyPaste-mip2: image captured — signal opportunistic P2P dial.
+            onStored?.invoke()
             repository.storeImageBytes(storedId, pngBytes)
             // CopyPaste-g4ik: guard storedId (UUID) in log — stripped from release by R8.
             if (BuildConfig.DEBUG) {
@@ -1356,6 +1498,8 @@ class ClipboardService : Service() {
             // accessibility-service caller (which has no SyncManager wired) compiles
             // unchanged and simply skips the cloud push.
             syncManager: SyncManager? = null,
+            // CopyPaste-mip2: called when the file is actually stored — for P2P wake.
+            onStored: (() -> Unit)? = null,
         ) {
             // Copy-from-history echo guard (mirrors text + image paths above).
             // HistoryActivity calls ClipboardRepository.expectImageUri(uri) before
@@ -1443,6 +1587,8 @@ class ClipboardService : Service() {
                 return
             }
 
+            // CopyPaste-mip2: file captured — signal opportunistic P2P dial.
+            onStored?.invoke()
             repository.storeFileBytes(storedId, fileBytes)
             repository.storeFileMeta(storedId, fileName, mimeType)
             // CopyPaste-als8: do NOT log the filename — AppLogger writes to

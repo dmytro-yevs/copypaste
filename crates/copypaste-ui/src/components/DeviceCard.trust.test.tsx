@@ -2,10 +2,8 @@
  * Tests for CopyPaste-mgkr (NG-3): explicit Verified / Unverified trust label
  * on paired device cards.
  *
- * All peers in the paired list have completed SAS confirmation — they are
- * implicitly "Verified". This test ensures PeerRow renders an explicit
- * "Verified" badge so the trust state is visible without relying on
- * context or user knowledge.
+ * CopyPaste-1jms.30: badge text is derived from peer.trust ("verified" → Verified,
+ * anything else / absent → Unverified), matching Android's trustLabel(peer) logic.
  *
  * PARITY-SPEC §NG-3: trust label/badge must appear on peer rows on both
  * platforms (web + Android).
@@ -32,6 +30,9 @@ const BASE_PEER: PairedDevice = {
   online: true,
   last_seen_secs: 5,
   latency_ms: 12,
+  // CopyPaste-1jms.30: daemon always sends trust: "verified" for persisted peers
+  // that completed SAS. Tests use this to assert the Verified badge.
+  trust: "verified",
 };
 
 const NOOP = vi.fn();

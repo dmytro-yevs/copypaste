@@ -681,32 +681,59 @@ mod tests {
         assert!(decrypt_relay_token(&tampered, &key).is_none());
     }
 
-    /// Legacy plaintext migration: load_cached_token falls back to the raw
-    /// token when the file contains a plaintext string that cannot be decrypted.
+    /// CopyPaste-qvtg.2: a token file that does NOT authenticate under AEAD
+    /// (legacy plaintext, corrupt, or attacker-planted) must be REJECTED —
+    /// `load_cached_token` returns `None` and never the raw file bytes — while a
+    /// properly AEAD-encrypted token is still accepted. This closes the
+    /// write-then-use TOCTOU where a local attacker plants a controlled token.
     #[test]
-    fn load_cached_token_migrates_legacy_plaintext() {
+    fn load_cached_token_rejects_non_aead_token() {
+        let _lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let dir = tempfile::tempdir().expect("tmpdir");
-        let token_file = dir.path().join(RELAY_TOKEN_FILE);
+        // try_app_support_dir() resolves under HOME on macOS / XDG_DATA_HOME on
+        // Linux; set both so token_path() lands inside the tempdir.
+        let prev_home = std::env::var_os("HOME");
+        let prev_xdg = std::env::var_os("XDG_DATA_HOME");
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+            std::env::set_var("XDG_DATA_HOME", dir.path());
+        }
 
-        // Write a legacy plaintext token (the old format).
-        std::fs::write(&token_file, b"legacy-plaintext-token-xyz\n").expect("write");
-
-        // Redirect token_path() by temporarily overriding the app support dir
-        // via the file directly — we test the crypto helpers and not the path
-        // resolution, so we call the helpers directly.
         let key = zeroize::Zeroizing::new([0x55u8; 32]);
+        let token_file = super::token::token_path().expect("token path resolves");
+        if let Some(parent) = token_file.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir");
+        }
 
-        let raw = std::fs::read_to_string(&token_file).expect("read");
-        let trimmed = raw.trim();
-        // Decrypting legacy plaintext must return None (it is not a valid blob).
+        // 1) Legacy plaintext / attacker-planted token → rejected, never returned.
+        std::fs::write(&token_file, b"attacker-planted-token-xyz\n").expect("write");
         assert!(
-            decrypt_relay_token(trimmed, &key).is_none(),
-            "legacy plaintext must not decrypt successfully"
+            super::token::load_cached_token(&key).is_none(),
+            "non-AEAD token must be rejected (None), never returned as the bearer"
         );
-        // The migration path should return the raw trimmed string as the token.
-        // Simulate what load_cached_token does after decrypt_relay_token returns None:
-        let fallback = trimmed.to_owned();
-        assert_eq!(fallback, "legacy-plaintext-token-xyz");
+
+        // 2) A properly AEAD-encrypted token → accepted and round-trips.
+        let enc = encrypt_relay_token("real-encrypted-token-123", &key).expect("encrypt");
+        super::token::write_token_0600(&token_file, &enc).expect("write encrypted");
+        assert_eq!(
+            super::token::load_cached_token(&key).as_deref(),
+            Some("real-encrypted-token-123"),
+            "a valid AEAD token must still load"
+        );
+
+        // Restore env.
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+            match prev_xdg {
+                Some(v) => std::env::set_var("XDG_DATA_HOME", v),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
     }
 
     /// Empty file → load returns None (no fallback to empty token).
@@ -1089,51 +1116,103 @@ mod tests {
     /// encoder would catch sensitive items: it would not, and sensitive
     /// ciphertext would be pushed to the relay.
     ///
-    /// This test confirms the guard predicate by constructing a sensitive item
-    /// and asserting the skip condition (`item.is_sensitive`) triggers.
-    #[test]
-    fn push_loop_skips_sensitive_items() {
-        // Build a sensitive local text item (is_sensitive = true).
-        let local_key = zeroize::Zeroizing::new([0xAAu8; 32]);
-        let sync_bytes = skey("sensitive-filter-test");
-        let sync_key = SyncKey::from_bytes(sync_bytes);
+    /// CopyPaste-jbao: this is a REAL end-to-end guard test (the previous one was
+    /// a tautology that asserted `is_sensitive==true` twice and never invoked
+    /// `push_loop`, so deleting the guard would not fail it). Here `push_loop`
+    /// runs against a mock relay (a bare TCP listener that counts inbound
+    /// connections):
+    ///   - a SENSITIVE item must produce ZERO connections (guard drops it before
+    ///     any token/registration/HTTP work);
+    ///   - a NON-sensitive item (with a sync key set) must produce ≥1 connection
+    ///     (the positive control — proves the zero above is the guard at work,
+    ///     not a broken setup). Removing the guard makes the sensitive case
+    ///     connect and the test fails.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn push_loop_does_not_upload_sensitive_items() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
 
-        let mut item = make_local_text_item(
-            "item-sensitive-1",
-            b"AKIA_SECRET_KEY_EXAMPLE",
-            &local_key,
-            1,
-            1000,
+        // Mock relay: accept TCP connections and count them (no HTTP response —
+        // we only care whether push_loop attempted to reach the relay).
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let conns = Arc::new(AtomicUsize::new(0));
+        let conns_acc = conns.clone();
+        let accept_task = tokio::spawn(async move {
+            // Drop each accepted socket immediately; the client request fails
+            // fast (we set a short client timeout below). We only count that a
+            // connection was attempted.
+            while let Ok((_sock, _)) = listener.accept().await {
+                conns_acc.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+
+        let local_key = Arc::new(zeroize::Zeroizing::new([0xAAu8; 32]));
+        // A sync key MUST be present so a non-sensitive item proceeds all the way
+        // to the HTTP push (the positive control).
+        let sync_key = Arc::new(tokio::sync::Mutex::new(Some(SyncKey::from_bytes(skey(
+            "jbao-guard-test",
+        )))));
+        // sync_enabled on, wifi-only off → nothing else blocks the push.
+        let core_config = Arc::new(std::sync::RwLock::new(AppConfig {
+            sync_enabled: true,
+            sync_on_wifi_only: false,
+            ..AppConfig::default()
+        }));
+        let (tx, rx) = tokio::sync::broadcast::channel::<ClipboardItem>(8);
+        let shutdown = Arc::new(tokio::sync::Notify::new());
+        // Short client timeout so a never-answered request fails fast instead of
+        // stalling the loop for the whole test.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(400))
+            .build()
+            .unwrap();
+
+        let loop_task = tokio::spawn(push::push_loop(
+            client,
+            format!("http://{addr}"),
+            "test-device".to_owned(),
+            rx,
+            shutdown.clone(),
+            sync_key,
+            local_key.clone(),
+            Arc::new(AtomicI64::new(0)),
+            core_config,
+        ));
+
+        // 1) SENSITIVE item — must NOT reach the relay.
+        let mut sensitive =
+            make_local_text_item("sens-1", b"AKIAIOSFODNN7EXAMPLE", &local_key, 1, 1000);
+        sensitive.is_sensitive = true;
+        tx.send(sensitive).unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+        assert_eq!(
+            conns.load(Ordering::SeqCst),
+            0,
+            "sensitive item must never connect to the relay"
         );
-        item.is_sensitive = true;
 
-        // The push_loop guard fires on `item.is_sensitive`, so `build_content_b64`
-        // is never called. Confirm the guard is the right predicate and that a
-        // non-sensitive item does pass through (basic sanity check).
+        // 2) NON-sensitive item (positive control) — must reach the relay.
+        let mut plain = make_local_text_item("plain-1", b"hello, world", &local_key, 2, 2000);
+        plain.is_sensitive = false;
+        tx.send(plain).unwrap();
+        // Allow time for token registration + push connection attempt(s).
+        let mut got_conn = false;
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if conns.load(Ordering::SeqCst) >= 1 {
+                got_conn = true;
+                break;
+            }
+        }
         assert!(
-            item.is_sensitive,
-            "sensitive item must carry is_sensitive=true"
+            got_conn,
+            "non-sensitive item must reach the relay (positive control) — if this \
+             fails the test setup is broken, not the guard"
         );
 
-        // Non-sensitive item: build_content_b64 must succeed (returns Some).
-        let mut plain_item =
-            make_local_text_item("item-plain-1", b"hello, world", &local_key, 2, 2000);
-        plain_item.is_sensitive = false;
-        let result = build_content_b64(&plain_item, &local_key, &sync_key);
-        assert!(
-            result.is_some(),
-            "non-sensitive item must produce a content_b64 payload (push should proceed)"
-        );
-
-        // Confirm that the sensitive item would be filtered: if push_loop received
-        // this item it would `continue` at the `if item.is_sensitive` guard, never
-        // reaching build_content_b64. Document that expectation in an assertion so
-        // a future refactor that removes the guard fails this test.
-        assert!(
-            item.is_sensitive,
-            "push_loop MUST check item.is_sensitive and skip; if this assertion \
-             passes but the guard is gone, the relay-push sensitive filter is broken"
-        );
+        shutdown.notify_one();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), loop_task).await;
+        accept_task.abort();
     }
 
     #[test]

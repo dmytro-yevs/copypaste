@@ -44,6 +44,15 @@ ignore = [
     # Transitive via ruflo/agentdb dependencies. v1 is considered feature-complete
     # upstream; migration to alternatives (postcard, rkyv) is non-trivial.
     "RUSTSEC-2025-0141",
+    # glib 0.18.5 unsound Iterator/DoubleEndedIterator for glib::VariantStrIter
+    # (incorrect lifetime -> potential use-after-free). Reachable ONLY on Linux
+    # daemon/UI builds via webkit2gtk -> tauri; the macOS primary target uses
+    # WKWebView (wry/tao), not webkit2gtk/glib, and Android does not pull glib at
+    # all, so it is unreachable on the shipped targets. No upstream fix: glib
+    # 0.18.x is EOL and 0.19+ requires webkit2gtk 2.1+. Not on any crypto/IPC
+    # path. See bd CopyPaste-8p37. Revisit when tauri's Linux webkit2gtk stack
+    # moves to glib 0.19+.
+    "RUSTSEC-2024-0429", # glib VariantStrIter unsound — Linux/webkit2gtk only
 ]
 
 [licenses]

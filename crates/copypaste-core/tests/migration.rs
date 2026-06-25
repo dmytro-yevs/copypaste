@@ -24,35 +24,21 @@ use copypaste_core::Database;
 use rusqlite::Connection;
 use tempfile::tempdir;
 
-/// T3: Schema rollback test — v5 migration interrupted mid-batch.
-///
-/// Requires the `migration_state` table (from wave1a) to be merged before this
-/// can be implemented. Marked `#[ignore]` so CI skips it.
-///
-/// When un-ignoring:
-///   1. Open a DB at schema v4 (force user_version = 4).
-///   2. Begin a v5 migration transaction and partially apply it (insert some rows).
-///   3. Simulate a crash (drop connection without committing).
-///   4. Reopen the DB and assert it can resume/complete v5 migration cleanly.
-///   5. Verify no data was lost and the schema is at v5.
-#[tokio::test]
-#[ignore = "requires migration harness — see wave1a T3 scope"]
-async fn test_schema_rollback_v5_mid_batch() {
-    // CopyPaste-2h5d: stub body — this test depends on the migration_state
-    // resumable-sweep infrastructure (wave1a) which has not yet landed. The
-    // migration runs atomically inside a single SQLite transaction (see
-    // apply_migrations), so a simulated crash is a no-op on the schema version
-    // even without the resumable harness; a more nuanced mid-batch test can
-    // only be written once the harness is available. Un-ignore and complete
-    // when wave1a T3 lands. The `#[ignore]` gate above prevents this stub
-    // from being run by `cargo test` (without --ignored).
-}
+// CopyPaste-ojas.17: removed the empty, assertion-free `#[ignore]` stub
+// `test_schema_rollback_v5_mid_batch`. It masqueraded as coverage while
+// asserting nothing, and the invariant it described (a migration that fails /
+// is interrupted leaves the schema atomic — all-or-nothing) is ALREADY covered
+// by a real test: `schema::tests::apply_migrations_is_atomic_on_failure` in
+// src/storage/schema.rs. A resumable mid-batch test needs the unlanded
+// migration_state harness; it is tracked in bd, not as a fake test here.
 
-/// Mirror of `copypaste-core/src/storage/schema.rs::SCHEMA_VERSION`.
-/// Kept in-sync manually because the module is private. Bumping
-/// SCHEMA_VERSION in src/ MUST be accompanied by bumping this and adding
-/// a new migration test below.
+/// The live schema version, read directly from the source const
+/// (`copypaste_core::storage::SCHEMA_VERSION`) — CopyPaste-ojas.17. Previously a
+/// hand-mirrored literal that silently went stale on a bump, so a schema bump
+/// would pass these assertions against the OLD value. Bumping SCHEMA_VERSION in
+/// src/ now automatically flows here; still add a new migration test below.
 ///
+/// Migration history (for reference):
 /// v4: adds key_version column (HKDF v1→v2 re-encrypt sweep).
 /// v5: adds idx_dedup_hash_minute (TOCTOU dedup) +
 ///     idx_clipboard_item_id (sync replay dedup). See schema_v2.sql.
@@ -74,7 +60,7 @@ async fn test_schema_rollback_v5_mid_batch() {
 ///      (pinned DESC, pin_order, wall_time DESC) WHERE deleted=0 so that
 ///      get_page_pinned_first uses an index scan instead of a full-table scan
 ///      + filesort on every history_page IPC call (CopyPaste-89rd).
-const CURRENT_SCHEMA_VERSION: i64 = 14;
+const CURRENT_SCHEMA_VERSION: i64 = copypaste_core::storage::SCHEMA_VERSION;
 
 /// v1 schema (the exact contents of src/storage/schema_v1.sql, inlined because
 /// the file is `include_str!`'d into the crate and not accessible from

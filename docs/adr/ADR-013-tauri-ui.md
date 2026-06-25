@@ -3,7 +3,7 @@
 **Status:** Accepted
 **Date:** 2026-05-28
 **Deciders:** Project owner
-**Supersedes:** [ADR-005](./ADR-005-slint-ui-framework.md)
+**Supersedes:** ADR-005 (Slint UI framework — file deleted along with the Slint crate)
 
 ## Context
 

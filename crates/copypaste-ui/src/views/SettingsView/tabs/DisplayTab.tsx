@@ -29,9 +29,10 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
           data-palette attribute sync (already wired). */}
       <SectionHeader label="Appearance" />
       <Panel>
-        {/* Palette picker — grid of 10 swatches */}
-        <div className="border-b border-ide-divider/70 px-3 py-3 last:border-b-0">
-          <div className="mb-2 text-[12px] text-ide-dim">Color palette</div>
+        {/* Palette picker — grid of 10 swatches.
+            bdac.105: converted raw <div> with hardcoded 12px/text-ide-dim/mb-2
+            to SettingsRow with fullWidth so label typography is density-aware. */}
+        <SettingsRow title="Color palette" fullWidth>
           <div
             data-testid="palette-picker"
             className="grid grid-cols-5 gap-2"
@@ -67,7 +68,7 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
               );
             })}
           </div>
-        </div>
+        </SettingsRow>
 
         {/* W-F4: Skin picker — Visual style segmented control (Classic / Quiet / Vapor).
             Mirrors the density/theme segmented control pattern exactly.
@@ -126,117 +127,126 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
         </SettingsRow>
 
         {/* Color theme — matches styleguide §form-controls segmented control */}
-        <SettingsRow title="Color theme">
-          <div className="flex items-center gap-2">
-            <InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />
-            {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
-                Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius.
-                itsu: hairline border + mute token (was faint, now mute per spec) */}
-            <div className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5">
-              {(["light", "dark", "system"] as const).map((opt) => {
-                const selected = (prefs.theme ?? "dark") === opt;
-                return (
-                  <button
-                    key={opt}
-                    type="button"
-                    aria-label={opt}
-                    onClick={() => setPrefs({ theme: opt })}
-                    className={[
-                      "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
-                      selected
-                        ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                        : "text-ide-dim hover:text-ide-text",
-                    ].join(" ")}
-                  >
-                    {opt}
-                  </button>
-                );
-              })}
-            </div>
+        {/* bdac.104: InfoPopover moved to info= slot (label column) */}
+        {/* bdac.107: description added for Color theme row */}
+        <SettingsRow
+          title="Color theme"
+          description="Overrides the system appearance for this app only."
+          info={<InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />}
+        >
+          {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
+              Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius.
+              itsu: hairline border + mute token (was faint, now mute per spec) */}
+          <div className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5">
+            {(["light", "dark", "system"] as const).map((opt) => {
+              const selected = (prefs.theme ?? "dark") === opt;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  aria-label={opt}
+                  onClick={() => setPrefs({ theme: opt })}
+                  className={[
+                    "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
+                    selected
+                      ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
+                      : "text-ide-dim hover:text-ide-text",
+                  ].join(" ")}
+                >
+                  {opt}
+                </button>
+              );
+            })}
           </div>
         </SettingsRow>
 
         {/* Translucency — kept here so all visual appearance controls are together */}
-        <SettingsRow title="Translucency">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />
-            <Toggle
-              checked={prefs.translucency ?? true}
-              onChange={(v) => setPrefs({ translucency: v })}
-            />
-          </div>
+        {/* bdac.104: InfoPopover moved to info= slot */}
+        <SettingsRow
+          title="Translucency"
+          info={<InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />}
+        >
+          <Toggle
+            checked={prefs.translucency ?? true}
+            onChange={(v) => setPrefs({ translucency: v })}
+          />
         </SettingsRow>
 
         {/* Reduce motion — switches aurora from cinematic to calm profile.
             "calm" slows the aurora (--speed: 1.45) and dims it (--motion-opacity: .55).
             OS prefers-reduced-motion still zeroes the aurora automatically via CSS. */}
-        <SettingsRow title="Reduce motion">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Slow and dim the aurora background animation. The OS 'Reduce Motion' accessibility setting stops it entirely regardless of this toggle." />
-            <Toggle
-              checked={prefs.motionReduced ?? false}
-              onChange={(v) => setPrefs({ motionReduced: v })}
-            />
-          </div>
+        {/* bdac.104: InfoPopover moved to info= slot */}
+        <SettingsRow
+          title="Reduce motion"
+          info={<InfoPopover text="Slow and dim the aurora background animation. The OS 'Reduce Motion' accessibility setting stops it entirely regardless of this toggle." />}
+        >
+          <Toggle
+            checked={prefs.motionReduced ?? false}
+            onChange={(v) => setPrefs({ motionReduced: v })}
+          />
         </SettingsRow>
 
         {/* n9gp (PG-34): sensitive-reveal warning toggle — Android parity.
             When on (default), a "Sensitive — preview hidden · click to reveal" overlay appears
             before the blur is lifted. When off, clicking the blur reveals
             immediately without the extra confirmation step. */}
-        <SettingsRow title="Warn before revealing sensitive">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Show a confirmation overlay before revealing blurred sensitive content. Matches the Android warning sheet behaviour. Turn off if you find the extra step redundant." />
-            <Toggle
-              checked={prefs.showSensitiveWarnings ?? true}
-              onChange={(v) => setPrefs({ showSensitiveWarnings: v })}
-            />
-          </div>
+        {/* bdac.104: InfoPopover moved to info= slot */}
+        <SettingsRow
+          title="Warn before revealing sensitive"
+          info={<InfoPopover text="Show a confirmation overlay before revealing blurred sensitive content. Matches the Android warning sheet behaviour. Turn off if you find the extra step redundant." />}
+        >
+          <Toggle
+            checked={prefs.showSensitiveWarnings ?? true}
+            onChange={(v) => setPrefs({ showSensitiveWarnings: v })}
+          />
         </SettingsRow>
       </Panel>
 
       <SectionHeader label="History list" />
       <Panel>
         {/* M4: split previewLines — main window has its own independent setting */}
-        <SettingsRow title="Preview lines">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Number of text lines shown per clip in the main history window. Independent from the popup setting." />
-            <SliderRow
-              min={1}
-              max={6}
-              step={1}
-              value={prefs.previewLinesApp}
-              onChange={(v) => setPrefs({ previewLinesApp: v })}
-              formatValue={(v) => String(v)}
-            />
-          </div>
+        {/* bdac.104: InfoPopover moved to info= slot */}
+        <SettingsRow
+          title="Preview lines"
+          info={<InfoPopover text="Number of text lines shown per clip in the main history window. Independent from the popup setting." />}
+        >
+          <SliderRow
+            min={1}
+            max={6}
+            step={1}
+            value={prefs.previewLinesApp}
+            onChange={(v) => setPrefs({ previewLinesApp: v })}
+            formatValue={(v) => String(v)}
+          />
         </SettingsRow>
         {/* Image preview height controls the thumbnail bounding box in both
             the history list and the popup. Moved here from "Popup appearance"
             so users looking for list image sizing find it in the list section. */}
-        <SettingsRow title="Image preview height">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Max height (px) of image thumbnails in the history list and the popup. The image scales to fit within 340 × height, aspect-preserving, never upscaled." />
-            <SliderRow
-              min={1}
-              max={200}
-              step={1}
-              value={prefs.imageMaxHeight}
-              onChange={(v) => setPrefs({ imageMaxHeight: v })}
-              formatValue={(v) => `${v}px`}
-            />
-          </div>
+        {/* bdac.104: InfoPopover moved to info= slot */}
+        <SettingsRow
+          title="Image preview height"
+          info={<InfoPopover text="Max height (px) of image thumbnails in the history list and the popup. The image scales to fit within 340 × height, aspect-preserving, never upscaled." />}
+        >
+          <SliderRow
+            min={1}
+            max={200}
+            step={1}
+            value={prefs.imageMaxHeight}
+            onChange={(v) => setPrefs({ imageMaxHeight: v })}
+            formatValue={(v) => `${v}px`}
+          />
         </SettingsRow>
         {/* bdac.91: Group by device — persists the sort mode chosen in the History toolbar.
             Android parity: Android Settings.kt:627 sortByDevice, default false. */}
-        <SettingsRow title="Group by device">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Group clipboard items by the device they came from, with your device shown first. You can also toggle this from the History toolbar when multiple devices are paired." />
-            <Toggle
-              checked={prefs.sortByDevice ?? false}
-              onChange={(v) => setPrefs({ sortByDevice: v })}
-            />
-          </div>
+        {/* bdac.104: InfoPopover moved to info= slot */}
+        <SettingsRow
+          title="Group by device"
+          info={<InfoPopover text="Group clipboard items by the device they came from, with your device shown first. You can also toggle this from the History toolbar when multiple devices are paired." />}
+        >
+          <Toggle
+            checked={prefs.sortByDevice ?? false}
+            onChange={(v) => setPrefs({ sortByDevice: v })}
+          />
         </SettingsRow>
         {/* M5: historySize removed — history uses lazy pagination now */}
         {/* M6: previewDelay removed — replaced by explicit Eye preview button */}
@@ -245,18 +255,19 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
       <SectionHeader label="Popup appearance" hint="How the popup looks when triggered." />
       <Panel>
         {/* M4: popup gets its own independent preview-lines setting */}
-        <SettingsRow title="Preview lines">
-          <div className="flex items-center gap-1.5">
-            <InfoPopover text="Number of text lines shown per clip in the Quick-Paste popup. Independent from the main window setting." />
-            <SliderRow
-              min={1}
-              max={6}
-              step={1}
-              value={prefs.previewLinesPopup}
-              onChange={(v) => setPrefs({ previewLinesPopup: v })}
-              formatValue={(v) => String(v)}
-            />
-          </div>
+        {/* bdac.104: InfoPopover moved to info= slot */}
+        <SettingsRow
+          title="Preview lines"
+          info={<InfoPopover text="Number of text lines shown per clip in the Quick-Paste popup. Independent from the main window setting." />}
+        >
+          <SliderRow
+            min={1}
+            max={6}
+            step={1}
+            value={prefs.previewLinesPopup}
+            onChange={(v) => setPrefs({ previewLinesPopup: v })}
+            formatValue={(v) => String(v)}
+          />
         </SettingsRow>
       </Panel>
     </div>

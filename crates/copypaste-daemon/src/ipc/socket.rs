@@ -406,42 +406,33 @@ pub(crate) fn bind_with_stale_cleanup(
         // the subsequent bind error is the authoritative signal.
         let _ = std::fs::remove_file(socket_path);
     }
-    // CopyPaste-6exk: eliminate the bind→chmod TOCTOU window by restricting
-    // the socket's initial mode AT CREATION rather than after the fact.
-    //
-    // `UnixListener::bind` creates the socket with mode
-    // `~umask & 0o777` — the default umask (typically 0o022) leaves the
-    // socket group- and world-accessible for a brief instant before the
-    // `set_permissions` call in `IpcServer::bind`. With umask=0o177 the
-    // kernel creates the socket at 0o600 directly, eliminating the window.
-    //
-    // Thread-safety: `umask` is a per-process (not per-thread) property on
-    // most Unix kernels.  We save and restore it while holding the exclusive
-    // flock so no concurrent same-process bind can observe the restricted
-    // umask.  The brief hold is safe: only the flock-protected bind code runs
-    // between save and restore, and the IPC socket is bound at most once per
-    // daemon startup.
-    let listener = {
-        #[cfg(unix)]
-        let _umask_guard = {
-            // SAFETY: `libc::umask` is always safe to call; the old mask is
-            // returned and restored in the guard's Drop impl.
-            let old = unsafe { libc::umask(0o177) };
-            // RAII guard that restores the old umask on drop.
-            struct UmaskGuard(libc::mode_t);
-            impl Drop for UmaskGuard {
-                fn drop(&mut self) {
-                    // SAFETY: restoring a previously-read umask is always safe.
-                    unsafe { libc::umask(self.0) };
-                }
-            }
-            UmaskGuard(old)
-        };
-        let listener = UnixListener::bind(socket_path)?;
-        // _umask_guard drops here, restoring the old umask before returning.
-        listener
-    };
-    #[cfg(not(unix))]
     let listener = UnixListener::bind(socket_path)?;
+
+    // CopyPaste-c4q2.26: tighten the socket inode to 0600 via `fchmod` on the
+    // bound fd rather than a process-wide `umask(0o177)`.
+    //
+    // The previous fix (CopyPaste-6exk) wrapped the bind in `umask(0o177)` to
+    // make the kernel create the socket at 0600. But `umask` is a per-PROCESS
+    // property: during the (brief) window it was set, ANY concurrent startup
+    // thread — `spawn_blocking` tasks writing `device_id`, `peers.json`,
+    // `config.json` — would have its newly-created files clamped to `& ~0o177`
+    // (i.e. 0600) too, regardless of their intended mode. Startup is largely
+    // sequential today, so it rarely bit, but it was not structurally
+    // guaranteed and is a latent correctness bug.
+    //
+    // A path `chmod` targets ONLY this socket's inode and has no global side
+    // effect. (`fchmod(2)` on an AF_UNIX socket fd returns `EINVAL` on macOS,
+    // so an fd-based chmod is not portable here — the path chmod is.) The parent
+    // directory is already restricted to 0700 by `IpcServer::bind`, so the
+    // socket is unreachable by other users even during the sub-millisecond
+    // window between `bind` and this `chmod`; `IpcServer::bind` re-asserts 0600
+    // on the path as defence-in-depth.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| anyhow::anyhow!("chmod(socket, 0600) failed: {e}"))?;
+    }
+
     Ok(listener)
 }

@@ -492,11 +492,18 @@ pub(crate) const PAKE_SESSION_TTL: std::time::Duration = std::time::Duration::fr
 pub(crate) const MAX_PAKE_SESSIONS: usize = 64;
 
 /// A peer whose `last_sync_at` is within this many seconds of the current
-/// clock is considered **online** in the `list_peers` response, even if no
-/// live mTLS or mDNS signal is available.  60 s is chosen to survive a single
-/// missed polling cycle (the sync loop re-connects approximately every 30 s)
-/// while still marking a device offline quickly after it disconnects.
-pub(crate) const ONLINE_THRESHOLD_SECS: i64 = 60;
+/// clock is considered **online** in the `list_peers` response when no live
+/// mTLS/mDNS signal is available (the `live_sink` path is authoritative and
+/// unaffected by this threshold).
+///
+/// CopyPaste-1jms.25: this is derived from the SAME recency window the sync
+/// badge chip uses (`copypaste_ipc::SYNC_BADGE_RECENT_MS`, 5 min) so the two
+/// user-facing "recently heard from?" signals agree. Previously this was a
+/// standalone `60` while the chip used 300 s, so a peer 75 s stale showed an
+/// **offline** peer-card dot but a non-error chip — a contradictory state. The
+/// `live_sink` path still flips a disconnected peer to offline immediately, so
+/// widening this fallback only affects the P2P-disabled / pre-connect case.
+pub(crate) const ONLINE_THRESHOLD_SECS: i64 = (copypaste_ipc::SYNC_BADGE_RECENT_MS / 1_000) as i64;
 
 /// c4q2.21: Pure function for computing peer online status.
 ///

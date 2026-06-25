@@ -48,6 +48,8 @@ Adding new codes is allowed; renaming or repurposing an existing code is a break
 | `version_mismatch`        | Client sent a `protocol_version` outside the daemon's supported range.                      | CLI/UI is too old or too new for this daemon; surface an upgrade prompt — do NOT retry the request.     |
 | `migration_in_progress`   | The v4 key-rotation sweep is still running; ingest writes are temporarily refused.          | Client should back off and retry after a short delay.                                                   |
 | `rate_limited`            | A conflicting single-active operation is already in flight (e.g. a second active pairing). | Wait for the current operation to finish, then retry.                                                    |
+| `daemon_offline`          | Daemon socket is missing or refused the connection (client-side view only; the daemon never emits this). | The daemon is not running or the socket path is wrong; start the daemon. |
+| `request_too_large`       | Request payload exceeded the daemon's accepted size limit and was rejected before full buffering. | Surface "payload too large, reduce size" to the user — do NOT retry with the same payload. |
 
 ## Methods
 
@@ -185,4 +187,4 @@ The following legacy method verbs are **still recognised** by the daemon but alw
 
 ## Source of truth
 
-Codes are declared in [`crates/copypaste-daemon/src/protocol.rs`](../crates/copypaste-daemon/src/protocol.rs) as `ERR_CODE_*` constants. Helpers `Response::err_with_code` and `Response::not_implemented` produce tagged responses.
+Codes are defined in [`crates/copypaste-ipc/src/response.rs`](../crates/copypaste-ipc/src/response.rs) as `ERR_CODE_*` string constants, and in [`crates/copypaste-ipc/src/error.rs`](../crates/copypaste-ipc/src/error.rs) as the typed `ErrorCode` enum. The daemon re-exports these via `crates/copypaste-daemon/src/protocol.rs`. Helpers `Response::err_with_code` and `Response::not_implemented` produce tagged responses.

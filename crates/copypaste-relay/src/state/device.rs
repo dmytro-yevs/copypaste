@@ -32,7 +32,8 @@ pub(super) const MAX_TOKENS_PER_DEVICE: usize = 16;
 /// shared inbox.
 #[derive(Debug, Clone)]
 pub struct TokenEntry {
-    /// Bearer token: 32 hex characters representing 16 random bytes from OsRng.
+    /// Bearer token: 64 hex characters representing 32 random bytes (256-bit)
+    /// from OsRng (CopyPaste-qvtg.3).
     /// Generated at registration time and stored verbatim — never recomputed
     /// from the public key (which would make it a deterministic oracle).
     pub token: String,

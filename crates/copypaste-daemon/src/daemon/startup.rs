@@ -313,7 +313,19 @@ pub(crate) fn load_local_key_material() -> KeyLoad {
     {
         match crate::keychain::load_or_create() {
             Ok(kp) => {
-                tracing::info!("device fingerprint={}", kp.fingerprint());
+                // CopyPaste-qvtg.1: the full 64-char fingerprint is the device's
+                // mTLS-pinning identity; emitting it at info on every restart
+                // leaks it into persistent log stores (OSLog/journald) where
+                // diagnostics tooling may collect it, enabling targeted
+                // impersonation/enumeration. Log only the short prefix at info
+                // (matches keychain::generate's new-key path) and keep the full
+                // value at debug for deep diagnostics.
+                let fp = kp.fingerprint();
+                tracing::info!(
+                    "device fingerprint_prefix={}",
+                    fp.get(..23).unwrap_or(fp.as_str())
+                );
+                tracing::debug!("full device fingerprint={}", fp);
                 KeyLoad::Ready(kp.local_enc_key(), kp.public_key_bytes())
             }
             // A LOCKED/denied Keychain must NOT be papered over with an

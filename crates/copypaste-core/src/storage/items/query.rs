@@ -13,7 +13,10 @@ pub fn get_page<D: DbRead + ?Sized>(
     // LIMIT into "no limit" in SQLite (negative LIMIT means unlimited rows).
     let limit_i64 = limit.min(i64::MAX as usize) as i64;
     let offset_i64 = offset.min(i64::MAX as usize) as i64;
-    let mut stmt = db.conn().prepare(
+    // CopyPaste-jvzm.4: prepare_cached on the hot history_page path so the
+    // statement is compiled once per connection and reused, not re-parsed on
+    // every page fetch.
+    let mut stmt = db.conn().prepare_cached(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
                 content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
@@ -43,7 +46,10 @@ pub fn get_page_pinned_first<D: DbRead + ?Sized>(
     // Fix 6: clamp before cast to avoid negative LIMIT/OFFSET in SQLite.
     let limit_i64 = limit.min(i64::MAX as usize) as i64;
     let offset_i64 = offset.min(i64::MAX as usize) as i64;
-    let mut stmt = db.conn().prepare(
+    // CopyPaste-jvzm.4: prepare_cached on the hot history_page path so the
+    // statement is compiled once per connection and reused, not re-parsed on
+    // every page fetch.
+    let mut stmt = db.conn().prepare_cached(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
                 content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
@@ -88,7 +94,10 @@ pub fn get_page_pinned_first_lamport<D: DbRead + ?Sized>(
     // Fix 6: clamp before cast to avoid negative LIMIT/OFFSET in SQLite.
     let limit_i64 = limit.min(i64::MAX as usize) as i64;
     let offset_i64 = offset.min(i64::MAX as usize) as i64;
-    let mut stmt = db.conn().prepare(
+    // CopyPaste-jvzm.4: prepare_cached on the hot history_page path so the
+    // statement is compiled once per connection and reused, not re-parsed on
+    // every page fetch.
+    let mut stmt = db.conn().prepare_cached(
         "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
                 content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
@@ -176,7 +185,10 @@ pub fn get_page_meta(
     // Fix 6: clamp before cast to avoid negative LIMIT/OFFSET in SQLite.
     let limit_i64 = limit.min(i64::MAX as usize) as i64;
     let offset_i64 = offset.min(i64::MAX as usize) as i64;
-    let mut stmt = db.conn().prepare(
+    // CopyPaste-jvzm.4: prepare_cached on the hot history_page path so the
+    // statement is compiled once per connection and reused, not re-parsed on
+    // every page fetch.
+    let mut stmt = db.conn().prepare_cached(
         "SELECT id, item_id, content_type, NULL AS content, content_nonce, blob_ref,
                 is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
                 content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted

@@ -89,6 +89,23 @@ pub fn store_supabase_password_to_keychain(password: &str) -> Result<(), Keychai
 /// keychain prompt. `cargo test --workspace` and `make dev-daemon` set this
 /// env so they run non-interactively. Production (env unset) is unaffected —
 /// every caller falls through to the real Security-framework path unchanged.
+/// CopyPaste-qvtg.5: in production the env var is read **once** and cached for
+/// the process lifetime, so an attacker who can mutate the running daemon's
+/// environment mid-session (e.g. via a debugger) cannot flip it into
+/// ephemeral-key bypass *after* the real Keychain-backed key is already in use.
+/// The legitimate opt-in is always set before launch, so caching the first
+/// observed value loses no real functionality.
+#[cfg(not(test))]
+pub(crate) fn keychain_bypassed() -> bool {
+    static BYPASS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *BYPASS.get_or_init(|| std::env::var_os("COPYPASTE_EPHEMERAL_KEY").is_some())
+}
+
+/// Test build: read the env live each call. The suite toggles
+/// `COPYPASTE_EPHEMERAL_KEY` under `TEST_ENV_LOCK` to exercise both the bypass
+/// and the real path within one process, which a `OnceLock` cache (pinning the
+/// first-observed value for the whole run) would break.
+#[cfg(test)]
 pub(crate) fn keychain_bypassed() -> bool {
     std::env::var_os("COPYPASTE_EPHEMERAL_KEY").is_some()
 }

@@ -33,9 +33,10 @@ P2P, relay, and Supabase in one scan.
 
 Upgrading from an earlier release requires a **one-time re-pair of all
 devices**. The P2P bootstrap protocol (`BOOTSTRAP_PROTO_VERSION` 2) and the
-Android UniFFI ABI (version 13) were bumped, so old pairings will not connect
-until re-paired. Re-scan the pairing QR, or re-run LAN discovery + SAS
-confirmation, on each device.
+Android UniFFI ABI (bumped to 13 at v0.6; current ABI is 18 — see the
+[UDL / Rust API contract](#udl--rust-api-contract) section below) were bumped,
+so old pairings will not connect until re-paired. Re-scan the pairing QR, or
+re-run LAN discovery + SAS confirmation, on each device.
 
 ## Supported platforms
 

@@ -693,6 +693,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         }
     };
 
+    // CopyPaste-44rq.67: shared slot holding the live relay orchestrator handle.
+    // The IPC server gets a clone (`with_relay_handle`) so its `set_config`
+    // handler can shut the relay down when the user clears `relay_url`; this
+    // local clone keeps the handle alive for the daemon's lifetime.
+    #[cfg(feature = "relay-sync")]
+    let relay_handle_slot: Arc<tokio::sync::Mutex<Option<crate::relay::RelayHandle>>> =
+        Arc::new(tokio::sync::Mutex::new(None));
+
     #[cfg(unix)]
     let (
         self_write_change_count_arc,
@@ -716,6 +724,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         .with_new_item_tx(new_item_tx.clone())
         .with_core_config(core_config_arc.clone())
         .with_local_device_id(local_device_id.clone());
+        // CopyPaste-44rq.67: share the relay-handle slot so set_config can stop
+        // the relay at runtime (relay-sync feature only).
+        #[cfg(feature = "relay-sync")]
+        {
+            server = server.with_relay_handle(relay_handle_slot.clone());
+        }
         if let Some(peers) = p2p_peers.clone() {
             server = server.with_p2p_peers(peers);
         }
@@ -966,6 +980,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             // successful button-pair.  All clones share the same
             // Arc<Mutex<…>> backing store built above.
             sync_crypto.clone(),
+            // CopyPaste-7ub: the shared live core config so the P2P outbound
+            // fanout honours sync_on_wifi_only (same Arc the IPC server hot-reloads).
+            core_config_arc.clone(),
         )
         .await
         {
@@ -1239,12 +1256,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     // sync key) and push to / poll it. The reqwest client is built once and
     // shared by both relay loops.
     #[cfg(feature = "relay-sync")]
-    let _relay_handle = {
+    // CopyPaste-44rq.67: store the started handle in the shared slot (rather than
+    // a bare local) so the IPC `set_config` handler can shut it down at runtime
+    // when the user clears `relay_url`. The slot keeps the handle alive.
+    {
         let relay_url = core_config_arc
             .read()
             .ok()
             .and_then(|c| c.relay_url.clone());
-        if !sync_enabled_at_start {
+        let started = if !sync_enabled_at_start {
             tracing::info!("relay-sync: sync_enabled=false — not starting relay orchestrator");
             None
         } else if let Some(relay_url) = relay_url {
@@ -1311,8 +1331,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         } else {
             tracing::debug!("relay-sync: relay_url not set, skipping");
             None
-        }
-    };
+        };
+        // Publish into the shared slot the IPC server holds a clone of.
+        *relay_handle_slot.lock().await = started;
+    }
 
     let mut monitor = ClipboardMonitor::new(config.max_text_size_bytes);
     // Override the READ-gate image cap with the user-configured value so the

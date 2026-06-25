@@ -257,6 +257,27 @@ pub fn soft_delete_item(
 ) -> Result<usize, ItemsError> {
     let conn = db.conn();
     let tx = conn.unchecked_transaction()?;
+    let changed = soft_delete_item_in_tx(&tx, id, lamport_ts, wall_time)?;
+    tx.commit()?;
+    Ok(changed)
+}
+
+/// Soft-delete one item INSIDE a caller-provided transaction (CopyPaste-jvzm.3).
+///
+/// Identical work to [`soft_delete_item`] (tombstone: `deleted=1`,
+/// `is_synced=0`, content/nonce/thumb wiped, LWW clocks bumped; plus the
+/// in-flight `pending_uploads` row and the FTS index entry are cleaned in the
+/// SAME transaction), but it does NOT open or commit a transaction itself. This
+/// lets a batch caller (e.g. the `delete_all` IPC handler) tombstone many items
+/// in ONE transaction while reusing the single canonical tombstone definition —
+/// so the two paths cannot drift, and the previous O(n) "FTS orphan purge"
+/// cross-table scan per call is no longer needed.
+pub fn soft_delete_item_in_tx(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    lamport_ts: i64,
+    wall_time: i64,
+) -> Result<usize, ItemsError> {
     let changed = tx.execute(
         "UPDATE clipboard_items
          SET deleted = 1,
@@ -275,16 +296,20 @@ pub fn soft_delete_item(
         // apply (CopyPaste-6fd). Must run inside the same transaction so the
         // item_id → pending_uploads join still resolves.
         let id_owned = id.to_string();
-        delete_pending_uploads_for_ids(&tx, std::slice::from_ref(&id_owned))?;
+        delete_pending_uploads_for_ids(tx, std::slice::from_ref(&id_owned))?;
         // Remove from FTS so the tombstone is not returned by search queries.
         tx.execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;
     }
-    tx.commit()?;
     Ok(changed)
 }
 
 /// Remove an item's entry from the FTS5 index.
-/// Call this after `delete_item` or `delete_expired`.
+///
+/// CopyPaste-jvzm.5: `delete_item`, `delete_expired`, and the soft-delete paths
+/// ALREADY clean the FTS index inside their own transactions — do NOT call this
+/// after them (it would be a redundant no-op). This standalone helper is only
+/// for callers that remove a row WITHOUT going through those functions (e.g. an
+/// ad-hoc raw `DELETE FROM clipboard_items`) and must keep the FTS index in sync.
 pub fn delete_fts(db: &Database, id: &str) -> Result<(), ItemsError> {
     db.conn()
         .execute("DELETE FROM clipboard_fts WHERE id = ?1", params![id])?;

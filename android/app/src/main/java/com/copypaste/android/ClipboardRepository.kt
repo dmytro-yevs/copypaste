@@ -1437,6 +1437,16 @@ class ClipboardRepository(context: Context) {
             // deleting it) and enqueues a delete mutation so peers learn about the eviction
             // and do NOT re-push the item on the next sync. Without this, a hard-evicted
             // item would resurect on the next sync because no tombstone existed to suppress it.
+            //
+            // INVARIANTS (mirrors deleteItem's single-item tombstone path):
+            //  1. The tombstone blob is written to "item_$evictId" (deleted=1, bumped lamportTs)
+            //     so storeItemWithLww can find it via "item_id_ref_$evictId" and reject a
+            //     stale re-sync of the same item via lamport comparison.
+            //  2. "item_id_ref_$evictId" is NOT removed — the LWW lookup path in
+            //     storeItemWithLww uses this ref to reach the tombstone. Removing it caused
+            //     storeItemWithLww to fall to the "new item" path on re-sync (resurrection).
+            //  3. The evicted id is NOT removed from KEY_ITEM_IDS (caller keeps ids intact)
+            //     so the tombstone entry persists in the index, consistent with deleteItem.
             fun tombstoneEvict(evictId: String) {
                 val existing = prefs.getString("item_$evictId", null)
                 val oldLamport = try {
@@ -1467,17 +1477,20 @@ class ClipboardRepository(context: Context) {
                 editor.remove("item_thumb_$evictId")
                 editor.remove("item_file_$evictId")
                 editor.remove("item_filemeta_$evictId")
-                editor.remove("item_id_ref_$evictId")
+                // Do NOT remove "item_id_ref_$evictId": storeItemWithLww uses this ref to
+                // find the tombstone blob. Removing it caused resurrection (CopyPaste-44rq.58).
                 evictParseCache(evictId)
             }
 
-            // Pass 1: byte-quota eviction (oldest unpinned first, same as before).
+            // Pass 1: byte-quota eviction (oldest unpinned first).
+            // Keep evicted ids in `ids` so their tombstone blobs remain in KEY_ITEM_IDS
+            // (mirrors deleteItem's single-item path which never removes from KEY_ITEM_IDS).
             while (unpinned.isNotEmpty()) {
                 val quotaExceeded = quotaBytes > 0 && totalBytes > quotaBytes
                 if (!quotaExceeded) break
 
                 val evictId = unpinned.removeAt(0)
-                ids.remove(evictId)
+                // Do NOT remove from ids — the tombstone must stay in KEY_ITEM_IDS.
                 val sz = blobSizes[evictId] ?: 0
                 totalBytes -= sz
                 tombstoneEvict(evictId)
@@ -1489,16 +1502,21 @@ class ClipboardRepository(context: Context) {
             // Pass 2: count-cap eviction.  Settings.maxHistoryItems (default 1000)
             // was previously stored but never enforced — it only controlled the
             // display cap in HistoryActivity/ClipboardViewModel via PAGE_SIZE.
-            // This pass evicts the OLDEST unpinned items until the total item
-            // count (pinned + unpinned) is <= maxItems.  Pinned items count toward
-            // the limit but are never evicted (same policy as the quota pass).
-            while (unpinned.isNotEmpty() && ids.size > maxItems) {
+            // This pass evicts the OLDEST unpinned items until the LIVE item count
+            // (pinned + unpinned, excluding tombstones) is <= maxItems. Pinned items
+            // count toward the limit but are never evicted (same policy as the quota pass).
+            //
+            // `liveCount` tracks live (non-tombstoned) items; `ids` itself is not
+            // reduced here so tombstone entries remain in KEY_ITEM_IDS (see INVARIANT 3).
+            var liveCount = ids.size
+            while (unpinned.isNotEmpty() && liveCount > maxItems) {
                 val evictId = unpinned.removeAt(0)
-                ids.remove(evictId)
+                // Do NOT remove from ids — the tombstone must stay in KEY_ITEM_IDS.
+                liveCount--
                 tombstoneEvict(evictId)
                 didEvict = true
                 evictedCount++
-                Log.d(TAG, "pruneToLimits: count-evicted $evictId (total now ${ids.size}/${maxItems})")
+                Log.d(TAG, "pruneToLimits: count-evicted $evictId (live now $liveCount/$maxItems)")
             }
 
             if (didEvict) {

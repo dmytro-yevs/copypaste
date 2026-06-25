@@ -443,10 +443,7 @@ internal fun StorageTab(
                         color = LocalIdeColors.current.text,
                     )
                     Text(
-                        text = if (onVacuumDatabase != null)
-                            stringResource(R.string.setting_compact_db_subtitle)
-                        else
-                            "Not available on this build (requires FFI vacuum support)",
+                        text = stringResource(R.string.setting_compact_db_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = LocalIdeColors.current.dim,
                     )

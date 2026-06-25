@@ -108,12 +108,14 @@ jobs:
     # Android NDK image + cargo cross-compile is RAM-heavy; the larger
     # runner roughly halves cold build time. Falls back to `ubuntu-latest`
     # if the larger runner is not provisioned. See docs/release/build-perf.md.
-    # AUDIT: `ubuntu-latest-xlarge` is a GitHub-hosted larger runner that incurs
-    # additional billing cost (billed per minute at 2x rate vs ubuntu-latest).
-    # Verify this runner label is available on your GitHub plan/org before use.
-    # If not available the job will fail with "No hosted runner matching" — in that
-    # case change to `ubuntu-latest` (slower but always available). Human decision.
-    runs-on: ubuntu-latest-xlarge
+    # CopyPaste-d41w.15: pick the runner from the `ANDROID_RUNNER` repository
+    # variable, defaulting to the always-available `ubuntu-latest`. Orgs that
+    # have provisioned a larger runner can set `vars.ANDROID_RUNNER` (e.g.
+    # `ubuntu-latest-xlarge`, billed at ~2x/min but ~halves cold build time) to
+    # opt in; forks and standard accounts fall back gracefully instead of failing
+    # with "No hosted runner matching the required labels". See
+    # docs/release/build-perf.md.
+    runs-on: ${{ vars.ANDROID_RUNNER || 'ubuntu-latest' }}
     # continue-on-error removed (bd CopyPaste-ojas.12): it was masking real Android
     # build failures. nightly-summary uses `if: always()` so it still posts even
     # when this job fails — no need for continue-on-error on the build job itself.
