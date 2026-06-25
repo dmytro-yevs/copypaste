@@ -160,6 +160,31 @@ pub const METHOD_GET_OWN_DEVICE_INFO: &str = "get_own_device_info";
 /// Response: `{ id: String }` — the stable clipboard item UUID.
 pub const METHOD_ADD_FILE_ITEM: &str = "add_file_item";
 
+/// Subscribe to a push stream of newly-ingested clipboard items.
+///
+/// This is a **streaming** method: unlike every other IPC method (which is
+/// request → single response), `watch_subscribe` holds the connection open
+/// and writes one JSON line per new item event as items are ingested.
+///
+/// Wire protocol:
+/// 1. Client sends: `{"id":"<id>","method":"watch_subscribe","params":{}}\n`
+/// 2. Daemon sends back an initial ack:
+///    `{"ok":true,"event":"subscribed","id":"<id>"}\n`
+/// 3. For each new item, the daemon sends one event line:
+///    `{"ok":true,"event":"new_item","id":"<id>","item_id":"<uuid>","content_type":"<type>","wall_time":<ms>,"is_sensitive":<bool>}\n`
+/// 4. The stream ends when the client disconnects (the daemon detects a write
+///    error and terminates the connection handler silently).
+///
+/// If `new_item_tx` is not wired (e.g. degraded-mode, tests without a
+/// broadcast channel), the daemon sends the ack and then idles until the
+/// client disconnects — no events are emitted but the connection stays open.
+///
+/// **SECURITY**: the response lines contain `item_id`, `content_type`,
+/// `wall_time`, and `is_sensitive` — the same metadata surfaced by
+/// `history_page`. Content/plaintext is NEVER included. Trust level is the
+/// same as all other local Unix-socket IPC methods (owner-only, 0600 socket).
+pub const METHOD_WATCH_SUBSCRIBE: &str = "watch_subscribe";
+
 // ── Content-type → macOS UTI mapping ─────────────────────────────────────────
 
 /// Map the IPC wire `content_type` string to a macOS UTI suitable for

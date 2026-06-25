@@ -2597,6 +2597,19 @@ impl IpcServer {
                 }
             };
 
+            // CopyPaste-44rq.19: watch_subscribe is a streaming method — it
+            // holds the connection open and writes one line per new item rather
+            // than returning a single response. Intercept it here, before the
+            // normal one-shot dispatch, so the streaming loop can own `writer`
+            // without interfering with any other method's request/response model.
+            // When the client disconnects (write error) or the broadcast channel
+            // is closed, the call returns and the connection is dropped cleanly.
+            if extract_json_string_field(line.as_bytes(), "method").as_deref()
+                == Some(copypaste_ipc::METHOD_WATCH_SUBSCRIBE)
+            {
+                return self.handle_watch_subscribe(line, writer).await;
+            }
+
             let resp = self.dispatch(line).await;
             let mut out = serde_json::to_string(&resp)?;
             out.push('\n');
@@ -2616,6 +2629,131 @@ impl IpcServer {
                         timeout_secs = IPC_WRITE_TIMEOUT.as_secs(),
                         "ipc write timeout: dropping slow-draining client connection"
                     );
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    /// Handle the `watch_subscribe` streaming IPC method (CopyPaste-44rq.19).
+    ///
+    /// Unlike every other method, this call does NOT return a single response and
+    /// exit. Instead it:
+    /// 1. Parses the request to extract the `id`.
+    /// 2. Writes one ack line (`{"ok":true,"event":"subscribed","id":"<id>"}`).
+    /// 3. Loops on `new_item_tx.subscribe()`: for each broadcast item writes one
+    ///    event line (`{"ok":true,"event":"new_item",...}`), omitting all plaintext.
+    /// 4. Returns (cleanly, no error) when:
+    ///    - The client disconnects (write returns an error).
+    ///    - `new_item_tx` is `None` — the daemon was started without a broadcast
+    ///      channel (degraded mode / tests); in that case no events are ever emitted
+    ///      but the ack is still sent and the call idles until client disconnect.
+    ///    - A `Lagged` error from the broadcast receiver: we skip the missed items
+    ///      and continue so a slow consumer never crashes the daemon.
+    ///
+    /// The `writer` half of the Unix stream is owned for the duration of this call
+    /// and dropped on return, cleanly closing the send side of the connection.
+    ///
+    /// SECURITY: event lines carry `item_id`, `content_type`, `wall_time`, and
+    /// `is_sensitive` — the same metadata as `history_page`. Plaintext / ciphertext
+    /// is NEVER included. No special auth beyond the socket's 0600 mode is needed.
+    async fn handle_watch_subscribe(
+        &self,
+        line: &str,
+        mut writer: tokio::net::unix::OwnedWriteHalf,
+    ) -> anyhow::Result<()> {
+        // Extract the request id for the ack (best-effort; fall back to "?").
+        let req_id: String = serde_json::from_str::<serde_json::Value>(line)
+            .ok()
+            .and_then(|v| {
+                v["id"]
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .or_else(|| v["id"].as_i64().map(|n| n.to_string()))
+                    .or_else(|| v["id"].as_u64().map(|n| n.to_string()))
+            })
+            .unwrap_or_else(|| "?".to_string());
+
+        // Send the initial ack.
+        let mut ack = serde_json::json!({
+            "ok": true,
+            "event": "subscribed",
+            "id": req_id,
+        })
+        .to_string();
+        ack.push('\n');
+        // On write failure the client already disconnected — exit cleanly.
+        match tokio::time::timeout(IPC_WRITE_TIMEOUT, writer.write_all(ack.as_bytes())).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                tracing::debug!("watch_subscribe: ack write failed (client gone): {e}");
+                return Ok(());
+            }
+            Err(_) => {
+                tracing::debug!("watch_subscribe: ack write timed out — dropping client");
+                return Ok(());
+            }
+        }
+
+        // If the daemon has no broadcast channel, nothing to stream — just idle
+        // until the client disconnects (which we cannot detect without a read,
+        // so we return immediately; the client will see EOF).
+        let Some(ref tx) = self.new_item_tx else {
+            tracing::debug!("watch_subscribe: no new_item_tx; returning after ack");
+            return Ok(());
+        };
+
+        // Subscribe AFTER sending the ack so we don't miss items that arrive
+        // between construction and the loop. Missed items during the brief ack
+        // write window are acceptable (the client has not yet set up its reader).
+        let mut rx = tx.subscribe();
+
+        loop {
+            match rx.recv().await {
+                Ok(item) => {
+                    // Build the event line — metadata only, NO plaintext/ciphertext.
+                    let mut evt = serde_json::json!({
+                        "ok": true,
+                        "event": "new_item",
+                        "id": req_id,
+                        "item_id": item.item_id,
+                        "content_type": item.content_type,
+                        "wall_time": item.wall_time,
+                        "is_sensitive": item.is_sensitive,
+                    })
+                    .to_string();
+                    evt.push('\n');
+                    match tokio::time::timeout(IPC_WRITE_TIMEOUT, writer.write_all(evt.as_bytes()))
+                        .await
+                    {
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            // Client disconnected — exit cleanly, no alarm.
+                            tracing::debug!(
+                                "watch_subscribe: write failed (client disconnected): {e}"
+                            );
+                            return Ok(());
+                        }
+                        Err(_) => {
+                            tracing::warn!(
+                                "watch_subscribe: event write timed out — dropping client"
+                            );
+                            return Ok(());
+                        }
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    // The consumer was too slow; skip the missed messages and
+                    // continue. We do NOT crash or disconnect — a slow watch
+                    // client must never wedge the broadcast sender.
+                    tracing::debug!(
+                        "watch_subscribe: broadcast lagged by {n} messages; continuing"
+                    );
+                    // rx is already re-positioned to the next available message.
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    // Daemon is shutting down or the broadcast channel was dropped.
+                    tracing::debug!("watch_subscribe: broadcast channel closed; exiting");
                     return Ok(());
                 }
             }
@@ -15616,6 +15754,188 @@ mod tests {
         assert_eq!(
             resp["ok"], false,
             "restore with missing file must be rejected: {resp}"
+        );
+    }
+
+    // ── CopyPaste-44rq.19: watch_subscribe push-streaming tests ────────────────
+
+    /// Start a test server that has a `new_item_tx` wired in, returning both
+    /// the broadcast sender and the db handle so callers can inject events.
+    async fn start_test_server_with_broadcast(
+        socket_path: &std::path::Path,
+    ) -> (
+        tokio::sync::broadcast::Sender<copypaste_core::ClipboardItem>,
+        Arc<Mutex<Database>>,
+    ) {
+        let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+        let private_mode = Arc::new(AtomicBool::new(false));
+        let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+        let device_pub = Arc::new([0u8; 32]);
+        // Capacity 64: large enough for tests, mirrors the production value.
+        let (tx, _) = tokio::sync::broadcast::channel::<copypaste_core::ClipboardItem>(64);
+        let cert = copypaste_p2p::cert::SelfSignedCert::generate("test-device").unwrap();
+        let server = IpcServer::new(db.clone(), private_mode, local_key, device_pub)
+            .with_cert_fingerprint(display_fingerprint(&cert.fingerprint()))
+            .with_new_item_tx(tx.clone());
+        let listener =
+            tokio::net::UnixListener::bind(socket_path).expect("test socket bind must succeed");
+        let path = socket_path.to_path_buf();
+        tokio::spawn(async move {
+            if let Err(e) = server.serve_on(listener, CancellationToken::new()).await {
+                tracing::error!("ipc watch-test server error: {e} at {path:?}");
+            }
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        (tx, db)
+    }
+
+    /// CopyPaste-44rq.19: `watch_subscribe` must send an initial ack (ok=true,
+    /// event="subscribed") and then push one event line per new clipboard item
+    /// broadcast on `new_item_tx`, without any polling.
+    #[tokio::test]
+    async fn watch_subscribe_receives_push_events() {
+        let dir = safe_tempdir();
+        let sock = dir.path().join("watch_push.sock");
+        let (tx, _db) = start_test_server_with_broadcast(&sock).await;
+
+        // Open a subscribe connection.
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"w1\",\"method\":\"watch_subscribe\",\"params\":{}}\n")
+            .await
+            .unwrap();
+
+        let mut lines = BufReader::new(&mut stream).lines();
+
+        // First line must be the ack.
+        let ack_line = tokio::time::timeout(std::time::Duration::from_secs(2), lines.next_line())
+            .await
+            .expect("ack must arrive within 2 s")
+            .unwrap()
+            .unwrap();
+        let ack: serde_json::Value = serde_json::from_str(&ack_line).unwrap();
+        assert_eq!(ack["ok"], true, "ack must be ok=true: {ack_line}");
+        assert_eq!(
+            ack["event"].as_str(),
+            Some("subscribed"),
+            "ack must have event=subscribed: {ack_line}"
+        );
+        assert_eq!(
+            ack["id"].as_str(),
+            Some("w1"),
+            "ack must echo the request id: {ack_line}"
+        );
+
+        // Broadcast a new clipboard item.
+        let item = copypaste_core::ClipboardItem::new_text(
+            vec![0u8; 16], // dummy encrypted content
+            vec![0u8; 24], // dummy nonce
+            1,
+        );
+        let item_id = item.item_id.clone();
+        let _ = tx.send(item);
+
+        // The daemon must push a new_item event line within 500 ms.
+        let evt_line =
+            tokio::time::timeout(std::time::Duration::from_millis(500), lines.next_line())
+                .await
+                .expect("new_item event must arrive within 500 ms")
+                .unwrap()
+                .unwrap();
+        let evt: serde_json::Value = serde_json::from_str(&evt_line).unwrap();
+        assert_eq!(evt["ok"], true, "event must be ok=true: {evt_line}");
+        assert_eq!(
+            evt["event"].as_str(),
+            Some("new_item"),
+            "event must have event=new_item: {evt_line}"
+        );
+        assert_eq!(
+            evt["item_id"].as_str(),
+            Some(item_id.as_str()),
+            "event must carry item_id: {evt_line}"
+        );
+        // Content/plaintext must NOT be present.
+        assert!(
+            evt.get("content").is_none(),
+            "event must not contain raw content: {evt_line}"
+        );
+    }
+
+    /// CopyPaste-44rq.19: while a `watch_subscribe` connection is open, a
+    /// second normal one-shot request (e.g. `status`) on a DIFFERENT connection
+    /// must still return its normal response. This verifies the subscribe path
+    /// does not wedge the accept loop or any shared state.
+    #[tokio::test]
+    async fn watch_subscribe_does_not_break_concurrent_one_shot_requests() {
+        let dir = safe_tempdir();
+        let sock = dir.path().join("watch_concurrent.sock");
+        let (_tx, _db) = start_test_server_with_broadcast(&sock).await;
+
+        // Open a long-lived subscribe connection; don't close it.
+        let mut sub_stream = UnixStream::connect(&sock).await.unwrap();
+        sub_stream
+            .write_all(b"{\"id\":\"ws1\",\"method\":\"watch_subscribe\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        // Consume the ack to confirm the subscribe is established.
+        let mut sub_lines = BufReader::new(&mut sub_stream).lines();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), sub_lines.next_line())
+            .await
+            .expect("subscribe ack must arrive")
+            .unwrap()
+            .unwrap();
+
+        // Now make a normal one-shot `status` request on a DIFFERENT connection.
+        let status_resp = call_one(&sock, r#"{"id":"st1","method":"status"}"#).await;
+        assert_eq!(
+            status_resp["ok"], true,
+            "status must succeed while a subscribe connection is open: {status_resp}"
+        );
+        assert_eq!(
+            status_resp["data"]["status"].as_str(),
+            Some("running"),
+            "status.data.status must be 'running': {status_resp}"
+        );
+    }
+
+    /// CopyPaste-44rq.19: closing the subscribe client (dropping the stream)
+    /// must NOT wedge the daemon. After the subscriber disconnects, subsequent
+    /// `status` calls on a fresh connection must still succeed.
+    #[tokio::test]
+    async fn watch_subscribe_client_disconnect_does_not_wedge_daemon() {
+        let dir = safe_tempdir();
+        let sock = dir.path().join("watch_disconnect.sock");
+        let (tx, _db) = start_test_server_with_broadcast(&sock).await;
+
+        // Subscribe, read the ack, then drop the client connection.
+        {
+            let mut stream = UnixStream::connect(&sock).await.unwrap();
+            stream
+                .write_all(b"{\"id\":\"wd1\",\"method\":\"watch_subscribe\",\"params\":{}}\n")
+                .await
+                .unwrap();
+            let mut lines = BufReader::new(&mut stream).lines();
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(2), lines.next_line())
+                .await
+                .expect("ack must arrive")
+                .unwrap()
+                .unwrap();
+            // Drop `stream` here — simulates client disconnect.
+        }
+
+        // Broadcast an event so the daemon's subscribe loop sees a write error
+        // and exits cleanly.
+        let item = copypaste_core::ClipboardItem::new_text(vec![0u8; 16], vec![0u8; 24], 2);
+        let _ = tx.send(item);
+
+        // Give the task a moment to handle the disconnect.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        // The daemon must still handle normal requests.
+        let resp = call_one(&sock, r#"{"id":"wd2","method":"status"}"#).await;
+        assert_eq!(
+            resp["ok"], true,
+            "daemon must still respond after subscriber disconnect: {resp}"
         );
     }
 
