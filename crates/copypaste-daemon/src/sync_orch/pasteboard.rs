@@ -1,7 +1,13 @@
-// l07l: AtomicI64/Ordering are only exercised by the macOS pasteboard
-// change-count path; allow them unused on non-macOS so -D warnings stays green.
+// l07l: AtomicI64 is only exercised by the macOS pasteboard change-count path;
+// allow it unused on non-macOS so -D warnings stays green.
+// CopyPaste-54it #9: sentinel stamp/reset calls now go through
+// `crate::fs_atomic::{sentinel_pre_stamp, sentinel_post_stamp, sentinel_reset}`
+// (consolidated from the pattern in `ipc::mod::write_to_pasteboard`). The
+// helper's post-stamp is the stronger CopyPaste-8yzf variant: it only updates
+// the sentinel when `actual == expected`, preventing a racing third-party write
+// from being silently suppressed.
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
-use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 
 use copypaste_core::Database;
@@ -63,9 +69,11 @@ pub(super) fn apply_to_pasteboard_if_fresh(
                     use objc2_app_kit::NSPasteboardTypeString;
                     use objc2_foundation::NSString;
 
-                    // Pre-stamp expected changeCount (clearContents +1, setString +1).
+                    // Pre-stamp expected changeCount before any NSPasteboard
+                    // mutation (clearContents +1, setString +1 = pre+2).
                     let pre = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                    self_write_change_count.store(pre + 2, Ordering::Release);
+                    let expected =
+                        crate::fs_atomic::sentinel_pre_stamp(self_write_change_count, pre);
 
                     let ok = unsafe {
                         let pb = NSPasteboard::generalPasteboard();
@@ -74,17 +82,22 @@ pub(super) fn apply_to_pasteboard_if_fresh(
                         pb.setString_forType(&ns_str, NSPasteboardTypeString)
                     };
                     if ok {
-                        // Post-stamp with the actual changeCount.
+                        // Post-stamp: only update if no third-party write raced
+                        // (CopyPaste-8yzf guard — see fs_atomic::sentinel_post_stamp).
                         let actual =
                             unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                        self_write_change_count.store(actual, Ordering::Release);
+                        crate::fs_atomic::sentinel_post_stamp(
+                            self_write_change_count,
+                            actual,
+                            expected,
+                        );
                         debug!(
                             change_count = actual,
                             "sync_orch: auto-applied synced text to NSPasteboard"
                         );
                     } else {
                         // Reset sentinel so the monitor is not permanently suppressed.
-                        self_write_change_count.store(-1, Ordering::Release);
+                        crate::fs_atomic::sentinel_reset(self_write_change_count);
                         warn!("sync_orch: auto-apply text: NSPasteboard setString:forType: returned false");
                     }
                 });
@@ -105,8 +118,10 @@ pub(super) fn apply_to_pasteboard_if_fresh(
                 objc2::rc::autoreleasepool(|_pool| {
                     use objc2_foundation::{NSData, NSString};
 
+                    // Pre-stamp before any NSPasteboard mutation.
                     let pre = unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                    self_write_change_count.store(pre + 2, Ordering::Release);
+                    let expected =
+                        crate::fs_atomic::sentinel_pre_stamp(self_write_change_count, pre);
 
                     let ok = unsafe {
                         let pb = NSPasteboard::generalPasteboard();
@@ -116,15 +131,21 @@ pub(super) fn apply_to_pasteboard_if_fresh(
                         pb.setData_forType(Some(&data), &type_str)
                     };
                     if ok {
+                        // Post-stamp: only update if no third-party write raced
+                        // (CopyPaste-8yzf guard — see fs_atomic::sentinel_post_stamp).
                         let actual =
                             unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
-                        self_write_change_count.store(actual, Ordering::Release);
+                        crate::fs_atomic::sentinel_post_stamp(
+                            self_write_change_count,
+                            actual,
+                            expected,
+                        );
                         debug!(
                             change_count = actual,
                             "sync_orch: auto-applied synced image to NSPasteboard"
                         );
                     } else {
-                        self_write_change_count.store(-1, Ordering::Release);
+                        crate::fs_atomic::sentinel_reset(self_write_change_count);
                         warn!("sync_orch: auto-apply image: NSPasteboard setData:forType: returned false");
                     }
                 });

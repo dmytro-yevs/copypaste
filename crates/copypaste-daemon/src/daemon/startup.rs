@@ -401,58 +401,12 @@ pub(crate) fn load_config() -> AppConfig {
 
 /// Write `text` to `path` atomically with mode `0600` (Fix-2).
 ///
-/// Creates a uniquely-named temp file in the SAME directory (so rename is
-/// atomic and same-filesystem), sets mode `0600` before writing any bytes,
-/// writes + flushes + syncs, then renames over the destination. This prevents
-/// the world-readable window that exists between `std::fs::write` (creates at
-/// umask-derived mode, typically `0644`) and a subsequent `set_permissions`.
+/// Thin wrapper around [`crate::fs_atomic::write_atomic_0600`] — see that
+/// function for the full durability and security contract (tmp write → fsync →
+/// rename → 0600 on temp before any bytes are written, parent tightened to
+/// 0700; CopyPaste-54it #7 consolidation).
 pub(crate) fn write_text_atomic_0600(path: &std::path::Path, text: &str) -> anyhow::Result<()> {
-    use std::io::Write as _;
-
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("path has no parent directory: {}", path.display()))?;
-    std::fs::create_dir_all(parent)?;
-
-    let tmp = parent.join(format!(
-        ".{}.tmp.{}.{}",
-        path.file_name().and_then(|n| n.to_str()).unwrap_or("file"),
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-
-    let write_result = (|| -> std::io::Result<()> {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        }
-        f.write_all(text.as_bytes())?;
-        f.flush()?;
-        f.sync_all()?;
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    Ok(())
+    crate::fs_atomic::write_atomic_0600(path, text.as_bytes())
 }
 
 /// Loads the persistent device_id from disk, creating it on first run.

@@ -14,6 +14,7 @@ use copypaste_sync::merge::{remote_wins, RemoteMeta};
 use crate::sync_common::{
     build_local_item, decode_payload_ct, replace_cloud_item_by_item_id, SYNC_HTTP_TIMEOUT,
 };
+use crate::sync_cursor::CloudCursor;
 use crate::sync_in_flight::SyncInFlightGuard;
 
 use super::auth::refresh_bearer;
@@ -74,11 +75,10 @@ const POLL_WATERMARK_KEY: &str = "cloud_poll_watermark";
 // PartialEq: the burst-drain loop compares the post-poll cursor against the
 // pre-poll snapshot to detect a no-advance stall (full batch but no usable
 // keyset progress) and break rather than re-poll the same window forever.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct PollCursor {
-    pub(crate) wall: i64,
-    pub(crate) id: String,
-}
+//
+// CopyPaste-w47w #3: the struct has moved to `crate::sync_cursor::CloudCursor`;
+// `PollCursor` is a type alias kept for all existing call sites.
+pub(crate) type PollCursor = CloudCursor;
 
 /// Base poll query (no lower bound). The keyset cursor filter is appended by
 /// [`build_poll_url`] when a watermark is known. Order is the **compound**

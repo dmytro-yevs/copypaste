@@ -5,9 +5,8 @@
 
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
-
 use super::token::write_token_0600;
+use crate::sync_cursor::RelayCursor;
 
 /// `(wall_time, id)` keyset watermark so pagination is deterministic even within
 /// one millisecond and a restart resumes forward.
@@ -15,11 +14,11 @@ use super::token::write_token_0600;
 /// CopyPaste-hf40 / CopyPaste-1jms.24: persisted to `relay_watermark.json` so
 /// that on daemon restart the receive loop resumes from the last-seen cursor
 /// instead of re-fetching everything from `(0, 0)`.
-#[derive(Clone, Copy, Default, Serialize, Deserialize)]
-pub(super) struct Watermark {
-    pub(super) wall: u64,
-    pub(super) id: i64,
-}
+///
+/// CopyPaste-w47w #3: the struct has been consolidated into
+/// `crate::sync_cursor::RelayCursor`; `Watermark` is a type alias kept for all
+/// existing call sites in this module.
+pub(super) type Watermark = RelayCursor;
 
 pub(super) const RELAY_WATERMARK_FILE: &str = "relay_watermark.json";
 

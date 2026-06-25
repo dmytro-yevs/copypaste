@@ -2,6 +2,7 @@
 // Contains all state, refs, effects, and handlers for the Settings screen.
 // SettingsView.tsx is now a thin composition root that calls this hook.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { type LoadState } from "../../../lib/loadState";
 import { emit, listen } from "@tauri-apps/api/event";
 import {
   api,
@@ -39,14 +40,9 @@ import {
   DEFAULT_SENSITIVE_TTL_SECS,
 } from "../lib/settingsSliders";
 
-// `degraded` = daemon up but its DB is unavailable (reported only by `status`).
-// `not_ready` added alongside `offline`/`degraded` so the daemon starting-up
-// state shows a friendly banner rather than "Daemon not running."
-// Distinct from `offline` so the banner is accurate and the inputs that need a
-// working DB stay disabled.
-// tk2j: "error" added to distinguish a generic daemon-side failure (daemon is up
-// but the IPC call failed for another reason) from a genuine offline/degraded state.
-export type LoadState = "loading" | "ready" | "offline" | "not_ready" | "degraded" | "error";
+// #14: LoadState is now defined in the shared lib/loadState.ts module (superset).
+// Re-exported for backward compat with consumers that import it from this path.
+export type { LoadState } from "../../../lib/loadState";
 
 // Capture fields that are not (yet) in the AppSettings interface in
 // lib/ipc.ts. set_config accepts them; we attach them via this typed shape so

@@ -9,10 +9,18 @@ use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use crate::pake::CONFIRM_TAG_LEN;
 use crate::transport::TransportError;
 
-/// Upper bound on a single PAKE/fingerprint frame. PAKE messages are a few
-/// hundred bytes and fingerprints are 64 hex chars; 64 KiB is a wide margin
-/// that still rejects a desynced peer flooding a huge length prefix.
-pub(super) const MAX_FRAME_BYTES: usize = 64 * 1024;
+/// Upper bound on a single PAKE/fingerprint bootstrap-handshake frame (64 KiB).
+///
+/// PAKE messages are a few hundred bytes and fingerprints are 64 hex chars;
+/// 64 KiB is a wide margin that still rejects a desynced peer flooding a huge
+/// length prefix.
+///
+/// This constant is INTENTIONALLY different from the data-plane cap
+/// (`copypaste_p2p::transport::MAX_FRAME_BYTES` = 16 MiB): the bootstrap
+/// handshake carries only small PAKE/fingerprint frames, not full clipboard
+/// items.  The tighter bound provides defense-in-depth during pairing.
+/// (CopyPaste-w47w #1 — do NOT merge this constant with the 16 MiB one.)
+pub(super) const MAX_HANDSHAKE_FRAME_BYTES: usize = 64 * 1024;
 
 /// Upper bound on the sync-provisioning JSON frame. Two URLs plus a base64-ish
 /// anon key and a 32-byte key (base64 ≈ 44 chars) total well under 4 KiB; the
@@ -43,7 +51,7 @@ pub(super) const MAX_SYNC_ADDR_BYTES: usize = 256;
 
 pub(super) fn length_codec() -> LengthDelimitedCodec {
     LengthDelimitedCodec::builder()
-        .max_frame_length(MAX_FRAME_BYTES)
+        .max_frame_length(MAX_HANDSHAKE_FRAME_BYTES)
         .new_codec()
 }
 

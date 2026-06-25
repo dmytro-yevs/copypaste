@@ -7,6 +7,7 @@
  * And helpers: parseUrl, parseFilename.
  */
 import React, { useState, useEffect } from "react";
+import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { isImageType, sourceAppLabel, type HistoryEntry } from "../../lib/ipc";
 import { applySpanMasking, maskPlaceholder, shouldMask } from "../../lib/masking";
 import { formatRelativeTime } from "../../lib/time";
@@ -252,16 +253,11 @@ export const HistoryRow = React.memo(function HistoryRow({
   const isFile = entry.content_type === "file";
 
   // Per-row reveal toggle: user clicks the placeholder to temporarily show it.
-  const [revealed, setRevealed] = useState(false);
-
-  // SCRH-7: re-hide sensitive content when the window loses focus so plaintext
-  // is not left visible if the user walks away from the machine.
-  useEffect(() => {
-    if (!entry.is_sensitive || !maskSensitive) return;
-    const handleBlur = () => setRevealed(false);
-    window.addEventListener("blur", handleBlur);
-    return () => window.removeEventListener("blur", handleBlur);
-  }, [entry.is_sensitive, maskSensitive]);
+  // #17: useSensitiveReveal encapsulates revealed state + SCRH-7 auto-blur on window blur.
+  const { revealed, setRevealed } = useSensitiveReveal({
+    isSensitive: entry.is_sensitive,
+    maskSensitive,
+  });
 
   // CopyPaste-5917.56: auto re-blur after 10 s whenever the content is revealed.
   // Mirrors Android's show_sensitive_warnings flow: once revealed the secret is

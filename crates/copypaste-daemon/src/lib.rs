@@ -23,6 +23,10 @@ pub mod clipboard;
 pub mod config;
 pub mod daemon;
 pub mod device_meta;
+/// Atomic 0600-mode file write helper and pasteboard sentinel helpers,
+/// consolidated from `ipc::config::atomic_write_0600` and
+/// `daemon::startup::write_text_atomic_0600` (CopyPaste-54it #7/#9).
+pub mod fs_atomic;
 #[cfg(unix)]
 pub mod ipc;
 /// Shared HTTPS URL validation guard (g06m.32 #2 — replaces duplicate
@@ -43,6 +47,8 @@ pub mod peers;
 pub mod platform;
 pub mod protocol;
 pub mod public_ip;
+/// Shared `(wall_time, id)` keyset-pagination cursor (CopyPaste-w47w #3).
+pub mod sync_cursor;
 /// RAII guard for the `sync_in_flight` `AtomicBool` flag (CopyPaste-1jms.22).
 pub mod sync_in_flight;
 pub mod sync_orch;

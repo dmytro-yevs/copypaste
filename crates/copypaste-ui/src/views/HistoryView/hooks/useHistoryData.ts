@@ -13,18 +13,20 @@ import {
   api,
   friendlyIpcError,
   IpcError,
+  isIpcNotReady,
   type HistoryEntry,
   type HistoryPage,
 } from "../../../lib/ipc";
+import { type LoadState } from "../../../lib/loadState";
 import { itemsSignature } from "../historySignature";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-// bdac.6: "not_ready" is now a first-class state so ipc_not_ready errors
-// render the "Starting up…" EmptyState instead of the error/degraded UI.
-export type LoadState = "loading" | "ready" | "offline" | "not_ready" | "error";
+// #14: LoadState is now defined in the shared lib/loadState.ts module (superset).
+// Re-exported for backward compat with consumers that import it from this path.
+export type { LoadState } from "../../../lib/loadState";
 
 export interface UndoPending {
   id: string;
@@ -110,11 +112,9 @@ export function useHistoryData() {
         // bdac.6: Check ipc_not_ready BEFORE calling setErrorDetail so the
         // "Starting up…" state never populates errorDetail with an unfriendly
         // message. Matches the pattern in DevicesView (not_ready branch) and
-        // Popup (ipc_not_ready branch).
-        const notReady =
-          err instanceof IpcError &&
-          (err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY");
-        if (notReady) {
+        // Popup (ipc_not_ready branch). Uses the shared isIpcNotReady helper
+        // (#15) instead of an inline err.code comparison.
+        if (isIpcNotReady(err)) {
           setLoadState("not_ready");
           return;
         }

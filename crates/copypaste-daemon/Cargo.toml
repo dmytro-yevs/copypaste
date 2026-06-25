@@ -132,6 +132,12 @@ security-framework-sys = "2"
 # is launched by launchd and cannot host an NSApplication main run loop on
 # macOS, which tray-icon / muda::Menu both require).
 
+# CopyPaste-w47w #1: compile-time + run-time equality assertion for the shared
+# 16 MiB MAX_FRAME_BYTES constant across copypaste-sync and copypaste-p2p.
+[[test]]
+name = "frame_consts"
+path = "tests/frame_consts.rs"
+
 [[test]]
 name = "integration_ipc"
 path = "tests/integration_ipc.rs"

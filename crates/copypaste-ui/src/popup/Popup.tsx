@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { Search, Clipboard, SearchX, PlugZap } from "lucide-react";
-import { api, friendlyIpcError, pasteAsPlainText, playCopySound, showCopyNotification } from "../lib/ipc";
+import { api, friendlyIpcError, pasteAsPlainText } from "../lib/ipc";
+import { copyWithFeedback } from "../lib/copyWithFeedback";
 import { useUI } from "../store";
 import { EmptyState } from "../components/EmptyState";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
@@ -192,12 +193,13 @@ export function Popup() {
         // Copy succeeded — now hide (activates prior app) and paste.
         await hide();
         await invoke("paste_to_frontmost");
-        if (playSoundOnCopy) {
-          void playCopySound();
-        }
-        if (notifyOnCopy) {
-          void showCopyNotification(contentType, preview);
-        }
+        // #16: delegated to copyWithFeedback instead of inline guard duplication.
+        void copyWithFeedback({
+          playSoundOnCopy: playSoundOnCopy ?? false,
+          notifyOnCopy: notifyOnCopy ?? false,
+          contentType,
+          preview,
+        });
       } catch (e) {
         // ERR-1: friendlyIpcError never leaks socket paths or raw transport strings.
         const msg = friendlyIpcError(e);

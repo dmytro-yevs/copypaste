@@ -1,6 +1,7 @@
 // Extracted from DevicesView.tsx (CopyPaste-g06m.15).
 // Cut/paste only — NO behavior changes.
 import { useState, useEffect, useCallback, useRef } from "react";
+import { type LoadState } from "../../../lib/loadState";
 import {
   api,
   ipcErrorMessage,
@@ -11,10 +12,9 @@ import {
 } from "../../../lib/ipc";
 import { type DeviceRowState } from "../../../components/DeviceCard";
 
-// Devices load outcomes. `degraded` (daemon up, DB unavailable), `not_ready`
-// (daemon up but still initialising), and `error` (some other failure) are split
-// out from `offline` so each condition gets its own friendly message.
-export type LoadState = "loading" | "offline" | "not_ready" | "degraded" | "error" | "ready";
+// #14: LoadState is now defined in the shared lib/loadState.ts module (superset).
+// Re-exported for backward compat with consumers that import it from this path.
+export type { LoadState } from "../../../lib/loadState";
 
 const PEERS_POLL_MS = 10_000;
 

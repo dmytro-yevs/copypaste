@@ -8,6 +8,7 @@
  * state) so it survives unmount/remount cycles across modal opens.
  */
 import { useState, useRef, useEffect } from "react";
+import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { api, isImageType, sourceAppLabel, type HistoryEntry } from "../../lib/ipc";
 import { shouldMask, maskPlaceholder } from "../../lib/masking";
 import { useFocusTrap } from "../../lib/useFocusTrap";
@@ -139,19 +140,12 @@ export function DetailsModal({
   const isFile = entry.content_type === "file";
 
   // Per-modal reveal: user must click "Reveal" to see sensitive plaintext.
-  const [revealed, setRevealed] = useState(false);
+  // #17: useSensitiveReveal encapsulates revealed state + SCRH-7 auto-blur on window blur.
+  const { revealed, setRevealed } = useSensitiveReveal({
+    isSensitive: entry.is_sensitive,
+    maskSensitive,
+  });
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
-
-  // SCRH-7: re-blur (hide sensitive plaintext) when the window loses focus.
-  // This prevents "reveal once, walk away" — anyone who picks up the machine
-  // sees the placeholder, not the secret. Only applies when the item is
-  // sensitive and masking is on; benign for non-sensitive items.
-  useEffect(() => {
-    if (!entry.is_sensitive || !maskSensitive) return;
-    const handleBlur = () => setRevealed(false);
-    window.addEventListener("blur", handleBlur);
-    return () => window.removeEventListener("blur", handleBlur);
-  }, [entry.is_sensitive, maskSensitive]);
 
   // Focus trap — traps Tab/Shift+Tab inside the dialog panel and restores focus on close.
   const modalRef = useRef<HTMLDivElement>(null);

@@ -3,8 +3,6 @@
 //! Extracted from `ipc.rs` for organisation — behaviour unchanged.
 //! All public items are re-exported from `ipc/mod.rs`.
 
-use std::os::unix::fs::PermissionsExt as _;
-
 /// Persistent application configuration stored at `config.json`.
 ///
 /// CopyPaste-c4q2.25: this used to be a daemon-local **shadow** struct,
@@ -373,75 +371,10 @@ pub(crate) fn merge_config(existing: AppConfig, incoming: AppConfig) -> AppConfi
     }
 }
 
-/// Atomically write `bytes` to `path` with mode `0600` from the first byte.
-///
-/// Uses the same atomic-0600 pattern as `crate::peers::save_peers`:
-/// 1. Ensure the parent directory exists (tightened to `0700`).
-/// 2. Create a uniquely-named temp file in the **same** directory (same
-///    filesystem → `rename` is POSIX-atomic).
-/// 3. Set mode `0600` on the temp file before writing any bytes.
-/// 4. Write + flush + sync the payload.
-/// 5. `rename` over the destination.
-///
-/// A crash between write and rename leaves an invisible `.tmp.*` file that
-/// will be cleaned up by the next successful write.
-fn atomic_write_0600(path: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()> {
-    use std::io::Write as _;
-
-    let parent = path
-        .parent()
-        .ok_or_else(|| anyhow::anyhow!("path has no parent directory: {}", path.display()))?;
-    std::fs::create_dir_all(parent)?;
-    // Best-effort: tighten parent dir to user-only so secret files are not
-    // discoverable through a world-executable parent.
-    let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
-
-    let stem = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "tmp".to_owned());
-    let tmp = parent.join(format!(
-        ".{}.tmp.{}.{}",
-        stem,
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0)
-    ));
-
-    let write_result = (|| -> std::io::Result<()> {
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create(true).truncate(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
-        }
-        let mut f = opts.open(&tmp)?;
-        // Defence-in-depth: re-assert 0600 in case a restrictive parent umask
-        // or a non-honouring filesystem ignored the create mode above.
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            f.set_permissions(std::fs::Permissions::from_mode(0o600))?;
-        }
-        f.write_all(bytes)?;
-        f.flush()?;
-        f.sync_all()?;
-        Ok(())
-    })();
-
-    if let Err(e) = write_result {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    if let Err(e) = std::fs::rename(&tmp, path) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e.into());
-    }
-    Ok(())
-}
+// Atomic 0600 write is provided by `crate::fs_atomic::write_atomic_0600`
+// (CopyPaste-54it #7). The former private `atomic_write_0600` here was
+// identical in intent and nearly identical in implementation; the consolidated
+// helper also tightens the parent directory to 0700 (see `fs_atomic` docs).
 
 /// Atomically write `cfg` to the `config.json` path with mode `0600`.
 ///
@@ -452,10 +385,11 @@ fn atomic_write_0600(path: &std::path::Path, bytes: &[u8]) -> anyhow::Result<()>
 /// `set_permissions(path, 0o600)`. Between the write and the chmod the file
 /// was world-readable for a brief window — long enough for a concurrent process
 /// running as the same user to read `supabase_password` or `supabase_anon_key`.
-/// Delegates to [`atomic_write_0600`], which sets `0600` on the temp file
-/// before any bytes are written and `rename`s it over the destination.
+/// Delegates to [`crate::fs_atomic::write_atomic_0600`], which sets `0600` on
+/// the temp file before any bytes are written and `rename`s it over the
+/// destination.
 pub(crate) fn write_config(cfg: &AppConfig) -> anyhow::Result<()> {
     let path = config_path().ok_or_else(|| anyhow::anyhow!("cannot determine config dir"))?;
     let json = serde_json::to_string_pretty(cfg)?;
-    atomic_write_0600(&path, json.as_bytes())
+    crate::fs_atomic::write_atomic_0600(&path, json.as_bytes())
 }

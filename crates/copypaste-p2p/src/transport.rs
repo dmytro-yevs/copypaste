@@ -73,15 +73,23 @@ pub const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 /// image item whose ciphertext the relay caps at 10 MiB
 /// (`RELAY_MAX_ITEM_BYTES`); base64/JSON framing of that blob plus item
 /// metadata can roughly inflate it, so we size the ceiling to match
-/// `copypaste_sync::engine`'s `MAX_FRAME_SIZE` (16 MiB) rather than relying on
+/// `copypaste_sync::engine::MAX_FRAME_BYTES` (16 MiB) rather than relying on
 /// tokio-util's silent 8 MiB `LengthDelimitedCodec::new()` default, which would
 /// truncate large images and stall the link. A peer that sends a frame above
 /// this ceiling has its connection torn down (DoS guard).
+///
+/// CopyPaste-w47w #1: this constant MUST stay equal to
+/// `copypaste_sync::engine::MAX_FRAME_BYTES`.  A compile-time equality assertion
+/// lives in `copypaste-daemon/tests/frame_consts.rs` (which has both crates as
+/// dev-deps) — any change here must update that constant too.
 pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
 /// Build the length-delimited codec used for every data-plane stream, with the
-/// frame ceiling explicitly set to [`MAX_FRAME_BYTES`] (mirrors the bootstrap
-/// handshake's `length_codec()` so both planes share one bound).
+/// frame ceiling explicitly set to [`MAX_FRAME_BYTES`] (16 MiB).
+///
+/// The bootstrap handshake uses a separate, tighter 64 KiB codec
+/// (`bootstrap::framing::MAX_HANDSHAKE_FRAME_BYTES`); this is the data-plane
+/// codec that carries `WireItem` payloads after the handshake completes.
 fn length_codec() -> LengthDelimitedCodec {
     LengthDelimitedCodec::builder()
         .max_frame_length(MAX_FRAME_BYTES)

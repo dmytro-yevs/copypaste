@@ -8,11 +8,10 @@ import {
   friendlyIpcError,
   isImageType,
   pasteAsPlainText,
-  playCopySound,
   resetDatabase,
-  showCopyNotification,
   type HistoryEntry,
 } from "../lib/ipc";
+import { copyWithFeedback } from "../lib/copyWithFeedback";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
 import { useUI } from "../store";
@@ -251,17 +250,14 @@ export function HistoryViewInner() {
       try {
         await api.copyItem(id);
         // Fire sound / notification on successful copy — same gates as the popup.
-        if (playSoundOnCopy) {
-          void playCopySound();
-        }
-        if (notifyOnCopy) {
-          // Use content_type + preview from HistoryEntry for rich notification.
-          const item = items.find((it) => it.id === id);
-          void showCopyNotification(
-            item?.content_type ?? "",
-            item?.preview ?? ""
-          );
-        }
+        // #16: delegated to copyWithFeedback to avoid duplicating the guard logic.
+        const item = items.find((it) => it.id === id);
+        void copyWithFeedback({
+          playSoundOnCopy: playSoundOnCopy ?? false,
+          notifyOnCopy: notifyOnCopy ?? false,
+          contentType: item?.content_type ?? "",
+          preview: item?.preview ?? "",
+        });
         // Optimistically move the copied item to the top — but only for
         // unpinned items. Pinned items keep their pin_order position; the daemon
         // only bumps wall_time, which does not affect their sort position.
@@ -568,17 +564,14 @@ export function HistoryViewInner() {
       clearSelection();
       void load(true);
       // Fire sound / notification on successful bulk copy — same gates as row-click.
-      if (playSoundOnCopy) {
-        void playCopySound();
-      }
-      if (notifyOnCopy) {
-        // Use content_type + preview from the first selected item for the banner.
-        const firstItem = selectedItems[0];
-        void showCopyNotification(
-          firstItem?.content_type ?? "",
-          firstItem?.preview ?? ""
-        );
-      }
+      // #16: delegated to copyWithFeedback; first-item content_type + preview for banner.
+      const firstItem = selectedItems[0];
+      void copyWithFeedback({
+        playSoundOnCopy: playSoundOnCopy ?? false,
+        notifyOnCopy: notifyOnCopy ?? false,
+        contentType: firstItem?.content_type ?? "",
+        preview: firstItem?.preview ?? "",
+      });
       showToast(`Copied ${selectedItems.length} item${selectedItems.length === 1 ? "" : "s"}`, "success");
     } finally {
       // Always release the busy flag — even if clearSelection/load throws,
