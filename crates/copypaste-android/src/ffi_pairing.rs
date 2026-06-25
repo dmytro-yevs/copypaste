@@ -368,6 +368,10 @@ pub fn build_android_peer_meta(
         // StunUtils before calling pairWithDiscovered / bootstrap_pair_initiator).
         public_ip,
         device_id: None,
+        // CopyPaste-yw2k: Android does not yet exchange the Supabase account id
+        // during pairing (cross-device account-mismatch detection is currently a
+        // desktop feature); None is the safe default and loads back as absent.
+        supabase_account_id: None,
     }
 }
 

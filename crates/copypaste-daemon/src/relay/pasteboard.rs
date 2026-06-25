@@ -15,8 +15,12 @@ use copypaste_core::{ClipboardItem, Database};
 ///
 /// Pure function — injectable `is_on_wifi_fn` makes this unit-testable without
 /// a real `networksetup` invocation. Mirrors the guard in `cloud.rs`.
+///
+/// Delegates to [`crate::sync_common::should_skip_on_cellular`], which is the
+/// canonical single implementation of this logic shared by the cloud, relay, and
+/// P2P paths (CopyPaste-hao6 de-dup).
 pub(super) fn relay_should_skip_wifi(sync_on_wifi_only: bool, is_on_wifi: bool) -> bool {
-    sync_on_wifi_only && !is_on_wifi
+    crate::sync_common::should_skip_on_cellular(sync_on_wifi_only, is_on_wifi)
 }
 
 /// Returns `true` when the relay receive path should auto-apply a freshly-synced
@@ -195,5 +199,27 @@ pub(super) fn relay_apply_to_pasteboard(
             content_type = candidate.content_type.as_str(),
             "relay-sync: auto-apply skipped (not macOS)"
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::relay_should_skip_wifi;
+
+    /// Parity contract: relay_should_skip_wifi must agree with
+    /// sync_common::should_skip_on_cellular on all four (bool, bool) inputs
+    /// (CopyPaste-hao6 de-dup guard — catches any future body drift between the
+    /// relay wrapper and the canonical shared helper).
+    #[test]
+    fn relay_skip_wifi_delegates_to_canonical_helper() {
+        let cases = [(true, false), (true, true), (false, false), (false, true)];
+        for (wifi_only, on_wifi) in cases {
+            assert_eq!(
+                relay_should_skip_wifi(wifi_only, on_wifi),
+                crate::sync_common::should_skip_on_cellular(wifi_only, on_wifi),
+                "relay_should_skip_wifi({wifi_only}, {on_wifi}) must equal \
+                 should_skip_on_cellular({wifi_only}, {on_wifi})"
+            );
+        }
     }
 }

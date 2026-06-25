@@ -791,6 +791,8 @@ mod tests {
                             device_name: Some("Test Mac".into()),
                             public_ip: Some("203.0.113.9".into()),
                             device_id: None,
+                            // CopyPaste-yw2k: test peer carries no Supabase account id.
+                            supabase_account_id: None,
                         },
                         // Responder advertises provisioning so the FFI initiator
                         // receives it in `peer_provisioning`.
