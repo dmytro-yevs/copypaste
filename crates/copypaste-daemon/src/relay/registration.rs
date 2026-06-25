@@ -94,6 +94,9 @@ pub(super) async fn register(
 
 /// Ensure we hold a valid token: return the cached one if present, else register
 /// and cache a fresh one.
+///
+/// `device_id` is the daemon's own stable device UUID, bound into the token
+/// file's AEAD AAD via [`store_cached_token`].
 pub(super) async fn ensure_token(
     client: &reqwest::Client,
     relay_url: &str,
@@ -101,18 +104,25 @@ pub(super) async fn ensure_token(
     device_name: &str,
     cached: &mut Option<String>,
     local_key: &zeroize::Zeroizing<[u8; 32]>,
+    device_id: &str,
 ) -> Result<String, RelayError> {
     if let Some(t) = cached.as_ref() {
         return Ok(t.clone());
     }
     let token = register(client, relay_url, sync_key_bytes, device_name).await?;
-    store_cached_token(&token, local_key);
+    store_cached_token(&token, local_key, device_id);
     *cached = Some(token.clone());
     Ok(token)
 }
 
 /// Load the initial cached token at startup (thin wrapper for the push/receive
 /// loops so they don't import from `token` directly).
-pub(super) fn load_initial_token(local_key: &zeroize::Zeroizing<[u8; 32]>) -> Option<String> {
-    load_cached_token(local_key)
+///
+/// `device_id` is the daemon's own stable device UUID — must match the id that
+/// was used when the token was stored (see [`store_cached_token`]).
+pub(super) fn load_initial_token(
+    local_key: &zeroize::Zeroizing<[u8; 32]>,
+    device_id: &str,
+) -> Option<String> {
+    load_cached_token(local_key, device_id)
 }

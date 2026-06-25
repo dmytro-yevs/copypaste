@@ -123,14 +123,15 @@ pub(super) async fn push_item(
 }
 
 /// The push loop: a 3rd subscriber on `new_item_tx` (alongside cloud + sync_orch).
-// relay_url, device_name, sync_key, local_key, last_sync_ms, and shutdown are
-// independent state slices — no natural grouping into a struct without adding
-// indirection for a private-only function.
+// relay_url, device_name, device_id, sync_key, local_key, last_sync_ms, and
+// shutdown are independent state slices — no natural grouping into a struct
+// without adding indirection for a private-only function.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn push_loop(
     client: reqwest::Client,
     relay_url: String,
     device_name: String,
+    device_id: String,
     mut rx: tokio::sync::broadcast::Receiver<ClipboardItem>,
     shutdown: Arc<Notify>,
     sync_key: Arc<Mutex<Option<SyncKey>>>,
@@ -138,7 +139,7 @@ pub(super) async fn push_loop(
     last_sync_ms: Arc<AtomicI64>,
     core_config: Arc<std::sync::RwLock<AppConfig>>,
 ) {
-    let mut cached_token = load_initial_token(&local_key);
+    let mut cached_token = load_initial_token(&local_key, &device_id);
     let mut warned_no_key = false;
 
     loop {
@@ -259,6 +260,7 @@ pub(super) async fn push_loop(
                     &inbox_id,
                     &key_bytes,
                     &device_name,
+                    &device_id,
                     &item.content_type,
                     content_b64,
                     wall_time,
@@ -280,8 +282,8 @@ pub(super) async fn push_loop(
 /// Push with one re-auth retry: ensure a token, push; on 401 drop the token,
 /// re-register, and push once more.
 // The relay protocol binds all of: client, url, inbox_id, sync_key_bytes,
-// device_name/id, local_key, and last_sync_ms. No natural grouping without
-// a new intermediate struct; count is justified by the protocol surface.
+// device_name, device_id, local_key, and last_sync_ms. No natural grouping
+// without a new intermediate struct; count is justified by the protocol surface.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn push_with_reauth(
     client: &reqwest::Client,
@@ -289,6 +291,7 @@ pub(super) async fn push_with_reauth(
     inbox_id: &str,
     sync_key_bytes: &[u8; 32],
     device_name: &str,
+    device_id: &str,
     content_type: &str,
     content_b64: String,
     wall_time: u64,
@@ -302,6 +305,7 @@ pub(super) async fn push_with_reauth(
         device_name,
         cached_token,
         local_key,
+        device_id,
     )
     .await?;
     match push_item(
@@ -327,6 +331,7 @@ pub(super) async fn push_with_reauth(
                 device_name,
                 cached_token,
                 local_key,
+                device_id,
             )
             .await?;
             match push_item(

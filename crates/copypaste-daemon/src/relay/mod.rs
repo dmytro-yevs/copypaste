@@ -183,6 +183,11 @@ pub(super) fn now_ms() -> i64 {
 ///
 /// `device_name` is the human-readable name presented at registration (1..=64).
 ///
+/// `device_id` is the daemon's own stable device UUID (from
+/// `load_or_create_device_id`). It is bound into the relay token file's AEAD AAD
+/// so a token written by device A cannot authenticate on device B even under a
+/// shared `local_key` (CopyPaste-qvtg.4).
+///
 /// `auto_apply_change_count` — when `Some`, enables the Universal Clipboard
 /// feature on the relay receive path: a freshly-synced text item is written to
 /// NSPasteboard immediately after ingest, honoring the `auto_apply_synced_clip`
@@ -191,14 +196,15 @@ pub(super) fn now_ms() -> i64 {
 /// local item (loop prevention).  Pass the same `self_write_change_count_arc`
 /// that the IPC server and sync_orch already share.  Pass `None` to disable
 /// (non-macOS, tests, or callers that have not wired the sentinel).
-// All params are distinct daemon-lifecycle handles (client, url, name, db,
-// rx, sync_key, local_key, last_sync_ms, core_config, auto_apply_change_count)
+// All params are distinct daemon-lifecycle handles (client, url, name, device_id,
+// db, rx, sync_key, local_key, last_sync_ms, core_config, auto_apply_change_count)
 // — no struct without reaching into daemon internals.
 #[allow(clippy::too_many_arguments)]
 pub fn start_relay(
     client: reqwest::Client,
     relay_url: String,
     device_name: String,
+    device_id: String,
     db: Arc<Mutex<Database>>,
     new_item_rx: tokio::sync::broadcast::Receiver<ClipboardItem>,
     sync_key: Arc<Mutex<Option<SyncKey>>>,
@@ -231,6 +237,7 @@ pub fn start_relay(
         client.clone(),
         relay_url.clone(),
         device_name.clone(),
+        device_id.clone(),
         new_item_rx,
         shutdown.clone(),
         sync_key.clone(),
@@ -242,6 +249,7 @@ pub fn start_relay(
         client,
         relay_url,
         device_name,
+        device_id,
         shutdown.clone(),
         db,
         sync_key,
@@ -336,6 +344,7 @@ mod tests {
             client.clone(),
             "".to_owned(),
             "test-device".to_owned(),
+            "device-test-uuid-a".to_owned(),
             db.clone(),
             rx,
             sync_key.clone(),
@@ -355,6 +364,7 @@ mod tests {
             client,
             "   ".to_owned(),
             "test-device".to_owned(),
+            "device-test-uuid-b".to_owned(),
             db,
             rx2,
             sync_key,
@@ -633,8 +643,10 @@ mod tests {
     fn token_encrypt_decrypt_roundtrip() {
         let key = zeroize::Zeroizing::new([0xABu8; 32]);
         let token = "test-auth-token-abc123-deadbeef";
-        let encoded = encrypt_relay_token(token, &key).expect("encrypt");
-        let recovered = decrypt_relay_token(&encoded, &key).expect("decrypt returned None");
+        let device_id = "device-roundtrip-uuid";
+        let encoded = encrypt_relay_token(token, &key, device_id).expect("encrypt");
+        let recovered =
+            decrypt_relay_token(&encoded, &key, device_id).expect("decrypt returned None");
         assert_eq!(recovered, token);
     }
 
@@ -644,8 +656,9 @@ mod tests {
     fn token_encrypt_nonce_is_unique_across_writes() {
         let key = zeroize::Zeroizing::new([0xCDu8; 32]);
         let token = "same-token-every-time";
-        let enc1 = encrypt_relay_token(token, &key).expect("enc1");
-        let enc2 = encrypt_relay_token(token, &key).expect("enc2");
+        let device_id = "device-nonce-uuid";
+        let enc1 = encrypt_relay_token(token, &key, device_id).expect("enc1");
+        let enc2 = encrypt_relay_token(token, &key, device_id).expect("enc2");
         // The blobs must differ (nonce changes, so the entire base64 string differs).
         assert_ne!(enc1, enc2, "each encryption must use a fresh random nonce");
     }
@@ -655,8 +668,9 @@ mod tests {
     fn token_decrypt_wrong_key_returns_none() {
         let key_a = zeroize::Zeroizing::new([0x11u8; 32]);
         let key_b = zeroize::Zeroizing::new([0x22u8; 32]);
-        let encoded = encrypt_relay_token("secret-token", &key_a).expect("encrypt");
-        let result = decrypt_relay_token(&encoded, &key_b);
+        let device_id = "device-wrongkey-uuid";
+        let encoded = encrypt_relay_token("secret-token", &key_a, device_id).expect("encrypt");
+        let result = decrypt_relay_token(&encoded, &key_b, device_id);
         assert!(
             result.is_none(),
             "wrong key must yield None, not a recovered token"
@@ -670,15 +684,42 @@ mod tests {
         use copypaste_core::NONCE_SIZE;
 
         let key = zeroize::Zeroizing::new([0x33u8; 32]);
+        let device_id = "device-tamper-uuid";
         let mut blob = base64::engine::general_purpose::STANDARD
-            .decode(encrypt_relay_token("my-token", &key).expect("enc"))
+            .decode(encrypt_relay_token("my-token", &key, device_id).expect("enc"))
             .expect("b64");
         // Flip a bit in the ciphertext portion (after the 24-byte nonce).
         if let Some(b) = blob.get_mut(NONCE_SIZE) {
             *b ^= 0xFF;
         }
         let tampered = base64::engine::general_purpose::STANDARD.encode(&blob);
-        assert!(decrypt_relay_token(&tampered, &key).is_none());
+        assert!(decrypt_relay_token(&tampered, &key, device_id).is_none());
+    }
+
+    /// CopyPaste-qvtg.4: a token encrypted for device_id "A" must fail to decrypt
+    /// under device_id "B" with the same local_key. This is the primary regression
+    /// guard for the device-id AAD binding.
+    #[test]
+    fn token_encrypted_for_device_a_fails_under_device_b() {
+        let key = zeroize::Zeroizing::new([0x44u8; 32]);
+        let device_id_a = "device-uuid-aaaa-1111-2222-333333333333";
+        let device_id_b = "device-uuid-bbbb-4444-5555-666666666666";
+        let token = "my-relay-auth-token-xyz";
+
+        let encoded = encrypt_relay_token(token, &key, device_id_a).expect("encrypt for A");
+
+        // Must succeed under device A.
+        let recovered =
+            decrypt_relay_token(&encoded, &key, device_id_a).expect("same device must decrypt");
+        assert_eq!(recovered, token, "device A can recover its own token");
+
+        // Must fail under device B even though the key is identical.
+        let result_b = decrypt_relay_token(&encoded, &key, device_id_b);
+        assert!(
+            result_b.is_none(),
+            "token encrypted for device A must NOT decrypt under device B's id \
+             (AEAD tag covers the device_id in the AAD)"
+        );
     }
 
     /// CopyPaste-qvtg.2: a token file that does NOT authenticate under AEAD
@@ -702,6 +743,7 @@ mod tests {
         }
 
         let key = zeroize::Zeroizing::new([0x55u8; 32]);
+        let device_id = "device-load-test-uuid";
         let token_file = super::token::token_path().expect("token path resolves");
         if let Some(parent) = token_file.parent() {
             std::fs::create_dir_all(parent).expect("mkdir");
@@ -710,17 +752,27 @@ mod tests {
         // 1) Legacy plaintext / attacker-planted token → rejected, never returned.
         std::fs::write(&token_file, b"attacker-planted-token-xyz\n").expect("write");
         assert!(
-            super::token::load_cached_token(&key).is_none(),
+            super::token::load_cached_token(&key, device_id).is_none(),
             "non-AEAD token must be rejected (None), never returned as the bearer"
         );
 
         // 2) A properly AEAD-encrypted token → accepted and round-trips.
-        let enc = encrypt_relay_token("real-encrypted-token-123", &key).expect("encrypt");
+        let enc =
+            encrypt_relay_token("real-encrypted-token-123", &key, device_id).expect("encrypt");
         super::token::write_token_0600(&token_file, &enc).expect("write encrypted");
         assert_eq!(
-            super::token::load_cached_token(&key).as_deref(),
+            super::token::load_cached_token(&key, device_id).as_deref(),
             Some("real-encrypted-token-123"),
             "a valid AEAD token must still load"
+        );
+
+        // 3) Token encrypted for a DIFFERENT device_id → rejected (qvtg.4 binding).
+        let enc_other =
+            encrypt_relay_token("other-device-token", &key, "other-device-uuid").expect("encrypt");
+        super::token::write_token_0600(&token_file, &enc_other).expect("write other");
+        assert!(
+            super::token::load_cached_token(&key, device_id).is_none(),
+            "token written for another device_id must be rejected for this device"
         );
 
         // Restore env.
@@ -744,6 +796,7 @@ mod tests {
         std::fs::write(&token_file, b"   \n").expect("write");
 
         let key = zeroize::Zeroizing::new([0x77u8; 32]);
+        let device_id = "device-empty-test-uuid";
         let raw = std::fs::read_to_string(&token_file).expect("read");
         let trimmed = raw.trim();
         // Empty / whitespace-only file → treated as absent.
@@ -752,7 +805,7 @@ mod tests {
         assert!(if trimmed.is_empty() {
             None::<String>
         } else {
-            decrypt_relay_token(trimmed, &key)
+            decrypt_relay_token(trimmed, &key, device_id)
         }
         .is_none());
     }
@@ -1171,6 +1224,7 @@ mod tests {
             client,
             format!("http://{addr}"),
             "test-device".to_owned(),
+            "device-jbao-test-uuid".to_owned(),
             rx,
             shutdown.clone(),
             sync_key,

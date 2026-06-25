@@ -7,6 +7,7 @@ import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
 import { InfoPopover } from "../components/InfoPopover";
 import { StatusRow } from "../components/StatusRow";
+import { CloudAccountMismatchBanner } from "../components/CloudAccountMismatchBanner";
 import { formatSyncTime } from "../../../lib/time";
 import type { SyncStatus, AppSettings } from "../../../lib/ipc";
 
@@ -55,6 +56,19 @@ export type SyncTabProps = {
   handleSetPassphrase: () => void;
   handleTestConnection: () => void;
   handleSaveConfig: () => void;
+  /**
+   * CopyPaste-1jms.34: true when a cross-device Supabase account mismatch is
+   * detected. Controls visibility of the CloudAccountMismatchBanner.
+   *
+   * Until peer supabase_account_id is plumbed (CopyPaste-1jms.35), callers
+   * pass false here — the banner is intentionally hidden to avoid false positives.
+   */
+  cloudAccountMismatch: boolean;
+  /**
+   * This device's canonical Supabase account id, for informational display in
+   * the mismatch banner. Null/absent when cloud-sync is off or anon-key-only.
+   */
+  localSupabaseAccountId?: string | null;
 };
 
 // bdac.106: branch on .ok (typed signal) — no string comparison.
@@ -105,6 +119,8 @@ export function SyncTab({
   handleSetPassphrase,
   handleTestConnection,
   handleSaveConfig,
+  cloudAccountMismatch,
+  localSupabaseAccountId,
 }: SyncTabProps) {
   return (
     <div className="space-y-2">
@@ -229,6 +245,14 @@ export function SyncTab({
       <SectionHeader
         label="Cloud sync"
         hint="Syncs over the internet via your Supabase project."
+      />
+      {/* CopyPaste-1jms.34: cross-device Supabase account mismatch banner.
+          Renders only when cloudAccountMismatch is true. Until peer account ids
+          are plumbed (CopyPaste-1jms.35) callers always pass false, so the
+          banner is hidden and no false positives are shown. */}
+      <CloudAccountMismatchBanner
+        hasMismatch={cloudAccountMismatch}
+        localAccountId={localSupabaseAccountId}
       />
       <Panel>
         <SettingsRow title="Supabase URL">

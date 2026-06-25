@@ -284,13 +284,15 @@ pub(super) fn ingest_page_blocking(
 
 /// The receive loop: poll the shared inbox, ingest new items via the LWW path,
 /// advance the watermark.
-// All parameters are independent runtime slices (db, url, name, keys, shutdown,
-// auto_apply_change_count) with no natural grouping for a private async fn.
+// All parameters are independent runtime slices (db, url, name, device_id,
+// keys, shutdown, auto_apply_change_count) with no natural grouping for a
+// private async fn.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn receive_loop(
     client: reqwest::Client,
     relay_url: String,
     device_name: String,
+    device_id: String,
     shutdown: Arc<Notify>,
     db: Arc<Mutex<Database>>,
     sync_key: Arc<Mutex<Option<SyncKey>>>,
@@ -310,7 +312,7 @@ pub(super) async fn receive_loop(
     };
     use copypaste_core::derive_relay_inbox_id;
 
-    let mut cached_token = load_initial_token(&local_key);
+    let mut cached_token = load_initial_token(&local_key, &device_id);
     // CopyPaste-hf40 / CopyPaste-1jms.24: load the persisted watermark so a
     // daemon restart resumes from the last-seen (wall, id) cursor rather than
     // re-fetching all relay items from (0, 0).
@@ -393,6 +395,7 @@ pub(super) async fn receive_loop(
             &device_name,
             &mut cached_token,
             &local_key,
+            &device_id,
         )
         .await
         {

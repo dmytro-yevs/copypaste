@@ -206,9 +206,6 @@ export interface DaemonStatus {
   build_version?: string | null;
   /** Daemon OS process id, if reported. */
   pid?: number | null;
-  // TODO(task-7): expose supabase_account_id from daemon status so the UI can
-  // surface a cross-device account mismatch in SettingsView's cloud section.
-  // Add `supabase_account_id?: string | null` here once the daemon emits it.
 }
 
 /**
@@ -270,6 +267,25 @@ export interface SyncStatus {
    * Absent on daemons predating this field; fall back to local derivation then.
    */
   badge_state?: SyncBadgeState | null;
+  /**
+   * CopyPaste-1jms.34: canonical Supabase account identity for this device.
+   *
+   * Derived from the Supabase project URL + GoTrue user UUID by the daemon via
+   * `copypaste_supabase::supabase_account_id`. Two paired devices MUST share the
+   * same value for Supabase RLS to let them see each other's rows. A mismatch
+   * means they are on different Supabase projects or different GoTrue accounts —
+   * their clipboard rows are silently invisible to each other.
+   *
+   * This is a non-secret stable identifier (not a token/key). Absent/null when
+   * cloud-sync is off, not configured, or anon-key-only (no GoTrue session).
+   * Absent on daemons predating this field — treat absence as null.
+   *
+   * NOTE: peer `supabase_account_id` is not yet plumbed through the `list_peers`
+   * response (follow-up issue CopyPaste-1jms.35). Full mismatch detection
+   * (comparing local vs. every paired peer's account id) is deferred; the UI
+   * currently surfaces this field for diagnostic/display only.
+   */
+  supabase_account_id?: string | null;
 }
 
 /**

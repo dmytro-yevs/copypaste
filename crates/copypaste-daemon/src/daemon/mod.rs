@@ -701,6 +701,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let relay_handle_slot: Arc<tokio::sync::Mutex<Option<crate::relay::RelayHandle>>> =
         Arc::new(tokio::sync::Mutex::new(None));
 
+    // CopyPaste-1jms.34: allocate the cloud account-id slot BEFORE the server
+    // tuple block so it can be written by the `start_cloud` result AFTER the
+    // server is spawned. The IpcServer receives a clone of this Arc via
+    // `with_cloud_account_id_slot` inside the block; the cloud startup block at
+    // the bottom of this function writes the value through the outer binding.
+    #[cfg(feature = "cloud-sync")]
+    let cloud_account_id_slot: Arc<std::sync::Mutex<Option<String>>> =
+        Arc::new(std::sync::Mutex::new(None));
+
     #[cfg(unix)]
     let (
         self_write_change_count_arc,
@@ -762,6 +771,14 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 cloud_last_sync_ms.clone(),
                 cloud_signed_in.clone(),
             );
+        }
+        // CopyPaste-1jms.34: wire the outer cloud_account_id_slot Arc so the
+        // server and the start_cloud result share the SAME backing Mutex. When
+        // start_cloud writes into `cloud_account_id_slot` below, the server's
+        // `get_sync_status` handler immediately sees the new value.
+        #[cfg(feature = "cloud-sync")]
+        {
+            server = server.with_cloud_account_id_slot(cloud_account_id_slot.clone());
         }
         // Public-IP cache: shared between the IPC server (read path) and the
         // STUN refresh task (write path).  Created here so both can hold an
@@ -1227,6 +1244,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             {
                 Ok(handle) => {
                     tracing::info!("cloud-sync: orchestrator started");
+                    // CopyPaste-1jms.34: publish the canonical account id into
+                    // the shared slot. The IpcServer's `get_sync_status` handler
+                    // holds the same Arc and reads through it on every request,
+                    // so this one write at startup is sufficient.
+                    *cloud_account_id_slot
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner()) = handle.cloud_account_id.clone();
                     Some(handle)
                 }
                 Err(e) => {
@@ -1311,6 +1335,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 client,
                 relay_url,
                 resolve_device_name(),
+                local_device_id.clone(),
                 db.clone(),
                 new_item_tx.subscribe(),
                 cloud_sync_key.clone(),

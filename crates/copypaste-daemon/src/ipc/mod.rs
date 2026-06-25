@@ -442,6 +442,21 @@ pub struct IpcServer {
     /// the old hardcoded `signed_in = supabase_configured`.
     #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     pub cloud_signed_in: Arc<AtomicBool>,
+    /// Canonical Supabase account identity for this device (CopyPaste-1jms.34).
+    ///
+    /// Set by `with_cloud_account_id` after `start_cloud` returns. The value
+    /// is `copypaste_supabase::supabase_account_id(url, user_id)` — a non-secret
+    /// stable identifier derived from the Supabase project URL + GoTrue user UUID.
+    ///
+    /// The `get_sync_status` handler includes this in the response so the UI can
+    /// surface a banner when two paired devices report different account IDs
+    /// (= different Supabase projects or different GoTrue accounts).
+    ///
+    /// `None` when cloud-sync is off, not configured, or anon-key-only
+    /// (no GoTrue session). Interior-mutable so it can be updated if the cloud
+    /// loops are restarted at runtime without taking the entire IpcServer lock.
+    #[cfg(feature = "cloud-sync")]
+    pub cloud_account_id: Arc<std::sync::Mutex<Option<String>>>,
     /// Broadcast sender for newly-ingested clipboard items, shared with the
     /// clipboard monitor and the sync orchestrator (P2P Phase 3).
     ///
@@ -846,6 +861,22 @@ impl IpcServer {
         self
     }
 
+    /// Wire the canonical Supabase account-identity slot (CopyPaste-1jms.34).
+    ///
+    /// The caller creates a shared `Arc<Mutex<Option<String>>>` BEFORE spawning
+    /// the server, passes it here, and then retains its own clone to write the
+    /// value produced by `start_cloud` *after* the server has been spawned.
+    /// The `get_sync_status` handler reads through the same `Arc` on every
+    /// request — writing once at startup is sufficient and race-free.
+    #[cfg(feature = "cloud-sync")]
+    pub fn with_cloud_account_id_slot(
+        mut self,
+        slot: Arc<std::sync::Mutex<Option<String>>>,
+    ) -> Self {
+        self.cloud_account_id = slot;
+        self
+    }
+
     /// Attach the broadcast sender for newly-ingested clipboard items so the
     /// `import` IPC method can notify the sync orchestrator (P2P Phase 3).
     pub fn with_new_item_tx(
@@ -891,6 +922,8 @@ impl IpcServer {
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
+            #[cfg(feature = "cloud-sync")]
+            cloud_account_id: Arc::new(std::sync::Mutex::new(None)),
             new_item_tx: None,
             degraded_reason: Arc::new(std::sync::Mutex::new(None)),
             core_config: None,
@@ -4845,6 +4878,15 @@ impl IpcServer {
                 );
                 let badge_state_json =
                     serde_json::to_value(&badge_state).unwrap_or(serde_json::Value::Null);
+                // CopyPaste-1jms.34: read the canonical account identity set by
+                // `with_cloud_account_id` after `start_cloud` returned. A `None`
+                // means cloud-sync is not active or the daemon is anon-key-only.
+                // The Mutex hold is tiny (clone the String and drop immediately).
+                let account_id_val: Option<String> = self
+                    .cloud_account_id
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
                 Response::ok(
                     req.id,
                     serde_json::json!({
@@ -4859,6 +4901,9 @@ impl IpcServer {
                         // MUST use it; consumers talking to older daemons may not see it
                         // and may fall back to local derivation from the raw fields above.
                         "badge_state": badge_state_json,
+                        // Non-secret stable account identity (CopyPaste-1jms.34).
+                        // Omitted from the wire when None (cloud off / anon-key-only).
+                        "supabase_account_id": account_id_val,
                     }),
                 )
             }

@@ -1170,6 +1170,13 @@ export function useSettingsState() {
     offline: loadState !== "ready",
     degraded: loadState === "degraded",
     notReady: loadState === "not_ready",
+    // CopyPaste-1jms.34: expose the local Supabase account id from syncStatus.
+    // Full mismatch detection (comparing against paired peers) is deferred to
+    // CopyPaste-1jms.35 — peer supabase_account_id is not yet plumbed through
+    // the list_peers response. Until then, hasMismatch is always false so the
+    // banner is never shown (no false positives).
+    cloudAccountMismatch: false as boolean,
+    localSupabaseAccountId: syncStatus?.supabase_account_id ?? null,
     // Helpers (functions read live state via closure)
     buildConfigPatch,
     showLimitsMsg,

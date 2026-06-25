@@ -77,6 +77,8 @@ export function SettingsView() {
                     handleP2pToggle={s.handleP2pToggle} handleLanVisibilityToggle={s.handleLanVisibilityToggle}
                     handleSetPassphrase={s.handleSetPassphrase} handleTestConnection={s.handleTestConnection}
                     handleSaveConfig={s.handleSaveConfig}
+                    cloudAccountMismatch={s.cloudAccountMismatch}
+                    localSupabaseAccountId={s.localSupabaseAccountId}
                   />
                 </div>
               )}

@@ -117,6 +117,24 @@ pub struct GetSyncStatusResponse {
     /// `last_sync_ms` + `supabase_configured` with their own threshold.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub badge_state: Option<SyncBadgeState>,
+
+    /// Canonical Supabase account identity for this device (CopyPaste-1jms.34).
+    ///
+    /// Computed by `copypaste_supabase::supabase_account_id` from the
+    /// combination of the Supabase project URL and the signed-in GoTrue user UUID.
+    /// Two paired devices MUST share the same token for RLS to let them see each
+    /// other's rows; a mismatch means they are using different Supabase projects
+    /// or different GoTrue accounts — their items are silently invisible to each
+    /// other.
+    ///
+    /// This is a **non-secret** stable identifier (not a token/key). `None` when
+    /// cloud-sync is off, not configured, or the daemon is in anon-key-only mode
+    /// (no GoTrue session).
+    ///
+    /// Omitted from the wire when `None` for back-compat: daemons that predate
+    /// this field simply omit it; consumers must treat absence as `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supabase_account_id: Option<String>,
 }
 
 /// Run a live connection diagnostic against the configured cloud backend.
@@ -174,6 +192,7 @@ mod tests {
             supabase_url: Some("https://example.supabase.co".into()),
             email: Some("d***@example.com".into()),
             badge_state: Some(SyncBadgeState::Synced),
+            supabase_account_id: None,
         };
         let s = serde_json::to_string(&resp).unwrap();
         let back: GetSyncStatusResponse = serde_json::from_str(&s).unwrap();
@@ -194,6 +213,7 @@ mod tests {
             supabase_url: None,
             email: None,
             badge_state: None,
+            supabase_account_id: None,
         };
         let s = serde_json::to_string(&resp).unwrap();
         assert!(
@@ -203,6 +223,57 @@ mod tests {
         // Parse it back — badge_state defaults to None.
         let back: GetSyncStatusResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(back.badge_state, None);
+    }
+
+    /// CopyPaste-1jms.34: `supabase_account_id` must round-trip on the wire when
+    /// present and must be omitted from the JSON when `None` (backward-compat with
+    /// older consumers that don't know the field).
+    #[test]
+    fn get_sync_status_response_supabase_account_id_wire() {
+        // Present: must survive serde round-trip.
+        let with_id = GetSyncStatusResponse {
+            passphrase_set: true,
+            supabase_configured: true,
+            signed_in: true,
+            last_sync_ms: None,
+            supabase_url: None,
+            email: None,
+            badge_state: None,
+            supabase_account_id: Some(
+                "proj_abc123/uid_00000000-0000-0000-0000-000000000001".into(),
+            ),
+        };
+        let s = serde_json::to_string(&with_id).unwrap();
+        assert!(
+            s.contains("\"supabase_account_id\":\"proj_abc123/uid_00000000"),
+            "account_id must be present on the wire: {s}"
+        );
+        let back: GetSyncStatusResponse = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.supabase_account_id, with_id.supabase_account_id);
+
+        // Absent: must be omitted so older consumers can parse without error.
+        let without_id = GetSyncStatusResponse {
+            passphrase_set: false,
+            supabase_configured: false,
+            signed_in: false,
+            last_sync_ms: None,
+            supabase_url: None,
+            email: None,
+            badge_state: None,
+            supabase_account_id: None,
+        };
+        let s2 = serde_json::to_string(&without_id).unwrap();
+        assert!(
+            !s2.contains("supabase_account_id"),
+            "absent account_id must not appear on the wire: {s2}"
+        );
+        // Parse a legacy response missing the field — must default to None.
+        let legacy = r#"{"passphrase_set":false,"supabase_configured":false,"signed_in":false,"last_sync_ms":null}"#;
+        let parsed: GetSyncStatusResponse = serde_json::from_str(legacy).unwrap();
+        assert_eq!(
+            parsed.supabase_account_id, None,
+            "absent field must default to None"
+        );
     }
 
     #[test]
