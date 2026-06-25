@@ -68,6 +68,17 @@ pub struct PeerMeta {
     /// that do not carry this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_id: Option<String>,
+    /// Stable, non-secret Supabase account identity (CopyPaste-yw2k).
+    ///
+    /// Derived by `copypaste_supabase::supabase_account_id(url, user_id)` on the
+    /// sending side and stored in the peer's `PairedDevice::supabase_account_id`
+    /// on receipt. Enables mismatch detection: if two paired devices carry
+    /// different values here, their Supabase RLS rows are invisible to each other.
+    ///
+    /// This is **non-secret** (not a token or key) — safe to exchange in-band.
+    /// `#[serde(default)]` for back-compat with peers that do not carry this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supabase_account_id: Option<String>,
 }
 
 /// Sync-account provisioning exchanged in-band over the bootstrap channel AFTER
@@ -193,4 +204,9 @@ pub struct BootstrapPairing {
     /// provisioning exchange was skipped. The caller decides what to APPLY (only
     /// fields it currently lacks). See [`SyncProvisioning`].
     pub peer_provisioning: Option<SyncProvisioning>,
+    /// Peer's stable, non-secret Supabase account identity (CopyPaste-yw2k),
+    /// learned from `PeerMeta.supabase_account_id`. `None` when the peer is a
+    /// legacy build that does not advertise this field, or when cloud-sync is
+    /// not configured on the peer side.
+    pub peer_supabase_account_id: Option<String>,
 }

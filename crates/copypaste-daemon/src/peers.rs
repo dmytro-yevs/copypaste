@@ -79,6 +79,22 @@ pub struct PairedDevice {
     /// with this peer. Updated on every established (throttled) connection.
     #[serde(default)]
     pub last_sync_at: Option<i64>,
+    /// Peer's Supabase account identity (CopyPaste-yw2k).
+    ///
+    /// Derived from the peer's Supabase project URL + GoTrue user UUID via
+    /// `copypaste_supabase::supabase_account_id`. Learned in-band over the
+    /// bootstrap channel at pairing time (exchanged in `PeerMeta`).
+    ///
+    /// Two paired devices MUST share the same value for Supabase RLS to
+    /// let them see each other's rows. A mismatch means they are on
+    /// different Supabase projects or different GoTrue accounts.
+    ///
+    /// This is a **non-secret** stable identifier (not a token or key).
+    /// `#[serde(default, skip_serializing_if)]` keeps backward compatibility
+    /// with older records that predate this field (they deserialise to `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supabase_account_id: Option<String>,
+
     /// **DEPRECATED (plaintext at-rest)** — Base64 of the raw `PasswordFile`
     /// blob. Kept for **migration reads only**: if this field is present in an
     /// existing `peers.json` and `password_file_enc` is absent the daemon
@@ -457,6 +473,7 @@ mod tests {
             app_version: None,
             local_ip: None,
             public_ip: None,
+            supabase_account_id: None,
             first_sync_at: None,
             last_sync_at: None,
             password_file_b64: None,
@@ -789,6 +806,7 @@ mod tests {
             app_version: None,
             local_ip: None,
             public_ip: None,
+            supabase_account_id: None,
             first_sync_at: None,
             last_sync_at: None,
             password_file_b64: None,
@@ -878,6 +896,7 @@ mod tests {
             app_version: None,
             local_ip: None,
             public_ip: None,
+            supabase_account_id: None,
             first_sync_at: None,
             last_sync_at: None,
             password_file_b64: Some(fake_pf_b64.clone()),
@@ -890,6 +909,64 @@ mod tests {
             loaded[0].password_file_b64.as_deref(),
             Some(fake_pf_b64.as_str()),
             "password_file_b64 must survive resave when password_file_enc is None"
+        );
+    }
+
+    // ─── CopyPaste-yw2k: supabase_account_id field ──────────────────────────
+
+    /// CopyPaste-yw2k: `supabase_account_id` must round-trip through
+    /// `save_peers` / `load_peers` when set.
+    #[test]
+    fn supabase_account_id_roundtrips_through_save_load() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+
+        let mut device = make_device("aa:bb:cc", "Alice");
+        device.supabase_account_id =
+            Some("proj_abc/uid_00000000-1111-2222-3333-444444444444".to_string());
+
+        save_peers(&path, &[device]).unwrap();
+        let loaded = load_peers(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(
+            loaded[0].supabase_account_id.as_deref(),
+            Some("proj_abc/uid_00000000-1111-2222-3333-444444444444"),
+            "supabase_account_id must survive save/load round-trip"
+        );
+    }
+
+    /// CopyPaste-yw2k: a `peers.json` written before the `supabase_account_id`
+    /// field existed must still deserialise — the field defaults to `None`.
+    #[test]
+    fn legacy_record_without_supabase_account_id_loads_as_none() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        std::fs::write(
+            &path,
+            br#"[{"fingerprint":"aa:bb:cc","name":"Old","added_at":1700000000}]"#,
+        )
+        .unwrap();
+        let loaded = load_peers(&path);
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(
+            loaded[0].supabase_account_id, None,
+            "legacy records must deserialise with supabase_account_id=None"
+        );
+    }
+
+    /// CopyPaste-yw2k: when `supabase_account_id` is `None` it must NOT appear
+    /// in the serialised JSON (back-compat: old daemons would ignore it but no
+    /// point polluting the file).
+    #[test]
+    fn supabase_account_id_absent_from_json_when_none() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        let device = make_device("aa:bb:cc", "Alice"); // supabase_account_id = None
+        save_peers(&path, &[device]).unwrap();
+        let raw = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            !raw.contains("supabase_account_id"),
+            "supabase_account_id must not appear in JSON when None"
         );
     }
 }

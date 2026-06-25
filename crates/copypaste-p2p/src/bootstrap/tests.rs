@@ -85,6 +85,7 @@ async fn bootstrap_pake_over_tls_loopback_succeeds() {
         device_name: None,
         public_ip: Some("198.51.100.10".into()),
         device_id: None,
+        supabase_account_id: None,
     };
     let resp_meta_task = resp_meta.clone();
     // The responder advertises a full SyncProvisioning ("the configured PC");
@@ -113,6 +114,7 @@ async fn bootstrap_pake_over_tls_loopback_succeeds() {
         device_name: None,
         public_ip: Some("198.51.100.11".into()),
         device_id: None,
+        supabase_account_id: None,
     };
     let init_meta_task = init_meta.clone();
     let initiator_task = tokio::spawn(async move {
@@ -443,6 +445,7 @@ async fn exchange_peer_meta_both_new_learns_each_other() {
         device_name: None,
         public_ip: Some("203.0.113.7".into()),
         device_id: None,
+        supabase_account_id: None,
     };
     let meta_b = PeerMeta {
         model: Some("Mac mini".into()),
@@ -627,6 +630,7 @@ fn peer_meta_public_ip_round_trips() {
         device_name: Some("Alice's MacBook".into()),
         public_ip: Some("203.0.113.42".into()),
         device_id: None,
+        supabase_account_id: None,
     };
     let json = serde_json::to_string(&meta).expect("serialize PeerMeta");
     assert!(

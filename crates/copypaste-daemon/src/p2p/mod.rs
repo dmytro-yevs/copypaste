@@ -281,6 +281,9 @@ pub async fn start_p2p(
     // "Wi-Fi only" privacy setting exactly like the relay and cloud paths
     // (previously P2P transmitted on cellular regardless of the flag).
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    // CopyPaste-yw2k: non-secret Supabase account identity slot; forwarded
+    // to the standing pairing responder so it can include it in `PeerMeta`.
+    cloud_account_id: Option<Arc<std::sync::Mutex<Option<String>>>>,
 ) -> anyhow::Result<P2pHandle> {
     let bind_addr = format!("0.0.0.0:{}", config.listen_port);
     let listener = TcpListener::bind(&bind_addr).await?;
@@ -446,6 +449,9 @@ pub async fn start_p2p(
             // Thread our own device UUID so the responder advertises it in-band,
             // allowing the peer to match clipboard origin_device_id to a name.
             let local_device_id_for_responder = Some(device_id.to_string());
+            // CopyPaste-yw2k: clone the account-id arc so the responder can
+            // include our supabase_account_id in PeerMeta (non-secret, not a token).
+            let cloud_account_id_for_responder = cloud_account_id.clone();
             tokio::spawn(async move {
                 pairing_responder::standing_pairing_responder_loop(
                     bport,
@@ -457,6 +463,7 @@ pub async fn start_p2p(
                     public_ip_cache_for_responder,
                     sync_crypto_for_responder,
                     local_device_id_for_responder,
+                    cloud_account_id_for_responder,
                     responder_shutdown,
                 )
                 .await;
@@ -956,6 +963,7 @@ mod tests {
                 last_sync_at: None,
                 password_file_b64: None,
                 password_file_enc: None,
+                supabase_account_id: None,
             }],
         )
         .unwrap();
@@ -1178,6 +1186,7 @@ mod tests {
                     public_ip_cache,
                     None, // sync_crypto — not needed for cancellation test
                     None, // local_device_id — not needed for cancellation test
+                    None, // cloud_account_id — not needed for cancellation test
                     token,
                 )
                 .await;
@@ -1598,6 +1607,7 @@ mod tests {
                     last_sync_at: Some(999),
                     password_file_b64: None,
                     password_file_enc: None,
+                    supabase_account_id: None,
                 },
                 crate::peers::PairedDevice {
                     fingerprint: "ccdd".to_string(),
@@ -1614,6 +1624,7 @@ mod tests {
                     last_sync_at: None,
                     password_file_b64: None,
                     password_file_enc: None,
+                    supabase_account_id: None,
                 },
             ],
         )
@@ -1671,6 +1682,7 @@ mod tests {
                 last_sync_at: None,
                 password_file_b64: None,
                 password_file_enc: None,
+                supabase_account_id: None,
             }],
         )
         .unwrap();
@@ -1718,6 +1730,7 @@ mod tests {
                     last_sync_at: None,
                     password_file_b64: None,
                     password_file_enc: None,
+                    supabase_account_id: None,
                 },
                 crate::peers::PairedDevice {
                     fingerprint: "dd:ee:ff".to_string(),
@@ -1734,6 +1747,7 @@ mod tests {
                     last_sync_at: None,
                     password_file_b64: None,
                     password_file_enc: None,
+                    supabase_account_id: None,
                 },
             ],
         )
@@ -1794,6 +1808,7 @@ mod tests {
                 last_sync_at: None,
                 password_file_b64: None,
                 password_file_enc: None,
+                supabase_account_id: None,
             }],
         )
         .unwrap();
@@ -1873,6 +1888,7 @@ mod tests {
             device_name: Some("Test Device".to_string()),
             public_ip: None,
             device_id: None,
+            supabase_account_id: None,
         };
         let fp = "aa:bb:cc:dd:ee:ff:00:11";
 

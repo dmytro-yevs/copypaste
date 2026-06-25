@@ -895,6 +895,18 @@ impl IpcServer {
         self
     }
 
+    /// Return a clone of the `Arc<Mutex<Option<String>>>` holding the local
+    /// Supabase account identity so callers (e.g. the P2P standing responder)
+    /// can read it without coupling to the full `IpcServer`.
+    ///
+    /// CopyPaste-yw2k: the arc is cloned once at startup and forwarded to
+    /// `start_p2p` so the standing responder can include our `supabase_account_id`
+    /// in the `PeerMeta` it sends during in-band pairing.
+    #[cfg(feature = "cloud-sync")]
+    pub fn cloud_account_id_slot(&self) -> Arc<std::sync::Mutex<Option<String>>> {
+        Arc::clone(&self.cloud_account_id)
+    }
+
     /// Attach the broadcast sender for newly-ingested clipboard items so the
     /// `import` IPC method can notify the sync orchestrator (P2P Phase 3).
     pub fn with_new_item_tx(
@@ -1138,6 +1150,7 @@ impl IpcServer {
     pub(crate) fn collect_own_peer_meta(
         public_ip: Option<String>,
         device_id: Option<String>,
+        supabase_account_id: Option<String>,
     ) -> copypaste_p2p::bootstrap::PeerMeta {
         // CopyPaste-bps: use the process-wide cache warmed at daemon startup
         // instead of calling DeviceMeta::collect again (which spawns child
@@ -1155,6 +1168,9 @@ impl IpcServer {
             device_name: meta.device_name.clone(),
             public_ip,
             device_id,
+            // CopyPaste-yw2k: advertise our non-secret Supabase account identity
+            // so the peer can detect cross-account mismatches at pairing time.
+            supabase_account_id,
         }
     }
 
@@ -1637,6 +1653,10 @@ impl IpcServer {
                 app_version: peer_meta.app_version.clone(),
                 local_ip: peer_meta.local_ip.clone(),
                 public_ip: peer_meta.public_ip.clone(),
+                // CopyPaste-yw2k: persist the peer's non-secret Supabase account
+                // identity so list_peers can surface it and the UI can detect
+                // cross-account mismatches at render time (not a token/key).
+                supabase_account_id: peer_meta.supabase_account_id.clone(),
                 first_sync_at: prior_first_sync,
                 last_sync_at: prior_last_sync,
                 // password_file_b64 / password_file_enc are only populated on the
@@ -1806,8 +1826,15 @@ impl IpcServer {
         // collection is disabled. Reuses the daemon's single STUN source.
         let own_public_ip = self.cached_public_ip.read().await.clone();
         let own_device_id = self.local_device_id.clone();
+        // CopyPaste-yw2k: read the local Supabase account identity (non-secret)
+        // to advertise it in-band so the peer can detect cross-account mismatches.
+        let own_supabase_account_id: Option<String> = self
+            .cloud_account_id
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
         let own_meta = tokio::task::spawn_blocking(move || {
-            Self::collect_own_peer_meta(own_public_ip, own_device_id)
+            Self::collect_own_peer_meta(own_public_ip, own_device_id, own_supabase_account_id)
         })
         .await
         .unwrap_or_default();
@@ -1878,6 +1905,8 @@ impl IpcServer {
                     device_name: outcome.peer_device_name.clone(),
                     public_ip: outcome.peer_public_ip.clone(),
                     device_id: outcome.peer_device_id.clone(),
+                    // CopyPaste-yw2k: carry the peer's non-secret account identity.
+                    supabase_account_id: outcome.peer_supabase_account_id.clone(),
                 };
                 Self::persist_paired_peer(
                     &outcome.peer_fingerprint,
@@ -2007,13 +2036,22 @@ impl IpcServer {
         // after persist_paired_peer writes peers.json.
         let spawn_sync_crypto = self.p2p_sync_crypto.clone();
         let own_device_id = self.local_device_id.clone();
+        // CopyPaste-yw2k: clone the account-id Arc before the move so the
+        // spawned task can read the non-secret identity to advertise in-band.
+        let cloud_account_id_arc = self.cloud_account_id.clone();
         tokio::spawn(async move {
+            // CopyPaste-yw2k: read the non-secret local Supabase account id
+            // inside the task (after the Arc was cloned before the spawn).
+            let own_supabase_account_id: Option<String> = cloud_account_id_arc
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
             // P2P Phase 4: collect our own device metadata to advertise in-band.
             // DeviceMeta::collect spawns child processes (up to ~2 s), so run it
             // off the async worker. Falls back to empty metadata on join error.
             let own_public_ip = public_ip_cache.read().await.clone();
             let own_meta = tokio::task::spawn_blocking(move || {
-                Self::collect_own_peer_meta(own_public_ip, own_device_id)
+                Self::collect_own_peer_meta(own_public_ip, own_device_id, own_supabase_account_id)
             })
             .await
             .unwrap_or_default();
@@ -2060,6 +2098,8 @@ impl IpcServer {
                         device_name: outcome.peer_device_name.clone(),
                         public_ip: outcome.peer_public_ip.clone(),
                         device_id: outcome.peer_device_id.clone(),
+                        // CopyPaste-yw2k: carry the peer's non-secret account identity.
+                        supabase_account_id: outcome.peer_supabase_account_id.clone(),
                     };
                     // Persist is the last observable side-effect of the bootstrap
                     // task. `list_peers` awaits `pending_bootstrap` (stored by
@@ -2145,11 +2185,18 @@ impl IpcServer {
         // can show it. None if unresolved/disabled.
         let own_public_ip = self.cached_public_ip.read().await.clone();
         let own_device_id = self.local_device_id.clone();
+        // CopyPaste-yw2k: read the non-secret local Supabase account id to
+        // advertise in-band so the peer can detect cross-account mismatches.
+        let own_supabase_account_id: Option<String> = self
+            .cloud_account_id
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
         // P2P Phase 4: collect our own device metadata to advertise in-band.
         // DeviceMeta::collect spawns child processes (up to ~2 s), so run it off
         // the async worker; empty metadata on join error.
         let own_meta = tokio::task::spawn_blocking(move || {
-            Self::collect_own_peer_meta(own_public_ip, own_device_id)
+            Self::collect_own_peer_meta(own_public_ip, own_device_id, own_supabase_account_id)
         })
         .await
         .unwrap_or_default();
@@ -2192,6 +2239,8 @@ impl IpcServer {
                     device_name: outcome.peer_device_name.clone(),
                     public_ip: outcome.peer_public_ip.clone(),
                     device_id: outcome.peer_device_id.clone(),
+                    // CopyPaste-yw2k: carry the peer's non-secret account identity.
+                    supabase_account_id: outcome.peer_supabase_account_id.clone(),
                 };
                 Self::persist_paired_peer(
                     &outcome.peer_fingerprint,
@@ -12271,7 +12320,7 @@ mod tests {
     /// so it is advertised in-band to the peer during pairing.
     #[test]
     fn collect_own_peer_meta_copies_public_ip_into_meta() {
-        let meta = IpcServer::collect_own_peer_meta(Some("198.51.100.7".to_owned()), None);
+        let meta = IpcServer::collect_own_peer_meta(Some("198.51.100.7".to_owned()), None, None);
         assert_eq!(
             meta.public_ip.as_deref(),
             Some("198.51.100.7"),
@@ -12283,10 +12332,35 @@ mod tests {
     /// `collect_public_ip` disabled), the outgoing `PeerMeta.public_ip` is `None`.
     #[test]
     fn collect_own_peer_meta_none_public_ip_yields_none() {
-        let meta = IpcServer::collect_own_peer_meta(None, None);
+        let meta = IpcServer::collect_own_peer_meta(None, None, None);
         assert_eq!(
             meta.public_ip, None,
             "a None public_ip must not synthesise any value in PeerMeta"
+        );
+    }
+
+    /// CopyPaste-yw2k: `collect_own_peer_meta` must copy the supplied
+    /// `supabase_account_id` into the outgoing `PeerMeta` so it is advertised
+    /// in-band to the peer during pairing.
+    #[test]
+    fn collect_own_peer_meta_copies_supabase_account_id_into_meta() {
+        let account_id = "proj_abc/uid_00000000-0000-0000-0000-000000000001".to_owned();
+        let meta = IpcServer::collect_own_peer_meta(None, None, Some(account_id.clone()));
+        assert_eq!(
+            meta.supabase_account_id.as_deref(),
+            Some(account_id.as_str()),
+            "collect_own_peer_meta must put the supplied supabase_account_id into PeerMeta"
+        );
+    }
+
+    /// CopyPaste-yw2k: when `supabase_account_id` is `None` (cloud-sync off),
+    /// the outgoing `PeerMeta.supabase_account_id` must also be `None`.
+    #[test]
+    fn collect_own_peer_meta_none_supabase_account_id_yields_none() {
+        let meta = IpcServer::collect_own_peer_meta(None, None, None);
+        assert_eq!(
+            meta.supabase_account_id, None,
+            "a None supabase_account_id must not synthesise any value in PeerMeta"
         );
     }
 
@@ -14043,6 +14117,7 @@ mod tests {
             device_name: Some("Alice's iPhone".to_string()),
             public_ip: Some("203.0.113.42".to_string()),
             device_id: None,
+            supabase_account_id: None,
         };
         // A dummy session key (all-zero is fine for this structural test).
         // SessionKey is a newtype tuple-struct: SessionKey([u8; 32]).
@@ -14074,6 +14149,108 @@ mod tests {
             Some("203.0.113.42"),
             "public_ip must come from PeerMeta.public_ip; got {:?}",
             record.public_ip
+        );
+    }
+
+    /// CopyPaste-yw2k: `list_peers` must surface `supabase_account_id` when it
+    /// is stored in `peers.json` (seeded by the pairing handshake). Peers that
+    /// predate this field surface no `supabase_account_id` key (or null).
+    #[tokio::test]
+    async fn list_peers_surfaces_supabase_account_id() {
+        let dir = safe_tempdir();
+        let sock = dir.path().join("lp_sai.sock");
+        let cfg_home = dir.path().join("cfg_sai");
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
+            &cfg_home,
+        );
+        std::fs::create_dir_all(&cfg_home).unwrap();
+
+        let peers_json = cfg_home.join("peers.json");
+        // Seed one peer that carries a supabase_account_id (as stored after a
+        // successful pairing handshake with a new-build peer).
+        let peers = serde_json::json!([{
+            "name": "Laptop",
+            "fingerprint": "a1:b2:c3:d4:e5:f6:07:18",
+            "added_at": 1,
+            "supabase_account_id": "proj_abc/uid_00000000-1111-2222-3333-444444444444"
+        }]);
+        std::fs::write(&peers_json, serde_json::to_string(&peers).unwrap()).unwrap();
+
+        start_test_server(&sock).await;
+        let resp = call_one(
+            &sock,
+            r#"{"id":"lp_sai1","method":"list_peers","params":{}}"#,
+        )
+        .await;
+        assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+        let peer_arr = resp["data"]["peers"]
+            .as_array()
+            .expect("data.peers must be array");
+        assert_eq!(peer_arr.len(), 1, "must have exactly one peer");
+
+        let peer = &peer_arr[0];
+        assert_eq!(
+            peer["supabase_account_id"].as_str(),
+            Some("proj_abc/uid_00000000-1111-2222-3333-444444444444"),
+            "list_peers must surface supabase_account_id from peers.json: {peer}"
+        );
+    }
+
+    /// CopyPaste-yw2k: `persist_paired_peer` must store the peer's
+    /// `supabase_account_id` from `PeerMeta` into `peers.json`.
+    #[tokio::test]
+    async fn persist_paired_peer_stores_supabase_account_id() {
+        let dir = safe_tempdir();
+        let cfg_home = dir.path().join("cfg_sai2");
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
+            &cfg_home,
+        );
+        std::fs::create_dir_all(&cfg_home).unwrap();
+
+        let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
+            model: None,
+            os_version: None,
+            app_version: None,
+            local_ip: None,
+            device_name: Some("Bob's MacBook".to_string()),
+            public_ip: None,
+            device_id: None,
+            supabase_account_id: Some(
+                "proj_xyz/uid_99999999-aaaa-bbbb-cccc-dddddddddddd".to_string(),
+            ),
+        };
+        let session_key = copypaste_p2p::pake::SessionKey([0u8; 32]);
+        let fp = "de:ad:be:ef:ca:fe:00:11";
+
+        IpcServer::persist_paired_peer(fp, "127.0.0.1:5002", &session_key, &peer_meta, None).await;
+
+        let peers_path = peers_file_path();
+        let written = crate::peers::load_peers(&peers_path);
+        let record = written
+            .iter()
+            .find(|p| canonical_fingerprint(&p.fingerprint) == canonical_fingerprint(fp));
+        assert!(
+            record.is_some(),
+            "persist_paired_peer must write a record for {fp}"
+        );
+        let record = record.unwrap();
+        assert_eq!(
+            record.supabase_account_id.as_deref(),
+            Some("proj_xyz/uid_99999999-aaaa-bbbb-cccc-dddddddddddd"),
+            "supabase_account_id must be stored from PeerMeta; got {:?}",
+            record.supabase_account_id
         );
     }
 

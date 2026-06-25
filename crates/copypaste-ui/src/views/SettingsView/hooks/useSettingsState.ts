@@ -21,6 +21,7 @@ import {
   type AppSettings,
   type SyncStatus,
   type DaemonStatus,
+  type PairedDevice,
 } from "../../../lib/ipc";
 import { useUI } from "../../../store";
 import { isNotificationPermissionGranted } from "../../../lib/notificationPermission";
@@ -104,6 +105,10 @@ export function useSettingsState() {
   const [passphrase, setPassphrase] = useState("");
   const [passphraseSavedMsg, setPassphraseSavedMsg] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  // CopyPaste-yw2k: paired peers list, loaded alongside the other settings so
+  // cloudAccountMismatch can be derived by comparing each peer's supabase_account_id
+  // against the local one. Null until the first successful load.
+  const [pairedPeers, setPairedPeers] = useState<PairedDevice[] | null>(null);
 
   // Shortcuts
   const [currentShortcut, setCurrentShortcut] = useState(DEFAULT_POPUP_SHORTCUT);
@@ -297,12 +302,15 @@ export function useSettingsState() {
       try {
         // api.status() is fetched once and reused for: degraded probe, build_version
         // display, and stale-daemon detection — avoids three separate round-trips.
-        const [pmResult, cfg, syncSt, daemonSt, myAppVer] = await Promise.all([
+        // CopyPaste-yw2k: listPeers is included here so cloudAccountMismatch can
+        // be derived synchronously in the return object (no extra render cycle).
+        const [pmResult, cfg, syncSt, daemonSt, myAppVer, peersResult] = await Promise.all([
           api.getPrivateMode().catch(() => null),
           api.getConfig().catch(() => null),
           api.getSyncStatus().catch(() => null),
           api.status().catch(() => null) as Promise<DaemonStatus | null>,
           appVersion().catch(() => null),
+          api.listPeers().catch(() => null),
         ]);
         if (cancelled) return;
 
@@ -350,6 +358,10 @@ export function useSettingsState() {
         setSupabaseKey(rawCfg.supabase_anon_key ?? "");
         setRelayUrl(rawCfg.relay_url ?? "");
         setSyncStatus(syncSt);
+        // CopyPaste-yw2k: store the peer list so cloudAccountMismatch can be
+        // computed. Non-fatal: null when the daemon rejects list_peers (e.g.
+        // not-ready) — mismatch stays false until peers are known.
+        setPairedPeers(peersResult?.peers ?? null);
 
         // Storage / Limits — snap raw bytes to nearest step array entry so an
         // existing config with an arbitrary value always loads cleanly.
@@ -1166,13 +1178,23 @@ export function useSettingsState() {
     offline: loadState !== "ready",
     degraded: loadState === "degraded",
     notReady: loadState === "not_ready",
-    // CopyPaste-1jms.34: expose the local Supabase account id from syncStatus.
-    // Full mismatch detection (comparing against paired peers) is deferred to
-    // CopyPaste-1jms.35 — peer supabase_account_id is not yet plumbed through
-    // the list_peers response. Until then, hasMismatch is always false so the
-    // banner is never shown (no false positives).
-    cloudAccountMismatch: false as boolean,
+    // CopyPaste-yw2k: set cloudAccountMismatch=true when ANY paired peer carries
+    // a supabase_account_id that differs from our own local one. Keep false when:
+    //   - local id is null/absent (cloud-sync off or not signed in)
+    //   - peer has no id (legacy build or cloud-sync not configured on peer)
+    //   - all peers with ids match the local id
+    // This drives the CloudAccountMismatchBanner already wired in SettingsView.
     localSupabaseAccountId: syncStatus?.supabase_account_id ?? null,
+    cloudAccountMismatch: (() => {
+      const localId = syncStatus?.supabase_account_id ?? null;
+      // If we don't know our own id, we can't detect a mismatch.
+      if (localId == null) return false;
+      // If no peers loaded yet, stay false (no false positives).
+      if (pairedPeers == null) return false;
+      return pairedPeers.some(
+        (p) => p.supabase_account_id != null && p.supabase_account_id !== localId,
+      );
+    })(),
     // Helpers (functions read live state via closure)
     buildConfigPatch,
     showLimitsMsg,

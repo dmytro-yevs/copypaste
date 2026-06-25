@@ -55,6 +55,9 @@ pub(super) async fn standing_pairing_responder_loop(
     // carries device_id and the peer can match clipboard origin_device_id to
     // a peer name without relying on the TLS cert fingerprint.
     local_device_id: Option<String>,
+    // CopyPaste-yw2k: non-secret Supabase account identity to advertise
+    // in-band so the peer can detect cross-account mismatches.
+    cloud_account_id: Option<Arc<std::sync::Mutex<Option<String>>>>,
     shutdown: CancellationToken,
 ) {
     tracing::info!(bport, "LAN/SAS standing pairing responder running");
@@ -138,8 +141,16 @@ pub(super) async fn standing_pairing_responder_loop(
             .unwrap_or_else(|p| p.into_inner().clone().unwrap_or_default());
         let own_public_ip = public_ip_cache.read().await.clone();
         let own_device_id = local_device_id.clone();
+        // CopyPaste-yw2k: read the non-secret Supabase account id to advertise.
+        let own_supabase_account_id: Option<String> = cloud_account_id
+            .as_ref()
+            .and_then(|arc| arc.lock().unwrap_or_else(|p| p.into_inner()).clone());
         let own_meta = tokio::task::spawn_blocking(move || {
-            crate::ipc::IpcServer::collect_own_peer_meta(own_public_ip, own_device_id)
+            crate::ipc::IpcServer::collect_own_peer_meta(
+                own_public_ip,
+                own_device_id,
+                own_supabase_account_id,
+            )
         })
         .await
         .unwrap_or_default();
@@ -255,6 +266,8 @@ pub(super) async fn standing_pairing_responder_loop(
                     device_name: outcome.peer_device_name.clone(),
                     public_ip: outcome.peer_public_ip.clone(),
                     device_id: outcome.peer_device_id.clone(),
+                    // CopyPaste-yw2k: carry the peer's non-secret account identity.
+                    supabase_account_id: outcome.peer_supabase_account_id.clone(),
                 };
                 // CopyPaste-1w7 (H8 fix): pass the real SyncCrypto handle so
                 // `persist_paired_peer` calls `reload_sync_key` after writing

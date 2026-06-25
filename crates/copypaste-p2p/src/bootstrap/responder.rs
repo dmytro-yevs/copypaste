@@ -256,6 +256,7 @@ impl BootstrapResponder {
                 peer_public_ip: peer_meta.public_ip,
                 peer_device_id: peer_meta.device_id,
                 peer_provisioning,
+                peer_supabase_account_id: peer_meta.supabase_account_id,
             })
         })
         .await
@@ -439,6 +440,7 @@ impl BootstrapResponder {
             peer_public_ip: peer_meta.public_ip,
             peer_device_id: peer_meta.device_id,
             peer_provisioning,
+            peer_supabase_account_id: peer_meta.supabase_account_id,
         })
     }
 }

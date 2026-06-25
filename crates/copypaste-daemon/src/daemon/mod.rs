@@ -1015,6 +1015,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
             // CopyPaste-7ub: the shared live core config so the P2P outbound
             // fanout honours sync_on_wifi_only (same Arc the IPC server hot-reloads).
             core_config_arc.clone(),
+            // CopyPaste-yw2k: non-secret Supabase account identity slot so the
+            // standing LAN/SAS responder can include it in PeerMeta in-band.
+            // The outer `cloud_account_id_slot` Arc is written by start_cloud later;
+            // reading through it at runtime is safe (Mutex-guarded). Only wired when
+            // the cloud-sync feature is compiled in (the Arc always exists then).
+            #[cfg(feature = "cloud-sync")]
+            Some(std::sync::Arc::clone(&cloud_account_id_slot)),
+            #[cfg(not(feature = "cloud-sync"))]
+            None,
         )
         .await
         {

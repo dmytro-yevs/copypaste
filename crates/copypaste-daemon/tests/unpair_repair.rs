@@ -439,6 +439,7 @@ fn interleaved_pair_add_and_unpair_remove_yield_consistent_peers_json() {
         last_sync_at: None,
         password_file_b64: None,
         password_file_enc: None,
+        supabase_account_id: None,
     };
     save_peers(&path, std::slice::from_ref(&peer_x)).expect("initial save");
 
@@ -469,6 +470,7 @@ fn interleaved_pair_add_and_unpair_remove_yield_consistent_peers_json() {
         last_sync_at: None,
         password_file_b64: None,
         password_file_enc: None,
+        supabase_account_id: None,
     };
     snap_b.push(peer_y.clone());
 

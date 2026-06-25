@@ -280,10 +280,9 @@ export interface SyncStatus {
    * cloud-sync is off, not configured, or anon-key-only (no GoTrue session).
    * Absent on daemons predating this field — treat absence as null.
    *
-   * NOTE: peer `supabase_account_id` is not yet plumbed through the `list_peers`
-   * response (follow-up issue CopyPaste-1jms.35). Full mismatch detection
-   * (comparing local vs. every paired peer's account id) is deferred; the UI
-   * currently surfaces this field for diagnostic/display only.
+   * Peer `supabase_account_id` is now plumbed through the `list_peers` response
+   * (CopyPaste-yw2k). The UI compares this local value against each peer's
+   * `supabase_account_id` in `useSettingsState` to set `cloudAccountMismatch`.
    */
   supabase_account_id?: string | null;
 }
@@ -417,6 +416,20 @@ export interface PairedDevice {
    * When absent, the UI falls back to the local_ip/address heuristic.
    */
   transport?: "p2p" | "relay" | "supabase" | null;
+  /**
+   * CopyPaste-yw2k: peer's stable, non-secret Supabase account identity.
+   *
+   * Derived by the peer from `copypaste_supabase::supabase_account_id(url, user_id)`
+   * and exchanged in-band over the bootstrap channel at pairing time. Two paired
+   * devices MUST share the same value for Supabase RLS to let them see each other's
+   * rows. A mismatch means they are on different Supabase projects or different
+   * GoTrue accounts.
+   *
+   * Absent/null when the peer is a legacy build that doesn't carry this field,
+   * or when cloud-sync is not configured on the peer side. Use this to set
+   * `cloudAccountMismatch` in `useSettingsState`.
+   */
+  supabase_account_id?: string | null;
 }
 
 /**
