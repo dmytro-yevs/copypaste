@@ -25,6 +25,9 @@ pub mod daemon;
 pub mod device_meta;
 #[cfg(unix)]
 pub mod ipc;
+/// Shared HTTPS URL validation guard (g06m.32 #2 — replaces duplicate
+/// `cloud::config::is_https_url` and `relay::registration::is_relay_url_ok`).
+pub mod url_guard;
 // P2-o8ew: wire the Windows named-pipe IPC skeleton under cfg(windows) so it is
 // no longer an undeclared orphan on disk (its own header wrongly claimed it was
 // already declared). Compiled out on unix; Windows is frozen per ADR-012, so no

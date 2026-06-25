@@ -129,51 +129,25 @@ impl CloudConfig {
     }
 }
 
-/// Strict HTTPS check. We deliberately do **not** pull in the `url` crate for
-/// this — a string-prefix check plus a sanity test that something follows the
-/// scheme is sufficient, and avoids a transitive-dep surface.
+// ── URL validation (delegated to crate::url_guard) ───────────────────────────
+
+/// Strict HTTPS-URL check — delegates to the crate-wide guard so cloud and
+/// relay paths always share the same validation logic (g06m.32 #2).
 ///
 /// Accepts: `https://host[:port][/path...]`
 /// Rejects: `http://...`, `ws://...`, `file://...`, bare hostnames, empty strings.
 pub(crate) fn is_https_url(s: &str) -> bool {
-    // Use a case-insensitive scheme compare; reject if no authority follows.
-    let lower = s.to_ascii_lowercase();
-    if !lower.starts_with("https://") {
-        return false;
-    }
-    let rest = &s[8..];
-    // Must have at least one non-`/` character (a host).
-    rest.chars()
-        .next()
-        .is_some_and(|c| c != '/' && !c.is_whitespace())
+    crate::url_guard::is_https_url(s)
 }
 
-/// TEST-ONLY HTTPS-gate relaxation.
+/// TEST-ONLY HTTPS-gate relaxation — delegates to `url_guard` so the same
+/// loopback-HTTP allowlist applies to both cloud and relay test paths.
 ///
-/// Returns `true` only when the URL is plain `http://` pointing at a loopback
-/// host (`127.0.0.1`/`localhost`/`[::1]`). This lets the test suite point the
-/// cloud orchestrator at an in-process mock PostgREST bound to loopback.
-///
-/// In production this function does not exist: the `#[cfg(not(test))]` variant
-/// is a hard `false`, so [`start_cloud`] always demands HTTPS in the shipped
-/// binary. Loopback HTTP is never trusted outside the test harness.
-#[cfg(test)]
+/// In production this returns `false` unconditionally (the `#[cfg(not(test))]`
+/// variant in `url_guard` is compiled in instead), so neither path trusts plain
+/// HTTP in the shipped binary.
 pub(super) fn test_only_allows_local_http(s: &str) -> bool {
-    let lower = s.to_ascii_lowercase();
-    let Some(rest) = lower.strip_prefix("http://") else {
-        return false;
-    };
-    // Host is everything up to the first `/`, `:` (port), or end-of-string.
-    let host = rest.split(['/', ':']).next().unwrap_or_default();
-    matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1")
-}
-
-/// Production stub: loopback HTTP is NEVER allowed. Always `false` so the HTTPS
-/// gate in [`start_cloud`] is absolute in the shipped binary.
-#[cfg(not(test))]
-#[inline]
-pub(super) fn test_only_allows_local_http(_s: &str) -> bool {
-    false
+    crate::url_guard::allows_loopback_http_in_tests(s)
 }
 
 /// Redact an account email for logging / error payloads. The account email is

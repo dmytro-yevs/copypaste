@@ -15,23 +15,13 @@ use super::types::{RegisterBody, RegisterResp, RelayError};
 // ── URL validation ────────────────────────────────────────────────────────────
 
 /// Accept `https://...`; in tests also accept loopback `http://` so the mock
-/// relay can be exercised. Mirrors `cloud::is_https_url`'s posture.
+/// relay can be exercised.
+///
+/// Delegates to `crate::url_guard` — the single authoritative HTTPS gate shared
+/// by both cloud-sync and relay-sync (g06m.32 #2).  Any security fix to the
+/// gate logic now propagates to both paths automatically.
 pub(super) fn is_relay_url_ok(s: &str) -> bool {
-    let lower = s.to_ascii_lowercase();
-    if let Some(rest) = lower.strip_prefix("https://") {
-        return rest
-            .chars()
-            .next()
-            .is_some_and(|c| c != '/' && !c.is_whitespace());
-    }
-    #[cfg(test)]
-    {
-        if let Some(rest) = lower.strip_prefix("http://") {
-            let host = rest.split(['/', ':']).next().unwrap_or_default();
-            return matches!(host, "127.0.0.1" | "localhost" | "[::1]" | "::1");
-        }
-    }
-    false
+    crate::url_guard::is_https_url(s) || crate::url_guard::allows_loopback_http_in_tests(s)
 }
 
 // ── Sync-key snapshot helper ────────────────────────────────────────────────
