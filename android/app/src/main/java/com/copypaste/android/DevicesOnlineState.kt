@@ -32,10 +32,22 @@ internal fun PairedPeer.isOnline(nowMs: Long = System.currentTimeMillis()): Bool
  * [SyncStatusBadge] should gate its "connected" colour on this threshold when
  * falling back to the configured-count path (PG-41 / PG-11 follow-up):
  * `lastActivityMs.value > 0 && (now - lastActivityMs.value) <= RECENT_SYNC_MS`.
+ *
+ * ## CopyPaste-km61: Rust source of truth
+ * This value is seeded from `syncBadgeRecentMs()` (FFI) which mirrors
+ * `copypaste_ipc::SYNC_BADGE_RECENT_MS`. The literal `5 * 60 * 1_000L` below is
+ * used only as the compile-time default (before FFI is available) and as the
+ * stub-mode fallback. Do NOT change this literal independently — update the Rust
+ * constant instead and the FFI getter will propagate the new value to Kotlin.
+ *
+ * Call [seedFromRust] once at Application.onCreate (or before the first use of
+ * [DevicesOnlineState]) to replace the compile-time default with the Rust value.
  */
-// c4q2.5: This value mirrors copypaste_ipc::SYNC_BADGE_RECENT_MS (crates/copypaste-ipc/src/methods.rs:208).
-// Both must stay equal — if the Rust constant changes, update this too (and vice-versa).
-internal const val RECENT_SYNC_MS = 5 * 60 * 1_000L
+// CopyPaste-km61: This value is seeded at runtime from syncBadgeRecentMs() which reads
+// copypaste_ipc::SYNC_BADGE_RECENT_MS. The literal here is the safe compile-time default;
+// call DevicesOnlineState.seedFromRust() at startup to pull the live Rust constant.
+internal var RECENT_SYNC_MS: Long = 5 * 60 * 1_000L
+    private set
 
 /**
  * CopyPaste-d6z3: pure online-derivation function matching macOS daemon logic.
@@ -82,6 +94,20 @@ internal fun isPeerOnline(
  * should show the grey idle dot even if count > 0 (parity with macOS chip).
  */
 object DevicesOnlineState {
+
+    /**
+     * CopyPaste-km61: seed [RECENT_SYNC_MS] from the Rust FFI source of truth.
+     *
+     * Call ONCE at [CopyPasteApplication.onCreate] (or equivalent) before any badge
+     * computation runs. When the native library is absent, [syncBadgeRecentMs] already
+     * returns the safe 5-minute default, so this call is always safe.
+     *
+     * Idempotent — calling multiple times is harmless; the value is just overwritten.
+     */
+    fun seedFromRust() {
+        RECENT_SYNC_MS = syncBadgeRecentMs()
+    }
+
     private val _onlineCount = MutableStateFlow(-1)
     private val _lastActivityMs = MutableStateFlow(0L)
 

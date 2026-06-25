@@ -465,10 +465,23 @@ class FgsSyncLoop(
                         consecutiveFailures++
                         val backoff = backoffMs(consecutiveFailures)
                         Log.w(TAG, "Poll failed (#$consecutiveFailures): ${pollError.message} — backing off ${backoff}ms")
-                        // CopyPaste-1jms.23: publish authoritative "error" state so
-                        // SyncStatusBadge shows red (DaemonUnreachable) immediately
-                        // without waiting for the heuristic to detect stale activity.
-                        DevicesOnlineState.setBadgeState("error")
+                        // CopyPaste-234q: publish authoritative badge state via Rust FFI
+                        // (computeAndroidSyncBadgeState) so the wire string is derived from
+                        // the single canonical source of truth. is_auth_error=true drives
+                        // "error" → DaemonUnreachable (red), matching the macOS daemon's
+                        // badge_state on an auth failure. Previously this was hardcoded "error".
+                        val nowMs = System.currentTimeMillis()
+                        val liveCountOnErr = DevicesOnlineState.onlineCount.value.toLong()
+                        val badgeOnError = computeAndroidSyncBadgeState(
+                            onlineCount = liveCountOnErr,
+                            lastActivityMs = DevicesOnlineState.lastActivityMs.value,
+                            recentSyncMs = RECENT_SYNC_MS,
+                            hasInternet = isWifi, // wifi is a reasonable proxy for internet here
+                            isAuthError = true,   // any poll failure = auth/config error
+                            isSyncing = false,    // setSyncing(false) was called in finally above
+                            nowMs = nowMs,
+                        )
+                        DevicesOnlineState.setBadgeState(badgeOnError)
                         delay(backoff)
                         if (!isActive) break
                         continue // re-poll immediately after the backoff sleep
@@ -479,14 +492,24 @@ class FgsSyncLoop(
                     if (newCount > 0) {
                         Log.d(TAG, "FgsSyncLoop: $newCount new item(s) stored")
                     }
-                    // CopyPaste-1jms.23: publish authoritative badge state on success.
-                    // "synced" when at least one peer is online (count > 0); "idle" when
-                    // no peers are online but the poll itself succeeded (no auth error).
-                    // This makes IpcSyncBadgeState live — SyncStatusBadge will route through
-                    // IpcSyncBadgeState.fromIpcString → toSyncBadgeState instead of the
-                    // heuristic when this value is non-null.
-                    val liveCount = DevicesOnlineState.onlineCount.value
-                    DevicesOnlineState.setBadgeState(if (liveCount > 0) "synced" else "idle")
+                    // CopyPaste-234q: publish authoritative badge state via Rust FFI
+                    // (computeAndroidSyncBadgeState). Previously this was a hardcoded
+                    // `if (liveCount > 0) "synced" else "idle"`. Using the FFI function
+                    // ensures the priority logic (auth-error > syncing > synced > offline > idle)
+                    // is derived from the single Rust source of truth — making
+                    // IpcSyncBadgeState live: SyncStatusBadge routes through
+                    // IpcSyncBadgeState.fromIpcString → toSyncBadgeState on every tick.
+                    val liveCount = DevicesOnlineState.onlineCount.value.toLong()
+                    val badgeOnSuccess = computeAndroidSyncBadgeState(
+                        onlineCount = liveCount,
+                        lastActivityMs = DevicesOnlineState.lastActivityMs.value,
+                        recentSyncMs = RECENT_SYNC_MS,
+                        hasInternet = isWifi,
+                        isAuthError = false,
+                        isSyncing = false,    // setSyncing(false) was called in finally above
+                        nowMs = System.currentTimeMillis(),
+                    )
+                    DevicesOnlineState.setBadgeState(badgeOnSuccess)
                     nextDelay = pollIntervalMs(
                         wsConnected = wsClient?.isConnected ?: false,
                         consecutiveEmpty = consecutiveEmpty,

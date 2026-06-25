@@ -71,7 +71,7 @@ pub use ffi_sensitive::{
 };
 pub use ffi_system::{
     classify_text_kind, compute_android_sync_badge_state, get_private_mode, resolve_stun_public_ip,
-    set_private_mode,
+    set_private_mode, sync_badge_recent_ms,
 };
 
 // When using UDL-based scaffolding, uniffi::Error and uniffi::Record proc-macro
@@ -791,7 +791,6 @@ mod tests {
                             device_name: Some("Test Mac".into()),
                             public_ip: Some("203.0.113.9".into()),
                             device_id: None,
-                            // CopyPaste-yw2k: test peer carries no Supabase account id.
                             supabase_account_id: None,
                         },
                         // Responder advertises provisioning so the FFI initiator

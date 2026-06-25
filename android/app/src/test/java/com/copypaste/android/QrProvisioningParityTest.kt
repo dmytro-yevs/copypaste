@@ -115,8 +115,10 @@ class QrProvisioningParityTest {
     private fun buildCppair2PayloadWithProvJson(json: String): String {
         val jsonBytes = json.toByteArray(Charsets.UTF_8)
         // base64url (url-safe alphabet, no padding) — same as Rust's b64().encode().
-        val provB64 = android.util.Base64
-            .encodeToString(jsonBytes, android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING)
+        // Use java.util.Base64 (API 26+ / JVM) so this helper works in JVM unit tests
+        // without Robolectric (android.util.Base64 is a JVM stub that throws).
+        val provB64 = java.util.Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(jsonBytes)
         return "CPPAIR2.fp.tok.id.name.addr.$provB64"
     }
 }

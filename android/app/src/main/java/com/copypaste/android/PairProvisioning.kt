@@ -46,10 +46,12 @@ internal fun extractQrProvisioning(barePayload: String): QrProvisioningData? {
     val provB64 = parts[6].trim()
     if (provB64.isEmpty()) return null
     return try {
-        // base64url: replace url-safe chars to standard before decoding.
-        val bytes = android.util.Base64.decode(
-            provB64.replace('-', '+').replace('_', '/'),
-            android.util.Base64.NO_WRAP or android.util.Base64.NO_PADDING,
+        // base64url: use java.util.Base64 (available API 26+ = minSdk) so this path
+        // is exercisable in JVM unit tests without Robolectric, while remaining correct
+        // on device. android.util.Base64 is a stub in JVM unit tests and would throw.
+        val bytes = java.util.Base64.getUrlDecoder().decode(
+            // getUrlDecoder handles the url-safe alphabet (-/_) and tolerates absent padding.
+            provB64,
         )
         val json = String(bytes, Charsets.UTF_8)
         QrProvisioningData(

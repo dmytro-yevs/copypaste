@@ -1708,6 +1708,92 @@ fun pairConfirmSas(accept: Boolean) {
     }
 }
 
+// ── CopyPaste-km61 + CopyPaste-234q: Badge-state + recency-window FFI ────────
+// sync_badge_recent_ms() exposes the Rust SYNC_BADGE_RECENT_MS constant so
+// DevicesOnlineState.kt can seed RECENT_SYNC_MS from the single source of truth.
+// computeAndroidSyncBadgeState() drives badge computation from Rust, replacing
+// hardcoded "error"/"synced"/"idle" strings in FgsSyncLoop.
+
+/**
+ * Return the badge-recency window in milliseconds from the Rust source of truth.
+ *
+ * Mirrors `copypaste_ipc::SYNC_BADGE_RECENT_MS` (currently 300_000 = 5 minutes).
+ * DevicesOnlineState seeds its [RECENT_SYNC_MS] constant from this value at startup.
+ *
+ * Stub fallback when the native library is absent: returns 300_000 (5 minutes) so
+ * the heuristic still works correctly on devices where the .so failed to load.
+ */
+fun syncBadgeRecentMs(): Long {
+    if (!isNativeLibraryLoaded) return 5 * 60 * 1_000L // safe fallback: 5 minutes
+    return try {
+        uniffi.copypaste_android.syncBadgeRecentMs()
+    } catch (e: Exception) {
+        Log.w(TAG, "syncBadgeRecentMs: native call failed, using default 300_000: ${e.message}")
+        5 * 60 * 1_000L
+    }
+}
+
+/**
+ * Compute the canonical Android sync-badge state string from raw sync signals.
+ *
+ * Returns one of: `"synced"`, `"syncing"`, `"idle"`, `"offline"`, `"error"`.
+ * These are the same wire values as [IpcSyncBadgeState] in [SyncStatusBadge.kt], so the
+ * caller can pass the result directly to [DevicesOnlineState.setBadgeState].
+ *
+ * Priority (mirrors Rust `compute_android_sync_badge_state`):
+ *  1. [isAuthError] → `"error"` (takes absolute priority; red dot).
+ *  2. [isSyncing]   → `"syncing"` (in-flight; green dot).
+ *  3. [onlineCount] > 0 AND [lastActivityMs] within [recentSyncMs] → `"synced"`.
+ *  4. !hasInternet  → `"offline"`.
+ *  5. Otherwise     → `"idle"`.
+ *
+ * Stub fallback when the native library is absent: derives the state in Kotlin
+ * using the same priority logic so stub-mode devices still get a correct badge.
+ *
+ * Wrapped in a try/catch — returns `"idle"` on any unexpected exception.
+ *
+ * @param onlineCount    Number of currently-online peers (from DevicesOnlineState).
+ * @param lastActivityMs Wall-clock ms of last successful sync (0 = never).
+ * @param recentSyncMs   Recency window; use [syncBadgeRecentMs] as the value.
+ * @param hasInternet    True when OS reports a validated internet connection.
+ * @param isAuthError    True when the last sync attempt hit an auth failure (401/403/RLS).
+ * @param isSyncing      True while a sync operation is actively in-flight.
+ * @param nowMs          Current wall-clock ms (pass [System.currentTimeMillis]).
+ */
+fun computeAndroidSyncBadgeState(
+    onlineCount: Long,
+    lastActivityMs: Long,
+    recentSyncMs: Long,
+    hasInternet: Boolean,
+    isAuthError: Boolean,
+    isSyncing: Boolean,
+    nowMs: Long,
+): String {
+    if (!isNativeLibraryLoaded) {
+        // Stub-mode fallback: same priority logic as the Rust implementation.
+        if (isAuthError) return "error"
+        if (isSyncing) return "syncing"
+        val recentEnough = lastActivityMs > 0 && (nowMs - lastActivityMs) <= recentSyncMs
+        if (onlineCount > 0 && recentEnough) return "synced"
+        if (!hasInternet) return "offline"
+        return "idle"
+    }
+    return try {
+        uniffi.copypaste_android.computeAndroidSyncBadgeState(
+            onlineCount = onlineCount,
+            lastActivityMs = lastActivityMs,
+            recentSyncMs = recentSyncMs,
+            hasInternet = hasInternet,
+            isAuthError = isAuthError,
+            isSyncing = isSyncing,
+            nowMs = nowMs,
+        )
+    } catch (e: Exception) {
+        Log.w(TAG, "computeAndroidSyncBadgeState: native call failed, defaulting to idle: ${e.message}")
+        "idle"
+    }
+}
+
 /**
  * Abort the in-flight pairing (e.g. the user closed the modal before a terminal
  * state). Best-effort: a call with no active pairing is tolerated and only

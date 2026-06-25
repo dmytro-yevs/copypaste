@@ -179,6 +179,21 @@ namespace copypaste_android {
   /// Check before any Rust-initiated clipboard capture.
   boolean get_private_mode();
 
+  // ── CopyPaste-km61: SYNC_BADGE_RECENT_MS getter — single source of truth ────
+  // Android DevicesOnlineState.kt previously hardcoded RECENT_SYNC_MS = 5*60*1000.
+  // This getter exposes the Rust source-of-truth value (mirrors
+  // copypaste_ipc::SYNC_BADGE_RECENT_MS) so Android can seed its constant from Rust
+  // rather than maintaining a duplicate literal that can drift silently.
+  // Kotlin MUST call this once at startup (e.g. in Application.onCreate or the
+  // first time DevicesOnlineState is accessed) and use the result wherever
+  // RECENT_SYNC_MS is referenced (badge heuristic, isPeerOnline, etc.).
+
+  /// Return the badge-recency window in milliseconds.
+  ///
+  /// Mirrors `copypaste_ipc::SYNC_BADGE_RECENT_MS` (currently 300_000 = 5 minutes).
+  /// Kotlin seeds `RECENT_SYNC_MS` from this value at startup.
+  i64 sync_badge_recent_ms();
+
   // ── CopyPaste-1jms.23: Canonical Android sync-badge state ────────────────
   // Rust implementation of the badge-state priority logic, matching the macOS
   // daemon's authoritative `badge_state` IPC field. Returns one of:

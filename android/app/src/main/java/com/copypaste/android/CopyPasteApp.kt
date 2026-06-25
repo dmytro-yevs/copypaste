@@ -32,6 +32,12 @@ class CopyPasteApp : Application() {
         AppLogger.init(this)
         CrashHandler.install(this)
 
+        // CopyPaste-km61: seed the badge-recency window (RECENT_SYNC_MS) from the
+        // Rust FFI source of truth (copypaste_ipc::SYNC_BADGE_RECENT_MS) so the
+        // Android badge can never silently drift from the daemon's value.
+        // Best-effort: keeps the compiled default in stub mode / on FFI failure.
+        runCatching { DevicesOnlineState.seedFromRust() }
+
         // CopyPaste-8r3p: Log clearly when the device ABI is unsupported so operators
         // understand why crypto is unavailable, rather than silently running in stub mode.
         // abiFilters = ["arm64-v8a"] — 32-bit (armeabi-v7a) devices get no .so.

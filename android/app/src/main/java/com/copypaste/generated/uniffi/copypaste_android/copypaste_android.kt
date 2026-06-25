@@ -798,6 +798,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -915,6 +917,8 @@ internal interface UniffiLib : Library {
     ): Unit
     fun uniffi_copypaste_android_fn_func_store_clipboard_item(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`text`: RustBuffer.ByValue,`sensitiveTtlSecs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_sync_badge_recent_ms(uniffi_out_err: UniffiRustCallStatus, 
+    ): Long
     fun uniffi_copypaste_android_fn_func_sync_with_peer(`peerAddr`: RustBuffer.ByValue,`peerFingerprint`: RustBuffer.ByValue,`sessionKey`: RustBuffer.ByValue,`certDer`: RustBuffer.ByValue,`keyDer`: RustBuffer.ByValue,`localItems`: RustBuffer.ByValue,`revokedFingerprints`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_uniffi_abi_version(uniffi_out_err: UniffiRustCallStatus, 
@@ -1135,6 +1139,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_store_clipboard_item(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_sync_badge_recent_ms(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_sync_with_peer(
     ): Short
     fun uniffi_copypaste_android_checksum_func_uniffi_abi_version(
@@ -1309,6 +1315,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_store_clipboard_item() != 14123.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_sync_badge_recent_ms() != 51569.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_sync_with_peer() != 60986.toShort()) {
@@ -3937,6 +3946,21 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_store_clipboard_item(
         FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),FfiConverterString.lower(`text`),FfiConverterULong.lower(`sensitiveTtlSecs`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Return the badge-recency window in milliseconds.
+         *
+         * Mirrors `copypaste_ipc::SYNC_BADGE_RECENT_MS` (currently 300_000 = 5 minutes).
+         * Kotlin seeds `RECENT_SYNC_MS` from this value at startup.
+         */ fun `syncBadgeRecentMs`(): kotlin.Long {
+            return FfiConverterLong.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_sync_badge_recent_ms(
+        _status)
 }
     )
     }

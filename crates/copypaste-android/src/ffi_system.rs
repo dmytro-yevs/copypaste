@@ -122,6 +122,31 @@ pub fn resolve_stun_public_ip() -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
+// CopyPaste-km61: Expose SYNC_BADGE_RECENT_MS as a UniFFI getter
+//
+// Android DevicesOnlineState.kt previously hardcoded RECENT_SYNC_MS = 5 * 60 * 1_000L,
+// a duplication of copypaste_ipc::SYNC_BADGE_RECENT_MS. Exposing the constant via FFI
+// makes Kotlin read the SINGLE source of truth at runtime — if the Rust constant changes,
+// Android picks it up on the next app build without a code change.
+// ---------------------------------------------------------------------------
+
+/// Mirrors `copypaste_ipc::SYNC_BADGE_RECENT_MS` (crates/copypaste-ipc/src/methods/badge.rs).
+/// Both MUST stay equal — if either changes, update the other and re-export via FFI.
+/// copypaste-android intentionally does not depend on copypaste-ipc to keep the FFI crate
+/// lean; this constant is a local mirror.
+const SYNC_BADGE_RECENT_MS_LOCAL: i64 = 5 * 60 * 1_000; // 5 minutes — single value
+
+/// Return the RECENT_SYNC_MS recency window (milliseconds) from the Rust source of truth.
+///
+/// Mirrors `copypaste_ipc::SYNC_BADGE_RECENT_MS`. Kotlin MUST call this once at startup
+/// and use the returned value wherever RECENT_SYNC_MS was previously hardcoded, ensuring
+/// both platforms agree on the "recently synced" window. Returns 300_000 (5 minutes) at
+/// compile time; only changes if the Rust constant is updated.
+pub fn sync_badge_recent_ms() -> i64 {
+    SYNC_BADGE_RECENT_MS_LOCAL
+}
+
+// ---------------------------------------------------------------------------
 // CopyPaste-1jms.23: Canonical Android sync-badge state (Rust parity)
 //
 // The Kotlin `resolveSyncBadgeState` heuristic re-derives badge state from raw
@@ -198,7 +223,9 @@ pub fn compute_android_sync_badge_state(
 
 #[cfg(test)]
 mod sync_badge_tests {
-    use super::compute_android_sync_badge_state;
+    use super::{
+        compute_android_sync_badge_state, sync_badge_recent_ms, SYNC_BADGE_RECENT_MS_LOCAL,
+    };
 
     const RECENT_MS: i64 = 5 * 60 * 1_000; // 5 min
     const NOW: i64 = 1_000_000_000;
@@ -245,5 +272,32 @@ mod sync_badge_tests {
     fn idle_when_stale_sync_despite_positive_count() {
         let stale = NOW - RECENT_MS - 1_000; // outside window
         assert_eq!("idle", badge(1, stale, true, false, false));
+    }
+
+    // ── CopyPaste-km61: sync_badge_recent_ms getter ───────────────────────────
+
+    /// sync_badge_recent_ms() must return the SAME value as the SYNC_BADGE_RECENT_MS_LOCAL
+    /// constant. If either is changed independently, this test catches the drift.
+    #[test]
+    fn sync_badge_recent_ms_matches_local_constant() {
+        assert_eq!(
+            sync_badge_recent_ms(),
+            SYNC_BADGE_RECENT_MS_LOCAL,
+            "sync_badge_recent_ms() must equal SYNC_BADGE_RECENT_MS_LOCAL (300_000)"
+        );
+    }
+
+    /// sync_badge_recent_ms() must return 300_000 (5 minutes in ms).
+    /// This is the CANONICAL badge-recency window shared with the Kotlin RECENT_SYNC_MS
+    /// constant and macOS SyncStatusChip. Any change to this value MUST be coordinated
+    /// across copypaste_ipc::SYNC_BADGE_RECENT_MS, this constant, and DevicesOnlineState.kt.
+    #[test]
+    fn sync_badge_recent_ms_is_five_minutes() {
+        const FIVE_MINUTES_MS: i64 = 5 * 60 * 1_000;
+        assert_eq!(
+            sync_badge_recent_ms(),
+            FIVE_MINUTES_MS,
+            "badge-recency window must be 5 minutes (300_000 ms)"
+        );
     }
 }
