@@ -283,15 +283,37 @@ export function PeerRow({
   // last_sync_at is epoch seconds; formatSyncTime default unit is "secs".
   const lastSyncStr = formatSyncTime(peer.last_sync_at);
 
-  // Transport chip: P2P when we have a local LAN address/ip; Cloud otherwise.
-  // Defensive: no crash when address/local_ip are absent.
-  const isP2p = !!(peer.local_ip || peer.address);
-  const transportLabel = isP2p ? "P2P" : "Cloud";
+  // CopyPaste-1jms.32: 3-way transport chip.
+  // When the daemon provides peer.transport, use it for an authoritative label.
+  // Fallback: the legacy local_ip/address heuristic (P2P vs Cloud) for daemons
+  // that predate the transport field (peer.transport absent or null).
+  //
   // sry7: transport chips → rounded-full pills with hairline border (nmea / 1hqt)
   // 1hqt: P2P uses sky token (not info) to match URL/IMAGE kind
-  const transportClass = isP2p
-    ? "text-ide-sky bg-ide-sky/14 border border-ide-sky/30 rounded-full"
-    : "text-ide-accent bg-ide-accent/14 border border-ide-accent/30 rounded-full";
+  // Relay uses warning/amber token (store-and-forward, not live).
+  // Supabase uses accent/purple token (cloud backend).
+  let transportLabel: string;
+  let transportClass: string;
+  if (peer.transport === "p2p") {
+    transportLabel = "P2P";
+    transportClass =
+      "text-ide-sky bg-ide-sky/14 border border-ide-sky/30 rounded-full";
+  } else if (peer.transport === "relay") {
+    transportLabel = "Relay";
+    transportClass =
+      "text-ide-warning bg-ide-warning/14 border border-ide-warning/30 rounded-full";
+  } else if (peer.transport === "supabase") {
+    transportLabel = "Supabase";
+    transportClass =
+      "text-ide-accent bg-ide-accent/14 border border-ide-accent/30 rounded-full";
+  } else {
+    // Fallback heuristic: local_ip or address present → likely P2P; else Cloud.
+    const isP2pHeuristic = !!(peer.local_ip || peer.address);
+    transportLabel = isP2pHeuristic ? "P2P" : "Cloud";
+    transportClass = isP2pHeuristic
+      ? "text-ide-sky bg-ide-sky/14 border border-ide-sky/30 rounded-full"
+      : "text-ide-accent bg-ide-accent/14 border border-ide-accent/30 rounded-full";
+  }
 
   return (
     // card-in: glass entrance fade-up (styleguide §device-card)

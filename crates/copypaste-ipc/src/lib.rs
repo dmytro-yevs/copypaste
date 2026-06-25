@@ -37,7 +37,7 @@ pub use error::ErrorCode;
 pub use methods::{
     compute_sync_badge_state, compute_sync_badge_state_with_inflight, map_content_type_to_uti,
     AppConfig, AppConfigResponse, DbBackupRequest, DbBackupResponse, DbRestoreRequest,
-    DbRestoreResponse, DbStatsResponse, GetSyncStatusResponse, ResetDatabaseRequest,
+    DbRestoreResponse, DbStatsResponse, GetSyncStatusResponse, PeerTransport, ResetDatabaseRequest,
     ResetDatabaseResponse, StatsResponse, StoreCloudPasswordRequest, StoreCloudPasswordResponse,
     SyncBadgeState, VacuumRequest, VacuumResponse, METHOD_ADD_FILE_ITEM,
     METHOD_CLOUD_TEST_CONNECTION, METHOD_COPY, METHOD_COPY_ITEM, METHOD_COUNT, METHOD_DB_BACKUP,

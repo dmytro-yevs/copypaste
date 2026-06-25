@@ -5841,6 +5841,37 @@ impl IpcServer {
                             }
                         };
 
+                        // CopyPaste-1jms.32: Determine which non-P2P transport is
+                        // active for this daemon so offline peers can be labelled
+                        // "Relay" or "Supabase" rather than a generic "Cloud".
+                        //
+                        // Relay and Supabase both use a shared inbox (no per-peer
+                        // routing), so transport is inferred from daemon config:
+                        //   relay running  → all non-P2P peers use "relay"
+                        //   supabase signed-in (no relay) → "supabase"
+                        //   neither  → None (unknown)
+                        //
+                        // P2P takes precedence and is determined per-peer below
+                        // via `live_fps`.
+                        #[cfg(feature = "relay-sync")]
+                        let relay_active: bool = {
+                            // Non-blocking check: try_lock returns None if the lock
+                            // is momentarily held; we conservatively treat that as
+                            // "relay running" (the common-path assumption is that
+                            // relay IS active — a brief lock on set_config should
+                            // not flip the chip to Unknown transiently).
+                            self.relay_handle
+                                .try_lock()
+                                .map_or(true, |g| g.is_some())
+                        };
+                        #[cfg(not(feature = "relay-sync"))]
+                        let relay_active: bool = false;
+
+                        #[cfg(feature = "cloud-sync")]
+                        let supabase_active: bool = self.cloud_signed_in.load(Ordering::Relaxed);
+                        #[cfg(not(feature = "cloud-sync"))]
+                        let supabase_active: bool = false;
+
                         let enriched: Vec<serde_json::Value> = peers
                         .into_iter()
                         .map(|mut peer| {
@@ -5909,6 +5940,30 @@ impl IpcServer {
                                     "trust".to_string(),
                                     serde_json::Value::String("verified".to_string()),
                                 );
+
+                                // CopyPaste-1jms.32: surface per-peer transport.
+                                // Priority: P2P (live sink) > Relay > Supabase > None.
+                                let transport_str: Option<&'static str> = if live_sink_opt
+                                    == Some(true)
+                                {
+                                    // Live P2P connection for this peer.
+                                    Some("p2p")
+                                } else if relay_active {
+                                    // Relay is the active secondary transport.
+                                    Some("relay")
+                                } else if supabase_active {
+                                    // Supabase is the active secondary transport.
+                                    Some("supabase")
+                                } else {
+                                    // No transport is active or known.
+                                    None
+                                };
+                                if let Some(t) = transport_str {
+                                    obj.insert(
+                                        "transport".to_string(),
+                                        serde_json::Value::String(t.to_string()),
+                                    );
+                                }
                                 // CopyPaste-5lm: never expose the PasswordFile blob
                                 // (encrypted or plaintext) over the IPC wire. The UI
                                 // has no need for this field; stripping it here means
@@ -9036,6 +9091,65 @@ mod tests {
             p["trust"], "verified",
             "persisted peers must have trust=verified, got: {p}"
         );
+    }
+
+    /// CopyPaste-1jms.32: list_peers must include a `transport` field when a
+    /// transport is active for a peer, and omit it (or set to null) when none
+    /// is configured. In the test server (no P2P, no relay, no cloud) the field
+    /// must be absent — the UI falls back to the local_ip/address heuristic.
+    #[tokio::test]
+    async fn list_peers_transport_absent_when_no_transport_active() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixStream;
+        let dir = safe_tempdir();
+        let cfg_home = dir.path().join("cfg-transport");
+        let _env = EnvGuard::set_all(
+            &[
+                "COPYPASTE_CONFIG_DIR",
+                "COPYPASTE_DATA_DIR",
+                "HOME",
+                "XDG_CONFIG_HOME",
+            ],
+            &cfg_home,
+        );
+
+        let peers_path = cfg_home.join("peers.json");
+        std::fs::create_dir_all(&cfg_home).unwrap();
+        // Peer with a local_ip (normally the heuristic for P2P) but no live
+        // P2P connection in the test server. Transport should be absent/null.
+        std::fs::write(
+            &peers_path,
+            r#"[{"fingerprint":"aa:bb:11","name":"Carol","added_at":1700000000,"local_ip":"192.168.1.10"}]"#,
+        )
+        .unwrap();
+
+        let sock = dir.path().join("test-transport-none.sock");
+        start_test_server(&sock).await;
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"tp1\",\"method\":\"list_peers\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let line = lines.next_line().await.unwrap().unwrap();
+        let resp: serde_json::Value = serde_json::from_str(&line).unwrap();
+
+        assert_eq!(resp["ok"], true, "list_peers must succeed: {resp}");
+        let peers = resp["data"]["peers"].as_array().unwrap();
+        assert_eq!(peers.len(), 1);
+        let p = &peers[0];
+        // In the test server: no P2P sinks wired (live_fps = None), relay feature
+        // is compiled but no relay_handle injected, cloud-sync is off. The
+        // transport field must be absent (not `"p2p"`) because there is no live
+        // P2P connection — even though local_ip is present.
+        assert!(
+            p.get("transport").is_none() || p["transport"].is_null(),
+            "transport must be absent/null when no transport is active, got: {p}"
+        );
+        // Other fields must still be present.
+        assert_eq!(p["fingerprint"], "aa:bb:11");
+        assert_eq!(p["trust"], "verified");
     }
 
     /// When the credentials are absent (None), the presence flags must be

@@ -408,6 +408,15 @@ export interface PairedDevice {
    * Mirrors Android's trustLabel(peer): Verified iff sasVerified, else Unverified.
    */
   trust?: string;
+  /**
+   * CopyPaste-1jms.32: transport kind used for the most recent sync with this peer.
+   * "p2p"      = direct mTLS P2P connection (currently live).
+   * "relay"    = HTTP relay store-and-forward inbox.
+   * "supabase" = Supabase cloud backend.
+   * null / absent = unknown (no transport active, or daemon predates this field).
+   * When absent, the UI falls back to the local_ip/address heuristic.
+   */
+  transport?: "p2p" | "relay" | "supabase" | null;
 }
 
 /**

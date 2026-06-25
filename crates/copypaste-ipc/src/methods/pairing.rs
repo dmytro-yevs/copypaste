@@ -97,6 +97,28 @@ pub const METHOD_POLL_PEER_EVENTS: &str = "poll_peer_events";
 /// fresh discovered device list.  Same response shape as [`METHOD_LIST_DISCOVERED`].
 pub const METHOD_RESCAN_DISCOVERED: &str = "rescan_discovered";
 
+/// Transport kind reported per-peer in the `list_peers` response.
+///
+/// Indicates which sync transport was used for the most recent interaction with
+/// this peer. Serialised as lowercase string on the wire (`"p2p"`, `"relay"`,
+/// `"supabase"`) so the UI can render a 3-way chip. `None` / absent means the
+/// transport is unknown (peer paired but never successfully synced, or pre-field
+/// daemon).
+///
+/// Back-compat: the field is `#[serde(skip_serializing_if = "Option::is_none")]`
+/// at the call site so older daemons that don't emit it produce JSON that
+/// deserialises to `transport: None` on the UI side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PeerTransport {
+    /// Synced via direct mTLS P2P connection.
+    P2p,
+    /// Synced via the HTTP relay (store-and-forward inbox).
+    Relay,
+    /// Synced via Supabase cloud backend.
+    Supabase,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,5 +146,48 @@ mod tests {
         assert_eq!(METHOD_REVOKE_ALL_PEERS, "revoke_all_peers");
         assert_eq!(METHOD_REORDER_PINNED, "reorder_pinned");
         assert_eq!(METHOD_RESCAN_DISCOVERED, "rescan_discovered");
+    }
+
+    /// CopyPaste-1jms.32: `PeerTransport` must serialise to lowercase wire strings
+    /// and round-trip through JSON (the format used by the `list_peers` response).
+    #[test]
+    fn peer_transport_serde_roundtrip() {
+        // Serialise each variant to the expected lowercase wire string.
+        assert_eq!(
+            serde_json::to_string(&PeerTransport::P2p).unwrap(),
+            "\"p2p\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PeerTransport::Relay).unwrap(),
+            "\"relay\""
+        );
+        assert_eq!(
+            serde_json::to_string(&PeerTransport::Supabase).unwrap(),
+            "\"supabase\""
+        );
+
+        // Deserialise back from wire strings.
+        assert_eq!(
+            serde_json::from_str::<PeerTransport>("\"p2p\"").unwrap(),
+            PeerTransport::P2p
+        );
+        assert_eq!(
+            serde_json::from_str::<PeerTransport>("\"relay\"").unwrap(),
+            PeerTransport::Relay
+        );
+        assert_eq!(
+            serde_json::from_str::<PeerTransport>("\"supabase\"").unwrap(),
+            PeerTransport::Supabase
+        );
+    }
+
+    /// `PeerTransport` as `Option<PeerTransport>` serialises to `null` when `None`
+    /// and is omitted only when the caller uses `skip_serializing_if = "Option::is_none"`.
+    #[test]
+    fn peer_transport_option_none_serialises_to_null() {
+        let none: Option<PeerTransport> = None;
+        assert_eq!(serde_json::to_string(&none).unwrap(), "null");
+        let some = Some(PeerTransport::Relay);
+        assert_eq!(serde_json::to_string(&some).unwrap(), "\"relay\"");
     }
 }
