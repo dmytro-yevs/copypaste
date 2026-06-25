@@ -13,6 +13,7 @@ use copypaste_supabase::{RealtimeClient, RealtimeConfig};
 use copypaste_sync::merge::{remote_wins, RemoteMeta};
 
 use crate::sync_common::{build_local_item, decode_payload_ct, replace_cloud_item_by_item_id};
+use crate::sync_in_flight::SyncInFlightGuard;
 
 ///
 /// # Token refresh
@@ -47,6 +48,11 @@ pub(super) async fn ws_ingest_loop(
     // (`storage_quota_bytes`).  Read on every prune so a runtime set_config
     // change takes effect without a restart — mirrors realtime_loop.
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    // CopyPaste-1jms.22: shared in-flight flag for SyncBadgeState::Syncing.
+    // Each ingest of a Realtime event is a round-trip: arm the guard around
+    // the blocking_lock + DB write so the badge is Syncing only during
+    // actual ingest work, not during the idle listen loop.
+    sync_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     loop {
         // Snapshot the current sync key.  If absent, back off and retry —
@@ -309,6 +315,12 @@ pub(super) async fn ws_ingest_loop(
                                     .map(|g| g.storage_quota_bytes)
                                     .unwrap_or(defaults.storage_quota_bytes)
                             };
+
+                            // CopyPaste-1jms.22: arm in-flight guard for this
+                            // WS event ingest. The guard covers the blocking DB
+                            // write (not the idle listen loop) and resets on drop.
+                            let _ws_guard =
+                                SyncInFlightGuard::new(std::sync::Arc::clone(&sync_in_flight));
 
                             // Decrypt + re-encrypt + insert on the blocking pool.
                             let result = tokio::task::spawn_blocking(move || {

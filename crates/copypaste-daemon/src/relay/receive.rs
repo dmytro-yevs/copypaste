@@ -18,6 +18,7 @@ use copypaste_sync::merge::{remote_wins, RemoteMeta};
 use tokio::sync::{Mutex, Notify};
 
 use crate::sync_common::{build_local_item, decode_payload_ct, replace_cloud_item_by_item_id};
+use crate::sync_in_flight::SyncInFlightGuard;
 
 use super::pasteboard::{
     relay_apply_to_pasteboard, relay_fetch_auto_apply_candidate, relay_should_auto_apply,
@@ -306,6 +307,8 @@ pub(super) async fn receive_loop(
     // `None` disables the pasteboard write (non-Unix, tests, callers that have
     // not wired the sentinel yet).
     auto_apply_change_count: Option<Arc<AtomicI64>>,
+    // CopyPaste-1jms.22: shared in-flight flag for SyncBadgeState::Syncing.
+    sync_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     use super::super::relay::{
         IDLE_EMPTY_POLL_THRESHOLD, IDLE_POLL_STEP, POLL_INTERVAL, POLL_INTERVAL_MAX,
@@ -408,6 +411,9 @@ pub(super) async fn receive_loop(
 
         // Burst-drain: keep pulling while pages come back full.
         loop {
+            // CopyPaste-1jms.22: arm in-flight guard for this relay pull
+            // round-trip. Resets on drop (error, empty, or end of drain).
+            let _relay_rx_guard = SyncInFlightGuard::new(std::sync::Arc::clone(&sync_in_flight));
             let page = match pull_page(&client, &relay_url, &inbox_id, &token, wm).await {
                 Ok(p) => p,
                 Err(RelayError::Status(401)) => {

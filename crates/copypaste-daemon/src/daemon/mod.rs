@@ -595,6 +595,15 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     let cloud_signed_in: std::sync::Arc<std::sync::atomic::AtomicBool> =
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
 
+    // CopyPaste-1jms.22: shared in-flight flag for the SyncBadgeState::Syncing
+    // variant. Created once here; clones are passed into each sync round-trip
+    // loop (cloud poll, cloud push, relay receive, relay push, P2P handshake)
+    // and into the IpcServer so get_sync_status can read it. Each loop wraps the
+    // active network exchange in a SyncInFlightGuard, which sets the flag true
+    // on entry and resets to false on Drop (all exit paths, including `?`).
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+    let sync_in_flight: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+
     // CopyPaste-bps: warm the DeviceMeta cache ONCE at startup, before the IPC
     // server is constructed.  `DeviceMeta::collect` spawns child processes
     // (`scutil`, `sysctl`, `sw_vers`) that together can take up to ~6 s on a
@@ -779,6 +788,12 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         #[cfg(feature = "cloud-sync")]
         {
             server = server.with_cloud_account_id_slot(cloud_account_id_slot.clone());
+        }
+        // CopyPaste-1jms.22: wire the shared in-flight flag so get_sync_status
+        // can emit SyncBadgeState::Syncing while a sync round-trip is active.
+        #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+        {
+            server = server.with_sync_in_flight(sync_in_flight.clone());
         }
         // Public-IP cache: shared between the IPC server (read path) and the
         // STUN refresh task (write path).  Created here so both can hold an
@@ -1239,6 +1254,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 local_key_arc.clone(),
                 cloud_signed_in.clone(),
                 core_config_arc.clone(),
+                sync_in_flight.clone(),
             )
             .await
             {
@@ -1343,6 +1359,7 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 cloud_last_sync_ms.clone(),
                 core_config_arc.clone(),
                 relay_auto_apply_cc,
+                sync_in_flight.clone(),
             ) {
                 Ok(handle) => {
                     tracing::info!("relay-sync: orchestrator started");

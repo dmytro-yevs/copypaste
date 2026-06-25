@@ -14,6 +14,7 @@ use copypaste_sync::merge::{remote_wins, RemoteMeta};
 use crate::sync_common::{
     build_local_item, decode_payload_ct, replace_cloud_item_by_item_id, SYNC_HTTP_TIMEOUT,
 };
+use crate::sync_in_flight::SyncInFlightGuard;
 
 use super::auth::refresh_bearer;
 use super::config::CloudConfig;
@@ -199,6 +200,10 @@ pub(super) async fn realtime_loop(
     // storage_quota_bytes (A-SET-2).  Loops read on every tick so runtime
     // set_config changes take effect without a daemon restart.
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    // CopyPaste-1jms.22: shared in-flight flag for SyncBadgeState::Syncing.
+    // Set true at the start of each poll_once round-trip via SyncInFlightGuard;
+    // the guard's Drop resets it false on ALL exit paths (success, error, `?`).
+    sync_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     // P1: same timeout as push_loop — see `sync_common::SYNC_HTTP_TIMEOUT`.
     //
@@ -352,6 +357,13 @@ pub(super) async fn realtime_loop(
                     // and the keyset filter re-requests the exact same window
                     // forever. Break on no-advance below (defensive).
                     let start_cursor = cursor.clone();
+                    // CopyPaste-1jms.22: arm the in-flight guard for this
+                    // poll round-trip. The guard sets sync_in_flight=true and
+                    // resets to false on Drop (all exit paths including `?`
+                    // and burst-drain breaks), so the badge is Syncing only
+                    // while the network exchange is actually in progress.
+                    let _in_flight_guard =
+                        SyncInFlightGuard::new(std::sync::Arc::clone(&sync_in_flight));
                     let (new_cursor, batch_size) = poll_once(
                         &client,
                         &config,
@@ -366,6 +378,9 @@ pub(super) async fn realtime_loop(
                         storage_quota_bytes,
                     )
                     .await;
+                    // Drop the guard before the burst-drain loop's bookkeeping
+                    // so idle checks between polls do not show Syncing.
+                    drop(_in_flight_guard);
                     cursor = new_cursor;
                     // Only keep draining if the batch was full AND shutdown hasn't fired.
                     // Check shutdown without blocking so we don't stall the drain loop.

@@ -40,6 +40,8 @@ pub mod peers;
 pub mod platform;
 pub mod protocol;
 pub mod public_ip;
+/// RAII guard for the `sync_in_flight` `AtomicBool` flag (CopyPaste-1jms.22).
+pub mod sync_in_flight;
 pub mod sync_orch;
 
 #[cfg(feature = "cloud-sync")]

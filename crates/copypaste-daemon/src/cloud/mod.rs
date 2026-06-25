@@ -1482,6 +1482,7 @@ mod tests {
             local_key,
             signed_in.clone(),
             Arc::new(std::sync::RwLock::new(copypaste_core::AppConfig::default())),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         )
         .await;
 

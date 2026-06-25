@@ -47,6 +47,8 @@ pub async fn start_cloud(
     // and `storage_quota_bytes` on every tick so runtime changes via
     // `set_config` take effect without a daemon restart (A-SET-2).
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    // CopyPaste-1jms.22: shared in-flight flag for SyncBadgeState::Syncing.
+    sync_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> anyhow::Result<CloudHandle> {
     // Defence-in-depth: re-validate the URL even though CloudConfig::new should
     // have rejected it already. Cheap, and protects callers that constructed
@@ -187,6 +189,7 @@ pub async fn start_cloud(
         push_signed_in,
         push_auth,
         push_core_config,
+        sync_in_flight.clone(),
     ));
 
     // Task B: poll Supabase REST for remote items and insert unknown ones locally.
@@ -219,6 +222,7 @@ pub async fn start_cloud(
         poll_auth,
         poll_ws_connected,
         poll_core_config,
+        sync_in_flight.clone(),
     ));
 
     // Task C: Supabase Realtime WebSocket — instant INSERT delivery.
@@ -267,6 +271,7 @@ pub async fn start_cloud(
         ws_shutdown,
         ws_connected_flag,
         ws_core_config,
+        sync_in_flight,
     ));
 
     tracing::info!(

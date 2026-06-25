@@ -4,13 +4,13 @@ use crate::protocol::{
     ERR_CODE_NOT_IMPLEMENTED, ERR_CODE_RATE_LIMITED, ERR_CODE_REQUEST_TOO_LARGE,
     ERR_CODE_VERSION_MISMATCH, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
-// CopyPaste-merc: canonical badge-state computation lives in copypaste-ipc so it
-// is shared across crates. The daemon calls this once per get_sync_status request
-// and embeds the result in the response; UI / Android consume the value directly.
-// Gated on cloud-sync: the get_sync_status handler is only compiled with that
-// feature, so the import must match to avoid an unused-import warning (-D warnings).
+// CopyPaste-merc / CopyPaste-1jms.22: canonical badge-state computation lives in
+// copypaste-ipc. The `_with_inflight` variant is used so the daemon can emit the
+// `Syncing` (green-pulse) badge while a round-trip is in progress. Gated on
+// cloud-sync: the get_sync_status handler is only compiled with that feature, so
+// the import must match to avoid an unused-import warning (-D warnings).
 #[cfg(feature = "cloud-sync")]
-use copypaste_ipc::compute_sync_badge_state;
+use copypaste_ipc::compute_sync_badge_state_with_inflight;
 // derive_sync_key / SyncKey are used by both cloud-sync (Supabase) and relay-sync.
 // `revoke_and_rotate` / `rotate_sync_key` derive a key from a passphrase;
 // `revoke_peer` uses `SyncKey::random()` for automatic no-passphrase rotation
@@ -635,6 +635,24 @@ pub struct IpcServer {
     /// tokio `Mutex` because the `set_config` handler `.await`s while holding it.
     #[cfg(feature = "relay-sync")]
     relay_handle: Arc<tokio::sync::Mutex<Option<crate::relay::RelayHandle>>>,
+
+    /// Shared in-flight sync flag (CopyPaste-1jms.22).
+    ///
+    /// Set to `true` by a [`crate::sync_in_flight::SyncInFlightGuard`] at the
+    /// start of each active sync round-trip (cloud poll, cloud push, relay
+    /// receive, relay push, P2P handshake) and reset to `false` when the guard
+    /// is dropped (on success, error, or early return via `?`).
+    ///
+    /// The `get_sync_status` handler passes this value as `in_flight` to
+    /// [`copypaste_ipc::compute_sync_badge_state_with_inflight`] so that
+    /// `SyncBadgeState::Syncing` is emitted during active exchanges rather than
+    /// the dead-code path it was before this fix.
+    ///
+    /// `AtomicBool` (not `Mutex`) because the read in `get_sync_status` and the
+    /// writes in the sync loops are all best-effort races — a brief window where
+    /// the badge says "idle" while a round-trip just started is acceptable, but a
+    /// blocking lock on the hot IPC path is not.
+    sync_in_flight: Arc<AtomicBool>,
 }
 
 /// Wire-serialisable peer event record returned by `poll_peer_events`.
@@ -946,6 +964,10 @@ impl IpcServer {
             // wires the shared slot via `with_relay_handle`.
             #[cfg(feature = "relay-sync")]
             relay_handle: Arc::new(tokio::sync::Mutex::new(None)),
+            // CopyPaste-1jms.22: starts false (no sync in progress at
+            // construction time). The daemon replaces this with a shared Arc via
+            // `with_sync_in_flight` before spawning the sync loops.
+            sync_in_flight: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -972,6 +994,21 @@ impl IpcServer {
         slot: Arc<tokio::sync::Mutex<Option<crate::relay::RelayHandle>>>,
     ) -> Self {
         self.relay_handle = slot;
+        self
+    }
+
+    /// Wire the shared in-flight sync flag (CopyPaste-1jms.22).
+    ///
+    /// `daemon::run` allocates the `Arc<AtomicBool>` once, clones it into each
+    /// sync loop (cloud poll, cloud push, relay receive, relay push, P2P
+    /// handshake), and passes another clone here so `get_sync_status` reads the
+    /// SAME flag that the sync loops flip via [`crate::sync_in_flight::SyncInFlightGuard`].
+    ///
+    /// When not wired (unit tests, degraded mode), the field defaults to a local
+    /// `Arc::new(AtomicBool::new(false))` that is never flipped, so
+    /// `badge_state` is unaffected.
+    pub fn with_sync_in_flight(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.sync_in_flight = flag;
         self
     }
 
@@ -4862,19 +4899,28 @@ impl IpcServer {
                             _ => "<redacted>".to_string(),
                         }
                     });
-                // CopyPaste-merc: compute badge state once here in the daemon so
-                // every consumer (macOS UI, Android) renders the SAME canonical
-                // value instead of each re-deriving it with a local constant.
-                // `supabase_url_val` is Some(url) when either the env var or the
-                // config has a URL, so use it as the "url_set" signal.
+                // CopyPaste-merc / CopyPaste-1jms.22: compute badge state once
+                // here in the daemon so every consumer (macOS UI, Android)
+                // renders the SAME canonical value. Use the `_with_inflight`
+                // variant so `Syncing` (green pulse) is emitted while a sync
+                // round-trip is actively in progress.
+                // `supabase_url_val` is Some(url) when either the env var or
+                // the config has a URL — use it as the "url_set" signal.
                 let supabase_url_set = supabase_url_val.is_some();
-                let badge_state = compute_sync_badge_state(
+                // Relaxed ordering: a brief window where the badge says "idle"
+                // while a round-trip just started (or vice versa) is acceptable.
+                // The badge is informational and is refreshed on every IPC poll.
+                let in_flight = self
+                    .sync_in_flight
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let badge_state = compute_sync_badge_state_with_inflight(
                     passphrase_set,
                     supabase_url_set,
                     supabase_configured,
                     signed_in,
                     last_sync_ms_val,
                     None, // use SystemTime::now() inside the helper
+                    in_flight,
                 );
                 let badge_state_json =
                     serde_json::to_value(&badge_state).unwrap_or(serde_json::Value::Null);

@@ -10,6 +10,7 @@ use copypaste_core::{derive_relay_inbox_id, encrypt_for_cloud, AppConfig, Clipbo
 use tokio::sync::{Mutex, Notify};
 
 use crate::sync_common::{decrypt_item_plaintext, wrap_and_check_cloud_upload_plaintext};
+use crate::sync_in_flight::SyncInFlightGuard;
 
 use super::pasteboard::relay_should_skip_wifi;
 use super::registration::{ensure_token, load_initial_token, snapshot_sync_key};
@@ -138,6 +139,8 @@ pub(super) async fn push_loop(
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: Arc<AtomicI64>,
     core_config: Arc<std::sync::RwLock<AppConfig>>,
+    // CopyPaste-1jms.22: shared in-flight flag for SyncBadgeState::Syncing.
+    sync_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     let mut cached_token = load_initial_token(&local_key, &device_id);
     let mut warned_no_key = false;
@@ -253,6 +256,10 @@ pub(super) async fn push_loop(
                 };
                 let wall_time = item.wall_time.max(0) as u64;
 
+                // CopyPaste-1jms.22: arm in-flight guard for this relay push
+                // round-trip. Resets on drop (error or success).
+                let _relay_push_guard =
+                    SyncInFlightGuard::new(std::sync::Arc::clone(&sync_in_flight));
                 // Ensure token, push, and on 401 re-register once.
                 if let Err(e) = push_with_reauth(
                     &client,

@@ -212,6 +212,8 @@ pub fn start_relay(
     last_sync_ms: Arc<AtomicI64>,
     core_config: Arc<std::sync::RwLock<AppConfig>>,
     auto_apply_change_count: Option<Arc<AtomicI64>>,
+    // CopyPaste-1jms.22: shared in-flight flag for SyncBadgeState::Syncing.
+    sync_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) -> Result<RelayHandle, RelayError> {
     // Empty / whitespace-only URL is the sentinel for "relay disabled / cleared".
     // Return Disabled (not InvalidUrl) so the caller can distinguish a deliberate
@@ -244,6 +246,7 @@ pub fn start_relay(
         local_key.clone(),
         last_sync_ms.clone(),
         core_config.clone(),
+        sync_in_flight.clone(),
     ));
     tokio::spawn(receive::receive_loop(
         client,
@@ -257,6 +260,7 @@ pub fn start_relay(
         last_sync_ms,
         core_config,
         auto_apply_change_count,
+        sync_in_flight,
     ));
 
     tracing::info!("relay-sync: orchestrator started");
@@ -352,6 +356,7 @@ mod tests {
             last_sync.clone(),
             core_config.clone(),
             None,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         );
         assert!(
             matches!(result, Err(RelayError::Disabled)),
@@ -372,6 +377,7 @@ mod tests {
             last_sync,
             core_config,
             None,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         );
         assert!(
             matches!(result2, Err(RelayError::Disabled)),
@@ -1231,6 +1237,7 @@ mod tests {
             local_key.clone(),
             Arc::new(AtomicI64::new(0)),
             core_config,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ));
 
         // 1) SENSITIVE item — must NOT reach the relay.

@@ -10,6 +10,7 @@ use copypaste_supabase::auth::AuthClient;
 use crate::sync_common::{
     decrypt_item_plaintext_blocking, wrap_and_check_cloud_upload_plaintext, SYNC_HTTP_TIMEOUT,
 };
+use crate::sync_in_flight::SyncInFlightGuard;
 
 use super::auth::refresh_bearer;
 use super::backlog::{run_backlog_sweep, run_tombstone_backlog_sweep};
@@ -198,6 +199,8 @@ pub(super) async fn push_loop(
     auth: Arc<AuthClient>,
     // Live core config for hot-reload of sync_on_wifi_only (A-SET-2).
     core_config: Arc<std::sync::RwLock<copypaste_core::AppConfig>>,
+    // CopyPaste-1jms.22: shared in-flight flag for SyncBadgeState::Syncing.
+    sync_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     // P1: set a per-request timeout so a stalled Supabase endpoint cannot hang
     // this loop indefinitely. See `sync_common::SYNC_HTTP_TIMEOUT` for rationale.
@@ -341,6 +344,9 @@ pub(super) async fn push_loop(
         // touching new items, recovery is observable and old items are not
         // perpetually starved by a steady stream of new work.
         if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
+            // CopyPaste-1jms.22: arm the in-flight guard for this push
+            // round-trip so get_sync_status emits SyncBadgeState::Syncing.
+            let _push_guard = SyncInFlightGuard::new(std::sync::Arc::clone(&sync_in_flight));
             match push_item_with_retries(
                 &client,
                 &rest_url,
@@ -498,6 +504,11 @@ pub(super) async fn push_loop(
                             // Park it first (already in retry_queue) then pop
                             // from the front so older queued items drain first.
                             if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
+                                // CopyPaste-1jms.22: arm in-flight guard for
+                                // this push round-trip (new item from broadcast).
+                                let _push_guard = SyncInFlightGuard::new(
+                                    std::sync::Arc::clone(&sync_in_flight),
+                                );
                                 match push_item_with_retries(
                                     &client,
                                     &rest_url,
