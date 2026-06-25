@@ -804,4 +804,67 @@ mod tests {
             .expect("provisioning must survive deep-link round-trip");
         assert_eq!(prov.relay_url.as_deref(), Some("https://relay.example.com"));
     }
+
+    /// #11 — QR pairing JSON schema parity: GOLDEN JSON test.
+    ///
+    /// Source of truth: `QrProvisioning::encode` in
+    ///   `crates/copypaste-core/src/crypto/pairing_qr/payload.rs`
+    ///
+    /// The provisioning 6th field carries compact JSON
+    ///   `{"ru":<relay_url>,"su":<supabase_url>,"sk":<supabase_anon_key>}`
+    /// base64url-encoded (no padding). This test pins the EXACT field names and
+    /// JSON structure so a rename in `QrProvisioning` immediately breaks this test.
+    ///
+    /// If this test fails after renaming fields, update the Android JVM test
+    /// `QrProvisioningParityTest.kt` to match the new field names / JSON shape.
+    ///
+    /// The companion Android JVM test lives at:
+    ///   android/app/src/test/java/com/copypaste/android/QrProvisioningParityTest.kt
+    #[test]
+    fn qr_provisioning_json_golden_schema() {
+        // Canonical test vector — same values used in the Android companion test.
+        let prov = QrProvisioning {
+            relay_url: Some("https://relay.example.com".to_string()),
+            supabase_url: Some("https://abcd.supabase.co".to_string()),
+            supabase_anon_key: Some("anon-key-123".to_string()),
+        };
+
+        // `encode()` produces base64url(JSON). Decode it back to verify the
+        // JSON field names are EXACTLY "ru", "su", "sk" — the names the Android
+        // PairProvisioning.kt parser looks up.
+        let encoded_b64 = prov.encode();
+        let json_bytes = b64().decode(&encoded_b64)
+            .expect("provisioning encodes to valid base64url");
+        let json = std::str::from_utf8(&json_bytes)
+            .expect("provisioning JSON is valid UTF-8");
+
+        // Authoritative golden JSON string. The Android companion test
+        // QrProvisioningParityTest.kt uses the SAME string to verify its parser.
+        // Field order is insertion order: ru, su, sk.
+        let expected_json =
+            r#"{"ru":"https://relay.example.com","su":"https://abcd.supabase.co","sk":"anon-key-123"}"#;
+
+        assert_eq!(
+            json, expected_json,
+            "QrProvisioning JSON golden schema mismatch — \
+             field names/order must stay ru/su/sk; \
+             update QrProvisioningParityTest.kt (Android) if this changes"
+        );
+
+        // Cross-check: decode() must round-trip from the produced JSON.
+        let decoded = QrProvisioning::decode(&encoded_b64)
+            .expect("QrProvisioning::decode must accept its own output");
+        assert_eq!(
+            decoded.relay_url.as_deref(),
+            Some("https://relay.example.com")
+        );
+        assert_eq!(
+            decoded.supabase_url.as_deref(),
+            Some("https://abcd.supabase.co")
+        );
+        assert_eq!(
+            decoded.supabase_anon_key.as_deref(),
+            Some("anon-key-123")
+        );
+    }
 }

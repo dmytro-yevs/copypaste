@@ -619,6 +619,64 @@ pub fn should_skip_on_cellular(sync_on_wifi_only: bool, on_wifi: bool) -> bool {
 mod tests {
     use super::*;
 
+    /// #10 — Cloud-file payload header parity: GOLDEN BYTES test.
+    ///
+    /// Source of truth: `encode_cloud_file_payload` in THIS file (sync_common.rs).
+    /// Wire format (all multi-byte integers big-endian):
+    ///   [1 byte  version = 1]
+    ///   [2 bytes name_len][name_len bytes UTF-8 file name]
+    ///   [2 bytes mime_len][mime_len bytes UTF-8 MIME type]
+    ///   [file bytes ...]
+    ///
+    /// If this test breaks, update the Android JVM test
+    /// `CloudFilePayloadParityTest.kt` to match the new layout.
+    ///
+    /// The companion Android JVM test lives at:
+    ///   android/app/src/test/java/com/copypaste/android/CloudFilePayloadParityTest.kt
+    #[test]
+    fn cloud_file_payload_golden_bytes() {
+        // Canonical test vector — must be byte-for-byte identical to the
+        // Android SyncManager.encodeCloudFilePayload result for the same inputs.
+        let name = "hello.txt";   // 9 UTF-8 bytes
+        let mime = "text/plain";  // 10 UTF-8 bytes
+        let body = b"BODY";       // 4 bytes
+
+        let encoded = encode_cloud_file_payload(name, mime, body);
+
+        // Build expected bytes by hand from the documented wire format:
+        //  [0x01]              — version byte = 1
+        //  [0x00, 0x09]        — name_len = 9 (big-endian u16)
+        //  "hello.txt" (9 B)
+        //  [0x00, 0x0A]        — mime_len = 10 (big-endian u16)
+        //  "text/plain" (10 B)
+        //  "BODY" (4 B)
+        let mut expected: Vec<u8> = vec![
+            // version
+            CLOUD_FILE_HEADER_VERSION,
+            // name_len = 9
+            0x00, 0x09,
+        ];
+        expected.extend_from_slice(b"hello.txt");
+        expected.extend_from_slice(&[
+            // mime_len = 10
+            0x00, 0x0A,
+        ]);
+        expected.extend_from_slice(b"text/plain");
+        expected.extend_from_slice(b"BODY");
+
+        assert_eq!(
+            encoded, expected,
+            "encode_cloud_file_payload golden bytes mismatch — \
+             if this changed, update CloudFilePayloadParityTest.kt (Android) too"
+        );
+
+        // Cross-check: decode must round-trip.
+        let (decoded_body, decoded_name, decoded_mime) = decode_cloud_file_payload(&encoded);
+        assert_eq!(decoded_body, body);
+        assert_eq!(decoded_name, name);
+        assert_eq!(decoded_mime, mime);
+    }
+
     #[test]
     fn should_skip_on_cellular_truth_table() {
         // Only skip when the user opted into Wi-Fi-only AND we are off Wi-Fi.
