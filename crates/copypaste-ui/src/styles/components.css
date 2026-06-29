@@ -22,7 +22,7 @@ textarea {
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
   /* CopyPaste-i6qj (W3): use skin token so radius follows the active skin. */
-  border-radius: var(--skin-r-ctl, 9px); /* ix8u: styleguide --radius-ctl 9px */
+  border-radius: var(--r-ctl);
   outline: none;
   font-family: inherit;
   font-size: 13px;
@@ -62,7 +62,7 @@ select {
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
   /* CopyPaste-i6qj (W3): use skin token so radius follows the active skin. */
-  border-radius: var(--skin-r-ctl, 9px); /* ix8u: styleguide --radius-ctl 9px */
+  border-radius: var(--r-ctl);
   padding: 4px 28px 4px 10px;
   font-family: inherit;
   font-size: 13px;
