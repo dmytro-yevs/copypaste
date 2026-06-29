@@ -78,6 +78,21 @@ internal fun isQrWarning(remainingSeconds: Int): Boolean =
     remainingSeconds <= DEVICES_QR_URGENT_THRESHOLD_SECONDS
 
 /**
+ * CopyPaste-crh3.33: regenerate the pairing QR this many seconds BEFORE the token
+ * actually expires, so a slow scan never reads an already-expired code. Mirrors
+ * the macOS `QR_REFRESH_MARGIN_SECS` (useQrCode.ts).
+ */
+internal const val QR_REFRESH_MARGIN_SECONDS = 15
+
+/**
+ * True when the QR should be pre-emptively regenerated: within the
+ * [QR_REFRESH_MARGIN_SECONDS] margin of expiry. Extracted so the margin logic is
+ * unit-testable without driving the Compose countdown effect.
+ */
+internal fun shouldRegenerateQr(remainingSeconds: Int): Boolean =
+    remainingSeconds <= QR_REFRESH_MARGIN_SECONDS
+
+/**
  * True when the PulseDot should animate: [online] && ![ reducedMotion].
  * Extracted so unit tests can verify the gate without Compose.
  */

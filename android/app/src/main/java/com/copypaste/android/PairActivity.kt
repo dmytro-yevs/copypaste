@@ -740,11 +740,14 @@ fun PairScreen(
         if (qr == null) return@LaunchedEffect
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             remainingSeconds = PAIR_TOKEN_TTL_SECONDS
-            while (remainingSeconds > 0) {
+            // CopyPaste-crh3.33: regenerate with a QR_REFRESH_MARGIN_SECONDS (15s)
+            // margin BEFORE the token actually expires (parity with macOS), so a
+            // slow scan never reads an already-expired code.
+            while (remainingSeconds > QR_REFRESH_MARGIN_SECONDS) {
                 delay(1000)
                 remainingSeconds -= 1
             }
-            // QR expired — auto-regenerate only when the success popup is not up.
+            // Near expiry — auto-regenerate only when the success popup is not up.
             if (pairedPeerForPopup == null) generateQr()
         }
     }

@@ -113,6 +113,18 @@ class DevicesLiquidGlassTest {
         assertFalse(isQrWarning(remainingSeconds = 120))
     }
 
+    @Test
+    fun `qr regenerates within the 15s refresh margin`() {
+        // CopyPaste-crh3.33: regenerate BEFORE expiry (15s margin) so a slow scan
+        // never reads an already-expired code (parity with macOS).
+        assertEquals(15, QR_REFRESH_MARGIN_SECONDS)
+        assertTrue(shouldRegenerateQr(remainingSeconds = 15))
+        assertTrue(shouldRegenerateQr(remainingSeconds = 14))
+        assertTrue(shouldRegenerateQr(remainingSeconds = 0))
+        assertFalse(shouldRegenerateQr(remainingSeconds = 16))
+        assertFalse(shouldRegenerateQr(remainingSeconds = 120))
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     // CopyPaste-bdac.102 PulseDot ring colour: ring must match dot colour
     // ────────────────────────────────────────────────────────────────────────
