@@ -491,3 +491,170 @@ mod validate_pop_tests {
         ));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Device-quota and registration tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod quota_tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use crate::error::RelayError;
+    use crate::quota::Tier;
+    use crate::state::test_helpers::*;
+
+    fn ip(n: u8) -> Option<IpAddr> {
+        Some(IpAddr::V4(Ipv4Addr::new(10, 0, 0, n)))
+    }
+
+    #[test]
+    fn sixth_free_device_registration_fails_with_403() {
+        let mut store = make_store();
+        for i in 0u8..5 {
+            store
+                .register_device_with_tier(
+                    unique_device_id(i),
+                    format!("Dev {i}"),
+                    unique_key(i),
+                    valid_pop_b64(),
+                    Tier::Free,
+                )
+                .unwrap();
+        }
+        let err = store
+            .register_device_with_tier(
+                unique_device_id(5),
+                "Dev 5".into(),
+                unique_key(5),
+                valid_pop_b64(),
+                Tier::Free,
+            )
+            .unwrap_err();
+        assert!(
+            matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn fifth_free_device_registration_succeeds() {
+        let mut store = make_store();
+        for i in 0u8..4 {
+            store
+                .register_device_with_tier(
+                    unique_device_id(i),
+                    format!("Dev {i}"),
+                    unique_key(i),
+                    valid_pop_b64(),
+                    Tier::Free,
+                )
+                .unwrap();
+        }
+        store
+            .register_device_with_tier(
+                unique_device_id(4),
+                "Dev 4".into(),
+                unique_key(4),
+                valid_pop_b64(),
+                Tier::Free,
+            )
+            .expect("5th free device must be accepted");
+    }
+
+    #[cfg(feature = "quota-tiers")]
+    #[test]
+    fn eleventh_pro_device_registration_fails() {
+        let mut store = make_store();
+        for i in 0u8..10 {
+            store
+                .register_device_with_tier(
+                    unique_device_id(i),
+                    format!("Dev {i}"),
+                    unique_key(i),
+                    valid_pop_b64(),
+                    Tier::Pro,
+                )
+                .unwrap();
+        }
+        let err = store
+            .register_device_with_tier(
+                unique_device_id(10),
+                "Dev 10".into(),
+                unique_key(10),
+                valid_pop_b64(),
+                Tier::Pro,
+            )
+            .unwrap_err();
+        assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 10 }));
+    }
+
+    #[test]
+    fn default_register_device_uses_free_tier() {
+        let mut store = make_store();
+        for i in 0u8..5 {
+            store
+                .register_device_with_tier(
+                    unique_device_id(i),
+                    format!("Dev {i}"),
+                    unique_key(i),
+                    valid_pop_b64(),
+                    Tier::Free,
+                )
+                .unwrap();
+        }
+        let err = store
+            .register_device(
+                unique_device_id(5),
+                "Dev 5".into(),
+                unique_key(5),
+                valid_pop_b64(),
+            )
+            .unwrap_err();
+        assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }));
+    }
+
+    /// H1: the device-count quota must be per scope (per registering IP), not global.
+    #[test]
+    fn device_quota_is_per_scope_not_global() {
+        let mut store = make_store();
+        // Scope A fills its 5-device free budget.
+        for i in 0u8..5 {
+            store
+                .register_device_with_tier_scoped(
+                    ip(1),
+                    unique_device_id(i),
+                    format!("A{i}"),
+                    unique_key(i),
+                    valid_pop_b64(),
+                    Tier::Free,
+                )
+                .expect("scope A device must be accepted");
+        }
+        // A 6th device from scope A is rejected.
+        let err = store
+            .register_device_with_tier_scoped(
+                ip(1),
+                unique_device_id(5),
+                "A5".into(),
+                unique_key(5),
+                valid_pop_b64(),
+                Tier::Free,
+            )
+            .unwrap_err();
+        assert!(matches!(err, RelayError::DeviceQuotaExceeded { limit: 5 }));
+
+        // A device from a different IP (scope B) still registers fine.
+        store
+            .register_device_with_tier_scoped(
+                ip(2),
+                unique_device_id(6),
+                "B0".into(),
+                unique_key(6),
+                valid_pop_b64(),
+                Tier::Free,
+            )
+            .expect("a different scope must get its own device budget");
+        assert_eq!(store.stats().0, 6, "relay holds 6 devices across 2 scopes");
+    }
+}

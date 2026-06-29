@@ -148,3 +148,122 @@ impl super::RelayStore {
         evicted
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use crate::state::test_helpers::*;
+
+    #[test]
+    fn cleanup_removes_old_inactive_devices() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        store
+            .register_device(
+                device_b_id(),
+                "Device B".into(),
+                unique_key(1),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let removed = store.cleanup_inactive_devices(0);
+        assert_eq!(removed, 2);
+        assert!(store.devices.is_empty());
+        assert!(store.sync_items.is_empty());
+    }
+
+    #[test]
+    fn cleanup_keeps_recently_registered_devices() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        store
+            .register_device(
+                device_b_id(),
+                "Device B".into(),
+                unique_key(1),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let removed = store.cleanup_inactive_devices(u64::MAX);
+        assert_eq!(removed, 0);
+        assert!(store.devices.contains_key(&device_a_id()));
+        assert!(store.devices.contains_key(&device_b_id()));
+    }
+
+    #[test]
+    fn cleanup_keeps_devices_with_items() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        push_text(&mut store, &device_a_id(), 1000);
+        let removed = store.cleanup_inactive_devices(0);
+        assert_eq!(removed, 0, "device with items must not be removed");
+    }
+
+    /// `prune_expired` must reclaim `next_sync_id_per_device` counters and empty
+    /// `sync_items` inboxes whose device record no longer exists, so those maps
+    /// stay bounded by the live device set instead of leaking forever.
+    #[test]
+    fn prune_expired_reclaims_orphaned_maps() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
+            .unwrap();
+        push_text(&mut store, &device_a_id(), 1000);
+        // Counter + inbox now exist for device A.
+        assert!(store.next_sync_id_per_device.contains_key(&device_a_id()));
+        assert!(store.sync_items.contains_key(&device_a_id()));
+
+        // Forcibly drop *only* the device record, simulating a record removed
+        // by some path that left the side maps behind.
+        store.devices.remove(&device_a_id());
+
+        let now = 1_000_000u64;
+        store.prune_expired(now, 60);
+
+        assert!(
+            !store.next_sync_id_per_device.contains_key(&device_a_id()),
+            "orphaned id-counter entry must be reclaimed"
+        );
+        assert!(
+            !store.sync_items.contains_key(&device_a_id()),
+            "orphaned inbox must be reclaimed"
+        );
+    }
+
+    /// Empty inboxes belonging to a *still-registered* device must be kept (the
+    /// device retains its registration regardless of inbox activity).
+    #[test]
+    fn prune_expired_keeps_empty_inbox_of_registered_device() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
+            .unwrap();
+        // Empty inbox, device still registered.
+        store.prune_expired(u64::MAX, 1);
+        assert!(store.sync_items.contains_key(&device_a_id()));
+    }
+}

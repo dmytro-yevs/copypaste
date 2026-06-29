@@ -11,7 +11,8 @@ use tokio::sync::broadcast;
 use crate::error::RelayError;
 use crate::models::PullItem;
 
-use super::{effective_history_cap, MAX_PULL_BYTES_BUDGET};
+use super::quota::effective_history_cap;
+use super::MAX_PULL_BYTES_BUDGET;
 
 /// A single encrypted item in the wall-clock push/pull sync protocol.
 pub struct SyncItem {
@@ -464,5 +465,542 @@ impl super::RelayStore {
         // existed), so propagate any persistence failure as 500.
         self.db.delete_item(device_id, parsed_id)?;
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine;
+
+    use crate::error::RelayError;
+    use crate::quota::Tier;
+    use crate::state::test_helpers::*;
+    use crate::state::{RelayStore, MAX_PULL_BYTES_BUDGET};
+
+    use crate::state::quota::{effective_history_cap, history_cap_for_limit};
+    use crate::state::MAX_PUSH_ITEMS_PER_DEVICE;
+
+    #[test]
+    fn push_returns_ascending_ids() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let id1 = push_text(&mut store, &device_a_id(), 1000);
+        let id2 = push_text(&mut store, &device_a_id(), 2000);
+        assert!(id2 > id1);
+    }
+
+    #[test]
+    fn pull_returns_items_since_wall_time() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        push_text(&mut store, &device_a_id(), 1000);
+        push_text(&mut store, &device_a_id(), 2000);
+        push_text(&mut store, &device_a_id(), 3000);
+        let items = store
+            .pull_items(&device_a_id(), 1000, None, usize::MAX)
+            .unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].wall_time, 2000);
+        assert_eq!(items[1].wall_time, 3000);
+    }
+
+    #[test]
+    fn pull_since_zero_returns_all() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        push_text(&mut store, &device_a_id(), 100);
+        push_text(&mut store, &device_a_id(), 200);
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn pull_sorted_ascending_by_wall_time() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        push_text(&mut store, &device_a_id(), 3000);
+        push_text(&mut store, &device_a_id(), 1000);
+        push_text(&mut store, &device_a_id(), 2000);
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        let times: Vec<u64> = items.iter().map(|i| i.wall_time).collect();
+        assert_eq!(times, vec![1000, 2000, 3000]);
+    }
+
+    #[test]
+    fn push_rejects_unknown_content_type() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let err = store
+            .push_item(
+                &device_a_id(),
+                "video".to_string(),
+                B64.encode(b"x"),
+                1000,
+                10 * 1024 * 1024,
+            )
+            .unwrap_err();
+        assert!(matches!(err, RelayError::BadRequest(_)));
+    }
+
+    #[test]
+    fn push_rejects_invalid_base64() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let err = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                "!!!not-base64!!!".to_string(),
+                1000,
+                10 * 1024 * 1024,
+            )
+            .unwrap_err();
+        assert!(matches!(err, RelayError::BadRequest(_)));
+    }
+
+    #[test]
+    fn push_rejects_oversized_payload() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let big = B64.encode(b"hello world");
+        let err = store
+            .push_item(&device_a_id(), "text".to_string(), big, 1000, 10)
+            .unwrap_err();
+        assert!(matches!(err, RelayError::PayloadTooLarge));
+    }
+
+    #[test]
+    fn push_quota_prunes_oldest_item() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 1) {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
+        let min_wt = items.iter().map(|i| i.wall_time).min().unwrap();
+        assert_eq!(min_wt, 2, "oldest item must be evicted");
+    }
+
+    #[test]
+    fn pull_returns_device_not_found_for_unknown_device() {
+        let store = make_store();
+        let err = store
+            .pull_items("unknown-device", 0, None, usize::MAX)
+            .unwrap_err();
+        assert!(matches!(err, RelayError::DeviceNotFound));
+    }
+
+    #[test]
+    fn stats_counts_correctly() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        store
+            .register_device(
+                device_b_id(),
+                "Device B".into(),
+                unique_key(1),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let (devices, items) = store.stats();
+        assert_eq!(devices, 2);
+        assert_eq!(items, 0);
+        push_text(&mut store, &device_a_id(), 1000);
+        let (_, items) = store.stats();
+        assert_eq!(items, 1);
+    }
+
+    /// The history quota is enforced inside `push_item` keyed by the device's
+    /// tier. A push is never rejected with an error: instead the inbox is capped
+    /// at the effective limit by pruning the oldest items.
+    #[test]
+    fn free_tier_inbox_never_exceeds_history_cap() {
+        let mut store = make_store();
+        store
+            .register_device_with_tier(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+                Tier::Free,
+            )
+            .unwrap();
+
+        // The effective cap is min(500, 1000) = 500 for Free tier.
+        let effective_cap =
+            MAX_PUSH_ITEMS_PER_DEVICE.min(Tier::Free.max_history_items().unwrap_or(usize::MAX));
+
+        for t in 1u64..=(effective_cap as u64 + 50) {
+            push_text(&mut store, &device_a_id(), t);
+        }
+
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        assert!(
+            items.len() <= effective_cap,
+            "inbox must never exceed the effective history cap ({effective_cap}), got {}",
+            items.len()
+        );
+    }
+
+    /// History-quota enforcement must consult the device's tier: a Pro device
+    /// (unlimited history) is bounded only by the absolute hard cap, never by a
+    /// tier history limit.
+    #[test]
+    fn pro_tier_history_is_bounded_only_by_hard_cap() {
+        let mut store = make_store();
+        store
+            .register_device_with_tier(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+                Tier::Pro,
+            )
+            .unwrap();
+
+        for t in 1u64..=(MAX_PUSH_ITEMS_PER_DEVICE as u64 + 50) {
+            push_text(&mut store, &device_a_id(), t);
+        }
+
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        // Pro tier has no history limit, so only the absolute hard cap applies.
+        assert_eq!(items.len(), MAX_PUSH_ITEMS_PER_DEVICE);
+    }
+
+    /// The effective per-inbox history cap is the tighter of the absolute hard
+    /// cap and the tier's `max_history_items`.
+    #[test]
+    fn effective_history_cap_is_tier_aware() {
+        assert_eq!(effective_history_cap(Tier::Free), MAX_PUSH_ITEMS_PER_DEVICE);
+        assert_eq!(effective_history_cap(Tier::Pro), MAX_PUSH_ITEMS_PER_DEVICE);
+        // A tier limit tighter than the hard cap must win.
+        let tight_tier_limit = 10usize;
+        assert!(tight_tier_limit < MAX_PUSH_ITEMS_PER_DEVICE);
+        assert_eq!(history_cap_for_limit(Some(tight_tier_limit)), 10);
+        // Unlimited tier history (`None`) clamps to the hard cap.
+        assert_eq!(history_cap_for_limit(None), MAX_PUSH_ITEMS_PER_DEVICE);
+    }
+
+    /// CopyPaste-1uqb: When the inbox overflows its cap, the items evicted must
+    /// be chosen by server-assigned `id` (smallest = earliest arrival), not by
+    /// client-supplied `wall_time`.
+    #[test]
+    fn inbox_overflow_evicts_by_server_id_not_client_wall_time() {
+        let mut store = RelayStore::new_with_cap(3600, 2 /* cap = 2 items */);
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+
+        let id_first = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                B64.encode(b"first"),
+                1000,
+                10 * 1024 * 1024,
+            )
+            .unwrap();
+
+        let id_attacker = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                B64.encode(b"attacker"),
+                1, // deliberately old wall_time
+                10 * 1024 * 1024,
+            )
+            .unwrap();
+
+        let _id_third = store
+            .push_item(
+                &device_a_id(),
+                "text".to_string(),
+                B64.encode(b"third"),
+                2000,
+                10 * 1024 * 1024,
+            )
+            .unwrap();
+
+        let remaining: Vec<i64> = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap()
+            .into_iter()
+            .map(|it| it.id)
+            .collect();
+
+        assert_eq!(remaining.len(), 2, "inbox must be at cap after overflow");
+        assert!(
+            !remaining.contains(&id_first),
+            "CopyPaste-1uqb: the earliest-arrived item (id={id_first}) must be evicted"
+        );
+        assert!(
+            remaining.contains(&id_attacker),
+            "attacker item (id={id_attacker}) must survive — it arrived AFTER id_first"
+        );
+        assert!(
+            remaining.contains(&_id_third),
+            "the third item must survive"
+        );
+    }
+
+    /// `pull_items` must honor `limit`, returning at most `limit` items.
+    #[test]
+    fn pull_items_respects_limit() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
+            .unwrap();
+        for t in 1u64..=10 {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let page = store.pull_items(&device_a_id(), 0, None, 3).unwrap();
+        assert_eq!(page.len(), 3, "limit must cap the page size");
+        assert_eq!(
+            page.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
+            vec![1, 2, 3],
+        );
+    }
+
+    /// Pagination via `since` + `limit` must walk the whole window without gaps
+    /// or duplicates.
+    #[test]
+    fn pull_items_pagination_walks_window() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
+            .unwrap();
+        for t in 1u64..=5 {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let mut seen = Vec::new();
+        let mut since = 0u64;
+        loop {
+            let page = store.pull_items(&device_a_id(), since, None, 2).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            since = page.last().unwrap().wall_time;
+            seen.extend(page.iter().map(|i| i.wall_time));
+        }
+        assert_eq!(seen, vec![1, 2, 3, 4, 5]);
+    }
+
+    /// Pagination must not drop items when a page boundary falls in the middle
+    /// of a run of equal `wall_time` values. The composite `(wall_time, id)`
+    /// cursor must walk the whole tied run.
+    #[test]
+    fn pull_items_pagination_no_drop_on_tied_wall_times() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
+            .unwrap();
+        let id1 = push_text(&mut store, &device_a_id(), 10);
+        let id2 = push_text(&mut store, &device_a_id(), 10);
+        let id3 = push_text(&mut store, &device_a_id(), 10);
+
+        let page1 = store.pull_items(&device_a_id(), 0, None, 2).unwrap();
+        assert_eq!(page1.len(), 2);
+        assert_eq!(
+            page1.iter().map(|i| i.id).collect::<Vec<_>>(),
+            vec![id1, id2]
+        );
+
+        let last = page1.last().unwrap();
+        let page2 = store
+            .pull_items(&device_a_id(), last.wall_time, Some(last.id), 2)
+            .unwrap();
+        assert_eq!(
+            page2.iter().map(|i| i.id).collect::<Vec<_>>(),
+            vec![id3],
+            "composite cursor must return the remaining tied item"
+        );
+
+        // Full walk must see every item exactly once.
+        let mut seen_ids = Vec::new();
+        let mut since = 0u64;
+        let mut since_id: Option<i64> = None;
+        loop {
+            let page = store
+                .pull_items(&device_a_id(), since, since_id, 2)
+                .unwrap();
+            if page.is_empty() {
+                break;
+            }
+            let last = page.last().unwrap();
+            since = last.wall_time;
+            since_id = Some(last.id);
+            seen_ids.extend(page.iter().map(|i| i.id));
+        }
+        assert_eq!(seen_ids, vec![id1, id2, id3]);
+    }
+
+    /// The config `max_items_per_device` must govern the inbox cap.
+    #[test]
+    fn max_items_per_device_config_governs_cap() {
+        const CUSTOM_CAP: usize = 5;
+        let mut store = RelayStore::new_with_cap(3600, CUSTOM_CAP);
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        for t in 1u64..=(CUSTOM_CAP as u64 + 3) {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        assert_eq!(
+            items.len(),
+            CUSTOM_CAP,
+            "inbox must be capped at the config-supplied max_items_per_device ({CUSTOM_CAP})"
+        );
+    }
+
+    /// Out-of-order pushes must still be returned ascending by `wall_time`.
+    #[test]
+    fn pull_items_ordered_after_out_of_order_push() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
+            .unwrap();
+        for t in [50u64, 10, 30, 20, 40] {
+            push_text(&mut store, &device_a_id(), t);
+        }
+        let items = store
+            .pull_items(&device_a_id(), 0, None, usize::MAX)
+            .unwrap();
+        assert_eq!(
+            items.iter().map(|i| i.wall_time).collect::<Vec<_>>(),
+            vec![10, 20, 30, 40, 50]
+        );
+    }
+
+    // ---- CopyPaste-0y04: SSE per-device connection cap ----------------------
+
+    /// `notifier_receiver_count` must reflect the number of live SSE receivers.
+    #[test]
+    fn sse_receiver_count_tracks_live_subscriptions() {
+        let mut store = make_store();
+        store
+            .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
+            .unwrap();
+
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 0);
+
+        let rx1 = store.subscribe_notifier(&device_a_id());
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 1);
+
+        let rx2 = store.subscribe_notifier(&device_a_id());
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 2);
+
+        drop(rx1);
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 1);
+
+        drop(rx2);
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 0);
+    }
+
+    /// Calling `notifier_receiver_count` on an unknown device returns 0 (no panic).
+    #[test]
+    fn sse_receiver_count_returns_zero_for_unknown_device() {
+        let store = make_store();
+        assert_eq!(store.notifier_receiver_count(&device_a_id()), 0);
+    }
+
+    // ---- MAX_PULL_BYTES_BUDGET accessible from this module ------------------
+
+    /// Smoke-test that the byte-budget constant is visible and has the expected
+    /// value (128 MiB), guarding against accidental rewrites.
+    #[test]
+    fn max_pull_bytes_budget_is_128_mib() {
+        assert_eq!(MAX_PULL_BYTES_BUDGET, 128 * 1024 * 1024);
     }
 }

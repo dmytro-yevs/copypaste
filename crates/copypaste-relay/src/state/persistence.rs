@@ -241,3 +241,67 @@ impl super::RelayStore {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use crate::state::test_helpers::*;
+    use crate::state::RelayStore;
+
+    /// CopyPaste-hf40: the `next_sync_id` counter (relay watermark) must be
+    /// rehydrated from the database on startup. Simulated by:
+    ///   1. Create store A (on-disk SQLite via `new_persistent`).
+    ///   2. Push N items → counter advances to N+1.
+    ///   3. Create store B reloading from the same on-disk DB → must seed from N+1.
+    ///   4. Push one more item in store B → must get server id N+1 (not 1).
+    #[test]
+    fn next_sync_id_watermark_is_seeded_from_db_on_restart() {
+        // Create a temp file path for the DB.
+        let dir = std::env::temp_dir().join(format!(
+            "copypaste-relay-hf40-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let db_path = dir.join("relay.db").to_str().unwrap().to_string();
+
+        // Store A: register device, push 3 items → last pushed id must be 3.
+        // Note: `push_item_decoded` writes `next_sync_id` synchronously via
+        // `db.set_next_sync_id` (even though the item payload write is deferred),
+        // so the watermark is guaranteed in DB when the store drops.
+        let last_id_a = {
+            let mut store = RelayStore::new_persistent(3600, 500, &db_path).unwrap();
+            store
+                .register_device(device_a_id(), "A".into(), valid_key_b64(), valid_pop_b64())
+                .unwrap();
+            push_text(&mut store, &device_a_id(), 10); // id=1
+            push_text(&mut store, &device_a_id(), 20); // id=2
+            push_text(&mut store, &device_a_id(), 30) // id=3
+        };
+        assert_eq!(last_id_a, 3, "first store: last pushed id must be 3");
+
+        // Store B: open the same on-disk DB and reload via `new_persistent`.
+        // The next push must continue from id=4, NOT restart from 1.
+        let first_id_b = {
+            let mut store = RelayStore::new_persistent(3600, 500, &db_path).unwrap();
+            push_text(&mut store, &device_a_id(), 40) // must be id=4
+        };
+        assert_eq!(
+            first_id_b,
+            4,
+            "CopyPaste-hf40: after restart the first new push must get id={} (continuation), \
+             not 1 (restart from scratch); got {}",
+            last_id_a + 1,
+            first_id_b
+        );
+
+        // Clean up.
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

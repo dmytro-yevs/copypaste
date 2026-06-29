@@ -243,3 +243,403 @@ impl super::RelayStore {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use crate::error::RelayError;
+    use crate::quota::Tier;
+    use crate::state::test_helpers::*;
+
+    use super::MAX_TOKENS_PER_DEVICE;
+
+    #[test]
+    fn register_returns_bearer_token() {
+        let mut store = make_store();
+        let (token, expires_at) = store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        // CopyPaste-qvtg.3: 32-byte (256-bit) token → 64 hex chars.
+        assert_eq!(token.len(), 64);
+        assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(expires_at > 0);
+    }
+
+    #[test]
+    fn issued_token_is_not_born_expired() {
+        // Guards the near-epoch-clock outage fix: under any correctly-set host
+        // clock the issued token must expire in the future (~1 year out), never
+        // at-or-before "now". A bogus near-epoch clock previously yielded
+        // `expires_at_unix ≈ 365d`, which is far in the past today, so every
+        // device would be Unauthorized on its next request.
+        let mut store = make_store();
+        let (token, expires_at) = store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let now_unix = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("test host clock must be past the epoch")
+            .as_secs() as i64;
+        assert!(
+            expires_at > now_unix,
+            "token must not be born expired: expires_at={expires_at}, now={now_unix}"
+        );
+        // Roughly one year out (allow a few seconds of test scheduling slack).
+        let one_year = 365 * 24 * 3600;
+        assert!((expires_at - now_unix - one_year).abs() < 60);
+        // And the freshly-issued token must actually verify.
+        assert!(store.verify_token(&device_a_id(), &token).is_ok());
+    }
+
+    #[test]
+    fn co_registration_mints_new_token_and_both_are_valid() {
+        // R1a: re-registering an already-registered device_id no longer
+        // conflicts — it co-registers, minting a fresh independent token while
+        // keeping the original valid. BOTH tokens must authorize.
+        let mut store = make_store();
+        let (token1, _) = store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let (token2, _) = store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        assert_ne!(token1, token2, "co-registration must mint a distinct token");
+        assert!(
+            store.verify_token(&device_a_id(), &token1).is_ok(),
+            "the original token must remain valid after co-registration"
+        );
+        assert!(
+            store.verify_token(&device_a_id(), &token2).is_ok(),
+            "the co-registered token must also be valid"
+        );
+        // Still one device record / one inbox — co-registration shares the inbox.
+        assert_eq!(store.devices.len(), 1);
+        assert_eq!(store.devices[&device_a_id()].tokens.len(), 2);
+    }
+
+    /// CopyPaste-crh3.115: device_tier reports the registered tier (the push
+    /// quota now reads this instead of a hardcoded Tier::Free), and falls back to
+    /// Free for an unknown device.
+    #[test]
+    fn device_tier_reports_registered_tier_and_free_fallback() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        assert_eq!(store.device_tier(&device_a_id()), Tier::Free);
+        assert_eq!(
+            store.device_tier("never-registered"),
+            Tier::Free,
+            "unknown device must default to Free (never over-grant)"
+        );
+    }
+
+    /// CopyPaste-crh3.115: a Pro-tier registration is reflected by device_tier, so
+    /// the push item-size quota admits an above-free item for that sender.
+    #[cfg(feature = "quota-tiers")]
+    #[test]
+    fn device_tier_reports_pro_for_pro_registration() {
+        let mut store = make_store();
+        store
+            .register_device_with_tier(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+                Tier::Pro,
+            )
+            .unwrap();
+        assert_eq!(store.device_tier(&device_a_id()), Tier::Pro);
+    }
+
+    #[test]
+    fn token_cap_evicts_oldest() {
+        // Issuing more than MAX_TOKENS_PER_DEVICE tokens for one device_id
+        // evicts the oldest (FIFO): the first-issued token stops authorizing
+        // once the cap is exceeded, while the most recent cap-worth stay valid.
+        let mut store = make_store();
+        let mut tokens = Vec::new();
+        for _ in 0..(MAX_TOKENS_PER_DEVICE + 1) {
+            let (t, _) = store
+                .register_device(
+                    device_a_id(),
+                    "Device A".into(),
+                    valid_key_b64(),
+                    valid_pop_b64(),
+                )
+                .unwrap();
+            tokens.push(t);
+        }
+        assert_eq!(
+            store.devices[&device_a_id()].tokens.len(),
+            MAX_TOKENS_PER_DEVICE,
+            "token set must be capped at MAX_TOKENS_PER_DEVICE"
+        );
+        // The very first token was evicted (oldest), the rest still authorize.
+        assert!(
+            store.verify_token(&device_a_id(), &tokens[0]).is_err(),
+            "oldest token must be evicted past the cap"
+        );
+        for t in &tokens[1..] {
+            assert!(
+                store.verify_token(&device_a_id(), t).is_ok(),
+                "the most recent cap-worth of tokens must remain valid"
+            );
+        }
+    }
+
+    #[test]
+    fn expired_token_is_pruned_on_co_registration() {
+        // add_token reclaims space from already-expired tokens before applying
+        // the oldest-eviction cap: an expired token is dropped on the next
+        // co-registration rather than counting toward the cap.
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        // Forcibly expire the sole token.
+        store.devices.get_mut(&device_a_id()).unwrap().tokens[0].expires_at_unix = 1;
+        // Co-register: the expired entry is pruned, leaving only the new token.
+        let (fresh, _) = store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let tokens = &store.devices[&device_a_id()].tokens;
+        assert_eq!(tokens.len(), 1, "expired token must be pruned on add");
+        assert_eq!(tokens[0].token, fresh);
+        assert!(store.verify_token(&device_a_id(), &fresh).is_ok());
+    }
+
+    #[test]
+    fn verify_token_ok() {
+        let mut store = make_store();
+        let (token, _) = store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        assert!(store.verify_token(&device_a_id(), &token).is_ok());
+    }
+
+    #[test]
+    fn verify_token_wrong_token_is_unauthorized() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let err = store
+            .verify_token(&device_a_id(), "badtoken00000000000000000000000")
+            .unwrap_err();
+        assert!(matches!(err, RelayError::Unauthorized));
+    }
+
+    #[test]
+    fn verify_token_expired_is_unauthorized() {
+        // M11: an expired token must return Unauthorized (same variant as
+        // a wrong token) so an attacker cannot distinguish the two cases.
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        // Forcibly expire the device's sole token by rewinding `expires_at_unix`.
+        let record = store.devices.get_mut(&device_a_id()).unwrap();
+        let token = record.tokens[0].token.clone();
+        record.tokens[0].expires_at_unix = 1; // 1970-01-01
+        let err = store.verify_token(&device_a_id(), &token).unwrap_err();
+        assert!(matches!(err, RelayError::Unauthorized));
+    }
+
+    #[test]
+    fn get_device_returns_correct_info() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "My Mac".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        let record = store.get_device(&device_a_id()).unwrap();
+        assert_eq!(record.device_id, device_a_id());
+        assert_eq!(record.device_name, "My Mac");
+        assert_eq!(record.public_key_b64, valid_key_b64());
+        assert!(record.latest_expires_at() > 0);
+    }
+
+    #[test]
+    fn get_device_missing_returns_not_found() {
+        let store = make_store();
+        let err = store.get_device("nonexistent-id").unwrap_err();
+        assert!(matches!(err, RelayError::DeviceNotFound));
+    }
+
+    /// Positive: a device that calls `update_last_seen` after the inactivity
+    /// threshold has elapsed must SURVIVE `cleanup_inactive_devices` — last_seen
+    /// is reset to "now" so the threshold is no longer exceeded.
+    ///
+    /// This guards the fix for the prior bug where `update_last_seen` was
+    /// defined but never called from the route handlers, so `last_seen` stayed
+    /// equal to `registered_at` and active devices were evicted after 30 days.
+    #[test]
+    fn update_last_seen_prevents_eviction_after_threshold() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+
+        // Simulate the device's last_seen being past the threshold by rewinding
+        // it to a time far in the past (subtract threshold + 1 second).
+        let threshold_secs = 60u64; // use a small finite threshold for the test
+        {
+            let record = store.devices.get_mut(&device_a_id()).unwrap();
+            // Rewind last_seen by (threshold + 1) seconds so cleanup would
+            // normally evict this device.
+            record.last_seen = Instant::now() - Duration::from_secs(threshold_secs + 1);
+        }
+
+        // Verify that WITHOUT update_last_seen the device would be evicted.
+        let would_evict = store
+            .devices
+            .get(&device_a_id())
+            .map(|r| r.last_seen.elapsed().as_secs() >= threshold_secs)
+            .unwrap_or(false);
+        assert!(
+            would_evict,
+            "precondition: device should be evictable before update_last_seen"
+        );
+
+        // Now call update_last_seen (simulating what the route handler does
+        // after a successful verify_token).
+        store.update_last_seen(&device_a_id());
+
+        // cleanup_inactive_devices with the same finite threshold must NOT
+        // evict the device whose last_seen was just refreshed.
+        let removed = store.cleanup_inactive_devices(threshold_secs);
+        assert_eq!(
+            removed, 0,
+            "device must survive cleanup after update_last_seen refreshes last_seen"
+        );
+        assert!(
+            store.devices.contains_key(&device_a_id()),
+            "device must still be registered"
+        );
+    }
+
+    /// Negative: a device that does NOT call `update_last_seen` after the
+    /// inactivity threshold has elapsed must be EVICTED by
+    /// `cleanup_inactive_devices`.
+    #[test]
+    fn no_update_last_seen_causes_eviction_after_threshold() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+
+        let threshold_secs = 60u64;
+
+        // Rewind last_seen past the threshold — no update_last_seen called.
+        {
+            let record = store.devices.get_mut(&device_a_id()).unwrap();
+            record.last_seen = Instant::now() - Duration::from_secs(threshold_secs + 1);
+        }
+
+        let removed = store.cleanup_inactive_devices(threshold_secs);
+        assert_eq!(
+            removed, 1,
+            "stale device with no last_seen update must be evicted"
+        );
+        assert!(
+            !store.devices.contains_key(&device_a_id()),
+            "device must be gone after eviction"
+        );
+    }
+
+    /// When `verify_token` encounters a clock error it must fail CLOSED (return
+    /// `Unauthorized`), not silently treat `now_unix=0` as "valid" (the old
+    /// `unwrap_or_default()` behaviour that made `0 <= expires_at_unix` always
+    /// true). We test the internal helper `verify_token_at` directly, injecting
+    /// a simulated clock error via `None` for `now_unix`.
+    #[test]
+    fn verify_token_clock_error_returns_unauthorized() {
+        let mut store = make_store();
+        let (token, _) = store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        // None = simulated clock error → must fail closed.
+        let err = store
+            .verify_token_at(&device_a_id(), &token, None)
+            .unwrap_err();
+        assert!(
+            matches!(err, RelayError::Unauthorized),
+            "clock error must fail closed: got {err:?}"
+        );
+    }
+}
