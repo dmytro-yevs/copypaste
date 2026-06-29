@@ -533,8 +533,11 @@
 
     <!-- CopyPaste-bdac.61: SettingsActivity — Data section export/import actions -->
     <string name="setting_export_history_label">Export history</string>
-    <string name="setting_export_history_subtitle">Save text items to a JSON file (images and sensitive items excluded)</string>
+    <string name="setting_export_history_subtitle">Save text items to a JSON file (images excluded; sensitive items excluded by default)</string>
     <string name="action_export">Export</string>
+    <!-- CopyPaste-crh3.40: Include-sensitive-items toggle on export (parity with macOS) -->
+    <string name="setting_export_include_sensitive_label">Include sensitive items</string>
+    <string name="setting_export_include_sensitive_warning">Warning: sensitive items will be exported as plaintext. Keep the file secure and delete it when done.</string>
     <string name="setting_import_history_label">Import history</string>
     <string name="setting_import_history_subtitle">Load items from a JSON export file</string>
     <string name="action_import">Import</string>

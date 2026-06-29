@@ -201,4 +201,104 @@ class HistoryExportImportTest {
         val (_, items) = parseExportJson(json)
         assertFalse("Missing 'pinned' field must default to false", items[0].pinned)
     }
+
+    // ── Sensitive-items filter (CopyPaste-crh3.40) ────────────────────────────
+    //
+    // The export filter logic mirrors ClipboardRepository.exportHistory():
+    //   isText && (!isSensitive || includeSensitive)
+    //
+    // Tests here validate that logic as a pure function so they can run on the
+    // JVM without any Android context (no SharedPreferences / FFI needed).
+
+    /** Represents a raw history item before export filtering. */
+    private data class RawHistoryItem(
+        val id: String,
+        val contentType: String,
+        val isSensitive: Boolean,
+        val snippet: String,
+    )
+
+    /**
+     * Pure filter that mirrors the loop body in ClipboardRepository.exportHistory().
+     * Keep in sync with the production implementation.
+     */
+    private fun filterForExport(
+        items: List<RawHistoryItem>,
+        includeSensitive: Boolean,
+    ): List<RawHistoryItem> = items.filter { item ->
+        item.contentType == "text" && (!item.isSensitive || includeSensitive)
+    }
+
+    @Test
+    fun sensitiveItems_areExcluded_byDefault() {
+        // Default (includeSensitive = false): sensitive text items must be omitted.
+        val items = listOf(
+            RawHistoryItem("s1", "text", isSensitive = true,  snippet = "secret"),
+            RawHistoryItem("n1", "text", isSensitive = false, snippet = "normal"),
+        )
+        val exported = filterForExport(items, includeSensitive = false)
+        assertEquals("Only non-sensitive item should be exported", 1, exported.size)
+        assertEquals("n1", exported[0].id)
+    }
+
+    @Test
+    fun sensitiveItems_areIncluded_whenFlagIsTrue() {
+        // includeSensitive = true: all text items (sensitive + non-sensitive) must appear.
+        val items = listOf(
+            RawHistoryItem("s1", "text", isSensitive = true,  snippet = "secret"),
+            RawHistoryItem("n1", "text", isSensitive = false, snippet = "normal"),
+        )
+        val exported = filterForExport(items, includeSensitive = true)
+        assertEquals("Both items should be exported when flag is true", 2, exported.size)
+        assertTrue("Sensitive item present", exported.any { it.id == "s1" })
+        assertTrue("Normal item present",    exported.any { it.id == "n1" })
+    }
+
+    @Test
+    fun sensitiveFilter_allSensitive_excludedByDefault() {
+        val items = listOf(
+            RawHistoryItem("s1", "text", isSensitive = true, snippet = "pw1"),
+            RawHistoryItem("s2", "text", isSensitive = true, snippet = "pw2"),
+        )
+        assertEquals(0, filterForExport(items, includeSensitive = false).size)
+    }
+
+    @Test
+    fun sensitiveFilter_allSensitive_includedWhenFlagIsTrue() {
+        val items = listOf(
+            RawHistoryItem("s1", "text", isSensitive = true, snippet = "pw1"),
+            RawHistoryItem("s2", "text", isSensitive = true, snippet = "pw2"),
+        )
+        assertEquals(2, filterForExport(items, includeSensitive = true).size)
+    }
+
+    @Test
+    fun sensitiveFilter_nonTextItems_alwaysExcluded() {
+        // Image / file items with isSensitive=false must still be excluded from export.
+        val items = listOf(
+            RawHistoryItem("i1", "image", isSensitive = false, snippet = "[img]"),
+            RawHistoryItem("f1", "file",  isSensitive = false, snippet = "[file]"),
+            RawHistoryItem("t1", "text",  isSensitive = false, snippet = "hello"),
+        )
+        val exported = filterForExport(items, includeSensitive = true)
+        assertEquals("Only the text item should survive", 1, exported.size)
+        assertEquals("t1", exported[0].id)
+    }
+
+    @Test
+    fun sensitiveFilter_mixedList_correctCountBothModes() {
+        // 2 sensitive text, 2 non-sensitive text, 1 sensitive image, 1 non-sensitive file
+        val items = listOf(
+            RawHistoryItem("st1", "text",  isSensitive = true,  snippet = "s1"),
+            RawHistoryItem("st2", "text",  isSensitive = true,  snippet = "s2"),
+            RawHistoryItem("nt1", "text",  isSensitive = false, snippet = "n1"),
+            RawHistoryItem("nt2", "text",  isSensitive = false, snippet = "n2"),
+            RawHistoryItem("si1", "image", isSensitive = true,  snippet = "[img]"),
+            RawHistoryItem("nf1", "file",  isSensitive = false, snippet = "[file]"),
+        )
+        // Default (off): only 2 non-sensitive text items
+        assertEquals(2, filterForExport(items, includeSensitive = false).size)
+        // On: 4 text items (2 sensitive + 2 non-sensitive); images/files still excluded
+        assertEquals(4, filterForExport(items, includeSensitive = true).size)
+    }
 }

@@ -2291,17 +2291,22 @@ class ClipboardRepository(context: Context) {
     //     encrypted with the device's current key.
 
     /**
-     * Export all non-sensitive TEXT clipboard items as a JSON string.
+     * Export TEXT clipboard items as a JSON string.
      *
      * Returns the JSON [String] on success. Image and file items are omitted.
-     * Sensitive items (flagged by [ClipboardItem.isSensitive]) are also omitted
-     * to avoid leaking secrets into plaintext export files.
+     * Sensitive items (flagged by [ClipboardItem.isSensitive]) are omitted unless
+     * [includeSensitive] is true — matching the macOS "Include sensitive items"
+     * export toggle (CopyPaste-crh3.40). The default is false (safe default: secrets
+     * stay out of plaintext export files unless the user explicitly opts in).
      *
      * [encryptionKey] is needed to decrypt stored ciphertext for the full-text field.
      * The returned JSON is plaintext — the caller must write it to a user-chosen
      * location via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
      */
-    suspend fun exportHistory(encryptionKey: ByteArray): String = withContext(Dispatchers.IO) {
+    suspend fun exportHistory(
+        encryptionKey: ByteArray,
+        includeSensitive: Boolean = false,
+    ): String = withContext(Dispatchers.IO) {
         // Load all items (no pagination cap) using the existing getItems path which
         // handles decryption, sensitivity detection, and pinned ordering.
         val allItems = getItems(key = encryptionKey, limit = Int.MAX_VALUE, offset = 0)
@@ -2311,8 +2316,8 @@ class ClipboardRepository(context: Context) {
         for (item in allItems) {
             // Only export text items.
             if (!item.isText) continue
-            // Skip sensitive items.
-            if (item.isSensitive) continue
+            // CopyPaste-crh3.40: skip sensitive items unless the user opted in.
+            if (item.isSensitive && !includeSensitive) continue
 
             val fullText = runCatching { loadFullPlaintext(item.id, encryptionKey) }.getOrNull()
                 ?: item.snippet

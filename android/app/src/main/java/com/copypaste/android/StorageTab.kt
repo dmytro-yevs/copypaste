@@ -35,6 +35,7 @@ import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.GlassAlertDialog
+import com.copypaste.android.ui.theme.IdeSwitch
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.LocalIdeColors
@@ -181,7 +182,8 @@ internal fun StorageTab(
     // CopyPaste-12f0: degraded-DB recovery — wipes the entire repository (macOS parity).
     onResetDatabase: () -> Unit,
     // CopyPaste-8jx8: export clipboard history as JSON (plaintext) via SAF.
-    onExportHistory: () -> Unit = {},
+    // CopyPaste-crh3.40: carries the includeSensitive toggle value (parity with macOS).
+    onExportHistory: (includeSensitive: Boolean) -> Unit = {},
     // CopyPaste-8jx8: import clipboard history from a JSON export file via SAF.
     onImportHistory: () -> Unit = {},
     // CopyPaste-bdac.42: compact (VACUUM) the SQLCipher database (macOS parity).
@@ -256,6 +258,12 @@ internal fun StorageTab(
             )
         }
 
+        // CopyPaste-crh3.40: Include-sensitive-items toggle — UI-local state (not persisted),
+        // matching the macOS export toggle which resets to OFF each time the Settings view
+        // opens. Default OFF is the safe choice: sensitive items stay out of plaintext
+        // export files unless the user explicitly opts in.
+        var includeSensitiveExport by rememberSaveable { mutableStateOf(false) }
+
         // ── DATA — destructive actions (CopyPaste-wuek NG-1: parity with macOS) ──
         // Canonical per PARITY-SPEC §8: destructive data operations belong in
         // Settings, matching the Apple HIG and macOS Settings → Storage → Data.
@@ -318,31 +326,65 @@ internal fun StorageTab(
         SettingsCard {
             val c = LocalIdeColors.current
             // CopyPaste-8jx8: Export history — produces a JSON file with text items
-            // (non-sensitive only) via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
-            Row(
+            // via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
+            // CopyPaste-crh3.40: Include-sensitive-items toggle (parity with macOS).
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+                        Text(
+                            text = stringResource(R.string.setting_export_history_label),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = c.text,
+                        )
+                        Text(
+                            text = stringResource(R.string.setting_export_history_subtitle),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = c.dim,
+                        )
+                    }
+                    CopyPasteButton(
+                        onClick = { onExportHistory(includeSensitiveExport) },
+                        variant = ButtonVariant.PRIMARY,
+                    ) {
+                        Text(stringResource(R.string.action_export))
+                    }
+                }
+                // Include-sensitive toggle row — mirrors macOS "Include sensitive items" checkbox.
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
                     Text(
-                        text = stringResource(R.string.setting_export_history_label),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = c.text,
-                    )
-                    Text(
-                        text = stringResource(R.string.setting_export_history_subtitle),
+                        text = stringResource(R.string.setting_export_include_sensitive_label),
                         style = MaterialTheme.typography.bodySmall,
                         color = c.dim,
+                        modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    )
+                    IdeSwitch(
+                        checked = includeSensitiveExport,
+                        onCheckedChange = { includeSensitiveExport = it },
+                        name = stringResource(R.string.setting_export_include_sensitive_label),
                     )
                 }
-                CopyPasteButton(
-                    onClick = onExportHistory,
-                    variant = ButtonVariant.PRIMARY,
-                ) {
-                    Text(stringResource(R.string.action_export))
+                // Warning text — only visible when toggle is ON (mirrors macOS plaintext warning).
+                if (includeSensitiveExport) {
+                    Text(
+                        text = stringResource(R.string.setting_export_include_sensitive_warning),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = c.warning,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
                 }
             }
             SettingsCardDivider()

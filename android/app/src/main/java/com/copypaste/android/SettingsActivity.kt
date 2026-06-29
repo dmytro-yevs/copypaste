@@ -487,18 +487,27 @@ fun SettingsScreen(
                         // CopyPaste-8jx8: Export via SAF — user picks a destination file.
                         // bd CopyPaste-44rq.22: show GlassToast on success/failure instead of
                         // silently logging — keeps the user informed about async SAF outcomes.
+                        //
+                        // CopyPaste-crh3.40: capture the includeSensitive toggle value in a
+                        // mutable state var. It is set just before calling exportLauncher.launch()
+                        // (in onExportHistory below) so the SAF result callback always sees the
+                        // value the user had selected when they pressed "Export".
+                        var exportIncludeSensitive by remember { mutableStateOf(false) }
                         val exportLauncher = rememberLauncherForActivityResult(
                             androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json"),
                         ) { uri ->
                             if (uri == null) return@rememberLauncherForActivityResult
+                            // Capture the flag into a local val so the coroutine closure is stable
+                            // even if a recomposition updates the outer var before the IO work runs.
+                            val includeSensitive = exportIncludeSensitive
                             scope.launch(Dispatchers.IO) {
                                 try {
                                     val key = settings.encryptionKey
-                                    val json = repository.exportHistory(key)
+                                    val json = repository.exportHistory(key, includeSensitive)
                                     ctx.contentResolver.openOutputStream(uri)?.use { out ->
                                         out.write(json.toByteArray(Charsets.UTF_8))
                                     }
-                                    android.util.Log.i("SettingsActivity", "Exported history to $uri")
+                                    android.util.Log.i("SettingsActivity", "Exported history to $uri (includeSensitive=$includeSensitive)")
                                     toastState.show(ctx.getString(R.string.history_export_ok), GlassToastKind.SUCCESS)
                                 } catch (e: Exception) {
                                     android.util.Log.e("SettingsActivity", "Export failed: ${e.message}", e)
@@ -558,7 +567,11 @@ fun SettingsScreen(
                                 scope.launch(Dispatchers.IO) { repository.resetDatabase(confirmed = true) }
                             },
                             // CopyPaste-8jx8: export/import via SAF file picker.
-                            onExportHistory = {
+                            // CopyPaste-crh3.40: StorageTab passes the current toggle value;
+                            // stash it before launching the file picker so the async callback
+                            // reads the right flag when the user picks a file.
+                            onExportHistory = { includeSensitive ->
+                                exportIncludeSensitive = includeSensitive
                                 val ts = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
                                     .format(java.util.Date())
                                 exportLauncher.launch("copypaste_history_$ts.json")
