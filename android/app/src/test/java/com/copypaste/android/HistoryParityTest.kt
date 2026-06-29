@@ -14,58 +14,18 @@ import org.junit.Test
 class HistoryParityTest {
 
     // ─────────────────────────────────────────────────────────────────────────
-    // §1 Density-aware row height
+    // §5 fixed row height — density modes removed (CopyPaste-xruv, §2/§12)
     // ─────────────────────────────────────────────────────────────────────────
 
     /**
-     * Utility mirroring the in-production lookup:
-     *   settings.density ("comfortable"|"compact"), defaulting to "comfortable"
-     * when the key is absent (defensive read — density pref may not exist yet).
+     * HistoryRow now uses a single fixed §5 comfortable min height (44 dp) for
+     * text rows; there is no density pref and no compact/comfortable branch.
      */
-    private fun readDensityPref(prefs: Map<String, String>): String =
-        prefs.getOrDefault("density", "comfortable")
-
-    /** Compact mode → min row height 28 dp. */
-    private fun rowMinHeightDp(density: String): Int = when (density) {
-        "compact" -> 28
-        else      -> 34   // comfortable (default) or any unknown value
-    }
+    private fun rowMinHeightDp(): Int = 44
 
     @Test
-    fun `density pref absent -- defaults to comfortable`() {
-        val density = readDensityPref(emptyMap())
-        assertEquals("comfortable", density)
-    }
-
-    @Test
-    fun `density pref set to compact -- returns compact`() {
-        val density = readDensityPref(mapOf("density" to "compact"))
-        assertEquals("compact", density)
-    }
-
-    @Test
-    fun `density pref set to comfortable -- returns comfortable`() {
-        val density = readDensityPref(mapOf("density" to "comfortable"))
-        assertEquals("comfortable", density)
-    }
-
-    @Test
-    fun `comfortable density -- row min height is 34dp`() {
-        val height = rowMinHeightDp("comfortable")
-        assertEquals(34, height)
-    }
-
-    @Test
-    fun `compact density -- row min height is 28dp`() {
-        val height = rowMinHeightDp("compact")
-        assertEquals(28, height)
-    }
-
-    @Test
-    fun `unknown density value -- falls through to comfortable 34dp`() {
-        // Defensive: any future unknown value should default to comfortable, not crash.
-        val height = rowMinHeightDp("ultra")
-        assertEquals(34, height)
+    fun `row min height is the fixed comfortable 44dp`() {
+        assertEquals(44, rowMinHeightDp())
     }
 
     // ─────────────────────────────────────────────────────────────────────────

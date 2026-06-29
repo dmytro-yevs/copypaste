@@ -42,9 +42,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.accentFill
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.RadiusControl
 import com.copypaste.android.ui.theme.SharedSettingsNavRow
@@ -66,7 +67,7 @@ import com.copypaste.android.ui.theme.ideTextFieldColors
  * with [CopyPasteCard] — the canonical styleguide .surface-card (14dp RadiusCard,
  * backdrop-filter blur 28, per-tier white-alpha gradient fill, bright .5px white
  * glass-rim hairline, soft tinted float shadow). The hairline is inherent to
- * LiquidGlassSurface(hairline=true) inside CopyPasteCard, so lr9p is resolved here.
+ * TranslucentSurface(hairline=true) inside CopyPasteCard, so lr9p is resolved here.
  */
 @Composable
 internal fun SettingsCard(content: @Composable () -> Unit) {
@@ -81,7 +82,7 @@ internal fun SettingsCard(content: @Composable () -> Unit) {
  */
 @Composable
 internal fun SettingsCardDivider() {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     HorizontalDivider(
         color = c.divider,
         thickness = 1.dp,
@@ -109,7 +110,7 @@ internal fun IdeSegmentedControl(
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // Fixed control radius (STYLEGUIDE §5 --r-ctl 8dp) — no skin.
     val ctlRadius = 8.dp
     val outerShape = RoundedCornerShape(ctlRadius)
@@ -149,7 +150,7 @@ internal fun IdeSegmentedControl(
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                         fontSize = 12.sp,
                     ),
-                    color = if (isSelected) c.accent else c.dim,
+                    color = if (isSelected) accentFill() else c.dim,
                     textAlign = TextAlign.Center,
                     maxLines = 1,
                 )
@@ -170,7 +171,7 @@ internal fun SettingsTextField(
     onValueChange: (String) -> Unit,
     password: Boolean = false,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // u1ad: track focus so we can render the 2dp accent focus ring.
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
@@ -193,7 +194,7 @@ internal fun SettingsTextField(
             .padding(horizontal = 16.dp, vertical = 6.dp)
             .then(
                 // 2dp accent outer ring when focused — mirrors the 2px outline-offset ring.
-                if (focused) Modifier.border(2.dp, c.accent.copy(alpha = 0.5f), RadiusControl)
+                if (focused) Modifier.border(2.dp, accentFill().copy(alpha = 0.5f), RadiusControl)
                 else Modifier
             ),
         visualTransformation = if (password) PasswordVisualTransformation()
@@ -216,14 +217,12 @@ internal fun SettingsNavRow(
     title: String,
     subtitle: String,
     onClick: () -> Unit,
-    density: Density,
     // CopyPaste-5917.77: optional leading icon (NavIcons.About / NavIcons.Logs).
     leadingIcon: ImageVector? = null,
 ) {
     SharedSettingsNavRow(
         title = title,
         subtitle = subtitle,
-        density = density,
         onClick = onClick,
         leadingIcon = leadingIcon,
     )
@@ -233,8 +232,8 @@ internal fun SettingsNavRow(
  * A row with a description and an action button — used in the Diagnostics
  * section for log export and similar non-toggle actions.
  *
- * CopyPaste-hffp: added density param; compact mode reduces padding and uses
- * bodyMedium title (was hardcoded bodyLarge + 10dp regardless of density).
+ * §5 fixed comfortable spacing (10dp + bodyLarge) — density modes removed
+ * (CopyPaste-xruv, §2/§12).
  */
 @Composable
 internal fun DiagnosticsNavRow(
@@ -242,17 +241,9 @@ internal fun DiagnosticsNavRow(
     subtitle: String,
     buttonLabel: String,
     onClick: () -> Unit,
-    // CopyPaste-hffp: live density param — replaces hardcoded bodyLarge/10dp.
-    density: Density,
 ) {
-    val c = LocalIdeColors.current
-    val isCompact  = density == Density.COMPACT
-    val isSpacious = density == Density.SPACIOUS
-    val vertPad = when {
-        isCompact  -> 8.dp
-        isSpacious -> 14.dp
-        else       -> 10.dp
-    }
+    val c = LocalCpColors.current
+    val vertPad = 10.dp
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -260,8 +251,7 @@ internal fun DiagnosticsNavRow(
     ) {
         Text(
             text = title,
-            style = if (isCompact) MaterialTheme.typography.bodyMedium
-                    else MaterialTheme.typography.bodyLarge,
+            style = MaterialTheme.typography.bodyLarge,
             color = c.text,
         )
         Text(
@@ -291,14 +281,12 @@ internal fun SettingsRow(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    density: Density,
 ) {
     SharedSettingsRow(
         title = title,
         subtitle = subtitle,
         checked = checked,
         onCheckedChange = onCheckedChange,
-        density = density,
     )
 }
 
@@ -312,7 +300,7 @@ internal fun AdbCaptureStatusLine(
     logcatStatus: LogcatCaptureStatus,
     ctx: android.content.Context,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val readLogsGranted = LogcatCaptureService.hasReadLogsPermission(ctx)
     val overlayGranted: Boolean = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.M) {
         android.provider.Settings.canDrawOverlays(ctx)
@@ -320,11 +308,11 @@ internal fun AdbCaptureStatusLine(
 
     val (captureText, captureColor) = when (logcatStatus) {
         LogcatCaptureStatus.WORKING ->
-            stringResource(R.string.bg_adb_status_capture_working) to c.success
+            stringResource(R.string.bg_adb_status_capture_working) to c.ok
         LogcatCaptureStatus.DISABLED, LogcatCaptureStatus.NOT_GRANTED ->
             stringResource(R.string.bg_adb_status_capture_inactive) to c.dim
         LogcatCaptureStatus.GRANTED_NOT_WORKING ->
-            stringResource(R.string.bg_adb_status_capture_inactive) to c.warning
+            stringResource(R.string.bg_adb_status_capture_inactive) to c.warn
     }
 
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
@@ -335,7 +323,7 @@ internal fun AdbCaptureStatusLine(
                 else
                     stringResource(R.string.bg_adb_status_read_logs_no),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (readLogsGranted) c.success else c.danger,
+                color = if (readLogsGranted) c.ok else c.err,
             )
             Text(
                 text = if (overlayGranted)
@@ -343,7 +331,7 @@ internal fun AdbCaptureStatusLine(
                 else
                     stringResource(R.string.bg_adb_status_overlay_no),
                 style = MaterialTheme.typography.bodySmall,
-                color = if (overlayGranted) c.success else c.dim,
+                color = if (overlayGranted) c.ok else c.dim,
             )
         }
         Text(
@@ -388,7 +376,7 @@ internal fun AdbCmdRow(
     // the unstyled OS-native black pill. Callers pass a lambda that routes to GlassToastHost.
     onToastRequest: (String) -> Unit = {},
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Text(
         text = label,
         style = MaterialTheme.typography.labelSmall,
@@ -397,7 +385,7 @@ internal fun AdbCmdRow(
     Text(
         text = cmd,
         style = MaterialTheme.typography.bodySmall.copy(fontFamily = MonoFontFamily),
-        color = c.accent,
+        color = accentFill(),
         modifier = Modifier
             .fillMaxWidth()
             // CopyPaste-n7ff: announce as a Button with a "Copy command" action.

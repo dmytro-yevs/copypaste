@@ -42,6 +42,8 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.PhonelinkSetup
 import androidx.compose.material.icons.outlined.Tune
 import com.copypaste.android.ui.theme.GlassAlertDialog
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.accentTint
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -77,7 +79,7 @@ import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.RadiusChip
@@ -342,7 +344,7 @@ fun OnboardingScreen(
     onOemHintConsumed: () -> Unit = {},
 ) {
     val ctx = LocalContext.current
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val dark = isDarkTheme()
     val translucent = rememberTranslucency()
     val reduced = rememberReducedMotion()
@@ -605,15 +607,15 @@ private fun PermissionCard(
     enterDelayMs: Int = 0,
     entered: Boolean = true,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val reduced = rememberReducedMotion()
     val slowDur = motionDuration(Motion.Slow)
 
     // Status-colored hairline border: granted → success; explicitly-missing +
     // required → danger; null (indeterminate) or optional → neutral.
     val borderColor = when {
-        granted == true               -> c.success
-        granted == false && required  -> c.danger
+        granted == true               -> c.ok
+        granted == false && required  -> c.err
         else                          -> c.border
     }
 
@@ -638,7 +640,7 @@ private fun PermissionCard(
                         .size(32.dp)
                         .clip(CircleShape)
                         .background(
-                            if (granted == true) c.successDim else c.accentDim
+                            if (granted == true) c.ok.copy(alpha = 0.12f) else accentTint()
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -646,14 +648,14 @@ private fun PermissionCard(
                         Icon(
                             imageVector = Icons.Outlined.Check,
                             contentDescription = null,
-                            tint = c.success,
+                            tint = c.ok,
                             modifier = Modifier.size(18.dp),
                         )
                     } else {
                         Icon(
                             imageVector = icon,
                             contentDescription = null,
-                            tint = c.accent,
+                            tint = accentFill(),
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -668,14 +670,14 @@ private fun PermissionCard(
                     // Required badge — accent-tinted chip pill
                     Box(
                         modifier = Modifier
-                            .background(c.dangerDim, RadiusChip)
-                            .border(0.5.dp, c.danger.copy(alpha = 0.35f), RadiusChip)
+                            .background(c.err.copy(alpha = 0.12f), RadiusChip)
+                            .border(0.5.dp, c.err.copy(alpha = 0.35f), RadiusChip)
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     ) {
                         Text(
                             text = "required",
                             style = MaterialTheme.typography.labelSmall,
-                            color = c.danger,
+                            color = c.err,
                         )
                     }
                 }
@@ -719,11 +721,11 @@ private fun AdbBackgroundCaptureCard(
     entered: Boolean = true,
     onToastRequest: (String) -> Unit = {},
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val reduced = rememberReducedMotion()
     val slowDur = motionDuration(Motion.Slow)
 
-    val borderColor = if (readLogsGranted && overlayGranted) c.success else c.border
+    val borderColor = if (readLogsGranted && overlayGranted) c.ok else c.border
 
     val alpha by animateFloatAsState(
         targetValue = if (entered) 1f else 0f,
@@ -813,13 +815,13 @@ private fun AdbBackgroundCaptureCard(
 /** Status badge pill — green on granted, muted otherwise. */
 @Composable
 private fun StatusPill(text: String, ok: Boolean) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Box(
         modifier = Modifier
-            .background(if (ok) c.successDim else c.accentDim, RadiusChip)
+            .background(if (ok) c.ok.copy(alpha = 0.12f) else accentTint(), RadiusChip)
             .border(
                 0.5.dp,
-                if (ok) c.success.copy(alpha = 0.35f) else c.border.copy(alpha = 0.35f),
+                if (ok) c.ok.copy(alpha = 0.35f) else c.border.copy(alpha = 0.35f),
                 RadiusChip,
             )
             .padding(horizontal = 7.dp, vertical = 2.dp),
@@ -827,7 +829,7 @@ private fun StatusPill(text: String, ok: Boolean) {
         Text(
             text = text,
             style = MaterialTheme.typography.labelSmall,
-            color = if (ok) c.success else c.dim,
+            color = if (ok) c.ok else c.dim,
         )
     }
 }
@@ -841,7 +843,7 @@ private fun AdbCommandRow(
     ctx: android.content.Context,
     onToastRequest: (String) -> Unit = {},
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Column {
         Text(
             text = label,

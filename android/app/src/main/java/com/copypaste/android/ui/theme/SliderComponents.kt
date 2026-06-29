@@ -35,7 +35,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.copypaste.android.Density
 
 // ---------------------------------------------------------------------------
 // GlassSliderThumb — bespoke 14 dp white slider thumb (PARITY-SPEC §7, P1 #2).
@@ -61,7 +60,7 @@ import com.copypaste.android.Density
  */
 @Composable
 private fun GlassSliderThumb() {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // Outer: 20dp touch-target box matching M3 default thumb geometry.
     Box(
         modifier = Modifier.size(20.dp),
@@ -99,7 +98,6 @@ private fun GlassSliderThumb() {
  * @param stepLabels Human-readable label per step (same length as [stepValues]).
  * @param currentValue The currently active raw value (snapped to nearest step on load).
  * @param onRelease  Called when the user lifts their finger with the chosen raw value.
- * @param density    CopyPaste-hffp: current UI density — compact mode uses bodyMedium label.
  */
 @Composable
 fun SteppedSliderRow(
@@ -109,12 +107,11 @@ fun SteppedSliderRow(
     currentValue: Long,
     onRelease: (Long) -> Unit,
     modifier: Modifier = Modifier,
-    density: Density = Density.COMFORTABLE,
 ) {
     require(stepValues.size >= 2) { "SteppedSliderRow needs ≥ 2 steps" }
     require(stepValues.size == stepLabels.size) { "stepValues and stepLabels must be same length" }
 
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
 
     // Find the closest step index for currentValue.
     val initialIndex = stepValues.indices.minByOrNull { kotlin.math.abs(stepValues[it] - currentValue) } ?: 0
@@ -125,12 +122,8 @@ fun SteppedSliderRow(
     // (i.e. array.size - 2 means stepValues.size total positions including endpoints).
     val discreteSteps = (stepValues.size - 2).coerceAtLeast(0)
 
-    // CopyPaste-hffp: compact mode uses bodyMedium (14sp) for the label to match
-    // the density-aware Settings rows; comfortable keeps bodyLarge (16sp).
-    val labelStyle = if (density == Density.COMPACT)
-        MaterialTheme.typography.bodyMedium
-    else
-        MaterialTheme.typography.bodyLarge
+    // §5 fixed comfortable label style — density modes removed (CopyPaste-xruv).
+    val labelStyle = MaterialTheme.typography.bodyLarge
 
     Column(modifier = modifier
         .fillMaxWidth()
@@ -153,7 +146,7 @@ fun SteppedSliderRow(
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
                 ),
-                color = c.accent,
+                color = accentFill(),
                 textAlign = TextAlign.End,
                 // §6 spec: value label fixed 80px min-width so step labels never
                 // cause the slider track to shift width between steps.
@@ -167,11 +160,11 @@ fun SteppedSliderRow(
         // halo; custom 14 dp white thumb slot replaces Material's larger thumb.
         val interactionSource = remember { MutableInteractionSource() }
         val sliderColors = SliderDefaults.colors(
-            thumbColor              = c.accent,
-            activeTrackColor        = c.accent,
+            thumbColor              = accentFill(),
+            activeTrackColor        = accentFill(),
             // vm7q: styleguide slider track = rgb(--ide-mute / .35) (was c.border).
             inactiveTrackColor      = c.mute.copy(alpha = 0.35f),
-            activeTickColor         = c.accent.copy(alpha = 0.7f),
+            activeTickColor         = accentFill().copy(alpha = 0.7f),
             inactiveTickColor       = c.mute.copy(alpha = 0.5f),
         )
         // CopyPaste-aod: the bare Slider announces only "Slider, N%"; include the
@@ -219,7 +212,6 @@ fun SteppedSliderRow(
  * @param max         Maximum allowed value (inclusive).
  * @param formatValue Converts the current integer to a display string (e.g. "120 px").
  * @param onRelease   Called with the chosen value when the user lifts their finger.
- * @param density     CopyPaste-hffp: current UI density — compact mode uses bodyMedium label.
  */
 @Composable
 fun ContinuousSliderRow(
@@ -230,16 +222,12 @@ fun ContinuousSliderRow(
     formatValue: (Int) -> String,
     onRelease: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    density: Density = Density.COMFORTABLE,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     var sliderPos by remember(value) { mutableFloatStateOf(value.coerceIn(min, max).toFloat()) }
 
-    // CopyPaste-hffp: compact mode uses bodyMedium (14sp) for the label.
-    val labelStyle = if (density == Density.COMPACT)
-        MaterialTheme.typography.bodyMedium
-    else
-        MaterialTheme.typography.bodyLarge
+    // §5 fixed comfortable label style — density modes removed (CopyPaste-xruv).
+    val labelStyle = MaterialTheme.typography.bodyLarge
 
     Column(modifier = modifier
         .fillMaxWidth()
@@ -261,7 +249,7 @@ fun ContinuousSliderRow(
                     fontWeight = FontWeight.Medium,
                     fontSize = 13.sp,
                 ),
-                color = c.accent,
+                color = accentFill(),
                 textAlign = TextAlign.End,
                 modifier = Modifier.padding(start = 8.dp),
             )
@@ -270,8 +258,8 @@ fun ContinuousSliderRow(
         // §7: own interactionSource + custom 14 dp white thumb → no state-layer halo.
         val interactionSource = remember { MutableInteractionSource() }
         val sliderColors = SliderDefaults.colors(
-            thumbColor         = c.accent,
-            activeTrackColor   = c.accent,
+            thumbColor         = accentFill(),
+            activeTrackColor   = accentFill(),
             // vm7q: styleguide slider track = rgb(--ide-mute / .35) (was c.border).
             inactiveTrackColor = c.mute.copy(alpha = 0.35f),
         )
@@ -399,7 +387,7 @@ val MAX_ITEMS_STEP_LABELS: Array<String> = arrayOf(
  */
 @Composable
 fun ideTextFieldColors(): androidx.compose.material3.TextFieldColors {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     return OutlinedTextFieldDefaults.colors(
         // Container (fill inside the text field)
         focusedContainerColor   = c.elevated,
@@ -408,29 +396,29 @@ fun ideTextFieldColors(): androidx.compose.material3.TextFieldColors {
         disabledContainerColor  = c.elevated.copy(alpha = 0.40f),
 
         // Border
-        focusedBorderColor   = c.accent,
+        focusedBorderColor   = accentFill(),
         unfocusedBorderColor = c.border,
         disabledBorderColor  = c.border.copy(alpha = 0.40f),
-        errorBorderColor     = c.danger,
+        errorBorderColor     = c.err,
 
         // Text
         focusedTextColor   = c.text,
         unfocusedTextColor = c.text,
         disabledTextColor  = c.dim,
-        errorTextColor     = c.danger,
+        errorTextColor     = c.err,
 
         // Label (floating)
-        focusedLabelColor   = c.accent,
+        focusedLabelColor   = accentFill(),
         unfocusedLabelColor = c.dim,
         disabledLabelColor  = c.faint,
-        errorLabelColor     = c.danger,
+        errorLabelColor     = c.err,
 
         // Placeholder
         focusedPlaceholderColor   = c.faint,
         unfocusedPlaceholderColor = c.faint,
 
         // Cursor
-        cursorColor      = c.accent,
-        errorCursorColor = c.danger,
+        cursorColor      = accentFill(),
+        errorCursorColor = c.err,
     )
 }

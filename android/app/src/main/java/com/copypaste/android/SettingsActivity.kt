@@ -41,6 +41,7 @@ import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.accentFill
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
@@ -49,7 +50,7 @@ import com.copypaste.android.ui.theme.EaseStandard
 import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
@@ -67,7 +68,7 @@ import kotlinx.coroutines.launch
  * when the user taps the sticky Save button (CopyPaste-u30t).
  *
  * Styled per PARITY-SPEC §7 (segmented controls), §8 (grouped rows / cards),
- * §3 (grey section labels), §1 (LocalIdeColors theme-adaptive tokens).
+ * §3 (grey section labels), §1 (LocalCpColors theme-adaptive tokens).
  */
 class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -124,7 +125,7 @@ fun SettingsScreen(
 ) {
     val ctx = LocalContext.current
     val settings = remember { Settings(ctx) }
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
 
     // ── Draft dirty flag — true once any setting is changed, reset to false after save ──
     var dirty by remember { mutableStateOf(false) }
@@ -147,7 +148,6 @@ fun SettingsScreen(
     var syncEnabled by remember { mutableStateOf(settings.syncEnabled) }
 
     // ── Display ──
-    var density by remember { mutableStateOf(settings.density) }
     // CopyPaste-bdac.32: renamed — captures toast-on-skip (not reveal-guard).
     var showWarnings by remember { mutableStateOf(settings.notifyOnSensitiveSkip) }
     // CopyPaste-bdac.35: reveal-guard toggle — "Warn before revealing sensitive items".
@@ -277,7 +277,6 @@ fun SettingsScreen(
         )
         settings.maxFileSizeBytes = maxFileSizeBytes
         settings.sensitiveTtlSecs = sensitiveTtlSecs
-        settings.density = density
         // §3/P1#9: preview-lines pref is pref-only (no daemon IPC), like density.
         settings.previewLines = previewLines
         // maxItems: pref-only sentinel (100_000 = Unlimited). No daemon IPC yet.
@@ -463,22 +462,22 @@ fun SettingsScreen(
                         ),
                         label = "tab_underline_width",
                     )
-                    // 764n: indicator color → c.accent per styleguide active-accent token.
+                    // 764n: indicator color → accentFill() per styleguide active-accent token.
                     TabRowDefaults.SecondaryIndicator(
                         modifier = Modifier
                             .wrapContentSize(Alignment.BottomStart)
                             .offset(x = indicatorOffset)
                             .width(indicatorWidth),
-                        color = c.accent,
+                        color = accentFill(),
                     )
                 },
             ) {
-                // 764n: map tab text to ide tokens — selected → c.accent, unselected → c.faint.
+                // 764n: map tab text to ide tokens — selected → accentFill(), unselected → c.faint.
                 tabs.forEachIndexed { index, title ->
                     Tab(
                         selected = selectedTab == index,
                         onClick = { selectedTab = index },
-                        selectedContentColor = c.accent,
+                        selectedContentColor = accentFill(),
                         unselectedContentColor = c.faint,
                         text = { Text(title) },
                     )
@@ -504,15 +503,12 @@ fun SettingsScreen(
                         logcatEnabled = logcatEnabled,
                         onLogcatEnabledChange = { logcatEnabled = it; dirty = true },
                         logcatStatus = logcatStatus,
-                        // CopyPaste-hffp: pass live draft density so rows update without Save.
-                        density = density,
                         ctx = ctx,
                         // CopyPaste-5917.17: route AdbCmdRow copy feedback and log-export errors
                         // through GlassToastHost instead of android.widget.Toast.
                         onToastRequest = { msg -> settingsScope.launch { toastState.show(msg) } },
                     )
                     TAB_DISPLAY -> DisplayTab(
-                        density = density,
                         showWarnings = showWarnings,
                         onShowWarningsChange = { showWarnings = it; dirty = true },
                         revealGuard = revealGuard,
@@ -682,8 +678,6 @@ fun SettingsScreen(
                         onSupabasePasswordChange = { v -> supabasePassword = v; dirty = true },
                         relayUrl = relayUrl,
                         onRelayUrlChange = { v -> relayUrl = v; dirty = true },
-                        // CopyPaste-hffp: pass live draft density.
-                        density = density,
                         // CopyPaste-dxq2: pass live sync error state.
                         syncError = syncError,
                         syncErrorIsUnauthorized = syncErrorIsUnauthorized,
@@ -748,8 +742,6 @@ fun SettingsScreen(
                         onNotifyOnCopyChange = { notifyOnCopy = it; dirty = true },
                         soundOnCopy = soundOnCopy,
                         onSoundOnCopyChange = { soundOnCopy = it; dirty = true },
-                        // CopyPaste-hffp: pass live draft density.
-                        density = density,
                     )
                 }
             }

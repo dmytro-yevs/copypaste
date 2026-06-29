@@ -15,7 +15,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-// SyncBackend, Density, ThemeMode, EncryptionKeyLostException → SettingsTypes.kt
+// SyncBackend, ThemeMode, EncryptionKeyLostException → SettingsTypes.kt
 // PairedPeer, P2pIdentity → PeerRoster.kt
 // rememberSkin, applyScreenshotPolicy → SettingsComposables.kt
 
@@ -621,23 +621,6 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("translucency", v).apply()
 
     /**
-     * UI density preference — comfortable (34dp rows, default) or compact (28dp).
-     *
-     * Mirrors the macOS/web `prefs.density` setting (§2/§6 of DESIGN-SYSTEM-v2.md).
-     * Persisted as the enum name string so new variants can be added without
-     * a migration. Falls back to [Density.DEFAULT] on an unrecognised value.
-     *
-     * Local pref only — mirrors macOS UIPrefs.density, not synced to daemon.
-     */
-    var density: Density
-        get() = when (prefs.getString("density", Density.DEFAULT.name)) {
-            Density.COMPACT.name   -> Density.COMPACT
-            Density.SPACIOUS.name  -> Density.SPACIOUS  // CopyPaste-gzli: spacious density step
-            else                   -> Density.COMFORTABLE
-        }
-        set(v) = prefs.edit().putString("density", v.name).apply()
-
-    /**
      * CopyPaste-un29: When true, the history list groups items by their origin device
      * (own device first, then peers alphabetically) instead of the default
      * pinned-first/recency sort. Mirrors the macOS HistoryView "Sort by device" toggle.
@@ -649,24 +632,20 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("sort_by_device", v).apply()
 
     /**
-     * App theme mode — System / Light / Dark (PARITY-SPEC §0).
+     * App theme mode — Light / Dark, default DARK (STYLEGUIDE §2).
      *
-     * The app is **light-first**: the default is [ThemeMode.LIGHT], NOT
-     * follow-OS. A Settings control (added by a later screen agent) drives this;
-     * [com.copypaste.android.ui.theme.CopyPasteTheme] reads it via
-     * [com.copypaste.android.ui.theme.rememberThemeMode] so every screen picks
-     * up the choice without per-call-site wiring.
-     *
-     * Persisted as the enum name string so new variants can be added without a
-     * migration. Falls back to [ThemeMode.DEFAULT] (LIGHT) on an unrecognised or
-     * absent value.
+     * The app is **dark-first** (matching the web store): the default is
+     * [ThemeMode.DARK]. There is no "system" mode — §2 removed it; a stored
+     * legacy "SYSTEM" (or any unknown value) resolves to DARK here and is
+     * rewritten to "DARK" by [migrateThemeForTwoAxis]. The Settings control
+     * drives this; [com.copypaste.android.ui.theme.CopyPasteTheme] reads it via
+     * [com.copypaste.android.ui.theme.rememberThemeMode].
      */
     var themeMode: ThemeMode
         get() = when (prefs.getString("theme_mode", ThemeMode.DEFAULT.name)) {
-            ThemeMode.SYSTEM.name -> ThemeMode.SYSTEM
-            ThemeMode.LIGHT.name  -> ThemeMode.LIGHT
-            ThemeMode.DARK.name   -> ThemeMode.DARK
-            // Unknown / absent value: fall back to the PARITY-SPEC §0 default (LIGHT).
+            ThemeMode.LIGHT.name -> ThemeMode.LIGHT
+            ThemeMode.DARK.name  -> ThemeMode.DARK
+            // Unknown / absent / legacy "SYSTEM": fall back to the §2 default (DARK).
             else -> ThemeMode.DEFAULT
         }
         set(v) = prefs.edit().putString("theme_mode", v.name).apply()
@@ -690,14 +669,19 @@ class Settings(context: Context) {
      */
     fun migrateThemeForTwoAxis() {
         if (prefs.getBoolean("theme_migrated_2axis", false)) return
-        prefs.edit()
+        val edit = prefs.edit()
             .remove("palette")
             .remove("skin")
             .remove("density")
             .remove("motion_reduced")
             .remove("contrast")
             .putBoolean("theme_migrated_2axis", true)
-            .apply()
+        // §2 / web store v4: the removed "SYSTEM" theme value maps to DARK so a
+        // stored legacy value never silently follows the OS again.
+        if (prefs.getString("theme_mode", null) == "SYSTEM") {
+            edit.putString("theme_mode", ThemeMode.DARK.name)
+        }
+        edit.apply()
     }
 
     /**

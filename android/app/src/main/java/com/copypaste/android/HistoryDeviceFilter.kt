@@ -20,8 +20,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.copypaste.android.ui.theme.IdeColors
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.CpColors
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.onAccent
+import com.copypaste.android.ui.theme.accentTint
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.rememberTranslucency
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,7 +40,7 @@ internal fun DeviceFilterRow(
     peers: List<PairedPeer>,
     onSelect: (String) -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // CopyPaste-5917.64: was always c.panel (opaque). Use transparent when translucent
     // is enabled so the glass top-bar visual tier continues through the filter strip.
     val translucent = rememberTranslucency()
@@ -80,15 +83,15 @@ internal fun DeviceChip(
     isOwn: Boolean = false,
     onClick: () -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
 
     // Inactive chip bg/fg.
-    val inactiveBg = if (isOwn) c.accentDim else c.elevated
-    val inactiveFg = if (isOwn) c.accent else c.dim
+    val inactiveBg = if (isOwn) accentTint() else c.elevated
+    val inactiveFg = if (isOwn) accentFill() else c.dim
 
     // Active chip: solid accent pill with on-accent text (STYLEGUIDE §9.4 — no skin).
-    val bg = if (isSelected) c.accent else inactiveBg
-    val fg = if (isSelected) c.accentOn else inactiveFg
+    val bg = if (isSelected) accentFill() else inactiveBg
+    val fg = if (isSelected) onAccent() else inactiveFg
 
     val baseModifier = Modifier
         .background(color = bg, shape = RoundedCornerShape(12.dp))
@@ -119,16 +122,16 @@ internal fun OriginDeviceBadge(
     ownDeviceId: String,
     peers: List<PairedPeer>,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val isOwn = deviceId == ownDeviceId
     val label = deviceDisplayName(deviceId, ownDeviceId, peers)
 
     // §9: origin badge unified at 10sp + 1dp bordered (parity with other badges).
-    val tint = if (isOwn) c.accent else c.dim
+    val tint = if (isOwn) accentFill() else c.dim
     Box(
         modifier = Modifier
             .background(
-                color = if (isOwn) c.accentDim else c.elevated,
+                color = if (isOwn) accentTint() else c.elevated,
                 shape = RoundedCornerShape(4.dp),
             )
             .border(width = 1.dp, color = tint.copy(alpha = 0.30f), shape = RoundedCornerShape(4.dp))
@@ -137,7 +140,7 @@ internal fun OriginDeviceBadge(
         Text(
             text = label,
             style = TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Medium),
-            color = if (isOwn) c.accent else c.faint,
+            color = if (isOwn) accentFill() else c.faint,
             maxLines = 1,
         )
     }

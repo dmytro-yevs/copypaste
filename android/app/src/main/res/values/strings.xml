@@ -116,10 +116,6 @@
     <string name="setting_clear_history_label">Clear clipboard history</string>
     <string name="btn_clear_history">Clear history…</string>
 
-    <!-- Settings — Display density toggle (§2/§6/§10) -->
-    <string name="setting_density_title">Density</string>
-    <string name="setting_density_subtitle_compact">Compact rows (28 dp) — more items visible at once.</string>
-    <string name="setting_density_subtitle_comfortable">Comfortable rows (34 dp, default).</string>
 
     <!-- Settings — Sync (HW-A9: P2P toggle) -->
     <string name="setting_p2p_sync_title">P2P sync (LAN)</string>
@@ -525,15 +521,11 @@
     <string name="skin_classic">Classic</string>
     <string name="skin_quiet">Quiet</string>
     <string name="skin_vapor">Vapor</string>
-    <string name="theme_system">System</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
 
     <!-- CopyPaste-bdac.61: SettingsActivity — Image &amp; preview section -->
     <string name="section_image_preview">Image &amp; preview</string>
-    <string name="setting_density_comfortable_label">Comfortable</string>
-    <string name="setting_density_compact_label">Compact</string>
-    <string name="setting_density_spacious_label">Spacious</string>
 
     <!-- CopyPaste-bdac.61: SettingsActivity — reveal-guard toggle -->
     <string name="setting_reveal_guard_title">Warn before revealing sensitive</string>

@@ -5,7 +5,6 @@ import android.content.Context
 import android.provider.Settings as AndroidSettings
 import android.view.WindowManager
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
@@ -26,10 +25,10 @@ import com.copypaste.android.ThemeMode
 // CopyPaste theme — two axes only (STYLEGUIDE §11): isDark × accent.
 //
 // There are no palettes, skins, density modes, contrast modes or motion modes.
-// The theme axis is driven by the persisted [ThemeMode] (System / Light / Dark);
-// the accent axis by the persisted [AccentColor]. `CopyPasteTheme` provides
-// `LocalCpColors`, `LocalAccent` (the new cross-platform contract) and the
-// legacy `LocalIdeColors` adapter alongside a Material3 scheme.
+// The theme axis is driven by the persisted [ThemeMode] (Light / Dark, default
+// Dark — STYLEGUIDE §2, no System axis); the accent axis by the persisted
+// [AccentColor]. `CopyPasteTheme` provides `LocalCpColors` + `LocalAccent` (the
+// cross-platform contract) alongside a Material3 scheme.
 //
 // Dynamic color (Material You) is intentionally disabled: it would override the
 // precise canonical palette we need to match the desktop app.
@@ -49,12 +48,35 @@ val LocalCpColors = staticCompositionLocalOf { DarkColors }
 /** Active accent, provided by [CopyPasteTheme]. */
 val LocalAccent = staticCompositionLocalOf { AccentColor.DEFAULT }
 
-/**
- * Legacy adapter bundle (derived from [LocalCpColors] + [LocalAccent]) read by
- * existing screens as `LocalIdeColors.current.<token>`. Defaults to the dark
- * adapter so any stray reader outside [CopyPasteTheme] is still defined.
- */
-val LocalIdeColors = staticCompositionLocalOf { DarkIdeColors }
+// ---------------------------------------------------------------------------
+// §3.5 accent-derived colours — thin @Composable wrappers over
+// `LocalAccent.current.base(isDark)/on(isDark)` so screens read the accent axis
+// directly (no adapter bundle). `isDarkTheme()` resolves the active theme axis.
+// ---------------------------------------------------------------------------
+
+/** Filled-accent surface colour (button/chip fill). Former `accent`/`accentPress`. */
+@Composable
+fun accentFill(): Color = LocalAccent.current.base(isDarkTheme())
+
+/** Text/icon colour laid on a filled accent (AA-checked, §3.5). Former `accentOn`. */
+@Composable
+fun onAccent(): Color = LocalAccent.current.on(isDarkTheme())
+
+/** 12% accent tint for soft container fills. Former `accentDim`. */
+@Composable
+fun accentTint(): Color = accentFill().copy(alpha = 0.12f)
+
+/** Selection highlight — accent at §3.4 selected alpha (16% dark / 12% light). */
+@Composable
+fun accentSelection(): Color {
+    val dark = isDarkTheme()
+    return LocalAccent.current.base(dark).copy(alpha = if (dark) 0.16f else 0.12f)
+}
+
+/** Neutral hover overlay (§3.4) — white@.045 on dark, black@.045 on light. Former `hover`. */
+@Composable
+fun hoverOverlay(): Color =
+    (if (isDarkTheme()) Color.White else Color.Black).copy(alpha = 0.045f)
 
 /** §6 out-expo easing — matches CSS cubic-bezier(.16,1,.3,1). */
 val EaseOutExpo = CubicBezierEasing(0.16f, 1.0f, 0.3f, 1.0f)
@@ -123,22 +145,20 @@ fun CopyPasteTheme(
     content: @Composable () -> Unit,
 ) {
     val isDark = when (themeMode) {
-        ThemeMode.LIGHT  -> false
-        ThemeMode.DARK   -> true
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK  -> true
     }
 
     val cp = if (isDark) DarkColors else LightColors
-    val ide = cpToIde(cp, accent, isDark)
 
     val scheme = (if (isDark) darkColorScheme() else lightColorScheme()).copy(
         primary                 = accent.base(isDark),
         onPrimary               = accent.on(isDark),
-        primaryContainer        = ide.accentDim,
+        primaryContainer        = accent.base(isDark).copy(alpha = 0.12f),
         onPrimaryContainer      = accent.base(isDark),
         secondary               = cp.warn,
         onSecondary             = accent.on(isDark),
-        secondaryContainer      = ide.warningDim,
+        secondaryContainer      = cp.warn.copy(alpha = 0.12f),
         onSecondaryContainer    = cp.warn,
         background              = cp.bg,
         onBackground            = cp.text,
@@ -155,12 +175,13 @@ fun CopyPasteTheme(
         outlineVariant          = cp.divider,
         error                   = cp.err,
         onError                 = Color.White,
-        errorContainer          = ide.dangerDim,
+        errorContainer          = cp.err.copy(alpha = 0.12f),
         onErrorContainer        = cp.err,
         inverseSurface          = cp.text,
         inverseOnSurface        = cp.bg,
         inversePrimary          = accent.base(isDark),
-        scrim                   = Color.Black,
+        // §3.4 modal/sheet backdrop scrim (qwx4) — drives ModalBottomSheet/Drawer.
+        scrim                   = cp.scrim,
     )
 
     val view = LocalView.current
@@ -180,9 +201,8 @@ fun CopyPasteTheme(
     }
 
     CompositionLocalProvider(
-        LocalCpColors  provides cp,
-        LocalAccent    provides accent,
-        LocalIdeColors provides ide,
+        LocalCpColors provides cp,
+        LocalAccent   provides accent,
     ) {
         MaterialTheme(
             colorScheme = scheme,

@@ -26,6 +26,7 @@ import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.SearchOff
 import com.copypaste.android.ui.theme.GlassAlertDialog
+import com.copypaste.android.ui.theme.accentFill
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -55,7 +56,7 @@ import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.EmptyStateCard
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.ideTextFieldColors
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.screenCanvas
@@ -161,7 +162,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
         }
     }
 
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
 
     // ── Clear-logs confirmation dialog ──────────────────────────────────────
     if (showClearDialog) {
@@ -263,7 +264,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                         Icon(
                             imageVector = Icons.Outlined.Delete,
                             contentDescription = "Clear logs",
-                            tint = c.danger,
+                            tint = c.err,
                         )
                     }
                 },
@@ -293,7 +294,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                 Text(
                     text = "Showing last ${TAIL_BYTES / 1024} KB — older lines omitted to avoid OOM.",
                     style = MaterialTheme.typography.labelSmall,
-                    color = c.warning,
+                    color = c.warn,
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(c.panel)
@@ -332,7 +333,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
                             imageVector = if (isFilter) Icons.Outlined.SearchOff
                                           else Icons.Outlined.Description,
                             contentDescription = null,
-                            tint = if (errorMsg != null) c.danger else c.accent,
+                            tint = if (errorMsg != null) c.err else accentFill(),
                             modifier = Modifier.size(26.dp),
                         )
                     },
@@ -385,14 +386,14 @@ fun LogViewerScreen(onBack: () -> Unit) {
  */
 @Composable
 private fun LogLine(line: String) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val color = when {
         // Level codes come after the timestamp: "... E/Tag:" or "... W/Tag:"
         // Uses file-level precompiled regexes to avoid allocation on every recomposition.
         RE_LEVEL_ANY.containsMatchIn(line) -> {
             when {
-                RE_LEVEL_E.containsMatchIn(line) -> c.danger
-                RE_LEVEL_W.containsMatchIn(line) -> c.warning
+                RE_LEVEL_E.containsMatchIn(line) -> c.err
+                RE_LEVEL_W.containsMatchIn(line) -> c.warn
                 RE_LEVEL_I.containsMatchIn(line) -> c.text
                 RE_LEVEL_D.containsMatchIn(line) -> c.dim
                 else -> c.dim
@@ -401,7 +402,7 @@ private fun LogLine(line: String) {
         // Stack trace lines
         line.trimStart().startsWith("at ") -> c.faint
         // Crash report header lines (=== ... ===)
-        line.startsWith("=") -> c.accent
+        line.startsWith("=") -> accentFill()
         else -> c.dim
     }
 

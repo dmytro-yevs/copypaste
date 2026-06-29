@@ -70,17 +70,18 @@ import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.CopyPasteTheme
+import com.copypaste.android.ui.theme.accentFill
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.rememberReducedMotion
-// PARITY-SPEC §1: read the ACTIVE (light-first) ramp via LocalIdeColors.current.*
+// PARITY-SPEC §1: read the ACTIVE (light-first) ramp via LocalCpColors.current.*
 // instead of the hardcoded dark Ide* constants, so the whole History screen
-// themes light/dark in lockstep with CopyPasteTheme. The IdeColors holder is
+// themes light/dark in lockstep with CopyPasteTheme. The CpColors holder is
 // passed into non-composable helpers (e.g. the chip color table) by value.
-import com.copypaste.android.ui.theme.IdeColors
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.CpColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.Motion
 // Two-axis theme: motionDuration helper (STYLEGUIDE §6, reduced-motion aware).
 import com.copypaste.android.ui.theme.motionDuration
@@ -182,11 +183,11 @@ fun HistoryScreen(
     // PARITY-SPEC §1: the active (light-first) ramp — read once at screen scope and
     // reuse for every token below so the chrome (scaffold, top bar, dialogs) themes
     // light/dark in lockstep with CopyPasteTheme.
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // §8 a11y: skip animated transitions when the user has requested reduced motion
     // (Accessibility → Remove animations, or Developer Options → Animator duration scale = 0).
     val reducedMotion = rememberReducedMotion()
-    // §2/P0: glass pref + theme for the frosted header (LiquidGlassSurface).
+    // §2/P0: glass pref + theme for the frosted header (TranslucentSurface).
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
     // CopyPaste-7m6r: loadErrorTemplate / clearAllErrorTemplate removed — error strings
@@ -1094,10 +1095,10 @@ private fun HistoryList(
     val scope = rememberCoroutineScope()
     // CopyPaste-998 (jank): pull the active ramp ONCE at list scope and pass it into
     // every row, so each row body does NOT touch the CompositionLocal during scroll
-    // recomposition. LocalIdeColors is staticCompositionLocalOf (changes only on a
+    // recomposition. LocalCpColors is staticCompositionLocalOf (changes only on a
     // full theme switch / activity recreate), so a single read here is stable for
     // the list's lifetime.
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // §8 a11y: skip animated transitions when the user has requested reduced motion.
     val reducedMotion = rememberReducedMotion()
     // E: hoist settings reads via a version token so they're re-read once per
@@ -1119,16 +1120,6 @@ private fun HistoryList(
     val previewDelayMs = remember(settingsVersion) { settings.previewDelay }
     // §3/P1#9: honour the preview-lines pref as the row's preview maxLines.
     val previewLines = remember(settingsVersion) { settings.previewLines }
-    // §2 density-aware row height: read the same "density" key the Settings store
-    // (Settings.density) writes — it persists the Density enum *name* ("COMPACT"/
-    // "COMFORTABLE"), so compare case-insensitively. Default to comfortable (34dp)
-    // when the key is absent. Keyed on settingsVersion so a toggle re-renders rows.
-    val isCompact = remember(settingsVersion) {
-        ctx.getSharedPreferences("copypaste", android.content.Context.MODE_PRIVATE)
-            .getString("density", "comfortable")
-            ?.equals("compact", ignoreCase = true) ?: false
-    }
-
     // CopyPaste-5917.76: rememberUpdatedState captures the latest onMediaCopyAsText without
     // invalidating the copyItemById remember key. The lambda inside always calls the most
     // recently provided callback (stable indirection), so callers can update the lambda without
@@ -1363,7 +1354,6 @@ private fun HistoryList(
                         imageMaxHeightDp = imageMaxHeightDp,
                         previewDelayMs = previewDelayMs,
                         previewLines = previewLines,
-                        isCompact = isCompact,
                         selectionMode = selectionMode,
                         isSelected = selectedIds.contains(item.id),
                         reorderMode = reorderMode,
@@ -1403,7 +1393,7 @@ private fun HistoryList(
                     contentAlignment = Alignment.Center,
                 ) {
                     CircularProgressIndicator(
-                        color = c.accent.copy(alpha = 0.5f),
+                        color = accentFill().copy(alpha = 0.5f),
                         strokeWidth = 1.5.dp,
                         modifier = Modifier.size(16.dp),
                     )

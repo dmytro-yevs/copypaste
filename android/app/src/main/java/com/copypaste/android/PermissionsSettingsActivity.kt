@@ -65,7 +65,7 @@ import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
@@ -271,7 +271,7 @@ fun PermissionsScreen(
     // Two-axis theme (STYLEGUIDE §2): isDark × accent only. Translucency is an optional
     // boolean toggle; no skin/palette system. Frosted glass when translucent, opaque otherwise.
     val translucent = rememberTranslucency()
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val dark = isDarkTheme()
 
     // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
@@ -395,9 +395,9 @@ private fun BgCaptureStatusCard(
     overlayGranted: Boolean,
     onToastRequest: (String) -> Unit = {},
 ) {
-    // CopyPaste-xi8h: use LocalIdeColors so colors adapt to light/dark palettes.
-    val c = LocalIdeColors.current
-    val borderColor = if (readLogsGranted && overlayGranted) c.success else c.border
+    // CopyPaste-xi8h: use LocalCpColors so colors adapt to light/dark palettes.
+    val c = LocalCpColors.current
+    val borderColor = if (readLogsGranted && overlayGranted) c.ok else c.border
     CopyPasteCard(accent = borderColor) {
         Column(modifier = Modifier.padding(16.dp)) {
             Text(
@@ -419,7 +419,7 @@ private fun BgCaptureStatusCard(
                     else
                         stringResource(R.string.bg_adb_status_read_logs_no),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (readLogsGranted) c.success else c.dim,
+                    color = if (readLogsGranted) c.ok else c.dim,
                 )
                 Text(
                     text = if (overlayGranted)
@@ -427,7 +427,7 @@ private fun BgCaptureStatusCard(
                     else
                         stringResource(R.string.bg_adb_status_overlay_no),
                     style = MaterialTheme.typography.labelSmall,
-                    color = if (overlayGranted) c.success else c.dim,
+                    color = if (overlayGranted) c.ok else c.dim,
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -472,8 +472,8 @@ internal fun AdbCommandBlock(
     onToastRequest: (String) -> Unit = {},
 ) {
     val ctx = LocalContext.current
-    // CopyPaste-xi8h: use LocalIdeColors so colors adapt to light/dark palettes.
-    val c = LocalIdeColors.current
+    // CopyPaste-xi8h: use LocalCpColors so colors adapt to light/dark palettes.
+    val c = LocalCpColors.current
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -521,13 +521,13 @@ private fun PermissionStatusCard(
     required: Boolean,
     infoOnly: Boolean = false,
 ) {
-    // CopyPaste-xi8h: use LocalIdeColors so colors adapt to light/dark palettes.
-    val c = LocalIdeColors.current
+    // CopyPaste-xi8h: use LocalCpColors so colors adapt to light/dark palettes.
+    val c = LocalCpColors.current
     // Status-colored hairline border: green = granted, red = missing+required,
     // neutral grey = unknown / optional. Matches the restrained macOS look.
     val borderColor = when {
-        granted == true              -> c.success
-        granted == false && required -> c.danger
+        granted == true              -> c.ok
+        granted == false && required -> c.err
         else                         -> c.border
     }
 
@@ -540,7 +540,7 @@ private fun PermissionStatusCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (granted == true) c.success else c.dim
+                    tint = if (granted == true) c.ok else c.dim
                 )
                 Text(
                     text = title,
@@ -552,7 +552,7 @@ private fun PermissionStatusCard(
                     Text(
                         text = "required",
                         style = MaterialTheme.typography.labelSmall,
-                        color = c.danger
+                        color = c.err
                     )
                 }
             }
@@ -568,12 +568,12 @@ private fun PermissionStatusCard(
                         imageVector = if (granted) Icons.Outlined.CheckCircle
                                       else Icons.Filled.ErrorOutline,
                         contentDescription = null,
-                        tint = if (granted) c.success else c.danger,
+                        tint = if (granted) c.ok else c.err,
                     )
                     Text(
                         text = if (granted) "Granted" else "Not granted",
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) c.success else c.danger,
+                        color = if (granted) c.ok else c.err,
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))

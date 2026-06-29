@@ -5,7 +5,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import com.copypaste.android.ui.theme.DarkIdeColors
+import com.copypaste.android.ui.theme.DarkColors
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -65,7 +65,7 @@ class SensitiveHistoryRowA11yTest {
             MaterialTheme {
                 HistoryRow(
                     item = sensitiveItem,
-                    colors = DarkIdeColors,
+                    colors = DarkColors,
                     repository = repo,
                     maskSensitive = true,
                     imageMaxHeightDp = 120,
@@ -108,7 +108,7 @@ class SensitiveHistoryRowA11yTest {
             MaterialTheme {
                 HistoryRow(
                     item = normalItem,
-                    colors = DarkIdeColors,
+                    colors = DarkColors,
                     repository = repo,
                     maskSensitive = true,
                     imageMaxHeightDp = 120,

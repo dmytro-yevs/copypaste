@@ -10,10 +10,11 @@ import androidx.compose.ui.graphics.Color
 // variable names map 1:1 (e.g. `cText` ↔ `--c-text`). There are NO palettes and
 // NO skins — only `CpColors` (light/dark semantic surfaces) and `AccentColor`.
 //
-// `IdeColors` (further down) is an INTERNAL adapter that derives the legacy
-// token bundle the existing screens read (`LocalIdeColors.current.<token>`) from
-// `CpColors` + the chosen `AccentColor`, so the two-axis switch drives every
-// screen without rewriting hundreds of call sites.
+// Screens read `LocalCpColors.current.<field>` for surfaces/status/content
+// colours and `LocalAccent.current` (via the §3.5 accent helpers in Theme.kt)
+// for the accent-derived fill/on/tint/selection colours. There is NO adapter
+// bundle: the two-axis switch drives every screen directly through these two
+// composition locals.
 // ---------------------------------------------------------------------------
 
 // ── CpColors — semantic tokens (dark + light). No palettes, no skins. ───────
@@ -25,6 +26,9 @@ data class CpColors(
     val ok: Color, val warn: Color, val err: Color, val info: Color,
     val cText: Color, val cUrl: Color, val cCode: Color, val cImage: Color, val cMail: Color,
     val cColor: Color, val cNum: Color, val cPath: Color, val cFile: Color, val cJson: Color, val cSecret: Color,
+    // §3.4 modal/sheet backdrop scrim (web `--scrim`). Dark: rgba(0,0,0,.55);
+    // light: rgba(20,22,30,.28). Painted behind dialogs/bottom-sheets.
+    val scrim: Color,
 )
 
 val DarkColors = CpColors(
@@ -36,6 +40,7 @@ val DarkColors = CpColors(
     cText = Color(0xFF8B93A5), cUrl = Color(0xFF34D1BF), cCode = Color(0xFFA78BFA), cImage = Color(0xFFE879C6),
     cMail = Color(0xFF4ED98A), cColor = Color(0xFFF5A524), cNum = Color(0xFF5CC1CE),
     cPath = Color(0xFF5B9DFF), cFile = Color(0xFF5B9DFF), cJson = Color(0xFFFB7B53), cSecret = Color(0xFFF2616B),
+    scrim = Color(0x8C000000), // rgba(0,0,0,.55)
 )
 
 val LightColors = CpColors(
@@ -47,18 +52,29 @@ val LightColors = CpColors(
     cText = Color(0xFF6A7282), cUrl = Color(0xFF0E9E8C), cCode = Color(0xFF7C5CE6), cImage = Color(0xFFC44BA0),
     cMail = Color(0xFF1FA85B), cColor = Color(0xFFC77F1A), cNum = Color(0xFF1C8B9B),
     cPath = Color(0xFF2F6FE0), cFile = Color(0xFF2F6FE0), cJson = Color(0xFFDC5A2E), cSecret = Color(0xFFD64545),
+    scrim = Color(0x4714161E), // rgba(20,22,30,.28)
 )
 
 // onDark/onLight = text laid on a filled accent; variant = accent-2 for tinted surfaces.
+//
+// CopyPaste-eud9 / §3.5 DEVIATION: the styleguide claimed "light deepens hues to
+// keep AA", but 5/12 on-accent cells shipped below WCAG AA (4.5:1). Corrected
+// (verified ratios in parens) so every filled-accent label passes AA:
+//   • dark  blue  → onDark  #06182F (4.84, was white 3.68)
+//   • dark  rose  → onDark  #2A0712 (5.15, was white 3.58)
+//   • light teal  → onLight #052824 (4.71, was white 3.34)
+//   • light green → onLight #062A12 (5.05, was white 3.08)
+//   • light amber → onLight #2A1B05 (5.15, was white 3.24)
+// (matches the parallel tokens.css --on-accent correction for cross-platform parity.)
 enum class AccentColor(
     val dark: Color, val light: Color, val onDark: Color, val onLight: Color, val variant: Color,
 ) {
-    INDIGO(Color(0xFF6E5BFF), Color(0xFF5B49E0), Color.White,       Color.White, Color(0xFF9C8FFF)),
-    BLUE  (Color(0xFF3B82F6), Color(0xFF2563EB), Color.White,       Color.White, Color(0xFF7CB0FF)),
-    TEAL  (Color(0xFF13B8A6), Color(0xFF0E9E8C), Color(0xFF06302C), Color.White, Color(0xFF5FE0D2)),
-    GREEN (Color(0xFF46C56A), Color(0xFF1FA85B), Color(0xFF062A12), Color.White, Color(0xFF84E29A)),
-    AMBER (Color(0xFFF5A524), Color(0xFFC77F1A), Color(0xFF2A1B05), Color.White, Color(0xFFFFC56B)),
-    ROSE  (Color(0xFFF43F7E), Color(0xFFE11D6B), Color.White,       Color.White, Color(0xFFFF85AC));
+    INDIGO(Color(0xFF6E5BFF), Color(0xFF5B49E0), Color.White,        Color.White,        Color(0xFF9C8FFF)),
+    BLUE  (Color(0xFF3B82F6), Color(0xFF2563EB), Color(0xFF08152C), Color.White,        Color(0xFF7CB0FF)),
+    TEAL  (Color(0xFF13B8A6), Color(0xFF0E9E8C), Color(0xFF06302C), Color(0xFF042722), Color(0xFF5FE0D2)),
+    GREEN (Color(0xFF46C56A), Color(0xFF1FA85B), Color(0xFF062A12), Color(0xFF062A12), Color(0xFF84E29A)),
+    AMBER (Color(0xFFF5A524), Color(0xFFC77F1A), Color(0xFF2A1B05), Color(0xFF2A1B05), Color(0xFFFFC56B)),
+    ROSE  (Color(0xFFF43F7E), Color(0xFFE11D6B), Color(0xFF240812), Color.White,        Color(0xFFFF85AC));
 
     fun base(isDark: Boolean) = if (isDark) dark else light
     fun on(isDark: Boolean)   = if (isDark) onDark else onLight
@@ -79,56 +95,3 @@ enum class AccentColor(
  * default accent's dark base so the system notification matches the app.
  */
 val IdeAccent = AccentColor.INDIGO.dark
-
-// ---------------------------------------------------------------------------
-// IdeColors — INTERNAL legacy adapter (NOT a palette).
-//
-// The existing screens read `LocalIdeColors.current.<token>`. Rather than
-// rewrite every call site, `CopyPasteTheme` derives this bundle from the active
-// `CpColors` + `AccentColor` via [cpToIde]. Field meanings:
-//   accent / accentOn / accentDim / accentPress / selection — from AccentColor
-//   success/warning/danger/info — CpColors ok/warn/err/info
-//   violet — CpColors cCode (the only remaining "violet" usage = code colour)
-//   ghost / ghostDeco — derived low-emphasis text alphas
-// ---------------------------------------------------------------------------
-@Immutable
-data class IdeColors(
-    val bg: Color, val panel: Color, val elevated: Color, val raised: Color,
-    val border: Color, val divider: Color,
-    val text: Color, val dim: Color, val faint: Color, val mute: Color,
-    val ghost: Color, val ghostDeco: Color,
-    val accent: Color, val accentOn: Color, val accentDim: Color, val accentPress: Color,
-    val selection: Color, val hover: Color,
-    val success: Color, val successDim: Color,
-    val warning: Color, val warningDim: Color,
-    val danger: Color, val dangerDim: Color,
-    val info: Color, val infoDim: Color,
-    val violet: Color, val violetDim: Color,
-)
-
-/** Derives the legacy [IdeColors] bundle from the two-axis tokens. */
-fun cpToIde(cp: CpColors, accent: AccentColor, isDark: Boolean): IdeColors {
-    val a = accent.base(isDark)
-    val overlay = if (isDark) Color.White else Color.Black
-    return IdeColors(
-        bg = cp.bg, panel = cp.panel, elevated = cp.elevated, raised = cp.raised,
-        border = cp.border, divider = cp.divider,
-        text = cp.text, dim = cp.dim, faint = cp.faint, mute = cp.mute,
-        ghost = cp.dim, ghostDeco = cp.faint,
-        accent = a, accentOn = accent.on(isDark),
-        accentDim = a.copy(alpha = 0.12f), accentPress = a,
-        selection = a.copy(alpha = if (isDark) 0.16f else 0.12f),
-        hover = overlay.copy(alpha = 0.045f),
-        success = cp.ok, successDim = cp.ok.copy(alpha = 0.12f),
-        warning = cp.warn, warningDim = cp.warn.copy(alpha = 0.12f),
-        danger = cp.err, dangerDim = cp.err.copy(alpha = 0.12f),
-        info = cp.info, infoDim = cp.info.copy(alpha = 0.12f),
-        violet = cp.cCode, violetDim = cp.cCode.copy(alpha = 0.12f),
-    )
-}
-
-/** Default dark adapter (indigo accent) — the staticCompositionLocal fallback. */
-val DarkIdeColors = cpToIde(DarkColors, AccentColor.DEFAULT, isDark = true)
-
-/** Default light adapter (indigo accent). */
-val LightIdeColors = cpToIde(LightColors, AccentColor.DEFAULT, isDark = false)

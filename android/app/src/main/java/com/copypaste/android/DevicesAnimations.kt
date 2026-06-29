@@ -29,7 +29,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.accentTint
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.RadiusChip
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -68,11 +70,11 @@ internal fun rememberReducedMotion(): Boolean {
  */
 @Composable
 internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val reducedMotion = rememberReducedMotion()
     // PG-37 parity: offline status dot uses danger (red) to match the macOS
     // DeviceCard offline indicator (was c.faint/grey, which diverged).
-    val dotColor = if (online) c.success else c.danger
+    val dotColor = if (online) c.ok else c.err
 
     // Fixed presence-ping duration (STYLEGUIDE §6 — no palette motion scale).
     val pingDurationMs = 2400
@@ -161,9 +163,9 @@ internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
 /**
  * Transport chip pill: 10 sp label in a tinted rounded pill.
  * P2P = info teal; Relay = warning amber; Cloud = accent blue (theme-adaptive
- * via [LocalIdeColors]). Label casing matches web's DevicesView ("P2P" / "Relay"
+ * via [LocalCpColors]). Label casing matches web's DevicesView ("P2P" / "Relay"
  * / "Cloud").
- * CopyPaste-crh3.30: Relay is rendered amber (c.warning) at parity with macOS
+ * CopyPaste-crh3.30: Relay is rendered amber (c.warn) at parity with macOS
  * DeviceCard.tsx, distinguishing the relay route from Supabase ("Cloud").
  * Defensive: never crashes on absent transport info — callers derive [chip]
  * via [transportChipFor] which is always non-null.
@@ -173,11 +175,11 @@ internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
  */
 @Composable
 internal fun TransportChipLabel(chip: TransportChip) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val (text, fg, bg) = when (chip) {
-        TransportChip.P2P -> Triple("P2P", c.info, c.infoDim)
-        TransportChip.Relay -> Triple("Relay", c.warning, c.warningDim)
-        TransportChip.Cloud -> Triple("Cloud", c.accent, c.accentDim)
+        TransportChip.P2P -> Triple("P2P", c.info, c.info.copy(alpha = 0.12f))
+        TransportChip.Relay -> Triple("Relay", c.warn, c.warn.copy(alpha = 0.12f))
+        TransportChip.Cloud -> Triple("Cloud", accentFill(), accentTint())
     }
 
     // Badge float animation removed — static chip is calmer.

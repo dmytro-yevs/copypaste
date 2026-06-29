@@ -16,7 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,8 +166,8 @@ internal fun shouldStartOneShotPulse(
  * enum rather than a CompositionLocal value makes the invariant unit-testable on a
  * plain JVM without a Compose runtime.
  *
- *  ONLINE  → success green  (c.success)
- *  OFFLINE → danger red     (c.danger)
+ *  ONLINE  → success green  (c.ok)
+ *  OFFLINE → danger red     (c.err)
  *
  * Both the ring [Modifier.background] and the dot [Modifier.background] in
  * [PulseDot] derive their colour from [dotColor], which maps to [PulseDotColorRole]
@@ -264,7 +264,7 @@ internal val META_LABEL_WIDTH: Dp = 72.dp
  */
 @Composable
 internal fun RowDivider() {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     HorizontalDivider(
         modifier = Modifier.padding(start = 16.dp),
         color = c.divider,
@@ -285,7 +285,7 @@ internal fun RowDivider() {
 // CopyPaste-jkbo: promoted from private to internal so future screens can reuse.
 @Composable
 internal fun MetaRow(label: String, value: String) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth(),

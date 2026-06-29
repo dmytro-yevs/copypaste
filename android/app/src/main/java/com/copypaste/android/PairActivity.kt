@@ -69,10 +69,12 @@ import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.accentTint
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.CopyPasteTopBar
@@ -825,7 +827,7 @@ fun PairScreen(
         onAutoScanConsumed()
     }
 
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
 
@@ -900,7 +902,7 @@ fun PairScreen(
                                     verticalArrangement = Arrangement.spacedBy(12.dp)
                                 ) {
                                     // voyf: use theme-adaptive tokens.
-                                    CircularProgressIndicator(color = c.accent)
+                                    CircularProgressIndicator(color = accentFill())
                                     Text(
                                         text = stringResource(R.string.status_pairing),
                                         style = MaterialTheme.typography.bodyMedium,
@@ -956,7 +958,7 @@ fun PairScreen(
                                             modifier = Modifier
                                                 .size(QR_SLOT_SIZE_DP.dp)
                                                 .background(
-                                                    c.accentDim,
+                                                    accentTint(),
                                                     RoundedCornerShape(12.dp),
                                                 ),
                                             contentAlignment = Alignment.Center,
@@ -964,10 +966,10 @@ fun PairScreen(
                                             Text(
                                                 text = "Tap to reveal",
                                                 style = MaterialTheme.typography.labelMedium,
-                                                color = c.accent,
+                                                color = accentFill(),
                                                 textAlign = TextAlign.Center,
                                                 modifier = Modifier
-                                                    .background(c.accentDim, RadiusChip)
+                                                    .background(accentTint(), RadiusChip)
                                                     .padding(horizontal = 12.dp, vertical = 5.dp),
                                             )
                                         }
@@ -1000,7 +1002,7 @@ fun PairScreen(
                                     text = stringResource(R.string.pair_token_expired),
                                     style = MaterialTheme.typography.bodyMedium,
                                     // voyf: theme-adaptive danger token.
-                                    color = c.danger,
+                                    color = c.err,
                                 )
                             }
                             else -> {
@@ -1015,7 +1017,7 @@ fun PairScreen(
                                     ),
                                     style = MaterialTheme.typography.bodyMedium,
                                     // voyf: theme-adaptive warning/accent tokens.
-                                    color = if (urgent) c.warning else c.accent,
+                                    color = if (urgent) c.warn else accentFill(),
                                 )
                                 // Drain bar — 2dp thin track draining left-to-right over the TTL.
                                 // Static (no pulse): progress bar pulse removed for calm UI.
@@ -1030,7 +1032,7 @@ fun PairScreen(
                                         modifier = Modifier
                                             .fillMaxWidth(qrCountdownProgress(remainingSeconds, PAIR_TOKEN_TTL_SECONDS))
                                             .height(2.dp)
-                                            .background(if (urgent) c.warning else c.accent),
+                                            .background(if (urgent) c.warn else accentFill()),
                                     )
                                 }
                             }
@@ -1081,13 +1083,13 @@ fun PairScreen(
                                 modifier = Modifier
                                     .size(38.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(c.accentDim),
+                                    .background(accentTint()),
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Text(
                                     text = displayName.take(1).uppercase(),
                                     style = MaterialTheme.typography.titleMedium,
-                                    color = c.accent,
+                                    color = accentFill(),
                                 )
                             }
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -1095,7 +1097,7 @@ fun PairScreen(
                                     text = "Device to pair with",
                                     style = MaterialTheme.typography.labelLarge,
                                     // voyf: theme-adaptive accent token.
-                                    color = c.accent,
+                                    color = accentFill(),
                                 )
                                 // Device name (from QR payload field 5)
                                 Text(
@@ -1110,7 +1112,7 @@ fun PairScreen(
                         // 483o: transport chip pill — RadiusChip (7dp) pill + hairline border + glyph.
                         Row(
                             modifier = Modifier
-                                .background(c.infoDim, RadiusChip)
+                                .background(c.info.copy(alpha = 0.12f), RadiusChip)
                                 .border(0.5.dp, c.info.copy(alpha = 0.5f), RadiusChip)
                                 .padding(horizontal = 9.dp, vertical = 3.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -1227,7 +1229,7 @@ fun PairScreen(
 
             if (syncing) {
                 // voyf: theme-adaptive accent token.
-                CircularProgressIndicator(color = c.accent)
+                CircularProgressIndicator(color = accentFill())
             }
 
             // ── Post-pair success popup ────────────────────────────────────────
@@ -1263,7 +1265,7 @@ fun PairScreen(
                                     modifier = Modifier
                                         .size(38.dp)
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(c.accentDim),
+                                        .background(accentTint()),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     // Device glyph placeholder — phone icon initial.
@@ -1277,7 +1279,7 @@ fun PairScreen(
                                         text = "Paired device",
                                         style = MaterialTheme.typography.labelLarge,
                                         // voyf: theme-adaptive accent token.
-                                        color = c.accent,
+                                        color = accentFill(),
                                     )
                                     // prld: status dot — danger for offline (unknown reachability here),
                                     // no redundant "Online/Offline" text label per styleguide.
@@ -1289,7 +1291,7 @@ fun PairScreen(
                                             modifier = Modifier
                                                 .size(8.dp)
                                                 .clip(CircleShape)
-                                                // CopyPaste-5917.49: was c.danger (hardcoded red even
+                                                // CopyPaste-5917.49: was c.err (hardcoded red even
                                                 // when peer is reachable). PairScreen has no liveness
                                                 // signal for the peer, so use c.faint (neutral grey)
                                                 // to avoid misleading the user. Danger would only be

@@ -26,9 +26,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.accentTint
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.RadiusChip
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -65,10 +67,10 @@ internal fun PeerRow(
     onUnpair: () -> Unit,
     onRevoke: () -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // PG-37 parity: offline status dot uses danger (red) to match the macOS
     // DeviceCard offline indicator (was c.faint/grey, which diverged).
-    val dotColor = if (online) c.success else c.danger
+    val dotColor = if (online) c.ok else c.err
     val chip = transportChipFor(peer, cloudTransport)
 
     // Row content only — the enclosing CopyPasteCard provides the glass surface,
@@ -105,15 +107,15 @@ internal fun PeerRow(
         // hard-coding a value. Parity with the web DeviceCard trust badge.
         Text(
             text = trustLabel(peer),
-            color = c.success,
+            color = c.ok,
             fontSize = 10.sp,
             letterSpacing = 0.4.sp,
             style = MaterialTheme.typography.labelSmall,
             modifier = Modifier
-                .background(c.success.copy(alpha = 0.14f), RadiusChip)
+                .background(c.ok.copy(alpha = 0.14f), RadiusChip)
                 .border(
                     width = 1.dp,
-                    color = c.success.copy(alpha = 0.30f),
+                    color = c.ok.copy(alpha = 0.30f),
                     shape = RadiusChip,
                 )
                 .padding(horizontal = 6.dp, vertical = 2.dp),
@@ -219,7 +221,7 @@ internal fun PeerRow(
 
 @Composable
 internal fun NoPeerCard(onPair: () -> Unit) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     CopyPasteCard(accent = c.border) {
         Row(
             modifier = Modifier.padding(16.dp),
@@ -261,7 +263,7 @@ internal fun NoPeerCard(onPair: () -> Unit) {
  */
 @Composable
 internal fun DiscoveryRingsIcon(size: Dp = 58.dp) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // Discovery rings removed — static icon is calmer (no idle loop animation).
     Box(
         modifier = Modifier.size(size),
@@ -272,12 +274,12 @@ internal fun DiscoveryRingsIcon(size: Dp = 58.dp) {
             modifier = Modifier
                 .size(size)
                 .clip(RoundedCornerShape(size / 3.5f))
-                .background(c.accentDim),
+                .background(accentTint()),
             contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = "⊕",
-                color = c.accent,
+                color = accentFill(),
                 fontSize = (size.value * 0.45f).sp,
             )
         }
@@ -304,7 +306,7 @@ internal fun OwnDeviceRow(
     // platform (Build/BuildConfig) and a LAN-IPv4 enumeration. No synchronous
     // public-IP source on-device, so that row is omitted (matches the bootstrap
     // path, which sends public_ip = None for this device).
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val model = Build.MODEL.orEmpty().ifBlank { "Android" }
     val osVersion = "Android " + Build.VERSION.RELEASE
     val appVersion = BuildConfig.VERSION_NAME
@@ -337,19 +339,19 @@ internal fun OwnDeviceRow(
             )
             Text(
                 text = "Online",
-                color = c.success,
+                color = c.ok,
                 style = MaterialTheme.typography.labelMedium,
             )
             // §7 "This Device" accent badge — static (float animation removed).
             // CopyPaste-5917.44: was RoundedCornerShape(4.dp); canonical chip token is RadiusChip (7dp).
             Text(
                 text = "This Device",
-                color = c.accent,
+                color = accentFill(),
                 fontSize = 10.sp,
                 letterSpacing = 0.4.sp,
                 style = MaterialTheme.typography.labelSmall,
                 modifier = Modifier
-                    .background(c.accentDim, RadiusChip)
+                    .background(accentTint(), RadiusChip)
                     .padding(horizontal = 6.dp, vertical = 2.dp),
             )
         }
@@ -389,7 +391,7 @@ internal fun DiscoveredPeerRow(
     busy: Boolean,
     onPair: () -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // v1 peers (no bootstrap port) cannot do SAS pairing → disable Pair.
     val pairable = peer.bport != null
     // CopyPaste-cnmw: show ALL discovered IPs (macOS merges/shows all) instead of

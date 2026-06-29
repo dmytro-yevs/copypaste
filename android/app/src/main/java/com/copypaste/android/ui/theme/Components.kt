@@ -76,7 +76,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.copypaste.android.Density
 import com.copypaste.android.Settings
 
 
@@ -103,7 +102,7 @@ import com.copypaste.android.Settings
  * key "translucency"), the container is the §2 glass fill at GLASS_ALPHA so the
  * opaque window canvas bleeds through for a frosted/glass look. When false, the
  * bar is the fully opaque theme panel surface — the pre-glass solid look. All
- * text/icon colors come from the active light/dark ramp (LocalIdeColors).
+ * text/icon colors come from the active light/dark ramp (LocalCpColors).
  *
  * **CopyPaste-6krb**: The header is now FLOATING — [RoundedCornerShape(14.dp)] with
  * 8 dp horizontal inset padding, matching the styleguide `.app-header` treatment and
@@ -128,7 +127,7 @@ fun CopyPasteTopBar(
     translucent: Boolean = rememberTranslucency(),
 ) {
     // Active light/dark ramp — read once so the bar themes in lockstep (§1).
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val dark = isDarkTheme()
 
     // Fixed radius (STYLEGUIDE §5 --r-card 13dp) — no skin.
@@ -140,14 +139,14 @@ fun CopyPasteTopBar(
 
     // §2/P0: outer Box carries the horizontal inset padding + float shadow so the header
     // appears to hover above content — the liquid-glass floating feel.
-    // The LiquidGlassSurface fills and rounds the clipped area; TopAppBar is transparent.
+    // The TranslucentSurface fills and rounds the clipped area; TopAppBar is transparent.
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 8.dp)
             .then(if (showHeaderShadow) Modifier.glassFloatShadow(GlassTier.GLASS, radius = headerRadius) else Modifier),
     ) {
-        LiquidGlassSurface(
+        TranslucentSurface(
             shape = headerShape,
             translucent = translucent,
             dark = dark,
@@ -233,7 +232,7 @@ fun CopyPasteCard(
 
     // Only paint an explicit Material border when the caller overrides `accent`
     // with a SEMANTIC tint; the default outline is superseded by the bright glass
-    // rim that LiquidGlassSurface draws.
+    // rim that TranslucentSurface draws.
     val semanticBorder = accent != MaterialTheme.colorScheme.outline
 
     // Card float shadow only when translucent.
@@ -268,7 +267,7 @@ fun CopyPasteCard(
             disabledElevation  = 0.dp,
         ),
     ) {
-        LiquidGlassSurface(
+        TranslucentSurface(
             shape = cardShape,
             translucent = translucent,
             dark = dark,
@@ -305,13 +304,13 @@ fun glassDialogContainerColor(translucent: Boolean = rememberTranslucency()): Co
  * Glass restyle of Material [AlertDialog] (PARITY-SPEC §8, audit #6/#10, P0 blur).
  *
  * Appearance only — the LOGIC (callbacks, button content, dismiss) is whatever
- * the caller passes. Built on a bare [Dialog] + [LiquidGlassSurface] so the
+ * the caller passes. Built on a bare [Dialog] + [TranslucentSurface] so the
  * modal gets a REAL API-31 RenderEffect frosted backdrop (flat §8 tint fallback
  * < 31), the §4 modal radius (16 dp), a §4 hairline border, and Material's
  * dimmed scrim behind it. The slot layout mirrors Material's AlertDialog (title,
  * supporting text, then a trailing buttons row: dismiss left of confirm) so the
  * call-site signature is a near drop-in. Title/text colors come from the active
- * ramp; the caller styles its own buttons (destructive actions in `c.danger`).
+ * ramp; the caller styles its own buttons (destructive actions in `c.err`).
  */
 @Composable
 fun GlassAlertDialog(
@@ -324,7 +323,7 @@ fun GlassAlertDialog(
     translucent: Boolean = rememberTranslucency(),
     properties: DialogProperties = DialogProperties(),
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val dark = isDarkTheme()
 
     // Fixed modal radius (STYLEGUIDE §5 --r-card 13dp) — no skin.
@@ -338,7 +337,7 @@ fun GlassAlertDialog(
         onDismissRequest = onDismissRequest,
         properties = properties,
     ) {
-        // Transparent Surface; LiquidGlassSurface supplies the .surface-strong
+        // Transparent Surface; TranslucentSurface supplies the .surface-strong
         // frosted blur, the .92 fill and the bright glass rim. vk12: the soft
         // tinted modal float shadow (0 20px 60px) replaces Material elevation.
         Surface(
@@ -350,7 +349,7 @@ fun GlassAlertDialog(
             border = if (translucent) null else BorderStroke(1.dp, c.border),
             shadowElevation = if (translucent) 0.dp else 6.dp,
         ) {
-            LiquidGlassSurface(
+            TranslucentSurface(
                 shape = dialogShape,
                 translucent = translucent,
                 dark = dark,
@@ -428,7 +427,7 @@ fun IdeSwitch(
     // switch into a labelled parent row (mergeDescendants) can leave it null.
     name: String? = null,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
 
     // §7 geometry. Thumb travels from the left inset to (track − thumb − inset).
     val trackW = 34.dp
@@ -446,7 +445,7 @@ fun IdeSwitch(
     )
     // 1vgu: styleguide closed track = rgb(--ide-mute / .5) grey (was c.elevated).
     val trackColor by animateColorAsState(
-        targetValue = if (checked) c.accent else c.mute.copy(alpha = 0.5f),
+        targetValue = if (checked) accentFill() else c.mute.copy(alpha = 0.5f),
         animationSpec = tween(120, easing = EaseStandard),
         label = "ideSwitchTrack",
     )
@@ -510,7 +509,7 @@ fun SectionLabel(
     text: String,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Text(
         // §3: uppercase Apple section header.
         text = text.uppercase(),
@@ -535,7 +534,7 @@ fun SectionLabel(
 // CopyPasteButton — unified styleguide button (k9ht).
 //
 // One component for the styleguide's button variants, all coloured from
-// LocalIdeColors and using the --radius-ctl 9dp control radius:
+// LocalCpColors and using the --radius-ctl 9dp control radius:
 //
 //   PRIMARY      accent fill + white label; press → accentPress (#0070EB light).
 //   SECONDARY    glass: translucent white@.5 + .5px white hairline (tier-1 glass);
@@ -553,7 +552,7 @@ enum class ButtonVariant { PRIMARY, SECONDARY, DANGER, DANGER_SOLID, GHOST }
 
 /**
  * Shared styleguide button. [variant] selects the fill/label recipe; everything
- * is coloured from [LocalIdeColors] so it themes light/dark in lockstep. Radius
+ * is coloured from [LocalCpColors] so it themes light/dark in lockstep. Radius
  * is the --radius-ctl 9dp control token. Press feedback is a colour shift (no
  * Material state-layer halo). [enabled] dims to 0.40 and blocks taps.
  */
@@ -566,7 +565,7 @@ fun CopyPasteButton(
     translucent: Boolean = rememberTranslucency(),
     content: @Composable RowScope.() -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val dark = isDarkTheme()
 
     // Fixed control radius (STYLEGUIDE §5 --r-ctl 8dp) — no skin.
@@ -576,20 +575,20 @@ fun CopyPasteButton(
     val pressed by interaction.collectIsPressedAsState()
 
     // Per-variant fill (background) + label colour. Secondary is glass, so its
-    // background is handled separately via LiquidGlassSurface below.
+    // background is handled separately via TranslucentSurface below.
     val labelColor = when (variant) {
-        ButtonVariant.PRIMARY      -> c.accentOn
+        ButtonVariant.PRIMARY      -> onAccent()
         ButtonVariant.SECONDARY    -> c.text
-        ButtonVariant.DANGER       -> c.danger
+        ButtonVariant.DANGER       -> c.err
         ButtonVariant.DANGER_SOLID -> Color.White
         ButtonVariant.GHOST        -> c.faint
     }
     val fill = when (variant) {
         // Primary press → styleguide --ide-accent-press; resting → accent.
-        ButtonVariant.PRIMARY      -> if (pressed) c.accentPress else c.accent
-        ButtonVariant.DANGER       -> c.danger.copy(alpha = if (pressed) 0.22f else 0.15f)
-        ButtonVariant.DANGER_SOLID -> if (pressed) c.danger.copy(alpha = 0.88f) else c.danger
-        ButtonVariant.GHOST        -> if (pressed) c.hover else Color.Transparent
+        ButtonVariant.PRIMARY      -> if (pressed) accentFill() else accentFill()
+        ButtonVariant.DANGER       -> c.err.copy(alpha = if (pressed) 0.22f else 0.15f)
+        ButtonVariant.DANGER_SOLID -> if (pressed) c.err.copy(alpha = 0.88f) else c.err
+        ButtonVariant.GHOST        -> if (pressed) hoverOverlay() else Color.Transparent
         ButtonVariant.SECONDARY    -> Color.Transparent // glass draws its own fill
     }
     val disabledAlpha = if (enabled) 1f else 0.40f
@@ -628,7 +627,7 @@ fun CopyPasteButton(
         // Glass secondary — tier-1 .surface-glass recipe (translucent white@.5 +
         // .5px white hairline + blur). Falls back to a flat tint < API 31.
         Box(modifier = clickMod) {
-            LiquidGlassSurface(
+            TranslucentSurface(
                 shape = shape,
                 translucent = translucent,
                 dark = dark,
@@ -658,8 +657,8 @@ fun CopyPasteButton(
 // SettingsNavRow    — label/subtitle + optional leading icon (navigation row,
 //                     no trailing control; tapping navigates to another screen)
 //
-// Both are density-aware: the live Density draft from SettingsScreen is
-// threaded down so density changes preview without Save.
+// Both use the fixed §5 comfortable spacing — density modes were removed
+// (CopyPaste-xruv, §2/§12).
 // ---------------------------------------------------------------------------
 
 /**
@@ -676,7 +675,6 @@ fun CopyPasteButton(
  * @param subtitle      Secondary description text.
  * @param checked       Current toggle state.
  * @param onCheckedChange Called with the new value when toggled.
- * @param density       Active UI density for padding/typography.
  */
 @Composable
 fun SharedSettingsRow(
@@ -684,17 +682,11 @@ fun SharedSettingsRow(
     subtitle: String,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
-    density: Density,
     modifier: Modifier = Modifier,
 ) {
-    val c = LocalIdeColors.current
-    val isCompact  = density == Density.COMPACT
-    val isSpacious = density == Density.SPACIOUS
-    val vertPad = when {
-        isCompact  -> 8.dp
-        isSpacious -> 16.dp
-        else       -> 12.dp
-    }
+    val c = LocalCpColors.current
+    // §5 fixed comfortable spacing — density modes removed (CopyPaste-xruv, §2/§12).
+    val vertPad = 12.dp
     Row(
         // CopyPaste-aod: merge the title + subtitle + switch into ONE TalkBack node
         // labelled with the title so it reads "<title>, <subtitle>, On/Off" instead
@@ -711,8 +703,7 @@ fun SharedSettingsRow(
             .padding(end = 12.dp)) {
             Text(
                 text = title,
-                style = if (isCompact) MaterialTheme.typography.bodyMedium
-                        else MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge,
                 color = c.text,
             )
             Text(
@@ -734,11 +725,10 @@ fun SharedSettingsRow(
  *
  * Extracted from SettingsActivity's private `SettingsNavRow`. Tapping the row
  * calls [onClick] to navigate elsewhere; there is no trailing control.
- * Density-aware (same padding/typography rules as [SharedSettingsRow]).
+ * Fixed §5 comfortable spacing (density modes removed — §2/§12).
  *
  * @param title         Main label text.
  * @param subtitle      Secondary description text.
- * @param density       Active UI density for padding/typography.
  * @param leadingIcon   Optional leading icon (e.g. NavIcons.About/Logs).
  * @param onClick       Called when the row is tapped.
  */
@@ -746,19 +736,13 @@ fun SharedSettingsRow(
 fun SharedSettingsNavRow(
     title: String,
     subtitle: String,
-    density: Density,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     leadingIcon: androidx.compose.ui.graphics.vector.ImageVector? = null,
 ) {
-    val c = LocalIdeColors.current
-    val isCompact  = density == Density.COMPACT
-    val isSpacious = density == Density.SPACIOUS
-    val vertPad = when {
-        isCompact  -> 8.dp
-        isSpacious -> 16.dp
-        else       -> 12.dp
-    }
+    val c = LocalCpColors.current
+    // §5 fixed comfortable spacing — density modes removed (CopyPaste-xruv, §2/§12).
+    val vertPad = 12.dp
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -781,8 +765,7 @@ fun SharedSettingsNavRow(
             .padding(end = 12.dp)) {
             Text(
                 text = title,
-                style = if (isCompact) MaterialTheme.typography.bodyMedium
-                        else MaterialTheme.typography.bodyLarge,
+                style = MaterialTheme.typography.bodyLarge,
                 color = c.text,
             )
             Text(
@@ -831,7 +814,7 @@ fun EmptyStateCard(
     modifier: Modifier = Modifier,
     reducedMotion: Boolean = false,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val translucent = rememberTranslucency()
     val enterDurMs = if (reducedMotion) 0 else 400
 
@@ -868,12 +851,12 @@ fun EmptyStateCard(
                         modifier = Modifier
                             .size(58.dp)
                             .background(
-                                color = c.accent.copy(alpha = 0.15f),
+                                color = accentFill().copy(alpha = 0.15f),
                                 shape = RoundedCornerShape(20.dp),
                             )
                             .border(
                                 width = 1.dp,
-                                color = c.accent.copy(alpha = 0.28f),
+                                color = accentFill().copy(alpha = 0.28f),
                                 shape = RoundedCornerShape(20.dp),
                             ),
                         contentAlignment = Alignment.Center,

@@ -29,6 +29,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import com.copypaste.android.ui.theme.NavIcons
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.onAccent
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -59,8 +61,8 @@ import androidx.lifecycle.lifecycleScope
 import com.copypaste.android.ui.SyncStatusBadge
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.GlassTier
-import com.copypaste.android.ui.theme.LiquidGlassSurface
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.TranslucentSurface
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.glassFloatShadow
 import com.copypaste.android.ui.theme.glassFloatShadowExplicit
 import com.copypaste.android.ui.theme.isDarkTheme
@@ -281,7 +283,7 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     // across the floating tab bar and all child screens. CopyPasteTopBar and
     // CopyPasteCard read it independently via rememberTranslucency() for
     // screens rendered without MainShell (standalone activities).
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
     val density = LocalDensity.current
@@ -399,7 +401,7 @@ private fun MainShell(viewModel: ClipboardViewModel) {
  * [GlassTier.GLASS] (blur 28dp, saturate 180%, per-tier white gradient fill +
  * hairline rim). Soft float shadow (0 18dp 45dp rgb(0,0,0/.20)) sits behind it.
  *
- * Active tab: accent-tinted pill background (accent@75%) + [c.accentOn] icon/label
+ * Active tab: accent-tinted pill background (accent@75%) + [onAccent()] icon/label
  * + a spring pop scale (0.94 → 1.06 → 1.0) gated by [motionDuration].
  * Inactive: [c.faint] icon/label, no background.
  */
@@ -413,7 +415,7 @@ private fun FloatingTabBar(
     navBarBottomPadding: androidx.compose.ui.unit.Dp,
     onTabSelected: (Int) -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val reducedMotion = rememberReducedMotion()
     // Spring spec for the active-tab scale pop: stiffness Low → smooth spring,
     // dampingRatio NoBouncy → one clean overshoot then settle.
@@ -422,7 +424,7 @@ private fun FloatingTabBar(
         stiffness = Spring.StiffnessMedium,
     )
 
-    LiquidGlassSurface(
+    TranslucentSurface(
         shape = tabBarShape,
         translucent = translucent,
         dark = dark,
@@ -465,10 +467,10 @@ private fun FloatingTabBar(
 
                 // Active tab pill (STYLEGUIDE §9.12): icon in an accent@18% rounded
                 // "ti" pill, label + icon in the accent. Inactive tabs are faint.
-                val activeIconColor = c.accent
+                val activeIconColor = accentFill()
                 val iconColor = if (isSelected) activeIconColor else c.faint
                 val textColor = if (isSelected) activeIconColor else c.faint
-                val pillColor = if (isSelected) c.accent.copy(alpha = 0.18f) else Color.Transparent
+                val pillColor = if (isSelected) accentFill().copy(alpha = 0.18f) else Color.Transparent
 
                 // Fixed active-pill radius (STYLEGUIDE §5 --r-chip 7dp).
                 val pillRadius = 7.dp

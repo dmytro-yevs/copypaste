@@ -124,28 +124,27 @@ class SettingsParityTest {
         }
     }
 
-    // ── density toggle (§3) ───────────────────────────────────────────────────
+    // ── theme axis (§2) ───────────────────────────────────────────────────────
+    // The density pref/enum was removed (CopyPaste-xruv, §2/§12): there is exactly
+    // one fixed §5 spacing scale, no density modes. The theme axis is dark/light
+    // only — no "system" — and defaults to dark.
 
-    /**
-     * The density pref key must be non-blank (i.e. the constant is defined and
-     * has a sensible name). We cannot construct a Settings without Android
-     * Context, so we test the key constant directly via the companion accessor.
-     */
     @Test
-    fun `Density enum has comfortable and compact cases`() {
-        val values = Density.entries.map { it.name }
-        assertTrue("Density must have COMFORTABLE", values.contains("COMFORTABLE"))
-        assertTrue("Density must have COMPACT", values.contains("COMPACT"))
+    fun `ThemeMode is dark-light only with no system case`() {
+        val values = ThemeMode.entries.map { it.name }
+        assertEquals(
+            "ThemeMode must be exactly LIGHT + DARK (no SYSTEM) — STYLEGUIDE §2",
+            listOf("LIGHT", "DARK"),
+            values,
+        )
     }
 
     @Test
-    fun `Density default is COMPACT`() {
-        // PG-33 (CopyPaste-lvx6): default aligned to COMPACT to match macOS store.ts:97.
-        // Previous §2 spec said COMFORTABLE; overridden by PG-33 decision.
+    fun `ThemeMode default is DARK`() {
         assertEquals(
-            "Default density must be COMPACT per PG-33 (CopyPaste-lvx6, matches macOS)",
-            Density.COMPACT,
-            Density.DEFAULT,
+            "Default theme must be DARK (dark-first, matches web store.ts) — §2",
+            ThemeMode.DARK,
+            ThemeMode.DEFAULT,
         )
     }
 }

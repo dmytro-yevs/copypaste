@@ -65,8 +65,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.IdeColors
-import com.copypaste.android.ui.theme.LiquidGlassSurface
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.CpColors
+import com.copypaste.android.ui.theme.TranslucentSurface
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.ideTextFieldColors
 
@@ -81,7 +82,7 @@ import com.copypaste.android.ui.theme.ideTextFieldColors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun HistoryNormalTopBar(
-    c: IdeColors,
+    c: CpColors,
     translucent: Boolean,
     dark: Boolean,
     reducedMotion: Boolean,
@@ -125,7 +126,7 @@ internal fun HistoryNormalTopBar(
     // §2/P0 + P1#3: route the History header through the canonical
     // glass surface (real API-31 RenderEffect blur, flat §2 tint
     // fallback < 31) instead of the solid c.panel Column background.
-    LiquidGlassSurface(
+    TranslucentSurface(
         shape = RectangleShape,
         translucent = translucent,
         dark = dark,
@@ -211,7 +212,7 @@ internal fun HistoryNormalTopBar(
                             if (searchExpanded) R.string.cd_search_close
                             else R.string.cd_search_open
                         ),
-                        tint = if (searchExpanded) c.accent else c.dim,
+                        tint = if (searchExpanded) accentFill() else c.dim,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -230,7 +231,7 @@ internal fun HistoryNormalTopBar(
                         Icon(
                             Icons.Outlined.SwapVert,
                             contentDescription = stringResource(R.string.cd_reorder_handle),
-                            tint = if (reorderMode) c.accent else c.dim,
+                            tint = if (reorderMode) accentFill() else c.dim,
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -259,14 +260,14 @@ internal fun HistoryNormalTopBar(
                                             if (sortByDevice) R.string.action_sort_by_recency
                                             else R.string.action_sort_by_device
                                         ),
-                                        color = if (sortByDevice) c.accent else c.text,
+                                        color = if (sortByDevice) accentFill() else c.text,
                                     )
                                 },
                                 leadingIcon = {
                                     Icon(
                                         Icons.Outlined.Devices,
                                         null,
-                                        tint = if (sortByDevice) c.accent else c.dim,
+                                        tint = if (sortByDevice) accentFill() else c.dim,
                                     )
                                 },
                                 onClick = {
@@ -299,11 +300,11 @@ internal fun HistoryNormalTopBar(
                                 text = {
                                     Text(
                                         stringResource(R.string.dialog_clear_all_title),
-                                        color = c.danger,
+                                        color = c.err,
                                     )
                                 },
                                 leadingIcon = {
-                                    Icon(Icons.Outlined.Delete, null, tint = c.danger)
+                                    Icon(Icons.Outlined.Delete, null, tint = c.err)
                                 },
                                 onClick = {
                                     onOverflowExpandedChange(false)
@@ -315,7 +316,7 @@ internal fun HistoryNormalTopBar(
                 }
             },
             colors = TopAppBarDefaults.topAppBarColors(
-                // Glass backdrop carries the fill (LiquidGlassSurface).
+                // Glass backdrop carries the fill (TranslucentSurface).
                 containerColor             = Color.Transparent,
                 titleContentColor          = c.text,
                 actionIconContentColor     = c.dim,
@@ -403,7 +404,7 @@ internal fun HistoryNormalTopBar(
                         Text(
                             text = clearRecentLabel,
                             style = MaterialTheme.typography.labelSmall,
-                            color = c.accent,
+                            color = accentFill(),
                             modifier = Modifier
                                 .semantics { role = Role.Button }
                                 .clickable(onClickLabel = clearRecentLabel) {
@@ -439,7 +440,7 @@ internal fun HistoryNormalTopBar(
             }
         }
       } // Column
-    } // LiquidGlassSurface (glass header)
+    } // TranslucentSurface (glass header)
 
     // Request keyboard focus once search bar becomes visible.
     LaunchedEffect(searchExpanded) {

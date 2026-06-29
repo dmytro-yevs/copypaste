@@ -8,34 +8,20 @@ enum class SyncBackend {
     SUPABASE,
 }
 
-/** UI density — mirrors prefs.density in the macOS/web SettingsView (§2/§6). */
-enum class Density {
-    COMFORTABLE, // 34dp rows (default)
-    COMPACT,     // 28dp rows
-    SPACIOUS;    // CopyPaste-gzli: 42dp rows — largest spacing step, mirrors web spacious branch
-
-    companion object {
-        // PG-33 (CopyPaste-lvx6): align default to COMPACT to match macOS (store.ts:97 compact).
-        val DEFAULT = COMPACT
-    }
-}
-
 /**
- * App theme mode — mirrors the web's System/Light/Dark theme control.
+ * App theme mode — the dark/light appearance axis (STYLEGUIDE §2).
  *
- * PARITY-SPEC §0: default is LIGHT (light-first, matching macOS/web store.ts).
- * The palette (Graphite Mist, etc.) is an independent CHROMA axis; both dark
- * and light themes work with any palette. The user may pick [SYSTEM] to follow
- * the OS dark/light setting, or [DARK] to force the dark palette ramp.
+ * There is NO "system" mode: §2 defines exactly two theme values, dark
+ * (default) and light, matching the web store (`store.ts` is dark-first, no
+ * system axis). The accent hue is the independent CHROMA axis ([AccentColor]).
  */
 enum class ThemeMode {
-    SYSTEM, // follow OS (isSystemInDarkTheme)
-    LIGHT,  // force light (PARITY-SPEC §0 default)
-    DARK;   // force dark
+    LIGHT, // force light
+    DARK;  // force dark (default)
 
     companion object {
-        /** PARITY-SPEC §0: light-first — default is LIGHT, matching web store.ts DEFAULT_PREFS. */
-        val DEFAULT = LIGHT
+        /** STYLEGUIDE §2: dark-first — default is DARK, matching web store.ts. */
+        val DEFAULT = DARK
     }
 }
 

@@ -37,7 +37,7 @@ import android.app.Activity
 import android.view.WindowManager
 import com.copypaste.android.ui.theme.AccentColor
 import com.copypaste.android.ui.theme.ContinuousSliderRow
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SectionLabel
 import com.copypaste.android.ui.theme.isDarkTheme
 
@@ -65,7 +65,7 @@ internal fun AccentPicker(
     settings: Settings,
     ctx: android.content.Context,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val dark = isDarkTheme()
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(
@@ -102,7 +102,7 @@ internal fun AccentSwatchItem(
     swatchColor: androidx.compose.ui.graphics.Color,
     onClick: () -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Box(
         modifier = Modifier
             .size(36.dp)
@@ -125,7 +125,6 @@ internal fun AccentSwatchItem(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun DisplayTab(
-    density: Density,
     showWarnings: Boolean,
     onShowWarningsChange: (Boolean) -> Unit,
     revealGuard: Boolean,
@@ -143,13 +142,13 @@ internal fun DisplayTab(
     settings: Settings,
     ctx: android.content.Context,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
 
         // ── APPEARANCE — two axes only: Theme + Accent (STYLEGUIDE §2) ──────
         SectionLabel(stringResource(R.string.section_appearance))
         SettingsCard {
-            // ── Theme mode (System / Light / Dark) ────────────────────────
+            // ── Theme mode (Light / Dark — no System axis, STYLEGUIDE §2) ──
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
                     text = stringResource(R.string.setting_color_scheme_label),
@@ -157,9 +156,8 @@ internal fun DisplayTab(
                     color = c.dim,
                     modifier = Modifier.padding(bottom = 8.dp),
                 )
-                val themeModes = listOf(ThemeMode.SYSTEM, ThemeMode.LIGHT, ThemeMode.DARK)
+                val themeModes = listOf(ThemeMode.LIGHT, ThemeMode.DARK)
                 val themeLabels = listOf(
-                    stringResource(R.string.theme_system),
                     stringResource(R.string.theme_light),
                     stringResource(R.string.theme_dark),
                 )
@@ -194,7 +192,6 @@ internal fun DisplayTab(
                 subtitle = stringResource(R.string.setting_sensitive_warnings_subtitle),
                 checked = showWarnings,
                 onCheckedChange = onShowWarningsChange,
-                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -202,7 +199,6 @@ internal fun DisplayTab(
                 subtitle = stringResource(R.string.setting_reveal_guard_subtitle),
                 checked = revealGuard,
                 onCheckedChange = onRevealGuardChange,
-                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -210,7 +206,6 @@ internal fun DisplayTab(
                 subtitle = stringResource(R.string.setting_mask_sensitive_subtitle),
                 checked = maskSensitive,
                 onCheckedChange = onMaskSensitiveChange,
-                density = density,
             )
             SettingsCardDivider()
             // Privacy: FLAG_SECURE toggle, applied immediately to the current window.
@@ -228,7 +223,6 @@ internal fun DisplayTab(
                         else w.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
                     }
                 },
-                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -236,7 +230,6 @@ internal fun DisplayTab(
                 subtitle = stringResource(R.string.setting_translucency_subtitle),
                 checked = translucency,
                 onCheckedChange = onTranslucencyChange,
-                density = density,
             )
         }
 

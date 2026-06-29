@@ -79,7 +79,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import kotlinx.coroutines.Dispatchers
@@ -215,7 +216,7 @@ fun PreviewOverlay(
     if (phase == PreviewPhase.Idle || item == null) return
 
     val pinned = phase == PreviewPhase.Pinned
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // §8 a11y: suppress card scale-in when the user has requested reduced motion.
     val reducedMotion = rememberReducedMotion()
 
@@ -410,7 +411,7 @@ private fun PreviewHeader(
     pinned: Boolean,
     onDismiss: (() -> Unit)?,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
@@ -483,19 +484,23 @@ private fun previewChipLabel(contentType: String, snippet: String): String = whe
  * (canonical: TEXT→accent, URL→info, EMAIL/PHONE→success, COLOR/NUMBER/PATH→warning,
  * JSON→danger, CODE/IMAGE→violet, FILE→faint, PRIVATE→danger).
  */
-private fun previewChipColor(label: String, c: com.copypaste.android.ui.theme.IdeColors): Color = when (label) {
-    "TEXT"    -> c.accent
+private fun previewChipColor(
+    label: String,
+    c: com.copypaste.android.ui.theme.CpColors,
+    accent: Color,
+): Color = when (label) {
+    "TEXT"    -> accent
     "URL"     -> c.info
-    "EMAIL"   -> c.success
-    "PHONE"   -> c.success
-    "COLOR"   -> c.warning
-    "NUMBER"  -> c.warning
-    "PATH"    -> c.warning
-    "JSON"    -> c.danger
-    "CODE"    -> c.violet
-    "IMAGE"   -> c.violet
+    "EMAIL"   -> c.ok
+    "PHONE"   -> c.ok
+    "COLOR"   -> c.warn
+    "NUMBER"  -> c.warn
+    "PATH"    -> c.warn
+    "JSON"    -> c.err
+    "CODE"    -> c.cCode
+    "IMAGE"   -> c.cCode
     "FILE"    -> c.faint
-    "PRIVATE" -> c.danger
+    "PRIVATE" -> c.err
     else      -> c.faint
 }
 
@@ -505,11 +510,11 @@ private fun PreviewContentTypeChip(
     @Suppress("UNUSED_PARAMETER") isSensitive: Boolean, // CopyPaste-1b55: label is always content-type, not "PRIVATE"
     snippet: String,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // CopyPaste-1b55 parity: keep content-type label even for sensitive items;
     // privacy is signalled by the blur/mask, not the chip label.
     val label = previewChipLabel(contentType, snippet)
-    val color = previewChipColor(label, c)
+    val color = previewChipColor(label, c, accentFill())
     // Match ContentTypeChip style from HistoryActivity: 7dp radius, 1dp border, 10sp SemiBold.
     Box(
         modifier = Modifier
@@ -545,7 +550,7 @@ private fun PreviewTextContent(
     maskSensitive: Boolean,
     pinned: Boolean,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val masked = item.isSensitive && maskSensitive
     // CopyPaste-5917.70 (security): on API 31+ use Modifier.blur on the real text
     // rather than substituting bullet characters. Plaintext is never placed in the
@@ -617,7 +622,7 @@ private fun PreviewImageContent(
     imagePanY: Float,
     onTransform: (scaleChange: Float, panDelta: Offset) -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // CopyPaste-44rq.42: sensitive images are blurred until the user intentionally reveals
     // them, mirroring the text-masking guard in PreviewTextContent. On API 31+ we use
     // Modifier.blur; on older APIs the bitmap is hidden entirely behind a placeholder.
@@ -646,13 +651,13 @@ private fun PreviewImageContent(
                 Icon(
                     imageVector = Icons.Outlined.AttachFile,
                     contentDescription = null,
-                    tint = c.danger,
+                    tint = c.err,
                     modifier = Modifier.size(32.dp),
                 )
                 Text(
                     text = stringResource(R.string.sensitive_preview_mask),
                     style = MaterialTheme.typography.bodySmall,
-                    color = c.danger,
+                    color = c.err,
                 )
             }
         } else if (bitmap != null) {
@@ -678,7 +683,7 @@ private fun PreviewImageContent(
             )
         } else {
             CircularProgressIndicator(
-                color = c.accent,
+                color = accentFill(),
                 strokeWidth = 2.dp,
                 modifier = Modifier.size(24.dp),
             )
@@ -692,7 +697,7 @@ private fun PreviewImageContent(
 
 @Composable
 private fun PreviewFileContent(item: ClipboardItem) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Column(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.Center,
@@ -729,7 +734,7 @@ private fun PreviewActionRow(
     /** Open with default app. Non-null only for file items. */
     onOpenFile: (() -> Unit)? = null,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // CopyPaste-5jcj: every action IconButton is 48dp (WCAG 2.5.5 minimum touch
     // target) while the inner Icon glyph stays 18dp — IconButton centres its content
     // so the visible icon is unchanged, only the tappable area grows.
@@ -742,7 +747,7 @@ private fun PreviewActionRow(
             Icon(
                 imageVector = Icons.Outlined.ContentCopy,
                 contentDescription = stringResource(R.string.cd_copy),
-                tint = c.accent,
+                tint = accentFill(),
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -754,7 +759,7 @@ private fun PreviewActionRow(
                 contentDescription = stringResource(
                     if (item.pinned) R.string.action_unpin else R.string.action_pin,
                 ),
-                tint = if (item.pinned) c.warning else c.dim,
+                tint = if (item.pinned) c.warn else c.dim,
                 modifier = Modifier.size(18.dp),
             )
         }
@@ -765,7 +770,7 @@ private fun PreviewActionRow(
                 Icon(
                     imageVector = Icons.Outlined.OpenInNew,
                     contentDescription = stringResource(R.string.cd_open_file),
-                    tint = c.accent,
+                    tint = accentFill(),
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -776,7 +781,7 @@ private fun PreviewActionRow(
                 Icon(
                     imageVector = Icons.Outlined.SaveAlt,
                     contentDescription = stringResource(R.string.action_save_file),
-                    tint = c.accent,
+                    tint = accentFill(),
                     modifier = Modifier.size(18.dp),
                 )
             }
@@ -786,7 +791,7 @@ private fun PreviewActionRow(
             Icon(
                 imageVector = Icons.Outlined.Delete,
                 contentDescription = stringResource(R.string.cd_delete),
-                tint = c.danger,
+                tint = c.err,
                 modifier = Modifier.size(18.dp),
             )
         }

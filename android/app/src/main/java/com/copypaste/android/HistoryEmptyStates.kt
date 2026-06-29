@@ -31,9 +31,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteCard
+import com.copypaste.android.ui.theme.accentFill
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.LocalAccent
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.rememberReducedMotion
@@ -45,7 +46,7 @@ import com.copypaste.android.ui.theme.rememberTranslucency
 
 @Composable
 internal fun LoadingBox(padding: PaddingValues) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val translucent = rememberTranslucency()
     Box(
         modifier = Modifier
@@ -55,7 +56,7 @@ internal fun LoadingBox(padding: PaddingValues) {
         contentAlignment = Alignment.Center,
     ) {
         CircularProgressIndicator(
-            color = c.accent,
+            color = accentFill(),
             strokeWidth = 2.dp,
             modifier = Modifier.size(20.dp),
         )
@@ -76,7 +77,7 @@ internal fun LoadingBox(padding: PaddingValues) {
  */
 @Composable
 internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = false) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val translucent = rememberTranslucency()
     val reducedMotion = rememberReducedMotion()
     val enterDurMs = motionDuration(Motion.Slow)
@@ -120,12 +121,12 @@ internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = 
                             modifier = Modifier
                                 .size(58.dp)
                                 .background(
-                                    color = c.accent.copy(alpha = 0.15f),
+                                    color = accentFill().copy(alpha = 0.15f),
                                     shape = RoundedCornerShape(20.dp),
                                 )
                                 .border(
                                     width = 1.dp,
-                                    color = c.accent.copy(alpha = 0.28f),
+                                    color = accentFill().copy(alpha = 0.28f),
                                     shape = RoundedCornerShape(20.dp),
                                 ),
                             contentAlignment = Alignment.Center,
@@ -168,7 +169,7 @@ internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = 
 /** §9 Empty state: search returned no results. */
 @Composable
 internal fun EmptySearchState(padding: PaddingValues, query: String) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val translucent = rememberTranslucency()
     val reducedMotion = rememberReducedMotion()
     val enterDurMs = motionDuration(Motion.Slow)
@@ -205,12 +206,12 @@ internal fun EmptySearchState(padding: PaddingValues, query: String) {
                         modifier = Modifier
                             .size(58.dp)
                             .background(
-                                color = c.accent.copy(alpha = 0.12f),
+                                color = accentFill().copy(alpha = 0.12f),
                                 shape = RoundedCornerShape(20.dp),
                             )
                             .border(
                                 width = 1.dp,
-                                color = c.accent.copy(alpha = 0.24f),
+                                color = accentFill().copy(alpha = 0.24f),
                                 shape = RoundedCornerShape(20.dp),
                             ),
                         contentAlignment = Alignment.Center,

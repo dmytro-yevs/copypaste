@@ -23,7 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SectionLabel
 import java.text.DateFormat
 import java.util.Date
@@ -56,8 +56,6 @@ internal fun SyncTab(
     onSupabasePasswordChange: (String) -> Unit,
     relayUrl: String,
     onRelayUrlChange: (String) -> Unit,
-    // CopyPaste-hffp: live density from SettingsScreen for density-aware rows.
-    density: Density,
     // CopyPaste-dxq2: sync error surfacing — written by FgsSyncLoop/SupabasePollWorker.
     syncError: String = "",
     syncErrorIsUnauthorized: Boolean = false,
@@ -65,7 +63,7 @@ internal fun SyncTab(
     // Null → not yet available (no backend reachability probe on Android).
     onTestConnection: (() -> Unit)? = null,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val ctx = LocalContext.current
     // CopyPaste-26zi: self-contained Settings handle for the independent transport
     // toggles. These apply immediately (like a Switch) and are read by the runtime
@@ -84,7 +82,7 @@ internal fun SyncTab(
             androidx.compose.material3.Card(
                 colors = androidx.compose.material3.CardDefaults.cardColors(
                     containerColor = if (syncErrorIsUnauthorized)
-                        c.danger.copy(alpha = 0.12f)
+                        c.err.copy(alpha = 0.12f)
                     else
                         c.elevated,
                 ),
@@ -96,7 +94,7 @@ internal fun SyncTab(
                     Text(
                         text = if (syncErrorIsUnauthorized) "Sync: authentication failed" else "Sync error",
                         style = MaterialTheme.typography.labelMedium,
-                        color = c.danger,
+                        color = c.err,
                     )
                     Text(
                         text = if (syncErrorIsUnauthorized)
@@ -118,7 +116,6 @@ internal fun SyncTab(
                 subtitle = stringResource(R.string.setting_p2p_sync_subtitle),
                 checked = p2pSyncEnabled,
                 onCheckedChange = onP2pSyncEnabledChange,
-                density = density,
             )
             SettingsCardDivider()
             // PG-29 (CopyPaste-yqn5): LAN visibility toggle — mirrors macOS lan_visibility
@@ -129,7 +126,6 @@ internal fun SyncTab(
                 subtitle = stringResource(R.string.setting_lan_visibility_subtitle),
                 checked = lanVisibility,
                 onCheckedChange = onLanVisibilityChange,
-                density = density,
             )
             SettingsCardDivider()
             // CopyPaste-44rq.24: auto-apply synced clipboard — mirrors macOS
@@ -141,7 +137,6 @@ internal fun SyncTab(
                 subtitle = stringResource(R.string.setting_auto_apply_synced_clip_subtitle),
                 checked = autoApplySyncedClip,
                 onCheckedChange = onAutoApplySyncedClipChange,
-                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -149,7 +144,6 @@ internal fun SyncTab(
                 subtitle = stringResource(R.string.setting_sync_wifi_only_subtitle),
                 checked = syncOnWifiOnly,
                 onCheckedChange = onSyncOnWifiOnlyChange,
-                density = density,
             )
             SettingsCardDivider()
             // CopyPaste-26zi: INDEPENDENT, ADDITIVE transport toggles.
@@ -186,7 +180,6 @@ internal fun SyncTab(
                         if (supabaseEnabled && !v) SyncBackend.SUPABASE else SyncBackend.RELAY,
                     )
                 },
-                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -200,7 +193,6 @@ internal fun SyncTab(
                         if (v) SyncBackend.SUPABASE else SyncBackend.RELAY,
                     )
                 },
-                density = density,
             )
         }
 
@@ -249,7 +241,7 @@ internal fun SyncTab(
             if (detectCloudAccountMismatch(localAccountId, peerAccountIds)) {
                 androidx.compose.material3.Card(
                     colors = androidx.compose.material3.CardDefaults.cardColors(
-                        containerColor = c.warning.copy(alpha = 0.12f),
+                        containerColor = c.warn.copy(alpha = 0.12f),
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -259,7 +251,7 @@ internal fun SyncTab(
                         Text(
                             text = stringResource(R.string.setting_cloud_account_mismatch_title),
                             style = MaterialTheme.typography.labelMedium,
-                            color = c.warning,
+                            color = c.warn,
                         )
                         Text(
                             text = stringResource(R.string.setting_cloud_account_mismatch_body),
@@ -299,7 +291,7 @@ internal fun SyncTab(
                     Text(
                         text = stringResource(R.string.setting_supabase_account_same_warning),
                         style = MaterialTheme.typography.bodySmall,
-                        color = c.danger,
+                        color = c.err,
                         modifier = Modifier.padding(top = 2.dp),
                     )
                 }
@@ -365,12 +357,12 @@ internal fun SyncTab(
                     Text(
                         text = stringResource(R.string.setting_test_connection_label),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = LocalIdeColors.current.text,
+                        color = LocalCpColors.current.text,
                     )
                     Text(
                         text = stringResource(R.string.setting_test_connection_subtitle),
                         style = MaterialTheme.typography.bodySmall,
-                        color = LocalIdeColors.current.dim,
+                        color = LocalCpColors.current.dim,
                     )
                 }
                 CopyPasteButton(
@@ -408,7 +400,7 @@ private fun SyncDiagnosticsCard(
     supabaseAnonKey: String,
     relayUrl: String,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
 
     // Backend op results — the AUTHORITATIVE per-backend health source (otb7).
     val supabaseOp by DevicesOnlineState.supabaseOpResult.collectAsState()
@@ -432,8 +424,8 @@ private fun SyncDiagnosticsCard(
     )
 
     fun stateLabelColor(s: BackendConnState): Pair<String, androidx.compose.ui.graphics.Color> = when (s) {
-        BackendConnState.Connected -> "Connected" to c.success
-        BackendConnState.Error     -> "Error (check config)" to c.danger
+        BackendConnState.Connected -> "Connected" to c.ok
+        BackendConnState.Error     -> "Error (check config)" to c.err
         BackendConnState.Idle      -> "Idle (no recent sync)" to c.faint
         BackendConnState.Unknown   -> "Not reporting yet" to c.dim
     }
@@ -499,7 +491,7 @@ private fun SyncDiagnosticsCard(
             DiagnosticsRow(
                 label = "Peers online (P2P)",
                 value = peerCount.toString(),
-                valueColor = if (peerCount > 0) c.success else c.faint,
+                valueColor = if (peerCount > 0) c.ok else c.faint,
                 c = c,
             )
             // Misconfig hints — one per enabled transport with a detected issue.
@@ -508,7 +500,7 @@ private fun SyncDiagnosticsCard(
                 Text(
                     text = hint,
                     style = MaterialTheme.typography.bodySmall,
-                    color = c.danger,
+                    color = c.err,
                 )
             }
         }
@@ -521,7 +513,7 @@ private fun DiagnosticsRow(
     label: String,
     value: String,
     valueColor: androidx.compose.ui.graphics.Color,
-    c: com.copypaste.android.ui.theme.IdeColors,
+    c: com.copypaste.android.ui.theme.CpColors,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -535,7 +527,7 @@ private fun DiagnosticsRow(
 
 /** A standard divider with vertical breathing room between diagnostics rows. */
 @Composable
-private fun DiagnosticsDivider(c: com.copypaste.android.ui.theme.IdeColors) {
+private fun DiagnosticsDivider(c: com.copypaste.android.ui.theme.CpColors) {
     Spacer(modifier = Modifier.height(8.dp))
     HorizontalDivider(color = c.divider, thickness = 1.dp)
     Spacer(modifier = Modifier.height(8.dp))

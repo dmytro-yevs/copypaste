@@ -129,7 +129,7 @@ fun pageExitTransition(reducedMotion: Boolean): ExitTransition =
 //
 // Usage:
 //   val flashAlpha by animateCopyFlash(trigger = copyFlashTrigger, reducedMotion = rm)
-//   Box(Modifier.background(c.success.copy(alpha = flashAlpha * 0.18f))) { … }
+//   Box(Modifier.background(c.ok.copy(alpha = flashAlpha * 0.18f))) { … }
 // ---------------------------------------------------------------------------
 
 /**

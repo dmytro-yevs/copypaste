@@ -23,11 +23,12 @@ import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
+import com.copypaste.android.ui.theme.accentFill
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.GlassTier
-import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LiquidGlassSurface
+import com.copypaste.android.ui.theme.LocalCpColors
+import com.copypaste.android.ui.theme.TranslucentSurface
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberTranslucency
 
@@ -56,13 +57,13 @@ internal fun SelectionTopBar(
     // g3z4: bulk-copy action — joins selected text items and puts them in the clipboard.
     onCopySelected: () -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-    // w67o: wrap in LiquidGlassSurface (tier GLASS = .surface-glass, frosted, parity styleguide
+    // w67o: wrap in TranslucentSurface (tier GLASS = .surface-glass, frosted, parity styleguide
     // bulk/selection bars = tier-1 surface-glass at L362). TopAppBar container → transparent so
     // the glass surface shows through. Matches the main History header pattern at L783.
-    LiquidGlassSurface(
+    TranslucentSurface(
         shape = RectangleShape,
         translucent = translucent,
         dark = dark,
@@ -95,7 +96,7 @@ internal fun SelectionTopBar(
                     Icon(
                         if (allSelected) Icons.Outlined.CheckBox else Icons.Outlined.CheckBoxOutlineBlank,
                         contentDescription = stringResource(R.string.cd_select_all),
-                        tint = if (allSelected) c.accent else c.dim,
+                        tint = if (allSelected) accentFill() else c.dim,
                         modifier = Modifier.size(18.dp),
                     )
                 }
@@ -113,7 +114,7 @@ internal fun SelectionTopBar(
                         Icon(
                             Icons.Outlined.Star,
                             contentDescription = stringResource(R.string.action_pin_selected),
-                            tint = c.accent,
+                            tint = accentFill(),
                             modifier = Modifier.size(18.dp),
                         )
                     }
@@ -129,13 +130,13 @@ internal fun SelectionTopBar(
                         Icon(
                             Icons.Outlined.Delete,
                             contentDescription = stringResource(R.string.action_delete_selected),
-                            tint = c.danger,
+                            tint = c.err,
                             modifier = Modifier.size(18.dp),
                         )
                     }
                 }
             },
-            // w67o: Transparent container — LiquidGlassSurface supplies the fill/blur.
+            // w67o: Transparent container — TranslucentSurface supplies the fill/blur.
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor             = Color.Transparent,
                 titleContentColor          = c.text,
@@ -158,7 +159,7 @@ internal fun ConfirmationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val title = when (action) {
         ConfirmAction.CLEAR_UNPINNED -> stringResource(R.string.dialog_clear_unpinned_title)
         ConfirmAction.CLEAR_ALL -> stringResource(R.string.dialog_clear_all_title)

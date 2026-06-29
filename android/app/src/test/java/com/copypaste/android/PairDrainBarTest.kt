@@ -69,13 +69,13 @@ class PairDrainBarTest {
     @Test
     fun `PairActivity drain-bar switches to warning color when urgent`() {
         val src = pairSource()
-        // The drain-bar fill color must flip to c.warning when urgent (≤20 s).
+        // The drain-bar fill color must flip to c.warn when urgent (≤20 s).
         // The urgency predicate is either inline `remainingSeconds <= …` or via
         // `isQrWarning(remainingSeconds)` — either form is acceptable as long as
-        // the warning branch references c.warning.
-        val hasWarningColor = src.contains("c.warning") && src.contains(".height(2.dp)")
+        // the warning branch references c.warn (CopyPaste-7rxb: was c.warning).
+        val hasWarningColor = src.contains("c.warn") && src.contains(".height(2.dp)")
         assertTrue(
-            "PairActivity drain-bar fill must use c.warning colour in the urgent zone",
+            "PairActivity drain-bar fill must use c.warn colour in the urgent zone",
             hasWarningColor,
         )
     }

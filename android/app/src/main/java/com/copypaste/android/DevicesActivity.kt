@@ -48,7 +48,7 @@ import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.SectionLabel
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.screenCanvas
@@ -123,7 +123,7 @@ fun DevicesScreen(
     paintCanvasBackdrop: Boolean = true,
 ) {
     val ctx = LocalContext.current
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val settings = remember { Settings(ctx) }
     val deviceKeyStore = remember { DeviceKeyStore(ctx) }
     val scope = rememberCoroutineScope()
@@ -590,7 +590,7 @@ fun DevicesScreen(
                         Text(
                             "Passphrase must be at least 8 characters.",
                             style = MaterialTheme.typography.labelSmall,
-                            color = c.danger,
+                            color = c.err,
                         )
                     }
                 }
@@ -941,7 +941,7 @@ fun DevicesScreen(
                 discoverError?.let { msg ->
                     Text(
                         text = msg,
-                        color = c.danger,
+                        color = c.err,
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }

@@ -83,8 +83,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.IdeColors
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.accentSelection
+import com.copypaste.android.ui.theme.CpColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.rememberReducedMotion
@@ -118,7 +120,7 @@ import java.io.File
 internal fun SourceAppBadge(
     sourceApp: String?,
     ctx: android.content.Context,
-    colors: IdeColors,
+    colors: CpColors,
 ) {
     val c = colors
     sourceAppLabel(sourceApp)?.let { appLabel ->
@@ -199,16 +201,14 @@ internal const val ROW_STAGGER_STEP_MS = 20
 internal fun HistoryRow(
     item: ClipboardItem,
     /** CopyPaste-998 (jank): the active ramp, passed in from list scope so the row
-     *  never reads LocalIdeColors during scroll recomposition. */
-    colors: IdeColors,
+     *  never reads LocalCpColors during scroll recomposition. */
+    colors: CpColors,
     repository: ClipboardRepository,
     maskSensitive: Boolean,
     imageMaxHeightDp: Int,
     previewDelayMs: Long,
     /** §3/P1#9: number of preview lines per row (1=single-line ellipsis, >1 clamp). */
     previewLines: Int = 1,
-    /** §2 Density pref: compact=28dp text rows, comfortable (default)=34dp. */
-    isCompact: Boolean = false,
     selectionMode: Boolean,
     isSelected: Boolean,
     reorderMode: Boolean = false,
@@ -263,15 +263,15 @@ internal fun HistoryRow(
         if (selectionMode) expanded = false
     }
 
-    // §5/§8 Copy-success flash: 90ms c.successDim background overlay on copy.
+    // §5/§8 Copy-success flash: 90ms c.ok.copy(alpha = 0.12f) background overlay on copy.
     // copyFlashTrigger increments on each copy; animateColorAsState fades from
-    // c.successDim → Transparent in Motion.Instant (90ms) and then resets the trigger
+    // c.ok.copy(alpha = 0.12f) → Transparent in Motion.Instant (90ms) and then resets the trigger
     // via finishedListener so the next copy can fire again.
     // Gated by reducedMotion: when true, durationMillis=0 means the color jumps
     // to transparent instantly (no visible flash, but the state still clears).
     var copyFlashTrigger by remember(item.id) { mutableStateOf(0) }
     val copyFlashColor by animateColorAsState(
-        targetValue = if (copyFlashTrigger > 0) colors.successDim else Color.Transparent,
+        targetValue = if (copyFlashTrigger > 0) colors.ok.copy(alpha = 0.12f) else Color.Transparent,
         animationSpec = tween(durationMillis = if (reducedMotion) 0 else Motion.Instant),
         label = "copyFlash",
         finishedListener = { copyFlashTrigger = 0 },
@@ -365,16 +365,16 @@ internal fun HistoryRow(
 
     // §5 row background: selection > expanded > sensitive tint > transparent
     val rowBg = when {
-        isSelected        -> colors.selection
+        isSelected        -> accentSelection()
         expanded          -> colors.elevated
-        detectedSensitive -> colors.danger.copy(alpha = 0.07f)
-        item.pinned       -> colors.warning.copy(alpha = 0.16f)
+        detectedSensitive -> colors.err.copy(alpha = 0.07f)
+        item.pinned       -> colors.warn.copy(alpha = 0.16f)
         else              -> Color.Transparent
     }
 
     // Left accent bar color: visible amber when pinned and no stronger state is active.
     val pinnedAccentColor = if (item.pinned && !isSelected && !expanded && !detectedSensitive)
-        colors.warning.copy(alpha = 0.72f)
+        colors.warn.copy(alpha = 0.72f)
     else
         Color.Transparent
 
@@ -398,7 +398,7 @@ internal fun HistoryRow(
             }
             .scale(rowScale)
             .background(rowBg)
-            // §5/§8 Copy-success flash overlay: animates from c.successDim → transparent
+            // §5/§8 Copy-success flash overlay: animates from c.ok.copy(alpha = 0.12f) → transparent
             // in 90ms (Motion.Instant).  Layered on top of rowBg so selection/pinned
             // tints are still visible underneath while the flash fades.
             .background(color = copyFlashColor)
@@ -454,7 +454,7 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = if (isCompact) 34.dp else 44.dp)
+                    .heightIn(min = 44.dp)
                     .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -466,7 +466,7 @@ internal fun HistoryRow(
                         stringResource(R.string.cd_checkbox_deselect)
                     else
                         stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
+                    tint = if (isSelected) accentFill() else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
@@ -478,7 +478,7 @@ internal fun HistoryRow(
                     Icon(
                         imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.warning.copy(alpha = 0.9f),
+                        tint = c.warn.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
@@ -498,13 +498,13 @@ internal fun HistoryRow(
                             .widthIn(max = 340.dp)
                             .heightIn(max = imageMaxHeightDp.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(c.dangerDim),
+                            .background(c.err.copy(alpha = 0.12f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Lock,
                             contentDescription = stringResource(R.string.sensitive_preview_mask),
-                            tint = c.danger,
+                            tint = c.err,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -555,7 +555,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.accent else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex > 0) accentFill() else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -563,7 +563,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.accent
+                                tint = if (pinnedIndex < pinnedCount - 1) accentFill()
                                        else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
@@ -579,7 +579,7 @@ internal fun HistoryRow(
                                     stringResource(R.string.action_unpin)
                                 else
                                     stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.warning else c.dim,
+                                tint = if (item.pinned) c.warn else c.dim,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -589,7 +589,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.danger,
+                                tint = c.err,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -602,7 +602,7 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = if (isCompact) 34.dp else 44.dp),
+                    .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Checkbox
@@ -613,7 +613,7 @@ internal fun HistoryRow(
                         stringResource(R.string.cd_checkbox_deselect)
                     else
                         stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
+                    tint = if (isSelected) accentFill() else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
@@ -626,7 +626,7 @@ internal fun HistoryRow(
                     Icon(
                         imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.warning.copy(alpha = 0.9f),
+                        tint = c.warn.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
@@ -679,7 +679,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.accent else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex > 0) accentFill() else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -687,7 +687,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.accent
+                                tint = if (pinnedIndex < pinnedCount - 1) accentFill()
                                        else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
@@ -698,7 +698,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.AutoMirrored.Outlined.OpenInNew,
                                 contentDescription = stringResource(R.string.cd_open_file),
-                                tint = c.accent,
+                                tint = accentFill(),
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -707,7 +707,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.SaveAlt,
                                 contentDescription = stringResource(R.string.action_save_file),
-                                tint = c.accent,
+                                tint = accentFill(),
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -719,7 +719,7 @@ internal fun HistoryRow(
                                     stringResource(R.string.action_unpin)
                                 else
                                     stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.warning else c.dim,
+                                tint = if (item.pinned) c.warn else c.dim,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -727,7 +727,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.danger,
+                                tint = c.err,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -743,7 +743,7 @@ internal fun HistoryRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = if (isCompact) 34.dp else 44.dp),
+                    .heightIn(min = 44.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // Checkbox
@@ -754,7 +754,7 @@ internal fun HistoryRow(
                         stringResource(R.string.cd_checkbox_deselect)
                     else
                         stringResource(R.string.cd_checkbox_select),
-                    tint = if (isSelected) c.accent else c.dim.copy(alpha = 0.4f),
+                    tint = if (isSelected) accentFill() else c.dim.copy(alpha = 0.4f),
                     modifier = Modifier
                         .size(16.dp)
                         .clickable(onClickLabel = if (isSelected) stringResource(R.string.cd_checkbox_deselect) else stringResource(R.string.cd_checkbox_select)) { onCheckboxTap() },
@@ -772,7 +772,7 @@ internal fun HistoryRow(
                     Icon(
                         imageVector = Icons.Outlined.Star,
                         contentDescription = stringResource(R.string.cd_pin_item),
-                        tint = c.warning.copy(alpha = 0.9f),
+                        tint = c.warn.copy(alpha = 0.9f),
                         modifier = Modifier.size(12.dp),
                     )
                     Spacer(Modifier.width(4.dp))
@@ -887,7 +887,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowUp,
                                 contentDescription = stringResource(R.string.action_move_up),
-                                tint = if (pinnedIndex > 0) c.accent else c.dim.copy(alpha = 0.3f),
+                                tint = if (pinnedIndex > 0) accentFill() else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
                         }
@@ -895,7 +895,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.KeyboardArrowDown,
                                 contentDescription = stringResource(R.string.action_move_down),
-                                tint = if (pinnedIndex < pinnedCount - 1) c.accent
+                                tint = if (pinnedIndex < pinnedCount - 1) accentFill()
                                        else c.dim.copy(alpha = 0.3f),
                                 modifier = Modifier.size(18.dp),
                             )
@@ -910,7 +910,7 @@ internal fun HistoryRow(
                                     stringResource(R.string.action_unpin)
                                 else
                                     stringResource(R.string.action_pin),
-                                tint = if (item.pinned) c.warning else c.dim,
+                                tint = if (item.pinned) c.warn else c.dim,
                                 modifier = Modifier.size(16.dp),
                             )
                         }
@@ -918,7 +918,7 @@ internal fun HistoryRow(
                             Icon(
                                 imageVector = Icons.Outlined.Delete,
                                 contentDescription = stringResource(R.string.cd_delete),
-                                tint = c.danger,
+                                tint = c.err,
                                 modifier = Modifier.size(16.dp),
                             )
                         }

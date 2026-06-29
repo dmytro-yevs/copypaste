@@ -31,7 +31,7 @@ import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -54,7 +54,7 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 private fun SasPeerMetadataCard(status: PairStatus) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     // Pre-resolve string resources outside buildList (stringResource is @Composable;
     // it cannot be called inside a non-@Composable lambda like buildList).
     val labelModel = stringResource(R.string.meta_label_model)
@@ -121,7 +121,7 @@ internal fun SasPairingDialog(
     onClose: () -> Unit,
     onPaired: () -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val scope = rememberCoroutineScope()
 
     // Current pairing status; starts optimistically at "initiating".
@@ -394,7 +394,7 @@ internal fun SasPairingDialog(
                     status.state == "confirmed" -> {
                         Text(
                             "Paired ✓",
-                            color = c.success,
+                            color = c.ok,
                             style = MaterialTheme.typography.titleSmall,
                         )
                     }
@@ -405,7 +405,7 @@ internal fun SasPairingDialog(
                                 "rejected" -> "Pairing was rejected."
                                 else -> "Pairing was cancelled."
                             },
-                            color = c.danger,
+                            color = c.err,
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
@@ -487,7 +487,7 @@ internal fun SasPairingDialog(
                 }
                 error?.let { msg ->
                     if (!terminal) {
-                        Text(msg, color = c.danger, style = MaterialTheme.typography.labelSmall)
+                        Text(msg, color = c.err, style = MaterialTheme.typography.labelSmall)
                     }
                 }
             }

@@ -42,9 +42,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.EaseOutExpo
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.Motion
-import com.copypaste.android.ui.theme.LiquidGlassSurface
+import com.copypaste.android.ui.theme.TranslucentSurface
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
@@ -154,7 +155,7 @@ class GlassToastState {
  * the screen content so the toast floats above the list.
  *
  * Respects reduced-motion: the slide is suppressed when the user disabled
- * animations. Honours the translucency pref via [LiquidGlassSurface] so the
+ * animations. Honours the translucency pref via [TranslucentSurface] so the
  * toast is the §2 frosted glass (or an opaque elevated surface when off).
  */
 @Composable
@@ -208,7 +209,7 @@ fun GlassToastHost(
 
 @Composable
 private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val dark = isDarkTheme()
 
     // Fixed toast geometry (STYLEGUIDE §5 --r-card 13dp + §5 --sh2 float).
@@ -216,24 +217,24 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
     val toastShape = RoundedCornerShape(13.dp)
 
     val dotColor: Color = when (data.kind) {
-        GlassToastKind.SUCCESS -> c.success
-        GlassToastKind.DANGER -> c.danger
+        GlassToastKind.SUCCESS -> c.ok
+        GlassToastKind.DANGER -> c.err
         GlassToastKind.INFO -> c.info
-        GlassToastKind.ACCENT -> c.accent
+        GlassToastKind.ACCENT -> accentFill()
     }
 
     // f6x0: DANGER toasts get a danger-tinted hairline border (alert tonization) so
     // they read as distinctly critical vs. neutral toasts. Other kinds keep the
     // standard glass-rim grey border.
     val borderColor: Color = if (data.kind == GlassToastKind.DANGER) {
-        c.danger.copy(alpha = 0.55f)
+        c.err.copy(alpha = 0.55f)
     } else {
         c.border
     }
 
     // §2/P0: the Material Surface stays TRANSPARENT and supplies only the §4
     // shadow + hairline border + shape clip; the real frosted blur + §2 tint
-    // comes from LiquidGlassSurface (API-31 RenderEffect blur, flat tint < 31),
+    // comes from TranslucentSurface (API-31 RenderEffect blur, flat tint < 31),
     // gated only on the translucency pref.
     Surface(
         // A-C9: skin-aware radius. CLASSIC frozen at 10dp; QUIET 7dp; VAPOR 12dp.
@@ -248,13 +249,13 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
         shadowElevation = shadowElevationDp,
         modifier = Modifier
             .padding(horizontal = 16.dp)
-            // CopyPaste-fiht: .clip(toastShape) removed — Surface(shape=) + LiquidGlassSurface
+            // CopyPaste-fiht: .clip(toastShape) removed — Surface(shape=) + TranslucentSurface
             // already clip to the shape; the extra .clip was causing redundant overdraw.
             // CopyPaste-n7ff: announce the toast via a polite live region so the
             // message is read even when focus is elsewhere.
             .semantics { liveRegion = LiveRegionMode.Polite },
     ) {
-        LiquidGlassSurface(
+        TranslucentSurface(
             shape = toastShape,
             translucent = translucent,
             dark = dark,
@@ -291,7 +292,7 @@ private fun GlassToastContent(data: GlassToastData, translucent: Boolean) {
                         // VISA-14: match bodyLarge baseline (13sp/18sp) consistent with message text.
                         Text(
                             text = data.action.first,
-                            color = c.accent,
+                            color = accentFill(),
                             style = MaterialTheme.typography.bodyLarge.copy(
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Normal,

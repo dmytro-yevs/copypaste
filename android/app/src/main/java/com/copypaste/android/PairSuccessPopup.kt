@@ -22,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.GlassAlertDialog
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Post-pairing success popup
@@ -47,7 +47,7 @@ internal fun PairedSuccessPopup(
     onDismiss: () -> Unit,
 ) {
     // voyf: read theme-adaptive ramp — no hardcoded Ide* constants.
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     GlassAlertDialog(
         onDismissRequest = onDismiss,
         title = {
@@ -55,7 +55,7 @@ internal fun PairedSuccessPopup(
                 text = "Paired successfully",
                 style = MaterialTheme.typography.titleMedium,
                 // voyf: theme-adaptive success token.
-                color = c.success,
+                color = c.ok,
             )
         },
         text = {
@@ -71,13 +71,13 @@ internal fun PairedSuccessPopup(
                         modifier = Modifier
                             .size(38.dp)
                             .clip(RoundedCornerShape(10.dp))
-                            .background(c.successDim),
+                            .background(c.ok.copy(alpha = 0.12f)),
                         contentAlignment = Alignment.Center,
                     ) {
                         Text(
                             text = displayName.take(1).uppercase(),
                             style = MaterialTheme.typography.titleMedium,
-                            color = c.success,
+                            color = c.ok,
                         )
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -90,7 +90,7 @@ internal fun PairedSuccessPopup(
                                 modifier = Modifier
                                     .size(8.dp)
                                     .clip(CircleShape)
-                                    .background(c.success),
+                                    .background(c.ok),
                             )
                             Text(
                                 text = displayName,
@@ -102,7 +102,7 @@ internal fun PairedSuccessPopup(
                         Text(
                             text = "Paired ✓",
                             style = MaterialTheme.typography.labelMedium,
-                            color = c.success,
+                            color = c.ok,
                         )
                     }
                 }
@@ -139,7 +139,7 @@ internal fun PairedSuccessPopup(
 @Composable
 private fun PopupMetaRow(label: String, value: String) {
     // voyf: read theme-adaptive ramp — no hardcoded Ide* constants.
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = label,

@@ -195,14 +195,14 @@ fun Modifier.screenCanvas(dark: Boolean): Modifier =
  * When [translucent] is false the surface is the opaque [solid] colour.
  */
 @Composable
-fun LiquidGlassSurface(
+fun TranslucentSurface(
     shape: Shape,
     translucent: Boolean,
     dark: Boolean,
     solid: Color,
     modifier: Modifier = Modifier,
     tier: GlassTier = GlassTier.CARD,
-    contentColor: Color = LocalIdeColors.current.text,
+    contentColor: Color = LocalCpColors.current.text,
     hairline: Boolean = true,
     content: @Composable BoxScope.() -> Unit,
 ) {

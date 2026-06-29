@@ -14,6 +14,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
 import com.copypaste.android.ui.theme.EaseOutExpo
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.accentTint
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -62,7 +64,7 @@ import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.LocalAccent
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.isDarkTheme
@@ -98,7 +100,7 @@ class AboutActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             CopyPasteTheme {
-                val c = LocalIdeColors.current
+                val c = LocalCpColors.current
                 val dark = isDarkTheme()
                 val translucent = rememberTranslucency()
 
@@ -160,7 +162,7 @@ fun AboutScreen(
     onBack: () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val accentVariant = LocalAccent.current.variant
     val reduced = rememberReducedMotion()
     val slowDur = motionDuration(Motion.Slow)
@@ -228,8 +230,8 @@ fun AboutScreen(
                     // Version badge — small glass chip pill
                     Box(
                         modifier = Modifier
-                            .background(c.accentDim, RadiusChip)
-                            .border(0.5.dp, c.accent.copy(alpha = 0.35f), RadiusChip)
+                            .background(accentTint(), RadiusChip)
+                            .border(0.5.dp, accentFill().copy(alpha = 0.35f), RadiusChip)
                             .padding(horizontal = 10.dp, vertical = 3.dp),
                     ) {
                         Text(
@@ -238,7 +240,7 @@ fun AboutScreen(
                                 fontFamily = com.copypaste.android.ui.theme.MonoFontFamily,
                                 fontSize = 11.sp,
                             ),
-                            color = c.accent,
+                            color = accentFill(),
                         )
                     }
                     Spacer(Modifier.height(10.dp))
@@ -290,11 +292,11 @@ fun AboutScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             modifier = Modifier.alpha(rowAlpha),
                         ) {
-                            // Success-tinted check icon — maps to c.success
+                            // Success-tinted check icon — maps to c.ok
                             Icon(
                                 Icons.Outlined.Check,
                                 contentDescription = null,
-                                tint = c.success,
+                                tint = c.ok,
                                 modifier = Modifier
                                     .padding(top = 1.dp)
                                     .size(16.dp),
@@ -340,12 +342,12 @@ fun AboutScreen(
                     Text(
                         text = "github.com/dmytro-yevs/copypaste",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = c.accent,
+                        color = accentFill(),
                     )
                     Icon(
                         Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = stringResource(R.string.about_open_github),
-                        tint = c.accent,
+                        tint = accentFill(),
                         modifier = Modifier.size(16.dp),
                     )
                 }

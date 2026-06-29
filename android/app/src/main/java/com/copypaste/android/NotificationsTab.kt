@@ -26,8 +26,6 @@ internal fun NotificationsTab(
     onNotifyOnCopyChange: (Boolean) -> Unit,
     soundOnCopy: Boolean,
     onSoundOnCopyChange: (Boolean) -> Unit,
-    // CopyPaste-hffp: live density from SettingsScreen for density-aware rows.
-    density: Density,
 ) {
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         SectionLabel(stringResource(R.string.section_notifications))
@@ -37,7 +35,6 @@ internal fun NotificationsTab(
                 subtitle = stringResource(R.string.setting_notify_on_copy_subtitle),
                 checked = notifyOnCopy,
                 onCheckedChange = onNotifyOnCopyChange,
-                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -45,7 +42,6 @@ internal fun NotificationsTab(
                 subtitle = stringResource(R.string.setting_sound_on_copy_subtitle),
                 checked = soundOnCopy,
                 onCheckedChange = onSoundOnCopyChange,
-                density = density,
             )
         }
         Spacer(modifier = Modifier.height(16.dp))

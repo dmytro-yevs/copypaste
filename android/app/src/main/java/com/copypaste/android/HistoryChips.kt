@@ -22,8 +22,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.copypaste.android.ui.theme.IdeColors
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.CpColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.contentIconFor
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
@@ -46,21 +46,21 @@ import androidx.compose.material.icons.outlined.Lock
  * the row can pre-derive the chip color once and never re-evaluate the `when` on
  * scroll recompositions.
  */
-internal fun chipColorFor(kind: String, c: IdeColors): Color = when (kind) {
+internal fun chipColorFor(kind: String, c: CpColors): Color = when (kind) {
     // 5917.80: TEXT→faint (grey), not accent (blue) — parity with macOS KindChip fallback.
     // IMAGE→violet (1jms.14 PARITY-SPEC §6), FILE→faint (styleguide .b-file = --ide-faint).
     "TEXT"    -> c.faint
     "URL"     -> c.info
-    "EMAIL"   -> c.success
-    "PHONE"   -> c.success
-    "COLOR"   -> c.warning
-    "NUMBER"  -> c.warning
-    "PATH"    -> c.warning
-    "JSON"    -> c.danger
-    "CODE"    -> c.violet
-    "IMAGE"   -> c.violet  // 1jms.14: PARITY-SPEC §6 canonical: IMAGE → violet (not sky/info)
+    "EMAIL"   -> c.ok
+    "PHONE"   -> c.ok
+    "COLOR"   -> c.warn
+    "NUMBER"  -> c.warn
+    "PATH"    -> c.warn
+    "JSON"    -> c.err
+    "CODE"    -> c.cCode
+    "IMAGE"   -> c.cCode  // 1jms.14: PARITY-SPEC §6 canonical: IMAGE → violet (not sky/info)
     "FILE"    -> c.dim     // CopyPaste-crh3.41: PARITY-SPEC §6 + macOS = dim (izio's faint diverged)
-    "PRIVATE" -> c.danger
+    "PRIVATE" -> c.err
     else      -> c.faint   // unknown text kinds default to the TEXT slot
 }
 
@@ -124,12 +124,12 @@ internal fun ContentTypeChip(label: String, color: Color) {
  */
 @Composable
 internal fun TooLargeBadge() {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Spacer(Modifier.width(4.dp))
     Icon(
         imageVector = Icons.Outlined.WarningAmber,
         contentDescription = stringResource(R.string.cd_too_large_sync),
-        tint = c.warning.copy(alpha = 0.9f),
+        tint = c.warn.copy(alpha = 0.9f),
         modifier = Modifier.size(12.dp),
     )
 }
@@ -177,7 +177,7 @@ internal fun parseHexColor(snippet: String): Color? {
  * static, matching the macOS treatment.
  */
 @Composable
-internal fun ContentIconTile(chipLabel: String, colors: IdeColors) {
+internal fun ContentIconTile(chipLabel: String, colors: CpColors) {
     // CopyPaste-5917.84: delegate to contentIconFor() (NavIcons.kt — single source of truth).
     // PATH=FolderOpen, NUMBER=Tag — previously PATH mapped to AttachFile (wrong icon).
     // Android-only extras not in the canonical set are handled first:
@@ -216,7 +216,7 @@ internal fun ContentIconTile(chipLabel: String, colors: IdeColors) {
  * Falls back to the icon tile when the hex color cannot be parsed.
  */
 @Composable
-internal fun ColorSwatchOrTile(snippet: String, colors: IdeColors) {
+internal fun ColorSwatchOrTile(snippet: String, colors: CpColors) {
     val parsed = remember(snippet) { parseHexColor(snippet) }
     if (parsed != null) {
         Box(

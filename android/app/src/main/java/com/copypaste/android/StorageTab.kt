@@ -38,7 +38,7 @@ import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IdeSwitch
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_LABELS
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_LABELS
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_LABELS
@@ -81,7 +81,7 @@ internal fun ExcludedAppsRow(
     excludedApps: List<String>,
     onExcludedAppsChange: (List<String>) -> Unit,
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     var newApp by rememberSaveable { mutableStateOf("") }
 
     val addCurrent: () -> Unit = {
@@ -255,7 +255,7 @@ internal fun StorageTab(
                 Text(
                     text = stringResource(R.string.setting_max_items_subtitle),
                     style = MaterialTheme.typography.bodySmall,
-                    color = LocalIdeColors.current.dim,
+                    color = LocalCpColors.current.dim,
                     modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
                 )
             }
@@ -337,7 +337,7 @@ internal fun StorageTab(
         }
         SectionLabel(stringResource(R.string.section_data))
         SettingsCard {
-            val c = LocalIdeColors.current
+            val c = LocalCpColors.current
             // CopyPaste-8jx8: Export history — produces a JSON file with text items
             // via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
             // CopyPaste-crh3.40: Include-sensitive-items toggle (parity with macOS).
@@ -395,7 +395,7 @@ internal fun StorageTab(
                     Text(
                         text = stringResource(R.string.setting_export_include_sensitive_warning),
                         style = MaterialTheme.typography.bodySmall,
-                        color = c.warning,
+                        color = c.warn,
                         modifier = Modifier.padding(top = 4.dp),
                     )
                 }
@@ -495,12 +495,12 @@ internal fun StorageTab(
                     Text(
                         text = stringResource(R.string.setting_compact_db_label),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = LocalIdeColors.current.text,
+                        color = LocalCpColors.current.text,
                     )
                     Text(
                         text = stringResource(R.string.setting_compact_db_subtitle),
                         style = MaterialTheme.typography.bodySmall,
-                        color = LocalIdeColors.current.dim,
+                        color = LocalCpColors.current.dim,
                     )
                 }
                 CopyPasteButton(

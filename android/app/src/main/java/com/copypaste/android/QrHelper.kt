@@ -33,7 +33,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteCard
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.accentFill
+import com.copypaste.android.ui.theme.accentTint
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.SectionLabel
 import kotlinx.coroutines.Dispatchers
@@ -105,7 +107,7 @@ private fun encodeDevicesQrBitmap(text: String, sizePx: Int): Bitmap =
  */
 @Composable
 internal fun OwnQrSection(settings: Settings) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val scope = rememberCoroutineScope()
     var qr by remember { mutableStateOf<PairingQrResult?>(null) }
     var qrBitmap by remember { mutableStateOf<Bitmap?>(null) }
@@ -202,7 +204,7 @@ internal fun OwnQrSection(settings: Settings) {
                     loading -> {
                         CircularProgressIndicator(
                             modifier = Modifier.size(32.dp),
-                            color = c.accent,
+                            color = accentFill(),
                             strokeWidth = 2.dp,
                         )
                     }
@@ -249,16 +251,16 @@ internal fun OwnQrSection(settings: Settings) {
                                 Box(
                                     modifier = Modifier
                                         .size(DEVICES_QR_SLOT_DP.dp)
-                                        .background(c.accentDim, RoundedCornerShape(12.dp)),
+                                        .background(accentTint(), RoundedCornerShape(12.dp)),
                                     contentAlignment = Alignment.Center,
                                 ) {
                                     Text(
                                         text = "Tap to reveal",
                                         style = MaterialTheme.typography.labelMedium,
-                                        color = c.accent,
+                                        color = accentFill(),
                                         textAlign = TextAlign.Center,
                                         modifier = Modifier
-                                            .background(c.accentDim, RadiusChip)
+                                            .background(accentTint(), RadiusChip)
                                             .padding(horizontal = 12.dp, vertical = 5.dp),
                                     )
                                 }
@@ -286,7 +288,7 @@ internal fun OwnQrSection(settings: Settings) {
                 Text(
                     text = stringResource(R.string.pair_token_expires_in_seconds, remainingSeconds),
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (urgent) c.warning else c.faint,
+                    color = if (urgent) c.warn else c.faint,
                 )
                 // §10 QR countdown drain bar: 2dp track, mute@35%; fill drains over TTL.
                 // Static fill (no pulse) — progress-bar pulse removed for calm UI.
@@ -301,7 +303,7 @@ internal fun OwnQrSection(settings: Settings) {
                         modifier = Modifier
                             .fillMaxWidth(qrCountdownProgress(remainingSeconds, DEVICES_QR_TTL_SECONDS))
                             .height(2.dp)
-                            .background(if (urgent) c.warning else c.accent),
+                            .background(if (urgent) c.warn else accentFill()),
                     )
                 }
             }
@@ -313,7 +315,7 @@ internal fun OwnQrSection(settings: Settings) {
                 Text(
                     text = sanitizedMsg,
                     style = MaterialTheme.typography.bodySmall,
-                    color = c.danger,
+                    color = c.err,
                     textAlign = TextAlign.Center,
                 )
             }

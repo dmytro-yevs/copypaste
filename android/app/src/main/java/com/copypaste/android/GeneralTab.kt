@@ -11,7 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 import com.copypaste.android.ui.theme.NavIcons
 import com.copypaste.android.ui.theme.SectionLabel
 
@@ -28,14 +28,12 @@ internal fun GeneralTab(
     logcatEnabled: Boolean,
     onLogcatEnabledChange: (Boolean) -> Unit,
     logcatStatus: LogcatCaptureStatus,
-    // CopyPaste-hffp: live density state threaded from SettingsScreen (not SharedPrefs snapshot).
-    density: Density,
     ctx: android.content.Context,
     // CopyPaste-5917.17: replaces android.widget.Toast in AdbCmdRow and log-export error path.
     // Called with a human-readable message; the caller (SettingsScreen) routes it to GlassToastHost.
     onToastRequest: (String) -> Unit = {},
 ) {
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         // ── GENERAL section card ──────────────────────────────────────────
         SectionLabel(stringResource(R.string.section_general))
@@ -45,7 +43,6 @@ internal fun GeneralTab(
                 subtitle = stringResource(R.string.setting_private_mode_subtitle),
                 checked = privateMode,
                 onCheckedChange = onPrivateModeChange,
-                density = density,
             )
             SettingsCardDivider()
             SettingsRow(
@@ -53,7 +50,6 @@ internal fun GeneralTab(
                 subtitle = stringResource(R.string.setting_sync_enabled_subtitle),
                 checked = syncEnabled,
                 onCheckedChange = onSyncEnabledChange,
-                density = density,
             )
         }
 
@@ -67,7 +63,6 @@ internal fun GeneralTab(
                 subtitle = stringResource(R.string.setting_collect_public_ip_subtitle),
                 checked = collectPublicIp,
                 onCheckedChange = onCollectPublicIpChange,
-                density = density,
             )
             SettingsCardDivider()
             // "Paste as plain text" — strip rich formatting (RTF/HTML) on paste. Mirrors macOS.
@@ -76,13 +71,11 @@ internal fun GeneralTab(
                 subtitle = stringResource(R.string.setting_paste_as_plain_text_subtitle),
                 checked = pasteAsPlainText,
                 onCheckedChange = onPasteAsPlainTextChange,
-                density = density,
             )
             SettingsCardDivider()
             SettingsNavRow(
                 title = stringResource(R.string.setting_permissions_title),
                 subtitle = stringResource(R.string.setting_permissions_subtitle),
-                density = density,
                 onClick = {
                     ctx.startActivity(Intent(ctx, PermissionsSettingsActivity::class.java))
                 }
@@ -91,7 +84,6 @@ internal fun GeneralTab(
             SettingsNavRow(
                 title = stringResource(R.string.setting_devices_title),
                 subtitle = stringResource(R.string.setting_devices_subtitle),
-                density = density,
                 onClick = {
                     ctx.startActivity(Intent(ctx, DevicesActivity::class.java))
                 }
@@ -103,7 +95,6 @@ internal fun GeneralTab(
             SettingsNavRow(
                 title = stringResource(R.string.setting_bg_capture_title),
                 subtitle = stringResource(R.string.setting_bg_capture_subtitle),
-                density = density,
                 onClick = {
                     ctx.startActivity(Intent(ctx, BackgroundCaptureSetupActivity::class.java))
                 }
@@ -119,7 +110,6 @@ internal fun GeneralTab(
             SettingsNavRow(
                 title = stringResource(R.string.log_viewer_button),
                 subtitle = stringResource(R.string.log_viewer_description),
-                density = density,
                 leadingIcon = NavIcons.Logs,
                 onClick = {
                     ctx.startActivity(Intent(ctx, LogViewerActivity::class.java))
@@ -130,7 +120,6 @@ internal fun GeneralTab(
                 title = stringResource(R.string.log_export_button),
                 subtitle = stringResource(R.string.log_export_description),
                 buttonLabel = stringResource(R.string.log_export_button),
-                density = density,
                 // CopyPaste-5917.17: pass onError so failures route through GlassToastHost
                 // instead of the android.widget.Toast fallback in LogExportHelper.
                 onClick = { LogExportHelper.shareLogsZip(ctx, onError = onToastRequest) }
@@ -156,7 +145,6 @@ internal fun GeneralTab(
                 subtitle = stringResource(R.string.setting_logcat_capture_subtitle),
                 checked = logcatEnabled,
                 onCheckedChange = onLogcatEnabledChange,
-                density = density,
             )
             SettingsCardDivider()
             // Tap-to-copy ADB commands
@@ -174,7 +162,6 @@ internal fun GeneralTab(
             SettingsNavRow(
                 title = stringResource(R.string.title_about),
                 subtitle = stringResource(R.string.about_tagline),
-                density = density,
                 leadingIcon = NavIcons.About,
                 onClick = {
                     ctx.startActivity(Intent(ctx, AboutActivity::class.java))

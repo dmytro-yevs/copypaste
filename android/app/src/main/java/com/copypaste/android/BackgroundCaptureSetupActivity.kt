@@ -56,7 +56,7 @@ import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalIdeColors
+import com.copypaste.android.ui.theme.LocalCpColors
 
 /**
  * "Background Capture" setup wizard — implements the ClipCascade-style combo
@@ -255,7 +255,7 @@ fun BackgroundCaptureSetupScreen(
     onOemHintConsumed: () -> Unit = {},
 ) {
     // ANDO-3: read the active ramp (light/dark) instead of hardcoding dark Ide* constants.
-    val c = LocalIdeColors.current
+    val c = LocalCpColors.current
     val ctx = LocalContext.current
 
     val toastState = remember { GlassToastState() }
@@ -423,7 +423,7 @@ fun BackgroundCaptureSetupScreen(
                         Icon(
                             imageVector = Icons.Outlined.PlayArrow,
                             contentDescription = null,
-                            tint = c.warning,
+                            tint = c.warn,
                         )
                         Text(
                             text = stringResource(R.string.bg_capture_restart_title),
@@ -473,12 +473,12 @@ private fun BgCaptureCard(
     onAcknowledge: (() -> Unit)? = null,
     acknowledgeLabel: String? = null,
 ) {
-    // ANDO-3: use LocalIdeColors.current so the card renders correctly in light themes.
-    val c = LocalIdeColors.current
+    // ANDO-3: use LocalCpColors.current so the card renders correctly in light themes.
+    val c = LocalCpColors.current
 
     val borderColor = when {
-        granted == true              -> c.success
-        granted == false && required -> c.danger
+        granted == true              -> c.ok
+        granted == false && required -> c.err
         else                         -> c.border
     }
 
@@ -491,7 +491,7 @@ private fun BgCaptureCard(
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (granted == true) c.success else c.dim,
+                    tint = if (granted == true) c.ok else c.dim,
                 )
                 Text(
                     text = title,
@@ -503,7 +503,7 @@ private fun BgCaptureCard(
                     Text(
                         text = stringResource(R.string.label_required),
                         style = MaterialTheme.typography.labelSmall,
-                        color = c.danger,
+                        color = c.err,
                     )
                 }
             }
@@ -523,7 +523,7 @@ private fun BgCaptureCard(
                         imageVector = if (granted) Icons.Outlined.CheckCircle
                                       else Icons.Filled.ErrorOutline,
                         contentDescription = null,
-                        tint = if (granted) c.success else c.danger,
+                        tint = if (granted) c.ok else c.err,
                     )
                     Text(
                         text = if (granted)
@@ -531,7 +531,7 @@ private fun BgCaptureCard(
                         else
                             stringResource(R.string.status_not_granted),
                         style = MaterialTheme.typography.labelMedium,
-                        color = if (granted) c.success else c.danger,
+                        color = if (granted) c.ok else c.err,
                     )
                 }
                 Spacer(modifier = Modifier.height(6.dp))
