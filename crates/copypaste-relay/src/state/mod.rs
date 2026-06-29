@@ -407,6 +407,21 @@ impl RelayStore {
         let total = self.sync_items.values().map(|v| v.len()).sum();
         (self.devices.len(), total)
     }
+
+    /// CopyPaste-crh3.115: the subscription [`Tier`] registered for `device_id`,
+    /// so the push path can apply the sender's ACTUAL per-tier item-size quota
+    /// instead of conservatively assuming `Tier::Free` for everyone.
+    ///
+    /// Returns `Tier::Free` for an unknown device — a conservative default that
+    /// never over-grants. In production (no `quota-tiers` feature) `Tier::Free`
+    /// is the only variant, so this is a no-op there; it future-proofs the push
+    /// quota for when paid tiers ship.
+    pub fn device_tier(&self, device_id: &str) -> Tier {
+        self.devices
+            .get(device_id)
+            .map(|r| r.tier)
+            .unwrap_or(Tier::Free)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -551,6 +566,46 @@ mod tests {
         // Still one device record / one inbox — co-registration shares the inbox.
         assert_eq!(store.devices.len(), 1);
         assert_eq!(store.devices[&device_a_id()].tokens.len(), 2);
+    }
+
+    /// CopyPaste-crh3.115: device_tier reports the registered tier (the push
+    /// quota now reads this instead of a hardcoded Tier::Free), and falls back to
+    /// Free for an unknown device.
+    #[test]
+    fn device_tier_reports_registered_tier_and_free_fallback() {
+        let mut store = make_store();
+        store
+            .register_device(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+            )
+            .unwrap();
+        assert_eq!(store.device_tier(&device_a_id()), Tier::Free);
+        assert_eq!(
+            store.device_tier("never-registered"),
+            Tier::Free,
+            "unknown device must default to Free (never over-grant)"
+        );
+    }
+
+    /// CopyPaste-crh3.115: a Pro-tier registration is reflected by device_tier, so
+    /// the push item-size quota admits an above-free item for that sender.
+    #[cfg(feature = "quota-tiers")]
+    #[test]
+    fn device_tier_reports_pro_for_pro_registration() {
+        let mut store = make_store();
+        store
+            .register_device_with_tier(
+                device_a_id(),
+                "Device A".into(),
+                valid_key_b64(),
+                valid_pop_b64(),
+                Tier::Pro,
+            )
+            .unwrap();
+        assert_eq!(store.device_tier(&device_a_id()), Tier::Pro);
     }
 
     #[test]

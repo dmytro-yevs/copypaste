@@ -14,7 +14,7 @@ use crate::auth::BearerToken;
 use crate::config::RelayConfig;
 use crate::error::RelayError;
 use crate::models::{PullItem, PullParams, PushRequest, PushResponse};
-use crate::quota::{self, QuotaViolation, Tier};
+use crate::quota::{self, QuotaViolation};
 use crate::state::{AppState, DEFAULT_PULL_LIMIT, MAX_PULL_LIMIT};
 
 // The SSE items below (issue #26) are wired into production via
@@ -142,11 +142,15 @@ pub async fn push(
     // before auth, letting unauthenticated callers trigger full decode work
     // (pre-auth CPU/alloc amplification). Authenticating first makes
     // unauthenticated pushes fail fast at the lock with a cheap map lookup.
-    {
-        // Short critical section: auth only, no decode under the lock.
+    // CopyPaste-crh3.115: capture the sender's registered tier in the same short
+    // critical section as auth, so the item-size quota below uses the ACTUAL tier
+    // rather than a hardcoded Tier::Free.
+    let tier = {
+        // Short critical section: auth + tier lookup, no decode under the lock.
         let store = state.lock().unwrap_or_else(|e| e.into_inner());
         store.verify_token(&device_id, &token)?;
-    }
+        store.device_tier(&device_id)
+    };
 
     // Per-tier item-size quota — checked after auth but before re-taking the
     // store mutex for the actual insert. We decode `content_b64` once here to
@@ -158,9 +162,9 @@ pub async fn push(
     // `push_item_decoded`, which re-decodes under the store lock anyway.
     let decoded_len = decoded_len_padded_b64(&body.content_b64)
         .ok_or_else(|| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?;
-    // Free-tier limits are applied conservatively for all senders (the relay
-    // does not yet look up the sender's tier from the bearer token).
-    quota::check_item_size(Tier::Free, decoded_len, &body.content_type).map_err(|v| match v {
+    // CopyPaste-crh3.115: enforce the sender's actual registered tier (looked up
+    // from the bearer-authenticated device above) rather than a blanket Free cap.
+    quota::check_item_size(tier, decoded_len, &body.content_type).map_err(|v| match v {
         QuotaViolation::ItemTooLarge { limit_bytes } => {
             RelayError::ItemSizeExceeded { limit_bytes }
         }
