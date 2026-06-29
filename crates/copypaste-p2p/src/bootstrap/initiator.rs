@@ -173,7 +173,7 @@ pub async fn run_initiator(
             exchange_peer_meta(&mut framed, &own_meta, own_provisioning.as_ref()).await;
 
         Ok::<BootstrapPairing, TransportError>(BootstrapPairing {
-            peer_fingerprint: tls_peer_fp,
+            peer_fingerprint: crate::transport::DeviceFingerprint(tls_peer_fp),
             peer_sync_addr,
             session_key,
             sas,
@@ -370,7 +370,7 @@ where
         exchange_peer_meta(&mut framed, own_meta, own_provisioning.as_ref()).await;
 
     Ok(BootstrapPairing {
-        peer_fingerprint,
+        peer_fingerprint: crate::transport::DeviceFingerprint(peer_fingerprint),
         peer_sync_addr,
         session_key,
         sas,

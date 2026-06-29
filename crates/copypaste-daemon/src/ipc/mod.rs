@@ -5,11 +5,11 @@ use crate::protocol::{
     ERR_CODE_VERSION_MISMATCH, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
 use anyhow::Context as _; // CopyPaste-crh3.90
-// CopyPaste-merc / CopyPaste-1jms.22: canonical badge-state computation lives in
-// copypaste-ipc. The `_with_inflight` variant is used so the daemon can emit the
-// `Syncing` (green-pulse) badge while a round-trip is in progress. Gated on
-// cloud-sync: the get_sync_status handler is only compiled with that feature, so
-// the import must match to avoid an unused-import warning (-D warnings).
+                          // CopyPaste-merc / CopyPaste-1jms.22: canonical badge-state computation lives in
+                          // copypaste-ipc. The `_with_inflight` variant is used so the daemon can emit the
+                          // `Syncing` (green-pulse) badge while a round-trip is in progress. Gated on
+                          // cloud-sync: the get_sync_status handler is only compiled with that feature, so
+                          // the import must match to avoid an unused-import warning (-D warnings).
 #[cfg(feature = "cloud-sync")]
 use copypaste_ipc::compute_sync_badge_state_with_inflight;
 // derive_sync_key / SyncKey are used by both cloud-sync (Supabase) and relay-sync.
@@ -2107,7 +2107,7 @@ impl IpcServer {
                 if let Some(ref peers) = self.p2p_peers {
                     peers.rotate_peer(
                         &outcome.peer_fingerprint,
-                        outcome.peer_fingerprint.clone(),
+                        outcome.peer_fingerprint.to_string(),
                         String::new(),
                     );
                 }
@@ -2141,7 +2141,7 @@ impl IpcServer {
                     req_id,
                     serde_json::json!({
                         "ok": true,
-                        "peer_fingerprint": outcome.peer_fingerprint,
+                        "peer_fingerprint": outcome.peer_fingerprint.to_string(),
                     }),
                 );
                 // BUG A1: the terminal outcome is returned synchronously to the
@@ -2296,7 +2296,7 @@ impl IpcServer {
                     if let Some(peers) = peers {
                         peers.rotate_peer(
                             &outcome.peer_fingerprint,
-                            outcome.peer_fingerprint.clone(),
+                            outcome.peer_fingerprint.to_string(),
                             String::new(),
                         );
                     }
@@ -2437,7 +2437,7 @@ impl IpcServer {
                 if let Some(ref peers) = self.p2p_peers {
                     peers.rotate_peer(
                         &outcome.peer_fingerprint,
-                        outcome.peer_fingerprint.clone(),
+                        outcome.peer_fingerprint.to_string(),
                         String::new(),
                     );
                 }
@@ -2473,7 +2473,7 @@ impl IpcServer {
                     req_id,
                     serde_json::json!({
                         "ok": true,
-                        "peer_fingerprint": outcome.peer_fingerprint,
+                        "peer_fingerprint": outcome.peer_fingerprint.to_string(),
                     }),
                 )
             }
@@ -6220,7 +6220,7 @@ impl IpcServer {
                                     sinks
                                         .iter()
                                         .filter(|(_, tx)| !tx.is_closed())
-                                        .map(|(fp, _)| fp.clone())
+                                        .map(|(fp, _)| fp.to_string())
                                         .collect(),
                                 )
                             } else {
@@ -6241,7 +6241,7 @@ impl IpcServer {
                             };
                             if let Some(rtt_arc) = maybe_rtt_arc {
                                 let rtt = rtt_arc.lock().await;
-                                Some(rtt.iter().map(|(k, v)| (k.clone(), *v)).collect())
+                                Some(rtt.iter().map(|(k, v)| (k.to_string(), *v)).collect())
                             } else {
                                 None
                             }
@@ -14264,7 +14264,10 @@ mod tests {
             tokio::sync::mpsc::channel::<copypaste_sync::protocol::PeerFrame>(1);
         let sinks_map: crate::p2p::LivePeerSinks =
             Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::from([
-                (fp_canonical.clone(), peer_tx),
+                (
+                    copypaste_p2p::DeviceFingerprint(fp_canonical.clone()),
+                    peer_tx,
+                ),
             ])));
 
         let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));

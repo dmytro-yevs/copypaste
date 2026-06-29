@@ -83,7 +83,7 @@ impl BootstrapResponder {
             listener,
             acceptor: TlsAcceptor::from(Arc::new(server_config)),
             own_cert_der: cert_der,
-            own_fingerprint,
+            own_fingerprint: crate::transport::DeviceFingerprint(own_fingerprint),
         })
     }
 
@@ -244,7 +244,7 @@ impl BootstrapResponder {
                 exchange_peer_meta(&mut framed, &own_meta, own_provisioning.as_ref()).await;
 
             Ok::<BootstrapPairing, TransportError>(BootstrapPairing {
-                peer_fingerprint: tls_peer_fp,
+                peer_fingerprint: crate::transport::DeviceFingerprint(tls_peer_fp),
                 peer_sync_addr,
                 session_key,
                 sas,
@@ -428,7 +428,7 @@ impl BootstrapResponder {
             exchange_peer_meta(&mut framed, own_meta, own_provisioning.as_ref()).await;
 
         Ok(BootstrapPairing {
-            peer_fingerprint,
+            peer_fingerprint: crate::transport::DeviceFingerprint(peer_fingerprint),
             peer_sync_addr,
             session_key,
             sas,

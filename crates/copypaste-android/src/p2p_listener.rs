@@ -423,7 +423,7 @@ async fn accept_loop(
                             // std::Mutex held briefly, never across an await.
                             let Ok(state) = peer_state.lock() else { continue };
                             let revoked = is_fingerprint_revoked(&peer_fp, &state.revoked);
-                            let key = state.session_keys.get(&peer_fp).cloned();
+                            let key = state.session_keys.get(peer_fp.as_str()).cloned();
                             (revoked, key)
                         };
                         if is_revoked {
@@ -470,7 +470,7 @@ async fn accept_loop(
                                 catchup,
                                 received,
                                 conn_cancel,
-                                peer_fp,
+                                peer_fp.into_string(),
                                 conn_peer_state,
                             )
                             .await;

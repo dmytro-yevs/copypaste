@@ -560,7 +560,7 @@ pub async fn start_p2p(
                 transport,
                 peer_sinks,
                 incoming_tx,
-                own_fp,
+                copypaste_p2p::DeviceFingerprint(own_fp),
                 catchup,
                 discovery_for_connector,
                 connector_shutdown,
@@ -750,7 +750,7 @@ mod tests {
             framed,
             peer_rx,
             incoming_tx,
-            "testpeer".to_string(),
+            copypaste_p2p::DeviceFingerprint("testpeer".to_string()),
             None,
             pending,
             rtt_ms,
@@ -1128,7 +1128,7 @@ mod tests {
                     transport,
                     peer_sinks,
                     incoming_tx,
-                    own_fp,
+                    copypaste_p2p::DeviceFingerprint(own_fp),
                     catchup,
                     discovery,
                     token,
@@ -2042,9 +2042,12 @@ mod tests {
         assert!(resolved.is_some(), "nonce must be found in pending_pings");
 
         let rtt_ms = resolved.unwrap().elapsed().as_millis() as u32;
-        peer_rtt_ms.lock().await.insert(peer_fp.clone(), rtt_ms);
+        peer_rtt_ms
+            .lock()
+            .await
+            .insert(copypaste_p2p::DeviceFingerprint(peer_fp.clone()), rtt_ms);
 
-        let stored = peer_rtt_ms.lock().await.get(&peer_fp).copied();
+        let stored = peer_rtt_ms.lock().await.get(peer_fp.as_str()).copied();
         assert!(
             stored.is_some(),
             "RTT map must contain an entry for the peer after Pong processing"
@@ -2091,7 +2094,7 @@ mod tests {
 
         // Simulate what accept_loop does after inserting the sink.
         let _ = tx.send(PeerEvent::Connected {
-            fingerprint: fp.clone(),
+            fingerprint: copypaste_p2p::DeviceFingerprint(fp.clone()),
         });
 
         match rx.recv().await.expect("should receive Connected event") {
@@ -2115,7 +2118,7 @@ mod tests {
 
         // Simulate what the cleanup task does after removing the sink.
         let _ = tx.send(PeerEvent::Disconnected {
-            fingerprint: fp.clone(),
+            fingerprint: copypaste_p2p::DeviceFingerprint(fp.clone()),
         });
 
         match rx.recv().await.expect("should receive Disconnected event") {
@@ -2137,10 +2140,10 @@ mod tests {
         let fp = "ff00aa112233".to_string();
 
         let _ = tx.send(PeerEvent::Connected {
-            fingerprint: fp.clone(),
+            fingerprint: copypaste_p2p::DeviceFingerprint(fp.clone()),
         });
         let _ = tx.send(PeerEvent::Disconnected {
-            fingerprint: fp.clone(),
+            fingerprint: copypaste_p2p::DeviceFingerprint(fp.clone()),
         });
 
         let first = rx.recv().await.expect("first event");
@@ -2166,7 +2169,7 @@ mod tests {
 
         // The `let _ =` pattern we use in p2p.rs must not panic.
         let result = tx.send(PeerEvent::Connected {
-            fingerprint: "aabbcc".to_string(),
+            fingerprint: copypaste_p2p::DeviceFingerprint("aabbcc".to_string()),
         });
         // `Err` is expected (no receivers), but we must not panic.
         assert!(
@@ -2311,7 +2314,10 @@ mod tests {
         let (incoming_tx, _incoming_rx) = mpsc::channel::<WireItem>(8);
 
         let fp = "aabbccddeeff0011223344556677889900112233445566778899aabbccddeeff".to_string();
-        peer_sinks.lock().await.insert(fp.clone(), peer_tx);
+        peer_sinks
+            .lock()
+            .await
+            .insert(copypaste_p2p::DeviceFingerprint(fp.clone()), peer_tx);
 
         // Spawn the real pump so it drains peer_rx and writes to server_framed.
         let pending: PendingPings = Arc::new(Mutex::new(HashMap::new()));
@@ -2320,7 +2326,7 @@ mod tests {
             server_framed,
             peer_rx,
             incoming_tx,
-            fp.clone(),
+            copypaste_p2p::DeviceFingerprint(fp.clone()),
             None,
             pending,
             rtt_ms,
@@ -2376,7 +2382,7 @@ mod tests {
 
         // CopyPaste-qw1k: sink must be absent from the map.
         assert!(
-            !peer_sinks.lock().await.contains_key(&fp),
+            !peer_sinks.lock().await.contains_key(fp.as_str()),
             "CopyPaste-qw1k: peer sink must be absent after send_unpair_and_close_session"
         );
     }

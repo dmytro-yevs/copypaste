@@ -382,7 +382,7 @@ pub fn bootstrap_result_from_pairing(
     pairing: copypaste_p2p::bootstrap::BootstrapPairing,
 ) -> BootstrapResult {
     BootstrapResult {
-        peer_fingerprint: pairing.peer_fingerprint,
+        peer_fingerprint: pairing.peer_fingerprint.into_string(),
         peer_sync_addr: pairing.peer_sync_addr,
         session_key: pairing.session_key.as_bytes().to_vec(),
         peer_provisioning: pairing.peer_provisioning.map(Into::into),
@@ -403,7 +403,7 @@ pub fn confirmed_pairing_from(
     p: copypaste_p2p::bootstrap::BootstrapPairing,
 ) -> pairing::ConfirmedPairing {
     pairing::ConfirmedPairing {
-        peer_fingerprint: p.peer_fingerprint,
+        peer_fingerprint: p.peer_fingerprint.into_string(),
         peer_sync_addr: p.peer_sync_addr,
         session_key: p.session_key.as_bytes().to_vec(),
         peer_provisioning: p.peer_provisioning.map(Into::into),

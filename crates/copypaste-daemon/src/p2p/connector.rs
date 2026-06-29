@@ -225,7 +225,9 @@ pub(super) fn dialable_peers_from_path(path: &std::path::Path) -> Vec<DialablePe
             }
         };
         out.push(DialablePeer {
-            fingerprint: crate::ipc::canonical_fingerprint(&dev.fingerprint),
+            fingerprint: copypaste_p2p::DeviceFingerprint(crate::ipc::canonical_fingerprint(
+                &dev.fingerprint,
+            )),
             addr,
         });
     }

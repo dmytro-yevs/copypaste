@@ -126,7 +126,86 @@ use crate::verifier::PeerCertVerifier;
 
 /// Opaque device identity — the SHA-256 fingerprint of the device's TLS cert
 /// encoded as lowercase hex.
-pub type DeviceFingerprint = String;
+///
+/// CopyPaste-crh3.87: a newtype (not `= String`) so a device *name* / UUID can no
+/// longer be passed where a fingerprint is expected — that previously compiled
+/// silently and made the constant-time identity comparison always-false.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DeviceFingerprint(pub String);
+
+impl DeviceFingerprint {
+    /// View as the underlying lowercase-hex string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+    /// Consume into the owned `String`.
+    pub fn into_string(self) -> String {
+        self.0
+    }
+}
+
+impl std::ops::Deref for DeviceFingerprint {
+    type Target = str;
+    fn deref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl AsRef<str> for DeviceFingerprint {
+    fn as_ref(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::borrow::Borrow<str> for DeviceFingerprint {
+    fn borrow(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for DeviceFingerprint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl From<String> for DeviceFingerprint {
+    fn from(s: String) -> Self {
+        DeviceFingerprint(s)
+    }
+}
+
+impl From<&str> for DeviceFingerprint {
+    fn from(s: &str) -> Self {
+        DeviceFingerprint(s.to_owned())
+    }
+}
+
+// CopyPaste-crh3.87: ergonomic cross-comparison with the raw hex string on both
+// sides, so `fingerprint == some_str` call sites keep working without allocating.
+impl PartialEq<str> for DeviceFingerprint {
+    fn eq(&self, other: &str) -> bool {
+        self.0 == other
+    }
+}
+
+impl PartialEq<String> for DeviceFingerprint {
+    fn eq(&self, other: &String) -> bool {
+        &self.0 == other
+    }
+}
+
+impl PartialEq<DeviceFingerprint> for str {
+    fn eq(&self, other: &DeviceFingerprint) -> bool {
+        self == other.0
+    }
+}
+
+impl PartialEq<DeviceFingerprint> for String {
+    fn eq(&self, other: &DeviceFingerprint) -> bool {
+        self == &other.0
+    }
+}
 
 /// Default window during which a peer's *previous* certificate fingerprint is
 /// still accepted after a rotation (S10 — cert rotation race). Sized to
@@ -192,7 +271,9 @@ impl PairedPeers {
         // the guard and continue — the allowlist is plain data, not an
         // invariant-bearing structure, so reading through poison is safe.
         let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
-        state.inner.insert(fingerprint.into(), display_name.into());
+        state
+            .inner
+            .insert(DeviceFingerprint(fingerprint.into()), display_name.into());
     }
 
     /// Atomically rotate a peer from `old_fingerprint` to `new_fingerprint`.
@@ -241,7 +322,7 @@ impl PairedPeers {
         // non-empty, and (c) it is not the same as the new active fingerprint.
         if previous_name.is_some() && !old_fingerprint.is_empty() && old_fingerprint != new_fp {
             state.superseded.insert(
-                old_fingerprint.to_owned(),
+                DeviceFingerprint(old_fingerprint.to_owned()),
                 SupersededFingerprint {
                     display_name: name.clone(),
                     expires_at: now + CERT_ROTATION_GRACE,
@@ -249,7 +330,7 @@ impl PairedPeers {
             );
         }
 
-        state.inner.insert(new_fp, name);
+        state.inner.insert(DeviceFingerprint(new_fp), name);
     }
 
     /// Returns `true` if `fingerprint` belongs to a known paired peer.
@@ -309,8 +390,8 @@ impl PairedPeers {
     pub fn remove(&self, fingerprint: &str) {
         let canonical = fingerprint.to_ascii_lowercase();
         let mut state = self.state.write().unwrap_or_else(|e| e.into_inner());
-        state.inner.remove(&canonical);
-        state.superseded.remove(&canonical);
+        state.inner.remove(canonical.as_str());
+        state.superseded.remove(canonical.as_str());
     }
 
     /// Display name associated with a fingerprint, whether it is an active or a
@@ -396,7 +477,7 @@ impl PeerTransport {
 
     /// Create a transport from existing DER-encoded certificate and private key.
     pub fn from_cert(cert_der: Vec<u8>, key_der: Vec<u8>, peers: PairedPeers) -> Self {
-        let own_fingerprint = fingerprint_of(&cert_der);
+        let own_fingerprint = DeviceFingerprint(fingerprint_of(&cert_der));
         Self {
             own_cert_der: cert_der,
             own_key_der: key_der,
@@ -469,7 +550,7 @@ impl PeerTransport {
         tracing::info!(peer_addr = %peer_addr, peer_fingerprint = %peer_fp, "peer authenticated");
 
         let framed = Framed::new(tls_stream, length_codec());
-        Ok((peer_addr, peer_fp, framed))
+        Ok((peer_addr, DeviceFingerprint(peer_fp), framed))
     }
 
     /// Connect to a peer at `addr` using mutual TLS.

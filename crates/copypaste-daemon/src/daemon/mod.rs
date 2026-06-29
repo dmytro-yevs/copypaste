@@ -1101,13 +1101,13 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                                                 crate::p2p::PeerEvent::Connected { fingerprint } => {
                                                     crate::ipc::PeerEventRecord {
                                                         kind: "connected",
-                                                        fingerprint: fingerprint.clone(),
+                                                        fingerprint: fingerprint.to_string(),
                                                     }
                                                 }
                                                 crate::p2p::PeerEvent::Disconnected { fingerprint } => {
                                                     crate::ipc::PeerEventRecord {
                                                         kind: "disconnected",
-                                                        fingerprint: fingerprint.clone(),
+                                                        fingerprint: fingerprint.to_string(),
                                                     }
                                                 }
                                             };

@@ -255,7 +255,7 @@ pub(super) async fn standing_pairing_responder_loop(
                 );
                 peers.rotate_peer(
                     &outcome.peer_fingerprint,
-                    outcome.peer_fingerprint.clone(),
+                    outcome.peer_fingerprint.to_string(),
                     String::new(),
                 );
                 let peer_meta = copypaste_p2p::bootstrap::PeerMeta {
