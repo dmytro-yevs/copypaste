@@ -85,9 +85,7 @@ pub fn fetch_text_previews_batch<D: DbRead + ?Sized>(
     // Build a `?,?,…` placeholder list sized to `ids`. Each id is bound as a
     // parameter (never interpolated), so this is injection-safe even though the
     // placeholder count is dynamic.
-    let placeholders = std::iter::repeat_n("?", ids.len())
-        .collect::<Vec<_>>()
-        .join(",");
+    let placeholders = super::sql_placeholders(ids.len());
     let sql = format!("SELECT id, content_text FROM clipboard_fts WHERE id IN ({placeholders})");
     let conn = db.conn();
     let mut stmt = conn.prepare(&sql)?;

@@ -8738,11 +8738,9 @@ impl IpcServer {
                         self.self_write_change_count
                             .store(-1, std::sync::atomic::Ordering::Release);
                         match e {
-                            EncryptError::AuthFailed | EncryptError::AadMismatch => {
-                                PasteboardError::decrypt(
-                                    "Decryption failed: authentication tag mismatch".to_string(),
-                                )
-                            }
+                            EncryptError::AuthFailed => PasteboardError::decrypt(
+                                "Decryption failed: authentication tag mismatch".to_string(),
+                            ),
                             EncryptError::UnknownKeyVersion(_) => PasteboardError::decrypt(
                                 "Item encrypted with a previous key — cannot be recovered. \
                                  Clear history to start fresh."

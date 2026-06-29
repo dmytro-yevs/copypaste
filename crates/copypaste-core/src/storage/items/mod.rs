@@ -5,6 +5,15 @@ mod pinned;
 mod query;
 mod types;
 
+/// CopyPaste-crh3.94: build a comma-separated `?` placeholder list of length `n`
+/// for a dynamic SQL `IN (...)` clause (`n == 3` → `"?,?,?"`). The count is the
+/// ONLY thing interpolated into the SQL string — values are always bound as
+/// parameters — so this stays injection-safe. Previously this 3-line idiom was
+/// copy-pasted across delete.rs (×3) and fts.rs.
+pub(crate) fn sql_placeholders(n: usize) -> String {
+    std::iter::repeat_n("?", n).collect::<Vec<_>>().join(",")
+}
+
 /// Current HKDF key generation written into the `key_version` column for
 /// freshly-inserted rows. Pinned here (rather than re-exported from
 /// `crypto::keys`) because the storage layer needs an i64 value matching the

@@ -22,9 +22,7 @@ pub(super) fn delete_pending_uploads_for_ids(
     if ids.is_empty() {
         return Ok(());
     }
-    let placeholders = std::iter::repeat_n("?", ids.len())
-        .collect::<Vec<_>>()
-        .join(",");
+    let placeholders = super::sql_placeholders(ids.len());
     let sql = format!(
         "DELETE FROM pending_uploads WHERE item_id IN \
          (SELECT item_id FROM clipboard_items WHERE id IN ({placeholders}))"
@@ -48,9 +46,7 @@ pub(super) fn delete_fts_for_ids(
     if ids.is_empty() {
         return Ok(());
     }
-    let placeholders = std::iter::repeat_n("?", ids.len())
-        .collect::<Vec<_>>()
-        .join(",");
+    let placeholders = super::sql_placeholders(ids.len());
     let sql = format!("DELETE FROM clipboard_fts WHERE id IN ({placeholders})");
     tx.execute(&sql, rusqlite::params_from_iter(ids.iter()))?;
     Ok(())
@@ -446,9 +442,7 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     delete_pending_uploads_for_ids(&tx, &ids)?;
 
     // DELETE by the already-materialised id list — no second CTE needed.
-    let placeholders = std::iter::repeat_n("?", ids.len())
-        .collect::<Vec<_>>()
-        .join(",");
+    let placeholders = super::sql_placeholders(ids.len());
     let delete_sql = format!("DELETE FROM clipboard_items WHERE id IN ({placeholders})");
     let deleted = tx.execute(&delete_sql, rusqlite::params_from_iter(ids.iter()))?;
 

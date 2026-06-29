@@ -9,6 +9,14 @@ use thiserror::Error;
 pub enum ConfigError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+    /// CopyPaste-crh3.98: IO error tied to a specific config file path. A bare
+    /// `Io` "No such file or directory" at startup gives no hint WHICH file was
+    /// missing/unreadable; this variant names it.
+    #[error("IO error for config file {path}: {source}")]
+    IoWithPath {
+        path: String,
+        source: std::io::Error,
+    },
     #[error("TOML parse error: {0}")]
     Parse(#[from] toml::de::Error),
     #[error("TOML serialize error: {0}")]
@@ -169,7 +177,12 @@ impl Default for AppConfig {
 
 impl AppConfig {
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
-        let text = std::fs::read_to_string(path)?;
+        // CopyPaste-crh3.98: bind the path into the IO error so a startup failure
+        // identifies WHICH config file was missing/unreadable.
+        let text = std::fs::read_to_string(path).map_err(|source| ConfigError::IoWithPath {
+            path: path.display().to_string(),
+            source,
+        })?;
         let mut cfg: Self = toml::from_str(&text)?;
         cfg.clamp_values();
         // CopyPaste-crh3.114: surface deprecated-but-set fields at load so a user
@@ -284,6 +297,20 @@ mod tests {
 
     /// CopyPaste-crh3.114: a default config has no deprecation warnings; a
     /// non-zero `history_limit` produces exactly one that names the replacement.
+    /// CopyPaste-crh3.98: a load failure must name the offending file path so a
+    /// startup error is diagnosable.
+    #[test]
+    fn load_missing_file_error_names_the_path() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("does-not-exist-cfg.toml");
+        let err = AppConfig::load(&path).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("does-not-exist-cfg.toml"),
+            "config load error must name the path: {msg}"
+        );
+    }
+
     #[test]
     fn deprecation_warnings_flags_nonzero_history_limit() {
         let mut cfg = AppConfig::default();

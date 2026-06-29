@@ -381,6 +381,16 @@ pub(crate) fn load_config() -> AppConfig {
                     path.display()
                 );
             }
+            // CopyPaste-crh3.98: AppConfig::load now wraps the read error with the
+            // path (IoWithPath); a missing file is still the silent first-run case.
+            copypaste_core::config::ConfigError::IoWithPath { source, .. }
+                if source.kind() == std::io::ErrorKind::NotFound =>
+            {
+                tracing::debug!(
+                    "config file not found at {}; using defaults",
+                    path.display()
+                );
+            }
             _ => {
                 // Parse error or unexpected IO error — operator action may be needed.
                 tracing::warn!(

@@ -40,13 +40,10 @@ pub const AAD_SCHEMA_VERSION_V4: u32 = 4;
 pub enum EncryptError {
     #[error("Decryption failed: authentication tag mismatch")]
     AuthFailed,
-    /// Strict-mode failure: the supplied AAD did not validate AND the
-    /// `COPYPASTE_ALLOW_LEGACY_AAD` env var is disabled, so we refused to
-    /// silently fall back to empty-AAD decryption. Callers can recover by
-    /// re-enabling the env var for one-shot legacy decrypts, or by
-    /// re-encrypting the affected row under the current AAD binding.
-    #[error("Decryption failed: AAD mismatch (legacy empty-AAD fallback disabled)")]
-    AadMismatch,
+    // CopyPaste-crh3.91: the `AadMismatch` variant was removed — it could never
+    // be constructed after the legacy empty-AAD fallback (`COPYPASTE_ALLOW_LEGACY_AAD`)
+    // was deleted in v0.3, so it only misled exhaustive-match callers about the
+    // real error space. An AAD that fails to validate now surfaces as `AuthFailed`.
     /// AEAD cipher rejected the input (e.g. payload exceeds the per-message
     /// limit of (2^32 - 1) * 64 bytes for ChaCha20-Poly1305). We surface the
     /// underlying error string instead of panicking so callers can degrade

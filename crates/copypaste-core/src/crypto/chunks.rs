@@ -110,7 +110,10 @@ pub fn encrypt_chunks(
             let is_final = idx == total - 1;
             let aad = build_aad(file_id, idx, total, is_final);
             let mut nonce_bytes = [0u8; NONCE_SIZE];
-            rand::thread_rng().fill_bytes(&mut nonce_bytes);
+            // CopyPaste-crh3.5: OsRng (the OS CSPRNG) for all cryptographic
+            // randomness, consistent with encrypt.rs / sync_key.rs — not the
+            // userspace-reseeded thread_rng.
+            rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
             let nonce = XNonce::from(nonce_bytes);
             let payload = Payload {
                 msg: chunk,

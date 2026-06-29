@@ -156,7 +156,9 @@ pub struct DeviceKeypair {
 
 impl DeviceKeypair {
     pub fn generate() -> Self {
-        let secret = StaticSecret::random_from_rng(rand::thread_rng());
+        // CopyPaste-crh3.5: OsRng (OS CSPRNG) for the X25519 static secret,
+        // consistent with the rest of the crypto code (encrypt.rs / sync_key.rs).
+        let secret = StaticSecret::random_from_rng(rand::rngs::OsRng);
         let public = PublicKey::from(&secret);
         Self { secret, public }
     }
