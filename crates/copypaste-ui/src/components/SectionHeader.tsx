@@ -1,10 +1,8 @@
-import { useUI } from "../store";
-
 // ---------------------------------------------------------------------------
 // SectionHeader — shared section / subsection label
 //
 // Mirrors SubsectionHeader from SettingsView.tsx (CopyPaste-zxv2 Step 3).
-// 11px semibold uppercase text-ide-dim, density-aware top margin, first:mt-0.
+// 11px semibold uppercase text-ide-dim, first:mt-0.
 // Also used in DevicesView for "Paired Devices" / "Discovered on your network"
 // labels (replaces raw <p> tags there).
 // ---------------------------------------------------------------------------
@@ -22,14 +20,8 @@ interface SectionHeaderProps {
 }
 
 export function SectionHeader({ label, hint, faint = false }: SectionHeaderProps) {
-  // CopyPaste-hffp: tighter top margin in compact density to reduce whitespace.
-  const density = useUI((s) => s.prefs.density ?? "comfortable");
-  const mt =
-    density === "compact"
-      ? "mt-5"
-      : density === "spacious"
-        ? "mt-9"
-        : "mt-7";
+  // Phase 4: density axis removed — fixed comfortable spacing (mt-7).
+  const mt = "mt-7";
   return (
     <div className={`${mt} mb-1.5 first:mt-0`}>
       {/* §3: section labels = grey (text-ide-dim or text-ide-faint), NOT accent blue;

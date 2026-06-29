@@ -84,7 +84,7 @@ export function AccessibilityBanner({
             ? "opacity-0 transition-opacity duration-500"
             : "opacity-100 transition-opacity duration-150",
         ].join(" ")}
-        style={{ borderRadius: "var(--skin-r-card)" }}
+        style={{ borderRadius: "var(--r-card)" }}
         role="status"
         aria-live="polite"
         data-testid="granted-banner"
@@ -103,7 +103,7 @@ export function AccessibilityBanner({
   return (
     <div
       className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
-      style={{ borderRadius: "var(--skin-r-card)" }}
+      style={{ borderRadius: "var(--r-card)" }}
       // A11Y-2 / CopyPaste-5917.3: assertive live region so screen readers announce
       // the permission warning immediately when it appears, without waiting for
       // the user to navigate to it. "polite" is already used for the granted
@@ -121,7 +121,7 @@ export function AccessibilityBanner({
           type="button"
           onClick={onOpenSettings}
           className="border border-ide-warning/50 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-warning hover:bg-ide-hover"
-          style={{ borderRadius: "var(--skin-r-ctl)" }}
+          style={{ borderRadius: "var(--r-ctl)" }}
         >
           Open Settings
         </button>
@@ -129,7 +129,7 @@ export function AccessibilityBanner({
           type="button"
           onClick={onDismiss}
           className="border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
-          style={{ borderRadius: "var(--skin-r-ctl)" }}
+          style={{ borderRadius: "var(--r-ctl)" }}
         >
           Dismiss
         </button>

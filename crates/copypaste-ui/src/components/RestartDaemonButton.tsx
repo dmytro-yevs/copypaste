@@ -50,12 +50,11 @@ export function RestartDaemonButton({
         className={
           className ??
           [
-            // rounded-ide removed; borderRadius driven by --skin-r-ctl (inline style below).
             "shrink-0 border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text",
             "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
           ].join(" ")
         }
-        style={{ borderRadius: "var(--skin-r-ctl)" }}
+        style={{ borderRadius: "var(--r-ctl)" }}
       >
         {phase === "restarting" ? "Restarting…" : label}
       </button>

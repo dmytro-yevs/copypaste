@@ -1,10 +1,10 @@
 /**
  * W5: SettingsView skin-token controls (CopyPaste-kp6f)
  *
- * Verifies that SettingsView uses --skin-r-card / --skin-r-ctl CSS variable
+ * Verifies that SettingsView uses --r-card / --r-ctl CSS variable
  * references via inline styles instead of hardcoded Tailwind classes
  * (rounded-ide / rounded-ide-lg) for all card panels, status banners, and
- * interactive controls. Classic skin: --skin-r-ctl=9px / --skin-r-card=14px,
+ * interactive controls. Classic skin: --r-ctl=9px / --r-card=14px,
  * so the visual output is byte-identical for the default skin.
  */
 
@@ -70,11 +70,11 @@ describe("§W5-A  SettingsView Panel — skin-driven card radius", () => {
     await waitFor(() =>
       expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
-    // rounded-ide-lg = hardcoded 14px; must be driven by --skin-r-card instead
+    // rounded-ide-lg = hardcoded 14px; must be driven by --r-card instead
     expect(noElementHasClass(container, "rounded-ide-lg")).toBe(true);
   });
 
-  it("Panel outer wrapper uses var(--skin-r-card) in inline style", async () => {
+  it("Panel outer wrapper uses var(--r-card) in inline style", async () => {
     const { container } = render(
       <ErrorBoundary label="Settings">
         <SettingsView />
@@ -83,7 +83,7 @@ describe("§W5-A  SettingsView Panel — skin-driven card radius", () => {
     await waitFor(() =>
       expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
-    expect(someInlineStyleContains(container, "--skin-r-card")).toBe(true);
+    expect(someInlineStyleContains(container, "--r-card")).toBe(true);
   });
 });
 
@@ -101,7 +101,7 @@ describe("§W5-B  SettingsView InfoPopover — skin-driven control radius", () =
     await waitFor(() =>
       expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
-    // The popover bubble uses rounded-ide; it should be --skin-r-ctl instead.
+    // The popover bubble uses rounded-ide; it should be --r-ctl instead.
     // Verify no element that is a popover (surface-glass-strong) has rounded-ide hardcoded.
     const popoverBubbles = container.querySelectorAll(".surface-glass-strong");
     for (const el of popoverBubbles) {
@@ -111,7 +111,7 @@ describe("§W5-B  SettingsView InfoPopover — skin-driven control radius", () =
 });
 
 // ---------------------------------------------------------------------------
-// §C  Interactive controls — buttons / inputs (inline style --skin-r-ctl)
+// §C  Interactive controls — buttons / inputs (inline style --r-ctl)
 // ---------------------------------------------------------------------------
 
 describe("§W5-C  SettingsView controls — skin-driven control radius", () => {
@@ -127,7 +127,7 @@ describe("§W5-C  SettingsView controls — skin-driven control radius", () => {
     expect(noElementHasClass(container, "rounded-ide")).toBe(true);
   });
 
-  it("uses var(--skin-r-ctl) in at least one inline style (controls use skin token)", async () => {
+  it("uses var(--r-ctl) in at least one inline style (controls use skin token)", async () => {
     const { container } = render(
       <ErrorBoundary label="Settings">
         <SettingsView />
@@ -136,7 +136,7 @@ describe("§W5-C  SettingsView controls — skin-driven control radius", () => {
     await waitFor(() =>
       expect(screen.getByText(/Background service not running/i)).toBeInTheDocument(),
     );
-    expect(someInlineStyleContains(container, "--skin-r-ctl")).toBe(true);
+    expect(someInlineStyleContains(container, "--r-ctl")).toBe(true);
   });
 });
 
@@ -158,7 +158,7 @@ describe("§W5-D  SettingsView status banners — skin-driven card radius", () =
     expect(noElementHasClass(container, "rounded-ide-lg")).toBe(true);
   });
 
-  it("offline banner uses var(--skin-r-card) in inline style", async () => {
+  it("offline banner uses var(--r-card) in inline style", async () => {
     const { container } = render(
       <ErrorBoundary label="Settings">
         <SettingsView />
@@ -178,7 +178,7 @@ describe("§W5-D  SettingsView status banners — skin-driven card radius", () =
     );
     expect(bannerDiv).not.toBeUndefined();
     const style = bannerDiv!.getAttribute("style") ?? "";
-    expect(style).toContain("--skin-r-card");
+    expect(style).toContain("--r-card");
   });
 });
 

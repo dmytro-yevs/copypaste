@@ -3,8 +3,7 @@ import { useRef, useState } from "react";
 // as ContentIcon's "file" case (no more inline SVG divergence).
 import { FileText } from "lucide-react";
 import { api } from "../lib/ipc";
-// bdac.20: ActionButton replaces raw <button> elements for consistent
-// secondary variant styling and skin-aware --skin-r-ctl border-radius.
+// bdac.20: ActionButton for consistent secondary variant styling.
 import { ActionButton } from "./ActionButton";
 
 // ---------------------------------------------------------------------------
@@ -147,7 +146,7 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
     <span
       ref={mountedRefCallback}
       className="inline-flex items-center gap-2 border border-ide-divider/60 bg-ide-elevated/60 px-2 py-1"
-      style={{ maxWidth: "100%", borderRadius: "var(--skin-r-chip)" }}
+      style={{ maxWidth: "100%", borderRadius: "var(--r-chip)" }}
     >
       {/* File icon — lucide FileText (ICON-11: unified glyph family with ContentIcon) */}
       <FileText
@@ -181,9 +180,7 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
         <span className="text-[11px] text-ide-danger shrink-0">{openError}</span>
       )}
 
-      {/* Action buttons — bdac.20: replaced raw <button> elements with ActionButton
-          (variant="secondary" size="sm") so skin-r-ctl radius, focus ring, and
-          disabled opacity come from a single source of truth. */}
+      {/* Action buttons — bdac.20: ActionButton for consistent radius, focus ring, and disabled opacity. */}
       <span className="ml-auto flex shrink-0 items-center gap-1">
         {/* Open — write to temp file and open with OS default app (no save dialog) */}
         <ActionButton

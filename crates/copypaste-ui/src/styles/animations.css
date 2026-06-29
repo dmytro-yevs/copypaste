@@ -1,14 +1,10 @@
 
-/* ── Aurora background — STATIC (no animation) ────────────────────────────
-   auroraSpin and glowDrift removed. Background orbs are fixed in place.
-   Colour atmosphere is preserved; zero idle looping animation.              */
-
 /* ═══════════════════════════════════════════════════════════════════════════
    §MO  APPROVED MOTION LANGUAGE — keyframes + utility classes
         (CopyPaste-1f90 epic; spec items 1-10)
    ─────────────────────────────────────────────────────────────────────────
    All classes below use --mo-* duration/easing tokens from :root.
-   NO laser scan-lines, NO aurora spins, NO infinite shimmer loops.
+   NO laser scan-lines, NO infinite shimmer loops.
    ALL motion wrapped in @media (prefers-reduced-motion: reduce) at bottom.
    ══════════════════════════════════════════════════════════════════════════ */
 
@@ -190,7 +186,7 @@
   /* Visual treatment: glass card fill for the active pill */
   background: rgba(var(--surface-rgb), calc(var(--glass-opacity, .40) + .12));
   border: 1px solid var(--glass-border, rgba(255,255,255,.16));
-  border-radius: var(--skin-r-ctl, 9px);
+  border-radius: var(--r-ctl);
   pointer-events: none;
 }
 
@@ -301,19 +297,6 @@
 
 .list-item-in {
   animation: listItemIn calc(140ms * var(--speed, .72)) cubic-bezier(.16,1,.3,1) both;
-}
-
-/* ── Skin row-treatment markers (HistoryView.tsx) ──────────────────────────── */
-/* skin-row-inset: vapor skin — each row is a self-contained rounded card.
-   Subtle elevated fill so the inset card reads against the panel surface. */
-.skin-row-inset {
-  background: rgba(var(--ide-elevated-rgb), calc(var(--glass-opacity, 0.08) + 0.08));
-}
-
-/* skin-row-line: quiet skin — flat dividers, no card depth.
-   No extra background; the divider border (border-b) provides the row separation. */
-.skin-row-line {
-  /* intentionally blank — row separation comes from the border-b Tailwind class */
 }
 
 /* ── Component micro-interaction utilities (legacy no-ops for removed anim) ─ */

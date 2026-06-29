@@ -47,7 +47,7 @@ export function CloudAccountMismatchBanner({
       role="alert"
       data-testid="cloud-account-mismatch-banner"
       className="border border-ide-warning/40 bg-ide-warning/5 px-3 py-2 text-[13px] text-ide-warning"
-      style={{ borderRadius: "var(--skin-r-ctl)" }}
+      style={{ borderRadius: "var(--r-ctl)" }}
     >
       <strong>Supabase account mismatch detected.</strong> Two or more paired
       devices are using different Supabase accounts or projects. Clipboard items

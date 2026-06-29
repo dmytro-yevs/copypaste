@@ -55,12 +55,12 @@ function ConfirmModalInner({
       // Escape key also cancels.
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}
     >
-      {/* surface-glass-strong = floating frosted-glass material — skin-driven radius + shadow.
+      {/* surface-glass-strong = floating frosted-glass material.
           modal-card-enter: approved motion entrance for modal card (§MO-1). */}
       <div
         ref={dialogRef}
         className="modal-card-enter surface-glass-strong w-full max-w-sm p-5"
-        style={{ borderRadius: "var(--skin-r-modal)", boxShadow: "var(--skin-shadow-float)" }}
+        style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh3)" }}
       >
         <p id="confirm-modal-title" className="mb-2 text-[13px] font-semibold text-ide-text">
           {title}
@@ -74,7 +74,7 @@ function ConfirmModalInner({
             onClick={onCancel}
             disabled={busy}
             className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
+            style={{ borderRadius: "var(--r-ctl)" }}
           >
             {cancelLabel}
           </button>
@@ -89,7 +89,7 @@ function ConfirmModalInner({
                 ? "bg-ide-danger text-white hover:bg-ide-danger/85"
                 : "border border-ide-border bg-ide-elevated text-ide-text hover:bg-ide-hover",
             ].join(" ")}
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
+            style={{ borderRadius: "var(--r-ctl)" }}
           >
             {busy ? "…" : confirmLabel}
           </button>

@@ -11,7 +11,6 @@ import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { isImageType, sourceAppLabel, type HistoryEntry } from "../../lib/ipc";
 import { applySpanMasking, maskPlaceholder, shouldMask } from "../../lib/masking";
 import { formatRelativeTime } from "../../lib/time";
-import { SKINS } from "../../lib/skins";
 import { COPY_FLASH_MS } from "../../lib/motion-tokens";
 import { ImageThumb } from "../../components/ImageThumb";
 import { AppIcon } from "../../components/AppIcon";
@@ -20,7 +19,6 @@ import { ContentIconTile, KindChip, kindFallback } from "../../components/Conten
 import { DeviceBadge } from "../../components/DeviceBadge";
 import { IconActionButton } from "../../components/IconActionButton";
 import { Star, StarOff } from "lucide-react";
-import type { SkinId } from "../../store";
 
 // ---------------------------------------------------------------------------
 // Pin indicator (filled amber star — dm51: ★ styleguide §pin)
@@ -189,14 +187,6 @@ export interface RowProps {
   density: "comfortable" | "compact" | "spacious";
   /** Own device UUID from the HistoryPage envelope — used for device badge. */
   ownDeviceId: string;
-  /**
-   * W-C3: Active skin — governs row treatment (card/line/inset).
-   *   classic  → card-style rows (border-b dividers + cinematic hover lift)
-   *   quiet    → line-style rows (border-b dividers only, no hover lift)
-   *   vapor    → inset-style rows (rounded card per row, no border-b, gap via --skin-row-gap)
-   * Classic is the default; its rendering is byte-identical to the pre-skin look.
-   */
-  skin: SkinId;
   onSelect: () => void;
   onToggleMultiSelect: (e: React.MouseEvent) => void;
   onCopy: () => void;
@@ -237,7 +227,6 @@ export const HistoryRow = React.memo(function HistoryRow({
   showSensitiveWarnings,
   density,
   ownDeviceId,
-  skin,
   onSelect,
   onToggleMultiSelect,
   onCopy,
@@ -306,10 +295,6 @@ export const HistoryRow = React.memo(function HistoryRow({
   // doesn't collapse the row. Mirrors Android heightIn(min = ...).
   const rowMinH = density === "spacious" ? "min-h-[42px]" : density === "compact" ? "min-h-[28px]" : "min-h-[34px]";
 
-  // 10lk: derive rowTreatment from the SKINS registry rather than comparing skin names.
-  // A future 4th theme only needs to set its rowTreatment token here — no component edits needed.
-  const rowTreatment = SKINS[skin ?? "classic"].rowTreatment;
-
   // In selection mode, clicking the row toggles multi-select.
   // Outside selection mode, clicking selects + copies (existing behavior).
   const handleRowClick = (e: React.MouseEvent) => {
@@ -344,25 +329,12 @@ export const HistoryRow = React.memo(function HistoryRow({
     : `${kindLabel}: ${preview.slice(0, 80)}`;
 
   // Merge stagger animation with drop-indicator box-shadow.
-  // o2o9: for inset rows, apply rounded card surface via inline style.
-  // VirtualList rows are absolutely positioned, so flex `gap` on the wrapper
-  // is a no-op. Instead apply marginBottom per row for the gap spacing.
   const rowStyle: React.CSSProperties = {
     ...staggerStyle,
     ...(dragHandleProps?.dropIndicator === "above"
       ? { boxShadow: "inset 0 2px 0 0 var(--ide-accent)" }
       : dragHandleProps?.dropIndicator === "below"
       ? { boxShadow: "inset 0 -2px 0 0 var(--ide-accent)" }
-      : {}),
-    ...(rowTreatment === "inset"
-      ? {
-          // Card surface: rounded corners + subtle translucent fill driven by tokens.
-          // CopyPaste-bdac.54: fallback corrected to 12px (Classic skin canonical value).
-          borderRadius: "var(--skin-r-card, 12px)",
-          // Per-row spacing: marginBottom so absolutely-positioned rows get visual separation.
-          // (flex gap on the absolutely-positioned VirtualList container is a no-op.)
-          marginBottom: "var(--skin-row-gap, 3px)",
-        }
       : {}),
   };
 
@@ -383,53 +355,18 @@ export const HistoryRow = React.memo(function HistoryRow({
         // row-interactive: approved motion primitive for hover bg transition (§MO-3).
         "row-interactive",
         "text-[13px]",
-        // W-C3 skin row treatment — three visual languages, orthogonal to palette/theme.
-        // 10lk: driven by rowTreatment token (SKINS[skin].rowTreatment), not skin name.
-        // A future 4th theme only needs to set its rowTreatment in skins.ts — no edits here.
-        // card  (classic): border-b dividers + cinematic hover lift.
-        // line  (quiet):   flat dividers only; no hover lift.
-        // inset (vapor):   individual rounded cards; no border-b; per-row margin gap.
-        rowTreatment === "inset"
-          ? // Inset: each row is a self-contained rounded card with glass surface.
-            // border-radius and marginBottom applied via inline rowStyle (o2o9 fix —
-            // VirtualList rows are absolutely positioned, so flex gap is a no-op).
-            // The rounded-[var(--skin-r-card)] Tailwind class is kept as a fallback
-            // for Tailwind-aware CSS inspection; the definitive radius is in rowStyle.
-            [
-              "skin-row-inset",
-              "transition-[transform,background] duration-[280ms] ease-out",
-              "hover:[transform:translateX(3px)_scale(1.004)]",
-            ].join(" ")
-          : rowTreatment === "line"
-          ? // Line: flat dividers, no hover lift (balanced 1.0× motion profile).
-            // Only bg changes on hover — no translateX/scale transform.
-            [
-              "skin-row-line",
-              "border-b",
-              "transition-[border-color,background] duration-[280ms] ease-out",
-            ].join(" ")
-          : // Card (default / classic): current Liquid Glass look — unchanged.
-            // Smooth hover lift: translateX(5px)+scale per styleguide §history-item.
-            // transition covers transform + border-color + background (matching SG .28s spring).
-            [
-              "border-b",
-              "transition-[transform,border-color,background] duration-[280ms] ease-out",
-              "hover:[transform:translateX(5px)_scale(1.008)]",
-            ].join(" "),
+        // Card row treatment: border-b dividers + hover lift (§9.5 history row).
+        // Smooth hover lift: translateX(5px)+scale per styleguide §history-item.
+        [
+          "border-b",
+          "transition-[transform,border-color,background] duration-[280ms] ease-out",
+          "hover:[transform:translateX(5px)_scale(1.008)]",
+        ].join(" "),
         // §8 copy-flash: .copy-flash approved motion primitive (§MO-4, 90ms keyframe).
-        // Applied before pinned so the flash is visible.
         copyFlash ? "copy-flash" : "",
-        // v0.5.3: warningDim tint for pinned rows — border-l-2 gives a clear
-        // amber left edge; bg-ide-warningDim (no opacity modifier) at its native
-        // 0.10 alpha is visible without overwhelming.
         // 8qzb: pinned rows use badge-warning (#D9A343) for left edge + tint.
-        // Inset rows: skip border-b on pinned (inset rows are self-contained cards).
         entry.pinned
-          ? rowTreatment === "inset"
-            ? "border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10"
-            : "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10 hover:border-b-ide-accent/35"
-          : rowTreatment === "inset"
-          ? "" // inset rows have no explicit border-b — spacing is via marginBottom in rowStyle
+          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10 hover:border-b-ide-accent/35"
           : "border-b border-ide-divider/50 hover:border-b-ide-accent/35",
         multiSelected
           ? "bg-ide-selection text-ide-text"
@@ -519,7 +456,7 @@ export const HistoryRow = React.memo(function HistoryRow({
       <span className="flex shrink-0 items-center gap-1">
         {/* s7ia: removed .icon-float — that class ran a 4s infinite iconFloat
             transform animation on every visible row tile (15+ GPU compositor
-            layers simultaneously). The aurora background provides sufficient motion.
+            layers simultaneously).
             CopyPaste-5917.82 (ICON-3): migrated from inline bg-ide-faint/16 span to
             ContentIconTile so the tile uses the spec-required mute/16 token. */}
         <ContentIconTile
@@ -724,8 +661,6 @@ export const HistoryRow = React.memo(function HistoryRow({
   if (prev.showSensitiveWarnings !== next.showSensitiveWarnings) return false;
   if (prev.density !== next.density) return false;
   if (prev.ownDeviceId !== next.ownDeviceId) return false;
-  // W-C3: skin change requires re-render (row treatment differs per skin).
-  if (prev.skin !== next.skin) return false;
   // Drag state (pinned rows only). Compare structural equality of the
   // dragging/dropIndicator fields; function refs are not compared since they
   // are rebuilt per entry.id and change only when drag/drop state changes.

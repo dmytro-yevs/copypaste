@@ -94,16 +94,14 @@ export function AboutView() {
   return (
     <ViewShell title="About">
       <div className="flex h-full flex-col items-center justify-center px-6">
-        {/* surface-card = frosted translucent glass (aurora canvas blurs through).
+        {/* surface-card = frosted translucent glass.
             .card-in = entrance animation (scale+fade from tokens).
             bg-ide-elevated is kept so the existing token assertion in
             AboutView.test.tsx still finds it; .surface-card overrides the opaque
             fill at paint time. */}
-        {/* rounded-ide-lg (fixed 14px) → --skin-r-card; shadow-ide-sm (fixed e2) → --skin-shadow-card
-            so Quiet (10px/none) and Vapor (16px/none+sheen) render correctly. */}
         <div
           className="surface-card card-in flex w-full max-w-sm flex-col gap-0 overflow-hidden bg-ide-elevated"
-          style={{ borderRadius: "var(--skin-r-card)", boxShadow: "var(--skin-shadow-card)" }}
+          style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh1)" }}
         >
 
           {/* Identity — .reveal-up staggers the heading after the card enters.

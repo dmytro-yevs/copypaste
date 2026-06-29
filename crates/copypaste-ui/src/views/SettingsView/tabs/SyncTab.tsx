@@ -123,7 +123,7 @@ export function SyncTab({
         syncStatus.supabase_configured &&
         syncStatus.signed_in &&
         syncStatus.email && (
-          <div className="surface-card px-3 py-2 text-[13px] text-ide-dim" style={{ borderRadius: "var(--skin-r-ctl)" }}>
+          <div className="surface-card px-3 py-2 text-[13px] text-ide-dim" style={{ borderRadius: "var(--r-ctl)" }}>
             <span className="font-medium text-ide-text">Signed in as {syncStatus.email}</span>
             <span className="ml-1">— All devices must use this same account to sync.</span>
           </div>
@@ -361,7 +361,7 @@ export function SyncTab({
                 disabled={offline || passphrase.trim() === ""}
                 onClick={() => void handleSetPassphrase()}
                 className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Set passphrase
               </button>

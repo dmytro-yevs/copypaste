@@ -115,14 +115,13 @@ export function LogView() {
   // Actions slot rendered into the ViewShell header (Refresh + Export buttons).
   const headerActions = (
     <div className="flex items-center gap-2">
-      {/* rounded-ide removed; --skin-r-ctl drives radius so Quiet/Vapor adapt. */}
       <button
         onClick={() => {
           setLoading(true);
           void load();
         }}
         className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text"
-        style={{ borderRadius: "var(--skin-r-ctl)" }}
+        style={{ borderRadius: "var(--r-ctl)" }}
       >
         Refresh
       </button>
@@ -130,7 +129,7 @@ export function LogView() {
         onClick={handleExport}
         disabled={isEmpty || !content}
         className="border border-ide-border bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-dim shadow-ide-xs hover:bg-ide-raised hover:text-ide-text disabled:opacity-40"
-        style={{ borderRadius: "var(--skin-r-ctl)" }}
+        style={{ borderRadius: "var(--r-ctl)" }}
       >
         Export
       </button>

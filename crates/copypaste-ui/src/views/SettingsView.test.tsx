@@ -280,10 +280,10 @@ describe("P2P toggle triggers daemon restart", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // §6 Liquid Glass Settings additions
+  // §6 Display tab — Phase 4: density/palette/skin removed, theme=Light/Dark
   // ---------------------------------------------------------------------------
 
-  it("§6.2 Display tab has a density segmented control as the first row", async () => {
+  it("§6.2 Display tab has an Appearance section with Theme segmented control", async () => {
     invoke.mockImplementation(makeOnlineInvoke());
     render(
       <ErrorBoundary label="Settings">
@@ -297,11 +297,13 @@ describe("P2P toggle triggers daemon restart", () => {
     const displayTab = await screen.findByText("Display");
     await act(async () => { fireEvent.click(displayTab); });
 
-    // "Row density" label must exist in the Display tab
-    expect(screen.getByText(/Row density/i)).toBeInTheDocument();
-    // Both density options must be present
-    expect(screen.getByRole("button", { name: /comfortable/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /compact/i })).toBeInTheDocument();
+    // "Appearance" subsection heading must be present
+    expect(screen.getAllByText(/Appearance/i).some((el) => el.textContent === "Appearance")).toBe(true);
+    // Theme row uses "Theme" label (not "Color theme")
+    expect(screen.getByText(/^Theme$/i)).toBeInTheDocument();
+    // Light and Dark buttons present (no "system" — §2 STYLEGUIDE)
+    expect(screen.getByRole("button", { name: /^Light$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Dark$/i })).toBeInTheDocument();
   });
 
   it("§6.3 Storage tab has a History display limit slider row", async () => {
@@ -342,10 +344,10 @@ describe("P2P toggle triggers daemon restart", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // §hn5v Appearance section — palette / density / theme pickers
+  // §hn5v Appearance section — Phase 4: palette/density/skin removed
   // ---------------------------------------------------------------------------
 
-  it("§hn5v Display tab has an Appearance section with palette picker", async () => {
+  it("§hn5v Display tab has accent picker with 6 hues (replaces palette)", async () => {
     invoke.mockImplementation(makeOnlineInvoke());
     render(
       <ErrorBoundary label="Settings">
@@ -362,17 +364,16 @@ describe("P2P toggle triggers daemon restart", () => {
     // "Appearance" subsection heading must be present (exact text, not "Popup appearance")
     expect(screen.getAllByText(/Appearance/i).some((el) => el.textContent === "Appearance")).toBe(true);
 
-    // palette picker grid is data-testid="palette-picker"
-    expect(document.querySelector('[data-testid="palette-picker"]')).not.toBeNull();
+    // Accent picker replaces palette picker
+    expect(document.querySelector('[data-testid="accent-picker"]')).not.toBeNull();
 
-    // All 10 palettes rendered as swatch buttons (aria-label = palette name)
-    expect(screen.getByRole("button", { name: /Graphite Mist/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Liquid Blue/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Aurora Violet/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Amber Night/i })).toBeInTheDocument();
+    // Phase 4 accent hues (§3.5): Indigo, Blue, Teal, Green, Amber, Rose
+    expect(screen.getByRole("button", { name: /^Indigo$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Blue$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Teal$/i })).toBeInTheDocument();
   });
 
-  it("§hn5v clicking a palette swatch updates the store (aria-pressed reflects active)", async () => {
+  it("§hn5v clicking an accent swatch updates the store (aria-pressed reflects active)", async () => {
     invoke.mockImplementation(makeOnlineInvoke());
     render(
       <ErrorBoundary label="Settings">
@@ -386,15 +387,15 @@ describe("P2P toggle triggers daemon restart", () => {
     const displayTab = await screen.findByText("Display");
     await act(async () => { fireEvent.click(displayTab); });
 
-    // Click "Liquid Blue" swatch — it should become pressed
-    const liquidBlueBtn = screen.getByRole("button", { name: /Liquid Blue/i });
-    await act(async () => { fireEvent.click(liquidBlueBtn); });
+    // Click "Teal" swatch — it should become pressed
+    const tealBtn = screen.getByRole("button", { name: /^Teal$/i });
+    await act(async () => { fireEvent.click(tealBtn); });
 
     // After click the button must be aria-pressed="true"
-    expect(liquidBlueBtn.getAttribute("aria-pressed")).toBe("true");
+    expect(tealBtn.getAttribute("aria-pressed")).toBe("true");
   });
 
-  it("§hn5v Display tab has density picker with compact/comfortable/spacious", async () => {
+  it("§hn5v Display tab theme has Light/Dark options (no density or system)", async () => {
     invoke.mockImplementation(makeOnlineInvoke());
     render(
       <ErrorBoundary label="Settings">
@@ -408,38 +409,19 @@ describe("P2P toggle triggers daemon restart", () => {
     const displayTab = await screen.findByText("Display");
     await act(async () => { fireEvent.click(displayTab); });
 
-    // All three density options present
-    expect(screen.getByRole("button", { name: /^compact$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^comfortable$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^spacious$/i })).toBeInTheDocument();
-  });
-
-  it("§hn5v Display tab has theme picker with dark/light/system", async () => {
-    invoke.mockImplementation(makeOnlineInvoke());
-    render(
-      <ErrorBoundary label="Settings">
-        <SettingsView />
-      </ErrorBoundary>,
-    );
-    await waitFor(() => {
-      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
-    });
-
-    const displayTab = await screen.findByText("Display");
-    await act(async () => { fireEvent.click(displayTab); });
-
-    // Theme row in Appearance section
-    expect(screen.getByText(/Color theme/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^light$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^dark$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^system$/i })).toBeInTheDocument();
+    // Theme row uses "Theme" label (§2: two-axis design, no "system")
+    expect(screen.getByText(/^Theme$/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Light$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Dark$/i })).toBeInTheDocument();
+    // No "system" option (removed in §2)
+    expect(screen.queryByRole("button", { name: /^system$/i })).toBeNull();
   });
 
   // ---------------------------------------------------------------------------
-  // W-F4: Skin picker in the Appearance section of the Display tab
+  // Phase 4: Appearance controls present (skin/palette/density removed)
   // ---------------------------------------------------------------------------
 
-  it("§W-F4 Display tab has a skin picker with Classic/Quiet/Vapor options", async () => {
+  it("Phase 4 Appearance section has Theme, Accent color, and Translucency rows", async () => {
     invoke.mockImplementation(makeOnlineInvoke());
     render(
       <ErrorBoundary label="Settings">
@@ -453,62 +435,15 @@ describe("P2P toggle triggers daemon restart", () => {
     const displayTab = await screen.findByText("Display");
     await act(async () => { fireEvent.click(displayTab); });
 
-    // "Visual style" skin picker must be in the Appearance section
-    expect(screen.getByText(/Visual style/i)).toBeInTheDocument();
-
-    // All three skin buttons must be present (data-testid="skin-picker")
-    expect(document.querySelector('[data-testid="skin-picker"]')).not.toBeNull();
-    expect(screen.getByRole("button", { name: /^Classic$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Quiet$/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^Vapor$/i })).toBeInTheDocument();
-  });
-
-  it("§W-F4 clicking a skin button updates the store (aria-pressed reflects active)", async () => {
-    invoke.mockImplementation(makeOnlineInvoke());
-    render(
-      <ErrorBoundary label="Settings">
-        <SettingsView />
-      </ErrorBoundary>,
-    );
-    await waitFor(() => {
-      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
-    });
-
-    const displayTab = await screen.findByText("Display");
-    await act(async () => { fireEvent.click(displayTab); });
-
-    // Click "Quiet" skin — it should become pressed
-    const quietBtn = screen.getByRole("button", { name: /^Quiet$/i });
-    await act(async () => { fireEvent.click(quietBtn); });
-
-    // After click Quiet must be aria-pressed="true"
-    expect(quietBtn.getAttribute("aria-pressed")).toBe("true");
-
-    // Classic should no longer be pressed
-    const classicBtn = screen.getByRole("button", { name: /^Classic$/i });
-    expect(classicBtn.getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("§W-F4 existing appearance controls still present after adding skin picker", async () => {
-    invoke.mockImplementation(makeOnlineInvoke());
-    render(
-      <ErrorBoundary label="Settings">
-        <SettingsView />
-      </ErrorBoundary>,
-    );
-    await waitFor(() => {
-      expect(screen.queryByText(/Daemon not running/i)).not.toBeInTheDocument();
-    });
-
-    const displayTab = await screen.findByText("Display");
-    await act(async () => { fireEvent.click(displayTab); });
-
-    // All existing Appearance controls must still be present (zero-feature-loss)
-    expect(document.querySelector('[data-testid="palette-picker"]')).not.toBeNull();
-    expect(screen.getByText(/Row density/i)).toBeInTheDocument();
-    expect(screen.getByText(/Color theme/i)).toBeInTheDocument();
+    // Phase 4 Appearance controls: Theme + Accent color + Translucency
+    expect(screen.getByText(/^Theme$/i)).toBeInTheDocument();
+    expect(screen.getByText(/Accent color/i)).toBeInTheDocument();
     expect(screen.getByText(/Translucency/i)).toBeInTheDocument();
-    expect(screen.getByText(/Reduce motion/i)).toBeInTheDocument();
+    // Density/skin/palette/reduce-motion removed
+    expect(screen.queryByText(/Row density/i)).toBeNull();
+    expect(screen.queryByText(/Visual style/i)).toBeNull();
+    expect(document.querySelector('[data-testid="palette-picker"]')).toBeNull();
+    expect(document.querySelector('[data-testid="skin-picker"]')).toBeNull();
   });
 
   it("does NOT call restart_daemon when set_config fails", async () => {

@@ -56,7 +56,7 @@ export function ShortcutsTab({
                 }
                 onClick={() => void handleResetShortcut()}
                 className="flex h-7 w-7 items-center justify-center border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text disabled:cursor-not-allowed disabled:opacity-40 transition-colors"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M2.5 8a5.5 5.5 0 1 1 1.6 3.9" />

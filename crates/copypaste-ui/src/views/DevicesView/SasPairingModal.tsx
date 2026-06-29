@@ -276,12 +276,11 @@ export function SasPairingModal({
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); handleClose(); } }}
     >
       {/* surface-glass-strong = floating frosted-glass pairing dialog.
-          modal-card-enter: approved motion entrance (§MO-1).
-          W-C4: radius and shadow are skin-driven so quiet/vapor skins adapt. */}
+          modal-card-enter: approved motion entrance (§MO-1). */}
       <div
         ref={modalRef}
         className="modal-card-enter surface-glass-strong w-full max-w-sm p-5"
-        style={{ borderRadius: "var(--skin-r-modal)", boxShadow: "var(--skin-shadow-float)" }}
+        style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh3)" }}
       >
         <p id="sas-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
           {isResponder ? `"${peerName}" wants to pair` : `Pair "${peerName}"`}
@@ -336,7 +335,7 @@ export function SasPairingModal({
                 (bd CopyPaste-1jms.1) */}
             <div
               className="surface-card mx-auto block px-4 py-3 font-mono text-[28px] font-semibold tracking-[0.3em] text-ide-text text-center"
-              style={{ borderRadius: "var(--skin-r-ctl)", userSelect: "none" }}
+              style={{ borderRadius: "var(--r-ctl)", userSelect: "none" }}
               aria-label={`Security code: ${status.sas}`}
               data-testid="sas-code-display"
             >
@@ -349,7 +348,7 @@ export function SasPairingModal({
             {(status.peer_device_name ??
               status.peer_ip_addrs?.length ??
               status.peer_fingerprint) && (
-              <div className="surface-card mt-3 px-3 py-2" style={{ borderRadius: "var(--skin-r-card)" }}>
+              <div className="surface-card mt-3 px-3 py-2" style={{ borderRadius: "var(--r-card)" }}>
                 <MetaRow label="Name" value={status.peer_device_name} />
                 <MetaRow
                   label="Addresses"
@@ -363,7 +362,7 @@ export function SasPairingModal({
                 onClick={() => void handleConfirm(false)}
                 disabled={confirmPending}
                 className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Doesn't match
               </button>
@@ -376,7 +375,7 @@ export function SasPairingModal({
                 disabled={confirmPending}
                 aria-label="Codes match — confirm pairing"
                 className="inline-flex items-center gap-1.5 bg-ide-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 {confirmPending && (
                   <span className="inline-block h-3 w-3 animate-spin motion-reduce:animate-none rounded-full border-2 border-white/40 border-t-white" />
@@ -406,7 +405,7 @@ export function SasPairingModal({
               <button
                 onClick={handleClose}
                 className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Close
               </button>
@@ -432,7 +431,7 @@ export function SasPairingModal({
               <button
                 onClick={handleClose}
                 className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Close
               </button>
@@ -453,7 +452,7 @@ export function SasPairingModal({
               <button
                 onClick={handleClose}
                 className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-text hover:bg-ide-hover"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Close
               </button>

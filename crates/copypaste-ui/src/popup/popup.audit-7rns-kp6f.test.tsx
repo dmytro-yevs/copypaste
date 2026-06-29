@@ -1,18 +1,10 @@
 /**
- * Audit fix tests:
- *   CopyPaste-7rns (P1): popup window borderRadius must be var(--skin-r-card),
- *     not var(--skin-r-modal), so classic renders 14px (pre-skin byte-identical).
- *   CopyPaste-kp6f (W5, popup part): source-app label chip must use
- *     borderRadius: "var(--skin-r-chip)" inline style instead of static
- *     rounded-ide-sm Tailwind class.
+ * Phase 4: Popup uses fixed radius tokens (--r-card, --r-chip).
+ * Updated from CopyPaste-7rns/kp6f audit: old skin tokens replaced.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
-
-// ---------------------------------------------------------------------------
-// Tauri mocks
-// ---------------------------------------------------------------------------
 
 const invoke = vi.fn();
 vi.mock("@tauri-apps/api/core", () => ({
@@ -33,10 +25,6 @@ vi.mock("@tauri-apps/api/webviewWindow", () => ({
     getByLabel: vi.fn().mockResolvedValue(null),
   },
 }));
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function mockEmptyHistory() {
   invoke.mockImplementation((cmd: string, args: unknown) => {
@@ -86,17 +74,17 @@ function mockHistoryWithApp(app_bundle_id: string) {
 }
 
 // ---------------------------------------------------------------------------
-// CopyPaste-7rns: popup root borderRadius must use var(--skin-r-card)
+// Popup root borderRadius uses var(--r-card)
 // ---------------------------------------------------------------------------
 
-describe("CopyPaste-7rns: popup root uses var(--skin-r-card) for borderRadius", () => {
+describe("Phase 4: popup root uses var(--r-card) for borderRadius", () => {
   beforeEach(() => {
     invoke.mockReset();
     localStorage.clear();
     vi.resetModules();
   });
 
-  it("popup root div borderRadius is var(--skin-r-card), not var(--skin-r-modal)", async () => {
+  it("popup root div borderRadius is var(--r-card)", async () => {
     mockEmptyHistory();
 
     const { Popup } = await import("./Popup");
@@ -106,44 +94,35 @@ describe("CopyPaste-7rns: popup root uses var(--skin-r-card) for borderRadius", 
     expect(popupRoot).not.toBeNull();
 
     const radius = popupRoot!.style.borderRadius;
-    // Must reference the card token (14px classic, 10px quiet, 16px vapor).
-    expect(radius).toBe("var(--skin-r-card)");
-    // Must NOT reference the modal token (which gives 16px in classic — wrong).
-    expect(radius).not.toBe("var(--skin-r-modal)");
+    expect(radius).toBe("var(--r-card)");
   });
 });
 
 // ---------------------------------------------------------------------------
-// CopyPaste-kp6f: source-app chip uses inline borderRadius var(--skin-r-chip)
+// Source-app chip uses inline borderRadius var(--r-chip)
 // ---------------------------------------------------------------------------
 
-describe("CopyPaste-kp6f: source-app chip uses var(--skin-r-chip) inline style", () => {
+describe("Phase 4: source-app chip uses var(--r-chip) inline style", () => {
   beforeEach(() => {
     invoke.mockReset();
     localStorage.clear();
     vi.resetModules();
   });
 
-  it("source-app chip span has borderRadius: var(--skin-r-chip) inline style", async () => {
-    // Use a known bundle ID that sourceAppLabel maps to a non-empty string.
+  it("source-app chip span has borderRadius: var(--r-chip) inline style", async () => {
     mockHistoryWithApp("com.apple.terminal");
 
     const { Popup } = await import("./Popup");
     const { container } = render(<Popup />);
 
-    // Wait for the item row to render (app label "Terminal" appears).
     await waitFor(() => {
       expect(screen.getByText("Terminal")).toBeInTheDocument();
     });
 
-    // Find the chip span — it renders the app label text.
     const chip = screen.getByText("Terminal").closest("span");
     expect(chip).not.toBeNull();
 
-    // Must have borderRadius set as inline style with the skin token.
-    expect(chip!.style.borderRadius).toBe("var(--skin-r-chip)");
-
-    // Must NOT rely on the static Tailwind class.
+    expect(chip!.style.borderRadius).toBe("var(--r-chip)");
     expect(chip!.className).not.toContain("rounded-ide-sm");
   });
 });

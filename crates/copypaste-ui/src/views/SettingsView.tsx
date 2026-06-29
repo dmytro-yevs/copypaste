@@ -28,7 +28,7 @@ export function SettingsView() {
 
       {s.loadState !== "loading" && (
         <div className="mx-auto w-full" style={{ maxWidth: "620px" }}>
-          <div className="surface-card overflow-hidden shadow-ide-sm" style={{ borderRadius: "var(--skin-r-card)" }}>
+          <div className="surface-card overflow-hidden shadow-ide-sm" style={{ borderRadius: "var(--r-card)" }}>
             <div className="px-4 pt-4 border-b border-ide-border/30">
               <TabBar active={activeTab} onChange={setActiveTab} />
             </div>

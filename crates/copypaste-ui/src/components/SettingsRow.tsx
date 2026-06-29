@@ -1,5 +1,3 @@
-import { useUI } from "../store";
-
 // ---------------------------------------------------------------------------
 // SettingsRow — one canonical settings row
 //
@@ -11,9 +9,6 @@ import { useUI } from "../store";
 //                  to the label, not inside the control column.
 //   children     — right-aligned control slot (Toggle, slider, input, button…)
 //   disabled     — visually dims the title/description when true.
-//
-// Density-aware: compact / comfortable / spacious row heights match the rest
-// of the Settings UI (CopyPaste-hffp / CopyPaste-gzli).
 // ---------------------------------------------------------------------------
 
 interface SettingsRowProps {
@@ -33,17 +28,11 @@ interface SettingsRowProps {
 }
 
 export function SettingsRow({ title, description, info, children, disabled, fullWidth }: SettingsRowProps) {
-  // CopyPaste-hffp: density-aware row height/padding.
-  // CopyPaste-gzli: spacious adds extra padding as the largest step.
-  const density = useUI((s) => s.prefs.density ?? "comfortable");
-  // fullWidth rows use block layout (py-3 matches the old raw-div palette wrapper).
+  // Phase 4: density axis removed — fixed comfortable row height.
+  // fullWidth rows use block layout.
   const rowCls = fullWidth
     ? "block border-b border-ide-divider/70 px-3 py-3 last:border-b-0"
-    : density === "compact"
-      ? "flex min-h-[30px] items-center justify-between border-b border-ide-divider/70 px-3 py-1 last:border-b-0"
-      : density === "spacious"
-        ? "flex min-h-[42px] items-center justify-between border-b border-ide-divider/70 px-3 py-2.5 last:border-b-0"
-        : "flex min-h-[36px] items-center justify-between border-b border-ide-divider/70 px-3 py-2 last:border-b-0";
+    : "flex min-h-[36px] items-center justify-between border-b border-ide-divider/70 px-3 py-2 last:border-b-0";
 
   return (
     <div className={rowCls}>

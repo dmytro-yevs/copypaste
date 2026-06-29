@@ -171,7 +171,7 @@ function DevicesViewInner({
         onClick={() => setRevokeAllConfirm(true)}
         disabled={revokeAllPending || loadState !== "ready" || peers.length === 0}
         className="border border-ide-danger/35 bg-ide-elevated px-2.5 py-1 text-[12px] text-ide-danger hover:bg-ide-raised hover:border-ide-danger/60 shadow-ide-xs disabled:cursor-not-allowed disabled:opacity-40"
-        style={{ borderRadius: "var(--skin-r-ctl)" }}
+        style={{ borderRadius: "var(--r-ctl)" }}
       >
         {revokeAllPending ? "Revoking…" : "Revoke all"}
       </button>
@@ -297,11 +297,9 @@ function DevicesViewInner({
       </div>
 
       {/* ── Single unified device list (this Mac first, then peers) ── */}
-      {/* surface-card glass: the list container is a frosted layer over the aurora.
-          W-C4: radius is skin-driven (--skin-r-card) so quiet/vapor skins adapt. */}
       <div
         className="surface-card flex flex-col divide-y divide-ide-divider"
-        style={{ borderRadius: "var(--skin-r-card)" }}
+        style={{ borderRadius: "var(--r-card)" }}
       >
         {/* This device — always first */}
         {ownState.status === "loading" && (
@@ -377,7 +375,7 @@ function DevicesViewInner({
           disabled={rescanning}
           aria-label={rescanning ? "Scanning…" : "Rescan local network"}
           className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium text-ide-accent hover:bg-ide-hover disabled:opacity-50 disabled:cursor-default"
-          style={{ borderRadius: "var(--skin-r-ctl)" }}
+          style={{ borderRadius: "var(--r-ctl)" }}
           title="Rescan the local network for devices"
         >
           {/* RefreshCw from lucide-react; spins while rescanning; reduced-motion: static */}
@@ -391,10 +389,9 @@ function DevicesViewInner({
         </button>
       </div>
       {discovered.length > 0 ? (
-        /* W-C4: radius skin-driven (--skin-r-card) */
         <div
           className="surface-card flex flex-col divide-y divide-ide-divider"
-          style={{ borderRadius: "var(--skin-r-card)" }}
+          style={{ borderRadius: "var(--r-card)" }}
         >
           {discovered.map((device, idx) => (
             <DiscoveredRow
@@ -441,11 +438,10 @@ function DevicesViewInner({
         <SectionHeader label="Pair a new device" />
       </div>
 
-      {/* card-in: glass card entrance (styleguide §device-card).
-          W-C4: radius skin-driven; shadow provided by surface-card utility. */}
+      {/* card-in: glass card entrance (styleguide §device-card). */}
       <section
         className="card-in surface-card p-4 space-y-3"
-        style={{ borderRadius: "var(--skin-r-card)" }}
+        style={{ borderRadius: "var(--r-card)" }}
       >
         {qrState.status === "loading" && (
           // Static muted text — no animate-pulse (MOT-21)
@@ -468,7 +464,7 @@ function DevicesViewInner({
                 "relative shrink-0 surface-card p-2 overflow-hidden",
                 qrBlur === "blurred" ? "qr-hidden" : "qr-visible",
               ].join(" ")}
-              style={{ width: 190, height: 190, borderRadius: "var(--skin-r-card)" }}
+              style={{ width: 190, height: 190, borderRadius: "var(--r-card)" }}
             >
               {/* qr-grid: the blurred/revealed target (§MO-7) */}
               <div

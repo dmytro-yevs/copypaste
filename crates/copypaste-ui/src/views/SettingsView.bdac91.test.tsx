@@ -225,8 +225,8 @@ describe("CopyPaste-bdac.91: 'Group by device' toggle in SettingsView Display ta
     // Toggle sortByDevice on via the store (simulating UI interaction).
     await act(async () => { useUI.getState().setPrefs({ sortByDevice: true }); });
 
-    // The v3 localStorage key must now contain sortByDevice:true.
-    const raw = localStorage.getItem("copypaste-ui-prefs-v3");
+    // The v4 localStorage key must now contain sortByDevice:true (Phase 4 bump).
+    const raw = localStorage.getItem("copypaste-ui-prefs-v4");
     expect(raw).not.toBeNull();
     const parsed = JSON.parse(raw!);
     expect(parsed.sortByDevice).toBe(true);

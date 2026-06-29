@@ -5,22 +5,22 @@
  *   - Uses SKINS[skin].rowTreatment instead of `skin === "vapor"` / `skin === "quiet"`.
  *
  * CopyPaste-o2o9 (vapor inset visual): vapor rows apply inline styles for
- *   rounded-card surface (borderRadius: var(--skin-r-card)) and per-row
+ *   rounded-card surface (borderRadius: var(--r-card)) and per-row
  *   marginBottom (var(--skin-row-gap)) for spacing — because VirtualList rows
  *   are absolutely positioned and flex gap on a wrapper is a no-op.
  *
  * CopyPaste-kp6f (skin radius tokens): file-attach btn, device-filter select,
  *   sort toggle, and selection-glide div must NOT use `rounded-ide` class;
- *   they must apply inline style with var(--skin-r-ctl) or var(--skin-r-card).
- *   Toast borderRadius must use "var(--skin-r-card)" not hardcoded 10.
+ *   they must apply inline style with var(--r-ctl) or var(--r-card).
+ *   Toast borderRadius must use "var(--r-card)" not hardcoded 10.
  *
  * CopyPaste-5917.54 (meta sub-row): history rows show a .meta sub-row beneath the
  *   preview with KindChip (readable kind text label), timestamp, and optional app.
  *   Matches the approved styleguide .hrow .meta pattern.
  *
  * CopyPaste-bdac.54 (glide overlay radius): selection-glide overlay at line ~1402
- *   used var(--skin-r-card, 14px) — wrong fallback for Classic canonical 12px.
- *   Fixed to var(--skin-r-card, 12px).
+ *   used var(--r-card, 14px) — wrong fallback for Classic canonical 12px.
+ *   Fixed to var(--r-card, 12px).
  *
  * CopyPaste-bdac.66 (image placeholder copy): FullResImage showed "Image unavailable"
  *   and plain "Loading…" — inconsistent with empty/error patterns. Now shows
@@ -79,40 +79,12 @@ function setupInvokeWithItems(items: ReturnType<typeof makeEntry>[]) {
 // CopyPaste-10lk: row treatment driven by SKINS[skin].rowTreatment token
 // ---------------------------------------------------------------------------
 
-describe("CopyPaste-10lk: rowTreatment token-driven (not skin-name hardcoded)", () => {
+describe("Phase 4: card row treatment (border-b + hover lift)", () => {
   beforeEach(() => {
     invoke.mockReset();
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
   });
 
-  it("vapor rows use skin-row-inset (rowTreatment='inset')", async () => {
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "vapor" } }));
-    setupInvokeWithItems([makeEntry("a"), makeEntry("b")]);
-
-    render(<HistoryView />);
-
-    await waitFor(() => expect(screen.getByText("Item a")).toBeInTheDocument());
-
-    const rows = screen.getAllByRole("option");
-    expect(rows[0].className).toContain("skin-row-inset");
-    // Inset rows: no flat border-b divider
-    expect(rows[0].className).not.toContain("border-b");
-  });
-
-  it("quiet rows use skin-row-line (rowTreatment='line')", async () => {
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "quiet" } }));
-    setupInvokeWithItems([makeEntry("a")]);
-
-    render(<HistoryView />);
-
-    await waitFor(() => expect(screen.getByText("Item a")).toBeInTheDocument());
-
-    const rows = screen.getAllByRole("option");
-    expect(rows[0].className).toContain("skin-row-line");
-    expect(rows[0].className).toContain("border-b");
-  });
-
-  it("classic rows use card treatment (border-b, no skin-row-inset/skin-row-line)", async () => {
+  it("rows use card treatment (border-b, no skin-row-inset/skin-row-line)", async () => {
     setupInvokeWithItems([makeEntry("a")]);
 
     render(<HistoryView />);
@@ -140,64 +112,18 @@ describe("CopyPaste-10lk: rowTreatment token-driven (not skin-name hardcoded)", 
 // CopyPaste-o2o9: vapor inset rows render with inline style for card surface
 // ---------------------------------------------------------------------------
 
-describe("CopyPaste-o2o9: vapor inset rows render with inline style for spacing and surface", () => {
-  beforeEach(() => {
-    invoke.mockReset();
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "vapor" } }));
-  });
-
-  it("vapor rows have inline borderRadius from var(--skin-r-card)", async () => {
-    setupInvokeWithItems([makeEntry("v1"), makeEntry("v2")]);
-
-    render(<HistoryView />);
-
-    await waitFor(() => expect(screen.getByText("Item v1")).toBeInTheDocument());
-
-    const rows = screen.getAllByRole("option");
-    const styleAttr = rows[0].getAttribute("style") ?? "";
-    // Inline style must reference the skin token (not a hardcoded px value like 16px alone)
-    expect(styleAttr).toMatch(/border-radius.*var\(--skin-r-card/i);
-  });
-
-  it("vapor rows have per-row marginBottom for spacing (gap is no-op on abs positioned rows)", async () => {
-    setupInvokeWithItems([makeEntry("v1"), makeEntry("v2")]);
-
-    render(<HistoryView />);
-
-    await waitFor(() => expect(screen.getByText("Item v1")).toBeInTheDocument());
-
-    const rows = screen.getAllByRole("option");
-    const styleAttr = rows[0].getAttribute("style") ?? "";
-    // Per-row vertical spacing must be margin-bottom referencing the skin gap token
-    expect(styleAttr).toMatch(/margin-bottom.*var\(--skin-row-gap/i);
-  });
-
-  it("classic rows do NOT have vapor card-surface inline styles", async () => {
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
-    setupInvokeWithItems([makeEntry("c1")]);
-
-    render(<HistoryView />);
-
-    await waitFor(() => expect(screen.getByText("Item c1")).toBeInTheDocument());
-
-    const rows = screen.getAllByRole("option");
-    const styleAttr = rows[0].getAttribute("style") ?? "";
-    // Classic rows must not carry the vapor inset surface token inline
-    expect(styleAttr).not.toMatch(/var\(--skin-r-card\)/);
-  });
-});
+// Phase 4: vapor/inset skin treatment removed — no inset row tests needed.
 
 // ---------------------------------------------------------------------------
 // CopyPaste-kp6f: skin radius tokens on controls (no rounded-ide class)
 // ---------------------------------------------------------------------------
 
-describe("CopyPaste-kp6f: controls use var(--skin-r-ctl) inline, not rounded-ide class", () => {
+describe("CopyPaste-kp6f: controls use var(--r-ctl) inline, not rounded-ide class", () => {
   beforeEach(() => {
     invoke.mockReset();
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
   });
 
-  it("file-attach button uses inline var(--skin-r-ctl) borderRadius, not rounded-ide class", async () => {
+  it("file-attach button uses inline var(--r-ctl) borderRadius, not rounded-ide class", async () => {
     setupInvokeWithItems([makeEntry("a")]);
     const { container } = render(<HistoryView />);
     await waitFor(() => expect(screen.getByText("Item a")).toBeInTheDocument());
@@ -208,11 +134,11 @@ describe("CopyPaste-kp6f: controls use var(--skin-r-ctl) inline, not rounded-ide
       const cls = attachBtn.getAttribute("class") ?? "";
       expect(cls).not.toContain("rounded-ide");
       const style = attachBtn.getAttribute("style") ?? "";
-      expect(style).toMatch(/border-radius.*var\(--skin-r-ctl/i);
+      expect(style).toMatch(/border-radius.*var\(--r-ctl/i);
     }
   });
 
-  it("sort-toggle button uses inline var(--skin-r-ctl) borderRadius, not rounded-ide class", async () => {
+  it("sort-toggle button uses inline var(--r-ctl) borderRadius, not rounded-ide class", async () => {
     // Sort toggle only renders when there are multiple devices
     // Provide items from two different device IDs
     const items = [
@@ -240,18 +166,18 @@ describe("CopyPaste-kp6f: controls use var(--skin-r-ctl) inline, not rounded-ide
       const cls = sortBtn.getAttribute("class") ?? "";
       expect(cls).not.toContain("rounded-ide");
       const style = sortBtn.getAttribute("style") ?? "";
-      expect(style).toMatch(/border-radius.*var\(--skin-r-ctl/i);
+      expect(style).toMatch(/border-radius.*var\(--r-ctl/i);
     }
     // If sort button not shown (single device), pass — that's expected.
   });
 
-  it("Toast component uses var(--skin-r-modal) for borderRadius, not a hardcoded value", () => {
+  it("Toast component uses var(--r-card) for borderRadius, not a hardcoded value", () => {
     // Previously this test was a conditional no-op: it only asserted when a toast
     // happened to be visible after HistoryView IPC actions, which never fired in
     // JSDOM. This replacement renders GlassToast directly and asserts the token
     // unconditionally — the assertion can never silently pass without the
-    // var(--skin-r-modal) token being present.
-    // CopyPaste-bdac.56: Toast radius is the modal token (--skin-r-modal), not --skin-r-card.
+    // var(--r-card) token being present.
+    // CopyPaste-bdac.56: Toast radius is the modal token (--r-card), not --r-card.
     const { container } = render(
       <GlassToast msg={{ id: "kp6f-toast", text: "test" }} onDismiss={() => {}} />,
     );
@@ -260,8 +186,8 @@ describe("CopyPaste-kp6f: controls use var(--skin-r-ctl) inline, not rounded-ide
 
     // Accept either inline style or a Tailwind arbitrary-value class that encodes the var.
     const inlineStyle = bubble!.style.borderRadius;
-    const hasVarInStyle = inlineStyle.includes("--skin-r-modal");
-    const hasVarInClass = bubble!.className.includes("--skin-r-modal");
+    const hasVarInStyle = inlineStyle.includes("--r-card");
+    const hasVarInClass = bubble!.className.includes("--r-card");
     expect(hasVarInStyle || hasVarInClass).toBe(true);
 
     // Regression guard: must NOT be a bare hardcoded pixel value (e.g. "10px").
@@ -276,7 +202,6 @@ describe("CopyPaste-kp6f: controls use var(--skin-r-ctl) inline, not rounded-ide
 describe("CopyPaste-5917.54: history rows show KindChip label text in .meta sub-row", () => {
   beforeEach(() => {
     invoke.mockReset();
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
   });
 
   it("URL item shows the text 'URL' visibly in the row (not just as aria-label/tooltip)", async () => {
@@ -321,10 +246,9 @@ describe("CopyPaste-5917.54: history rows show KindChip label text in .meta sub-
 // CopyPaste-bdac.54: glide overlay uses correct 12px fallback (not 14px)
 // ---------------------------------------------------------------------------
 
-describe("CopyPaste-bdac.54: all var(--skin-r-card) usages in HistoryView use 12px fallback", () => {
+describe("CopyPaste-bdac.54: all var(--r-card) usages in HistoryView use 12px fallback", () => {
   beforeEach(() => {
     invoke.mockReset();
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
   });
 
   it("glide selection overlay fallback is 12px, not 14px", async () => {
@@ -337,28 +261,16 @@ describe("CopyPaste-bdac.54: all var(--skin-r-card) usages in HistoryView use 12
       "utf8",
     );
 
-    // No occurrence of the wrong fallback in any var(--skin-r-card, ...) usage.
+    // No occurrence of the wrong fallback in any var(--r-card, ...) usage.
     // Filter out comment lines (lines beginning with //) before matching.
     const codeLines = src.split("\n").filter(l => !l.trimStart().startsWith("//")).join("\n");
-    const wrongFallbacks = [...codeLines.matchAll(/var\(--skin-r-card,\s*(\d+px)\)/g)].filter(
+    const wrongFallbacks = [...codeLines.matchAll(/var\(--r-card,\s*(\d+px)\)/g)].filter(
       ([, px]) => px !== "12px",
     );
     expect(wrongFallbacks).toHaveLength(0);
   });
 
-  it("inset row (vapor skin) renders borderRadius referencing var(--skin-r-card) with 12px fallback", async () => {
-    // The inset row inline style uses var(--skin-r-card, 12px) — verify at runtime.
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "vapor" } }));
-    setupInvokeWithItems([makeEntry("v-bdac54")]);
-
-    render(<HistoryView />);
-    await waitFor(() => expect(screen.getByText("Item v-bdac54")).toBeInTheDocument());
-
-    const rows = screen.getAllByRole("option");
-    const styleAttr = rows[0].getAttribute("style") ?? "";
-    // Must reference the token and must use 12px as fallback (not 14px or 16px)
-    expect(styleAttr).toMatch(/border-radius.*var\(--skin-r-card,\s*12px\)/i);
-  });
+  // Phase 4: vapor/inset skin removed — runtime inset row test no longer needed.
 });
 
 // ---------------------------------------------------------------------------
@@ -393,7 +305,6 @@ describe("CopyPaste-bdac.66: FullResImage placeholder copy is consistent with em
 
   it("shows 'Couldn't load image' in the Details modal when image fetch fails", async () => {
     invoke.mockReset();
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
 
     const imageEntry = {
       ...makeEntry("img-bdac66"),

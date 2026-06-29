@@ -50,14 +50,14 @@ export const INPUT_CLS = [
   "disabled:cursor-not-allowed disabled:opacity-40",
 ].join(" ");
 
-// borderRadius is applied via inline style (var(--skin-r-ctl)) on every button using btnCls.
+// borderRadius is applied via inline style (var(--r-ctl)) on every button using btnCls.
 // Do NOT add rounded-ide here — use btnStyle instead.
 export const BTN_CLS = [
   "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
   "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
 ].join(" ");
 
-export const BTN_STYLE = { borderRadius: "var(--skin-r-ctl)" } as const;
+export const BTN_STYLE = { borderRadius: "var(--r-ctl)" } as const;
 
 export function useSettingsState() {
   // Display prefs (localStorage-persisted, no daemon needed).

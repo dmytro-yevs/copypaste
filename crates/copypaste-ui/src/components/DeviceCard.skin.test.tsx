@@ -55,7 +55,7 @@ describe("PeerRow W-C7: skin token compliance", () => {
 
     buttons.forEach((btn) => {
       // Must use inline style borderRadius referencing the skin token
-      expect(btn.style.borderRadius).toBe("var(--skin-r-ctl)");
+      expect(btn.style.borderRadius).toBe("var(--r-ctl)");
 
       // Must NOT use the hardcoded rounded-ide Tailwind class (9px static)
       expect(btn.classList.contains("rounded-ide")).toBe(false);

@@ -93,11 +93,10 @@ describe("AboutView visual structure (JetBrains tokens)", () => {
     expect(elevated).not.toBeNull();
   });
 
-  it("card uses --skin-r-card for border-radius (skin-aware token)", () => {
-    // W-C8: rounded-ide-lg (fixed 14px) replaced with --skin-r-card so Quiet/Vapor adapt.
-    // The class is gone; the inline style drives radius.
+  it("card uses --r-card for border-radius (fixed token)", () => {
+    // Phase 4: --skin-r-card replaced with --r-card (fixed 13px).
     const { container } = render(<AboutView />);
-    const card = container.querySelector("[style*='--skin-r-card']");
+    const card = container.querySelector("[style*='--r-card']");
     expect(card).not.toBeNull();
   });
 

@@ -44,12 +44,11 @@ export function RevokeConfirmDialog({
       onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); onCancel(); } }}
     >
       {/* surface-glass-strong = floating frosted-glass revoke dialog.
-          modal-card-enter: approved motion entrance (§MO-1).
-          W-C4: radius and shadow are skin-driven so quiet/vapor skins adapt. */}
+          modal-card-enter: approved motion entrance (§MO-1). */}
       <div
         ref={dialogRef}
         className="modal-card-enter surface-glass-strong w-full max-w-sm p-5"
-        style={{ borderRadius: "var(--skin-r-modal)", boxShadow: "var(--skin-shadow-float)" }}
+        style={{ borderRadius: "var(--r-card)", boxShadow: "var(--sh3)" }}
       >
         <p id="revoke-modal-title" className="mb-1 text-[13px] font-medium text-ide-text">
           Revoke &ldquo;{name}&rdquo;
@@ -75,7 +74,7 @@ export function RevokeConfirmDialog({
           autoComplete="new-password"
           disabled={revokeBusy}
           className="mb-3 w-full border border-ide-border bg-ide-panel/60 px-2.5 py-1.5 text-[12px] text-ide-text placeholder:text-ide-faint focus:border-ide-accent/60 focus:outline-none disabled:opacity-40"
-          style={{ borderRadius: "var(--skin-r-ctl)" }}
+          style={{ borderRadius: "var(--r-ctl)" }}
         />
 
         <div className="flex items-center justify-end gap-2">
@@ -83,7 +82,7 @@ export function RevokeConfirmDialog({
             onClick={onCancel}
             disabled={revokeBusy}
             className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-dim hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
+            style={{ borderRadius: "var(--r-ctl)" }}
           >
             Cancel
           </button>
@@ -91,7 +90,7 @@ export function RevokeConfirmDialog({
             onClick={() => onRevoke(fingerprint)}
             disabled={revokeBusy}
             className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[12px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
+            style={{ borderRadius: "var(--r-ctl)" }}
           >
             Revoke only
           </button>
@@ -108,7 +107,7 @@ export function RevokeConfirmDialog({
             aria-label="Revoke and rotate sync key"
             // puf4: solid-danger variant for primary destructive action (Revoke & rotate)
             className="bg-ide-danger px-3 py-1.5 text-[12px] font-medium text-white hover:bg-ide-danger/85 disabled:cursor-not-allowed disabled:opacity-40"
-            style={{ borderRadius: "var(--skin-r-ctl)" }}
+            style={{ borderRadius: "var(--r-ctl)" }}
           >
             {/* bdac.83: aligned to Android label "Revoke & rotate key" for platform parity */}
             {revokeBusy ? "…" : "Revoke & rotate key"}

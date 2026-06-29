@@ -52,7 +52,7 @@ export function InfoPopover({ text }: { text: string }) {
             left: pos.left,
             minWidth: "14rem",
             transform: "translateY(-50%)",
-            borderRadius: "var(--skin-r-ctl)",
+            borderRadius: "var(--r-ctl)",
           }}
         >
           {text}

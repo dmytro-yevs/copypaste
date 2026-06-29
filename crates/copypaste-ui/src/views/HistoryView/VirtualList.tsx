@@ -155,7 +155,7 @@ export function VirtualList({
               top: glideStyle.top,
               height: glideStyle.height,
               // CopyPaste-bdac.54: fallback corrected to 12px (Classic canonical) — was 14px.
-              borderRadius: "var(--skin-r-card, 12px)",
+              borderRadius: "var(--r-card)",
               transition:
                 "top 130ms cubic-bezier(.2,0,0,1), height 130ms cubic-bezier(.2,0,0,1)",
             }}
