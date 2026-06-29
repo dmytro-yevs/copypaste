@@ -515,10 +515,11 @@ fun OnboardingScreen(
                     icon = Icons.Outlined.PhonelinkSetup,
                     title = stringResource(R.string.onboarding_oem_title),
                     description = oemDesc,
-                    // We cannot reliably detect whether autostart is enabled without
-                    // root, so this card is never shown as "granted" — the user must
-                    // manually verify in the OEM screen.
-                    granted = false,
+                    // CopyPaste-crh3.113: we cannot reliably detect whether
+                    // autostart is enabled without root, so this card is
+                    // INDETERMINATE (null → neutral), not a permanent red
+                    // "not granted". Matches PermissionsSettingsActivity's OEM card.
+                    granted = null,
                     buttonLabel = stringResource(R.string.onboarding_oem_button),
                     onClick = onOpenOemAutoStart,
                     required = false,
@@ -631,7 +632,12 @@ private fun PermissionCard(
     icon: ImageVector,
     title: String,
     description: String,
-    granted: Boolean,
+    // CopyPaste-crh3.113: nullable — null means "indeterminate" (e.g. OEM
+    // autostart, which cannot be detected without root). A null card renders
+    // NEUTRAL (never red), matching PermissionsSettingsActivity's PermissionCard,
+    // instead of the previous granted=false which forced a permanent not-granted
+    // (red-on-required) appearance even after the user completed the OEM steps.
+    granted: Boolean?,
     buttonLabel: String,
     onClick: () -> Unit,
     required: Boolean,
@@ -643,11 +649,12 @@ private fun PermissionCard(
     val reduced = rememberReducedMotion()
     val slowDur = motionDuration(Motion.Slow)
 
-    // Status-colored hairline border: granted → success; missing+required → danger; neutral.
+    // Status-colored hairline border: granted → success; explicitly-missing +
+    // required → danger; null (indeterminate) or optional → neutral.
     val borderColor = when {
-        granted  -> c.success
-        required -> c.danger
-        else     -> c.border
+        granted == true               -> c.success
+        granted == false && required  -> c.danger
+        else                          -> c.border
     }
 
     val alpha by animateFloatAsState(
@@ -671,11 +678,11 @@ private fun PermissionCard(
                         .size(32.dp)
                         .clip(CircleShape)
                         .background(
-                            if (granted) c.successDim else c.accentDim
+                            if (granted == true) c.successDim else c.accentDim
                         ),
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (granted) {
+                    if (granted == true) {
                         Icon(
                             imageVector = Icons.Outlined.Check,
                             contentDescription = null,
@@ -722,8 +729,8 @@ private fun PermissionCard(
             Spacer(modifier = Modifier.height(10.dp))
             CopyPasteButton(
                 onClick = onClick,
-                enabled = !granted || alwaysShowButton,
-                variant = if (granted && !alwaysShowButton) ButtonVariant.GHOST
+                enabled = granted != true || alwaysShowButton,
+                variant = if (granted == true && !alwaysShowButton) ButtonVariant.GHOST
                           else ButtonVariant.PRIMARY,
                 modifier = Modifier.align(Alignment.End),
             ) {
