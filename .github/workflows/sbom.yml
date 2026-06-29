@@ -1,16 +1,23 @@
 name: SBOM (CycloneDX)
 
-# Generate CycloneDX SBOMs on release tag push, attach them as
-# GitHub Release assets. Manual runs upload artifacts only.
+# Generate CycloneDX SBOMs only after a successful Release workflow run.
+# Using workflow_run instead of a direct tag-push trigger ensures the SBOM
+# is never published for a failed or incomplete release.
+#
+# workflow_run fires when the Release workflow completes; the job-level `if`
+# guard allows the job only when conclusion == 'success'.
+# Manual workflow_dispatch bypasses the gating (no release context needed).
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
 
 concurrency:
-  group: sbom-${{ github.ref }}
+  # Use the triggering release's branch/tag for workflow_run;
+  # fall back to the current ref for manual dispatch runs.
+  group: sbom-${{ github.event.workflow_run.head_branch || github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -23,10 +30,22 @@ jobs:
   sbom:
     name: Generate CycloneDX SBOM
     runs-on: ubuntu-latest
+    # workflow_run: only proceed when the Release workflow succeeded.
+    # workflow_dispatch: always proceed — manual run, no release gating needed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     env:
-      REF_NAME: ${{ github.ref_name }}
+      # workflow_run: head_branch is the tag name (e.g. v1.2.3) that triggered
+      # the Release workflow.  workflow_dispatch: ref_name is the manually
+      # selected branch/tag.
+      REF_NAME: ${{ github.event.workflow_run.head_branch || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # workflow_run: github.sha is the default-branch HEAD, NOT the tag.
+          # Check out the exact commit that was released instead.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -62,8 +81,14 @@ jobs:
           retention-days: 90
 
       - name: Attach SBOM to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        # Attach only when we were triggered by a tag-push Release run
+        # (event == 'push' on the Release workflow means a real tag was pushed).
+        # Skip for workflow_dispatch on sbom.yml and for Release workflow_dispatch runs.
+        if: >-
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.event == 'push'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.REF_NAME }}
           files: reports/sbom-${{ env.REF_NAME }}.tar.gz
           fail_on_unmatched_files: true
