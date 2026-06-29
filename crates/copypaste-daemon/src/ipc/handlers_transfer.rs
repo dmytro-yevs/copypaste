@@ -203,7 +203,7 @@ impl IpcServer {
                         // origin" sentinel; sync will reassign on first push.
                         let item_id = uuid::Uuid::new_v4().to_string();
                         let aad = copypaste_core::build_item_aad_v2(
-                            &item_id,
+                            &copypaste_core::ItemId::from(item_id.as_str()),
                             copypaste_core::AAD_SCHEMA_VERSION_V4,
                             copypaste_core::ITEM_KEY_VERSION_CURRENT as u32,
                         );
@@ -222,7 +222,7 @@ impl IpcServer {
                             };
                         let mut clip =
                             copypaste_core::ClipboardItem::new_text(ciphertext, nonce.to_vec(), 0);
-                        clip.item_id = item_id;
+                        clip.item_id = copypaste_core::ItemId::from(item_id);
                         clip.content_type = item.content_type.clone();
                         clip.wall_time = item.created_at_ms;
                         clip.content_hash = Some(hash_hex);
@@ -475,7 +475,7 @@ impl IpcServer {
                             key_version,
                             V1Key(&local_key_v1),
                             V2Key(&v2_key),
-                            &item_id,
+                            &ItemId::from(item_id.as_str()),
                             nonce,
                             &content,
                         ) {

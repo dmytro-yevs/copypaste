@@ -6,7 +6,7 @@
 //! Kotlin for at-rest encryption of clipboard content in the local SQLite store.
 
 use copypaste_core::{
-    build_item_aad, build_item_aad_v2, decrypt_item_with_aad, encrypt_item_with_aad,
+    build_item_aad, build_item_aad_v2, decrypt_item_with_aad, encrypt_item_with_aad, ItemId,
     AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 use zeroize::Zeroizing;
@@ -45,8 +45,12 @@ pub fn encrypt_text(
         );
         // Mirror the dispatch table in decrypt_item_by_version (copypaste-core).
         let aad = match key_version {
-            1 => build_item_aad(&item_id, AAD_SCHEMA_VERSION),
-            2 => build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, u32::from(key_version)),
+            1 => build_item_aad(&ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION),
+            2 => build_item_aad_v2(
+                &ItemId::from(item_id.as_str()),
+                AAD_SCHEMA_VERSION_V4,
+                u32::from(key_version),
+            ),
             _ => return Err(CopypasteError::EncryptionFailed),
         };
         let (nonce, ciphertext) = encrypt_item_with_aad(bytes, &key_arr, &aad)
@@ -89,8 +93,12 @@ pub fn decrypt_text(
                 })?;
         // Mirror the dispatch table in decrypt_item_by_version (copypaste-core).
         let aad = match key_version {
-            1 => build_item_aad(&item_id, AAD_SCHEMA_VERSION),
-            2 => build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, u32::from(key_version)),
+            1 => build_item_aad(&ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION),
+            2 => build_item_aad_v2(
+                &ItemId::from(item_id.as_str()),
+                AAD_SCHEMA_VERSION_V4,
+                u32::from(key_version),
+            ),
             v => {
                 return Err(CopypasteError::DecryptionFailed {
                     reason: format!("unknown key_version: {v}"),
@@ -206,9 +214,9 @@ pub fn decrypt_text_batch(
 pub(crate) fn try_decrypt_one(item: &EncryptedItem, key: &[u8; 32]) -> Option<Vec<u8>> {
     let nonce: [u8; NONCE_SIZE] = item.nonce.as_slice().try_into().ok()?;
     let aad = match item.key_version {
-        1 => build_item_aad(&item.item_id, AAD_SCHEMA_VERSION),
+        1 => build_item_aad(&ItemId::from(item.item_id.as_str()), AAD_SCHEMA_VERSION),
         2 => build_item_aad_v2(
-            &item.item_id,
+            &ItemId::from(item.item_id.as_str()),
             AAD_SCHEMA_VERSION_V4,
             u32::from(item.key_version),
         ),

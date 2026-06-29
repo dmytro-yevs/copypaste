@@ -40,7 +40,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
-use copypaste_core::{decrypt_from_cloud, encrypt_for_cloud, SyncKey};
+use copypaste_core::{decrypt_from_cloud, encrypt_for_cloud, ItemId, SyncKey};
 use copypaste_p2p::transport::{PairedPeers, PeerTransport};
 // PG-1 (7d8x): import PeerFrame + ControlMsg so the inbound listener can handle
 // Control(Unpair) from the macOS peer — mirrors the outbound `sync_with_peer`
@@ -210,7 +210,7 @@ fn build_catchup_wire_items(
         } else {
             it.id.clone()
         };
-        let blob = encrypt_for_cloud(shared, &item_id, &it.plaintext)
+        let blob = encrypt_for_cloud(shared, &ItemId::from(item_id.as_str()), &it.plaintext)
             .map_err(|_| CopypasteError::EncryptionFailed)?;
         outbound.push(WireItem {
             id,
@@ -272,7 +272,7 @@ fn decrypt_wire_item(wire: &WireItem, shared: &SyncKey) -> Option<SyncedItem> {
         return None;
     }
     let blob = wire.content.as_ref()?;
-    match decrypt_from_cloud(shared, &wire.item_id, blob) {
+    match decrypt_from_cloud(shared, &ItemId::from(wire.item_id.as_str()), blob) {
         Ok(plaintext) => Some(SyncedItem {
             id: wire.id.clone(),
             item_id: wire.item_id.clone(),

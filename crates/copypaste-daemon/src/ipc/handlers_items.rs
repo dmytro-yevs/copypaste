@@ -112,7 +112,7 @@ impl IpcServer {
                                     format!("[sensitive — id:{}]", &item.id[..8])
                                 } else if item.content_type == "text" {
                                     preview_map
-                                        .get(&item.id)
+                                        .get(item.id.as_str())
                                         .cloned()
                                         .unwrap_or_else(|| format!("[text — id:{}]", &item.id[..8]))
                                 } else if item.content_type == "file" {
@@ -1231,9 +1231,9 @@ impl IpcServer {
                                     let preview = if item.is_sensitive {
                                         format!("[sensitive — id:{}]", &item.id[..8])
                                     } else if item.content_type == "text" {
-                                        preview_map.get(&item.id).cloned().unwrap_or_else(|| {
-                                            format!("[text — id:{}]", &item.id[..8])
-                                        })
+                                        preview_map.get(item.id.as_str()).cloned().unwrap_or_else(
+                                            || format!("[text — id:{}]", &item.id[..8]),
+                                        )
                                     } else if item.content_type == "file" {
                                         let name = item
                                             .blob_ref
@@ -1436,7 +1436,7 @@ impl IpcServer {
                     let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
                     // Stable cross-device identity: derive item_id from the
                     // content-hash file_id (mirrors handle_file in daemon.rs).
-                    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+                    item.item_id = ItemId::from(uuid::Uuid::from_bytes(file_id).to_string());
 
                     let db_guard = db_arc.blocking_lock();
                     let stored_id = copypaste_core::insert_item_with_fts(&db_guard, &item, "")
@@ -1502,9 +1502,10 @@ impl IpcServer {
                     Some(bytes) => bytes.as_slice(),
                     None => return Err(PasteboardError::other("item has no content")),
                 };
-                let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
-                    PasteboardError::other("file item missing blob_ref metadata")
-                })?;
+                let meta_json = item
+                    .blob_ref
+                    .as_deref()
+                    .ok_or_else(|| PasteboardError::other("file item missing blob_ref metadata"))?;
                 let file_meta = parse_file_meta(meta_json).map_err(|e| {
                     PasteboardError::other(format!("file item blob_ref parse error: {e}"))
                 })?;
@@ -1520,10 +1521,8 @@ impl IpcServer {
                 } else {
                     &v2_key
                 };
-                let raw_bytes =
-                    decode_file(&chunks, key_to_use, &file_meta.file_id).map_err(|e| {
-                        PasteboardError::decrypt(format!("file decode failed: {e}"))
-                    })?;
+                let raw_bytes = decode_file(&chunks, key_to_use, &file_meta.file_id)
+                    .map_err(|e| PasteboardError::decrypt(format!("file decode failed: {e}")))?;
                 // Sanitise the filename: strip any leading path separators so the
                 // stored name cannot escape the cache directory.
                 let safe_name = std::path::Path::new(&file_meta.filename)
@@ -1549,9 +1548,7 @@ impl IpcServer {
                     })?;
                     let dest = paste_dir.join(&safe_name);
                     std::fs::write(&dest, &raw_bytes).map_err(|e| {
-                        PasteboardError::other(format!(
-                            "failed to write paste file {dest:?}: {e}"
-                        ))
+                        PasteboardError::other(format!("failed to write paste file {dest:?}: {e}"))
                     })?;
                     Ok::<_, PasteboardError>(dest)
                 })

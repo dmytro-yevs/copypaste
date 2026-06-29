@@ -182,7 +182,7 @@ pub fn insert_item_with_fts(
         )?;
     }
     tx.commit()?;
-    Ok(item.id.clone())
+    Ok(item.id.to_string())
 }
 
 /// Find the id of an existing row that conflicts with `item` on one of

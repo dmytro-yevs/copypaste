@@ -2,7 +2,7 @@ use crate::clipboard::{ClipboardContent, ClipboardMonitor};
 use copypaste_core::{
     build_item_aad_v2, bump_item_recency, chunks_to_blob, derive_v2, encode_image_full,
     encrypt_item_with_aad, find_recent_by_hash, get_item_by_id, insert_item_with_fts,
-    is_sensitive_for_autowipe, prune_to_cap, AppConfig, ClipboardItem, Database,
+    is_sensitive_for_autowipe, prune_to_cap, AppConfig, ClipboardItem, Database, ItemId,
     AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -581,7 +581,11 @@ pub(crate) fn encrypt_text_for_storage(
     item_id: &str,
 ) -> Result<([u8; copypaste_core::NONCE_SIZE], Vec<u8>), copypaste_core::EncryptError> {
     let v2_key = derive_v2(local_key);
-    let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT_U32);
+    let aad = build_item_aad_v2(
+        &ItemId::from(item_id),
+        AAD_SCHEMA_VERSION_V4,
+        ITEM_KEY_VERSION_CURRENT_U32,
+    );
     encrypt_item_with_aad(plaintext, &v2_key, &aad)
 }
 
@@ -745,7 +749,7 @@ pub(crate) async fn handle_text(
             nonce.to_vec(),
             copypaste_core::next_lamport_ts(0, now_ms),
         );
-        item.item_id = item_id;
+        item.item_id = ItemId::from(item_id);
         item.is_sensitive = is_sensitive;
         // mtf5 (PG-22): record which app was frontmost at capture time.
         // This allows UIs to display the source app and lets the DB preserve
@@ -941,7 +945,7 @@ pub(crate) async fn handle_image(
                 // identity across devices and LWW can fire. (The image AEAD AAD
                 // is bound to `file_id`, not `item_id`, so this does not affect
                 // chunk encryption.)
-                item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+                item.item_id = ItemId::from(uuid::Uuid::from_bytes(file_id).to_string());
                 // Stamp stable device identity (same fix as handle_text).
                 item.origin_device_id = local_device_id;
                 // mtf5 (PG-22): mark sensitive when the source app is a
@@ -1060,7 +1064,7 @@ pub(crate) async fn handle_file(
                 item.lamport_ts = copypaste_core::next_lamport_ts(0, item.wall_time);
                 // Stable cross-device identity: derive item_id from the
                 // content-hash file_id (same pattern as handle_image).
-                item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+                item.item_id = ItemId::from(uuid::Uuid::from_bytes(file_id).to_string());
                 item.origin_device_id = local_device_id;
                 // mtf5 (PG-22): mark sensitive when source app is a password manager.
                 item.is_sensitive = app_is_sensitive_file;

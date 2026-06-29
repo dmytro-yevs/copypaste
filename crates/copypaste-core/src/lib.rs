@@ -58,7 +58,7 @@ pub use storage::items::{
     get_page_pinned_first_lamport, has_sensitive_items, incremental_vacuum, insert_item,
     insert_item_with_fts, insert_tombstone, next_lamport_ts, pin_item, prune_to_cap,
     reorder_pinned, search_items, search_items_filtered, set_thumb, soft_delete_item, unpin_item,
-    upsert_fts, ClipboardItem, DecryptedPage, ItemsError, ITEM_KEY_VERSION_CURRENT,
+    upsert_fts, ClipboardItem, DecryptedPage, ItemId, ItemsError, RowId, ITEM_KEY_VERSION_CURRENT,
     MAX_PREVIEW_BYTES,
 };
 pub use storage::{open_pool, open_pool_with_cache_mb, PoolError, SqlitePool};

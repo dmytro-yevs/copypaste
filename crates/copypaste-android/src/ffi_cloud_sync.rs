@@ -6,7 +6,9 @@
 
 // Brings `Engine::encode` into scope for `relay_public_key_b64` (STANDARD base64).
 use base64::Engine as _;
-use copypaste_core::{decrypt_from_cloud, derive_sync_key, encrypt_for_cloud, SyncKeyError};
+use copypaste_core::{
+    decrypt_from_cloud, derive_sync_key, encrypt_for_cloud, ItemId, SyncKeyError,
+};
 use zeroize::Zeroizing;
 
 use crate::{panic_boundary, CopypasteError};
@@ -117,7 +119,7 @@ pub fn cloud_encrypt(
                 .map_err(|_| CopypasteError::InvalidKeyLength)?,
         );
         let sync_key = copypaste_core::SyncKey::from_bytes(*key_arr);
-        let blob = encrypt_for_cloud(&sync_key, &item_id, plaintext)
+        let blob = encrypt_for_cloud(&sync_key, &ItemId::from(item_id.as_str()), plaintext)
             .map_err(|_| CopypasteError::EncryptionFailed)?;
         Ok(blob)
     })
@@ -145,7 +147,7 @@ pub fn cloud_decrypt(
                 .map_err(|_| CopypasteError::InvalidKeyLength)?,
         );
         let sync_key = copypaste_core::SyncKey::from_bytes(*key_arr);
-        decrypt_from_cloud(&sync_key, &item_id, blob).map_err(|e| {
+        decrypt_from_cloud(&sync_key, &ItemId::from(item_id.as_str()), blob).map_err(|e| {
             CopypasteError::DecryptionFailed {
                 reason: e.to_string(),
             }

@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use copypaste_core::{
-    is_sensitive_for_autowipe, prune_to_cap, ClipboardItem, Database, MigrationState,
+    is_sensitive_for_autowipe, prune_to_cap, ClipboardItem, Database, MigrationState, RowId,
 };
 use copypaste_sync::{
     merge::{resolve, wire_to_local, MergeOutcome},
@@ -108,7 +108,7 @@ pub async fn merge_incoming_with_crypto(
     // released so PNG decode+re-encode does not stall other DB writers).
     struct PendingRekey {
         wire: WireItem,
-        local_pk: Option<String>,
+        local_pk: Option<RowId>,
         exists: bool,
         wall_time: i64,
         content_type: String,
@@ -159,7 +159,7 @@ pub async fn merge_incoming_with_crypto(
                 // On TakeRemote we patch `to_insert.id` so FTS / copy_item / pins that
                 // are keyed on the local `id` keep pointing at the same row — mirroring
                 // the cloud path's `preserved_pk` pattern.
-                let local_pk: Option<String> = existing.as_ref().map(|r| r.id.clone());
+                let local_pk: Option<RowId> = existing.as_ref().map(|r| r.id.clone());
                 let exists = existing.is_some();
                 let take_remote = match existing.as_ref() {
                     Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),

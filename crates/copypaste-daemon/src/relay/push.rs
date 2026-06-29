@@ -62,7 +62,7 @@ pub(super) fn build_content_b64(
         base64::engine::general_purpose::STANDARD.encode(&blob)
     };
     let envelope = RelayEnvelope {
-        item_id: item.item_id.clone(),
+        item_id: item.item_id.to_string(),
         lamport_ts: item.lamport_ts,
         ct_b64,
         // CopyPaste-cm0u: carry delete + pin state so they propagate over relay.

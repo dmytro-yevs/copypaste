@@ -9,7 +9,7 @@ use std::sync::{
 use base64::Engine as _;
 use copypaste_core::{
     decrypt_from_cloud, exists_item_by_item_id, get_item_by_item_id, insert_item, insert_tombstone,
-    prune_to_cap, soft_delete_item, AppConfig, Database, SyncKey,
+    prune_to_cap, soft_delete_item, AppConfig, Database, ItemId, SyncKey,
 };
 // CopyPaste-ayvs: relay LWW now routes through the SAME total order the P2P and
 // cloud paths use (lamport -> wall_time -> origin_device_id) so all transports
@@ -209,7 +209,7 @@ pub(super) fn ingest_page_blocking(
         }
 
         // Decrypt with the sync key (AAD = item_id + cloud schema v5).
-        let plaintext = match decrypt_from_cloud(&sk, &env.item_id, &blob) {
+        let plaintext = match decrypt_from_cloud(&sk, &ItemId::from(env.item_id.as_str()), &blob) {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(

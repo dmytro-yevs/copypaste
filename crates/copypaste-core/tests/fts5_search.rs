@@ -8,7 +8,7 @@
 //! and exercises the public `insert_item` + `upsert_fts` + `search_items`
 //! surface — matching how the daemon writes the index in production.
 
-use copypaste_core::{insert_item, search_items, upsert_fts, ClipboardItem, Database};
+use copypaste_core::{insert_item, search_items, upsert_fts, ClipboardItem, Database, RowId};
 use tempfile::tempdir;
 
 /// Open a fresh encrypted DB in a temp dir. The key is deterministic per-test
@@ -23,7 +23,7 @@ fn fresh_db() -> (tempfile::TempDir, Database) {
 
 /// Insert one clipboard row + its FTS5 plaintext shadow.
 /// `lamport` keeps rows distinguishable without affecting search behaviour.
-fn insert_with_text(db: &Database, lamport: i64, plaintext: &str) -> String {
+fn insert_with_text(db: &Database, lamport: i64, plaintext: &str) -> RowId {
     // Real content bytes are irrelevant for FTS — we only index `plaintext`.
     let item = ClipboardItem::new_text(vec![0u8; 4], vec![0u8; 24], lamport);
     let id = item.id.clone();

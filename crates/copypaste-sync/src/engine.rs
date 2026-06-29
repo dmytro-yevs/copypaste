@@ -231,14 +231,14 @@ impl SyncEngine {
         // identity every device agrees on.
         let local_clock_map: HashMap<String, i64> = local_items
             .iter()
-            .map(|i| (i.item_id.clone(), i.lamport_ts))
+            .map(|i| (i.item_id.to_string(), i.lamport_ts))
             .collect();
         let local_ids: HashSet<&String> = local_clock_map.keys().collect();
 
         let my_have = Message::Have {
             items: local_items
                 .iter()
-                .map(|i| (i.item_id.clone(), i.lamport_ts))
+                .map(|i| (i.item_id.to_string(), i.lamport_ts))
                 .collect(),
         };
         send_message(stream, &my_have).await?;

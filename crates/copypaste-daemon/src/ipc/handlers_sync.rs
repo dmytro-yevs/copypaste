@@ -337,11 +337,18 @@ impl IpcServer {
                                             let raw = base64::engine::general_purpose::STANDARD
                                                 .decode(old_ct_b64)
                                                 .map_err(|e| format!("base64: {e}"))?;
-                                            let plain = decrypt_from_cloud(&old_k, item_id, &raw)
-                                                .map_err(|e| format!("decrypt: {e}"))?;
-                                            let new_blob =
-                                                encrypt_for_cloud(&new_k, item_id, &plain)
-                                                    .map_err(|e| format!("re-encrypt: {e}"))?;
+                                            let plain = decrypt_from_cloud(
+                                                &old_k,
+                                                &ItemId::from(item_id),
+                                                &raw,
+                                            )
+                                            .map_err(|e| format!("decrypt: {e}"))?;
+                                            let new_blob = encrypt_for_cloud(
+                                                &new_k,
+                                                &ItemId::from(item_id),
+                                                &plain,
+                                            )
+                                            .map_err(|e| format!("re-encrypt: {e}"))?;
                                             Ok(base64::engine::general_purpose::STANDARD
                                                 .encode(&new_blob))
                                         },

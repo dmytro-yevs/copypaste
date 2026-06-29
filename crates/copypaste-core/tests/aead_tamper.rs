@@ -25,8 +25,8 @@
 //!     pre-v0.3 ciphertexts no longer decrypt cleanly.
 
 use copypaste_core::{
-    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad, EncryptError, AAD_SCHEMA_VERSION,
-    NONCE_SIZE,
+    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad, EncryptError, ItemId,
+    AAD_SCHEMA_VERSION, NONCE_SIZE,
 };
 
 const TAG_SIZE: usize = 16;
@@ -43,7 +43,7 @@ fn key_b() -> [u8; 32] {
 /// uses a unique item_id so any future cross-test bleed would be detected
 /// by the AAD binding itself.
 fn aad_for(item_id: &str) -> Vec<u8> {
-    build_item_aad(item_id, AAD_SCHEMA_VERSION)
+    build_item_aad(&ItemId::from(item_id), AAD_SCHEMA_VERSION)
 }
 
 #[test]
@@ -262,8 +262,8 @@ fn aad_swap_fails() {
     let key = key_a();
     let plaintext = b"row-A content";
 
-    let aad_a = build_item_aad("item-A-uuid", 3);
-    let aad_b = build_item_aad("item-B-uuid", 3);
+    let aad_a = build_item_aad(&ItemId::from("item-A-uuid"), 3);
+    let aad_b = build_item_aad(&ItemId::from("item-B-uuid"), 3);
     assert_ne!(aad_a, aad_b, "distinct item_ids must produce distinct AAD");
 
     let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad_a).expect("encrypt");
@@ -280,7 +280,7 @@ fn aad_swap_fails() {
 
     // Schema-version mismatch (same item_id, different version) must also fail —
     // pins the second half of the binding pair.
-    let aad_a_v2 = build_item_aad("item-A-uuid", 2);
+    let aad_a_v2 = build_item_aad(&ItemId::from("item-A-uuid"), 2);
     let schema_swap = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_a_v2);
     assert!(
         matches!(schema_swap, Err(EncryptError::AuthFailed)),
@@ -297,7 +297,7 @@ fn aad_match_succeeds() {
     let plaintext = b"correctly-bound payload";
     // Pin the exported AAD_SCHEMA_VERSION constant — storage callers will use
     // this value instead of hard-coding `3`.
-    let aad = build_item_aad("item-X-uuid", AAD_SCHEMA_VERSION);
+    let aad = build_item_aad(&ItemId::from("item-X-uuid"), AAD_SCHEMA_VERSION);
 
     let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &aad).expect("encrypt");
     let decrypted = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad).expect("decrypt");
@@ -305,7 +305,7 @@ fn aad_match_succeeds() {
 
     // build_item_aad must be deterministic — encrypting and decrypting from
     // independently-reconstructed AAD bytes must also succeed.
-    let aad_again = build_item_aad("item-X-uuid", AAD_SCHEMA_VERSION);
+    let aad_again = build_item_aad(&ItemId::from("item-X-uuid"), AAD_SCHEMA_VERSION);
     let decrypted_again = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_again)
         .expect("decrypt with rebuilt AAD");
     assert_eq!(decrypted_again, plaintext);
@@ -329,7 +329,7 @@ fn decrypt_without_aad_fails() {
 
     // v0.3 reader: reconstructs AAD from (item_id, schema_version). The
     // legacy empty-AAD fallback is GONE, so the strict-AAD decrypt MUST fail.
-    let v3_aad = build_item_aad("legacy-row-uuid", AAD_SCHEMA_VERSION);
+    let v3_aad = build_item_aad(&ItemId::from("legacy-row-uuid"), AAD_SCHEMA_VERSION);
     let result = decrypt_item_with_aad(&ciphertext, &nonce, &key, &v3_aad);
     assert!(
         matches!(result, Err(EncryptError::AuthFailed)),

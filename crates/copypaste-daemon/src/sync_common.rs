@@ -24,8 +24,8 @@
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_item_by_version, derive_v2, encrypt_item_with_aad,
-    is_sensitive_for_autowipe, ClipboardItem, Database, V1Key, V2Key, AAD_SCHEMA_VERSION_V4,
-    ITEM_KEY_VERSION_CURRENT,
+    is_sensitive_for_autowipe, ClipboardItem, Database, ItemId, RowId, V1Key, V2Key,
+    AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 
 // ── Cloud file-identity envelope (BUG C1) ──────────────────────────────────────
@@ -353,7 +353,7 @@ pub(crate) fn build_local_item(
     // takes u32 and ClipboardItem.key_version is u8 — cast explicitly.
     // Value is 2 (v2 HKDF key), which fits both u32 and u8.
     let aad = build_item_aad_v2(
-        item_id,
+        &ItemId::from(item_id),
         AAD_SCHEMA_VERSION_V4,
         ITEM_KEY_VERSION_CURRENT as u32,
     );
@@ -371,8 +371,8 @@ pub(crate) fn build_local_item(
     };
 
     Ok(ClipboardItem {
-        id: id.to_owned(),
-        item_id: item_id.to_owned(),
+        id: RowId::from(id),
+        item_id: ItemId::from(item_id),
         content_type: content_type.to_owned(),
         content: Some(ciphertext),
         content_nonce: Some(nonce.to_vec()),
@@ -490,8 +490,8 @@ fn build_local_blob_item(
     };
 
     Ok(ClipboardItem {
-        id: id.to_owned(),
-        item_id: item_id.to_owned(),
+        id: RowId::from(id),
+        item_id: ItemId::from(item_id),
         content_type: content_type.to_owned(),
         content: Some(content),
         // Chunks are self-framed per-chunk; there is no item-level nonce.
