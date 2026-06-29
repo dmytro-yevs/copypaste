@@ -21,6 +21,7 @@
 //! | `unpair` | `send_unpair_and_close_session`, `evict_peer_local`, `stamp_peer_sync` |
 //! | `pairing_responder` | `standing_pairing_responder_loop` |
 
+use anyhow::Context as _; // CopyPaste-crh3.90
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
@@ -409,7 +410,7 @@ pub async fn start_p2p(
             ),
             None => discovery.register(actual_port, &device_id_str, &config.device_name),
         };
-        register_result.map_err(|e| anyhow::anyhow!("mDNS register failed: {e}"))?;
+        register_result.context("mDNS register failed")?;
     } else {
         tracing::info!("lan_visibility=false: skipping mDNS-SD registration and browsing");
     }

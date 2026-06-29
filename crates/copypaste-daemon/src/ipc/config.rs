@@ -3,6 +3,11 @@
 //! Extracted from `ipc.rs` for organisation — behaviour unchanged.
 //! All public items are re-exported from `ipc/mod.rs`.
 
+// CopyPaste-crh3.90: `.context()` preserves the error's downcast chain (so a
+// SQLITE_CANTOPEN vs permission-denied is still distinguishable under `{:#}`),
+// unlike `anyhow!("label: {e}")` which stringifies the source.
+use anyhow::Context as _;
+
 /// Persistent application configuration stored at `config.json`.
 ///
 /// CopyPaste-c4q2.25: this used to be a daemon-local **shadow** struct,
@@ -312,11 +317,10 @@ pub(crate) fn update_core_config(
     // create the parent dir; ensure it exists (mirrors write_config for the
     // sibling config.json) so first-run / test config dirs don't ENOENT.
     if let Some(parent) = toml_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| anyhow::anyhow!("failed to create config dir: {e}"))?;
+        std::fs::create_dir_all(parent).context("failed to create config dir")?;
     }
     core.save(&toml_path)
-        .map_err(|e| anyhow::anyhow!("failed to save config.toml: {e}"))?;
+        .context("failed to save config.toml")?;
     Ok(core)
 }
 

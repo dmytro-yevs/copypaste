@@ -1,6 +1,7 @@
 // l07l: AtomicI64/Ordering are only exercised by the macOS pasteboard
 // change-count path; allow them unused on non-macOS so -D warnings stays green.
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
+use anyhow::Context as _; // CopyPaste-crh3.90
 use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 
@@ -477,7 +478,7 @@ pub async fn merge_incoming_with_crypto(
         upserted
     })
     .await
-    .map_err(|e| anyhow::anyhow!("sync_orch: merge blocking task panicked: {e}"))?;
+    .context("sync_orch: merge blocking task panicked")?;
 
     Ok(result)
 }

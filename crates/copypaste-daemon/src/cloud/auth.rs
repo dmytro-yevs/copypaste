@@ -1,3 +1,4 @@
+use anyhow::Context as _; // CopyPaste-crh3.90
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -71,7 +72,7 @@ pub(crate) async fn sign_in_with_password(
     let session = client
         .sign_in(email, password)
         .await
-        .map_err(|e| anyhow::anyhow!("auth failed: {e}"))?;
+        .context("auth failed")?;
     Ok(session.access_token)
 }
 

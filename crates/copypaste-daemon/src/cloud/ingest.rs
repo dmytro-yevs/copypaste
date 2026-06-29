@@ -1,3 +1,4 @@
+use anyhow::Context as _; // CopyPaste-crh3.90
 use copypaste_core::{ClipboardItem, Database};
 
 // ── Helper: exists_item ───────────────────────────────────────────────────────
@@ -11,7 +12,7 @@ pub fn exists_item(db: &Database, id: &str) -> Result<bool, anyhow::Error> {
             rusqlite::params![id],
             |row| row.get(0),
         )
-        .map_err(|e| anyhow::anyhow!("exists_item query: {e}"))?;
+        .context("exists_item query")?;
     Ok(count > 0)
 }
 

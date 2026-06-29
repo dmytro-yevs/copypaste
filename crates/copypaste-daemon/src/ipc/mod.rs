@@ -4,6 +4,7 @@ use crate::protocol::{
     ERR_CODE_NOT_IMPLEMENTED, ERR_CODE_RATE_LIMITED, ERR_CODE_REQUEST_TOO_LARGE,
     ERR_CODE_VERSION_MISMATCH, MIN_SUPPORTED_PROTOCOL_VERSION,
 };
+use anyhow::Context as _; // CopyPaste-crh3.90
 // CopyPaste-merc / CopyPaste-1jms.22: canonical badge-state computation lives in
 // copypaste-ipc. The `_with_inflight` variant is used so the daemon can emit the
 // `Syncing` (green-pulse) badge while a round-trip is in progress. Gated on
@@ -8554,10 +8555,10 @@ impl IpcServer {
                         &file_id,
                         max_file_bytes,
                     )
-                    .map_err(|e| anyhow::anyhow!("encode_file failed: {e}"))?;
+                    .context("encode_file failed")?;
 
                     let blob = copypaste_core::chunks_to_blob(&chunks)
-                        .map_err(|e| anyhow::anyhow!("chunks_to_blob failed: {e}"))?;
+                        .context("chunks_to_blob failed")?;
 
                     let meta_json = crate::clipboard::build_file_meta_json(&meta);
                     let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
@@ -8567,7 +8568,7 @@ impl IpcServer {
 
                     let db_guard = db_arc.blocking_lock();
                     let stored_id = copypaste_core::insert_item_with_fts(&db_guard, &item, "")
-                        .map_err(|e| anyhow::anyhow!("insert_item_with_fts failed: {e}"))?;
+                        .context("insert_item_with_fts failed")?;
 
                     Ok::<String, anyhow::Error>(stored_id)
                 })

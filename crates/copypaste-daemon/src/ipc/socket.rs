@@ -4,6 +4,7 @@
 //! All items are re-exported from `ipc/mod.rs`.
 
 use super::BUILD_VERSION;
+use anyhow::Context as _; // CopyPaste-crh3.90
 use tokio::net::UnixListener;
 
 /// Probe whether a Unix-domain socket at `socket_path` has a *live* listener.
@@ -431,7 +432,7 @@ pub(crate) fn bind_with_stale_cleanup(
     {
         use std::os::unix::fs::PermissionsExt as _;
         std::fs::set_permissions(socket_path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| anyhow::anyhow!("chmod(socket, 0600) failed: {e}"))?;
+            .context("chmod(socket, 0600) failed")?;
     }
 
     Ok(listener)

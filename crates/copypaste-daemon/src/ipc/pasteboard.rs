@@ -4,6 +4,7 @@
 //! Extracted from `ipc.rs` for organisation — behaviour unchanged.
 //! All public items are re-exported from `ipc/mod.rs`.
 
+use anyhow::Context as _; // CopyPaste-crh3.90
 use copypaste_core::{
     chunks_from_blob, decode_image, derive_v2, encode_thumbnail_from_png, set_thumb, FileMeta,
 };
@@ -140,10 +141,9 @@ pub(crate) fn lazy_backfill_thumbnail(
     // 1. Decrypt the full-resolution content to PNG bytes.
     let file_id = parse_image_file_id(meta_json)
         .map_err(|e| anyhow::anyhow!("backfill: file_id parse error: {e}"))?;
-    let chunks = chunks_from_blob(content)
-        .map_err(|e| anyhow::anyhow!("backfill: chunks_from_blob failed: {e}"))?;
-    let png_bytes = decode_image(&chunks, decode_key, &file_id)
-        .map_err(|e| anyhow::anyhow!("backfill: decode_image failed: {e}"))?;
+    let chunks = chunks_from_blob(content).context("backfill: chunks_from_blob failed")?;
+    let png_bytes =
+        decode_image(&chunks, decode_key, &file_id).context("backfill: decode_image failed")?;
 
     // 2. Derive the distinct thumb_file_id and encode the thumbnail.
     //    `image_thumb_file_id` is deterministic (SHA-256 domain-separated), so
@@ -151,7 +151,7 @@ pub(crate) fn lazy_backfill_thumbnail(
     let thumb_file_id = crate::clipboard::image_thumb_file_id(&file_id);
     let (thumb_blob, thumb_w, thumb_h) =
         encode_thumbnail_from_png(&png_bytes, decode_key, &thumb_file_id, THUMBNAIL_MAX_DIM)
-            .map_err(|e| anyhow::anyhow!("backfill: encode_thumbnail_from_png failed: {e}"))?;
+            .context("backfill: encode_thumbnail_from_png failed")?;
 
     // 3. Persist the thumbnail blob.  A write failure is non-fatal: the item
     //    will just be regenerated on the next `get_item_thumbnail` call.
