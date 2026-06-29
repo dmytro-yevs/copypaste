@@ -128,10 +128,6 @@ export default {
           "100%": { opacity: "0", transform: "translateX(-50%) translateY(7px) scale(.992)" },
         },
         // Legacy toast (kept for compat)
-        toastIn: {
-          "0%":   { opacity: "0", transform: "translateX(-50%) translateY(8px)" },
-          "100%": { opacity: "1", transform: "translateX(-50%) translateY(0)" },
-        },
         fadeIn: {
           "0%":   { opacity: "0", transform: "translateY(2px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
@@ -196,7 +192,6 @@ export default {
         // §MO-6 Toast
         "toast-enter":         "toastEnter 180ms cubic-bezier(.16,1,.3,1) both",
         "toast-exit":          "toastExit 180ms cubic-bezier(.16,1,.3,1) both",
-        "toast-in":            "toastIn 180ms cubic-bezier(.16,1,.3,1) both", /* legacy */
         "fade-in":             "fadeIn 130ms ease both",
         // §MO-1 Modal
         "modal-scrim-enter":   "modalScrimIn 180ms cubic-bezier(.2,0,.2,1) both",

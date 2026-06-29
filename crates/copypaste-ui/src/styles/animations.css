@@ -132,16 +132,11 @@
   to   { opacity: 0; transform: translateX(-50%) translateY(7px) scale(.992); }
 }
 
-/* Legacy toastIn (same base keyframe — kept for compat) */
-@keyframes toastIn {
-  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-  to   { opacity: 1; transform: translateX(-50%) translateY(0);   }
-}
+/* CopyPaste-crh3.75: removed dead .toast-in / @keyframes toastIn — Toast.tsx
+ * uses .toast-enter (MO-6); the "legacy compat" alias had zero references. */
 
 .toast-enter { animation: toastEnter var(--mo-base) var(--mo-ease-emphasized) both; }
 .toast-exit  { animation: toastExit  var(--mo-base) var(--mo-ease-emphasized) both; }
-/* Legacy alias */
-.toast-in    { animation: toastIn 180ms cubic-bezier(.16,1,.3,1) both; }
 
 /* ── §MO-7 QR code hidden/reveal state ──────────────────────────────────── */
 /* Default hidden — blurred + faded + slightly scaled up.
@@ -385,7 +380,7 @@
   .panel-enter-right, .panel-exit-left,
   .panel-enter-left, .panel-exit-right,
   .row-press, .copy-flash, .online-pulse,
-  .toast-enter, .toast-exit, .toast-in,
+  .toast-enter, .toast-exit,
   .popup-enter, .card-in, .reveal-up, .list-item-in,
   .toggle-pop,
   .cursor-blink {
