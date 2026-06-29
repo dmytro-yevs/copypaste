@@ -74,6 +74,9 @@ fn devices_tokens_and_items_survive_reopen() {
         let id1 = push_text(&mut store, DEVICE_A, 1000);
         let id2 = push_text(&mut store, DEVICE_A, 2000);
         let id3 = push_text(&mut store, DEVICE_A, 3000);
+        // CopyPaste-crh3.70: insert_item is deferred; flush the pending writes
+        // to DB now so they survive the simulated "process restart" below.
+        store.flush_pending_db_writes_for_test();
         (token1, token2, vec![id1, id2, id3])
     }; // <- store dropped here: connection closed, "process" exited.
 
@@ -135,6 +138,9 @@ fn ttl_eviction_persists_across_reopen() {
             .unwrap();
         push_text(&mut store, DEVICE_A, 1000);
         push_text(&mut store, DEVICE_A, 2000);
+        // CopyPaste-crh3.70: flush deferred writes so items are in DB before
+        // prune_expired attempts to delete them by inserted_at_unix.
+        store.flush_pending_db_writes_for_test();
         // All items were inserted "just now" (inserted_at_unix ~= now). Prune
         // with a now far in the future and a TTL of 1 second so the cutoff
         // (now - ttl) is well past every item's insert time → all evicted.
@@ -180,6 +186,9 @@ fn cursor_ordering_correct_after_reopen() {
         let id_a = push_text(&mut store, DEVICE_A, 10);
         let id_b = push_text(&mut store, DEVICE_A, 10);
         let id_c = push_text(&mut store, DEVICE_A, 20);
+        // CopyPaste-crh3.70: flush deferred insert_item writes to DB before the
+        // simulated "process restart."
+        store.flush_pending_db_writes_for_test();
         (id_a, id_b, id_c)
     };
 

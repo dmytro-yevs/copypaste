@@ -6,7 +6,9 @@ use anyhow::{anyhow, bail, Result};
 // decrypted text). METHOD_COPY is the legacy alias; kept in copypaste-ipc
 // for back-compat but must not be used by new CLI code.
 use copypaste_ipc::methods::METHOD_COPY_ITEM;
-use copypaste_ipc::{METHOD_LIST, METHOD_SEARCH};
+// CopyPaste-crh3.99: use METHOD_HISTORY_PAGE — the daemon's list handler now
+// returns ERR_CODE_NOT_IMPLEMENTED, so fetching history must use history_page.
+use copypaste_ipc::{METHOD_HISTORY_PAGE, METHOD_SEARCH};
 use std::path::Path;
 
 /// Exit code used when the `copy` command is invoked with no mode.
@@ -199,12 +201,16 @@ pub fn cmd_copy_by_id(socket_path: &Path, id: &str) -> Result<()> {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-/// Fetch up to `limit` history items from the daemon via the `list` IPC method.
+/// Fetch up to `limit` history items from the daemon via the `history_page` IPC method.
+///
+/// CopyPaste-crh3.99: the legacy `list` handler now returns
+/// ERR_CODE_NOT_IMPLEMENTED; `history_page` is the current paginated API.
+/// Response shape: `{ items: […], total: u32, own_device_id: String }`.
 pub fn fetch_history(socket_path: &Path, limit: u64) -> Result<Vec<serde_json::Value>> {
     let mut client = IpcClient::connect(socket_path)?;
     let req = IpcClient::build_request(
         &IpcClient::next_id(),
-        METHOD_LIST,
+        METHOD_HISTORY_PAGE,
         serde_json::json!({"limit": limit, "offset": 0}),
     );
     let resp = client.call(&req)?;
@@ -458,6 +464,47 @@ mod tests {
     /// CopyPaste-abg1: cmd_copy_by_id must send "copy_item" on the wire,
     /// NOT the legacy "copy" method. We capture the raw request in the mock
     /// server and assert on the "method" field.
+    /// CopyPaste-crh3.99: fetch_history must send "history_page" on the wire,
+    /// NOT the legacy "list" method which the daemon now returns not_implemented for.
+    #[test]
+    fn fetch_history_uses_history_page_method() {
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("fetch_hist_method.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let captured: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+        let cap = Arc::clone(&captured);
+
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = String::new();
+                std::io::BufRead::read_line(&mut std::io::BufReader::new(&stream), &mut buf)
+                    .unwrap();
+                *cap.lock().unwrap() = Some(buf.trim().to_string());
+                let req_id = serde_json::from_str::<serde_json::Value>(buf.trim())
+                    .ok()
+                    .and_then(|v| v["id"].as_str().map(|s| s.to_string()))
+                    .unwrap_or_else(|| "1".to_string());
+                let resp =
+                    format!(r#"{{"id":"{req_id}","ok":true,"data":{{"items":[],"total":0}}}}"#);
+                stream.write_all(resp.as_bytes()).unwrap();
+                stream.write_all(b"\n").unwrap();
+            }
+        });
+
+        let _ = fetch_history(&sock, 10);
+
+        let raw = captured.lock().unwrap().clone().unwrap_or_default();
+        let v: serde_json::Value =
+            serde_json::from_str(&raw).expect("captured request must be JSON");
+        assert_eq!(
+            v["method"].as_str(),
+            Some("history_page"),
+            "CopyPaste-crh3.99: must send 'history_page', not 'list' — got: {raw}"
+        );
+    }
+
     #[test]
     fn cmd_copy_by_id_uses_copy_item_method() {
         use std::sync::{Arc, Mutex};

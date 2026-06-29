@@ -80,7 +80,9 @@ export function useQrCode() {
   }, []);
 
   const handleQrRegenerate = useCallback(() => {
-    // Blur is kept as-is across regeneration — the user must reveal explicitly.
+    // Re-blur before regenerating: a fresh PAKE session token is a NEW credential
+    // and must not be visible without re-confirmation (spec §10 / CopyPaste-crh3.21).
+    setQrBlur("blurred");
     void generateQr();
   }, [generateQr]);
 

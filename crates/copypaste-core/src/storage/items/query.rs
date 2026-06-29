@@ -387,9 +387,14 @@ pub fn find_recent_by_hash(
     // Use saturating_sub for consistency with `delete_sensitive_expired` and to
     // avoid a debug-mode panic when now_ms < within_ms (e.g. now_ms=0, within_ms=i64::MAX).
     let cutoff = now_ms.saturating_sub(within_ms);
+    // CopyPaste-crh3.67: exclude soft-delete tombstones. soft_delete keeps
+    // content_hash (and bumps wall_time) while wiping content, so without
+    // `deleted = 0` a tombstone matches this dedup probe and the daemon treats a
+    // re-copy of a previously deleted item as a duplicate — the item could never
+    // be re-copied back into history.
     let result = db.conn().query_row(
         "SELECT id FROM clipboard_items
-         WHERE content_hash = ?1 AND wall_time >= ?2
+         WHERE content_hash = ?1 AND wall_time >= ?2 AND deleted = 0
          ORDER BY wall_time DESC LIMIT 1",
         params![hash, cutoff],
         |row| row.get::<_, String>(0),

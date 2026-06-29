@@ -833,16 +833,15 @@ mod tests {
         // JSON field names are EXACTLY "ru", "su", "sk" — the names the Android
         // PairProvisioning.kt parser looks up.
         let encoded_b64 = prov.encode();
-        let json_bytes = b64().decode(&encoded_b64)
+        let json_bytes = b64()
+            .decode(&encoded_b64)
             .expect("provisioning encodes to valid base64url");
-        let json = std::str::from_utf8(&json_bytes)
-            .expect("provisioning JSON is valid UTF-8");
+        let json = std::str::from_utf8(&json_bytes).expect("provisioning JSON is valid UTF-8");
 
         // Authoritative golden JSON string. The Android companion test
         // QrProvisioningParityTest.kt uses the SAME string to verify its parser.
         // Field order is insertion order: ru, su, sk.
-        let expected_json =
-            r#"{"ru":"https://relay.example.com","su":"https://abcd.supabase.co","sk":"anon-key-123"}"#;
+        let expected_json = r#"{"ru":"https://relay.example.com","su":"https://abcd.supabase.co","sk":"anon-key-123"}"#;
 
         assert_eq!(
             json, expected_json,
@@ -862,9 +861,6 @@ mod tests {
             decoded.supabase_url.as_deref(),
             Some("https://abcd.supabase.co")
         );
-        assert_eq!(
-            decoded.supabase_anon_key.as_deref(),
-            Some("anon-key-123")
-        );
+        assert_eq!(decoded.supabase_anon_key.as_deref(), Some("anon-key-123"));
     }
 }

@@ -168,6 +168,13 @@ impl super::RelayStore {
 
     /// Advance the per-device sync-id counter in the DB
     /// (called by the retry task after the item write succeeds).
+    ///
+    /// Uses `MAX(current, next_sync_id)` semantics (via
+    /// [`crate::db::Db::set_next_sync_id_at_least`]) so an out-of-order retry
+    /// cannot roll the counter BACK: the primary `set_next_sync_id` call in
+    /// `push_item_decoded` always runs in insertion order (under the store mutex);
+    /// a retry that arrives late after a later item already advanced the counter
+    /// must not clobber the higher value.
     // Called from `retry::run_push_retry`. See `db_insert_item_retry` for the
     // dead_code rationale.
     #[allow(dead_code)]
@@ -177,7 +184,7 @@ impl super::RelayStore {
         next_sync_id: i64,
     ) -> Result<(), RelayError> {
         self.db
-            .set_next_sync_id(device_id, next_sync_id)
+            .set_next_sync_id_at_least(device_id, next_sync_id)
             .map_err(RelayError::from)
     }
 
@@ -204,5 +211,33 @@ impl super::RelayStore {
         self.db
             .item_count(device_id)
             .expect("test helper: db_item_count_for_test failed")
+    }
+
+    /// Test-only helper: synchronously drain and execute all pending deferred DB
+    /// writes from the retry queue (CopyPaste-crh3.70).
+    ///
+    /// In production, deferred `insert_item` / `delete_oldest_items` writes are
+    /// processed by the `run_push_retry` background task (woken immediately via
+    /// `db_write_notify`). Tests that need synchronous DB durability — e.g.
+    /// persistence tests that drop the store and reopen the same file — must call
+    /// this helper to flush the queue before "restarting."
+    ///
+    /// Mirrors the per-item logic in `retry::run_push_retry` but runs on the
+    /// current thread without spawning a task or sleeping.
+    #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)]
+    pub fn flush_pending_db_writes_for_test(&mut self) {
+        use super::PUSH_RETRY_QUEUE_CAP;
+        let mut batch = Vec::new();
+        self.push_retry_queue
+            .drain_front(PUSH_RETRY_QUEUE_CAP, &mut batch);
+        for write in batch {
+            // Ignore individual errors: test helper, not retry logic.
+            let _ = self.db_insert_item_retry(&write);
+            if write.pruned_count > 0 {
+                let _ = self.db_delete_oldest_retry(&write.device_id, write.pruned_count);
+            }
+            let _ = self.db_set_next_sync_id_retry(&write.device_id, write.next_sync_id);
+        }
     }
 }

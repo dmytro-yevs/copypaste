@@ -637,9 +637,9 @@ mod tests {
     fn cloud_file_payload_golden_bytes() {
         // Canonical test vector — must be byte-for-byte identical to the
         // Android SyncManager.encodeCloudFilePayload result for the same inputs.
-        let name = "hello.txt";   // 9 UTF-8 bytes
-        let mime = "text/plain";  // 10 UTF-8 bytes
-        let body = b"BODY";       // 4 bytes
+        let name = "hello.txt"; // 9 UTF-8 bytes
+        let mime = "text/plain"; // 10 UTF-8 bytes
+        let body = b"BODY"; // 4 bytes
 
         let encoded = encode_cloud_file_payload(name, mime, body);
 
@@ -654,7 +654,8 @@ mod tests {
             // version
             CLOUD_FILE_HEADER_VERSION,
             // name_len = 9
-            0x00, 0x09,
+            0x00,
+            0x09,
         ];
         expected.extend_from_slice(b"hello.txt");
         expected.extend_from_slice(&[

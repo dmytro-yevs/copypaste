@@ -49,7 +49,11 @@ jobs:
           tool: cargo-llvm-cov
 
       - name: Run coverage (HTML + LCOV)
-        run: bash scripts/coverage.sh
+        # --threshold 50: fail the job if line coverage drops below 50%.
+        # This is a conservative baseline chosen on 2026-06-29; raise it as the
+        # test suite matures.  The script (scripts/coverage.sh) parses
+        # cargo-llvm-cov's TOTAL line and exits 1 if coverage < threshold.
+        run: bash scripts/coverage.sh --threshold 50
 
       - name: Upload coverage to Codecov
         if: ${{ env.CODECOV_TOKEN != '' }}
@@ -58,7 +62,7 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           files: coverage/lcov.info
-          fail_ci_if_error: false
+          fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
       - name: Upload coverage artifacts

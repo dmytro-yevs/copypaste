@@ -1,6 +1,44 @@
 import "@testing-library/jest-dom/vitest";
 
 // ---------------------------------------------------------------------------
+// localStorage polyfill — Node 24 compat
+//
+// Node ≥ 24 ships an experimental process-level `localStorage` global backed
+// by --localstorage-file.  When Vitest runs in jsdom mode that global can
+// shadow (or conflict with) jsdom's proper Web Storage implementation, causing
+// `localStorage.clear()` / `removeItem()` to throw TypeError because the Node
+// object doesn't satisfy the full Storage interface.
+//
+// We always define `window.localStorage` here as a clean in-memory
+// implementation so every test gets a predictable, isolated store regardless
+// of Node version or experimental flags.
+// ---------------------------------------------------------------------------
+const _lsStore: Record<string, string> = {};
+Object.defineProperty(window, "localStorage", {
+  value: {
+    getItem: (key: string): string | null =>
+      Object.prototype.hasOwnProperty.call(_lsStore, key)
+        ? _lsStore[key]
+        : null,
+    setItem: (key: string, value: string): void => {
+      _lsStore[key] = String(value);
+    },
+    removeItem: (key: string): void => {
+      delete _lsStore[key];
+    },
+    clear: (): void => {
+      Object.keys(_lsStore).forEach((k) => delete _lsStore[k]);
+    },
+    key: (n: number): string | null => Object.keys(_lsStore)[n] ?? null,
+    get length(): number {
+      return Object.keys(_lsStore).length;
+    },
+  } satisfies Storage,
+  writable: true,
+  configurable: true,
+});
+
+// ---------------------------------------------------------------------------
 // Global Tauri jsdom stubs
 //
 // The Tauri runtime APIs (window.__TAURI_INTERNALS__, @tauri-apps/api/webview,

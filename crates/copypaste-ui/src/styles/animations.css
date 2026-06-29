@@ -82,7 +82,11 @@
 }
 
 .copy-flash {
-  animation: copyFlash var(--mo-instant) var(--mo-ease-standard) both;
+  /* crh3.20: duration changed from --mo-instant (90ms) to --mo-base (180ms) so
+     the CSS animation duration agrees with the JS setTimeout in HistoryRow.tsx
+     (COPY_FLASH_MS = MO_BASE_MS = 180ms from lib/motion-tokens.ts).
+     Single source of truth: both CSS and JS reference --mo-base / MO_BASE_MS. */
+  animation: copyFlash var(--mo-base) var(--mo-ease-standard) both;
   outline-offset: 2px;
   border-radius: inherit;
 }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, formatWallTime } from "../lib/ipc";
-import type { PairedDevice, SyncBadgeState } from "../lib/ipc";
+import type { SyncBadgeState } from "../lib/ipc";
 
 // ---------------------------------------------------------------------------
 // SyncState — canonical six-state display model (CMP-7 parity with Android)
@@ -77,6 +77,16 @@ const RECENT_SYNC_MS_FALLBACK = 5 * 60 * 1000; // 5 minutes — FALLBACK ONLY
  * component tree.
  */
 export const SYNC_POLL_INTERVAL_MS = 2_000;
+
+/**
+ * Peer-count polling interval — 10 s, matching usePairedDevices (PEERS_POLL_MS).
+ *
+ * CopyPaste-crh3.48: the old implementation called listPeers() on every 2s
+ * sync-status poll (30 IPC calls/min), even though peer count changes rarely.
+ * Decoupling to a separate 10s poll reduces calls to ≤6/min.
+ * Exported so tests can assert the upper bound.
+ */
+export const PEERS_POLL_INTERVAL_MS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -209,15 +219,17 @@ export function SyncStatusChip() {
   // cancelRef prevents setState after unmount when the poll fires mid-flight.
   const cancelRef = useRef(false);
 
-  // Stable callback — useCallback ensures the effect dep array sees a constant
-  // reference, so the interval is set up exactly once while the component is
-  // mounted. cancelRef is a ref, so it doesn't need to be listed as a dep.
-  const refresh = useCallback(async () => {
-    // Fetch sync status and peer list concurrently; each fails independently.
-    const [syncResult, peersResult] = await Promise.allSettled([
-      api.getSyncStatus(),
-      api.listPeers(),
-    ]);
+  // CopyPaste-crh3.48: peer count is decoupled from the 2s sync-status poll.
+  // peerCountRef caches the last known paired-device count so refreshSync can
+  // read it without calling listPeers on every tick. Updated by refreshPeers
+  // which runs on its own 10s interval (matching usePairedDevices cadence).
+  const peerCountRef = useRef(0);
+
+  // Stable sync-status poll (2s). Reads peerCountRef for deviceCount so it no
+  // longer calls listPeers — reducing listPeers from 30/min to ≤6/min.
+  // cancelRef is a ref, so it does not need to be listed as a dep.
+  const refreshSync = useCallback(async () => {
+    const syncResult = await Promise.allSettled([api.getSyncStatus()]);
 
     // Guard against setting state after the component has unmounted or after
     // the effect has been torn down and re-run (e.g. React StrictMode double
@@ -226,17 +238,15 @@ export function SyncStatusChip() {
 
     // If the sync-status call itself failed → daemon is offline (IPC socket down).
     // CMP-7: use "offline" (IPC unreachable) — not "error" (backend error).
-    if (syncResult.status === "rejected") {
+    if (syncResult[0].status === "rejected") {
       setInfo({ state: "offline", deviceCount: 0, lastSyncMs: null, email: null, cloudMisconfig: false });
       return;
     }
 
-    const sync = syncResult.value;
-    const peers: PairedDevice[] =
-      peersResult.status === "fulfilled" ? peersResult.value.peers : [];
-
+    const sync = syncResult[0].value;
     const lastSyncMs = sync.last_sync_ms ?? null;
-    const deviceCount = peers.length;
+    // Use the cached peer count — updated independently by refreshPeers.
+    const deviceCount = peerCountRef.current;
 
     // PG-44 / CopyPaste-k1jo: cloud misconfig = supabase URL is set but the
     // cloud sync layer is not properly configured (anon key missing, or auth
@@ -273,18 +283,41 @@ export function SyncStatusChip() {
       email: sync.email ?? null,
       cloudMisconfig,
     });
-  }, []); // no external deps — api is module-level stable, setInfo is stable
+  }, []); // no external deps — api is module-level stable, setInfo/peerCountRef are stable
+
+  // Stable peer-count poll (10s). Decoupled from the 2s sync-status poll so
+  // listPeers is called at most 6×/min instead of 30×/min (CopyPaste-crh3.48).
+  // On success, writes peerCountRef and patches info.deviceCount in place so
+  // the chip reflects paired-device count changes without waiting for the next
+  // refreshSync tick.
+  const refreshPeers = useCallback(async () => {
+    try {
+      const { peers } = await api.listPeers();
+      if (cancelRef.current) return;
+      const count = peers.length;
+      peerCountRef.current = count;
+      // Patch only deviceCount — leave all other SyncInfo fields intact.
+      setInfo((prev) => ({ ...prev, deviceCount: count }));
+    } catch {
+      // Keep last known count on error — daemon may be briefly unavailable.
+      // refreshSync will flip to "offline" if getSyncStatus also fails.
+    }
+  }, []); // no external deps
 
   useEffect(() => {
     cancelRef.current = false;
-    void refresh();
+    // Fire both immediately on mount to populate state before the first interval tick.
+    void refreshSync();
+    void refreshPeers();
 
-    const id = setInterval(() => { void refresh(); }, SYNC_POLL_INTERVAL_MS);
+    const syncId = setInterval(() => { void refreshSync(); }, SYNC_POLL_INTERVAL_MS);
+    const peersId = setInterval(() => { void refreshPeers(); }, PEERS_POLL_INTERVAL_MS);
     return () => {
       cancelRef.current = true;
-      clearInterval(id);
+      clearInterval(syncId);
+      clearInterval(peersId);
     };
-  }, [refresh]); // refresh is stable (useCallback with no deps) → runs once
+  }, [refreshSync, refreshPeers]); // both are stable (useCallback with no deps) → runs once
 
   const tooltip = buildTooltip(info);
 

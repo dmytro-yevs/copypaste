@@ -12,6 +12,7 @@ import { isImageType, sourceAppLabel, type HistoryEntry } from "../../lib/ipc";
 import { applySpanMasking, maskPlaceholder, shouldMask } from "../../lib/masking";
 import { formatRelativeTime } from "../../lib/time";
 import { SKINS } from "../../lib/skins";
+import { COPY_FLASH_MS } from "../../lib/motion-tokens";
 import { ImageThumb } from "../../components/ImageThumb";
 import { AppIcon } from "../../components/AppIcon";
 import { FileChip } from "../../components/FileChip";
@@ -317,12 +318,12 @@ export const HistoryRow = React.memo(function HistoryRow({
     } else {
       onSelect();
       onCopy();
-      // §8: flash success bg for ~200ms — within the nbase(180ms)–nslow(240ms) range
-      // that makes the confirmation perceptible without being loud. The original
-      // 90ms (motion-instant) was below the conscious-perception threshold (~100-150ms).
-      // CopyPaste-5917.51: bumped from 90ms to 200ms.
+      // §8 (crh3.20): flash duration = COPY_FLASH_MS (180ms = --mo-base) so the JS
+      // timer matches the .copy-flash CSS animation exactly — single source of truth
+      // via lib/motion-tokens.ts. The class is cleared after the animation finishes
+      // so a subsequent copy can re-trigger the flash.
       setCopyFlash(true);
-      setTimeout(() => setCopyFlash(false), 200);
+      setTimeout(() => setCopyFlash(false), COPY_FLASH_MS);
     }
   };
 

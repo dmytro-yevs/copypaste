@@ -359,6 +359,14 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     // `idx_clipboard_unpinned_len` (schema v11) verbatim, so SQLite serves this
     // SUM from an index-only scan — no full-table scan and no decrypted-BLOB
     // reads on every clipboard write.
+    // CopyPaste-crh3.3: this SUM intentionally keeps `WHERE pinned = 0` (no
+    // `deleted = 0`) so it matches the partial covering index
+    // `idx_clipboard_unpinned_len` verbatim and stays an index-only scan on
+    // every clipboard write (CopyPaste-pvp4). Tombstones (deleted = 1) have
+    // content = NULL, so `LENGTH(COALESCE(content, '')) = 0` — they contribute
+    // nothing to this total and cannot push it over the cap. Excluding them from
+    // the eviction CTE below (not from this SUM) is therefore both correct and
+    // index-preserving.
     let total_unpinned: i64 = db.conn().query_row(
         "SELECT COALESCE(SUM(LENGTH(COALESCE(content, ''))), 0) \
          FROM clipboard_items WHERE pinned = 0",
@@ -384,7 +392,7 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
     let newest_unpinned_id: Option<String> = db
         .conn()
         .query_row(
-            "SELECT id FROM clipboard_items WHERE pinned = 0 \
+            "SELECT id FROM clipboard_items WHERE pinned = 0 AND deleted = 0 \
              ORDER BY wall_time DESC, id DESC LIMIT 1",
             [],
             |r| r.get(0),
@@ -419,7 +427,7 @@ pub fn prune_to_cap(db: &Database, max_bytes: i64) -> Result<usize, ItemsError> 
                      ROWS UNBOUNDED PRECEDING
                  ) AS cum_bytes
              FROM clipboard_items
-             WHERE pinned = 0 AND id <> ?2
+             WHERE pinned = 0 AND deleted = 0 AND id <> ?2
          )
          SELECT id FROM ranked
          WHERE cum_bytes - row_bytes < ?1",

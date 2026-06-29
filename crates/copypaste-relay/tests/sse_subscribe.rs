@@ -340,6 +340,102 @@ async fn wait_for_count(state: &AppState, device_id: &str, want: usize, overall:
     }
 }
 
+/// CopyPaste-crh3.58: regression — SSE lag recovery must deliver all items when
+/// more wake signals arrive than the broadcast channel can hold.
+///
+/// The relay's SSE notification channel (`SYNC_NOTIFY_CHANNEL_CAP = 64`) is a
+/// signal-only wake channel: each push fires `tx.send(())`, and the SSE producer
+/// re-reads the inbox from its cursor on every wake. When a burst of pushes
+/// exceeds the channel capacity, the receiver observes `RecvError::Lagged` — the
+/// existing handler (`Err(RecvError::Lagged(_)) => {}`) simply loops and
+/// re-drains from the cursor, recovering every missed item because wake ticks are
+/// contentless (no item data is carried in the channel).
+///
+/// This test pushes `N_ITEMS = 70 > 64` items under a single lock hold so all
+/// 70 wake signals fire before the SSE producer can drain any of them. The
+/// producer sees `Lagged(6)` on its first `recv()` after we release the lock, then
+/// re-drains the inbox and delivers all 70 items — proving zero are dropped.
+///
+/// The test passes IFF the lag handler exists and loops (re-drain path); removing
+/// the `Err(RecvError::Lagged(_)) => {}` arm and leaving only the `Closed` arm
+/// would cause the producer to exit early, failing the item-count assertion.
+#[tokio::test]
+async fn sse_lag_recovery_delivers_all_items() {
+    const N_ITEMS: usize = 70; // > SYNC_NOTIFY_CHANNEL_CAP (64)
+
+    let (addr, state) = spawn_relay().await;
+
+    let b_token = {
+        let mut s = state.lock().unwrap();
+        s.register_device(
+            DEVICE_B.to_string(),
+            "Device B".into(),
+            valid_pub_key(),
+            valid_pop(),
+        )
+        .unwrap()
+        .0
+    };
+
+    // Open the SSE subscription against an empty inbox (since=0).
+    let mut sse = open_sse(
+        addr,
+        &format!("/devices/{DEVICE_B}/subscribe?since=0"),
+        &b_token,
+    )
+    .await;
+    let _headers = read_until(&mut sse, "\r\n\r\n", Duration::from_secs(2)).await;
+
+    // Wait until the SSE producer is parked on its wake channel (inbox is
+    // empty, so it backfills nothing and parks immediately). Once parked, the
+    // producer holds exactly 1 broadcast receiver.
+    let parked = wait_for_count(&state, DEVICE_B, 1, Duration::from_secs(5)).await;
+    assert!(
+        parked,
+        "SSE producer must park on the wake channel before the burst; \
+         receiver count = {}",
+        state.lock().unwrap().notifier_receiver_count(DEVICE_B)
+    );
+
+    // Push N_ITEMS items under a single lock hold so all N_ITEMS wake signals
+    // are sent before the producer can acquire the lock and drain any of them.
+    // The wake channel can only buffer 64 signals; signals 65-70 cause the
+    // receiver to report Lagged when it next calls recv().
+    {
+        let mut s = state.lock().unwrap();
+        for i in 0..N_ITEMS {
+            s.push_item(
+                DEVICE_B,
+                "text".to_string(),
+                // Unique payload per item so we can detect receipt of the last one.
+                sample_content_b64(format!("lag-item-{i}").as_bytes()),
+                (i as u64) + 1, // unique ascending wall_time
+                10 * 1024 * 1024,
+            )
+            .unwrap();
+        }
+    } // lock released; SSE producer can now acquire it and drain.
+
+    // The last item's content_b64 appears only after all N_ITEMS have been
+    // delivered (items are emitted in wall_time ascending order).
+    let last_payload = sample_content_b64(format!("lag-item-{}", N_ITEMS - 1).as_bytes());
+    let body = read_until(&mut sse, &last_payload, Duration::from_secs(10)).await;
+
+    assert!(
+        body.contains(&last_payload),
+        "SSE lag recovery must deliver the last item; body:\n{body}"
+    );
+
+    // Count how many SSE `item` events arrived. Each item emits exactly one
+    // `event: item` line. All N_ITEMS must be present — none dropped on lag.
+    let delivered = body.matches("event: item").count();
+    assert_eq!(
+        delivered, N_ITEMS,
+        "CopyPaste-crh3.58: SSE lag recovery must deliver all {N_ITEMS} items; \
+         got {delivered}. Full body:\n{body}"
+    );
+}
+
 /// SSE must require auth via the same BearerToken contract as /poll.
 #[tokio::test]
 async fn sse_rejects_missing_auth() {

@@ -37,7 +37,6 @@ vi.mock("../lib/ipc", async (importOriginal) => {
       unpairPeer: vi.fn().mockResolvedValue(undefined),
       pairGetSas: vi.fn().mockResolvedValue({ state: "idle" }),
       pairAbort: vi.fn().mockResolvedValue({ ok: true }),
-      pairReset: vi.fn().mockResolvedValue({ ok: true }),
       pairConfirmSas: vi.fn().mockResolvedValue({ ok: true, accepted: true }),
       revokeAndRotate: vi.fn().mockResolvedValue({ revoked_at: 0 }),
     },

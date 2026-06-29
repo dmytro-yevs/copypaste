@@ -115,6 +115,54 @@ fn insert_same_text_twice_returns_existing_id_no_new_row() {
     assert_eq!(count_items(&db).unwrap(), 1);
 }
 
+/// CopyPaste-crh3.67: `soft_delete_item` keeps the row's `content_hash` (and
+/// bumps `wall_time`) while wiping `content`, so without an `AND deleted = 0`
+/// filter the dedup probe would match the tombstone and the daemon would treat
+/// a re-copy of a previously deleted item as a duplicate — the content could
+/// never return to history. `find_recent_by_hash` must ignore tombstones, and
+/// re-copying must insert a fresh, live row.
+#[test]
+fn find_recent_by_hash_ignores_soft_deleted_tombstone() {
+    use copypaste_core::soft_delete_item;
+    let (_tmp, db) = fresh_db();
+    let plaintext = b"content i deleted then re-copied";
+    let hash = sha256_hex(plaintext);
+    let now: i64 = 2_000_000;
+
+    // Insert, then soft-delete: the tombstone retains content_hash.
+    let item = text_item(plaintext, now, 1);
+    let item_id = item.id.clone();
+    insert_item(&db, &item).unwrap();
+    soft_delete_item(&db, &item_id, 2, now + 10).unwrap();
+
+    // The dedup probe must NOT match the tombstone, even with a wide-open
+    // window (the daemon probes with effectively an i64::MAX window).
+    assert!(
+        find_recent_by_hash(&db, &hash, now + 20, i64::MAX)
+            .unwrap()
+            .is_none(),
+        "find_recent_by_hash must ignore soft-delete tombstones"
+    );
+
+    // Re-copying the same content LATER inserts a fresh, live row (new id). The
+    // re-copy sits in a different (wall_time / 60) bucket than the tombstone so
+    // it is independent of the separate per-bucket `idx_dedup_hash_minute`
+    // guard; this models the real "deleted earlier, re-copied later" flow.
+    let recopy = text_item(plaintext, now + 600_000, 3);
+    let recopy_id = recopy.id.clone();
+    insert_item(&db, &recopy).unwrap();
+    assert_ne!(
+        recopy_id, item_id,
+        "re-copy must be a new row, not the tombstone"
+    );
+    let hit = find_recent_by_hash(&db, &hash, now + 600_010, i64::MAX).unwrap();
+    assert_eq!(
+        hit.as_deref(),
+        Some(recopy_id.as_str()),
+        "after re-copy the dedup probe matches the fresh live row"
+    );
+}
+
 /// Image payloads use the same SHA-256 + `find_recent_by_hash` flow. The
 /// content shape differs (binary blob via `new_image`) but the dedup
 /// contract is identical.

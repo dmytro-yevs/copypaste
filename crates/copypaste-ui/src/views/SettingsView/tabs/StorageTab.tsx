@@ -15,6 +15,7 @@ import {
   DEFAULT_MAX_ITEMS,
 } from "../lib/settingsSliders";
 import type { UIPrefs } from "../../../store";
+import { LimitsMsg } from "../components/LimitsMsg";
 
 export type StorageTabProps = {
   offline: boolean;
@@ -53,17 +54,6 @@ export type StorageTabProps = {
   handleVacuum: () => void;
   setDeleteConfirm: (v: boolean) => void;
 };
-
-// bdac.106: branch on .ok (typed signal) — no string comparison.
-function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, { ok: boolean; message: string } | null> }) {
-  const entry = limitsMsg[field];
-  if (!entry) return null;
-  return (
-    <span className={`text-[11px] ${entry.ok ? "text-ide-success" : "text-ide-danger"}`}>
-      {entry.message}
-    </span>
-  );
-}
 
 export function StorageTab({
   offline,

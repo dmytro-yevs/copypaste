@@ -80,17 +80,22 @@ export function Sidebar() {
         Matches the styleguide: radial-gradient circle at 40% 10% with accent at 24%.
         Pure decorative; pointer-events none, aria-hidden.
         Uses a Tailwind arbitrary background to stay token-driven (no hex).
+        CopyPaste-crh3.14: NOT rendered in Quiet skin (flat material, no aurora/tint
+        — Quiet sets --skin-aurora-scale:0 to suppress all glow; the blob contradicts
+        the flat spec). Classic and Vapor both render the tint.
       */}
-      <div
-        data-accent-tint
-        aria-hidden
-        className="pointer-events-none absolute inset-0 z-0"
-        style={{
-          // bg built from CSS custom properties — no hex values.
-          background:
-            "radial-gradient(circle at 40% 10%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 42%)",
-        }}
-      />
+      {skin !== "quiet" && (
+        <div
+          data-accent-tint
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-0"
+          style={{
+            // bg built from CSS custom properties — no hex values.
+            background:
+              "radial-gradient(circle at 40% 10%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 42%)",
+          }}
+        />
+      )}
 
       {/* All content above the tint overlay */}
       <div className="relative z-10 flex flex-1 flex-col">

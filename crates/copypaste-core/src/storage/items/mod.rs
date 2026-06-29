@@ -342,6 +342,60 @@ mod tests {
         assert_eq!(count_items(&db).unwrap(), 2);
     }
 
+    /// CopyPaste-crh3.3 / crh3.56: `prune_to_cap` must NEVER hard-delete a
+    /// soft-delete tombstone (`deleted = 1`). Tombstones are 0-byte rows that
+    /// carry sync obligations — the merge layer propagates the delete to offline
+    /// peers from the persisted tombstone, so evicting one before a peer
+    /// reconnects would resurrect the item there. A tombstone also frees no
+    /// space, so excluding it from size-based eviction is strictly correct.
+    #[test]
+    fn prune_to_cap_never_evicts_tombstones() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Eviction order is (wall_time ASC, id ASC). Make the tombstone the
+        // OLDEST unpinned row so the pre-fix code would have evicted it first.
+        let mut doomed = make_item(1);
+        doomed.wall_time = 10;
+        let tombstone_id = doomed.id.clone();
+        insert_item(&db, &doomed).unwrap();
+        soft_delete_item(&db, &tombstone_id, 100, 11).unwrap();
+
+        // Several live 2-byte rows, all newer than the tombstone.
+        for i in 0..5 {
+            let mut it = make_item(10 + i);
+            it.wall_time = 100 + i;
+            insert_item(&db, &it).unwrap();
+        }
+
+        let tombstones: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE deleted = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tombstones, 1, "one tombstone seeded");
+
+        // 5 live rows * 2 bytes = 10 bytes unpinned; cap to 4 forces eviction
+        // (the newest live row is always protected from same-tick eviction).
+        let evicted = prune_to_cap(&db, 4).unwrap();
+        assert!(evicted > 0, "eviction must have removed some live rows");
+
+        let survived: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_items WHERE id = ?1 AND deleted = 1",
+                params![tombstone_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            survived, 1,
+            "prune_to_cap must never hard-delete a tombstone"
+        );
+    }
+
     #[test]
     fn pagination_returns_correct_page() {
         let db = Database::open_in_memory().unwrap();

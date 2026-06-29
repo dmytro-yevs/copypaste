@@ -4,8 +4,8 @@
  * 1jms.1: SAS verification code must be non-copyable (userSelect: none, no
  *         click-to-copy path that writes to the clipboard).
  * 1jms.5: QR payload text must be non-selectable (userSelect: none).
- * 1jms.3: pairAbort/pairReset is called after ABORT terminal state.
- * 1jms.12: pairAbort/pairReset is called after CONFIRM terminal state.
+ * 1jms.3: pairAbort is called after ABORT terminal state.
+ * 1jms.12: pairAbort is called after CONFIRM terminal state.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

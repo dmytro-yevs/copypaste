@@ -79,6 +79,32 @@ pub fn store_supabase_password_to_keychain(password: &str) -> Result<(), Keychai
     }
 }
 
+/// Delete the Supabase GoTrue password from the macOS Keychain (CopyPaste-crh3.100).
+///
+/// Used by `cloud_sign_out` so the credential is not re-resolved by
+/// `CloudConfig::from_env` on the next daemon start. A missing entry is treated
+/// as success (idempotent sign-out). No-op (Ok) on non-macOS and in
+/// ephemeral-key mode so callers need no platform branch.
+pub fn delete_supabase_password_from_keychain() -> Result<(), KeychainError> {
+    if keychain_bypassed() {
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        match delete_generic_password(SERVICE, SUPABASE_PASSWORD_ACCOUNT) {
+            Ok(()) => Ok(()),
+            // A not-found entry means there was nothing to sign out of — treat
+            // as success so sign-out is idempotent.
+            Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(()),
+            Err(e) => Err(KeychainError::from(e)),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(())
+    }
+}
+
 /// Dev/test escape hatch: when `COPYPASTE_EPHEMERAL_KEY` is set in the
 /// environment, every keychain entry point in this module short-circuits
 /// BEFORE any Security-framework call so the macOS login-keychain password
@@ -698,6 +724,30 @@ mod tests {
         assert!(
             !is_missing_entitlement(&other),
             "non-missing-entitlement errors must NOT trigger the ad-hoc warn path"
+        );
+    }
+
+    /// CopyPaste-crh3.100: `delete_supabase_password_from_keychain` must be
+    /// idempotent — a sign-out when the entry is already absent (or in
+    /// ephemeral-key bypass) returns `Ok` so `cloud_sign_out` never fails just
+    /// because there was nothing to delete.
+    #[test]
+    fn delete_supabase_password_is_idempotent_in_bypass() {
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("COPYPASTE_EPHEMERAL_KEY");
+        // SAFETY: single-threaded under the TEST_ENV_LOCK guard.
+        unsafe { std::env::set_var("COPYPASTE_EPHEMERAL_KEY", "1") };
+        let result = delete_supabase_password_from_keychain();
+        // Restore the original env before asserting so it is always cleaned up.
+        match prev {
+            Some(v) => unsafe { std::env::set_var("COPYPASTE_EPHEMERAL_KEY", v) },
+            None => unsafe { std::env::remove_var("COPYPASTE_EPHEMERAL_KEY") },
+        }
+        assert!(
+            result.is_ok(),
+            "delete must be a no-op Ok in bypass mode: {result:?}"
         );
     }
 

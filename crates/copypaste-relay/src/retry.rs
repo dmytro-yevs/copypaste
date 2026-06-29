@@ -51,6 +51,7 @@
 //! same lock that serialises all other store mutations also serialises queue
 //! access — no additional lock needed.
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::state::{AppState, PendingDbWrite};
@@ -98,21 +99,36 @@ fn backoff_ms(attempt: u32) -> u64 {
 // Background retry runner
 // ---------------------------------------------------------------------------
 
-/// Background loop that drains [`crate::state::PushRetryQueue`] and replays
-/// failed DB writes.
+/// Background loop that drains [`crate::state::PushRetryQueue`] and writes
+/// all deferred DB operations (CopyPaste-crh3.70 / CopyPaste-k4py).
 ///
 /// Spawned by `main.rs` via [`crate::supervise::spawn_supervised`] so panics
 /// are logged and the task restarts automatically.
 ///
-/// The task ticks at `PUSH_RETRY_POLL_MS` intervals. On a persistent DB failure
-/// it applies exponential backoff (capped at `PUSH_RETRY_MAX_DELAY_MS`) before
-/// re-enqueuing the item for the next attempt. After `MAX_RETRY_ATTEMPTS` the
-/// write is discarded with an ERROR log.
+/// The task wakes immediately when `push_item_decoded` enqueues a write via
+/// `store.db_write_notify.notify_one()`, or at most `PUSH_RETRY_POLL_MS` later
+/// as a safety-net fallback (catches any missed notifications and handles
+/// persistent write failures needing backoff). Each item's three DB calls
+/// (insert + optional delete_oldest + set_next_sync_id) run under a single brief
+/// lock acquisition; the lock is released between items so concurrent push
+/// requests are not stalled for more than one item's worth of SQLite I/O at a
+/// time. On a persistent DB failure the item is re-enqueued with exponential
+/// backoff; after `MAX_RETRY_ATTEMPTS` it is discarded with an ERROR log.
 pub async fn run_push_retry(state: AppState) {
+    // Clone the Arc<Notify> once at start-up and hold it outside the lock so
+    // we can .await it without keeping the store mutex locked.
+    let notify: Arc<tokio::sync::Notify> = {
+        let store = state.lock().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(&store.db_write_notify)
+    };
+
     loop {
-        // Tick every PUSH_RETRY_POLL_MS; the lock is held only for a brief
-        // drain + write, never across .await.
-        tokio::time::sleep(Duration::from_millis(PUSH_RETRY_POLL_MS)).await;
+        // Wake immediately on a push enqueue (notify_one from push_item_decoded)
+        // or fall back to the polling interval — whichever fires first.
+        tokio::select! {
+            _ = notify.notified() => {}
+            _ = tokio::time::sleep(Duration::from_millis(PUSH_RETRY_POLL_MS)) => {}
+        }
 
         // Drain up to 16 pending writes per tick so a burst doesn't hold the
         // lock for many SQLite calls.
@@ -290,10 +306,12 @@ mod tests {
 
     // ---- integration-style test: push_item_decoded enqueues on DB failure ---
 
-    /// CopyPaste-k4py: when push_item_decoded returns Ok (normal path), the
-    /// retry queue stays empty (no spurious enqueue on success).
+    /// CopyPaste-crh3.70: every push enqueues exactly one deferred DB write so
+    /// SQLite I/O is never performed while the store mutex is held by a push
+    /// request. Previously (CopyPaste-k4py) the queue was only populated on
+    /// failure; now it is the primary write path.
     #[test]
-    fn no_retry_enqueued_on_successful_push() {
+    fn push_enqueues_deferred_db_write() {
         use base64::engine::general_purpose::STANDARD as B64;
         use base64::Engine;
 
@@ -318,22 +336,23 @@ mod tests {
             .unwrap();
 
         assert!(id >= 1, "push must return a positive id");
-        assert!(
-            store.push_retry_queue.is_empty(),
-            "CopyPaste-k4py: retry queue must be empty after a successful push"
+        assert_eq!(
+            store.push_retry_queue.len(),
+            1,
+            "CopyPaste-crh3.70: push must enqueue exactly one deferred DB write; queue len should be 1"
         );
     }
 
     // ---- async integration: retry runner drains queue on subsequent tick ----
 
-    /// CopyPaste-k4py: run_push_retry drains a pre-seeded retry queue and writes
-    /// the pending item to the DB. Verifies end-to-end: item inserted by
-    /// push_item_decoded sits in the retry queue → background task retries →
-    /// item appears in the DB.
+    /// CopyPaste-crh3.70: run_push_retry drains the deferred write queue and
+    /// persists each item to the DB. Verifies the end-to-end path:
+    /// push_item_decoded enqueues a deferred write → the retry task is woken
+    /// immediately via db_write_notify → the item appears in the DB.
     ///
-    /// We simulate the "retry queue has an entry" state by directly enqueuing a
-    /// PendingDbWrite after a normal push that already stored the item in memory,
-    /// then verify the background task eventually persists it.
+    /// Since crh3.70 makes push_item_decoded always enqueue (no immediate DB
+    /// write), after push the item is in the in-memory inbox and in the retry
+    /// queue, but NOT yet in the DB. The retry task must write it.
     #[tokio::test]
     async fn retry_runner_drains_queue_and_writes_to_db() {
         use base64::engine::general_purpose::STANDARD as B64;
@@ -356,36 +375,30 @@ mod tests {
             .unwrap();
         }
 
-        // Seed the retry queue with a PendingDbWrite whose DB write has not yet
-        // happened (simulates a transient failure on the initial push attempt).
-        let content_b64: std::sync::Arc<str> = std::sync::Arc::from(B64.encode(b"retry payload"));
+        // Push an item — crh3.70: insert_item is deferred to the retry task.
+        // The item lands in the in-memory inbox and the retry queue;
+        // set_next_sync_id runs synchronously (fast metadata UPDATE).
         {
             let mut s = state.lock().unwrap();
-            // Push the item into memory so we have a real item_id.
-            let item_id = s
-                .push_item(
-                    &device_id,
-                    "text".into(),
-                    B64.encode(b"retry payload"),
-                    5000,
-                    10 * 1024 * 1024,
-                )
-                .unwrap();
-            // The normal push wrote to DB. Remove the DB row to simulate "the
-            // first DB write failed" — then enqueue for retry.
-            s.db_delete_item_for_test(&device_id, item_id);
-
-            s.push_retry_queue.enqueue(PendingDbWrite {
-                device_id: device_id.clone(),
-                item_id,
-                content_type: "text".into(),
-                content_b64: std::sync::Arc::clone(&content_b64),
-                wall_time: 5000,
-                inserted_at_unix: 1,
-                pruned_count: 0,
-                next_sync_id: item_id + 1,
-                attempts: 0,
-            });
+            s.push_item(
+                &device_id,
+                "text".into(),
+                B64.encode(b"retry payload"),
+                5000,
+                10 * 1024 * 1024,
+            )
+            .unwrap();
+            assert_eq!(
+                s.push_retry_queue.len(),
+                1,
+                "push must enqueue exactly one deferred insert_item write"
+            );
+            // insert_item has NOT been called yet — ciphertext is not in the DB.
+            assert_eq!(
+                s.db_item_count_for_test(&device_id),
+                0,
+                "CopyPaste-crh3.70: insert_item must be deferred — DB item count must be 0 before retry task runs"
+            );
         }
 
         // Spawn the retry background task.
@@ -406,15 +419,15 @@ mod tests {
         });
         deadline
             .await
-            .expect("CopyPaste-k4py: retry queue must drain within 3 s");
+            .expect("CopyPaste-crh3.70: deferred write queue must drain within 3 s");
 
-        // Verify the item was written to the DB by checking the DB item count.
+        // Verify the item was written to the DB by the retry task.
         {
             let s = state.lock().unwrap();
             let count = s.db_item_count_for_test(&device_id);
             assert!(
                 count >= 1,
-                "CopyPaste-k4py: DB must contain the retried item; got count={count}"
+                "CopyPaste-crh3.70: DB must contain the pushed item after retry task runs; got count={count}"
             );
         }
 

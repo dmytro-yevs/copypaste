@@ -1,6 +1,6 @@
 /**
  * Tests for Liquid Glass §7 DevicesView enhancements (CopyPaste-9ug):
- * 1. StatusDot online pulse ring (animate-pulse-ping)
+ * 1. StatusDot online pulse ring (animate-online-pulse — fixed from animate-pulse-ping in crh3.18)
  * 2. Transport chip P2P/Cloud on PeerRow
  * 3. Fingerprint display removed from device cards (CopyPaste-55vf) — asserts absence
  * 4. Per-peer sync line "Synced X ago" / last sync on PeerRow
@@ -90,7 +90,7 @@ afterEach(() => {
 // §7.1 StatusDot pulse ring
 // ---------------------------------------------------------------------------
 describe("§7.1 StatusDot — online pulse ring", () => {
-  it("renders an expanding-ring element with animate-pulse-ping for online peer", async () => {
+  it("renders an expanding-ring element with animate-online-pulse for online peer", async () => {
     listPeers.mockResolvedValue({
       peers: [{ ...BASE_PEER, online: true }],
     });
@@ -100,7 +100,7 @@ describe("§7.1 StatusDot — online pulse ring", () => {
     await screen.findByText("Alice's iPhone");
 
     // The pulse ring span must exist inside the peer row status dot wrapper
-    const pings = container.querySelectorAll(".animate-pulse-ping");
+    const pings = container.querySelectorAll(".animate-online-pulse");
     expect(pings.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -116,7 +116,7 @@ describe("§7.1 StatusDot — online pulse ring", () => {
     // online-count badge (always shown when peers.length > 0), contributing 1 pulse ring.
     // ThisDeviceCard adds 1 more. The offline peer row must NOT add a third.
     // Expected: exactly 2 pings (header badge + ThisDeviceCard); no ping from offline peer row.
-    const pings = container.querySelectorAll(".animate-pulse-ping");
+    const pings = container.querySelectorAll(".animate-online-pulse");
     expect(pings.length).toBe(2);
   });
 
@@ -128,7 +128,7 @@ describe("§7.1 StatusDot — online pulse ring", () => {
     const { container } = render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
-    const pings = container.querySelectorAll(".animate-pulse-ping");
+    const pings = container.querySelectorAll(".animate-online-pulse");
     // All pulse rings must carry the motion-reduce gate
     for (const el of pings) {
       expect(el.className).toMatch(/motion-reduce:animate-none/);

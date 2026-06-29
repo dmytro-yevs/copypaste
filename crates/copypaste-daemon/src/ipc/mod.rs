@@ -292,6 +292,167 @@ use pasteboard::{
     lazy_backfill_thumbnail, map_content_type_to_uti, parse_image_thumb_dims, PasteboardError,
 };
 
+/// Validate `src_path` as a SQLCipher backup encrypted with `key`, then
+/// atomically swap it into `db_path`, returning the freshly-opened restored
+/// [`Database`]. This is the core of the `db_restore` IPC verb, extracted as a
+/// pure filesystem + SQLCipher routine (no IPC state) so it is unit-testable
+/// with temp directories (CopyPaste-8wbt / crh3.6).
+///
+/// Safety contract:
+/// * **Validation runs on a throwaway staging copy** — a wrong-key, plaintext,
+///   corrupt, or non-CopyPaste backup leaves the live files at `db_path`
+///   completely untouched and returns `Err`.
+/// * **The live DB is moved aside (never deleted) before the swap**, for BOTH
+///   `force` values, so a failure during the swap rolls the originals back.
+///   `force` only decides whether the aside safety copy
+///   (`clipboard.db.before-restore-<ts>`) is removed on success.
+/// * The caller must keep its existing `Database` handle until it installs the
+///   returned one: on a rolled-back failure that handle stays valid (its inode
+///   is renamed aside and back, never replaced).
+fn restore_database_file(
+    src_path: &std::path::Path,
+    db_path: &std::path::Path,
+    key: &[u8; 32],
+    force: bool,
+) -> Result<Database, String> {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    // Best-effort removal of a DB triple (main + WAL + SHM) sharing `base`.
+    let remove_triple = |base: &std::path::Path| {
+        for suffix in ["", "-wal", "-shm"] {
+            let mut p = base.as_os_str().to_os_string();
+            p.push(suffix);
+            let _ = std::fs::remove_file(std::path::PathBuf::from(p));
+        }
+    };
+
+    // ── PHASE A — validate on a throwaway staging copy. `db_path` is NOT
+    //    touched here, so any failure leaves the live DB fully intact.
+    let staging = {
+        let mut s = db_path.as_os_str().to_os_string();
+        s.push(format!(".restore-staging-{ts}"));
+        std::path::PathBuf::from(s)
+    };
+    remove_triple(&staging);
+    std::fs::copy(src_path, &staging).map_err(|e| {
+        format!(
+            "db_restore: failed to stage backup copy at {}: {e}",
+            staging.display()
+        )
+    })?;
+
+    // `open_no_auto_migrate` REJECTS plaintext/garbage files (no silent
+    // plaintext→SQLCipher migration), so only a genuine SQLCipher DB encrypted
+    // with `key` validates.
+    let validation = (|| -> Result<(), String> {
+        let probe = Database::open_no_auto_migrate(&staging, key).map_err(|e| {
+            format!(
+                "db_restore: backup did not open with the current key (wrong key, \
+                 corrupt, or not a CopyPaste database): {e}"
+            )
+        })?;
+        // integrity_check catches a backup that decrypts but is structurally
+        // corrupt / truncated.
+        let integrity: String = probe
+            .conn()
+            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+            .map_err(|e| format!("db_restore: integrity_check failed: {e}"))?;
+        if integrity != "ok" {
+            return Err(format!(
+                "db_restore: backup integrity_check returned '{integrity}' (corrupt backup)"
+            ));
+        }
+        // Schema sanity: a legitimate backup carries the clipboard schema.
+        probe
+            .conn()
+            .query_row("SELECT COUNT(*) FROM clipboard_items", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map_err(|e| {
+                format!(
+                    "db_restore: backup is missing the clipboard_items table — not a \
+                     CopyPaste database: {e}"
+                )
+            })?;
+        Ok(())
+    })();
+    remove_triple(&staging);
+    validation?;
+
+    // ── PHASE B — swap. Validation passed; every step is rollback-safe.
+    //
+    // Move the live DB aside (BOTH modes) so a late failure can roll back.
+    let mut moved: Vec<(std::path::PathBuf, std::path::PathBuf)> = Vec::new();
+    for suffix in ["", "-wal", "-shm"] {
+        let mut orig = db_path.as_os_str().to_os_string();
+        orig.push(suffix);
+        let orig = std::path::PathBuf::from(orig);
+        if orig.exists() {
+            let mut aside = db_path.as_os_str().to_os_string();
+            aside.push(format!("{suffix}.before-restore-{ts}"));
+            let aside = std::path::PathBuf::from(aside);
+            std::fs::rename(&orig, &aside)
+                .map_err(|e| format!("db_restore: could not move {} aside: {e}", orig.display()))?;
+            moved.push((orig, aside));
+        }
+    }
+
+    // Roll back: drop any partially-written restored file, then move every
+    // aside file back to its original path.
+    let rollback = |moved: &[(std::path::PathBuf, std::path::PathBuf)]| {
+        remove_triple(db_path);
+        for (orig, aside) in moved {
+            let _ = std::fs::rename(aside, orig);
+        }
+    };
+
+    // Place the validated backup.
+    if let Err(e) = std::fs::copy(src_path, db_path) {
+        let msg = format!("db_restore: failed to copy backup into place: {e}");
+        rollback(&moved);
+        return Err(msg);
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(db_path) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o600);
+            let _ = std::fs::set_permissions(db_path, perms);
+        }
+    }
+
+    let restored = match Database::open_no_auto_migrate(db_path, key) {
+        Ok(db) => db,
+        Err(e) => {
+            let msg = format!(
+                "db_restore: failed to open restored DB (rolled back to prior database): {e}"
+            );
+            rollback(&moved);
+            return Err(msg);
+        }
+    };
+
+    // Ensure the additive audit table exists (matches the normal startup path).
+    if let Err(e) = ensure_revoked_devices_table(restored.conn()) {
+        tracing::warn!("db_restore: ensure_revoked_devices_table failed: {e}");
+    }
+
+    // Success. With `force`, drop the aside safety copy; otherwise keep it as
+    // clipboard.db.before-restore-<ts>.
+    if force {
+        for (_orig, aside) in &moved {
+            let _ = std::fs::remove_file(aside);
+        }
+    }
+
+    Ok(restored)
+}
+
 pub struct IpcServer {
     db: Arc<Mutex<Database>>,
     /// Optional r2d2 connection pool for concurrent read-only queries (CopyPaste-j8p).
@@ -304,7 +465,14 @@ pub struct IpcServer {
     ///
     /// Falls back to `self.db` (write mutex) when `None` (degraded startup,
     /// tests that don't need pool concurrency, or pool exhaustion).
-    read_pool: Option<Arc<copypaste_core::SqlitePool>>,
+    ///
+    /// Wrapped in a `std::sync::Mutex` so `db_restore` can atomically rebuild
+    /// the pool against the restored database file (CopyPaste-crh3.2). The
+    /// pooled connections hold file descriptors to the *old* inode; after a
+    /// restore swaps the on-disk DB they must be replaced or every read keeps
+    /// serving pre-restore data. The lock is only ever held long enough to
+    /// `clone()` the inner `Arc` (no `.await` across the guard).
+    read_pool: std::sync::Mutex<Option<Arc<copypaste_core::SqlitePool>>>,
     /// Shared private-mode flag. When true, the clipboard monitor skips recording.
     private_mode: Arc<AtomicBool>,
     /// Monotonically-increasing epoch counter for the private-mode flag.
@@ -931,7 +1099,7 @@ impl IpcServer {
     ) -> Self {
         Self {
             db,
-            read_pool: None,
+            read_pool: std::sync::Mutex::new(None),
             private_mode,
             private_mode_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             local_device_id: None,
@@ -988,8 +1156,8 @@ impl IpcServer {
     /// Read-only handlers (`list`, `count`, `search`, `history_page`, `stats`)
     /// will acquire connections from `pool` instead of locking `self.db`,
     /// allowing concurrent reads without blocking the writer.
-    pub fn with_read_pool(mut self, pool: Arc<copypaste_core::SqlitePool>) -> Self {
-        self.read_pool = Some(pool);
+    pub fn with_read_pool(self, pool: Arc<copypaste_core::SqlitePool>) -> Self {
+        *self.read_pool.lock().unwrap_or_else(|p| p.into_inner()) = Some(pool);
         self
     }
 
@@ -2341,6 +2509,15 @@ impl IpcServer {
                 | "revoke_and_rotate"
                 // db_stats reads item count and file size — needs a ready DB.
                 | "db_stats"
+                // CopyPaste-crh3.7: db_backup and vacuum must be gated in
+                // degraded mode. Otherwise db_backup VACUUM INTOs the empty
+                // in-memory placeholder and returns {ok:true} for an EMPTY
+                // backup, and vacuum runs on the placeholder while reporting
+                // size_before/after read from the REAL on-disk file — both
+                // dangerously misleading. db_restore is intentionally NOT here:
+                // it is the recovery escape hatch and must work while degraded.
+                | "db_backup"
+                | "vacuum"
         )
     }
 
@@ -2967,7 +3144,11 @@ impl IpcServer {
                 }
             }
             "count" => {
-                let pool_opt = self.read_pool.clone();
+                let pool_opt = self
+                    .read_pool
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     if let Some(pool) = pool_opt {
@@ -3022,7 +3203,11 @@ impl IpcServer {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let pool_opt = self.read_pool.clone();
+                let pool_opt = self
+                    .read_pool
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     let kf = kind_filter.as_deref();
@@ -3332,7 +3517,11 @@ impl IpcServer {
                 }
             }
             "stats" => {
-                let pool_opt = self.read_pool.clone();
+                let pool_opt = self
+                    .read_pool
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     // Helper closure: compute (total, sensitive_count) from any
@@ -4173,7 +4362,11 @@ impl IpcServer {
                     .get("offset")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as usize;
-                let pool_opt = self.read_pool.clone();
+                let pool_opt = self
+                    .read_pool
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone();
                 let db_arc = self.db.clone();
                 let join = tokio::task::spawn_blocking(move || {
                     // Build the history page using a common helper that accepts
@@ -4703,7 +4896,35 @@ impl IpcServer {
                 // CopyPaste-i5b fix: clear the flag on explicit sign-out so
                 // get_sync_status stops reporting signed_in = true after logout.
                 self.cloud_signed_in.store(false, Ordering::SeqCst);
-                tracing::info!("cloud_sign_out: cloud_signed_in = false");
+
+                // CopyPaste-crh3.100: make sign-out PERSISTENT. Previously only
+                // the in-memory flag was cleared, so CloudConfig::from_env
+                // re-resolved the Keychain password on the next daemon start and
+                // silently re-authenticated — the user stayed signed in across a
+                // restart despite signing out. Delete the Keychain Supabase
+                // password AND clear the persisted email/password from
+                // config.json so credential resolution finds nothing. The
+                // Supabase project URL + anon key are deliberately KEPT so the
+                // user can sign back in without re-entering project settings.
+                if let Err(e) = crate::keychain::delete_supabase_password_from_keychain() {
+                    tracing::warn!(
+                        error = %e,
+                        "cloud_sign_out: failed to delete the Keychain Supabase password"
+                    );
+                }
+                let mut cfg = read_config();
+                cfg.supabase_email = None;
+                cfg.supabase_password = None;
+                if let Err(e) = write_config(&cfg) {
+                    tracing::warn!(
+                        error = %e,
+                        "cloud_sign_out: failed to clear persisted Supabase credentials"
+                    );
+                }
+                tracing::info!(
+                    "cloud_sign_out: cloud_signed_in = false; Keychain + persisted \
+                     Supabase credentials cleared"
+                );
                 Response::ok(req.id, serde_json::json!({"signed_in": false}))
             }
             // When cloud-sync is not compiled in, cloud_sign_in / cloud_sign_out
@@ -5690,14 +5911,26 @@ impl IpcServer {
             }
 
             // ------------------------------------------------------------------
-            // db_restore — replace the live DB with a backup (CopyPaste-8wbt)
+            // db_restore — replace the live DB with a backup (CopyPaste-8wbt,
+            // crh3.6, crh3.2)
             //
-            // Mirrors the `reset_database` safe-swap pattern:
-            //   1. Swap live handle to in-memory DB (quiesce writes).
-            //   2. Rename existing clipboard.db aside (or delete with force).
-            //   3. Copy the backup file into place.
-            //   4. Reopen with the daemon's current key.
-            //   5. Swap live handle to restored DB and mark ready.
+            // VALIDATE-then-SWAP. The previous implementation moved/deleted the
+            // live DB *before* checking the backup could be opened, so a
+            // wrong-key or corrupt backup permanently destroyed the user's
+            // history. The flow is now:
+            //   PHASE A (no live mutation): copy the backup to a throwaway
+            //     staging file, open it with the real device key, run an
+            //     integrity_check and a schema sanity check. Any failure aborts
+            //     with the live DB completely untouched.
+            //   PHASE B (only after A succeeds): quiesce, move the live DB aside
+            //     (BOTH force and non-force, so a late failure can roll back),
+            //     copy the validated backup into place, reopen. On any Phase-B
+            //     failure the aside files are moved back and the original DB is
+            //     reopened. `force` only controls whether the aside safety copy
+            //     is deleted on success.
+            // Degraded mode (crh3.6): the key is resolved from the Keychain, not
+            // the daemon's throwaway in-memory key. crh3.2: the r2d2 read pool is
+            // rebuilt against the restored file so reads stop serving stale data.
             // ------------------------------------------------------------------
             "db_restore" => {
                 let confirm = req
@@ -5739,108 +5972,78 @@ impl IpcServer {
                     .unwrap_or(false);
 
                 let db_path = crate::paths::db_path();
+
+                // Resolve the REAL device key for validating + opening the
+                // restored DB (CopyPaste-crh3.6). The daemon's in-memory key is
+                // a throwaway dummy when degraded (Keychain locked at startup),
+                // which can NEVER open a backup encrypted with the real device
+                // key. Mirror `reset_database`: load the key from the Keychain.
+                // If the daemon is degraded AND the Keychain is still
+                // unreachable, reject with ipc_not_ready and make NO filesystem
+                // change (the only safe outcome).
+                let restore_key: zeroize::Zeroizing<[u8; 32]> = {
+                    #[cfg(target_os = "macos")]
+                    {
+                        match crate::keychain::load_or_create() {
+                            Ok(kp) => kp.local_enc_key(),
+                            Err(e) => {
+                                if !self.ready.load(Ordering::Relaxed) {
+                                    tracing::warn!(
+                                        error = %e,
+                                        "db_restore: refusing — daemon is degraded and the \
+                                         Keychain key is unreachable; no filesystem change made"
+                                    );
+                                    return Response::err_with_code(
+                                        req.id,
+                                        ERR_CODE_IPC_NOT_READY,
+                                        ERR_IPC_NOT_READY,
+                                    );
+                                }
+                                tracing::warn!(
+                                    error = %e,
+                                    "db_restore: Keychain unavailable; validating with the \
+                                     daemon's current in-memory key"
+                                );
+                                zeroize::Zeroizing::new(**self.local_key)
+                            }
+                        }
+                    }
+                    #[cfg(not(target_os = "macos"))]
+                    {
+                        zeroize::Zeroizing::new(**self.local_key)
+                    }
+                };
+
                 tracing::warn!(
                     src_path = %src_path,
                     db_path = %db_path.display(),
                     force,
-                    "db_restore: replacing live database with backup"
+                    "db_restore: validating backup before any destructive change"
                 );
-
-                // Resolve the encryption key for the restored database.
-                // We use the daemon's current in-memory key — the backup MUST
-                // have been made while the same key was active. On macOS we
-                // could re-read from Keychain, but the in-memory key is always
-                // consistent with the current DB anyway.
-                let restore_key: zeroize::Zeroizing<[u8; 32]> =
-                    zeroize::Zeroizing::new(**self.local_key);
 
                 let db_arc = self.db.clone();
                 let src_for_task = src_path.clone();
                 let db_path_for_task = db_path.clone();
-                let join = tokio::task::spawn_blocking(move || {
+                // Clone the key for the blocking task; the outer `restore_key`
+                // is reused after the join to rebuild the read pool (crh3.2).
+                let key_for_task: zeroize::Zeroizing<[u8; 32]> =
+                    zeroize::Zeroizing::new(*restore_key);
+                let join = tokio::task::spawn_blocking(move || -> Result<(), String> {
+                    // Hold the write lock across validate+swap so no concurrent
+                    // write lands on the about-to-be-replaced handle. The old
+                    // handle is kept live until the swap succeeds: on a
+                    // rolled-back failure it remains valid (its inode is moved
+                    // aside and back, never replaced), so `guard` is always a
+                    // usable DB.
                     let mut guard = db_arc.blocking_lock();
-
-                    // 1. Quiesce: swap live handle to a throwaway in-memory DB
-                    //    so the on-disk files are no longer open/locked.
-                    *guard = Database::open_in_memory()
-                        .map_err(|e| format!("failed to open transient in-memory DB: {e}"))?;
-
-                    // 2. Move existing DB aside (or delete with --force).
-                    if db_path_for_task.exists() {
-                        if force {
-                            for suffix in ["", "-wal", "-shm"] {
-                                let mut p = db_path_for_task.clone().into_os_string();
-                                p.push(suffix);
-                                let p = std::path::PathBuf::from(p);
-                                match std::fs::remove_file(&p) {
-                                    Ok(()) => {}
-                                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                                    Err(e) => {
-                                        return Err(format!(
-                                            "db_restore: failed to delete {}: {e}",
-                                            p.display()
-                                        ));
-                                    }
-                                }
-                            }
-                        } else {
-                            let ts = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0);
-                            for suffix in ["", "-wal", "-shm"] {
-                                let mut src_p = db_path_for_task.clone().into_os_string();
-                                src_p.push(suffix);
-                                let src_p = std::path::PathBuf::from(src_p);
-                                if src_p.exists() {
-                                    let mut aside = db_path_for_task.clone().into_os_string();
-                                    aside.push(format!("{suffix}.before-restore-{ts}"));
-                                    let aside = std::path::PathBuf::from(aside);
-                                    std::fs::rename(&src_p, &aside).map_err(|e| {
-                                        format!(
-                                            "db_restore: could not rename {} aside: {e}",
-                                            src_p.display()
-                                        )
-                                    })?;
-                                }
-                            }
-                        }
-                    }
-
-                    // 3. Copy backup into place.
-                    std::fs::copy(&src_for_task, &db_path_for_task).map_err(|e| {
-                        format!(
-                            "db_restore: failed to copy {} to {}: {e}",
-                            src_for_task,
-                            db_path_for_task.display()
-                        )
-                    })?;
-
-                    // 4. Set restrictive permissions.
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        if let Ok(meta) = std::fs::metadata(&db_path_for_task) {
-                            let mut perms = meta.permissions();
-                            perms.set_mode(0o600);
-                            let _ = std::fs::set_permissions(&db_path_for_task, perms);
-                        }
-                    }
-
-                    // 5. Reopen with the daemon's key (validates the backup
-                    //    was encrypted with the same key).
-                    let restored = Database::open(&db_path_for_task, &restore_key)
-                        .map_err(|e| format!("db_restore: failed to open restored DB: {e}"))?;
-
-                    // 6. Ensure the additive audit table exists (matches
-                    //    normal startup path).
-                    if let Err(e) = ensure_revoked_devices_table(restored.conn()) {
-                        tracing::warn!("db_restore: ensure_revoked_devices_table failed: {e}");
-                    }
-
-                    // 7. Swap live handle to the restored DB.
+                    let restored = restore_database_file(
+                        std::path::Path::new(&src_for_task),
+                        &db_path_for_task,
+                        &key_for_task,
+                        force,
+                    )?;
                     *guard = restored;
-                    Ok::<(), String>(())
+                    Ok(())
                 })
                 .await;
 
@@ -5852,6 +6055,15 @@ impl IpcServer {
                             .degraded_reason
                             .lock()
                             .unwrap_or_else(|p| p.into_inner()) = None;
+                        // CopyPaste-crh3.2: the r2d2 read pool still holds file
+                        // descriptors to the OLD database inode. Rebuild it
+                        // against the restored file so reads stop serving
+                        // pre-restore data. On failure, drop to None — reads then
+                        // fall back to the write handle, which IS the restored DB.
+                        let rebuilt = copypaste_core::open_pool(&db_path, &restore_key, 4)
+                            .ok()
+                            .map(Arc::new);
+                        *self.read_pool.lock().unwrap_or_else(|p| p.into_inner()) = rebuilt;
                         tracing::warn!(
                             src_path = %src_path,
                             db_path = %db_path.display(),
@@ -5862,7 +6074,7 @@ impl IpcServer {
                     Ok(Err(msg)) => {
                         tracing::error!(
                             error = %msg,
-                            "db_restore: FAILED — daemon remains in prior state"
+                            "db_restore: FAILED — prior database preserved"
                         );
                         Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, msg)
                     }
@@ -15932,6 +16144,315 @@ mod tests {
             resp["ok"], false,
             "restore with missing file must be rejected: {resp}"
         );
+    }
+
+    /// CopyPaste-crh3.7 / crh3.57: db_backup and vacuum must be gated in
+    /// degraded mode (ready=false). Otherwise db_backup writes an EMPTY backup
+    /// of the in-memory placeholder and returns ok:true, and vacuum reports
+    /// misleading size stats read from the real on-disk file. Both must return
+    /// ipc_not_ready and db_backup must create NO file.
+    #[tokio::test]
+    async fn db_backup_and_vacuum_gated_in_degraded_mode() {
+        let dir = safe_tempdir();
+        let sock = dir.path().join("degraded_backup.sock");
+        start_not_ready_server(&sock).await;
+
+        // db_backup → ipc_not_ready, and no file at dest_path.
+        let dest = dir.path().join("should_not_be_created.db.enc");
+        let backup_req = format!(
+            "{{\"id\":\"dg1\",\"method\":\"db_backup\",\"params\":{{\"dest_path\":\"{}\"}}}}\n",
+            dest.to_string_lossy()
+        );
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream.write_all(backup_req.as_bytes()).await.unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let resp: serde_json::Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(
+            resp["ok"], false,
+            "db_backup must be rejected when degraded: {resp}"
+        );
+        assert_eq!(
+            resp["error_code"].as_str().unwrap_or_default(),
+            "ipc_not_ready",
+            "db_backup must return ipc_not_ready when degraded: {resp}"
+        );
+        assert!(
+            !dest.exists(),
+            "degraded db_backup must NOT create a backup file"
+        );
+        drop(stream);
+
+        // vacuum → ipc_not_ready.
+        let mut stream2 = UnixStream::connect(&sock).await.unwrap();
+        stream2
+            .write_all(b"{\"id\":\"dg2\",\"method\":\"vacuum\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut lines2 = BufReader::new(&mut stream2).lines();
+        let resp2: serde_json::Value =
+            serde_json::from_str(&lines2.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(
+            resp2["ok"], false,
+            "vacuum must be rejected when degraded: {resp2}"
+        );
+        assert_eq!(
+            resp2["error_code"].as_str().unwrap_or_default(),
+            "ipc_not_ready",
+            "vacuum must return ipc_not_ready when degraded: {resp2}"
+        );
+    }
+
+    // ── CopyPaste-8wbt / crh3.6 / crh3.2: db_restore validate-then-swap ────────
+    //
+    // These drive the pure `restore_database_file` routine directly against real
+    // on-disk SQLCipher databases in a temp dir, so they are deterministic and
+    // independent of the Keychain / IPC harness.
+
+    /// Create a real on-disk SQLCipher DB at `path` (clipboard schema via
+    /// `Database::open`) and stamp a `_restore_marker` row with `tag` so two
+    /// databases can be told apart. Checkpoints the WAL so a plain file copy of
+    /// `path` is self-contained.
+    fn make_marked_db(path: &std::path::Path, key: &[u8; 32], tag: &str) {
+        let db = Database::open(path, key).expect("open marked db");
+        db.conn()
+            .execute_batch(&format!(
+                "CREATE TABLE IF NOT EXISTS _restore_marker(tag TEXT); \
+                 DELETE FROM _restore_marker; \
+                 INSERT INTO _restore_marker(tag) VALUES ('{tag}'); \
+                 PRAGMA wal_checkpoint(TRUNCATE);"
+            ))
+            .unwrap();
+    }
+
+    /// Read the marker stamped by [`make_marked_db`], opening `path` with `key`.
+    /// Returns `None` if the DB cannot be opened with that key.
+    fn read_marker(path: &std::path::Path, key: &[u8; 32]) -> Option<String> {
+        let db = Database::open_no_auto_migrate(path, key).ok()?;
+        db.conn()
+            .query_row("SELECT tag FROM _restore_marker LIMIT 1", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .ok()
+    }
+
+    /// True if any `clipboard.db.before-restore-*` aside copy exists next to
+    /// `db_path`.
+    fn aside_exists(db_path: &std::path::Path) -> bool {
+        let name = db_path.file_name().unwrap().to_string_lossy().to_string();
+        let needle = format!("{name}.before-restore-");
+        std::fs::read_dir(db_path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().starts_with(&needle))
+    }
+
+    /// True if any `clipboard.db.restore-staging-*` artifact was left behind.
+    fn staging_exists(db_path: &std::path::Path) -> bool {
+        let name = db_path.file_name().unwrap().to_string_lossy().to_string();
+        let needle = format!("{name}.restore-staging-");
+        std::fs::read_dir(db_path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().starts_with(&needle))
+    }
+
+    #[test]
+    fn restore_valid_backup_swaps_data_and_keeps_aside_when_not_forced() {
+        let dir = safe_tempdir();
+        let key = [0x11u8; 32];
+        let db_path = dir.path().join("clipboard.db");
+        let backup = dir.path().join("backup.db");
+        make_marked_db(&db_path, &key, "LIVE");
+        make_marked_db(&backup, &key, "BACKUP");
+
+        let restored = restore_database_file(&backup, &db_path, &key, false)
+            .expect("valid backup must restore");
+        drop(restored);
+        assert_eq!(read_marker(&db_path, &key).as_deref(), Some("BACKUP"));
+        assert!(
+            aside_exists(&db_path),
+            "non-force restore must keep the prior DB as an aside safety copy"
+        );
+        assert!(
+            !staging_exists(&db_path),
+            "staging copy must be cleaned up after a successful restore"
+        );
+    }
+
+    #[test]
+    fn restore_valid_backup_force_removes_aside() {
+        let dir = safe_tempdir();
+        let key = [0x22u8; 32];
+        let db_path = dir.path().join("clipboard.db");
+        let backup = dir.path().join("backup.db");
+        make_marked_db(&db_path, &key, "LIVE");
+        make_marked_db(&backup, &key, "BACKUP");
+
+        restore_database_file(&backup, &db_path, &key, true).expect("restore");
+        assert_eq!(read_marker(&db_path, &key).as_deref(), Some("BACKUP"));
+        assert!(
+            !aside_exists(&db_path),
+            "force restore must delete the aside safety copy"
+        );
+    }
+
+    #[test]
+    fn restore_wrong_key_backup_leaves_live_db_intact() {
+        // CopyPaste-8wbt: the core P0 — a wrong-key backup must NEVER touch the
+        // live database.
+        let dir = safe_tempdir();
+        let live_key = [0x33u8; 32];
+        let other_key = [0x44u8; 32];
+        let db_path = dir.path().join("clipboard.db");
+        let backup = dir.path().join("backup.db");
+        make_marked_db(&db_path, &live_key, "LIVE");
+        make_marked_db(&backup, &other_key, "OTHER");
+
+        let err = restore_database_file(&backup, &db_path, &live_key, true)
+            .map(|_| ())
+            .expect_err("wrong-key backup must be rejected");
+        assert!(err.contains("db_restore"), "error must be tagged: {err}");
+        assert_eq!(
+            read_marker(&db_path, &live_key).as_deref(),
+            Some("LIVE"),
+            "live DB must remain readable with its original key"
+        );
+        assert!(
+            !aside_exists(&db_path),
+            "failed validation must not move the live DB aside"
+        );
+        assert!(
+            !staging_exists(&db_path),
+            "failed validation must clean up the staging copy"
+        );
+    }
+
+    #[test]
+    fn restore_corrupt_backup_leaves_live_db_intact() {
+        let dir = safe_tempdir();
+        let key = [0x55u8; 32];
+        let db_path = dir.path().join("clipboard.db");
+        let backup = dir.path().join("garbage.db");
+        make_marked_db(&db_path, &key, "LIVE");
+        std::fs::write(&backup, b"this is not a sqlite database at all").unwrap();
+
+        let err = restore_database_file(&backup, &db_path, &key, false)
+            .map(|_| ())
+            .expect_err("garbage backup must be rejected");
+        assert!(err.contains("db_restore"), "error must be tagged: {err}");
+        assert_eq!(read_marker(&db_path, &key).as_deref(), Some("LIVE"));
+        assert!(!aside_exists(&db_path));
+    }
+
+    #[test]
+    fn restore_wrong_schema_backup_is_rejected() {
+        // A real SQLCipher DB with the correct key but WITHOUT the clipboard
+        // schema must be rejected (it is not a CopyPaste database).
+        let dir = safe_tempdir();
+        let key = [0x66u8; 32];
+        let db_path = dir.path().join("clipboard.db");
+        let backup = dir.path().join("foreign.db");
+        make_marked_db(&db_path, &key, "LIVE");
+        {
+            let foreign = Database::open(&backup, &key).unwrap();
+            foreign
+                .conn()
+                .execute_batch(
+                    "DROP TABLE IF EXISTS clipboard_items; PRAGMA wal_checkpoint(TRUNCATE);",
+                )
+                .unwrap();
+        }
+        let err = restore_database_file(&backup, &db_path, &key, false)
+            .map(|_| ())
+            .expect_err("non-CopyPaste DB must be rejected");
+        assert!(
+            err.contains("clipboard_items"),
+            "error must name the missing clipboard table: {err}"
+        );
+        assert_eq!(read_marker(&db_path, &key).as_deref(), Some("LIVE"));
+    }
+
+    #[test]
+    fn restore_into_empty_path_succeeds_for_degraded_recovery() {
+        // crh3.6: degraded recovery — no live DB on disk yet. A valid backup must
+        // still restore, with nothing to move aside.
+        let dir = safe_tempdir();
+        let key = [0x77u8; 32];
+        let db_path = dir.path().join("clipboard.db");
+        let backup = dir.path().join("backup.db");
+        make_marked_db(&backup, &key, "BACKUP");
+        assert!(!db_path.exists());
+
+        restore_database_file(&backup, &db_path, &key, false).expect("restore into empty path");
+        assert_eq!(read_marker(&db_path, &key).as_deref(), Some("BACKUP"));
+        assert!(
+            !aside_exists(&db_path),
+            "nothing to move aside when there was no live DB"
+        );
+    }
+
+    #[test]
+    fn restore_rebuilt_pool_sees_restored_data_while_stale_pool_does_not() {
+        // CopyPaste-crh3.2 / crh3.54: after a restore swaps the on-disk inode, a
+        // read pool opened BEFORE the restore keeps serving stale data through
+        // its cached file descriptors; only a pool rebuilt against the restored
+        // file returns the restored contents. This is exactly why the db_restore
+        // handler rebuilds `self.read_pool`.
+        let dir = safe_tempdir();
+        let key = [0x88u8; 32];
+        let db_path = dir.path().join("clipboard.db");
+        let backup = dir.path().join("backup.db");
+
+        // Live DB starts at tag "A"; snapshot it as the backup at that point.
+        make_marked_db(&db_path, &key, "A");
+        std::fs::copy(&db_path, &backup).unwrap();
+        // Advance the live DB to tag "B" (post-backup mutation), checkpointed.
+        {
+            let live = Database::open_no_auto_migrate(&db_path, &key).unwrap();
+            live.conn()
+                .execute_batch(
+                    "UPDATE _restore_marker SET tag = 'B'; PRAGMA wal_checkpoint(TRUNCATE);",
+                )
+                .unwrap();
+        }
+
+        // A pool opened against the live "B" DB BEFORE the restore.
+        let stale_pool = copypaste_core::open_pool(&db_path, &key, 2).unwrap();
+        let stale_before: String = stale_pool
+            .get()
+            .unwrap()
+            .query_row("SELECT tag FROM _restore_marker LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            stale_before, "B",
+            "sanity: pool sees live data before restore"
+        );
+
+        // Restore from the "A" backup.
+        restore_database_file(&backup, &db_path, &key, false).expect("restore");
+
+        // The stale pool keeps serving "B" from its cached FDs — the crh3.2 bug
+        // the handler must work around by rebuilding the pool.
+        let stale_after: String = stale_pool
+            .get()
+            .unwrap()
+            .query_row("SELECT tag FROM _restore_marker LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(
+            stale_after, "B",
+            "stale pool keeps serving pre-restore data (crh3.2 root cause)"
+        );
+
+        // A freshly rebuilt pool (what the handler installs after restore) sees
+        // the restored "A" data.
+        let fresh_pool = copypaste_core::open_pool(&db_path, &key, 2).unwrap();
+        let fresh_tag: String = fresh_pool
+            .get()
+            .unwrap()
+            .query_row("SELECT tag FROM _restore_marker LIMIT 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fresh_tag, "A", "rebuilt pool sees the restored data");
     }
 
     // ── CopyPaste-44rq.19: watch_subscribe push-streaming tests ────────────────

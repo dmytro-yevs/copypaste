@@ -8,6 +8,7 @@ import { Panel } from "../../../components/Panel";
 import { InfoPopover } from "../components/InfoPopover";
 import { StatusRow } from "../components/StatusRow";
 import { CloudAccountMismatchBanner } from "../components/CloudAccountMismatchBanner";
+import { LimitsMsg } from "../components/LimitsMsg";
 import { formatSyncTime } from "../../../lib/time";
 import type { SyncStatus, AppSettings } from "../../../lib/ipc";
 
@@ -70,17 +71,6 @@ export type SyncTabProps = {
    */
   localSupabaseAccountId?: string | null;
 };
-
-// bdac.106: branch on .ok (typed signal) — no string comparison.
-function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, { ok: boolean; message: string } | null> }) {
-  const entry = limitsMsg[field];
-  if (!entry) return null;
-  return (
-    <span className={`text-[11px] ${entry.ok ? "text-ide-success" : "text-ide-danger"}`}>
-      {entry.message}
-    </span>
-  );
-}
 
 export function SyncTab({
   offline,

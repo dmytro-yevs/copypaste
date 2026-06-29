@@ -342,6 +342,24 @@ impl Db {
         Ok(())
     }
 
+    /// Idempotent / monotonic variant of [`set_next_sync_id`]: advances the
+    /// counter to `next` only if `next` is greater than the current value
+    /// (`MAX(current, next)`). Used by the deferred-write retry path
+    /// (CopyPaste-crh3.70) where items may be retried out of insertion order:
+    /// a failed item 1 (counter 2) must not clobber a successful item 2
+    /// (counter 3) when it finally retries.
+    pub fn set_next_sync_id_at_least(
+        &self,
+        device_id: &str,
+        next: i64,
+    ) -> Result<(), rusqlite::Error> {
+        self.conn.execute(
+            "UPDATE devices SET next_sync_id = MAX(next_sync_id, ?2) WHERE device_id = ?1",
+            params![device_id, next],
+        )?;
+        Ok(())
+    }
+
     /// Delete a device and (via `ON DELETE CASCADE`) its tokens + inbox.
     pub fn delete_device(&self, device_id: &str) -> Result<(), rusqlite::Error> {
         self.conn.execute(

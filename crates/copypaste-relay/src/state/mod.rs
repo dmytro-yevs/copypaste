@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, Notify};
 
 use crate::db::Db;
 use crate::error::RelayError;
@@ -183,17 +183,30 @@ pub struct RelayStore {
     /// blocking/feature-unification rationale.
     pub(self) db: Db,
 
-    /// Bounded queue of DB writes that failed transiently during
-    /// `push_item_decoded` and are waiting to be retried (CopyPaste-k4py).
+    /// Bounded queue of DB writes enqueued by `push_item_decoded`
+    /// (CopyPaste-k4py / CopyPaste-crh3.70).
     ///
-    /// When a `push_item_decoded` DB write fails, the write parameters are
-    /// serialised into a `PendingDbWrite` and enqueued here
-    /// instead of returning `Err`. The HTTP handler then returns 201 (the item
-    /// IS in the in-memory inbox) and the background
-    /// `crate::retry::run_push_retry` task drains this queue, replaying each
-    /// write with exponential backoff. Bounded at
-    /// `PUSH_RETRY_QUEUE_CAP` to prevent unbounded growth.
+    /// Every `push_item_decoded` call enqueues its DB write here instead of
+    /// performing it synchronously under the store mutex. The background
+    /// `crate::retry::run_push_retry` task drains the queue, woken immediately
+    /// by `db_write_notify` (or within `PUSH_RETRY_POLL_MS` as a safety net).
+    /// This keeps the push handler's lock-hold to in-memory work only —
+    /// SQLite I/O never happens while the store mutex is held by a push
+    /// request.
+    ///
+    /// Bounded at `PUSH_RETRY_QUEUE_CAP`. When the queue is full, the DB
+    /// write is logged at WARN and discarded — the item remains in the
+    /// in-memory inbox for the process lifetime but will not survive a restart.
     pub push_retry_queue: PushRetryQueue,
+
+    /// Wake signal for the DB-write task (CopyPaste-crh3.70).
+    ///
+    /// `push_item_decoded` calls `notify_one()` after every enqueue so the
+    /// retry task drains the queue within microseconds rather than waiting for
+    /// the `PUSH_RETRY_POLL_MS` fallback interval. Stored as `Arc<Notify>` so
+    /// the retry task can clone it once at start-up and hold it OUTSIDE the
+    /// store mutex — allowing it to `.await` the notification without a lock.
+    pub(crate) db_write_notify: Arc<Notify>,
 }
 
 /// Map a [`Tier`] to its persisted string form.
@@ -280,6 +293,8 @@ impl RelayStore {
             sync_notifiers: HashMap::new(),
             db,
             push_retry_queue: PushRetryQueue::new(),
+            // CopyPaste-crh3.70: wake signal for the deferred DB-write task.
+            db_write_notify: Arc::new(Notify::new()),
         };
         store.rehydrate_from_db()?;
         Ok(store)

@@ -45,16 +45,6 @@ import {
 // Re-exported for backward compat with consumers that import it from this path.
 export type { LoadState } from "../../../lib/loadState";
 
-// Capture fields that are not (yet) in the AppSettings interface in
-// lib/ipc.ts. set_config accepts them; we attach them via this typed shape so
-// every patch round-trips the current privacy state without using `any`.
-export type PrivacyPatch = {
-  collect_public_ip?: boolean | null;
-  paste_as_plain_text?: boolean | null;
-  excluded_app_bundle_ids?: string[] | null;
-  lan_visibility?: boolean | null;
-};
-
 // v0.5.3: inputs use global base styles from index.css; only width/padding overrides needed here
 export const INPUT_CLS = [
   "w-64 px-2.5 py-1.5 text-[13px]",
@@ -546,7 +536,7 @@ export function useSettingsState() {
 
   // Build the full AppSettings patch for set_config, merging current config
   // with any updated limits fields. Slider values are already raw bytes/counts/secs.
-  function buildConfigPatch(overrides: Partial<AppSettings> & PrivacyPatch): AppSettings & PrivacyPatch {
+  function buildConfigPatch(overrides: Partial<AppSettings>): AppSettings {
     return {
       // j9xj (PG-30): include master sync_enabled in every patch so it is
       // preserved across other config saves. Daemon ignores unknown fields.
@@ -589,7 +579,7 @@ export function useSettingsState() {
     if (loadState !== "ready") return;
     try {
       await api.setConfig(
-        buildConfigPatch({ excluded_app_bundle_ids: next }) as unknown as Parameters<typeof api.setConfig>[0],
+        buildConfigPatch({ excluded_app_bundle_ids: next }),
       );
     } catch {
       setExcludedApps(prev);
@@ -604,7 +594,7 @@ export function useSettingsState() {
     if (loadState !== "ready") return;
     try {
       await api.setConfig(
-        buildConfigPatch({ excluded_app_bundle_ids: next }) as unknown as Parameters<typeof api.setConfig>[0],
+        buildConfigPatch({ excluded_app_bundle_ids: next }),
       );
     } catch {
       setExcludedApps(prev);
@@ -620,7 +610,7 @@ export function useSettingsState() {
     onRevert?: () => void,
   ) {
     try {
-      await api.setConfig(buildConfigPatch(patch) as unknown as Parameters<typeof api.setConfig>[0]);
+      await api.setConfig(buildConfigPatch(patch));
     } catch (err) {
       const msg = ipcErrorMessage(err, "Save failed");
       showLimitsMsg(field, msg, 4000, false);
@@ -788,7 +778,7 @@ export function useSettingsState() {
     setConfig((c) => ({ ...c, p2p_enabled: val }));
     try {
       await api.setConfig(
-        buildConfigPatch({ p2p_enabled: val }) as unknown as Parameters<typeof api.setConfig>[0],
+        buildConfigPatch({ p2p_enabled: val }),
       );
       // The daemon only reads p2p_enabled at startup — restart so the new
       // value takes effect immediately. Show a transient status message and

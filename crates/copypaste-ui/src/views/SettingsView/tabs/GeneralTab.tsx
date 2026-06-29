@@ -6,17 +6,10 @@ import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
 import { RestartDaemonButton } from "../../../components/RestartDaemonButton";
 import { InfoPopover } from "../components/InfoPopover";
+import { LimitsMsg } from "../components/LimitsMsg";
 import { api } from "../../../lib/ipc";
 import type { AppSettings } from "../../../lib/ipc";
 import type { UIPrefs } from "../../../store";
-
-// PrivacyPatch mirrors the type in SettingsView.tsx — kept in sync manually.
-type PrivacyPatch = {
-  collect_public_ip?: boolean | null;
-  paste_as_plain_text?: boolean | null;
-  excluded_app_bundle_ids?: string[] | null;
-  lan_visibility?: boolean | null;
-};
 
 export type GeneralTabProps = {
   offline: boolean;
@@ -39,7 +32,7 @@ export type GeneralTabProps = {
   setNewExcludedApp: (v: string) => void;
   daemonVersion: string | null;
   limitsMsg: Record<string, { ok: boolean; message: string } | null>;
-  buildConfigPatch: (overrides: Partial<AppSettings> & PrivacyPatch) => AppSettings & PrivacyPatch;
+  buildConfigPatch: (overrides: Partial<AppSettings>) => AppSettings;
   handleSyncEnabledToggle: (v: boolean) => void;
   handlePrivateMode: (v: boolean) => void;
   handleAllowScreenshots: (v: boolean) => void;
@@ -47,17 +40,6 @@ export type GeneralTabProps = {
   removeExcludedApp: (bundleId: string) => void;
   setReloadKey: React.Dispatch<React.SetStateAction<number>>;
 };
-
-// bdac.106: branch on .ok (typed signal) — no string comparison.
-function LimitsMsg({ field, limitsMsg }: { field: string; limitsMsg: Record<string, { ok: boolean; message: string } | null> }) {
-  const entry = limitsMsg[field];
-  if (!entry) return null;
-  return (
-    <span className={`text-[11px] ${entry.ok ? "text-ide-success" : "text-ide-danger"}`}>
-      {entry.message}
-    </span>
-  );
-}
 
 export function GeneralTab({
   offline,
@@ -151,7 +133,7 @@ export function GeneralTab({
               // before "ready" would push default values over the real config.
               setPrefs({ playSoundOnCopy: v });
               if (loadState === "ready") {
-                void api.setConfig(buildConfigPatch({ sound_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
+                void api.setConfig(buildConfigPatch({ sound_on_copy: v })).catch(() => {
                   setPrefs({ playSoundOnCopy: !v });
                 });
               }
@@ -175,7 +157,7 @@ export function GeneralTab({
                 // P0 fix: same guard as sound_on_copy above.
                 setPrefs({ notifyOnCopy: v });
                 if (loadState === "ready") {
-                  void api.setConfig(buildConfigPatch({ notify_on_copy: v }) as unknown as Parameters<typeof api.setConfig>[0]).catch(() => {
+                  void api.setConfig(buildConfigPatch({ notify_on_copy: v })).catch(() => {
                     setPrefs({ notifyOnCopy: !v });
                   });
                 }
@@ -219,7 +201,7 @@ export function GeneralTab({
               setCollectPublicIp(v);
               if (loadState === "ready") {
                 void api
-                  .setConfig(buildConfigPatch({ collect_public_ip: v }) as unknown as Parameters<typeof api.setConfig>[0])
+                  .setConfig(buildConfigPatch({ collect_public_ip: v }))
                   .catch(() => setCollectPublicIp(!v));
               }
             }}
@@ -239,7 +221,7 @@ export function GeneralTab({
               setPasteAsPlainText(v);
               if (loadState === "ready") {
                 void api
-                  .setConfig(buildConfigPatch({ paste_as_plain_text: v }) as unknown as Parameters<typeof api.setConfig>[0])
+                  .setConfig(buildConfigPatch({ paste_as_plain_text: v }))
                   .catch(() => setPasteAsPlainText(!v));
               }
             }}

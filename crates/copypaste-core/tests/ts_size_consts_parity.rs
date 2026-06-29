@@ -19,9 +19,9 @@
 //! CROSS-LINK: the companion TS test lives at
 //!   `crates/copypaste-ui/src/views/SettingsView/lib/settingsSliders.parity.test.ts`
 
-use copypaste_core::config::MAX_TEXT_SIZE_BYTES;
-use copypaste_core::config::MAX_IMAGE_SIZE_BYTES;
 use copypaste_core::config::MAX_FILE_SIZE_BYTES;
+use copypaste_core::config::MAX_IMAGE_SIZE_BYTES;
+use copypaste_core::config::MAX_TEXT_SIZE_BYTES;
 use copypaste_core::config::STORAGE_QUOTA_BYTES;
 
 /// Literals copied verbatim from settingsSliders.ts — these are the EXPECTED values.
@@ -40,8 +40,7 @@ const TS_DEFAULT_STORAGE_QUOTA_BYTES: u64 = 10 * 1024 * 1024 * 1024;
 #[test]
 fn max_text_size_bytes_matches_ts_default() {
     assert_eq!(
-        MAX_TEXT_SIZE_BYTES,
-        TS_DEFAULT_MAX_TEXT_BYTES,
+        MAX_TEXT_SIZE_BYTES, TS_DEFAULT_MAX_TEXT_BYTES,
         "Rust MAX_TEXT_SIZE_BYTES changed — update DEFAULT_MAX_TEXT_BYTES in \
          crates/copypaste-ui/src/views/SettingsView/lib/settingsSliders.ts"
     );
@@ -50,8 +49,7 @@ fn max_text_size_bytes_matches_ts_default() {
 #[test]
 fn max_image_size_bytes_matches_ts_default() {
     assert_eq!(
-        MAX_IMAGE_SIZE_BYTES,
-        TS_DEFAULT_MAX_IMAGE_BYTES,
+        MAX_IMAGE_SIZE_BYTES, TS_DEFAULT_MAX_IMAGE_BYTES,
         "Rust MAX_IMAGE_SIZE_BYTES changed — update DEFAULT_MAX_IMAGE_BYTES in \
          crates/copypaste-ui/src/views/SettingsView/lib/settingsSliders.ts"
     );
@@ -60,8 +58,7 @@ fn max_image_size_bytes_matches_ts_default() {
 #[test]
 fn max_file_size_bytes_matches_ts_default() {
     assert_eq!(
-        MAX_FILE_SIZE_BYTES,
-        TS_DEFAULT_MAX_FILE_BYTES,
+        MAX_FILE_SIZE_BYTES, TS_DEFAULT_MAX_FILE_BYTES,
         "Rust MAX_FILE_SIZE_BYTES changed — update DEFAULT_MAX_FILE_BYTES in \
          crates/copypaste-ui/src/views/SettingsView/lib/settingsSliders.ts"
     );
@@ -70,8 +67,7 @@ fn max_file_size_bytes_matches_ts_default() {
 #[test]
 fn storage_quota_bytes_matches_ts_default() {
     assert_eq!(
-        STORAGE_QUOTA_BYTES,
-        TS_DEFAULT_STORAGE_QUOTA_BYTES,
+        STORAGE_QUOTA_BYTES, TS_DEFAULT_STORAGE_QUOTA_BYTES,
         "Rust STORAGE_QUOTA_BYTES changed — update DEFAULT_STORAGE_QUOTA_BYTES in \
          crates/copypaste-ui/src/views/SettingsView/lib/settingsSliders.ts"
     );

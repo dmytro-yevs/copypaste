@@ -206,8 +206,8 @@ export default {
         // §MO-2 Page panel
         "panel-enter-right":   "panelSlideInRight 240ms cubic-bezier(.16,1,.3,1) both",
         "panel-exit-left":     "panelSlideOutLeft 240ms cubic-bezier(.16,1,.3,1) both",
-        // §MO-4 Copy-flash
-        "copy-flash":          "copyFlash 90ms cubic-bezier(.2,0,.2,1) both",
+        // §MO-4 Copy-flash — 180ms (--mo-base) to match CSS primitive + JS timer (crh3.20)
+        "copy-flash":          "copyFlash 180ms cubic-bezier(.2,0,.2,1) both",
         // §MO-5 Online pulse (ONE-SHOT, not infinite)
         "online-pulse":        "onlinePulse 2s cubic-bezier(.2,0,.2,1) forwards",
         // §MO-3 Row press

@@ -271,10 +271,18 @@ describe("W-C1-E  feature preservation across all skins", () => {
         expect(buttons.length).toBe(5);
       });
 
-      it("renders accent-tint radial overlay", () => {
+      it(skin === "quiet"
+        // crh3.14: Quiet is a flat skin; the accent-tint blob must be absent.
+        ? "does NOT render accent-tint radial overlay (flat skin)"
+        // Classic and Vapor: non-flat skins render the accent-tint glow.
+        : "renders accent-tint radial overlay", () => {
         setSkin(skin);
         const { container } = render(<Sidebar />);
-        expect(container.querySelector("[data-accent-tint]")).not.toBeNull();
+        if (skin === "quiet") {
+          expect(container.querySelector("[data-accent-tint]")).toBeNull();
+        } else {
+          expect(container.querySelector("[data-accent-tint]")).not.toBeNull();
+        }
       });
 
       it("has drag region", () => {

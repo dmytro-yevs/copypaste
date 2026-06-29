@@ -47,7 +47,7 @@ export function StatusDot({
   return (
     // relative wrapper so the pulse ring can be absolutely positioned behind the dot
     // status-ping: adds a CSS ::after expanding ring (styleguide §presence) in addition to
-    // the Tailwind animate-pulse-ping span kept for test-compatibility.
+    // the animate-online-pulse span (MO-5 one-shot, crh3.18 — replaces animate-pulse-ping).
     <span
       className={[
         "relative inline-flex shrink-0 items-center justify-center w-2 h-2",
@@ -58,7 +58,7 @@ export function StatusDot({
       {online && (
         <span
           aria-hidden="true"
-          className="absolute inset-0 animate-pulse-ping rounded-full bg-ide-success/50 motion-reduce:animate-none"
+          className="absolute inset-0 animate-online-pulse rounded-full bg-ide-success/50 motion-reduce:animate-none"
         />
       )}
       <span

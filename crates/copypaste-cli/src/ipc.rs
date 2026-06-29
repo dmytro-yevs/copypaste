@@ -22,6 +22,27 @@ const MIGRATION_BACKOFF_INIT_MS: u64 = 250;
 /// growth so the longest single wait is ~2 s even when many retries remain.
 const MIGRATION_BACKOFF_CAP_MS: u64 = 2_000;
 
+// CopyPaste-crh3.10: retry parameters for `ipc_not_ready` (daemon startup race).
+//
+// A daemon that just started returns this code until its DB and key-store are
+// ready. Three retries with a fixed 500 ms sleep (~1.5 s total) is enough to
+// bridge a normal startup; the cap is kept deliberately low because a
+// *persistently* degraded daemon returns the code indefinitely and the CLI
+// must fail promptly rather than loop forever.
+
+/// Maximum number of retry attempts for an `ipc_not_ready` response.
+///
+/// Capped lower than [`MIGRATION_MAX_RETRIES`]: a degraded daemon returns
+/// `ipc_not_ready` indefinitely, so we must fail promptly. Three retries
+/// (~1.5 s total) bridges a normal daemon startup race.
+const IPC_NOT_READY_MAX_RETRIES: u32 = 3;
+/// Fixed backoff delay in milliseconds between `ipc_not_ready` retries.
+///
+/// Intentionally non-exponential: daemon startup is a one-shot event so
+/// growing the delay adds no benefit. Fixed 500 ms gives three shots in
+/// ~1.5 s before returning an error.
+const IPC_NOT_READY_BACKOFF_MS: u64 = 500;
+
 /// Opaque counter for generating unique request ids within a process run.
 // Used by next_id(); suppress dead_code: this is intentional public API for
 // callers that want monotonic ids rather than the hardcoded "1" used today.
@@ -275,6 +296,11 @@ impl IpcClient {
     /// (CopyPaste-liaz: `process::exit` bypasses all Drop impls.)
     pub fn call(&mut self, request: &Value) -> Result<Response> {
         let mut delay_ms = MIGRATION_BACKOFF_INIT_MS;
+        // CopyPaste-crh3.10: separate counter for ipc_not_ready retries — kept
+        // independent of `attempt` so the two codes can coexist in edge cases
+        // (e.g. migration starts, then daemon restarts) without either counter
+        // interfering with the other's cap.
+        let mut ipc_not_ready_count: u32 = 0;
         for attempt in 0..=MIGRATION_MAX_RETRIES {
             let resp = self.call_once(request)?;
 
@@ -302,6 +328,30 @@ impl IpcClient {
                     return Err(anyhow::anyhow!(
                         "error [migration_in_progress]: daemon key-rotation is still in \
                          progress after {MIGRATION_MAX_RETRIES} retries — \
+                         please try again in a few seconds"
+                    ));
+                }
+                // CopyPaste-crh3.10: short bounded retry for daemon startup race.
+                // Fixed backoff (non-exponential) because startup is a one-shot
+                // event; cap is tight so a persistently-degraded daemon still
+                // fails promptly (~1.5 s total before error).
+                Some(ErrorCode::IpcNotReady) if ipc_not_ready_count < IPC_NOT_READY_MAX_RETRIES => {
+                    ipc_not_ready_count += 1;
+                    eprintln!(
+                        "daemon not yet ready — retrying in {IPC_NOT_READY_BACKOFF_MS}ms \
+                         (attempt {ipc_not_ready_count}/{IPC_NOT_READY_MAX_RETRIES})"
+                    );
+                    std::thread::sleep(Duration::from_millis(IPC_NOT_READY_BACKOFF_MS));
+                    if let Err(e) = self.reconnect() {
+                        return Err(e.context("failed to reconnect for ipc_not_ready retry"));
+                    }
+                }
+                Some(ErrorCode::IpcNotReady) => {
+                    // Retries exhausted. Fail promptly — a degraded daemon returns
+                    // ipc_not_ready indefinitely; we must not loop forever.
+                    return Err(anyhow::anyhow!(
+                        "error [ipc_not_ready]: daemon is not ready after \
+                         {IPC_NOT_READY_MAX_RETRIES} retries — \
                          please try again in a few seconds"
                     ));
                 }
@@ -542,6 +592,106 @@ mod tests {
             "expected ok=true after migration retry, got: {resp:?}"
         );
         assert_eq!(connection_count.load(Ordering::SeqCst), 2);
+    }
+
+    /// CopyPaste-crh3.10: call() must retry on ipc_not_ready and succeed when
+    /// the daemon becomes ready on the next attempt.
+    ///
+    /// Mock: first connection returns ipc_not_ready, second returns ok.
+    /// Verifies that call() retries transparently and returns the success
+    /// response (1 sleep of IPC_NOT_READY_BACKOFF_MS — ~500 ms).
+    #[test]
+    fn call_retries_on_ipc_not_ready_and_succeeds() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc as SArc;
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("ipc_not_ready_retry.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let connection_count = SArc::new(AtomicUsize::new(0));
+        let cc = SArc::clone(&connection_count);
+        thread::spawn(move || {
+            // Accept two sequential connections.
+            for _ in 0..2 {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let mut buf = String::new();
+                    let mut reader = BufReader::new(&stream);
+                    reader.read_line(&mut buf).unwrap();
+                    let n = cc.fetch_add(1, Ordering::SeqCst);
+                    let reply = if n == 0 {
+                        // First attempt: daemon still booting.
+                        r#"{"id":"1","ok":false,"error":"daemon is booting","error_code":"ipc_not_ready"}"#
+                    } else {
+                        // Second attempt: ready.
+                        r#"{"id":"1","ok":true,"data":{"status":"running"}}"#
+                    };
+                    stream.write_all(reply.as_bytes()).unwrap();
+                    stream.write_all(b"\n").unwrap();
+                }
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let mut client = IpcClient::connect(&sock).unwrap();
+        let req = serde_json::json!({"id": "1", "method": "status", "params": {}});
+        let resp = client.call(&req).unwrap();
+        assert!(
+            resp.ok,
+            "expected ok=true after ipc_not_ready retry, got: {resp:?}"
+        );
+        assert_eq!(connection_count.load(Ordering::SeqCst), 2);
+    }
+
+    /// CopyPaste-crh3.10: call() must fail promptly when a persistently-degraded
+    /// daemon keeps returning ipc_not_ready beyond IPC_NOT_READY_MAX_RETRIES.
+    ///
+    /// Mock serves IPC_NOT_READY_MAX_RETRIES + 1 connections (initial +
+    /// IPC_NOT_READY_MAX_RETRIES reconnects), all returning ipc_not_ready.
+    /// Verifies that call() stops retrying and returns Err.
+    ///
+    /// NOTE: this test sleeps IPC_NOT_READY_MAX_RETRIES × IPC_NOT_READY_BACKOFF_MS
+    /// (~1.5 s) due to real fixed-backoff sleeps in the retry loop.
+    #[test]
+    fn call_exhausts_ipc_not_ready_retries_and_fails() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc as SArc;
+
+        let dir = tempdir().unwrap();
+        let sock = dir.path().join("ipc_not_ready_exhaust.sock");
+        let listener = UnixListener::bind(&sock).unwrap();
+        let connection_count = SArc::new(AtomicUsize::new(0));
+        let cc = SArc::clone(&connection_count);
+        // Total connections = initial + IPC_NOT_READY_MAX_RETRIES reconnects.
+        let total = (IPC_NOT_READY_MAX_RETRIES + 1) as usize;
+        thread::spawn(move || {
+            for _ in 0..total {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let mut buf = String::new();
+                    let mut reader = BufReader::new(&stream);
+                    reader.read_line(&mut buf).unwrap();
+                    cc.fetch_add(1, Ordering::SeqCst);
+                    stream
+                        .write_all(
+                            b"{\"id\":\"1\",\"ok\":false,\"error\":\"daemon is booting\",\"error_code\":\"ipc_not_ready\"}\n",
+                        )
+                        .unwrap();
+                }
+            }
+        });
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let mut client = IpcClient::connect(&sock).unwrap();
+        let req = serde_json::json!({"id": "1", "method": "status", "params": {}});
+        let err = client.call(&req).unwrap_err();
+        assert!(
+            err.to_string().contains("ipc_not_ready") || err.to_string().contains("not ready"),
+            "expected ipc_not_ready exhaustion error, got: {err}"
+        );
+        assert_eq!(
+            connection_count.load(Ordering::SeqCst),
+            total,
+            "expected exactly {total} connection(s) before giving up"
+        );
     }
 
     /// FEACLI-8: a response carrying an error_code that is NOT in the

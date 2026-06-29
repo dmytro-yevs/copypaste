@@ -279,60 +279,65 @@ impl super::RelayStore {
         // End the mutable borrow of `inbox` before touching `self.db` (disjoint
         // fields, but keep the sequence explicit).
 
-        // R1b write-through (after all in-memory mutations so the persisted
-        // state mirrors memory): insert the new item, prune the same oldest
-        // items in SQL, and persist the advanced per-device id counter.
+        // CopyPaste-crh3.70: move the large SQLite payload write (`insert_item`
+        // + `delete_oldest_items`) OUTSIDE the store-mutex critical section.
         //
-        // CopyPaste-k4py: transient DB failures no longer propagate as 500.
-        // The item is already in the in-memory inbox (visible to pollers and
-        // SSE streams), so the push has logically succeeded. On a write
-        // failure we enqueue a `PendingDbWrite` and return Ok — the
-        // background `retry::run_push_retry` task will replay the write with
-        // exponential backoff. If the queue is full (persistent outage), the
-        // failure is logged at WARN and the item remains in memory for the
-        // process lifetime but will not survive a restart — same as the
-        // pre-fix behaviour, but only as a last resort rather than always.
-        // Ciphertext (`content_b64`) is written verbatim and never logged.
-        let db_result = self
-            .db
-            .insert_item(
-                device_id,
-                id,
-                &content_type,
-                &content_b64, // Arc<str> derefs to &str
-                wall_time,
-                inserted_at_unix,
-            )
-            .and_then(|()| {
-                if pruned > 0 {
-                    self.db.delete_oldest_items(device_id, pruned)
-                } else {
-                    Ok(())
-                }
-            })
-            .and_then(|()| self.db.set_next_sync_id(device_id, next_counter));
+        // Previously all three DB calls (insert + optional delete_oldest +
+        // set_next_sync_id) ran synchronously while the `std::sync::Mutex`
+        // was held, blocking the OS thread (and every concurrent Axum worker
+        // waiting for the lock) for the duration of the disk I/O. With a 10 MiB
+        // ciphertext, `insert_item` alone can take tens of milliseconds —
+        // serialising all concurrent pushes behind a single write.
+        //
+        // Fix: `insert_item` and `delete_oldest_items` are enqueued to the
+        // retry task (fast: a VecDeque push under the mutex + an atomic notify).
+        // `set_next_sync_id` is kept synchronous because it is a tiny metadata
+        // UPDATE (no payload) and is needed to keep the on-disk ID watermark
+        // up-to-date across restarts (tested by `next_sync_id_watermark_is_seeded_from_db_on_restart`).
+        // If that synchronous write fails (transient SQLite hiccup), the
+        // `next_sync_id` field in `PendingDbWrite` lets the retry task
+        // fix it (via MAX semantics — see `db_set_next_sync_id_retry`).
+        //
+        // The item is already in the in-memory inbox and will be delivered to
+        // pollers and SSE streams regardless of the deferred write outcome.
+        // Durability for the ciphertext arrives within µs (immediate retry-task
+        // wake via `db_write_notify`).
 
-        if let Err(db_err) = db_result {
-            use super::persistence::PendingDbWrite;
+        // Synchronous, fast: advances the ID watermark in DB (< 1 µs typically).
+        if let Err(db_err) = self.db.set_next_sync_id(device_id, next_counter) {
             tracing::warn!(
                 device_id,
                 item_id = id,
                 error = %db_err,
-                "CopyPaste-k4py: relay push DB write failed; enqueuing for retry"
+                "CopyPaste-crh3.70: sync_id DB write failed; retry task will repair it"
             );
-            self.push_retry_queue.enqueue(PendingDbWrite {
-                device_id: device_id.to_string(),
-                item_id: id,
-                content_type: content_type.clone(),
-                content_b64: std::sync::Arc::clone(&content_b64),
-                wall_time,
-                inserted_at_unix,
-                pruned_count: pruned,
-                next_sync_id: next_counter,
-                attempts: 0,
-            });
-            // Return Ok — item is in memory, retry will durabilise it.
+            // Non-fatal: retry task re-sets via MAX semantics (see PendingDbWrite.next_sync_id).
         }
+
+        // Deferred (potentially large): enqueue insert_item + delete_oldest.
+        // The retry task processes this outside the store mutex and wakes
+        // immediately via `db_write_notify`.
+        use super::persistence::PendingDbWrite;
+        let accepted = self.push_retry_queue.enqueue(PendingDbWrite {
+            device_id: device_id.to_string(),
+            item_id: id,
+            content_type: content_type.clone(),
+            content_b64: std::sync::Arc::clone(&content_b64),
+            wall_time,
+            inserted_at_unix,
+            pruned_count: pruned,
+            next_sync_id: next_counter,
+            attempts: 0,
+        });
+        if !accepted {
+            tracing::warn!(
+                device_id,
+                item_id = id,
+                "CopyPaste-crh3.70: DB-write queue full; item not durable (in-memory only)"
+            );
+        }
+        // Wake the retry task immediately — non-blocking signal.
+        self.db_write_notify.notify_one();
 
         // Increment Prometheus counter — items_total tracks all accepted
         // pushes regardless of later eviction (counter semantics).
