@@ -69,6 +69,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
@@ -318,6 +320,10 @@ internal fun HistoryRow(
     val masked = detectedSensitive && maskSensitive && !revealed
     val canBlur = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
     val maskString = stringResource(R.string.sensitive_preview_mask)
+    // CopyPaste-crh3.23: a11y description used to REPLACE the blurred plaintext in
+    // the semantic tree so TalkBack never announces the real secret (Modifier.blur
+    // is render-only and does not redact semantics).
+    val sensitiveHiddenDesc = stringResource(R.string.sensitive_hidden_a11y)
     val display = when {
         masked && !canBlur -> maskString
         item.snippet.isBlank() -> stringResource(R.string.empty_history)
@@ -819,8 +825,18 @@ internal fun HistoryRow(
                             // §10/P1#10: blur the real text while masked (tap reveals). On
                             // API < 31 `display` is the bullet mask instead (blur is a no-op
                             // there and must not leak the text), so blur only when canBlur.
+                            // CopyPaste-crh3.23: blur is render-only — it does NOT redact the
+                            // Compose semantic tree, so TalkBack would read the real
+                            // password/card number. clearAndSetSemantics replaces the node's
+                            // semantics with a non-sensitive description while masked; after
+                            // reveal (masked=false) the modifier is bare and the real text is
+                            // announced again.
                             modifier = if (masked && canBlur)
-                                Modifier.blur(6.dp, BlurredEdgeTreatment.Unbounded)
+                                Modifier
+                                    .blur(6.dp, BlurredEdgeTreatment.Unbounded)
+                                    .clearAndSetSemantics {
+                                        contentDescription = sensitiveHiddenDesc
+                                    }
                             else
                                 Modifier,
                         )

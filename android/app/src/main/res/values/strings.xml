@@ -209,6 +209,9 @@
 
     <!-- History — sensitive marker -->
     <string name="sensitive_preview_mask">••••••</string>
+    <!-- CopyPaste-crh3.23: TalkBack announcement for a blurred sensitive row, so
+         the underlying plaintext is never read aloud from the a11y tree. -->
+    <string name="sensitive_hidden_a11y">Sensitive content hidden — tap to reveal</string>
     <string name="sensitive_badge_label">Sensitive</string>
     <string name="cd_sensitive_item">Sensitive content — preview hidden</string>
     <string name="sensitive_tap_hint">Sensitive — use Copy action</string>
