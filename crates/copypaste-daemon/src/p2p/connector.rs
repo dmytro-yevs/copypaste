@@ -260,7 +260,7 @@ pub(super) fn dialable_peers_from_path(path: &std::path::Path) -> Vec<DialablePe
 /// its (now-unreferenced) sink and exits when the stream closes — no duplicate
 /// fan-out. We additionally re-check `contains_key` immediately before dialing
 /// to skip a peer the accept loop just connected.
-#[allow(clippy::too_many_arguments)] // RTT + event params pushed count over 9
+#[allow(clippy::too_many_arguments)] // RTT + event + public_ip params pushed count over 9
 pub(super) async fn peer_connector_loop(
     transport: Arc<PeerTransport>,
     peer_sinks: PeerSinks,
@@ -280,6 +280,9 @@ pub(super) async fn peer_connector_loop(
     peer_rtt_ms: PeerRttMs,
     // Broadcast channel for peer connect/disconnect events.
     peer_event_tx: broadcast::Sender<PeerEvent>,
+    // crh3.109: STUN-resolved public IP cache. Read once per new outbound
+    // connection so DeviceInfo carries the current WAN address of THIS device.
+    public_ip_cache: Arc<tokio::sync::RwLock<Option<String>>>,
 ) {
     tracing::debug!(%own_fp, "P2P peer connector loop running");
     let peers_path = crate::ipc::peers_file_path();
@@ -415,6 +418,23 @@ pub(super) async fn peer_connector_loop(
                         // Stamp first/last sync times for this peer (once per
                         // established connection — see `stamp_peer_sync`).
                         stamp_peer_sync(&peers_path, &peer.fingerprint);
+
+                        // crh3.109: advertise our own current device metadata
+                        // to the peer so it can refresh its stale pairing-time
+                        // snapshot. `try_send` is non-blocking and fire-and-forget.
+                        {
+                            let meta =
+                                crate::device_meta::get_cached(crate::ipc::BUILD_VERSION);
+                            let own_public_ip =
+                                public_ip_cache.try_read().ok().and_then(|g| g.clone());
+                            let frame = PeerFrame::Control(ControlMsg::DeviceInfo {
+                                model: meta.device_model.clone(),
+                                os_version: meta.os_version.clone(),
+                                app_version: Some(meta.app_version.clone()),
+                                public_ip: own_public_ip,
+                            });
+                            let _ = cleanup_tx.try_send(frame);
+                        }
 
                         // Clone the sink sender for the catch-up replay BEFORE the
                         // drainer task takes ownership of `cleanup_tx`. The drainer

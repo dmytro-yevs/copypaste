@@ -187,6 +187,43 @@ pub(super) async fn run_peer_connection_framed<S>(
                                     peer_rtt_ms.lock().await.insert(peer_fp.clone(), rtt_ms);
                                 }
                             }
+                            Ok(PeerFrame::Control(ControlMsg::DeviceInfo {
+                                ref model,
+                                ref os_version,
+                                ref app_version,
+                                ref public_ip,
+                            })) => {
+                                // crh3.109: refresh the peer's stale metadata
+                                // captured at pairing time.  Best-effort: a
+                                // write failure is logged but never disrupts sync.
+                                let peers_path = crate::ipc::peers_file_path();
+                                match crate::peers::update_peer_device_info(
+                                    &peers_path,
+                                    &peer_fp,
+                                    model.as_deref(),
+                                    os_version.as_deref(),
+                                    app_version.as_deref(),
+                                    public_ip.as_deref(),
+                                ) {
+                                    Ok(true) => {
+                                        tracing::debug!(
+                                            peer = %peer_fp,
+                                            model = ?model,
+                                            os_version = ?os_version,
+                                            app_version = ?app_version,
+                                            "peer device-info refreshed (crh3.109)"
+                                        );
+                                    }
+                                    Ok(false) => {} // Nothing changed — no log noise.
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            peer = %peer_fp,
+                                            error = %e,
+                                            "failed to persist peer device-info refresh (crh3.109)"
+                                        );
+                                    }
+                                }
+                            }
                             Err(e) => {
                                 tracing::warn!("failed to deserialise frame from peer: {e}");
                             }

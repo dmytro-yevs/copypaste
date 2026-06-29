@@ -217,6 +217,70 @@ pub fn update_peer_address(
     save_peers(path, &peers)
 }
 
+/// Refresh the volatile device metadata for a paired peer from the peer's
+/// current in-band `ControlMsg::DeviceInfo` announcement.
+///
+/// Called on every successful authenticated session (both accept and connector
+/// paths) when the peer sends a `DeviceInfo` control frame. Only `Some` arguments
+/// overwrite the stored value — `None` means "no update for this field". This lets
+/// a peer that did not collect a particular field (e.g. STUN not yet resolved)
+/// avoid blanking an existing stored value.
+///
+/// Returns `true` when at least one field changed and the file was rewritten,
+/// `false` when nothing changed (no I/O). No-op (returns `Ok(false)`) when no
+/// matching peer record exists.
+pub fn update_peer_device_info(
+    path: &Path,
+    fingerprint: &str,
+    model: Option<&str>,
+    os_version: Option<&str>,
+    app_version: Option<&str>,
+    public_ip: Option<&str>,
+) -> anyhow::Result<bool> {
+    let target = canonical_fp(fingerprint);
+    let mut peers = load_peers(path);
+    let Some(peer) = peers
+        .iter_mut()
+        .find(|p| canonical_fp(&p.fingerprint) == target)
+    else {
+        return Ok(false);
+    };
+
+    let mut changed = false;
+
+    // Only write a field when the caller supplied Some AND the stored value
+    // differs — avoids a spurious write when the peer re-announces identical info.
+    if let Some(m) = model {
+        if peer.model.as_deref() != Some(m) {
+            peer.model = Some(m.to_string());
+            changed = true;
+        }
+    }
+    if let Some(os) = os_version {
+        if peer.os_version.as_deref() != Some(os) {
+            peer.os_version = Some(os.to_string());
+            changed = true;
+        }
+    }
+    if let Some(av) = app_version {
+        if peer.app_version.as_deref() != Some(av) {
+            peer.app_version = Some(av.to_string());
+            changed = true;
+        }
+    }
+    if let Some(ip) = public_ip {
+        if peer.public_ip.as_deref() != Some(ip) {
+            peer.public_ip = Some(ip.to_string());
+            changed = true;
+        }
+    }
+
+    if changed {
+        save_peers(path, &peers)?;
+    }
+    Ok(changed)
+}
+
 /// Stamp first/last sync timestamps for the peer identified by `fingerprint`.
 ///
 /// Loads `peers.json`, finds the record whose fingerprint canonicalises to the
@@ -910,6 +974,106 @@ mod tests {
             Some(fake_pf_b64.as_str()),
             "password_file_b64 must survive resave when password_file_enc is None"
         );
+    }
+
+    // ─── CopyPaste-crh3.109: peer device-info refresh ───────────────────────
+
+    /// `update_peer_device_info` with new values must update model/os/app/ip
+    /// in the stored record and return `true`; a second call with the SAME
+    /// values must be a no-op and return `false`.
+    #[test]
+    fn refresh_peer_device_info_updates_stored_metadata() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        save_peers(&path, &[make_device("aa:bb:cc:dd", "Alice")]).unwrap();
+
+        // Initial call — all fields change → returns true.
+        let changed = update_peer_device_info(
+            &path,
+            "aa:bb:cc:dd",
+            Some("MacBook Pro"),
+            Some("macOS 15.6"),
+            Some("1.2.3"),
+            Some("203.0.113.42"),
+        )
+        .expect("update_peer_device_info must not error");
+        assert!(changed, "first call with new metadata must return true");
+
+        let loaded = load_peers(&path);
+        assert_eq!(loaded[0].model.as_deref(), Some("MacBook Pro"));
+        assert_eq!(loaded[0].os_version.as_deref(), Some("macOS 15.6"));
+        assert_eq!(loaded[0].app_version.as_deref(), Some("1.2.3"));
+        assert_eq!(loaded[0].public_ip.as_deref(), Some("203.0.113.42"));
+        // Unrelated fields must be preserved verbatim.
+        assert_eq!(loaded[0].name, "Alice");
+        assert_eq!(loaded[0].address.as_deref(), Some("127.0.0.1:4242"));
+
+        // Second call with identical values → no-op, returns false.
+        let changed2 = update_peer_device_info(
+            &path,
+            "aa:bb:cc:dd",
+            Some("MacBook Pro"),
+            Some("macOS 15.6"),
+            Some("1.2.3"),
+            Some("203.0.113.42"),
+        )
+        .expect("update_peer_device_info must not error on repeat");
+        assert!(!changed2, "second call with same metadata must return false");
+    }
+
+    /// `update_peer_device_info` on an unknown fingerprint is a no-op (Ok(false)).
+    #[test]
+    fn refresh_peer_device_info_no_match_is_noop() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        save_peers(&path, &[make_device("aa:bb:cc:dd", "Alice")]).unwrap();
+
+        let changed = update_peer_device_info(
+            &path,
+            "deadbeef",
+            Some("Mac mini"),
+            None,
+            None,
+            None,
+        )
+        .expect("update_peer_device_info must not error on no-match");
+        assert!(!changed, "no-match must return false without modifying the file");
+
+        let loaded = load_peers(&path);
+        assert_eq!(loaded[0].model, None, "unmatched peer must be unmodified");
+    }
+
+    /// `update_peer_device_info` with `None` values must not overwrite
+    /// previously-stored non-None metadata (partial update — only `Some`
+    /// arguments replace the stored value).
+    #[test]
+    fn refresh_peer_device_info_none_args_do_not_overwrite() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("peers.json");
+        let mut device = make_device("aa:bb:cc:dd", "Alice");
+        device.model = Some("Mac mini".to_string());
+        device.os_version = Some("macOS 14.0".to_string());
+        device.app_version = Some("0.9.0".to_string());
+        device.public_ip = Some("1.2.3.4".to_string());
+        save_peers(&path, &[device]).unwrap();
+
+        // Pass None for model and os_version — they must be preserved.
+        let changed = update_peer_device_info(
+            &path,
+            "aa:bb:cc:dd",
+            None,             // do not overwrite model
+            None,             // do not overwrite os_version
+            Some("1.0.0"),   // update app_version
+            None,             // do not overwrite public_ip
+        )
+        .unwrap();
+        assert!(changed, "app_version changed → must return true");
+
+        let loaded = load_peers(&path);
+        assert_eq!(loaded[0].model.as_deref(), Some("Mac mini"), "model must be preserved");
+        assert_eq!(loaded[0].os_version.as_deref(), Some("macOS 14.0"), "os_version must be preserved");
+        assert_eq!(loaded[0].app_version.as_deref(), Some("1.0.0"), "app_version must be updated");
+        assert_eq!(loaded[0].public_ip.as_deref(), Some("1.2.3.4"), "public_ip must be preserved");
     }
 
     // ─── CopyPaste-yw2k: supabase_account_id field ──────────────────────────

@@ -292,6 +292,32 @@ pub enum ControlMsg {
         /// Echo of the nonce from the corresponding [`ControlMsg::Ping`].
         nonce: u64,
     },
+    /// Device-identity announcement sent by each side immediately after an
+    /// authenticated mTLS session is established (crh3.109).
+    ///
+    /// Allows paired peers to refresh the stale metadata (model / OS / app
+    /// version / public IP) that was captured once at pairing time and never
+    /// updated — without requiring a new pairing or a separate bootstrap round
+    /// trip.
+    ///
+    /// All fields are `Option`: a peer that has not yet collected a value (e.g.
+    /// STUN not resolved, or an older build that lacks the field) simply omits
+    /// it.  The recipient updates only the `Some` fields; `None` is a no-op for
+    /// that field so existing stored values are never blanked by an incomplete
+    /// announcement.
+    ///
+    /// Old peers that do not recognise this variant will fail to deserialise
+    /// the frame and log a warning — this is harmless and expected.
+    DeviceInfo {
+        /// Friendly hardware model (e.g. `"MacBook Air"`).
+        model: Option<String>,
+        /// OS name + version (e.g. `"macOS 15.5"`).
+        os_version: Option<String>,
+        /// App / daemon version string.
+        app_version: Option<String>,
+        /// Sender's STUN-resolved public / WAN IPv4 address.
+        public_ip: Option<String>,
+    },
 }
 
 /// A frame that may carry either a clipboard-item payload or a control signal.
@@ -660,5 +686,44 @@ mod tests {
         } else {
             panic!("expected Message::Items");
         }
+    }
+
+    // ── crh3.109: DeviceInfo control message ─────────────────────────────────
+
+    /// `ControlMsg::DeviceInfo` must survive a JSON encode/decode round-trip
+    /// through `PeerFrame` with all optional fields populated.
+    #[test]
+    fn device_info_control_msg_round_trips_full() {
+        let frame = PeerFrame::Control(ControlMsg::DeviceInfo {
+            model: Some("MacBook Air".to_string()),
+            os_version: Some("macOS 15.5".to_string()),
+            app_version: Some("0.3.1+abc1234".to_string()),
+            public_ip: Some("203.0.113.42".to_string()),
+        });
+        let json = serde_json::to_string(&frame).expect("must serialize");
+        // The tag field must be `"device_info"` (snake_case rename).
+        assert!(
+            json.contains("\"device_info\""),
+            "serialised DeviceInfo must carry the snake_case tag: {json}"
+        );
+        let decoded: PeerFrame = serde_json::from_str(&json).expect("must deserialize");
+        assert_eq!(
+            decoded, frame,
+            "DeviceInfo must survive a JSON round-trip"
+        );
+    }
+
+    /// `ControlMsg::DeviceInfo` with all-`None` fields must also round-trip.
+    #[test]
+    fn device_info_control_msg_round_trips_all_none() {
+        let frame = PeerFrame::Control(ControlMsg::DeviceInfo {
+            model: None,
+            os_version: None,
+            app_version: None,
+            public_ip: None,
+        });
+        let json = serde_json::to_string(&frame).expect("must serialize");
+        let decoded: PeerFrame = serde_json::from_str(&json).expect("must deserialize");
+        assert_eq!(decoded, frame, "all-None DeviceInfo must round-trip");
     }
 }

@@ -8,7 +8,7 @@ use tokio::sync::{broadcast, mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 
 use copypaste_p2p::transport::{DeviceFingerprint, PairedPeers, PeerTransport};
-use copypaste_sync::protocol::{PeerFrame, WireItem};
+use copypaste_sync::protocol::{ControlMsg, PeerFrame, WireItem};
 
 use super::fanout::push_catchup;
 use super::framed_pump::run_peer_connection;
@@ -25,7 +25,7 @@ use super::{CatchupProvider, PeerEvent, PeerRttMs, PeerSinks};
 ///
 /// The per-peer sender is stored in `peer_sinks` (keyed by the peer's cert
 /// fingerprint) so the outbound fanout loop can deliver outgoing items.
-#[allow(clippy::too_many_arguments)] // RTT + event params pushed count over 8
+#[allow(clippy::too_many_arguments)] // RTT + event + public_ip params pushed count over 8
 pub(super) async fn accept_loop(
     listener: TcpListener,
     shutdown: CancellationToken,
@@ -41,6 +41,9 @@ pub(super) async fn accept_loop(
     peer_rtt_ms: PeerRttMs,
     // Broadcast channel for peer connect/disconnect events.
     peer_event_tx: broadcast::Sender<PeerEvent>,
+    // crh3.109: STUN-resolved public IP cache. Read once per new connection
+    // so DeviceInfo carries the current WAN address of THIS device.
+    public_ip_cache: std::sync::Arc<tokio::sync::RwLock<Option<String>>>,
 ) {
     // fix/p2p-c-review #3: the previous `"unknown".parse().unwrap()` fallback
     // panicked because `"unknown"` is not a valid `SocketAddr`. `local_addr`
@@ -105,6 +108,32 @@ pub(super) async fn accept_loop(
                         // Stamp first/last sync times for this peer (once per
                         // established connection — see `stamp_peer_sync`).
                         stamp_peer_sync(&crate::ipc::peers_file_path(), &peer_fp);
+
+                        // crh3.109: advertise our own current device metadata
+                        // to the peer so it can refresh its stale pairing-time
+                        // snapshot. `try_send` is non-blocking and fire-and-forget
+                        // — a transient full channel simply skips this announcement
+                        // (the peer retains its previous metadata, which is the
+                        // pre-existing behaviour). `get_cached` may call blocking
+                        // child processes on the first invocation; after daemon
+                        // startup `warm_cache` is already called so this is a
+                        // wait-free OnceLock read in steady state.
+                        {
+                            let meta =
+                                crate::device_meta::get_cached(crate::ipc::BUILD_VERSION);
+                            let own_public_ip = public_ip_cache.try_read().ok().and_then(|g| g.clone());
+                            let frame = PeerFrame::Control(ControlMsg::DeviceInfo {
+                                model: meta.device_model.clone(),
+                                os_version: meta.os_version.clone(),
+                                app_version: Some(meta.app_version.clone()),
+                                public_ip: own_public_ip,
+                            });
+                            // cleanup_tx is the per-connection sink that the
+                            // framed pump drains.  The pump has not started yet
+                            // (it is spawned below), so the channel has capacity
+                            // to accept this single frame immediately.
+                            let _ = cleanup_tx.try_send(frame);
+                        }
 
                         // Clone the sink sender for the catch-up replay BEFORE the
                         // drainer task takes ownership of `cleanup_tx`. The drainer

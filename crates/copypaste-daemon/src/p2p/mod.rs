@@ -489,6 +489,9 @@ pub async fn start_p2p(
         let accept_peers = peers.clone();
         let accept_rtt_ms = Arc::clone(&peer_rtt_ms);
         let accept_event_tx = peer_event_tx.clone();
+        // crh3.109: share the STUN cache so each inbound connection can
+        // advertise our current public IP in the DeviceInfo control frame.
+        let accept_public_ip = Arc::clone(&public_ip_cache);
         tokio::spawn(async move {
             listener::accept_loop(
                 listener,
@@ -500,6 +503,7 @@ pub async fn start_p2p(
                 accept_peers,
                 accept_rtt_ms,
                 accept_event_tx,
+                accept_public_ip,
             )
             .await;
         });
@@ -555,6 +559,9 @@ pub async fn start_p2p(
         let connector_peers = peers.clone();
         let connector_rtt_ms = Arc::clone(&peer_rtt_ms);
         let connector_event_tx = peer_event_tx.clone();
+        // crh3.109: share the STUN cache so each outbound connection can
+        // advertise our current public IP in the DeviceInfo control frame.
+        let connector_public_ip = Arc::clone(&public_ip_cache);
         tokio::spawn(async move {
             connector::peer_connector_loop(
                 transport,
@@ -567,6 +574,7 @@ pub async fn start_p2p(
                 connector_peers,
                 connector_rtt_ms,
                 connector_event_tx,
+                connector_public_ip,
             )
             .await;
         });
@@ -1043,6 +1051,7 @@ mod tests {
                     PairedPeers::new(),
                     rtt_ms,
                     event_tx,
+                    Arc::new(tokio::sync::RwLock::new(None)), // crh3.109: no public IP in test
                 )
                 .await;
             })
@@ -1135,6 +1144,7 @@ mod tests {
                     PairedPeers::new(),
                     rtt_ms,
                     event_tx,
+                    Arc::new(tokio::sync::RwLock::new(None)), // crh3.109: no public IP in test
                 )
                 .await;
             })
