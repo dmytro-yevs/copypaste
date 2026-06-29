@@ -33,6 +33,15 @@ class SyncManager(
     private val token: String,
     private val settings: Settings? = null,
 ) {
+    /**
+     * CopyPaste-1t38: single-flight guard for [drainOutboundMutationQueue]. The
+     * periodic FgsSyncLoop drain and the UI mutation-hook drain can fire close
+     * together; this prevents two concurrent drains from double-pushing the same
+     * records (still idempotent via LWW, but wasteful) and from racing on the
+     * applyAcks re-read/commit.
+     */
+    private val draining = java.util.concurrent.atomic.AtomicBoolean(false)
+
     companion object {
         private const val TAG = "SyncManager"
 
@@ -1092,10 +1101,43 @@ class SyncManager(
             return@withContext 0
         }
 
-        val pending = OutboundMutationQueue.peekQueue(context)
-        if (pending.isEmpty()) return@withContext 0
+        // CopyPaste-1t38: single-flight. If a drain is already running (periodic
+        // tick + UI hook racing), skip — the in-flight drain covers the same queue.
+        if (!draining.compareAndSet(false, true)) {
+            Log.d(TAG, "drainOutboundMutationQueue: drain already in flight — skipping")
+            return@withContext 0
+        }
+        try {
+            drainOutboundMutationQueueInner(context, s)
+        } finally {
+            draining.set(false)
+        }
+    }
 
-        Log.d(TAG, "drainOutboundMutationQueue: draining ${pending.size} pending mutation(s)")
+    private suspend fun drainOutboundMutationQueueInner(
+        context: android.content.Context,
+        s: Settings,
+    ): Int {
+        val pending = OutboundMutationQueue.peekQueue(context)
+        if (pending.isEmpty()) return 0
+
+        // CopyPaste-yaip: the set of transports a record must reach before it can
+        // be dropped. p2p is "enabled" only when P2P sync is on AND at least one
+        // peer is paired; SyncManager cannot ack p2p itself — a record needing p2p
+        // stays pending until FgsSyncLoop's dial acks it. relay/Supabase "enabled"
+        // means CONFIGURED: a transient resolve/auth failure leaves the record
+        // pending for that transport (retried next drain), it is never dropped.
+        val enabled = OutboundMutationQueue.enabledTransports(
+            relay = s.isRelayConfigured,
+            supabase = s.isSupabaseConfigured,
+            p2p = s.p2pSyncEnabled && s.pairedPeers.isNotEmpty(),
+        )
+        if (enabled.isEmpty()) {
+            Log.d(TAG, "drainOutboundMutationQueue: no transport enabled — leaving ${pending.size} record(s) queued")
+            return 0
+        }
+
+        Log.d(TAG, "drainOutboundMutationQueue: draining ${pending.size} pending mutation(s); enabled=$enabled")
 
         // CopyPaste-yaip: resolve Supabase context once outside the per-record loop.
         // resolveSyncContext is ~0 ms on the happy path (cached JWT + cached sync key).
@@ -1111,7 +1153,17 @@ class SyncManager(
             null
         }
 
-        val delivered = mutableSetOf<Pair<String, Long>>()
+        // CopyPaste-yaip: per-record, per-transport acknowledgements. A record is
+        // NOT dropped just because ONE transport succeeded — applyAcks removes it
+        // only once every enabled transport has acked. We attempt a transport only
+        // when it is enabled AND not already acked for this record (cheaper retries).
+        val newAcks = mutableMapOf<Pair<String, Long>, MutableSet<String>>()
+        fun ack(rec: OutboundMutationQueue.MutationRecord, transport: String) {
+            newAcks.getOrPut(rec.itemId to rec.lamportTs) { mutableSetOf() }.add(transport)
+        }
+
+        val relayEnabled = OutboundMutationQueue.TRANSPORT_RELAY in enabled
+        val supabaseEnabled = OutboundMutationQueue.TRANSPORT_SUPABASE in enabled
 
         for (rec in pending) {
             val isDelete = rec.op == OutboundMutationQueue.OP_DELETE ||
@@ -1122,10 +1174,8 @@ class SyncManager(
                 rec.op == OutboundMutationQueue.OP_UNPIN ||
                 rec.op == OutboundMutationQueue.OP_REORDER
 
-            var pushed = false
-
             // ── Relay transport ──────────────────────────────────────────────
-            if (s.isRelayConfigured) {
+            if (relayEnabled && OutboundMutationQueue.TRANSPORT_RELAY !in rec.ackedTransports) {
                 try {
                     val relayOk = pushToRelay(
                         itemId = rec.itemId,
@@ -1138,7 +1188,7 @@ class SyncManager(
                         pinOrder = rec.pinOrder,
                     )
                     if (relayOk) {
-                        pushed = true
+                        ack(rec, OutboundMutationQueue.TRANSPORT_RELAY)
                         Log.d(
                             TAG,
                             "drainOutboundMutationQueue: relay ok ${rec.op} " +
@@ -1148,7 +1198,7 @@ class SyncManager(
                         Log.w(
                             TAG,
                             "drainOutboundMutationQueue: relay push failed for ${rec.op} " +
-                                "itemId=${rec.itemId.take(8)}…",
+                                "itemId=${rec.itemId.take(8)}… — staying pending for relay",
                         )
                     }
                 } catch (e: Exception) {
@@ -1162,9 +1212,16 @@ class SyncManager(
             // deleted/pinned/pin_order + bumped lamport_ts — mirrors the daemon's
             // cloud.rs `mark_deleted` / `update_pin_state` paths.
             //
-            // A successful Supabase push also marks the record as delivered so it is
-            // removed from the queue even if the relay push failed (and vice versa).
-            if (supaCtx != null && (isDelete || isPinOp)) {
+            // The Supabase ack is recorded INDEPENDENTLY of the relay ack: a relay
+            // failure no longer drops the record (and vice versa). supaCtx may be
+            // null on a transient resolve/auth failure even though Supabase is
+            // enabled — in that case we record no ack and the record stays pending
+            // for Supabase, to be retried on the next drain.
+            if (supabaseEnabled &&
+                OutboundMutationQueue.TRANSPORT_SUPABASE !in rec.ackedTransports &&
+                supaCtx != null &&
+                (isDelete || isPinOp)
+            ) {
                 try {
                     val supaOk = supaCtx.client.pushMutationRow(
                         bearerToken = supaCtx.bearer,
@@ -1175,7 +1232,7 @@ class SyncManager(
                         pinOrder = rec.pinOrder,
                     )
                     if (supaOk) {
-                        pushed = true
+                        ack(rec, OutboundMutationQueue.TRANSPORT_SUPABASE)
                         Log.d(
                             TAG,
                             "drainOutboundMutationQueue: supabase ok ${rec.op} " +
@@ -1185,28 +1242,26 @@ class SyncManager(
                         Log.w(
                             TAG,
                             "drainOutboundMutationQueue: supabase push failed for ${rec.op} " +
-                                "itemId=${rec.itemId.take(8)}…",
+                                "itemId=${rec.itemId.take(8)}… — staying pending for supabase",
                         )
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "drainOutboundMutationQueue: supabase exception for ${rec.op}: ${e.message}")
                 }
             }
-
-            if (pushed) {
-                delivered.add(rec.itemId to rec.lamportTs)
-            }
         }
 
-        if (delivered.isNotEmpty()) {
-            OutboundMutationQueue.removeRecords(context, delivered)
-        }
+        // CopyPaste-yaip: durably merge this pass's acks. A record is removed ONLY
+        // when every enabled transport (relay, Supabase, and p2p when applicable)
+        // has acknowledged it; partial success persists the remaining transports as
+        // still-pending. p2p is acked separately by FgsSyncLoop's dial path.
+        val removed = OutboundMutationQueue.applyAcks(context, newAcks, enabled)
 
         Log.d(
             TAG,
-            "drainOutboundMutationQueue: pushed ${delivered.size}/${pending.size} records",
+            "drainOutboundMutationQueue: removed $removed/${pending.size} fully-acked record(s)",
         )
-        delivered.size
+        return removed
     }
 
     suspend fun pollFromSupabase(

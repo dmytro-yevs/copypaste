@@ -144,6 +144,19 @@ class FgsSyncLoop(
      */
     private var lastP2pHadActivity: Boolean = false
 
+    /**
+     * CopyPaste-1t38: backoff state for the periodic relay/cloud mutation drain.
+     *
+     * [mutationDrainFailures] counts consecutive ticks where a drain left records
+     * still pending (offline / transport down); it feeds [backoffMs] to compute
+     * [mutationDrainBackoffUntilMs], the wall-clock instant before which the next
+     * drain attempt is skipped. Both reset to 0 the moment the queue fully drains.
+     *
+     * Read/written only inside the single [start] coroutine, so no synchronisation.
+     */
+    private var mutationDrainFailures: Int = 0
+    private var mutationDrainBackoffUntilMs: Long = 0L
+
     companion object {
         private const val TAG = "FgsSyncLoop"
 
@@ -279,6 +292,22 @@ class FgsSyncLoop(
          */
         fun intervalForEmptyStreak(consecutiveEmpty: Int): Long =
             pollIntervalMs(wsConnected = false, consecutiveEmpty = consecutiveEmpty)
+
+        /**
+         * CopyPaste-1t38: should the periodic loop attempt a relay/cloud mutation
+         * drain on this tick?
+         *
+         * True only when there is at least one pending record AND the backoff window
+         * from the previous failed/partial drain has elapsed. This keeps the periodic
+         * drain bounded (no work when the queue is empty) and prevents hammering the
+         * network while offline (a failed drain sets [backoffUntilMs] via [backoffMs]).
+         *
+         * Pure — no Android runtime — so the offline→online transition is unit-testable
+         * with a fake clock. The drain itself is single-flight inside
+         * [SyncManager.drainOutboundMutationQueue].
+         */
+        fun shouldAttemptDrain(queueSize: Int, nowMs: Long, backoffUntilMs: Long): Boolean =
+            queueSize > 0 && nowMs >= backoffUntilMs
 
         /**
          * Filter [allLocalItems] to only those items whose [wallTimeMs] is
@@ -530,6 +559,19 @@ class FgsSyncLoop(
                 // CopyPaste-lwnz: gate the SYNCING badge around the P2P dial too.
                 // CopyPaste-agde: re-check wifi gate before P2P dial — the transport
                 // could change between the poll check above and the dial below.
+                // CopyPaste-1t38: periodic relay/cloud mutation drain. Previously
+                // the OutboundMutationQueue was drained ONLY from UI mutation hooks
+                // and service startup; the periodic loop only peeked it for P2P
+                // augmentation and never drained relay/cloud. A mutation enqueued
+                // while offline therefore stayed unsent until a new UI action or a
+                // restart. Draining here means the queue flushes within one loop
+                // interval after connectivity returns — no UI action required.
+                // Bounded (skips when empty), backoff-governed, and single-flight
+                // inside SyncManager.drainOutboundMutationQueue.
+                if (isWifi) {
+                    drainMutationsPeriodic()
+                }
+
                 if (isWifi) {
                     lastP2pHadActivity = false
                     DevicesOnlineState.setSyncing(true)
@@ -596,6 +638,62 @@ class FgsSyncLoop(
         job?.cancel()
         job = null
         fgsScope = null
+    }
+
+    /**
+     * CopyPaste-1t38: drain the [OutboundMutationQueue] over relay + cloud on the
+     * periodic tick, with a backoff window so a persistently-offline device does
+     * not hammer the network.
+     *
+     * No-op when there is no Android context (unit tests / stub mode) or when the
+     * queue is empty / the backoff window has not elapsed ([shouldAttemptDrain]).
+     * The drain delegates to [SyncManager.drainOutboundMutationQueue], which is
+     * single-flight (so this never overlaps a concurrent UI-hook drain) and applies
+     * per-transport acks: a record is removed only after every enabled transport
+     * acknowledges it.
+     *
+     * After the attempt: if records remain pending the failure counter grows and
+     * the backoff window extends (via [backoffMs]); a fully-drained queue resets
+     * both. p2p acks are applied separately in [dialPairedPeer].
+     */
+    private suspend fun drainMutationsPeriodic() {
+        val ctx = context ?: return
+        val queueSize = runCatching { OutboundMutationQueue.queueSize(ctx) }.getOrDefault(0)
+        if (!shouldAttemptDrain(queueSize, System.currentTimeMillis(), mutationDrainBackoffUntilMs)) {
+            if (queueSize == 0) {
+                // Healthy: reset backoff so the next enqueue drains immediately.
+                mutationDrainFailures = 0
+                mutationDrainBackoffUntilMs = 0L
+            }
+            return
+        }
+
+        val removed = try {
+            syncManager.drainOutboundMutationQueue(ctx, repository)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Log.w(TAG, "periodic mutation drain failed: ${e.message}")
+            0
+        }
+
+        val remaining = runCatching { OutboundMutationQueue.queueSize(ctx) }.getOrDefault(0)
+        if (remaining > 0) {
+            // Still pending (offline / a transport is down): back off before retrying.
+            mutationDrainFailures += 1
+            mutationDrainBackoffUntilMs = System.currentTimeMillis() + backoffMs(mutationDrainFailures)
+            Log.d(
+                TAG,
+                "periodic mutation drain: removed $removed, $remaining still pending — " +
+                    "backing off ${backoffMs(mutationDrainFailures)}ms",
+            )
+        } else {
+            if (removed > 0) {
+                Log.i(TAG, "periodic mutation drain: flushed $removed queued mutation(s)")
+            }
+            mutationDrainFailures = 0
+            mutationDrainBackoffUntilMs = 0L
+        }
     }
 
     /**
@@ -1005,6 +1103,22 @@ class FgsSyncLoop(
                 }
             }
 
+            // CopyPaste-yaip (P2P durable ack): the (itemId, lamportTs) keys of any
+            // queued mutations whose item is actually being SENT in this dial. After
+            // a successful syncWithPeer we ack the p2p transport for these records so
+            // the durable queue can finally drop them once relay + cloud have also
+            // acked. Without this, p2p only ever PEEKED the queue and never confirmed
+            // delivery, so a record needing p2p would never converge.
+            val p2pAckKeys: List<Pair<String, Long>> = if (context == null) {
+                emptyList()
+            } else {
+                val sentItemIds = localItems.map { it.itemId }.toHashSet()
+                runCatching { OutboundMutationQueue.peekQueue(context) }
+                    .getOrDefault(emptyList())
+                    .filter { it.itemId in sentItemIds }
+                    .map { it.itemId to it.lamportTs }
+            }
+
             // CopyPaste-y4xa: acquire a PARTIAL_WAKE_LOCK for the duration of the
             // mTLS handshake + data exchange. An FGS notification keeps the CPU on
             // under normal conditions, but OEM schedulers (Xiaomi MIUI, Oppo ColorOS,
@@ -1108,6 +1222,31 @@ class FgsSyncLoop(
 
             // Advance the inbound high-water cursor to the max wallTimeMs received.
             settings.advanceP2pInboundHighWater(peerFingerprint, maxInboundWallTime)
+
+            // CopyPaste-yaip (P2P durable ack): syncWithPeer returned without
+            // throwing → the handshake + item exchange succeeded. Ack the p2p
+            // transport for the queued mutations whose item we just sent, so the
+            // durable queue can drop them once relay + cloud have also acked. The
+            // ack is per-transport: relay/cloud acks come from SyncManager's drain,
+            // p2p from here — applyAcks removes a record only when ALL enabled
+            // transports have confirmed it.
+            if (p2pAckKeys.isNotEmpty()) {
+                context?.let { ctx ->
+                    val enabled = OutboundMutationQueue.enabledTransports(
+                        relay = settings.isRelayConfigured,
+                        supabase = settings.isSupabaseConfigured,
+                        p2p = settings.p2pSyncEnabled && settings.pairedPeers.isNotEmpty(),
+                    )
+                    val p2pAcks = p2pAckKeys.associateWith {
+                        setOf(OutboundMutationQueue.TRANSPORT_P2P)
+                    }
+                    runCatching {
+                        OutboundMutationQueue.applyAcks(ctx, p2pAcks, enabled)
+                    }.onFailure { e ->
+                        Log.w(TAG, "dialPairedPeer: p2p applyAcks failed: ${e.message}")
+                    }
+                }
+            }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
