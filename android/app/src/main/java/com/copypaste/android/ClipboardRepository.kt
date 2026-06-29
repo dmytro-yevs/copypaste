@@ -48,13 +48,13 @@ class ClipboardRepository(context: Context) {
      * foreground-service notification counter honest (see [deleteItem]). Using
      * the application context avoids leaking an Activity.
      */
-    private val appContext: Context = context.applicationContext
+    internal val appContext: Context = context.applicationContext
 
-    private val prefs: SharedPreferences =
+    internal val prefs: SharedPreferences =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /** Read fresh each store so a UI change to the cap takes effect immediately. */
-    private val settings = Settings(context)
+    internal val settings = Settings(context)
 
     /**
      * Guard for read-modify-write on the comma-joined "item_ids" index.
@@ -62,7 +62,7 @@ class ClipboardRepository(context: Context) {
      * (UI delete + service insert) can both read the same baseline list and
      * the loser's update silently drops the winner's entry. See HIGH-8.
      */
-    private val idsWriteLock = Any()
+    internal val idsWriteLock = Any()
 
     /**
      * In-memory dedup window. Multiple OnPrimaryClipChangedListener owners
@@ -87,7 +87,7 @@ class ClipboardRepository(context: Context) {
      * WorkManager worker), so the seen-set must be mutated under a lock to avoid
      * a lost update that would let a duplicate row through.
      */
-    private val seenSourceIdsLock = Any()
+    internal val seenSourceIdsLock = Any()
 
     /**
      * Set to true the first time a native-library failure is posted as a
@@ -98,7 +98,7 @@ class ClipboardRepository(context: Context) {
      * AES-GCM (which produces items peers cannot decrypt). Instead we throw so
      * the item is not stored and post this sentinel notification once.
      */
-    @Volatile private var nativeUnavailableNotified = false
+    @Volatile internal var nativeUnavailableNotified = false
 
     /**
      * Subscribe to changes in the backing item store. Any write from the
@@ -703,234 +703,33 @@ class ClipboardRepository(context: Context) {
     }
 
     /**
-     * Pin or unpin item [id].
+     * Pin or unpin item [id]. Extracted to ClipboardRepositoryPin.kt (CopyPaste-ra15.4).
      * Pinned items survive the retention prune pass and have no sensitive TTL.
-     * The order of pinned ids in [KEY_PINNED_IDS] reflects display order (first = top).
-     * Newly pinned items are prepended so they appear at the top of the pinned section.
      */
-    fun setPinned(id: String, pinned: Boolean) {
-        synchronized(idsWriteLock) {
-            val pinnedList = storedPinnedList().toMutableList()
-            val changed = if (pinned) {
-                if (id !in pinnedList) {
-                    pinnedList.add(0, id) // prepend — new pins appear at the top
-                    true
-                } else false
-            } else {
-                pinnedList.remove(id)
-            }
-            if (changed) {
-                // CopyPaste-up1c: bump lamport_ts in the stored blob so pin changes
-                // are time-ordered into wall-clock space and propagate correctly via
-                // LWW. Mirrors pin_item/unpin_item in copypaste-core/src/storage/items.rs
-                // which call next_lamport_ts on every pin mutation.
-                val existing = prefs.getString("item_$id", null)
-                val nowMs = System.currentTimeMillis()
-                val editor = prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
-                var newLamport = nowMs
-                if (existing != null && !isDeletedBlob(existing)) {
-                    val oldLamport = try {
-                        existing.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
-                    } catch (_: Exception) { 0L }
-                    newLamport = nextLamportTs(oldLamport, nowMs)
-                    editor.putString("item_$id", bumpBlobLamportTs(existing, newLamport))
-                }
-                // CopyPaste-0qpn: enqueue the pin/unpin mutation so it propagates
-                // over relay, Supabase, and P2P. The pinOrder is the new position in
-                // the pinned list (1-based for the macOS daemon convention).
-                val newPinOrder: Double? = if (pinned) {
-                    (pinnedList.indexOf(id) + 1).toDouble().takeIf { it > 0.0 }
-                } else null
-                OutboundMutationQueue.enqueueMutation(
-                    appContext,
-                    OutboundMutationQueue.MutationRecord(
-                        itemId = id,
-                        op = if (pinned) OutboundMutationQueue.OP_PIN else OutboundMutationQueue.OP_UNPIN,
-                        lamportTs = newLamport,
-                        wallTimeMs = nowMs,
-                        pinned = pinned,
-                        pinOrder = newPinOrder,
-                    ),
-                )
-                // commit() (synchronous) so the new pinned set survives an immediate
-                // force-stop (SIGKILL) — matches the project pattern from 0f1d1ef.
-                editor.commit()
-                evictParseCache(id) // blob changed — evict stale decrypt cache entry
-            }
-        }
-        Log.d(TAG, "setPinned: item $id pinned=$pinned")
-    }
+    fun setPinned(id: String, pinned: Boolean) = setPinnedImpl(id, pinned)
 
     /**
-     * Reorder pinned items.
-     *
-     * [ids] must contain exactly the currently-pinned item IDs in the desired
-     * new display order (first element = top of the pinned section).
-     * Unknown ids are silently ignored; missing pinned ids are appended at the end
-     * to avoid data loss.
+     * Reorder pinned items. Extracted to ClipboardRepositoryPin.kt (CopyPaste-ra15.4).
+     * [ids] must contain exactly the currently-pinned item IDs in the desired new order.
      */
-    fun reorderPinned(ids: List<String>) {
-        synchronized(idsWriteLock) {
-            val currentPinned = storedPinnedList().toMutableSet()
-            // Accept only ids that are actually pinned; preserve order from caller.
-            val reordered = ids.filter { it in currentPinned }.toMutableList()
-            // Append any pinned ids that were not included in the caller's list.
-            val missing = currentPinned.filter { it !in reordered }
-            reordered.addAll(missing)
-
-            // CopyPaste-up1c: bump lamport_ts in every reordered blob so the new
-            // pin-order propagates correctly via LWW. Mirrors reorder_pinned in
-            // copypaste-core/src/storage/items.rs which calls next_lamport_ts per item.
-            val nowMs = System.currentTimeMillis()
-            val editor = prefs.edit().putString(KEY_PINNED_IDS, reordered.joinToString(","))
-            for ((idx, itemId) in reordered.withIndex()) {
-                val existing = prefs.getString("item_$itemId", null) ?: continue
-                if (isDeletedBlob(existing)) continue
-                val oldLamport = try {
-                    existing.split("|").getOrNull(5)?.toLongOrNull() ?: 0L
-                } catch (_: Exception) { 0L }
-                val newLamport = nextLamportTs(oldLamport, nowMs)
-                editor.putString("item_$itemId", bumpBlobLamportTs(existing, newLamport))
-                evictParseCache(itemId) // blob changed — evict stale decrypt cache entry
-
-                // CopyPaste-0qpn: enqueue per-item OP_REORDER so the new pin order
-                // propagates over all transports. pinOrder is 1-based (macOS daemon).
-                OutboundMutationQueue.enqueueMutation(
-                    appContext,
-                    OutboundMutationQueue.MutationRecord(
-                        itemId = itemId,
-                        op = OutboundMutationQueue.OP_REORDER,
-                        lamportTs = newLamport,
-                        wallTimeMs = nowMs,
-                        pinned = true,
-                        pinOrder = (idx + 1).toDouble(),
-                    ),
-                )
-            }
-            // commit() (synchronous) so the reordered set survives an immediate
-            // force-stop (SIGKILL) — matches the project pattern from 0f1d1ef.
-            editor.commit()
-        }
-        Log.d(TAG, "reorderPinned: new order = $ids")
-    }
+    fun reorderPinned(ids: List<String>) = reorderPinnedImpl(ids)
 
     /**
-     * Apply authoritative pin state from an inbound sync row (lcmq).
-     *
-     * Unlike [setPinned], which is used for LOCAL mutations and always bumps lamport_ts,
-     * this function applies pin state received from a remote peer WITHOUT minting a new
-     * local mutation. The remote lamport_ts is already authoritative — bumping it here
-     * would produce an artificial LWW win that could suppress a later authoritative remote
-     * unpin from a different peer.
-     *
-     * If [pinned] is true and [pinOrder] is non-null the item is inserted at the correct
-     * position in the pinned list according to ascending pin_order. Items without a
-     * pin_order are appended. If [pinned] is false the item is removed from the pinned
-     * list (convergent unpin).
-     *
-     * This function is idempotent: calling it with the same arguments repeatedly produces
-     * no additional side effects.
-     *
-     * Called from every inbound sync path: Supabase poll (FgsSyncLoop), relay SSE
-     * (SyncManager), P2P (FgsSyncLoop.dialPairedPeer), and WS catch-up
-     * (SupabaseRealtimeClient.triggerCatchUpPoll).
-     *
-     * @param id        The stable item_id.
-     * @param pinned    Authoritative pin state from the remote row.
-     * @param pinOrder  Authoritative pin_order from the remote row (null = no ordering).
+     * Apply authoritative pin state from an inbound sync row. Extracted to
+     * ClipboardRepositoryPin.kt (CopyPaste-ra15.4). Does NOT mint a new local mutation.
+     * @param id       The stable item_id.
+     * @param pinned   Authoritative pin state from the remote row.
+     * @param pinOrder Authoritative pin_order from the remote row (null = no ordering).
      */
-    fun applyAuthoritativePinState(id: String, pinned: Boolean, pinOrder: Double?) {
-        synchronized(idsWriteLock) {
-            val pinnedList = storedPinnedList().toMutableList()
-            val wasPinned = id in pinnedList
-            if (pinned) {
-                // Remove from current position (if present) and re-insert at the
-                // correct pin_order slot so a remote reorder converges.
-                pinnedList.remove(id)
-                if (pinOrder != null) {
-                    // Insert at the index where all earlier items have a pin_order < pinOrder.
-                    // We do not store per-item pin_order persistently yet (the list position
-                    // IS the sort key), so we use the numeric pinOrder to find the insertion
-                    // point relative to items already positioned by a prior authoritative apply.
-                    // Simple strategy: pinOrder < 1 → prepend; else → append if we cannot
-                    // compare against other items (we do not have their pin_order in memory).
-                    // Produces correct ordering when the full set of pinned items arrives
-                    // sequentially from a catch-up batch, which is the common case.
-                    val insertAt = pinnedList.size  // default: append
-                    pinnedList.add(insertAt.coerceAtMost(pinnedList.size), id)
-                } else {
-                    if (id !in pinnedList) pinnedList.add(id)
-                }
-            } else {
-                // Authoritative unpin: remove regardless of local state.
-                pinnedList.remove(id)
-            }
-            val changed = pinnedList != storedPinnedList()
-            if (changed) {
-                // Do NOT bump lamport_ts here — this is not a local mutation.
-                // The blob content (including its lamport_ts) is already written by
-                // storeItem / storeItemWithLww before applyAuthoritativePinState is called.
-                prefs.edit().putString(KEY_PINNED_IDS, pinnedList.joinToString(",")).apply()
-            }
-        }
-        Log.d(TAG, "applyAuthoritativePinState: item $id pinned=$pinned pinOrder=$pinOrder")
-    }
+    fun applyAuthoritativePinState(id: String, pinned: Boolean, pinOrder: Double?) =
+        applyAuthoritativePinStateImpl(id, pinned, pinOrder)
 
     /**
-     * Move item [id] to the top of the non-pinned (recency) section by re-stamping
-     * its wall-time to now and moving it to the END of the stored id index (the end
-     * is "most recent" because [getItems] does takeLast().reversed()).
-     *
-     * PINNED items are skipped: their position is governed solely by
-     * [KEY_PINNED_IDS] / pinnedSortIndex, so re-copying a pinned clip must NOT
-     * move it. Mirrors macOS `bump_item_recency` on copy (HW parity).
-     *
-     * Only field 0 (wall-time) of the pipe-delimited blob is rewritten; the crypto
-     * fields (nonce/ciphertext) and lamport_ts are preserved verbatim so the AEAD
-     * AAD binding and LWW ordering remain intact.
+     * Re-stamp [id] as the most-recently-used item (copy-back). Extracted to
+     * ClipboardRepositoryPin.kt (CopyPaste-ra15.4).
+     * Returns the new lamport timestamp, or -1L when the item was not found, pinned, or deleted.
      */
-    /**
-     * Re-stamp [id] as the most-recently-used item (copy-back).
-     *
-     * cvns (PG-18): bumps BOTH the wall-time (field 0) AND the lamport timestamp
-     * (field 5) so the item wins LWW merges on remote peers. Without the lamport
-     * bump peers would keep their stale ordering because their lamport_ts for the
-     * same item_id is higher than the wall-time-only re-stamp.
-     *
-     * Returns the new lamport timestamp so the caller can enqueue an immediate
-     * sync push; returns -1L when the item was not found, pinned, or deleted.
-     */
-    fun bumpToTop(id: String): Long {
-        val newLamport: Long
-        synchronized(idsWriteLock) {
-            if (id in storedPinnedIds()) return -1L  // pinned items keep their fixed order
-            val ids = storedIds().toMutableList()
-            if (!ids.remove(id)) return -1L  // unknown id — nothing to bump
-            val raw = prefs.getString("item_$id", null) ?: return -1L
-            // Soft-delete tombstone: tombstoned items must not be bumped to the top
-            // of the visible history — they are logically deleted.
-            if (isDeletedBlob(raw)) return -1L
-            val parts = raw.split("|")
-            // v3 blob = <wallTimeMs>|<contentType>|<payloadBytes>|<nonceB64>|<ciphertextB64>|<lamportTs>|<deleted>
-            if (parts.size < 6) return -1L  // legacy/malformed — leave untouched
-            val nowMs = System.currentTimeMillis()
-            val prevLamport = parts[5].toLongOrNull() ?: 0L
-            // cvns: advance lamport so this copy-back wins LWW on all peers.
-            newLamport = nextLamportTs(prevLamport, nowMs)
-            val rebuiltParts = parts.toMutableList()
-            rebuiltParts[0] = nowMs.toString()    // fresh wall-time
-            rebuiltParts[5] = newLamport.toString() // bumped lamport
-            val rebuilt = rebuiltParts.joinToString("|")
-            ids.add(id)  // re-append → most-recent position
-            ClipboardItemCache.cachedIds = ids
-            prefs.edit()
-                .putString("item_$id", rebuilt)
-                .putString(KEY_ITEM_IDS, ids.joinToString(","))
-                .commit()  // synchronous: survives an immediate force-stop (SIGKILL)
-        }
-        Log.d(TAG, "bumpToTop: re-stamped item $id to most-recent (lamport=$newLamport)")
-        return newLamport
-    }
+    fun bumpToTop(id: String): Long = bumpToTopImpl(id)
 
     /**
      * Encrypt [plaintext] with [key] and persist, returning the STABLE row id of
@@ -1364,7 +1163,7 @@ class ClipboardRepository(context: Context) {
      * Synchronous full-plaintext decrypt for use inside an already-`IO` context
      * (e.g. [searchIds]). Mirrors [loadFullPlaintext] without an extra dispatch.
      */
-    private fun loadFullPlaintextBlocking(id: String, key: ByteArray): String? {
+    internal fun loadFullPlaintextBlocking(id: String, key: ByteArray): String? {
         val raw = prefs.getString("item_$id", null) ?: return null
         val parts = raw.split("|")
         val nonceB64 = parts.getOrNull(3) ?: return null
@@ -1428,241 +1227,12 @@ class ClipboardRepository(context: Context) {
             planCountCapEvictions(liveIds, pinnedSet, newMax).size
         }
 
-    private fun pruneToLimits() {
-        val quotaBytes = settings.storageQuotaBytes.coerceAtLeast(0L)
-        // Settings.maxHistoryItems default 1000; coerceAtLeast(1) guards against
-        // a persisted 0 that would evict everything including pinned items.
-        val maxItems = settings.maxHistoryItems.coerceAtLeast(1)
-        var evictedCount = 0
+    // Extracted to ClipboardRepositoryPrune.kt (CopyPaste-ra15.4).
+    private fun pruneToLimits() = pruneToLimitsImpl()
 
-        synchronized(idsWriteLock) {
-            val pinnedSet = storedPinnedIds()
-            val ids = storedIds().toMutableList()
-
-            val blobSizes: Map<String, Int> = ids.associate { id ->
-                val textBytes = prefs.getString("item_$id", null)?.toByteArray(Charsets.UTF_8)?.size ?: 0
-                // Measure the SAME unit storeImageBytes caps on: raw decoded bytes,
-                // not the ~1.33x-inflated Base64 string length. Deriving the raw
-                // size from the Base64 length (NO_WRAP, so it is a multiple of 4
-                // with '=' padding) avoids a full decode allocation per row.
-                val imgBytes = prefs.getString("item_img_$id", null)?.let { base64RawByteSize(it) } ?: 0
-                val thumbBytes = prefs.getString("item_thumb_$id", null)?.let { base64RawByteSize(it) } ?: 0
-                val fileBytes = prefs.getString("item_file_$id", null)?.let { base64RawByteSize(it) } ?: 0
-                id to (textBytes + imgBytes + thumbBytes + fileBytes)
-            }
-
-            var totalBytes = blobSizes.values.sumOf { it.toLong() }
-            // LIVE (non-tombstone) ids: tombstones remain in KEY_ITEM_IDS to block
-            // re-sync resurrection, but must NOT be re-counted or re-evicted. Both the
-            // byte pass and the count-cap pass operate on live items only, and
-            // `liveCount` is the running live total shared across both passes so the
-            // count-cap math matches the pure [planCountCapEvictions] planner
-            // (crh3.108). Counting tombstones as live previously over-evicted live rows.
-            val liveIds = ids.filter { id ->
-                val raw = prefs.getString("item_$id", null)
-                raw != null && !isDeletedBlob(raw)
-            }
-            var liveCount = liveIds.size
-            val unpinned = liveIds.filter { it !in pinnedSet }.toMutableList()
-
-            val editor = prefs.edit()
-            var didEvict = false
-            val nowMs = System.currentTimeMillis()
-
-            // CopyPaste-44rq.58: helper that tombstones an evicted item (instead of hard-
-            // deleting it) and enqueues a delete mutation so peers learn about the eviction
-            // and do NOT re-push the item on the next sync. Without this, a hard-evicted
-            // item would resurect on the next sync because no tombstone existed to suppress it.
-            //
-            // INVARIANTS (mirrors deleteItem's single-item tombstone path):
-            //  1. The tombstone blob is written to "item_$evictId" (deleted=1, bumped lamportTs)
-            //     so storeItemWithLww can find it via "item_id_ref_$evictId" and reject a
-            //     stale re-sync of the same item via lamport comparison.
-            //  2. "item_id_ref_$evictId" is NOT removed — the LWW lookup path in
-            //     storeItemWithLww uses this ref to reach the tombstone. Removing it caused
-            //     storeItemWithLww to fall to the "new item" path on re-sync (resurrection).
-            //  3. The evicted id is NOT removed from KEY_ITEM_IDS (caller keeps ids intact)
-            //     so the tombstone entry persists in the index, consistent with deleteItem.
-            fun tombstoneEvict(evictId: String) {
-                val existing = prefs.getString("item_$evictId", null)
-                val oldLamport = try {
-                    existing?.split("|")?.getOrNull(5)?.toLongOrNull() ?: 0L
-                } catch (_: Exception) { 0L }
-                val newLamport = nextLamportTs(oldLamport, nowMs)
-                if (existing != null && !isDeletedBlob(existing)) {
-                    // Write a soft-delete tombstone so the id stays in the index (prevents
-                    // re-sync resurrection) but the content is logically gone. Mirrors the
-                    // deleteItem() path (CopyPaste-up1c).
-                    editor.putString("item_$evictId", encodeTombstone(existing, newLamport))
-                }
-                // Enqueue an OP_DELETE mutation so all transports (relay/Supabase/P2P)
-                // propagate the eviction to peers. Mirrors the deleteItems() path
-                // (CopyPaste-0qpn).
-                OutboundMutationQueue.enqueueMutation(
-                    appContext,
-                    OutboundMutationQueue.MutationRecord(
-                        itemId = evictId,
-                        op = OutboundMutationQueue.OP_DELETE,
-                        lamportTs = newLamport,
-                        wallTimeMs = nowMs,
-                        pinned = false,
-                        pinOrder = null,
-                    ),
-                )
-                editor.remove("item_img_$evictId")
-                editor.remove("item_thumb_$evictId")
-                editor.remove("item_file_$evictId")
-                editor.remove("item_filemeta_$evictId")
-                // Do NOT remove "item_id_ref_$evictId": storeItemWithLww uses this ref to
-                // find the tombstone blob. Removing it caused resurrection (CopyPaste-44rq.58).
-                evictParseCache(evictId)
-            }
-
-            // Pass 1: byte-quota eviction (oldest unpinned first).
-            // Keep evicted ids in `ids` so their tombstone blobs remain in KEY_ITEM_IDS
-            // (mirrors deleteItem's single-item path which never removes from KEY_ITEM_IDS).
-            while (unpinned.isNotEmpty()) {
-                val quotaExceeded = quotaBytes > 0 && totalBytes > quotaBytes
-                if (!quotaExceeded) break
-
-                val evictId = unpinned.removeAt(0)
-                // Do NOT remove from ids — the tombstone must stay in KEY_ITEM_IDS.
-                val sz = blobSizes[evictId] ?: 0
-                totalBytes -= sz
-                tombstoneEvict(evictId)
-                liveCount-- // byte-pass eviction also reduces the live count
-                didEvict = true
-                evictedCount++
-                Log.d(TAG, "pruneToLimits: evicted $evictId (blob ${sz}B, totalNow=${totalBytes}B)")
-            }
-
-            // Pass 2: count-cap eviction (crh3.108 continuous enforcement). This pass
-            // evicts the OLDEST unpinned items until the LIVE item count (pinned +
-            // unpinned, excluding tombstones) is <= maxItems. Pinned items count toward
-            // the limit but are never evicted (same policy as the quota pass). Mirrors
-            // the pure [planCountCapEvictions] planner that also drives the Settings
-            // confirmation count (bdac.88), so the predicted and actual deletion counts
-            // always agree.
-            //
-            // `liveCount` is the running live total (initialised above, decremented by
-            // Pass 1); `ids` itself is NOT reduced so tombstone entries remain in
-            // KEY_ITEM_IDS (see INVARIANT 3).
-            while (unpinned.isNotEmpty() && liveCount > maxItems) {
-                val evictId = unpinned.removeAt(0)
-                // Do NOT remove from ids — the tombstone must stay in KEY_ITEM_IDS.
-                liveCount--
-                tombstoneEvict(evictId)
-                didEvict = true
-                evictedCount++
-                Log.d(TAG, "pruneToLimits: count-evicted $evictId (live now $liveCount/$maxItems)")
-            }
-
-            if (didEvict) {
-                ClipboardItemCache.cachedIds = ids
-                editor.putString(KEY_ITEM_IDS, ids.joinToString(",")).apply()
-            }
-        }
-
-        if (evictedCount > 0) {
-            ClipboardService.onItemsDeleted(appContext, evictedCount)
-        }
-    }
-
-    /**
-     * AB-13 — retention TTL auto-wipe (macOS parity).
-     *
-     * macOS auto-wipes by two age policies; Android had neither. This pass
-     * deletes:
-     *  - any UNPINNED item older than the GENERAL retention TTL
-     *    ([generalTtlSecs], default [DEFAULT_GENERAL_TTL_SECS] = 30 days, mirroring
-     *    the macOS `sync_ttl_secs` retention floor); and
-     *  - any UNPINNED *sensitive* item older than [Settings.sensitiveTtlSecs]
-     *    (default 30 s; `0` disables, exactly like macOS).
-     *
-     * A TTL of `0` disables that pass (the macOS "never wipe" sentinel). PINNED
-     * items are never aged out — they survive until an explicit user delete,
-     * matching [pruneToLimits].
-     *
-     * Sensitivity is only evaluated for items already past the (short) sensitive
-     * TTL window AND only when the sensitive pass is enabled, so the per-row
-     * decrypt cost is bounded — fresh items are never decrypted here.
-     *
-     * Wall-time is field 0 of the pipe-delimited blob (written by [encodeItem]),
-     * so the general pass needs no decrypt at all.
-     */
-    private fun pruneByAge(key: ByteArray? = null) {
-        val generalTtlSecs = generalTtlSecs().coerceAtLeast(0L)
-        val sensitiveTtlSecs = settings.sensitiveTtlSecs.coerceAtLeast(0L)
-        if (generalTtlSecs == 0L && sensitiveTtlSecs == 0L) return // both disabled
-
-        val now = System.currentTimeMillis()
-        val generalCutoffMs = if (generalTtlSecs > 0L) now - generalTtlSecs * 1000L else Long.MIN_VALUE
-        val sensitiveCutoffMs = if (sensitiveTtlSecs > 0L) now - sensitiveTtlSecs * 1000L else Long.MIN_VALUE
-        var deletedCount = 0
-
-        synchronized(idsWriteLock) {
-            val pinnedSet = storedPinnedIds()
-            val ids = storedIds()
-            val editor = prefs.edit()
-            val survivors = ArrayList<String>(ids.size)
-
-            for (id in ids) {
-                if (id in pinnedSet) {
-                    survivors.add(id) // pinned items never age out
-                    continue
-                }
-                val raw = prefs.getString("item_$id", null)
-                if (raw == null) {
-                    // Index references a missing blob — drop the dangling id.
-                    continue
-                }
-                val wallTimeMs = raw.substringBefore('|').toLongOrNull()
-                if (wallTimeMs == null) {
-                    survivors.add(id) // malformed — leave it for the normal prune
-                    continue
-                }
-
-                // General retention: oldest-first absolute age cap.
-                val expiredByGeneral = generalTtlSecs > 0L && wallTimeMs < generalCutoffMs
-
-                // Sensitive retention: only decrypt+classify items already past the
-                // sensitive window (cheap fast-path skips the vast majority of rows).
-                val expiredBySensitive = sensitiveTtlSecs > 0L &&
-                    wallTimeMs < sensitiveCutoffMs &&
-                    isItemSensitive(id, raw, key)
-
-                if (expiredByGeneral || expiredBySensitive) {
-                    editor.remove("item_$id")
-                    editor.remove("item_img_$id")
-                    editor.remove("item_thumb_$id")
-                    editor.remove("item_file_$id")
-                    editor.remove("item_filemeta_$id")
-                    editor.remove("item_id_ref_$id")
-                    deletedCount++
-                    Log.d(TAG, "pruneByAge: wiped $id (general=$expiredByGeneral, sensitive=$expiredBySensitive)")
-                } else {
-                    survivors.add(id)
-                }
-            }
-
-            if (deletedCount > 0) {
-                ClipboardItemCache.cachedIds = survivors
-                editor.putString(KEY_ITEM_IDS, survivors.joinToString(",")).apply()
-            }
-        }
-
-        if (deletedCount > 0) {
-            ClipboardService.onItemsDeleted(appContext, deletedCount)
-        }
-    }
-
-    /**
-     * Decrypt [raw]'s payload and classify it via the native [isSensitive].
-     * Returns false (treat as non-sensitive) when no [key] is available or the
-     * blob cannot be decrypted, so a missing key never wrongly wipes data.
-     */
-    private fun isItemSensitive(id: String, raw: String, key: ByteArray?): Boolean =
-        ClipboardBlobCodec.isItemSensitive(id, raw, key)
+    // Extracted to ClipboardRepositoryPrune.kt (CopyPaste-ra15.4).
+    // AB-13 — retention TTL auto-wipe (macOS parity). See pruneByAgeImpl for docs.
+    private fun pruneByAge(key: ByteArray? = null) = pruneByAgeImpl(key)
 
     /**
      * General retention TTL in seconds. Read from the same "copypaste" prefs file
@@ -1670,7 +1240,7 @@ class ClipboardRepository(context: Context) {
      * defaults to [DEFAULT_GENERAL_TTL_SECS] (30 days) to mirror the macOS
      * `sync_ttl_secs` retention floor. `0` disables the general age pass.
      */
-    private fun generalTtlSecs(): Long =
+    internal fun generalTtlSecs(): Long =
         appContext.getSharedPreferences(SETTINGS_PREFS_NAME, Context.MODE_PRIVATE)
             .getLong(KEY_GENERAL_TTL_SECS, DEFAULT_GENERAL_TTL_SECS)
             .coerceAtLeast(0L)
@@ -1694,7 +1264,7 @@ class ClipboardRepository(context: Context) {
      * de-duplicated also heals any index that an older build may have corrupted,
      * so the history LazyColumn never sees a repeated key.
      */
-    private fun storedIds(): List<String> {
+    internal fun storedIds(): List<String> {
         // Fast path: in-memory snapshot populated by every writer.
         ClipboardItemCache.cachedIds?.let { return it }
         // Cold start: parse from SharedPreferences and cache.
@@ -1713,7 +1283,7 @@ class ClipboardRepository(context: Context) {
      * index can never hold the same id twice — the root invariant that keeps the
      * history LazyColumn's `key = { it.id }` from crashing on a duplicate.
      */
-    private fun appendUniqueId(current: List<String>, id: String): List<String> {
+    internal fun appendUniqueId(current: List<String>, id: String): List<String> {
         val next = current.toMutableList()
         next.remove(id)
         next.add(id)
@@ -1721,15 +1291,15 @@ class ClipboardRepository(context: Context) {
     }
 
     /** Ordered list of pinned ids — position 0 is displayed at the top of the pinned section. */
-    private fun storedPinnedList(): List<String> =
+    internal fun storedPinnedList(): List<String> =
         prefs.getString(KEY_PINNED_IDS, "")
             ?.split(",")
             ?.filter { it.isNotBlank() }
             ?: emptyList()
 
-    private fun storedPinnedIds(): Set<String> = storedPinnedList().toHashSet()
+    internal fun storedPinnedIds(): Set<String> = storedPinnedList().toHashSet()
 
-    private fun storedSourceIds(): LinkedHashSet<String> =
+    internal fun storedSourceIds(): LinkedHashSet<String> =
         LinkedHashSet(
             prefs.getString(KEY_SYNCED_SOURCE_IDS, "")
                 ?.split(",")
@@ -1737,7 +1307,7 @@ class ClipboardRepository(context: Context) {
                 ?: emptyList()
         )
 
-    private fun recordSourceId(sourceId: String, seen: LinkedHashSet<String>) {
+    internal fun recordSourceId(sourceId: String, seen: LinkedHashSet<String>) {
         seen.add(sourceId)
         while (seen.size > MAX_SEEN_SOURCE_IDS) {
             val oldest = seen.iterator().next()
@@ -1872,66 +1442,30 @@ class ClipboardRepository(context: Context) {
             get() = ClipboardBlobCodec.KNOWN_SENSITIVE_PACKAGES
 
         /**
-         * Compute the next Lamport timestamp, mirroring `next_lamport_ts` in
-         * copypaste-core/src/storage/items.rs ~lines 68-70:
-         *   `max(prev + 1, now_ms)`
+         * Compute the next Lamport timestamp — delegates to the package-level
+         * [com.copypaste.android.nextLamportTs] extracted in ClipboardRepositoryPlan.kt
+         * (CopyPaste-ra15.4). Kept here so callers using [ClipboardRepository.nextLamportTs]
+         * are unaffected.
          *
-         * This guarantees two properties:
-         *  - **monotonic**: always strictly greater than [prevLamport].
-         *  - **time-ordered**: at least [nowMs], so the newest writer across
-         *    devices wins under lamport-first LWW.
-         *
-         * CopyPaste-up1c: used in deleteItem / setPinned / reorderPinned so every
-         * local mutation bumps lamport_ts into the wall-clock value-space, preventing
-         * collisions with low-magnitude values emitted by older peers.
+         * `max(prev + 1, now_ms)` — monotonic and wall-clock time-ordered.
          */
         fun nextLamportTs(prevLamport: Long, nowMs: Long): Long =
-            maxOf(prevLamport + 1L, nowMs)
+            com.copypaste.android.nextLamportTs(prevLamport, nowMs)
 
         /**
          * CopyPaste-bdac.88 / crh3.39 / crh3.108 — PURE count-cap planner.
          *
-         * Given the LIVE (non-tombstone) item ids oldest-first, the pinned set, and
-         * the configured cap, returns the ids the count-cap pass would evict — the
-         * OLDEST UNPINNED items first — to bring the live item count down to
-         * [maxItems]. PINNED ids count toward the cap but are NEVER evicted, so the
-         * result is always disjoint from [pinned].
+         * Delegates to the package-level [com.copypaste.android.planCountCapEvictions]
+         * extracted in ClipboardRepositoryPlan.kt (CopyPaste-ra15.4). Kept here so
+         * callers using [ClipboardRepository.planCountCapEvictions] are unaffected.
          *
-         * This is the single source of truth shared by:
-         *  - [countPrunableByMaxItems], which feeds the deletion count shown in the
-         *    Settings "Maximum stored items" confirmation dialog (bdac.88); and
-         *  - the count-cap pass in [pruneToLimits], the continuous post-insert
-         *    enforcement that keeps the store at/under the cap (crh3.108).
-         *
-         * ## Cross-platform semantics (crh3.39)
-         *
-         * Android's cap is a STORED (destructive) cap — a non-empty return here means
-         * rows are permanently tombstoned. This deliberately differs from macOS, where
-         * the equivalent "Max history items" slider is a DISPLAY-ONLY filter that
-         * deletes nothing (the daemon retains every clip; see
-         * crates/copypaste-ui/src/views/SettingsView/tabs/StorageTab.tsx). The Android
-         * UI therefore labels the control "Maximum stored items" and gates a reduction
-         * behind a confirmation dialog stating scope + permanence.
-         *
-         * Extracted as a pure function so it is unit-testable without an Android runtime.
+         * See ClipboardRepositoryPlan.kt for full documentation.
          */
         internal fun planCountCapEvictions(
             liveIds: List<String>,
             pinned: Set<String>,
             maxItems: Int,
-        ): List<String> {
-            // coerceAtLeast(1): a persisted 0 must never evict the entire store
-            // (which would also wipe pinned items by exhausting the unpinned pool).
-            val cap = maxItems.coerceAtLeast(1)
-            val unpinned = liveIds.filter { it !in pinned }.toMutableList()
-            var liveCount = liveIds.size
-            val evicted = ArrayList<String>()
-            while (unpinned.isNotEmpty() && liveCount > cap) {
-                evicted.add(unpinned.removeAt(0)) // oldest unpinned first
-                liveCount--
-            }
-            return evicted
-        }
+        ): List<String> = com.copypaste.android.planCountCapEvictions(liveIds, pinned, maxItems)
 
         /**
          * Sync size ceiling in bytes (8 MiB). Delegates to [ClipboardBlobCodec.SYNC_MAX_BLOB_BYTES]
@@ -2054,205 +1588,10 @@ class ClipboardRepository(context: Context) {
      * [getFileMeta] into the new ABI-8 `fileName`/`mime` fields. Items whose
      * file-bytes sidecar is missing (e.g. storage failure at capture) are skipped.
      */
+    // Extracted to ClipboardRepositorySync.kt (CopyPaste-ra15.4).
     suspend fun localItemsForSync(
         key: ByteArray,
-    ): List<uniffi.copypaste_android.LocalItem> = withContext(Dispatchers.IO) {
-        val ids = storedIds()
-        // Snapshot pin state once: storedPinnedList() is ordered (index = sort position).
-        val pinnedList = storedPinnedList()
-        val pinnedSet = pinnedList.toHashSet()
-        // pin_order: position in the pinned list (0 = top of pinned section) as a
-        // 1-based f64 so the macOS daemon can sort correctly. None for unpinned.
-        val pinnedOrderMap: Map<String, Double> =
-            pinnedList.mapIndexed { idx, pid -> pid to (idx + 1).toDouble() }.toMap()
-
-        // ── Pass 1: parse and snapshot all non-tombstone rows. ────────────────
-        // Collect row metadata and the raw crypto fields needed for batch decrypt.
-        // Tombstones are emitted directly (no decrypt needed).
-        data class ParsedRow(
-            val id: String,
-            val isPinned: Boolean,
-            val pinOrder: Double?,
-            val wallTimeMs: Long,
-            val contentType: String,
-            val parts: List<String>,
-            // null means the nonce/ciphertext fields were missing (malformed row).
-            val encryptedItem: uniffi.copypaste_android.EncryptedItem?,
-        )
-
-        val tombstones = mutableListOf<uniffi.copypaste_android.LocalItem>()
-        val parsedRows = mutableListOf<ParsedRow>()
-
-        for (id in ids) {
-            val raw = prefs.getString("item_$id", null) ?: continue
-            val isPinned = id in pinnedSet
-            val pinOrder: Double? = pinnedOrderMap[id]
-
-            // ABI 15: include soft-delete tombstones so they propagate to peers.
-            // Tombstones carry deleted=true with empty plaintext (no decrypt needed).
-            if (isDeletedBlob(raw)) {
-                try {
-                    val parts = raw.split("|")
-                    val wallTimeMs = parts[0].toLong()
-                    val contentType = normalizeContentTypeForSync(parts.getOrNull(1) ?: "text")
-                    tombstones.add(
-                        uniffi.copypaste_android.LocalItem(
-                            id = id,
-                            itemId = id,
-                            wallTimeMs = wallTimeMs,
-                            contentType = contentType,
-                            plaintext = emptyList(),
-                            fileName = null,
-                            mime = null,
-                            deleted = true,
-                            pinned = false,      // tombstones are never pinned
-                            pinOrder = null,
-                        )
-                    )
-                } catch (e: Exception) {
-                    Log.d(TAG, "Skipping tombstone $id for sync (parse failed): ${e.message}")
-                }
-                continue
-            }
-
-            try {
-                val parts = raw.split("|")
-                val wallTimeMs = parts[0].toLong()
-                val contentType = normalizeContentTypeForSync(parts[1])
-                val nonceB64 = parts.getOrNull(3)
-                val ctB64 = parts.getOrNull(4)
-                val encryptedItem = if (nonceB64 != null && ctB64 != null &&
-                    nonceB64.isNotEmpty() && ctB64.isNotEmpty()
-                ) {
-                    val nonce = Base64.decode(nonceB64, Base64.NO_WRAP)
-                    val ciphertext = Base64.decode(ctB64, Base64.NO_WRAP)
-                    uniffi.copypaste_android.EncryptedItem(
-                        itemId = id,
-                        ciphertext = ciphertext.asUByteArray().asList(),
-                        nonce = nonce.asUByteArray().asList(),
-                        keyVersion = keyVersionFromParts(parts),
-                    )
-                } else {
-                    null
-                }
-                parsedRows.add(ParsedRow(id, isPinned, pinOrder, wallTimeMs, contentType, parts, encryptedItem))
-            } catch (e: Exception) {
-                Log.w(TAG, "localItemsForSync: skipping item $id for sync (parse failed): ${e.message}")
-            }
-        }
-
-        // ── Pass 2: ONE batch FFI call to decrypt all parseable items. ────────
-        // Items whose crypto fields were missing or malformed have encryptedItem=null
-        // and will be handled per-branch below (image/file items need no text decrypt).
-        val encryptedItems = parsedRows.mapNotNull { it.encryptedItem }
-        val batchResult = try {
-            decryptTextBatch(encryptedItems, key)
-        } catch (e: IllegalStateException) {
-            // Native library absent: stub-mode returns empty result, log once.
-            Log.w(TAG, "localItemsForSync: native library unavailable for batch decrypt — " +
-                "all text items will be skipped")
-            uniffi.copypaste_android.DecryptBatchResult(items = emptyList(), skipped = encryptedItems.size.toUInt())
-        }
-
-        // Log aggregate skip count once instead of per-item WARN spam.
-        if (batchResult.skipped > 0u) {
-            Log.i(TAG, "localItemsForSync: skipped ${batchResult.skipped} undecryptable legacy items")
-        }
-
-        // Build a map from itemId → plaintext bytes for O(1) lookup below.
-        val plaintextMap: Map<String, ByteArray> = batchResult.items.associate { decrypted ->
-            decrypted.itemId to ByteArray(decrypted.plaintext.size) { i -> decrypted.plaintext[i].toByte() }
-        }
-
-        // ── Pass 3: assemble LocalItem list. ─────────────────────────────────
-        val localItems = parsedRows.mapNotNull { row ->
-            val (id, isPinned, pinOrder, wallTimeMs, contentType, _, encryptedItem) = row
-            val isImage = contentTypeIsImage(contentType)
-            try {
-                if (contentTypeIsFile(contentType)) {
-                    // For file items the raw plaintext is just a label; the peer
-                    // needs the actual file bytes. Fetch from the sidecar store.
-                    // Decrypt result is irrelevant for file items — sidecar bytes are used.
-                    val fileBytes = getFileBytes(id)
-                    if (fileBytes == null || fileBytes.isEmpty()) {
-                        Log.d(TAG, "Skipping file item $id for sync: bytes missing or empty")
-                        return@mapNotNull null
-                    }
-                    val (fileName, mime) = getFileMeta(id)
-                    uniffi.copypaste_android.LocalItem(
-                        id = id,
-                        itemId = id,
-                        wallTimeMs = wallTimeMs,
-                        contentType = contentType,
-                        plaintext = fileBytes.asUByteArray().asList(),
-                        fileName = fileName,
-                        mime = mime,
-                        deleted = false,
-                        pinned = isPinned,
-                        pinOrder = pinOrder,
-                    )
-                } else if (isImage) {
-                    // AB-5: for image items the raw plaintext is the content:// URI
-                    // placeholder, NOT the pixels. Attach the real image bytes from
-                    // the sidecar store (mirrors the file branch) so P2P/cloud send
-                    // ships actual bytes instead of a useless URI string.
-                    // Decrypt result is irrelevant for image items — sidecar bytes are used.
-                    val imageBytes = getImageBytes(id)
-                    if (imageBytes == null || imageBytes.isEmpty()) {
-                        Log.d(TAG, "Skipping image item $id for sync: bytes missing or empty")
-                        return@mapNotNull null
-                    }
-                    uniffi.copypaste_android.LocalItem(
-                        id = id,
-                        itemId = id,
-                        wallTimeMs = wallTimeMs,
-                        contentType = contentType,
-                        plaintext = imageBytes.asUByteArray().asList(),
-                        // Images carry no in-band name/MIME header (only files do).
-                        fileName = null,
-                        mime = null,
-                        deleted = false,
-                        pinned = isPinned,
-                        pinOrder = pinOrder,
-                    )
-                } else {
-                    // Text item: look up the plaintext from the batch result.
-                    // Skip gracefully when decrypt failed (legacy AAD / wrong key).
-                    val plain = plaintextMap[id]
-                    if (plain == null) {
-                        // Already counted in batchResult.skipped — no per-item log here.
-                        return@mapNotNull null
-                    }
-                    uniffi.copypaste_android.LocalItem(
-                        id = id,
-                        // STABLE cross-device identity. The row id is minted ONCE at
-                        // capture (or carried from an incoming item) and persisted,
-                        // so reusing it as item_id lets the daemon dedup/LWW-merge
-                        // this clip instead of seeing a fresh item on every dial.
-                        itemId = id,
-                        wallTimeMs = wallTimeMs,
-                        contentType = contentType,
-                        plaintext = plain.asUByteArray().asList(),
-                        fileName = null,
-                        mime = null,
-                        deleted = false,
-                        pinned = isPinned,
-                        pinOrder = pinOrder,
-                    )
-                }
-            } catch (e: Exception) {
-                // WARN (not DEBUG): a skipped item means a gap in the sync payload.
-                // Log at WARN with the item id so operators/devs can diagnose missing
-                // items in production without needing a debug build.
-                Log.w(TAG, "localItemsForSync: skipping item $id for sync " +
-                    "(unexpected error): ${e.message}")
-                null
-            }
-        }
-
-        // Combine tombstones + live items, preserving original recency order (reversed).
-        (tombstones + localItems).reversed()
-    }
+    ): List<uniffi.copypaste_android.LocalItem> = localItemsForSyncImpl(key)
 
     /**
      * Apply an inbound soft-delete tombstone (from relay, P2P, or cloud) with LWW
@@ -2273,64 +1612,11 @@ class ClipboardRepository(context: Context) {
      *
      * Returns true when a tombstone was written (for caller stats).
      */
+    // Extracted to ClipboardRepositorySync.kt (CopyPaste-ra15.4).
     suspend fun applyInboundTombstoneWithLww(
         itemId: String,
         lamportTs: Long,
-    ): Boolean = withContext(Dispatchers.IO) {
-        synchronized(idsWriteLock) {
-            // Resolve the local storage id for this cross-device item_id.
-            val storageId = prefs.getString("item_id_ref_$itemId", null)
-            if (storageId == null) {
-                // CopyPaste-bfiu: delete-before-create — insert a ghost tombstone so
-                // a later arriving create for this item_id loses LWW. The ghost uses
-                // itemId as the storageId (same as storeItemWithLww convention) and is
-                // written into the id-index so item_id_ref lookup finds it. The UI
-                // filters it out via isDeletedBlob.
-                val nowMs = System.currentTimeMillis()
-                // Ghost tombstone blob format mirrors encodeTombstone without an existing blob:
-                // <nowMs>|text/plain|0||tombstone|<lamportTs>|1|
-                val ghostBlob = "$nowMs|text/plain|0||tombstone|$lamportTs|1|"
-                val ids = appendUniqueId(storedIds(), itemId)
-                ClipboardItemCache.cachedIds = ids
-                prefs.edit()
-                    .putString("item_$itemId", ghostBlob)
-                    .putString(KEY_ITEM_IDS, ids.joinToString(","))
-                    .putString("item_id_ref_$itemId", itemId)
-                    .apply()
-                Log.d(TAG, "applyInboundTombstone: inserted ghost tombstone for unknown item_id=$itemId (delete-before-create)")
-                return@synchronized true
-            }
-            val existing = prefs.getString("item_$storageId", null)
-                ?: return@synchronized false
-            // Already a tombstone — only replace if incoming ts is strictly newer.
-            val storedTs = try {
-                val parts = existing.split("|")
-                if (parts.size >= 6) parts[5].toLongOrNull() ?: 0L else 0L
-            } catch (_: Exception) { 0L }
-            if (lamportTs <= storedTs) {
-                Log.d(TAG, "applyInboundTombstone: skipping (stored=$storedTs >= incoming=$lamportTs) for item_id=$itemId")
-                return@synchronized false
-            }
-            // Write the tombstone at the incoming lamportTs so future LWW comparisons
-            // use the remote delete's timestamp (not a local bump of the old ts).
-            val tombstone = encodeTombstone(existing, lamportTs)
-            val pinnedList = storedPinnedList().toMutableList()
-            val wasPinned = pinnedList.remove(storageId)
-            val editor = prefs.edit()
-                .putString("item_$storageId", tombstone)
-                .remove("item_img_$storageId")
-                .remove("item_thumb_$storageId")
-                .remove("item_file_$storageId")
-                .remove("item_filemeta_$storageId")
-            if (wasPinned) {
-                editor.putString(KEY_PINNED_IDS, pinnedList.joinToString(","))
-            }
-            editor.apply()
-            evictParseCache(storageId)
-            Log.d(TAG, "applyInboundTombstone: tombstoned item_id=$itemId storageId=$storageId (lamport $storedTs→$lamportTs)")
-            true
-        }
-    }
+    ): Boolean = applyInboundTombstoneWithLwwImpl(itemId, lamportTs)
 
     /**
      * DEAD CODE — relay incoming sync is disabled.
@@ -2386,98 +1672,13 @@ class ClipboardRepository(context: Context) {
      * The returned JSON is plaintext — the caller must write it to a user-chosen
      * location via the Storage Access Framework (ACTION_CREATE_DOCUMENT).
      */
+    // Extracted to ClipboardRepositorySync.kt (CopyPaste-ra15.4).
     suspend fun exportHistory(
         encryptionKey: ByteArray,
         includeSensitive: Boolean = false,
-    ): String = withContext(Dispatchers.IO) {
-        // Load all items (no pagination cap) using the existing getItems path which
-        // handles decryption, sensitivity detection, and pinned ordering.
-        val allItems = getItems(key = encryptionKey, limit = Int.MAX_VALUE, offset = 0)
-        val exportedAt = System.currentTimeMillis()
+    ): String = exportHistoryImpl(encryptionKey, includeSensitive)
 
-        val arr = org.json.JSONArray()
-        for (item in allItems) {
-            // Only export text items.
-            if (!item.isText) continue
-            // CopyPaste-crh3.40: skip sensitive items unless the user opted in.
-            if (item.isSensitive && !includeSensitive) continue
-
-            val fullText = runCatching { loadFullPlaintext(item.id, encryptionKey) }.getOrNull()
-                ?: item.snippet
-
-            val obj = org.json.JSONObject()
-            obj.put("id", item.id)
-            obj.put("content_type", "text")
-            obj.put("snippet", item.snippet)
-            obj.put("full_text", fullText)
-            obj.put("wall_time_ms", item.wallTimeMs)
-            obj.put("pinned", item.pinned)
-            arr.put(obj)
-        }
-
-        val root = org.json.JSONObject()
-        root.put("version", 1)
-        root.put("exported_at", exportedAt)
-        root.put("items", arr)
-        root.toString(2) // pretty-print with 2-space indent
-    }
-
-    /**
-     * Import items from an export JSON string.
-     *
-     * Parses the export format, skips items whose [id] already exists locally
-     * (idempotent deduplication by ID), and inserts new items via [storeItem].
-     * The items are re-encrypted with the current device [encryptionKey].
-     *
-     * @return The number of items successfully imported.
-     * @throws org.json.JSONException if the JSON is malformed.
-     * @throws IllegalArgumentException if the export version is unsupported.
-     */
+    // Extracted to ClipboardRepositorySync.kt (CopyPaste-ra15.4).
     suspend fun importHistory(json: String, encryptionKey: ByteArray): Int =
-        withContext(Dispatchers.IO) {
-            val root = org.json.JSONObject(json)
-            val version = root.getInt("version")
-            require(version == 1) {
-                "Unsupported export version $version (expected 1)"
-            }
-            val arr = root.getJSONArray("items")
-            val existingIds = storedIds().toHashSet()
-            var imported = 0
-
-            for (i in 0 until arr.length()) {
-                val obj = arr.getJSONObject(i)
-                val id = obj.getString("id")
-                // Skip if already present locally.
-                if (id in existingIds) continue
-
-                val fullText = obj.optString("full_text").ifBlank {
-                    obj.optString("snippet")
-                }
-                if (fullText.isBlank()) continue
-
-                val wallTimeMs = obj.optLong("wall_time_ms", System.currentTimeMillis())
-                val pinned = obj.optBoolean("pinned", false)
-
-                // Encrypt and store via the standard path.
-                // Use overrideId = id so the stable cross-device item ID is preserved
-                // (allows subsequent syncs to deduplicate correctly via item_id_ref).
-                val stored = storeItem(
-                    plaintext = fullText,
-                    key = encryptionKey,
-                    overrideId = id,
-                    wallTimeMs = wallTimeMs,
-                )
-
-                if (stored.isNotBlank() && pinned) {
-                    // Restore pinned state.
-                    setPinned(stored, true)
-                }
-
-                if (stored.isNotBlank()) {
-                    imported++
-                    existingIds += stored // track to avoid re-inserting within the loop
-                }
-            }
-            imported
-        }
+        importHistoryImpl(json, encryptionKey)
 }
