@@ -69,7 +69,7 @@ describe("PeerRow CopyPaste-mgkr: trust label", () => {
     expect(container.querySelector("[data-testid='trust-badge']")).not.toBeNull();
   });
 
-  it("trust badge uses skin-aware border-radius via --skin-r-chip inline style", () => {
+  it("trust badge uses --r-chip for border-radius via inline style", () => {
     const { container } = render(
       <PeerRow
         peer={BASE_PEER}
@@ -83,8 +83,7 @@ describe("PeerRow CopyPaste-mgkr: trust label", () => {
 
     const badge = container.querySelector<HTMLElement>("[data-testid='trust-badge']");
     expect(badge).not.toBeNull();
-    // Must reference the skin token, not a hardcoded value.
-    expect(badge!.style.borderRadius).toBe("var(--skin-r-chip)");
+    expect(badge!.style.borderRadius).toBe("var(--r-chip)");
   });
 
   it("preserves peer name, transport chip, and action buttons alongside trust badge", () => {

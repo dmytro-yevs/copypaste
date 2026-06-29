@@ -273,14 +273,14 @@ export function GeneralTab({
               /* audit P2: was bg-ide-bg (grey canvas) → looked disabled. Match
                  the Sync-tab text inputs: white/near-white elevated fill. */
               className="flex-1 border border-ide-border bg-ide-elevated px-2.5 py-1.5 text-[13px] text-ide-text outline-none focus:border-ide-accent focus:ring-1 focus:ring-ide-accent disabled:cursor-not-allowed disabled:opacity-40"
-              style={{ borderRadius: "var(--skin-r-ctl)" }}
+              style={{ borderRadius: "var(--r-ctl)" }}
             />
             <button
               type="button"
               disabled={offline || newExcludedApp.trim() === ""}
               onClick={() => void addExcludedApp()}
               className="border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-              style={{ borderRadius: "var(--skin-r-ctl)" }}
+              style={{ borderRadius: "var(--r-ctl)" }}
             >
               Add
             </button>
@@ -291,7 +291,7 @@ export function GeneralTab({
                 <span
                   key={bundleId}
                   className="inline-flex items-center gap-1 border border-ide-border bg-ide-elevated/40 px-2 py-1 text-[12px] text-ide-dim"
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
+                  style={{ borderRadius: "var(--r-ctl)" }}
                 >
                   {bundleId}
                   <button

@@ -1,15 +1,6 @@
 /**
- * W-C6 / UIC-5 / VISM-11: Toast skin-token tests.
- *
- * Verifies:
- * 1. GlassToastItem no longer uses hardcoded `rounded-ide-lg` class (replaced by skin var).
- * 2. GlassToastItem no longer uses hardcoded `shadow-ide-sm` class (replaced by skin var).
- * 3. Toast bubble carries skin-driven border-radius via --skin-r-modal CSS var (UIC-5: modal tier).
- * 4. Toast bubble carries skin-driven box-shadow via --skin-shadow-card CSS var reference.
- * 5. surface-card material class is retained (correct floating-surface tier).
- * 6. All features preserved: auto-dismiss timer, dismiss button, kind variants (info/success/error/warning).
- * 7. UIC-5: border-radius uses --skin-r-modal (NOT --skin-r-card) — toast is a modal-tier surface.
- * 8. VISM-11: a leading semantic colour dot is rendered for each kind.
+ * Phase 4: Toast uses fixed design tokens (--r-card, --sh1).
+ * Updated from W-C6/UIC-5: old skin vars replaced with fixed tokens.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -21,7 +12,7 @@ import React from "react";
 // §1  No hardcoded radius/shadow tailwind classes
 // ---------------------------------------------------------------------------
 
-describe("W-C6 §1 — GlassToastItem: no hardcoded radius or shadow Tailwind class", () => {
+describe("Toast §1 — no hardcoded radius or shadow Tailwind class", () => {
   it("does NOT use rounded-ide-lg (hardcoded 14px radius)", () => {
     const { container } = render(
       <GlassToast msg={{ id: "t1", text: "hello" }} onDismiss={() => {}} />,
@@ -42,39 +33,26 @@ describe("W-C6 §1 — GlassToastItem: no hardcoded radius or shadow Tailwind cl
 });
 
 // ---------------------------------------------------------------------------
-// §2  Skin-driven radius and shadow via CSS var
+// §2  Fixed design tokens: --r-card radius, --sh1 shadow
 // ---------------------------------------------------------------------------
 
-describe("W-C6 / UIC-5 §2 — GlassToastItem: skin-driven radius and shadow", () => {
-  it("UIC-5: bubble has border-radius referencing --skin-r-modal (NOT --skin-r-card)", () => {
+describe("Toast §2 — fixed design tokens (Phase 4)", () => {
+  it("bubble has border-radius using var(--r-card)", () => {
     const { container } = render(
       <GlassToast msg={{ id: "t1", text: "hello" }} onDismiss={() => {}} />,
     );
     const bubble = container.querySelector('[role="status"]') as HTMLElement | null;
     expect(bubble).not.toBeNull();
-
-    // Must reference --skin-r-modal (modal-tier radius), not --skin-r-card.
-    const inlineStyle = bubble!.style.borderRadius;
-    const hasModalVar = inlineStyle.includes("--skin-r-modal") || bubble!.className.includes("--skin-r-modal");
-    expect(hasModalVar).toBe(true);
-
-    // Must NOT reference --skin-r-card (card radius is wrong tier for a floating toast).
-    const hasCardVar = inlineStyle.includes("--skin-r-card") || bubble!.className.includes("--skin-r-card");
-    expect(hasCardVar).toBe(false);
+    expect(bubble!.style.borderRadius).toBe("var(--r-card)");
   });
 
-  it("bubble has box-shadow referencing --skin-shadow-card via inline style or arbitrary class", () => {
+  it("bubble has box-shadow using var(--sh1)", () => {
     const { container } = render(
       <GlassToast msg={{ id: "t1", text: "hello" }} onDismiss={() => {}} />,
     );
     const bubble = container.querySelector('[role="status"]') as HTMLElement | null;
     expect(bubble).not.toBeNull();
-
-    const inlineStyle = bubble!.style.boxShadow;
-    const hasVarInStyle = inlineStyle.includes("--skin-shadow-card");
-    const hasVarInClass = bubble!.className.includes("--skin-shadow-card");
-
-    expect(hasVarInStyle || hasVarInClass).toBe(true);
+    expect(bubble!.style.boxShadow).toBe("var(--sh1)");
   });
 });
 
@@ -82,7 +60,7 @@ describe("W-C6 / UIC-5 §2 — GlassToastItem: skin-driven radius and shadow", (
 // §3  Material class preserved
 // ---------------------------------------------------------------------------
 
-describe("W-C6 §3 — GlassToastItem: surface-card material retained", () => {
+describe("Toast §3 — surface-card material retained", () => {
   it("bubble still carries surface-card class for glass material", () => {
     const { container } = render(
       <GlassToast msg={{ id: "t1", text: "hello" }} onDismiss={() => {}} />,
@@ -96,41 +74,26 @@ describe("W-C6 §3 — GlassToastItem: surface-card material retained", () => {
 // §4  Feature preservation: auto-dismiss
 // ---------------------------------------------------------------------------
 
-describe("W-C6 §4 — feature preservation: auto-dismiss", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+describe("Toast §4 — feature preservation: auto-dismiss", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
 
   it("toast dismisses after default 3000ms", () => {
     const onDismiss = vi.fn();
-    render(
-      <GlassToast msg={{ id: "t42", text: "bye" }} onDismiss={onDismiss} />,
-    );
+    render(<GlassToast msg={{ id: "t42", text: "bye" }} onDismiss={onDismiss} />);
     expect(onDismiss).not.toHaveBeenCalled();
-    act(() => {
-      vi.advanceTimersByTime(3000);
-    });
+    act(() => { vi.advanceTimersByTime(3000); });
     expect(onDismiss).toHaveBeenCalledWith("t42");
   });
 
   it("toast respects custom duration", () => {
     const onDismiss = vi.fn();
     render(
-      <GlassToast
-        msg={{ id: "t43", text: "short", duration: 1000 }}
-        onDismiss={onDismiss}
-      />,
+      <GlassToast msg={{ id: "t43", text: "short", duration: 1000 }} onDismiss={onDismiss} />,
     );
-    act(() => {
-      vi.advanceTimersByTime(999);
-    });
+    act(() => { vi.advanceTimersByTime(999); });
     expect(onDismiss).not.toHaveBeenCalled();
-    act(() => {
-      vi.advanceTimersByTime(1);
-    });
+    act(() => { vi.advanceTimersByTime(1); });
     expect(onDismiss).toHaveBeenCalledWith("t43");
   });
 });
@@ -139,12 +102,10 @@ describe("W-C6 §4 — feature preservation: auto-dismiss", () => {
 // §5  Feature preservation: dismiss button
 // ---------------------------------------------------------------------------
 
-describe("W-C6 §5 — feature preservation: dismiss button", () => {
+describe("Toast §5 — feature preservation: dismiss button", () => {
   it("dismiss button calls onDismiss with the message id", () => {
     const onDismiss = vi.fn();
-    render(
-      <GlassToast msg={{ id: "t99", text: "click me" }} onDismiss={onDismiss} />,
-    );
+    render(<GlassToast msg={{ id: "t99", text: "click me" }} onDismiss={onDismiss} />);
     const btn = screen.getByRole("button", { name: /dismiss/i });
     fireEvent.click(btn);
     expect(onDismiss).toHaveBeenCalledWith("t99");
@@ -152,10 +113,10 @@ describe("W-C6 §5 — feature preservation: dismiss button", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §6  Feature preservation: kind variants produce correct colour classes
+// §6  Feature preservation: kind variants
 // ---------------------------------------------------------------------------
 
-describe("W-C6 §6 — feature preservation: kind variants", () => {
+describe("Toast §6 — feature preservation: kind variants", () => {
   const cases: { kind: ToastKind; cls: string }[] = [
     { kind: "info",    cls: "text-ide-text" },
     { kind: "success", cls: "text-ide-success" },
@@ -178,7 +139,7 @@ describe("W-C6 §6 — feature preservation: kind variants", () => {
 // §7  VISM-11: semantic colour dot
 // ---------------------------------------------------------------------------
 
-describe("VISM-11 §7 — GlassToastItem: leading semantic colour dot", () => {
+describe("Toast VISM-11 §7 — leading semantic colour dot", () => {
   const dotCases: { kind: ToastKind; dotCls: string }[] = [
     { kind: "info",    dotCls: "bg-ide-text" },
     { kind: "success", dotCls: "bg-ide-success" },
@@ -191,7 +152,6 @@ describe("VISM-11 §7 — GlassToastItem: leading semantic colour dot", () => {
       const { container } = render(
         <GlassToast msg={{ id: "dot-test", text: "msg", kind }} onDismiss={() => {}} />,
       );
-      // The dot is an aria-hidden span with h-2 w-2 rounded-full and the kind colour class.
       const dots = container.querySelectorAll('[aria-hidden="true"]');
       const dot = Array.from(dots).find((el) =>
         el.className.includes("h-2") && el.className.includes("w-2") && el.className.includes("rounded-full")
@@ -201,7 +161,7 @@ describe("VISM-11 §7 — GlassToastItem: leading semantic colour dot", () => {
     });
   }
 
-  it("dot is aria-hidden (purely presentational — kind text colour conveys the same info)", () => {
+  it("dot is aria-hidden", () => {
     const { container } = render(
       <GlassToast msg={{ id: "a11y-dot", text: "msg", kind: "error" }} onDismiss={() => {}} />,
     );
@@ -215,7 +175,7 @@ describe("VISM-11 §7 — GlassToastItem: leading semantic colour dot", () => {
 });
 
 // ---------------------------------------------------------------------------
-// §8  ToastProvider integration: show + auto-dismiss via provider
+// §8  ToastProvider integration
 // ---------------------------------------------------------------------------
 
 function TestConsumer() {
@@ -227,13 +187,9 @@ function TestConsumer() {
   );
 }
 
-describe("W-C6 §8 — ToastProvider integration", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-  });
+describe("Toast §8 — ToastProvider integration", () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
 
   it("ToastProvider renders toast and dismisses it after 3s", () => {
     render(
@@ -241,13 +197,9 @@ describe("W-C6 §8 — ToastProvider integration", () => {
         <TestConsumer />
       </ToastProvider>,
     );
-    act(() => {
-      fireEvent.click(screen.getByRole("button", { name: /show/i }));
-    });
+    act(() => { fireEvent.click(screen.getByRole("button", { name: /show/i })); });
     expect(screen.getByText("provider toast")).toBeInTheDocument();
-    act(() => {
-      vi.advanceTimersByTime(3000);
-    });
+    act(() => { vi.advanceTimersByTime(3000); });
     expect(screen.queryByText("provider toast")).toBeNull();
   });
 });

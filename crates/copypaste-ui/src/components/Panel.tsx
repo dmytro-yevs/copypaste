@@ -5,11 +5,7 @@
 // panel's rounded corners without clipping absolutely-positioned InfoPopover
 // (z-50), which floats above the outer div via z-50.
 //
-// surface-card = frosted translucent glass: reads --skin-* vars for material,
-// blur, fill, shadow (--skin-shadow-card) so panels adapt to the active skin.
-//   Classic:  e2 shadow + glass
-//   Quiet:    no shadow + flat
-//   Vapor:    no card shadow + sheen
+// surface-card = frosted translucent glass card with radius and shadow tokens.
 // ---------------------------------------------------------------------------
 
 interface PanelProps {
@@ -18,8 +14,8 @@ interface PanelProps {
 
 export function Panel({ children }: PanelProps) {
   return (
-    <div className="surface-card" style={{ borderRadius: "var(--skin-r-card)" }}>
-      <div className="overflow-hidden" style={{ borderRadius: "var(--skin-r-card)" }}>
+    <div className="surface-card" style={{ borderRadius: "var(--r-card)" }}>
+      <div className="overflow-hidden" style={{ borderRadius: "var(--r-card)" }}>
         {children}
       </div>
     </div>

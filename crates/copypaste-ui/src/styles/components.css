@@ -21,7 +21,6 @@ textarea {
   background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
-  /* CopyPaste-i6qj (W3): use skin token so radius follows the active skin. */
   border-radius: var(--r-ctl);
   outline: none;
   font-family: inherit;
@@ -61,7 +60,6 @@ select {
   background: var(--ide-elevated);
   color: var(--ide-text);
   border: 1px solid var(--ide-border);
-  /* CopyPaste-i6qj (W3): use skin token so radius follows the active skin. */
   border-radius: var(--r-ctl);
   padding: 4px 28px 4px 10px;
   font-family: inherit;

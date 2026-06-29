@@ -146,13 +146,14 @@ describe("bdac.107 — settings-row copy consistency", () => {
 
   // ── Display tab ──────────────────────────────────────────────────────────
 
-  it("'Color theme' row has a description", async () => {
+  it("'Theme' row exists in Display tab (renamed from 'Color theme' in Phase 4)", async () => {
     await renderSettingsOnline();
     const displayTab = await screen.findByText("Display");
     await act(async () => { fireEvent.click(displayTab); });
 
-    expect(
-      screen.getByText("Overrides the system appearance for this app only."),
-    ).toBeInTheDocument();
+    // Phase 4: row renamed to "Theme"; no description popover (self-explanatory control)
+    expect(screen.getByText(/^Theme$/i)).toBeInTheDocument();
+    // "Color theme" label is gone
+    expect(screen.queryByText(/^Color theme$/i)).toBeNull();
   });
 });

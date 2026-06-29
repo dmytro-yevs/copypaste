@@ -1,31 +1,12 @@
 /**
- * W-C2: ViewShell skin token audit (CopyPaste-un1w / CopyPaste-aq5w)
- *
- * Verifies that ViewShell's header and content panel use --skin-* CSS variable
- * references for radius and shadow instead of hardcoded tailwind tokens
- * (rounded-ide-lg / shadow-ide-sm), so the component responds to skin switching
- * (classic / quiet / vapor) without code changes.
- *
- * Rules from §4 of the skin implementation plan:
- *  - Classic UNCHANGED: surface-glass, card-in, reveal-up are preserved.
- *  - No hardcoded rounded-ide-lg or shadow-ide-sm on ViewShell surfaces.
- *  - Radius driven by --skin-r-card (inline style or Tailwind arbitrary value).
- *  - Shadow driven by --skin-shadow-card (header AND content panel).
- *    CopyPaste-aq5w: content panel uses --skin-shadow-card (=E2 in classic),
- *    NOT --skin-shadow-float (=E3 in classic), so classic is byte-identical to
- *    the pre-skin shadow-ide-sm (E2) behaviour.
- *  - All original features (drag region, title, actions slot) preserved.
+ * Phase 4: ViewShell uses fixed design tokens (--r-card, --sh1).
+ * Updated from W-C2: old skin variables replaced.
  */
 
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { ViewShell } from "./ViewShell";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Collect all className strings from the rendered subtree. */
 function allClasses(container: HTMLElement): string {
   return Array.from(container.querySelectorAll("*"))
     .map((el) => el.className)
@@ -34,10 +15,10 @@ function allClasses(container: HTMLElement): string {
 }
 
 // ---------------------------------------------------------------------------
-// §A  Classic look preserved — surface-glass + entrance animations
+// §A  Glass surfaces + entrance animations preserved
 // ---------------------------------------------------------------------------
-describe("§W-C2-A  ViewShell — skin-driven surfaces (classic preserved)", () => {
-  it("header has surface-glass class (material driven by skin tokens)", () => {
+describe("§W-C2-A  ViewShell — glass surfaces (Phase 4)", () => {
+  it("header has surface-glass class", () => {
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
@@ -50,7 +31,6 @@ describe("§W-C2-A  ViewShell — skin-driven surfaces (classic preserved)", () 
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
-    // The flex-1 sibling of the header
     const panel = container.querySelector("div.flex-1");
     expect(panel).not.toBeNull();
     expect(panel!.className).toMatch(/surface-glass/);
@@ -101,15 +81,14 @@ describe("§W-C2-A  ViewShell — skin-driven surfaces (classic preserved)", () 
 });
 
 // ---------------------------------------------------------------------------
-// §B  Skin-token radius: --skin-r-card on both surfaces
+// §B  Fixed radius token: --r-card on both surfaces
 // ---------------------------------------------------------------------------
-describe("§W-C2-B  ViewShell — skin-driven radius (--skin-r-card)", () => {
+describe("§W-C2-B  ViewShell — fixed radius token (--r-card)", () => {
   it("header does NOT use hardcoded rounded-ide-lg class", () => {
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
     const header = container.querySelector("header");
-    // rounded-ide-lg is hardcoded 14px; skin should drive radius via --skin-r-card
     expect(header!.className).not.toMatch(/\brounded-ide-lg\b/);
   });
 
@@ -121,45 +100,32 @@ describe("§W-C2-B  ViewShell — skin-driven radius (--skin-r-card)", () => {
     expect(panel!.className).not.toMatch(/\brounded-ide-lg\b/);
   });
 
-  it("header radius references --skin-r-card (inline style or arbitrary value)", () => {
+  it("header radius uses var(--r-card)", () => {
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
     const header = container.querySelector("header") as HTMLElement;
-    // Accept: inline style borderRadius using var(--skin-r-card),
-    // OR Tailwind arbitrary class containing skin-r-card.
-    const inlineRadius = header.style.borderRadius;
-    const classStr = header.className;
-    const hasSkinRadius =
-      (inlineRadius && inlineRadius.includes("--skin-r-card")) ||
-      classStr.includes("skin-r-card");
-    expect(hasSkinRadius).toBe(true);
+    expect(header.style.borderRadius).toBe("var(--r-card)");
   });
 
-  it("content panel radius references --skin-r-card", () => {
+  it("content panel radius uses var(--r-card)", () => {
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
     const panel = container.querySelector("div.flex-1") as HTMLElement;
-    const inlineRadius = panel.style.borderRadius;
-    const classStr = panel.className;
-    const hasSkinRadius =
-      (inlineRadius && inlineRadius.includes("--skin-r-card")) ||
-      classStr.includes("skin-r-card");
-    expect(hasSkinRadius).toBe(true);
+    expect(panel.style.borderRadius).toBe("var(--r-card)");
   });
 });
 
 // ---------------------------------------------------------------------------
-// §C  Skin-token shadow: --skin-shadow-card on both header and content panel
+// §C  Fixed shadow token: --sh1 on both surfaces
 // ---------------------------------------------------------------------------
-describe("§W-C2-C  ViewShell — skin-driven shadow", () => {
+describe("§W-C2-C  ViewShell — fixed shadow token (--sh1)", () => {
   it("header does NOT use hardcoded shadow-ide-sm class", () => {
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
     const header = container.querySelector("header");
-    // shadow-ide-sm = hardcoded var(--ide-e2); skin should control via --skin-shadow-card
     expect(header!.className).not.toMatch(/\bshadow-ide-sm\b/);
   });
 
@@ -171,38 +137,19 @@ describe("§W-C2-C  ViewShell — skin-driven shadow", () => {
     expect(panel!.className).not.toMatch(/\bshadow-ide-sm\b/);
   });
 
-  it("header shadow references --skin-shadow-card (inline style or arbitrary value)", () => {
+  it("header shadow uses var(--sh1)", () => {
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
     const header = container.querySelector("header") as HTMLElement;
-    const inlineShadow = header.style.boxShadow;
-    const classStr = header.className;
-    const hasSkinShadow =
-      (inlineShadow && inlineShadow.includes("--skin-shadow-card")) ||
-      classStr.includes("skin-shadow-card");
-    expect(hasSkinShadow).toBe(true);
+    expect(header.style.boxShadow).toBe("var(--sh1)");
   });
 
-  // CopyPaste-aq5w: content panel must use --skin-shadow-card (E2 in classic),
-  // NOT --skin-shadow-float (E3 in classic). This keeps the content panel
-  // byte-identical to the pre-skin shadow-ide-sm (E2) shadow in classic.
-  it("content panel shadow references --skin-shadow-card (NOT --skin-shadow-float)", () => {
+  it("content panel shadow uses var(--sh1)", () => {
     const { container } = render(
       <ViewShell title="Test"><div>content</div></ViewShell>
     );
     const panel = container.querySelector("div.flex-1") as HTMLElement;
-    const inlineShadow = panel.style.boxShadow;
-    const classStr = panel.className;
-    const hasSkinCardShadow =
-      (inlineShadow && inlineShadow.includes("--skin-shadow-card")) ||
-      classStr.includes("skin-shadow-card");
-    const hasSkinFloatShadow =
-      (inlineShadow && inlineShadow.includes("--skin-shadow-float")) ||
-      classStr.includes("skin-shadow-float");
-    // Must use --skin-shadow-card (classic E2 = shadow-ide-sm parity)
-    expect(hasSkinCardShadow).toBe(true);
-    // Must NOT use --skin-shadow-float (classic E3 = regression)
-    expect(hasSkinFloatShadow).toBe(false);
+    expect(panel.style.boxShadow).toBe("var(--sh1)");
   });
 });

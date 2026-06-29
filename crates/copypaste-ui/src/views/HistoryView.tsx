@@ -15,7 +15,6 @@ import { copyWithFeedback } from "../lib/copyWithFeedback";
 import { RestartDaemonButton } from "../components/RestartDaemonButton";
 import { EmptyState } from "../components/EmptyState";
 import { useUI } from "../store";
-import { SKINS } from "../lib/skins";
 import { clearImageCache } from "../components/ImageThumb";
 import { ConfirmModal } from "../components/ConfirmModal";
 // CopyPaste-5917.102: replaced the local Toast duplicate with the shared
@@ -71,8 +70,10 @@ import { useFileDrop } from "./HistoryView/hooks/useFileDrop";
 // ---------------------------------------------------------------------------
 
 export function HistoryViewInner() {
-  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, showSensitiveWarnings, playSoundOnCopy, notifyOnCopy, density, historyDisplayLimit, skin, sortByDevice } =
+  const { previewLinesApp, previewSize, imageMaxHeight, maskSensitive, showSensitiveWarnings, playSoundOnCopy, notifyOnCopy, historyDisplayLimit, sortByDevice } =
     useUI((s) => s.prefs);
+  // density axis removed in Phase 4 redesign; calm fixed spacing per §5.
+  const density = "comfortable" as const;
   const setPrefs = useUI((s) => s.setPrefs);
 
   // -------------------------------------------------------------------------
@@ -665,14 +666,14 @@ export function HistoryViewInner() {
         aria-label="Add file to clipboard history"
         tabIndex={-1}
       />
-      {/* kp6f: borderRadius uses var(--skin-r-ctl) inline instead of rounded-ide class */}
+      {/* kp6f: borderRadius uses var(--r-ctl) inline instead of rounded-ide class */}
       <button
         type="button"
         title="Add file to clipboard history"
         aria-label="Add file"
         onClick={() => fileInputRef.current?.click()}
         className="flex h-7 w-7 items-center justify-center border border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text"
-        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+        style={{ borderRadius: "var(--r-ctl)" }}
       >
         {/* Paperclip / attach icon */}
         <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -680,13 +681,13 @@ export function HistoryViewInner() {
         </svg>
       </button>
       {/* Device filter dropdown — only shown when more than one device is present.
-          kp6f: borderRadius via var(--skin-r-ctl) inline instead of rounded-ide. */}
+          kp6f: borderRadius via var(--r-ctl) inline instead of rounded-ide. */}
       {knownDeviceIds.length > 1 && (
         <select
           value={deviceFilter}
           onChange={(e) => setDeviceFilter(e.target.value)}
           className="h-7 border border-ide-border bg-ide-elevated px-1.5 text-[11px] text-ide-text hover:bg-ide-hover cursor-pointer"
-          style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+          style={{ borderRadius: "var(--r-ctl)" }}
           aria-label="Filter by device"
           title="Filter by origin device"
         >
@@ -713,7 +714,7 @@ export function HistoryViewInner() {
               ? "border-ide-accent/60 bg-ide-accent/10 text-ide-accent"
               : "border-ide-border bg-ide-elevated text-ide-dim hover:bg-ide-hover hover:text-ide-text",
           ].join(" ")}
-          style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+          style={{ borderRadius: "var(--r-ctl)" }}
         >
           {/* Simple sort icon — two lines of different widths */}
           <svg viewBox="0 0 14 12" width="12" height="10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
@@ -747,7 +748,7 @@ export function HistoryViewInner() {
           disabled={clearAllBusy}
           onClick={() => setClearAllConfirmOpen(true)}
           className="flex h-7 items-center gap-1 border border-ide-danger/50 bg-ide-elevated px-2 text-[11px] text-ide-danger hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+          style={{ borderRadius: "var(--r-ctl)" }}
         >
           {/* Trash icon */}
           <svg viewBox="0 0 14 14" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -773,7 +774,7 @@ export function HistoryViewInner() {
           "focus:outline-none focus:border-ide-accent/60",
           "focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--ide-accent)_18%,transparent)]",
         ].join(" ")}
-        style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+        style={{ borderRadius: "var(--r-ctl)" }}
       />
     </>
   );
@@ -849,12 +850,10 @@ export function HistoryViewInner() {
             {/* 5j9x: replaced misclick-prone inline Yes/No with a ConfirmModal.
                 Clicking the button opens the modal; the modal calls handleResetConfirmed
                 only after the user explicitly confirms. */}
-            {/* CopyPaste-5917.39: replaced rounded-ide with skin-token radius so
-                Vapor (12px) and Quiet (7px) skins render the correct shape. */}
             <button
               onClick={() => setResetConfirm(true)}
               className="border border-ide-danger/60 bg-ide-elevated px-3 py-1.5 text-[12px] font-medium text-ide-danger hover:bg-ide-hover"
-              style={{ borderRadius: "var(--skin-r-ctl, 9px)" }}
+              style={{ borderRadius: "var(--r-ctl)" }}
             >
               Reset database (erases local history)
             </button>
@@ -917,17 +916,7 @@ export function HistoryViewInner() {
             isBusy={bulkBusy}
           />
         )}
-        {/* W-C3 / 10lk: Inset wrapper — adds padding around the VirtualList for inset rows.
-            Driven by rowTreatment token (not skin name) so a future skin with rowTreatment="inset"
-            gets the wrapper automatically. Per-row vertical gap is applied as marginBottom on each
-            row (o2o9 fix: flex gap on this wrapper is a no-op because VirtualList rows are
-            absolutely positioned). Classic/quiet (card/line) use no wrapper padding. */}
-        <div
-          className={SKINS[skin ?? "classic"].rowTreatment === "inset" ? "skin-list-vapor flex-1 overflow-hidden" : "flex-1 overflow-hidden"}
-          style={SKINS[skin ?? "classic"].rowTreatment === "inset"
-            ? { padding: "var(--skin-row-gap, 0px)" }
-            : {}}
-        >
+        <div className="flex-1 overflow-hidden">
         {/* SCRH-9: Show a subtle hint when the display-limit pref caps the visible list so
             the user isn't confused about why fewer items appear than the total-count badge
             shows. The sentinel value 100000 is used for "Unlimited" in settings. */}
@@ -979,7 +968,6 @@ export function HistoryViewInner() {
               maskSensitive={maskSensitive}
               showSensitiveWarnings={showSensitiveWarnings ?? true}
               ownDeviceId={ownDeviceId}
-              skin={skin ?? "classic"}
               onSelect={() => {
                 isKeyboardNavRef.current = false;
                 setSelectedId(entry.id);
@@ -1063,9 +1051,8 @@ export function HistoryViewInner() {
         {fileDragOver && (
           <div
             aria-hidden="true"
-            // CopyPaste-5917.39: replaced rounded-ide with skin-token radius (card).
             className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-ide-accent bg-ide-accent/5"
-            style={{ borderRadius: "var(--skin-r-card, 12px)" }}
+            style={{ borderRadius: "var(--r-card)" }}
           >
             <div className="flex flex-col items-center gap-2 text-ide-accent">
               <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1094,8 +1081,7 @@ export function HistoryViewInner() {
           aria-live="polite"
           style={{
             transform: "translateX(-50%)",
-            // CopyPaste-bdac.54: fallback corrected to 12px (Classic skin canonical value).
-            borderRadius: "var(--skin-r-card, 12px)",
+            borderRadius: "var(--r-card)",
           }}
         >
           <span

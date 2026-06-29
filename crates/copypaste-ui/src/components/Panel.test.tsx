@@ -25,12 +25,12 @@ describe("Panel", () => {
     expect(inner.classList.contains("overflow-hidden")).toBe(true);
   });
 
-  it("passes --skin-r-card to both wrappers via inline style", () => {
+  it("passes --r-card to both wrappers via inline style", () => {
     const { container } = render(<Panel><span>content</span></Panel>);
     const outer = container.firstElementChild as HTMLElement;
     const inner = outer.firstElementChild as HTMLElement;
-    expect(outer.style.borderRadius).toBe("var(--skin-r-card)");
-    expect(inner.style.borderRadius).toBe("var(--skin-r-card)");
+    expect(outer.style.borderRadius).toBe("var(--r-card)");
+    expect(inner.style.borderRadius).toBe("var(--r-card)");
   });
 
   it("renders multiple children", () => {

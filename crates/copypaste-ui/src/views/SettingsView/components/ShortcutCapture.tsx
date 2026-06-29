@@ -149,7 +149,7 @@ export function ShortcutCapture({
           ? "border-ide-accent ring-1 ring-ide-accent"
           : "border-ide-border hover:border-ide-accent",
       ].join(" ")}
-      style={{ borderRadius: "var(--skin-r-ctl)" }}
+      style={{ borderRadius: "var(--r-ctl)" }}
       title="Click and press a key combination"
     />
   );

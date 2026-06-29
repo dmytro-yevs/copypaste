@@ -12,14 +12,13 @@ export type AccentId = "indigo" | "blue" | "teal" | "green" | "amber" | "rose";
 // UI preferences persisted to localStorage
 // ---------------------------------------------------------------------------
 
-// v4 key — Phase 2 redesign: Liquid Glass system (skin/palette/density/motion)
-// replaced by two-axis theming (theme × accent). Migrates from v3/v2/v1.
+// v4 key — Phase 2 redesign: two-axis theming (theme × accent). Migrates from v3/v2/v1.
 const PREFS_KEY = "copypaste-ui-prefs-v4";
-// v3 key — introduced skin axis (W-F2). Migrated to v4: drop skin/density/motion.
+// v3 key — legacy; migrated to v4 (drops old appearance fields).
 const LEGACY_PREFS_V3_KEY = "copypaste-ui-prefs-v3";
-// v2 key — introduced with Liquid Glass redesign (skin pref did not exist yet).
+// v2 key — legacy; migrated to v4.
 const LEGACY_PREFS_V2_KEY = "copypaste-ui-prefs-v2";
-// Pre-Liquid-Glass key (v1). See loadPrefs() migration block.
+// v1 key — pre-redesign legacy. See loadPrefs() migration block.
 const LEGACY_PREFS_KEY = "copypaste-ui-prefs-v1";
 
 export interface UIPrefs {
@@ -61,8 +60,8 @@ export interface UIPrefs {
   translucency: boolean;
   /**
    * UI color theme — §2 STYLEGUIDE two-axis appearance axis 1.
-   *   "dark"  (default) — Graphite dark palette. §2 STYLEGUIDE mandates dark-first.
-   *   "light"           — Light palette.
+   *   "dark"  (default) — §2 STYLEGUIDE mandates dark-first.
+   *   "light"           — Light theme.
    * Applied via <html data-theme="dark|light"> in App.tsx.
    * Note: the "system" value from v1–v3 is removed; old stored "system" is
    * mapped to "dark" by the migration shim in loadPrefs().
@@ -125,8 +124,7 @@ function loadPrefs(): UIPrefs {
   try {
     let raw = localStorage.getItem(PREFS_KEY);
     // ── Two-axis theming upgrade migration (v3 → v4) ──────────────────────
-    // Phase 2 (CopyPaste-2hfj.3): drop Liquid Glass system fields (skin, palette,
-    // density, motionReduced) which no longer exist in UIPrefs v4.
+    // Phase 2 (CopyPaste-2hfj.3): old appearance fields removed from UIPrefs v4.
     // If only v3 prefs exist, adopt them and run the cleanup below.
     let migratedFromV3 = false;
     if (!raw) {
@@ -136,7 +134,7 @@ function loadPrefs(): UIPrefs {
         migratedFromV3 = true;
       }
     }
-    // ── Skin-axis upgrade migration (v2 → v4) ─────────────────────────────
+    // ── v2 → v4 migration ────────────────────────────────────────────────
     // If only v2 prefs exist, adopt them and run the cleanup below.
     let migratedFromV2 = false;
     if (!raw) {
@@ -159,14 +157,15 @@ function loadPrefs(): UIPrefs {
     }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
 
-    // ── Drop all Liquid Glass system keys (applies on every upgrade path) ─
-    // palette, skin, density, motionReduced were removed in Phase 2 (CopyPaste-2hfj.3).
-    // Also drop contrast which was proposed but never shipped.
-    delete parsed.palette;
-    delete parsed.skin;
-    delete parsed.density;
-    delete parsed.motionReduced;
-    delete parsed.contrast;
+    // ── Drop all keys not in the current schema (applies on every upgrade path) ──
+    // Old appearance fields (Phase 2, CopyPaste-2hfj.3) and any future renames are
+    // cleaned up automatically by this whitelist approach.
+    const knownKeys = new Set(Object.keys(DEFAULT_PREFS));
+    for (const key of Object.keys(parsed)) {
+      if (!knownKeys.has(key)) {
+        delete parsed[key];
+      }
+    }
     // "system" was a valid theme value in v1–v3; §2 STYLEGUIDE removes it.
     // Map to "dark" (the new §2 default — graphite is the design-language default).
     if (parsed.theme === "system") {

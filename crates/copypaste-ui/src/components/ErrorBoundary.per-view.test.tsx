@@ -125,7 +125,7 @@ describe("ErrorBoundary — per-view localized fallback (CopyPaste-a7kt)", () =>
     spy.mockRestore();
   });
 
-  it("Retry button uses skin radius token (CopyPaste-5917.94): no rounded-ide class, inline borderRadius = var(--skin-r-ctl)", () => {
+  it("Retry button uses skin radius token (CopyPaste-5917.94): no rounded-ide class, inline borderRadius = var(--r-ctl)", () => {
     // CopyPaste-5917.94: The Retry button must use the skin radius CSS variable
     // so its corner radius adapts across classic (9px), quiet (7px), and vapor
     // (12px) skins — NOT the static rounded-ide Tailwind class.
@@ -143,12 +143,12 @@ describe("ErrorBoundary — per-view localized fallback (CopyPaste-a7kt)", () =>
     expect(retryBtn.classList.contains("rounded-ide")).toBe(false);
 
     // Must reference the skin token so the browser resolves the active skin value.
-    expect(retryBtn.style.borderRadius).toBe("var(--skin-r-ctl)");
+    expect(retryBtn.style.borderRadius).toBe("var(--r-ctl)");
 
     spy.mockRestore();
   });
 
-  it("Retry button uses skin radius token (CopyPaste-5917.94): no rounded-ide class, inline borderRadius = var(--skin-r-ctl)", () => {
+  it("Retry button uses skin radius token (CopyPaste-5917.94): no rounded-ide class, inline borderRadius = var(--r-ctl)", () => {
     // CopyPaste-5917.94: The Retry button must use the skin radius CSS variable
     // so its corner radius adapts across classic (9px), quiet (7px), and vapor
     // (12px) skins — NOT the static rounded-ide Tailwind class.
@@ -166,7 +166,7 @@ describe("ErrorBoundary — per-view localized fallback (CopyPaste-a7kt)", () =>
     expect(retryBtn.classList.contains("rounded-ide")).toBe(false);
 
     // Must reference the skin token so the browser resolves the active skin value.
-    expect(retryBtn.style.borderRadius).toBe("var(--skin-r-ctl)");
+    expect(retryBtn.style.borderRadius).toBe("var(--r-ctl)");
 
     spy.mockRestore();
   });

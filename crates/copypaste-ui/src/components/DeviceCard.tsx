@@ -349,7 +349,7 @@ export function PeerRow({
         {peer.trust === "verified" ? (
           <span
             data-testid="trust-badge"
-            style={{ borderRadius: "var(--skin-r-chip)" }}
+            style={{ borderRadius: "var(--r-chip)" }}
             className="mt-1 inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 text-[10.5px] font-medium bg-ide-success/14 text-ide-success border border-ide-success/30"
           >
             <span className="inline-block w-1 h-1 rounded-full bg-ide-success" aria-hidden="true" />
@@ -358,7 +358,7 @@ export function PeerRow({
         ) : (
           <span
             data-testid="trust-badge"
-            style={{ borderRadius: "var(--skin-r-chip)" }}
+            style={{ borderRadius: "var(--r-chip)" }}
             className="mt-1 inline-flex shrink-0 items-center gap-0.5 px-1.5 py-0.5 text-[10.5px] font-medium bg-ide-warning/14 text-ide-warning border border-ide-warning/30"
           >
             <span className="inline-block w-1 h-1 rounded-full bg-ide-warning" aria-hidden="true" />
@@ -395,9 +395,7 @@ export function PeerRow({
       {/* g4ze: Action footer — full-width row below metadata with hairline border-t.
            Both buttons are flex-1 equal width, matching Android's weight(1f) pattern.
            bdac.14: use ActionButton(variant="danger") so the danger-tint style comes
-           from a single source of truth in ActionButton.tsx (spec §7). ActionButton
-           already applies --skin-r-ctl via inline style, so the W-C7 skin-radius
-           requirement is satisfied without an extra inline style here. */}
+           from a single source of truth in ActionButton.tsx (spec §7). */}
       <div className="mt-2 flex gap-1.5 border-t border-ide-border/20 pt-2">
         <ActionButton
           variant="danger"

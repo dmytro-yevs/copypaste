@@ -262,21 +262,16 @@ describe("SettingsRow state mapping (TST-1 / CopyPaste-ojas.1)", () => {
     expect(useUI.getState().prefs.maskSensitive).toBe(false);
   });
 
-  it("density pref drives SettingsRow height: compact uses min-h-[30px] class", async () => {
-    act(() => {
-      useUI.getState().setPrefs({ density: "compact" });
-    });
-
+  it("Phase 4: SettingsRow uses fixed comfortable height min-h-[36px] (density removed)", async () => {
     render(<SettingsView />);
 
     await waitFor(() => {
       expect(screen.queryByRole("heading", { name: /Settings/i })).toBeInTheDocument();
     });
 
-    // With compact density, SettingsRow renders min-h-[30px] rows.
-    // We verify by checking that at least one row with that class is present.
-    const compactRows = document.querySelectorAll(".min-h-\\[30px\\]");
-    expect(compactRows.length).toBeGreaterThan(0);
+    // Phase 4: density axis removed; SettingsRow hardcodes comfortable min-h-[36px].
+    const rows = document.querySelectorAll(".min-h-\\[36px\\]");
+    expect(rows.length).toBeGreaterThan(0);
   });
 });
 

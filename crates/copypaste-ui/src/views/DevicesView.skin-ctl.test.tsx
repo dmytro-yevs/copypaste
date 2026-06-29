@@ -3,31 +3,31 @@
  *
  * Verifies that every button/input/container that previously used the
  * hardcoded `rounded-ide` Tailwind class now uses an inline style of
- * `borderRadius: "var(--skin-r-ctl)"` (controls) or
- * `borderRadius: "var(--skin-r-card)"` (card containers).
+ * `borderRadius: "var(--r-ctl)"` (controls) or
+ * `borderRadius: "var(--r-card)"` (card containers).
  *
- * Classic skin values: --skin-r-ctl = 9px, --skin-r-card = 14px — so
+ * Classic skin values: --r-ctl = 9px, --r-card = 14px — so
  * existing visual output is byte-identical to the pre-migration state.
  *
  * Sites audited (DevicesView.tsx line ~):
- *   §1  SAS code copy button ~354       → --skin-r-ctl
- *   §2  SAS peer metadata card ~366     → --skin-r-card
- *   §3  SAS "Doesn't match" btn ~379    → --skin-r-ctl
- *   §4  SAS "Match" btn ~386            → --skin-r-ctl
- *   §5  SAS "Close" (confirmed) ~409    → --skin-r-ctl
- *   §6  SAS "Close" (rejected) ~432     → --skin-r-ctl
- *   §7  SAS "Close" (ended) ~452        → --skin-r-ctl
- *   §8  DiscoveredRow "Pair" btn ~525   → --skin-r-ctl
- *   §9  RevokeConfirmDialog password input ~597 → --skin-r-ctl
- *   §10 RevokeConfirmDialog "Cancel" btn ~604   → --skin-r-ctl
- *   §11 RevokeConfirmDialog "Revoke only" btn ~611 → --skin-r-ctl
- *   §12 RevokeConfirmDialog "Revoke & rotate" btn ~624 → --skin-r-ctl
- *   §13 Actions bar "Revoke all" Yes btn ~1189  → --skin-r-ctl
- *   §14 Actions bar "No" btn ~1195              → --skin-r-ctl
- *   §15 Actions bar "Revoke all" btn ~1204      → --skin-r-ctl
- *   §16 Rescan "Refresh" btn ~1369              → --skin-r-ctl
- *   §17 QR container div ~1450                  → --skin-r-card
- *   §18 QR reveal overlay button ~1467          → --skin-r-ctl
+ *   §1  SAS code copy button ~354       → --r-ctl
+ *   §2  SAS peer metadata card ~366     → --r-card
+ *   §3  SAS "Doesn't match" btn ~379    → --r-ctl
+ *   §4  SAS "Match" btn ~386            → --r-ctl
+ *   §5  SAS "Close" (confirmed) ~409    → --r-ctl
+ *   §6  SAS "Close" (rejected) ~432     → --r-ctl
+ *   §7  SAS "Close" (ended) ~452        → --r-ctl
+ *   §8  DiscoveredRow "Pair" btn ~525   → --r-ctl
+ *   §9  RevokeConfirmDialog password input ~597 → --r-ctl
+ *   §10 RevokeConfirmDialog "Cancel" btn ~604   → --r-ctl
+ *   §11 RevokeConfirmDialog "Revoke only" btn ~611 → --r-ctl
+ *   §12 RevokeConfirmDialog "Revoke & rotate" btn ~624 → --r-ctl
+ *   §13 Actions bar "Revoke all" Yes btn ~1189  → --r-ctl
+ *   §14 Actions bar "No" btn ~1195              → --r-ctl
+ *   §15 Actions bar "Revoke all" btn ~1204      → --r-ctl
+ *   §16 Rescan "Refresh" btn ~1369              → --r-ctl
+ *   §17 QR container div ~1450                  → --r-card
+ *   §18 QR reveal overlay button ~1467          → --r-ctl
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -159,10 +159,10 @@ function findButtonByText(container: HTMLElement, text: string): HTMLElement | n
   ) as HTMLElement | null;
 }
 
-// Helper: check element uses var(--skin-r-ctl) and does NOT have rounded-ide class
+// Helper: check element uses var(--r-ctl) and does NOT have rounded-ide class
 function expectSkinRCtl(el: HTMLElement, label: string) {
-  expect(el.style.borderRadius, `${label}: must use var(--skin-r-ctl) inline style`).toBe(
-    "var(--skin-r-ctl)"
+  expect(el.style.borderRadius, `${label}: must use var(--r-ctl) inline style`).toBe(
+    "var(--r-ctl)"
   );
   expect(
     el.classList.contains("rounded-ide"),
@@ -170,10 +170,10 @@ function expectSkinRCtl(el: HTMLElement, label: string) {
   ).toBe(false);
 }
 
-// Helper: check element uses var(--skin-r-card) and does NOT have rounded-ide class
+// Helper: check element uses var(--r-card) and does NOT have rounded-ide class
 function expectSkinRCard(el: HTMLElement, label: string) {
-  expect(el.style.borderRadius, `${label}: must use var(--skin-r-card) inline style`).toBe(
-    "var(--skin-r-card)"
+  expect(el.style.borderRadius, `${label}: must use var(--r-card) inline style`).toBe(
+    "var(--r-card)"
   );
   expect(
     el.classList.contains("rounded-ide"),
@@ -184,8 +184,8 @@ function expectSkinRCard(el: HTMLElement, label: string) {
 // ---------------------------------------------------------------------------
 // §1–§7  SAS pairing modal controls
 // ---------------------------------------------------------------------------
-describe("W5 §1 SAS code display uses --skin-r-ctl", () => {
-  it("div displaying the SAS code has borderRadius var(--skin-r-ctl)", async () => {
+describe("W5 §1 SAS code display uses --r-ctl", () => {
+  it("div displaying the SAS code has borderRadius var(--r-ctl)", async () => {
     const { container } = render(
       <DevicesView incomingPairing={RESPONDER_SAS} />
     );
@@ -200,8 +200,8 @@ describe("W5 §1 SAS code display uses --skin-r-ctl", () => {
   });
 });
 
-describe("W5 §2 SAS peer metadata card uses --skin-r-card", () => {
-  it("peer metadata card div has borderRadius var(--skin-r-card)", async () => {
+describe("W5 §2 SAS peer metadata card uses --r-card", () => {
+  it("peer metadata card div has borderRadius var(--r-card)", async () => {
     // Use a responder SAS with peer_device_name so the metadata card renders.
     // pairGetSas must also return the metadata so the poll loop keeps it visible.
     const sasWithMeta: import("../lib/ipc").PairSasStatus = {
@@ -239,8 +239,8 @@ describe("W5 §2 SAS peer metadata card uses --skin-r-card", () => {
   });
 });
 
-describe("W5 §3–§4 SAS flow action buttons use --skin-r-ctl", () => {
-  it("'Doesn't match' button uses var(--skin-r-ctl)", async () => {
+describe("W5 §3–§4 SAS flow action buttons use --r-ctl", () => {
+  it("'Doesn't match' button uses var(--r-ctl)", async () => {
     const { container } = render(
       <DevicesView incomingPairing={RESPONDER_SAS} />
     );
@@ -252,7 +252,7 @@ describe("W5 §3–§4 SAS flow action buttons use --skin-r-ctl", () => {
     expectSkinRCtl(btn!, "'Doesn't match' button");
   });
 
-  it("'Match' button uses var(--skin-r-ctl)", async () => {
+  it("'Match' button uses var(--r-ctl)", async () => {
     const { container } = render(
       <DevicesView incomingPairing={RESPONDER_SAS} />
     );
@@ -265,8 +265,8 @@ describe("W5 §3–§4 SAS flow action buttons use --skin-r-ctl", () => {
   });
 });
 
-describe("W5 §5 SAS Close (confirmed) button uses --skin-r-ctl", () => {
-  it("'Close' button in confirmed state uses var(--skin-r-ctl)", async () => {
+describe("W5 §5 SAS Close (confirmed) button uses --r-ctl", () => {
+  it("'Close' button in confirmed state uses var(--r-ctl)", async () => {
     pairGetSas.mockResolvedValue(CONFIRMED_SAS);
     const { container } = render(
       <DevicesView incomingPairing={CONFIRMED_SAS} />
@@ -285,8 +285,8 @@ describe("W5 §5 SAS Close (confirmed) button uses --skin-r-ctl", () => {
   });
 });
 
-describe("W5 §6 SAS Close (rejected) button uses --skin-r-ctl", () => {
-  it("'Close' button in rejected state uses var(--skin-r-ctl)", async () => {
+describe("W5 §6 SAS Close (rejected) button uses --r-ctl", () => {
+  it("'Close' button in rejected state uses var(--r-ctl)", async () => {
     pairGetSas.mockResolvedValue(REJECTED_SAS);
     const { container } = render(
       <DevicesView incomingPairing={REJECTED_SAS} />
@@ -304,8 +304,8 @@ describe("W5 §6 SAS Close (rejected) button uses --skin-r-ctl", () => {
   });
 });
 
-describe("W5 §7 SAS Close (ended) button uses --skin-r-ctl", () => {
-  it("'Close' button in ended state uses var(--skin-r-ctl)", async () => {
+describe("W5 §7 SAS Close (ended) button uses --r-ctl", () => {
+  it("'Close' button in ended state uses var(--r-ctl)", async () => {
     // Start with awaiting_sas, then return idle (simulating "ended" state)
     let callCount = 0;
     pairGetSas.mockImplementation(async () => {
@@ -334,8 +334,8 @@ describe("W5 §7 SAS Close (ended) button uses --skin-r-ctl", () => {
 // ---------------------------------------------------------------------------
 // §8  DiscoveredRow Pair button
 // ---------------------------------------------------------------------------
-describe("W5 §8 DiscoveredRow Pair button uses --skin-r-ctl", () => {
-  it("Pair button in discovered device row uses var(--skin-r-ctl)", async () => {
+describe("W5 §8 DiscoveredRow Pair button uses --r-ctl", () => {
+  it("Pair button in discovered device row uses var(--r-ctl)", async () => {
     // Override listDiscovered to return a pairable device
     const { api } = await import("../lib/ipc");
     vi.mocked(api.listDiscovered).mockResolvedValue({ devices: [DISCOVERED_DEVICE] });
@@ -354,7 +354,7 @@ describe("W5 §8 DiscoveredRow Pair button uses --skin-r-ctl", () => {
 // ---------------------------------------------------------------------------
 // §9–§12  RevokeConfirmDialog controls
 // ---------------------------------------------------------------------------
-describe("W5 §9–§12 RevokeConfirmDialog controls use --skin-r-ctl", () => {
+describe("W5 §9–§12 RevokeConfirmDialog controls use --r-ctl", () => {
   async function openRevokeDialog(container: HTMLElement) {
     await screen.findByText("Alice's iPhone");
     const revokeBtns = Array.from(container.querySelectorAll("button")).filter(
@@ -365,7 +365,7 @@ describe("W5 §9–§12 RevokeConfirmDialog controls use --skin-r-ctl", () => {
     await screen.findByRole("dialog", { name: /revoke/i });
   }
 
-  it("password input uses var(--skin-r-ctl)", async () => {
+  it("password input uses var(--r-ctl)", async () => {
     const { container } = render(<DevicesView />);
     await openRevokeDialog(container);
 
@@ -375,7 +375,7 @@ describe("W5 §9–§12 RevokeConfirmDialog controls use --skin-r-ctl", () => {
     expectSkinRCtl(input!, "RevokeConfirmDialog password input");
   });
 
-  it("'Cancel' button uses var(--skin-r-ctl)", async () => {
+  it("'Cancel' button uses var(--r-ctl)", async () => {
     const { container } = render(<DevicesView />);
     await openRevokeDialog(container);
 
@@ -385,7 +385,7 @@ describe("W5 §9–§12 RevokeConfirmDialog controls use --skin-r-ctl", () => {
     expectSkinRCtl(btn!, "RevokeConfirmDialog Cancel button");
   });
 
-  it("'Revoke only' button uses var(--skin-r-ctl)", async () => {
+  it("'Revoke only' button uses var(--r-ctl)", async () => {
     const { container } = render(<DevicesView />);
     await openRevokeDialog(container);
 
@@ -395,7 +395,7 @@ describe("W5 §9–§12 RevokeConfirmDialog controls use --skin-r-ctl", () => {
     expectSkinRCtl(btn!, "RevokeConfirmDialog 'Revoke only' button");
   });
 
-  it("'Revoke & rotate' button uses var(--skin-r-ctl)", async () => {
+  it("'Revoke & rotate' button uses var(--r-ctl)", async () => {
     const { container } = render(<DevicesView />);
     await openRevokeDialog(container);
 
@@ -410,8 +410,8 @@ describe("W5 §9–§12 RevokeConfirmDialog controls use --skin-r-ctl", () => {
 // ---------------------------------------------------------------------------
 // §13–§15  Actions bar (Revoke all Yes/No + button)
 // ---------------------------------------------------------------------------
-describe("W5 §13–§15 Actions bar revoke buttons use --skin-r-ctl", () => {
-  it("'Revoke all' button uses var(--skin-r-ctl)", async () => {
+describe("W5 §13–§15 Actions bar revoke buttons use --r-ctl", () => {
+  it("'Revoke all' button uses var(--r-ctl)", async () => {
     const { container } = render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
@@ -420,7 +420,7 @@ describe("W5 §13–§15 Actions bar revoke buttons use --skin-r-ctl", () => {
     expectSkinRCtl(btn!, "'Revoke all' button");
   });
 
-  it("'Revoke all' (confirm) button in the modal uses var(--skin-r-ctl) (uw45: modal replaces inline Yes)", async () => {
+  it("'Revoke all' (confirm) button in the modal uses var(--r-ctl) (uw45: modal replaces inline Yes)", async () => {
     // uw45: inline Yes/No replaced with ConfirmModal — the confirm/cancel buttons
     // live inside role="dialog". They must still use the skin-r-ctl token.
     render(<DevicesView />);
@@ -440,7 +440,7 @@ describe("W5 §13–§15 Actions bar revoke buttons use --skin-r-ctl", () => {
     expectSkinRCtl(confirmBtn!, "Revoke all modal confirm button");
   });
 
-  it("'Cancel' (revoke all cancel) button in the modal uses var(--skin-r-ctl) (uw45: modal replaces inline No)", async () => {
+  it("'Cancel' (revoke all cancel) button in the modal uses var(--r-ctl) (uw45: modal replaces inline No)", async () => {
     // uw45: inline Yes/No replaced with ConfirmModal — Cancel button must use skin-r-ctl.
     render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
@@ -458,8 +458,8 @@ describe("W5 §13–§15 Actions bar revoke buttons use --skin-r-ctl", () => {
 // ---------------------------------------------------------------------------
 // §16  Rescan button
 // ---------------------------------------------------------------------------
-describe("W5 §16 Rescan button uses --skin-r-ctl", () => {
-  it("Rescan/Refresh button uses var(--skin-r-ctl)", async () => {
+describe("W5 §16 Rescan button uses --r-ctl", () => {
+  it("Rescan/Refresh button uses var(--r-ctl)", async () => {
     const { container } = render(<DevicesView />);
     await screen.findByText("Alice's iPhone");
 
@@ -475,8 +475,8 @@ describe("W5 §16 Rescan button uses --skin-r-ctl", () => {
 // ---------------------------------------------------------------------------
 // §17–§18  QR container and reveal button
 // ---------------------------------------------------------------------------
-describe("W5 §17 QR container uses --skin-r-card", () => {
-  it("QR code container div uses var(--skin-r-card)", async () => {
+describe("W5 §17 QR container uses --r-card", () => {
+  it("QR code container div uses var(--r-card)", async () => {
     pairingQrSvg.mockResolvedValue({
       svg: "<svg><rect/></svg>",
       payload: "copypaste://pair?token=abc",
@@ -499,10 +499,10 @@ describe("W5 §17 QR container uses --skin-r-card", () => {
   });
 });
 
-// CopyPaste-5917.32: QR overlay button must use borderRadius:"inherit" (not --skin-r-ctl)
-// so it matches the QR container's --skin-r-card radius on all skins.
+// CopyPaste-5917.32: QR overlay button must use borderRadius:"inherit" (not --r-ctl)
+// so it matches the QR container's --r-card radius on all skins.
 describe("W5 §18 QR reveal overlay button inherits container card radius (CopyPaste-5917.32)", () => {
-  it("QR reveal button uses borderRadius:inherit (matches QR container --skin-r-card)", async () => {
+  it("QR reveal button uses borderRadius:inherit (matches QR container --r-card)", async () => {
     pairingQrSvg.mockResolvedValue({
       svg: "<svg><rect/></svg>",
       payload: "copypaste://pair?token=abc",

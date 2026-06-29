@@ -173,7 +173,7 @@ function buildTooltip(info: SyncInfo): string {
 }
 
 // ---------------------------------------------------------------------------
-// Dot colours — keyed to the ide-* Tailwind palette (CMP-7: all six states)
+// Dot colours — keyed to the ide-* Tailwind color map (CMP-7: all six states)
 // ---------------------------------------------------------------------------
 
 const DOT_CLASS: Record<SyncState, string> = {

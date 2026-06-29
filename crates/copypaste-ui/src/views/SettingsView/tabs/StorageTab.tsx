@@ -308,7 +308,7 @@ export function StorageTab({
                     "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-text",
                     "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
                   ].join(" ")}
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
+                  style={{ borderRadius: "var(--r-ctl)" }}
                 >
                   {exportInProgress ? "Exporting…" : "Export…"}
                 </button>
@@ -337,7 +337,7 @@ export function StorageTab({
                   "hover:bg-ide-hover",
                   (offline || importInProgress) ? "pointer-events-none opacity-40" : "",
                 ].join(" ")}
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 {importInProgress ? "Importing…" : "Import…"}
                 <input
@@ -416,7 +416,7 @@ export function StorageTab({
                 "border border-ide-border bg-ide-elevated px-3 py-1.5 text-[13px] text-ide-danger",
                 "hover:bg-ide-hover disabled:cursor-not-allowed disabled:opacity-40",
               ].join(" ")}
-              style={{ borderRadius: "var(--skin-r-ctl)" }}
+              style={{ borderRadius: "var(--r-ctl)" }}
             >
               Clear history…
             </button>

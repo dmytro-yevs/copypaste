@@ -6,13 +6,13 @@
  * render correctly.
  *
  * Test scope:
- *   1. SAS pairing modal panel uses --skin-r-modal for border-radius
- *   2. SAS pairing modal panel uses --skin-shadow-float for box-shadow
- *   3. Revoke confirm dialog uses --skin-r-modal for border-radius
- *   4. Revoke confirm dialog uses --skin-shadow-float for box-shadow
- *   5. Device list card container uses --skin-r-card for border-radius
- *   6. QR pairing section card uses --skin-r-card for border-radius
- *   7. No bare `rounded-ide-lg` on modal panels (those must use --skin-r-modal)
+ *   1. SAS pairing modal panel uses --r-card for border-radius
+ *   2. SAS pairing modal panel uses --sh3 for box-shadow
+ *   3. Revoke confirm dialog uses --r-card for border-radius
+ *   4. Revoke confirm dialog uses --sh3 for box-shadow
+ *   5. Device list card container uses --r-card for border-radius
+ *   6. QR pairing section card uses --r-card for border-radius
+ *   7. No bare `rounded-ide-lg` on modal panels (those must use --r-card)
  *   8. No bare `shadow-ide-lg` / `shadow-ide-sm` on modal/card top-level panels
  *      (those must use skin-shadow vars or rely on surface-* utility)
  *   9. SAS modal panel has surface-glass-strong class (material unchanged)
@@ -118,7 +118,7 @@ afterEach(() => {
 // §1 SAS modal — skin-driven radius + shadow
 // ---------------------------------------------------------------------------
 describe("W-C4 §1 SAS pairing modal — skin token radius/shadow", () => {
-  it("SAS modal panel uses var(--skin-r-modal) for border-radius", async () => {
+  it("SAS modal panel uses var(--r-card) for border-radius", async () => {
     const { container } = render(
       <DevicesView incomingPairing={RESPONDER_SAS} />
     );
@@ -130,11 +130,11 @@ describe("W-C4 §1 SAS pairing modal — skin token radius/shadow", () => {
     const panel = container.querySelector("[role='dialog'] .surface-glass-strong");
     expect(panel).not.toBeNull();
     const style = (panel as HTMLElement).style;
-    // Must reference --skin-r-modal (not a hardcoded px value via Tailwind rounded-ide-lg)
-    expect(style.borderRadius).toBe("var(--skin-r-modal)");
+    // Must reference --r-card (not a hardcoded px value via Tailwind rounded-ide-lg)
+    expect(style.borderRadius).toBe("var(--r-card)");
   });
 
-  it("SAS modal panel uses var(--skin-shadow-float) for box-shadow", async () => {
+  it("SAS modal panel uses var(--sh3) for box-shadow", async () => {
     const { container } = render(
       <DevicesView incomingPairing={RESPONDER_SAS} />
     );
@@ -144,8 +144,8 @@ describe("W-C4 §1 SAS pairing modal — skin token radius/shadow", () => {
     const panel = container.querySelector("[role='dialog'] .surface-glass-strong");
     expect(panel).not.toBeNull();
     const style = (panel as HTMLElement).style;
-    // Must reference --skin-shadow-float
-    expect(style.boxShadow).toBe("var(--skin-shadow-float)");
+    // Must reference --sh3
+    expect(style.boxShadow).toBe("var(--sh3)");
   });
 
   it("SAS modal panel retains surface-glass-strong class (material unchanged)", async () => {
@@ -178,7 +178,7 @@ describe("W-C4 §1 SAS pairing modal — skin token radius/shadow", () => {
 // §2 Revoke confirm dialog — skin-driven radius + shadow
 // ---------------------------------------------------------------------------
 describe("W-C4 §2 Revoke confirm dialog — skin token radius/shadow", () => {
-  it("Revoke dialog panel uses var(--skin-r-modal) for border-radius", async () => {
+  it("Revoke dialog panel uses var(--r-card) for border-radius", async () => {
     listPeers.mockResolvedValue({ peers: [BASE_PEER] });
     const { container } = render(<DevicesView />);
 
@@ -197,10 +197,10 @@ describe("W-C4 §2 Revoke confirm dialog — skin token radius/shadow", () => {
     const panel = container.querySelector("[role='dialog'][aria-labelledby='revoke-modal-title'] .surface-glass-strong");
     expect(panel).not.toBeNull();
     const style = (panel as HTMLElement).style;
-    expect(style.borderRadius).toBe("var(--skin-r-modal)");
+    expect(style.borderRadius).toBe("var(--r-card)");
   });
 
-  it("Revoke dialog panel uses var(--skin-shadow-float) for box-shadow", async () => {
+  it("Revoke dialog panel uses var(--sh3) for box-shadow", async () => {
     listPeers.mockResolvedValue({ peers: [BASE_PEER] });
     const { container } = render(<DevicesView />);
 
@@ -216,7 +216,7 @@ describe("W-C4 §2 Revoke confirm dialog — skin token radius/shadow", () => {
     const panel = container.querySelector("[role='dialog'][aria-labelledby='revoke-modal-title'] .surface-glass-strong");
     expect(panel).not.toBeNull();
     const style = (panel as HTMLElement).style;
-    expect(style.boxShadow).toBe("var(--skin-shadow-float)");
+    expect(style.boxShadow).toBe("var(--sh3)");
   });
 
   it("Revoke dialog panel retains surface-glass-strong class", async () => {
@@ -242,7 +242,7 @@ describe("W-C4 §2 Revoke confirm dialog — skin token radius/shadow", () => {
 // §3 Device list card — skin-driven radius
 // ---------------------------------------------------------------------------
 describe("W-C4 §3 Device list container — skin token radius", () => {
-  it("Paired devices list surface-card uses var(--skin-r-card) for border-radius", async () => {
+  it("Paired devices list surface-card uses var(--r-card) for border-radius", async () => {
     listPeers.mockResolvedValue({ peers: [BASE_PEER] });
     const { container } = render(<DevicesView />);
 
@@ -250,9 +250,9 @@ describe("W-C4 §3 Device list container — skin token radius", () => {
 
     // The paired devices surface-card list container
     const cards = container.querySelectorAll(".surface-card");
-    // At least one surface-card must reference --skin-r-card
+    // At least one surface-card must reference --r-card
     const skinCards = Array.from(cards).filter(
-      (el) => (el as HTMLElement).style.borderRadius === "var(--skin-r-card)"
+      (el) => (el as HTMLElement).style.borderRadius === "var(--r-card)"
     );
     expect(skinCards.length).toBeGreaterThanOrEqual(1);
   });
@@ -262,7 +262,7 @@ describe("W-C4 §3 Device list container — skin token radius", () => {
 // §4 QR pairing section — skin-driven radius
 // ---------------------------------------------------------------------------
 describe("W-C4 §4 QR pairing section — skin token radius", () => {
-  it("QR card section uses var(--skin-r-card) for border-radius", async () => {
+  it("QR card section uses var(--r-card) for border-radius", async () => {
     pairingQrSvg.mockResolvedValue({
       svg: "<svg><rect/></svg>",
       payload: "copypaste://pair?token=abc",
@@ -279,6 +279,6 @@ describe("W-C4 §4 QR pairing section — skin token radius", () => {
 
     const qrSection = container.querySelector("section.surface-card");
     expect(qrSection).not.toBeNull();
-    expect((qrSection as HTMLElement).style.borderRadius).toBe("var(--skin-r-card)");
+    expect((qrSection as HTMLElement).style.borderRadius).toBe("var(--r-card)");
   });
 });

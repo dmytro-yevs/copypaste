@@ -155,17 +155,13 @@ export const PopupRow = React.memo(function PopupRow({
         const appLabel = sourceAppLabel(item.app_bundle_id);
         return appLabel ? (
           <span
-            // Theme-aware subtle pill (was hardcoded white fill/border, invisible
-            // on light): reuse the .keycap surface tokens which adapt per theme.
-            // CopyPaste-kp6f: borderRadius via skin token (--skin-r-chip) as
-            // inline style — not the static rounded-ide-sm Tailwind class — so
-            // quiet/vapor get their canonical chip corner radius.
+            // Theme-aware subtle pill (was hardcoded white fill/border, invisible on light).
             className="flex shrink-0 items-center gap-1 text-[10.5px] leading-none px-1 py-0.5"
             style={{
               color: "var(--ide-ghost)",
               background: "var(--ide-hover)",
               border: "1px solid var(--ide-divider)",
-              borderRadius: "var(--skin-r-chip)",
+              borderRadius: "var(--r-chip)",
             }}
             title={item.app_bundle_id ?? undefined}
           >

@@ -424,14 +424,13 @@ export default function App() {
     // itself throws, the window shows a fallback instead of going blank.
     <ErrorBoundary>
       {/*
-        Floating shell layout — aurora is the fixed background (body gradient),
-        all panels are floating glass cards inset ~10px from window edges with
-        gaps between them so the aurora shows through. No edge-to-edge surfaces.
-        The outer div is transparent so the aurora bleeds through every gap.
+        Floating shell layout — body gradient behind all panels.
+        Panels are floating glass cards inset ~10px from window edges with gaps.
+        The outer div is transparent so the gradient shows through every gap.
       */}
       <div className="flex h-screen w-screen gap-[10px] overflow-hidden p-[10px] text-ide-text">
         <Sidebar />
-        {/* Main column: banners + view shell, all floating over the aurora */}
+        {/* Main column: banners + view shell */}
         <div className="flex min-w-0 flex-1 flex-col gap-[10px]">
           {/*
             Thin transparent drag strip covering the 10px gap row at the very top
@@ -450,7 +449,7 @@ export default function App() {
           {daemonError !== null && (
             <div
               className="surface-glass flex shrink-0 items-start gap-3 border border-red-500/40 px-3 py-2 text-[13px] text-red-400"
-              style={{ borderRadius: "var(--skin-r-card)" }}
+              style={{ borderRadius: "var(--r-card)" }}
             >
               <span className="shrink-0 font-semibold">Background service error:</span>
               <span>The background service failed to start. Please reinstall CopyPaste or restart your Mac.</span>
@@ -463,7 +462,7 @@ export default function App() {
             <div
               data-testid="protocol-mismatch-banner"
               className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
-              style={{ borderRadius: "var(--skin-r-card)" }}
+              style={{ borderRadius: "var(--r-card)" }}
             >
               <span>
                 CopyPaste app and background service are on incompatible versions
@@ -474,7 +473,7 @@ export default function App() {
                 type="button"
                 onClick={() => setMismatchDismissed(true)}
                 className="shrink-0 border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
-                style={{ borderRadius: "var(--skin-r-ctl)" }}
+                style={{ borderRadius: "var(--r-ctl)" }}
               >
                 Dismiss
               </button>
@@ -484,7 +483,7 @@ export default function App() {
           {showStaleBanner && (
             <div
               className="surface-glass flex shrink-0 items-start justify-between gap-3 border border-ide-warning/40 px-3 py-2 text-[13px] text-ide-warning"
-              style={{ borderRadius: "var(--skin-r-card)" }}
+              style={{ borderRadius: "var(--r-card)" }}
             >
               <span>
                 CopyPaste was updated but an older background service is still
@@ -503,7 +502,7 @@ export default function App() {
                   type="button"
                   onClick={() => setDismissed(true)}
                   className="border border-ide-border bg-ide-panel px-2.5 py-1 text-[12px] text-ide-text hover:bg-ide-hover"
-                  style={{ borderRadius: "var(--skin-r-ctl)" }}
+                  style={{ borderRadius: "var(--r-ctl)" }}
                 >
                   Dismiss
                 </button>

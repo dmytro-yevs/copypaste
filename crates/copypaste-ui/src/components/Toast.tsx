@@ -65,18 +65,14 @@ function GlassToastItem({
   }, [msg.id, duration, onDismiss]);
 
   return (
-    // surface-card: glass float over aurora canvas (spec §surface-card)
+    // surface-card: glass float (spec §surface-card)
     // toast-enter: approved motion primitive for entrance (§MO-6).
-    // UIC-5: radius uses --skin-r-modal (not --skin-r-card) — a floating toast
-    //   is a modal-tier surface (same tier as dropdowns and popovers), so it
-    //   receives the modal corner radius rather than the card radius.
-    //   Shadow stays --skin-shadow-card as toasts are lighter than full modals.
     <div
       role="status"
       aria-live="polite"
       style={{
-        borderRadius: "var(--skin-r-modal)",
-        boxShadow: "var(--skin-shadow-card)",
+        borderRadius: "var(--r-card)",
+        boxShadow: "var(--sh1)",
       }}
       className={[
         "surface-card toast-enter",

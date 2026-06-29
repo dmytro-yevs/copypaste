@@ -1,7 +1,6 @@
 /* ============================================================
    CopyPaste tokens — single source of truth.
    Axes: data-theme = dark|light   ×   data-accent = indigo|blue|teal|green|amber|rose
-   No skins, no palettes.
    ============================================================ */
 
 :root, :root[data-theme="dark"]{

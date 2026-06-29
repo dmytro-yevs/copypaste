@@ -2,11 +2,10 @@
 // Appearance tab: Theme segmented control + Accent swatch picker + optional toggles.
 // Source of truth: docs/design/STYLEGUIDE.md §9.2 (segmented), §3.5 (accents), §2 (two-axis).
 //
-// Removed from this tab (§2 STYLEGUIDE — "Everything else from the old appearance panel is deleted"):
-//   - Palette grid (liquid-tokens PALETTE_KEYS/PALETTES — deleted in Phase 1)
-//   - Skin selector (skins SKIN_IDS — deleted in Phase 1)
-//   - Row density control (density field removed in Phase 2)
-//   - Reduce motion toggle (motionReduced field removed in Phase 2)
+// Removed from this tab (§2 STYLEGUIDE):
+//   - Old appearance pickers (deleted in Phase 1–2)
+//   - Row density control (removed in Phase 2)
+//   - Reduce motion toggle (removed in Phase 2)
 //   - Color theme "System" option (§2: dark|light only)
 import { SectionHeader } from "../../../components/SectionHeader";
 import { SettingsRow } from "../../../components/SettingsRow";
@@ -42,8 +41,7 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
   return (
     <div className="space-y-2">
       {/* ── Appearance ─────────────────────────────────────────────────────── */}
-      {/* §2 STYLEGUIDE: The only appearance choices are theme (dark/light) and  */}
-      {/* accent (6 hues). Palette, skin, density, contrast, motion removed.     */}
+      {/* §2 STYLEGUIDE: The only appearance choices are theme (dark/light) and accent (6 hues). */}
       <SectionHeader label="Appearance" />
       <Panel>
         {/* Theme — §9.2 segmented control: Light / Dark.

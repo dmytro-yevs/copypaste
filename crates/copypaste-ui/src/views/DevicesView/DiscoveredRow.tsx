@@ -48,7 +48,7 @@ export function DiscoveredRow({
           disabled={!pairable || busy}
           title={pairable ? undefined : "This device does not support secure pairing"}
           className="shrink-0 bg-ide-accent px-2.5 py-1 text-[12px] font-medium text-white hover:bg-ide-accent-hover disabled:cursor-not-allowed disabled:opacity-40"
-          style={{ borderRadius: "var(--skin-r-ctl)" }}
+          style={{ borderRadius: "var(--r-ctl)" }}
         >
           Pair
         </button>

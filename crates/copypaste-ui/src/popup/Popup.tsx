@@ -39,8 +39,6 @@ export function Popup() {
     // Theme + translucency drive the popup's glass material (mirrors App.tsx).
     theme = "light",
     translucency = true,
-    // W-C5: skin drives the popup's radius/blur/shadow tokens (mirrors App.tsx).
-    skin = "classic",
   } = useUI((s) => s.prefs);
 
   // Apply the persisted theme + translucency to the popup's <html> at runtime.
@@ -58,13 +56,6 @@ export function Popup() {
       document.documentElement.classList.add("no-translucency");
     }
   }, [translucency]);
-
-  // W-C5: sync the active skin to the popup's <html> so that skin-driven CSS
-  // tokens (--skin-r-modal, --skin-blur-strong, etc.) resolve correctly for the
-  // popup window (mirrors the same effect in App.tsx for the main window).
-  useEffect(() => {
-    document.documentElement.setAttribute("data-skin", skin ?? "classic");
-  }, [skin]);
 
   const [query, setQuery] = useState("");
   const [selectedIdx, setSelectedIdx] = useState(0);
@@ -321,11 +312,7 @@ export function Popup() {
       // rgba(19,20,26,0.82) so the popup is a real glass material on BOTH themes.
       className="surface-glass-strong popup-enter flex flex-col h-screen overflow-hidden"
       style={{
-        // CopyPaste-7rns: use --skin-r-card so classic = 14px (byte-identical
-        // to the pre-skin hardcoded value). --skin-r-modal gave classic 16px
-        // which broke byte-identity. Token values by skin:
-        //   classic = 14px, quiet = 10px, vapor = 16px.
-        borderRadius: "var(--skin-r-card)",
+        borderRadius: "var(--r-card)",
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {

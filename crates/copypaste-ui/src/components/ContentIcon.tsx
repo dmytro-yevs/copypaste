@@ -291,15 +291,13 @@ export function KindChip({ contentType, kind }: KindChipProps) {
   return (
     <span
       className={[
-        // ix8u: chip radius driven by --skin-r-chip (Classic 7px, Quiet 6px, Vapor 10px).
-        // rounded-ide-sm removed; border-radius set via inline style below.
         "flex shrink-0 items-center border px-1 py-px",
         // audit P1-3: bumped 9px → 10px for legibility.
         "text-[10.5px] font-semibold leading-none tracking-wide uppercase",
         colorClass,
       ].join(" ")}
       aria-label={`Type: ${label}`}
-      style={{ borderRadius: "var(--skin-r-chip)" }}
+      style={{ borderRadius: "var(--r-chip)" }}
     >
       {label}
     </span>
