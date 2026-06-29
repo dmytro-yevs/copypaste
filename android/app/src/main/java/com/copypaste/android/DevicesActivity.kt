@@ -119,7 +119,7 @@ fun DevicesScreen(
      * modal if the state is `awaiting_sas`. Consumed after the first check.
      */
     autoOpenSasOnEntry: Boolean = false,
-    /** §1: paint the aurora backdrop here (standalone) vs. via MainShell (embedded). */
+    /** §1: paint the canvas backdrop here (standalone) vs. via MainShell (embedded). */
     paintCanvasBackdrop: Boolean = true,
 ) {
     val ctx = LocalContext.current
@@ -781,7 +781,7 @@ fun DevicesScreen(
         )
     }
 
-    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent
+    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent
     // and this screen owns its backdrop (standalone, not embedded in MainShell).
     val paintCanvas = shouldPaintCanvas(translucent, paintCanvasBackdrop)
     val scaffoldModifier = if (paintCanvas) modifier.screenCanvas(dark) else modifier

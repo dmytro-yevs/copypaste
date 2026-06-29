@@ -1,25 +1,19 @@
 name: Design Token Parity Check
 
-# Run when either design-token source file changes.
-# The check ensures web (index.css) and Android (Palette.kt) colour ramps
-# stay aligned — the automated enforcement of docs/PARITY-SPEC.md §A.
-# Also checks structural skin token parity (skins.ts ↔ Skin.kt) per §2.2 of
-# docs/design/skins-implementation-plan.md (CopyPaste-sn8k V1).
+# Checks that token NAMES in tokens.css map 1:1 to CpColors fields and AccentColor
+# variants in Color.kt (STYLEGUIDE §11, Phase 7 two-axis redesign).
+# The old skin-parity job (skins.ts ↔ Skin.kt) was removed; both files are deleted.
 on:
-  # ojas.2: removed paths: filters — parity must run on EVERY PR, not just when
-  # token source files change. A PR touching only a Component or View file can
-  # still drift token values; path filtering was hiding that.
   pull_request:
     branches: [main]
   push:
     branches:
       - main
-  # Allow manual runs from the Actions tab
   workflow_dispatch:
 
 jobs:
-  parity:
-    name: Web ↔ Android token parity
+  token-parity:
+    name: Two-axis token-name parity (tokens.css ↔ CpColors/AccentColor)
     runs-on: ubuntu-latest
 
     steps:
@@ -31,34 +25,10 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Run parity check
+      - name: Run token-parity check
         run: node scripts/parity-check.mjs --verbose
-        # Exit code 0 = all tokens within tolerance (PASS)
-        # Exit code 1 = one or more tokens diverge beyond ±5/255 per channel (FAIL)
-        # If this step fails, check docs/PARITY-SPEC.md §A for the expected values
-        # and update whichever platform drifted.
-
-  skin-parity:
-    name: Skin token parity (web SKINS ↔ android skinTokens)
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Run skin token parity check
-        run: node scripts/check-skin-parity.mjs --verbose
-        # Exit code 0 = web SkinTokens interface and android SkinTokens data class
-        #               expose the same canonical token set (PASS).
-        # Exit code 1 = one or more canonical tokens exist on one side but not the
-        #               other (FAIL — update skins.ts or Skin.kt to re-align).
-        #
-        # Normalization: trailing "Dp" is stripped and result is lowercased before
-        # comparison. This handles the intentional platform naming difference
-        # glassBlurDp (android) → glassBlur (web).
-        # See scripts/check-skin-parity.mjs for the canonical 19-token list.
+        # Exit code 0 = every CpColors field maps to a CSS custom property and every
+        #               AccentColor variant maps to a data-accent= value (PASS).
+        # Exit code 1 = one or more names are missing on one side (FAIL — update
+        #               tokens.css or Color.kt so both sides agree).
+        # See STYLEGUIDE §11 for the mapping rule: camelCase Kotlin field → kebab-case CSS var.

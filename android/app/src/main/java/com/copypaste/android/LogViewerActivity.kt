@@ -107,7 +107,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val listState: LazyListState = rememberLazyListState()
 
-    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
     val paintCanvas = translucent

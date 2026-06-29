@@ -1,281 +1,297 @@
 #!/usr/bin/env node
 /**
- * parity-check.mjs — Web ↔ Android design-token parity checker
+ * parity-check.mjs — Two-axis design-token parity checker (Phase 7, CopyPaste-2hfj.8)
  *
- * Parses design tokens from:
- *   • crates/copypaste-ui/src/index.css   (html[data-palette="X"] blocks)
- *   • android/.../ui/theme/Palette.kt     (per-palette Color() / private val ramps)
+ * Asserts that the token NAMES in tokens.css map 1:1 to the fields of CpColors
+ * in Color.kt, and that the data-accent values map 1:1 to the AccentColor
+ * variant names.
  *
- * Compares per-palette × per-theme accent, bg0/bg1/bg2, and key semantic
- * (success/warning/danger) values, then exits non-zero if any value diverges
- * beyond TOLERANCE per RGB channel.
+ * Sources:
+ *   • crates/copypaste-ui/src/styles/tokens.css  (web token names)
+ *   • android/.../ui/theme/Color.kt              (CpColors fields + AccentColor variants)
  *
- * Assumptions / known intentional deltas:
- *   • glass-opacity differs by design (web 0.40 uses Tauri vibrancy; Android 0.64
- *     uses direct RenderEffect). Excluded from comparison.
- *   • --ide-sky-rgb exists in CSS per-palette but Android IdeColors has no `sky` field
- *     (it uses `info` for both URL/sky and info badge color). Sky is parsed from CSS
- *     but not included in PALETTE_CHECKS to avoid spurious WARN noise. If a sky field
- *     is added to Android IdeColors, add "sky" to DARK_TOKENS/LIGHT_TOKENS and add a
- *     CSS_TO_KT_KEY entry { "sky": "sky" }.
- *   • Web CSS uses per-channel space-separated rgb triplets ("R G B") inside
- *     --ide-*-rgb vars AND full hex values for --accent/--bg-*.
- *   • Android uses Color(0xFFRRGGBB) hex literals.
- *   • Light-palette light-mode accents (cloud-silver etc.) come from the
- *     html[data-theme="light"][data-palette="X"] blocks in CSS and from the
- *     named IdeColors objects in Palette.kt.
- *   • LiquidBlue IdeColors in Android == DarkIdeColors (not a named palette block);
- *     the check falls back gracefully with a warning if data is missing.
+ * Mapping rule (Kotlin → CSS):
+ *   camelCase field name → kebab-case with -- prefix
+ *   e.g.  cText → --c-text   raised2 → --raised-2   bg → --bg
+ *
+ * AccentColor enum variants map to data-accent attribute values:
+ *   e.g.  INDIGO → data-accent="indigo"
+ *
+ * Exit codes:
+ *   0  all names match (PASS)
+ *   1  one or more names are missing on one side (FAIL)
  *
  * Usage:
  *   node scripts/parity-check.mjs            # from repo root
- *   node scripts/parity-check.mjs --verbose  # print all parsed values
- *
- * Exit codes:
- *   0  all comparisons within tolerance
- *   1  one or more token values diverge beyond tolerance
+ *   node scripts/parity-check.mjs --verbose  # print all parsed names
  */
 
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { fmtRgb, withinTolerance } from "./lib/color-utils.mjs";
-import { parseCss } from "./lib/css-parser.mjs";
-import { parseKotlin } from "./lib/kotlin-parser.mjs";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dir, "..");
 
-const CSS_PATH = resolve(ROOT, "crates/copypaste-ui/src/index.css");
+const CSS_PATH = resolve(ROOT, "crates/copypaste-ui/src/styles/tokens.css");
 const KT_PATH = resolve(
   ROOT,
-  "android/app/src/main/java/com/copypaste/android/ui/theme/Palette.kt"
-);
-// Color.kt holds DarkIdeColors (used for liquid-blue) and LightIdeColors
-const KT_COLOR_PATH = resolve(
-  ROOT,
-  "android/app/src/main/java/com/copypaste/android/ui/theme/Color.kt"
+  "android/app/src/main/java/com/copypaste/android/ui/theme/Color.kt",
 );
 
 const VERBOSE = process.argv.includes("--verbose");
-const TOLERANCE = 5; // per RGB channel (0–255)
 
 // ---------------------------------------------------------------------------
-// Comparison engine
+// Conversion helpers
 // ---------------------------------------------------------------------------
 
 /**
- * PALETTE_CHECKS defines what we compare and what tokens are compared.
- * Each entry: { palette, cssTheme, ktKey, tokens }
- *   palette   — CSS data-palette value / Android palette key
- *   cssTheme  — "dark" or "light" (which CSS block to read from)
- *   ktKey     — key used in the kt result map
- *   tokens    — list of token names to compare
+ * Convert a Kotlin camelCase field name to the CSS custom-property name.
+ *   bg       → --bg
+ *   cText    → --c-text
+ *   raised2  → --raised-2
  *
- * TOKEN NAME MAPPING (CSS → Kotlin):
- *   "accent"   → CSS "accent" (from --ide-accent-rgb)    / KT "accent"   (IdeColors.accent)
- *   "on-accent"→ CSS "on-accent" (from --on-accent:#hex) / KT "accentOn" (IdeColors.accentOn)
- *   "bg0/1/2"  → CSS "bg0/1/2" (from --bg-*:#hex)        / KT "bg0/1/2"  (AuroraDef.bg*)
- *   "success"  → CSS "success" (--ide-success-rgb)        / KT "success"  (IdeColors.success)
- *   etc.
- *
- * on-accent is critical: it is the text color rendered on accent-colored buttons and
- * chips. If it drifts between web and Android, button text becomes invisible on one
- * platform. The check uses a relaxed tolerance for this token since the Android
- * palette intentionally uses very dark (but not pure black) values (e.g. 0xFF031216
- * for Nordic Cyan, 0xFF1A0D00 for Amber Night) while the web CSS uses #000000.
+ * Algorithm: insert hyphen before each uppercase letter and before a
+ * letter→digit transition, then lowercase.
  */
-const DARK_TOKENS = ["accent", "on-accent", "bg0", "bg1", "bg2", "success", "warning", "danger", "info", "violet"];
-const LIGHT_TOKENS = ["accent", "on-accent", "bg0", "bg1", "bg2", "info", "violet"];
+function camelToKebab(name) {
+  return name
+    .replace(/([a-z])([A-Z])/g, "$1-$2") // camelCase → kebab
+    .replace(/([a-zA-Z])(\d)/g, "$1-$2") // letter→digit
+    .toLowerCase();
+}
 
-const PALETTE_CHECKS = [
-  // Dark palettes (native dark mode)
-  { palette: "graphite-mist", cssTheme: "dark", ktKey: "graphite-mist", tokens: DARK_TOKENS },
-  { palette: "deep-sky",      cssTheme: "dark", ktKey: "deep-sky",      tokens: DARK_TOKENS },
-  { palette: "nordic-cyan",   cssTheme: "dark", ktKey: "nordic-cyan",   tokens: DARK_TOKENS },
-  { palette: "aurora-violet", cssTheme: "dark", ktKey: "aurora-violet", tokens: DARK_TOKENS },
-  { palette: "amber-night",   cssTheme: "dark", ktKey: "amber-night",   tokens: DARK_TOKENS },
-  // Light palettes (native light mode — accent from their html[data-theme="light"] CSS blocks)
-  { palette: "cloud-silver",  cssTheme: "light", ktKey: "cloud-silver", tokens: LIGHT_TOKENS },
-  { palette: "frost-blue",    cssTheme: "light", ktKey: "frost-blue",   tokens: LIGHT_TOKENS },
-  { palette: "porcelain",     cssTheme: "light", ktKey: "porcelain",    tokens: LIGHT_TOKENS },
-  { palette: "pearl-grey",    cssTheme: "light", ktKey: "pearl-grey",   tokens: LIGHT_TOKENS },
-  // liquid-blue: accent + semantic tokens (no named IdeColors — uses DarkIdeColors)
-  { palette: "liquid-blue",   cssTheme: "dark", ktKey: "liquid-blue",  tokens: ["accent", "on-accent", "bg0", "info", "violet"] },
-];
+function fieldToCssToken(field) {
+  return "--" + camelToKebab(field);
+}
+
+// ---------------------------------------------------------------------------
+// CSS parser — extract token names present in the :root block
+// ---------------------------------------------------------------------------
 
 /**
- * Cross-platform token key mapping.
- * CSS block keys → Kotlin IdeColors field names (where they differ).
- * Used when looking up the Android-side value for a given CSS token.
+ * Extract all custom-property names (--foo) defined in the :root / :root[data-theme="dark"]
+ * block of tokens.css.  Returns a Set<string>.
  */
-const CSS_TO_KT_KEY = {
-  "on-accent": "accentOn",
-};
+function parseCssTokenNames(src) {
+  const names = new Set();
+  // Match all --token-name: ... declarations
+  const re = /--([a-z][a-z0-9-]*):/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    names.add("--" + m[1]);
+  }
+  return names;
+}
 
 /**
- * Per-token tolerance overrides (per RGB channel, 0–255).
- * Tokens not listed here use the global TOLERANCE.
- *
- * "on-accent": Android uses near-black (e.g. 0xFF031216 = rgb(3,18,22)) while
- * CSS uses #000000 = rgb(0,0,0). These are semantically equivalent (both are
- * "very dark text on accent") but numerically differ by up to 22 per channel.
- * We allow a looser 30-channel tolerance for this token so that dark-but-not-pure-
- * black values don't generate spurious failures — while still catching a drift from
- * dark to white (which would be a contrast failure, ΔR≈255).
+ * Extract data-accent values from tokens.css.
+ * Matches: :root[data-accent="indigo"]  → "indigo"
  */
-const TOKEN_TOLERANCE = {
-  "on-accent": 30,
-};
+function parseCssAccentValues(src) {
+  const values = new Set();
+  const re = /\[data-accent="([a-z]+)"\]/g;
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    values.add(m[1]);
+  }
+  return values;
+}
 
-// CSS token name → KT token name mapping
-// (CSS parses ide-accent-rgb as "accent"; KT parses IdeColors.accent as "accent" — same key)
-// bg0/bg1/bg2 both parse under the same key from AuroraDef / --bg-* vars.
-// For light palettes, CSS accent comes from --ide-accent-rgb in the [data-theme="light"][data-palette="X"] block.
+// ---------------------------------------------------------------------------
+// Kotlin parser — extract CpColors fields and AccentColor variants
+// ---------------------------------------------------------------------------
+
+/**
+ * Extract field names from the CpColors data class.
+ * Matches: val bg: Color, val cText: Color, etc.
+ */
+function parseCpColorsFields(src) {
+  // Find the data class body
+  const classStart = src.indexOf("data class CpColors(");
+  if (classStart === -1) throw new Error("Cannot find `data class CpColors(` in Color.kt");
+
+  let depth = 0, i = classStart, bodyStart = -1, bodyEnd = -1, inClass = false;
+  for (; i < src.length; i++) {
+    if (src[i] === "(") {
+      depth++;
+      if (!inClass) { inClass = true; bodyStart = i + 1; }
+    } else if (src[i] === ")") {
+      depth--;
+      if (inClass && depth === 0) { bodyEnd = i; break; }
+    }
+  }
+  if (bodyStart === -1 || bodyEnd === -1) throw new Error("Cannot parse CpColors body");
+
+  const body = src.slice(bodyStart, bodyEnd);
+  const fields = [];
+  const re = /\bval\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g;
+  let m;
+  while ((m = re.exec(body)) !== null) fields.push(m[1]);
+  return fields;
+}
+
+/**
+ * Extract enum variant names from AccentColor.
+ * Matches: INDIGO(...), BLUE(...), etc.
+ */
+function parseAccentVariants(src) {
+  const enumStart = src.indexOf("enum class AccentColor(");
+  if (enumStart === -1) throw new Error("Cannot find `enum class AccentColor(` in Color.kt");
+
+  // Find the { } body of the enum
+  let braceDepth = 0, i = enumStart, bodyStart = -1, bodyEnd = -1;
+  for (; i < src.length; i++) {
+    if (src[i] === "{") {
+      braceDepth++;
+      if (bodyStart === -1) bodyStart = i + 1;
+    } else if (src[i] === "}") {
+      braceDepth--;
+      if (braceDepth === 0) { bodyEnd = i; break; }
+    }
+  }
+  if (bodyStart === -1 || bodyEnd === -1) throw new Error("Cannot parse AccentColor body");
+
+  const body = src.slice(bodyStart, bodyEnd);
+  // Match variant names: INDIGO(, BLUE (, etc.
+  const variants = [];
+  const re = /\b([A-Z][A-Z]+)\s*\(/g;
+  let m;
+  while ((m = re.exec(body)) !== null) variants.push(m[1]);
+  return variants;
+}
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
 function main() {
-  let css, kt;
-  try {
-    css = readFileSync(CSS_PATH, "utf-8");
-  } catch (e) {
-    console.error(`ERROR: cannot read CSS: ${CSS_PATH}\n  ${e.message}`);
-    process.exit(1);
-  }
-  try {
-    kt = readFileSync(KT_PATH, "utf-8");
-  } catch (e) {
-    console.error(`ERROR: cannot read Kotlin: ${KT_PATH}\n  ${e.message}`);
-    process.exit(1);
-  }
+  let cssSrc, ktSrc;
 
-  console.log("Parsing CSS tokens from:", CSS_PATH.replace(ROOT + "/", ""));
-  const cssTokens = parseCss(css);
+  try { cssSrc = readFileSync(CSS_PATH, "utf-8"); }
+  catch (e) { console.error(`ERROR: cannot read ${CSS_PATH}: ${e.message}`); process.exit(1); }
 
-  let ktColor = "";
-  try {
-    ktColor = readFileSync(KT_COLOR_PATH, "utf-8");
-  } catch (e) {
-    console.warn(`WARN: cannot read Color.kt (liquid-blue Android accent will be skipped): ${e.message}`);
-  }
-  // Combine Palette.kt and Color.kt so parseKotlin can find DarkIdeColors / LightIdeColors
-  const ktCombined = kt + "\n" + ktColor;
+  try { ktSrc = readFileSync(KT_PATH, "utf-8"); }
+  catch (e) { console.error(`ERROR: cannot read ${KT_PATH}: ${e.message}`); process.exit(1); }
 
-  console.log("Parsing Kotlin tokens from:", KT_PATH.replace(ROOT + "/", ""));
-  if (ktColor) console.log("  (also reading)", KT_COLOR_PATH.replace(ROOT + "/", ""));
-  const ktTokens = parseKotlin(ktCombined, VERBOSE);
+  console.log("Checking token-name parity (web ↔ android)");
+  console.log(`  CSS:     ${CSS_PATH.replace(ROOT + "/", "")}`);
+  console.log(`  Kotlin:  ${KT_PATH.replace(ROOT + "/", "")}`);
+  console.log();
+
+  // Parse
+  const cssTokenNames = parseCssTokenNames(cssSrc);
+  const cssAccentValues = parseCssAccentValues(cssSrc);
+  let cpColorsFields, accentVariants;
+
+  try { cpColorsFields = parseCpColorsFields(ktSrc); }
+  catch (e) { console.error(`ERROR: ${e.message}`); process.exit(1); }
+
+  try { accentVariants = parseAccentVariants(ktSrc); }
+  catch (e) { console.error(`ERROR: ${e.message}`); process.exit(1); }
 
   if (VERBOSE) {
-    console.log("\n=== CSS parsed palettes ===");
-    for (const [p, themes] of Object.entries(cssTokens)) {
-      for (const [t, toks] of Object.entries(themes)) {
-        const keys = Object.keys(toks);
-        if (keys.length > 0) {
-          console.log(`  [${p || "root"}][${t}]: ${keys.join(", ")}`);
-        }
-      }
-    }
-    console.log("\n=== Kotlin parsed palettes ===");
-    for (const [p, toks] of Object.entries(ktTokens)) {
-      console.log(`  [${p}]: ${Object.keys(toks).join(", ")}`);
-    }
-  }
-
-  const failures = [];
-  const warnings = [];
-  let totalChecks = 0;
-  let passedChecks = 0;
-
-  console.log(`\nRunning parity checks (tolerance ±${TOLERANCE}/255 per channel)...\n`);
-
-  for (const { palette, cssTheme, ktKey, tokens } of PALETTE_CHECKS) {
-    const cssBlock = cssTokens[palette]?.[cssTheme] ?? {};
-    const ktBlock = ktTokens[ktKey] ?? {};
-
-    for (const token of tokens) {
-      totalChecks++;
-
-      // For "accent" in dark palette blocks, CSS stores it as "accent" from
-      // --ide-accent-rgb. Android stores it as "accent" from IdeColors.accent.
-      // For "on-accent", CSS uses --on-accent:#hex → "on-accent" key;
-      // Android uses IdeColors.accentOn → "accentOn" key. Remap via CSS_TO_KT_KEY.
-      // Both are already normalised to [r,g,b].
-      const cssVal = cssBlock[token];
-      const ktTokenKey = CSS_TO_KT_KEY[token] ?? token;
-      const ktVal = ktBlock[ktTokenKey];
-      const tol = TOKEN_TOLERANCE[token] ?? TOLERANCE;
-
-      if (!cssVal && !ktVal) {
-        warnings.push(
-          `  SKIP  [${palette}][${cssTheme}] ${token}: missing from both platforms`
-        );
-        totalChecks--; // Don't count as check if both are missing
-        continue;
-      }
-      if (!cssVal) {
-        warnings.push(
-          `  WARN  [${palette}][${cssTheme}] ${token}: missing from CSS (Android.${ktTokenKey}: ${fmtRgb(ktVal)})`
-        );
-        totalChecks--;
-        continue;
-      }
-      if (!ktVal) {
-        warnings.push(
-          `  WARN  [${palette}][${cssTheme}] ${token} (Android.${ktTokenKey}): missing from Kotlin (CSS: ${fmtRgb(cssVal)})`
-        );
-        totalChecks--;
-        continue;
-      }
-
-      const ok = withinTolerance(cssVal, ktVal, tol);
-      const label = `[${palette}][${cssTheme}] ${token}`;
-      const cssHex = fmtRgb(cssVal);
-      const ktHex = fmtRgb(ktVal);
-      const tolNote = tol !== TOLERANCE ? ` (tol ±${tol})` : "";
-
-      if (ok) {
-        passedChecks++;
-        if (VERBOSE) {
-          console.log(`  PASS  ${label}${tolNote}: CSS=${cssHex} Android.${ktTokenKey}=${ktHex}`);
-        }
-      } else {
-        failures.push(
-          `  FAIL  ${label}${tolNote}:\n` +
-          `          CSS    --${token}       = ${cssHex} (rgb ${cssVal.join(",")})\n` +
-          `          Android IdeColors.${ktTokenKey} = ${ktHex} (rgb ${ktVal.join(",")})\n` +
-          `          delta  = [${cssVal.map((v, i) => v - ktVal[i]).join(",")}]`
-        );
-      }
-    }
-  }
-
-  // Print results
-  if (warnings.length > 0) {
-    console.log("Warnings (skipped checks — data not parseable from one platform):");
-    for (const w of warnings) console.log(w);
+    console.log("=== CpColors fields ===");
+    cpColorsFields.forEach((f) => console.log(`  ${f}  →  ${fieldToCssToken(f)}`));
+    console.log();
+    console.log("=== AccentColor variants ===");
+    accentVariants.forEach((v) => console.log(`  ${v}  →  data-accent="${v.toLowerCase()}"`));
+    console.log();
+    console.log("=== CSS token names ===");
+    [...cssTokenNames].sort().forEach((t) => console.log(`  ${t}`));
+    console.log();
+    console.log("=== CSS accent values ===");
+    [...cssAccentValues].sort().forEach((v) => console.log(`  data-accent="${v}"`));
     console.log();
   }
 
+  const failures = [];
+
+  // ── Check 1: every CpColors field must have a corresponding CSS token ────────
+  for (const field of cpColorsFields) {
+    const cssToken = fieldToCssToken(field);
+    if (!cssTokenNames.has(cssToken)) {
+      failures.push(
+        `  FAIL  CpColors.${field} → ${cssToken}  (token absent from tokens.css)`,
+      );
+    } else if (VERBOSE) {
+      console.log(`  PASS  CpColors.${field} → ${cssToken}`);
+    }
+  }
+
+  // ── Check 2: every CSS --c-* and surface token must have a CpColors field ────
+  // Build the reverse map: CSS token → expected Kotlin field
+  const cpColorsCssTokens = new Set(cpColorsFields.map(fieldToCssToken));
+
+  // Tokens in CSS that we expect to be in CpColors (surfaces + text + status + c-*)
+  // These are the semantic tokens that MUST be paired.  We identify them as any
+  // token from the :root dark block EXCEPT utility/computed ones (hover, pressed,
+  // selected, scrim, sh1/2/3, card (alias), and font/spacing/radius/duration vars).
+  const EXCLUDED = new Set([
+    "--card",       // alias for --elevated; not a separate CpColors field
+    "--hover",      // computed overlay; not a colour token in CpColors
+    "--pressed",    // computed overlay
+    "--selected",   // computed from accent
+    "--scrim",      // modal backdrop — not in CpColors
+    "--sh1", "--sh2", "--sh3",  // shadows
+    "--f-ui", "--f-mono",       // fonts
+    "--r-chip", "--r-pill", "--r-ctl", "--r-input", "--r-card", "--r-window",
+    "--s-1","--s-2","--s-3","--s-4","--s-5","--s-6","--s-7","--s-8","--s-9",
+    "--dur-fast", "--dur", "--dur-theme", "--ease",
+    "--accent", "--accent-2", "--on-accent",  // accent tokens (checked separately)
+  ]);
+
+  for (const cssToken of cssTokenNames) {
+    if (EXCLUDED.has(cssToken)) continue;
+    if (!cpColorsCssTokens.has(cssToken)) {
+      failures.push(
+        `  FAIL  ${cssToken} present in tokens.css but no matching CpColors field`,
+      );
+    } else if (VERBOSE) {
+      console.log(`  PASS  ${cssToken} ← CpColors has matching field`);
+    }
+  }
+
+  // ── Check 3: every AccentColor variant maps to a data-accent value in CSS ────
+  for (const variant of accentVariants) {
+    const cssAccent = variant.toLowerCase();
+    if (!cssAccentValues.has(cssAccent)) {
+      failures.push(
+        `  FAIL  AccentColor.${variant} → data-accent="${cssAccent}"  (absent from tokens.css)`,
+      );
+    } else if (VERBOSE) {
+      console.log(`  PASS  AccentColor.${variant} → data-accent="${cssAccent}"`);
+    }
+  }
+
+  // ── Check 4: every data-accent value maps to an AccentColor variant ──────────
+  const accentVariantNames = new Set(accentVariants.map((v) => v.toLowerCase()));
+  for (const cssAccent of cssAccentValues) {
+    if (!accentVariantNames.has(cssAccent)) {
+      failures.push(
+        `  FAIL  data-accent="${cssAccent}" in tokens.css but no AccentColor.${cssAccent.toUpperCase()} variant`,
+      );
+    } else if (VERBOSE) {
+      console.log(`  PASS  data-accent="${cssAccent}" ← AccentColor has matching variant`);
+    }
+  }
+
+  // ── Report ────────────────────────────────────────────────────────────────────
+  const totalFields = cpColorsFields.length + accentVariants.length;
+
   if (failures.length === 0) {
     console.log(
-      `PASS: all ${passedChecks}/${totalChecks} token comparisons within tolerance ±${TOLERANCE}.`
+      `PASS: ${totalFields} CpColors fields + ${accentVariants.length} AccentColor variants all map 1:1 to tokens.css.`,
     );
-    if (warnings.length > 0) {
-      console.log(
-        `      (${warnings.length} token(s) skipped — see warnings above; investigate manually)`
-      );
-    }
     process.exit(0);
   } else {
-    console.log(`FAIL: ${failures.length} divergence(s) found (${passedChecks}/${totalChecks} passed):\n`);
+    console.log(`FAIL: ${failures.length} token-name mismatch(es):\n`);
     for (const f of failures) console.log(f);
     console.log(
-      `\nFix: update the failing platform to match the value in docs/PARITY-SPEC.md §A.`
+      `\nFix: update tokens.css or Color.kt so every CpColors field has a matching --token\n` +
+      `and every AccentColor variant has a matching data-accent value.\n` +
+      `Re-run: node scripts/parity-check.mjs --verbose`,
     );
-    console.log(`Re-run: node scripts/parity-check.mjs --verbose`);
     process.exit(1);
   }
 }

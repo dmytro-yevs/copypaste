@@ -390,7 +390,7 @@ fun OnboardingScreen(
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
 
-    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
     val scaffoldContainerColor = if (translucent) Color.Transparent else c.bg
     val scaffoldModifier: Modifier = if (translucent) Modifier.screenCanvas(dark) else Modifier
 

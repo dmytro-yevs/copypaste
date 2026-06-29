@@ -117,7 +117,7 @@ fun SettingsScreen(
      * are unsaved changes show the Discard/Keep-editing dialog.
      */
     onRegisterNavGuard: ((guard: (proceed: () -> Unit) -> Unit) -> Unit)? = null,
-    /** §1: paint the aurora backdrop here (standalone) vs. via MainShell (embedded). */
+    /** §1: paint the canvas backdrop here (standalone) vs. via MainShell (embedded). */
     paintCanvasBackdrop: Boolean = true,
     /** Called after the user confirms Save and all settings are persisted. */
     onSaved: () -> Unit = {},
@@ -341,8 +341,8 @@ fun SettingsScreen(
         onSaved()
     }
 
-    // Calm solid backdrop (STYLEGUIDE §6 — no aurora). When translucent, glass
-    // surfaces frost over the screen-canvas gradient; otherwise the bg is opaque.
+    // Calm solid backdrop (STYLEGUIDE §6). When translucent, glass surfaces frost
+    // over the screen-canvas gradient; otherwise the bg is opaque.
     val scaffoldModifier = if (translucency && paintCanvasBackdrop) modifier.screenCanvas(dark) else modifier
     Scaffold(
         modifier = scaffoldModifier,
@@ -372,7 +372,7 @@ fun SettingsScreen(
     ) { innerPadding ->
         // CopyPaste-sk02: wrap the entire tab panel (tab row + tab content) in a
         // CopyPasteCard so the settings panel floats as a single glass block over
-        // the aurora canvas, matching DevicesView/HistoryView patterns.
+        // the screen canvas, matching DevicesView/HistoryView patterns.
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -387,7 +387,7 @@ fun SettingsScreen(
             // AND3: Tab row with §8 animated underline (180ms EaseStandard).
             ScrollableTabRow(
                 selectedTabIndex = selectedTab,
-                // Transparent over the aurora canvas; opaque c.bg when translucency off.
+                // Transparent over the screen canvas; opaque c.bg when translucency off.
                 containerColor = if (translucency) androidx.compose.ui.graphics.Color.Transparent else c.bg,
                 edgePadding = 0.dp,
                 indicator = { tabPositions ->

@@ -303,7 +303,7 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     var tabBarHeightDp by remember { mutableStateOf(74.dp) }
     val contentBottomPadding = tabBarHeightDp + 10.dp + navBarInsetDp
 
-    // Calm screen backdrop (STYLEGUIDE §6 — no aurora): a neutral gradient behind
+    // Calm screen backdrop (STYLEGUIDE §6): a neutral gradient behind
     // the whole shell so the glass surfaces (tab bar, cards) frost over real colour.
     // Only when translucent — otherwise keep the opaque c.bg.
     Box(
@@ -333,7 +333,7 @@ private fun MainShell(viewModel: ClipboardViewModel) {
                         viewModel = viewModel,
                         showBackButton = false,
                         onBack = {},
-                        // Shell already paints the full-window aurora behind everything.
+                        // Shell already paints the full-window gradient backdrop behind everything.
                         paintCanvasBackdrop = false,
                     )
                     NavTab.DEVICES -> DevicesScreen(

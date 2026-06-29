@@ -367,17 +367,15 @@ jobs:
       - name: cargo test --workspace --all-features
         run: cargo test --workspace --all-features
 
-  # Token parity + contrast gates (bd CopyPaste-ojas.3, ojas.8).
+  # Two-axis token-parity + WCAG AA contrast gate (Phase 7, CopyPaste-2hfj.8).
   # Checks that:
-  #   1. Web CSS tokens and Android Kotlin tokens agree on values (not just key names)
-  #      for accent, on-accent, bg0/1/2, success, warning, danger across all 10 palettes.
-  #   2. On-accent foreground over accent background meets WCAG AA (4.5:1) on both platforms.
-  #   3. Text-on-surface (balanced contrast profile) meets WCAG AA on the web side.
-  # These scripts are dependency-light (Node only, no new packages) and run from the
-  # repo root. They exit 1 on drift/failure and are NOT continue-on-error: their job
-  # is to block PRs that introduce design token regressions.
+  #   1. Token NAMES in tokens.css map 1:1 to CpColors fields and AccentColor variants
+  #      (STYLEGUIDE §11). Fails on any name mismatch — no more 10-palette comparison.
+  #   2. The §3.3 text ramp (--text / --dim / --faint on --panel) meets WCAG AA in
+  #      both dark and light themes (covered by the vitest suite: tokens.parity.test.ts).
+  # The script is dependency-light (Node only) and runs from the repo root.
   token-parity-contrast:
-    name: Token parity + WCAG contrast gate
+    name: Two-axis token-parity + WCAG AA gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -387,15 +385,8 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Token value parity (Web CSS vs Android Kotlin) [ojas.8]
-        # Compares token VALUES (not just key names) for accent, on-accent,
-        # bg0/1/2, success, warning, danger across all 10 palettes.
-        # FAILS on first drift detected — print the exact drifting token + both values.
-        run: node scripts/parity-check.mjs
-
-      - name: WCAG AA contrast gate (on-accent + text-on-surface) [ojas.3]
-        # Computes WCAG contrast ratio for:
-        #   • on-accent foreground over accent background (button/chip label legibility)
-        #   • text-on-surface (balanced profile) composited over surfaceRgb
-        # FAILS if any pair is below AA normal (4.5:1) threshold.
-        run: node scripts/check-contrast.mjs
+      - name: Token-name parity (tokens.css ↔ CpColors/AccentColor)
+        # Asserts every CpColors field maps to a CSS custom property and every
+        # AccentColor variant maps to a data-accent= value (STYLEGUIDE §11).
+        # Fails if names drift between platforms.
+        run: node scripts/parity-check.mjs --verbose

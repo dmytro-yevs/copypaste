@@ -143,9 +143,9 @@ internal fun pulseDotColorRole(online: Boolean): PulseDotColorRole =
     if (online) PulseDotColorRole.ONLINE else PulseDotColorRole.OFFLINE
 
 /**
- * True when the calm screen-canvas backdrop should be painted (STYLEGUIDE §6 —
- * the aurora/tint-blob skin gating is removed). A frosted backdrop is painted
- * only when translucency is on and the screen owns its backdrop.
+ * True when the calm screen-canvas backdrop should be painted (STYLEGUIDE §6).
+ * A frosted backdrop is painted only when translucency is on and the screen
+ * owns its backdrop.
  */
 internal fun shouldPaintCanvas(
     translucent: Boolean,

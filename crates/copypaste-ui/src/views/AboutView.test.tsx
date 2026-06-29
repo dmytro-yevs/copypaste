@@ -94,7 +94,7 @@ describe("AboutView visual structure (JetBrains tokens)", () => {
   });
 
   it("card uses --r-card for border-radius (fixed token)", () => {
-    // Phase 4: --skin-r-card replaced with --r-card (fixed 13px).
+    // Phase 4: uses fixed --r-card token (13px) from two-axis token system.
     const { container } = render(<AboutView />);
     const card = container.querySelector("[style*='--r-card']");
     expect(card).not.toBeNull();

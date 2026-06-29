@@ -102,7 +102,7 @@ class AboutActivity : ComponentActivity() {
                 val dark = isDarkTheme()
                 val translucent = rememberTranslucency()
 
-                // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+                // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
                 val showCanvas = translucent
                 val canvasModifier = if (showCanvas) Modifier.screenCanvas(dark) else Modifier
 

@@ -268,15 +268,13 @@ fun PermissionsScreen(
     val hasOemScreen = OemAutoStartHelper.hasOemScreen(ctx)
     val oemLabel = OemAutoStartHelper.oemSettingsLabel(ctx)
 
-    // A-C8 / CopyPaste-i1c0 / CopyPaste-uya3: skin-aware background — 3-way when(tok.background).
-    // CLASSIC (AURORA + translucent=ON) → animated aurora canvas; byte-identical to pre-skin.
-    // QUIET (FLAT) → solid c.bg; no canvas regardless of translucency pref.
-    // VAPOR (TINT_BLOB + translucent=ON) → shared tintBlobCanvas (Components.kt).
+    // Two-axis theme (STYLEGUIDE §2): isDark × accent only. Translucency is an optional
+    // boolean toggle; no skin/palette system. Frosted glass when translucent, opaque otherwise.
     val translucent = rememberTranslucency()
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
 
-    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
     val scaffoldModifier: Modifier = if (translucent) Modifier.screenCanvas(dark) else Modifier
     val scaffoldContainerColor: Color = if (translucent) Color.Transparent else c.bg
 

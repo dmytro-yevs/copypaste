@@ -33,11 +33,11 @@ import com.copypaste.android.Settings
 // ---------------------------------------------------------------------------
 // Frosted-glass material (translucency axis only).
 //
-// The Liquid-Glass skin/palette/aurora system is removed (STYLEGUIDE §6, §11).
+// The old Liquid-Glass multi-skin/palette system is removed (STYLEGUIDE §6, §11).
 // What remains is a single optional "Translucency" treatment: when on, surfaces
 // frost the content behind them (real RenderEffect blur ≥ API 31, flat tint
-// fallback below). When off, surfaces are the opaque theme colour. No aurora
-// canvas, no per-skin tokens.
+// fallback below). When off, surfaces are the opaque theme colour. No animated
+// blobs, no per-skin tokens — only the two-axis theme × accent system.
 // ---------------------------------------------------------------------------
 
 /** LIGHT glass alpha (warm near-white fill). */
@@ -166,7 +166,7 @@ val supportsGlassBlur: Boolean
 
 /**
  * Opaque canvas gradient behind glass so the blur has real colour to sample.
- * A calm neutral gradient (no aurora blobs) — light greys / deep neutrals.
+ * A calm neutral gradient — light greys / deep neutrals (STYLEGUIDE §6).
  */
 fun glassCanvasBrush(dark: Boolean): Brush =
     if (dark) {
@@ -177,8 +177,8 @@ fun glassCanvasBrush(dark: Boolean): Brush =
 
 /**
  * Opaque screen backdrop for translucent screens — paints [glassCanvasBrush] so
- * frosted surfaces have real colour to sample. Replaces the removed aurora canvas
- * (STYLEGUIDE §6: no aurora, no blobs). Apply to a `fillMaxSize` Scaffold modifier
+ * frosted surfaces have real colour to sample (STYLEGUIDE §6). Apply to a
+ * `fillMaxSize` Scaffold modifier
  * whose container colour is Transparent.
  */
 fun Modifier.screenCanvas(dark: Boolean): Modifier =

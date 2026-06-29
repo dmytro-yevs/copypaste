@@ -1,14 +1,13 @@
 /**
- * Tests for W-C7: DeviceCard skin token audit.
+ * Tests for W-C7: DeviceCard fixed-radius token audit.
  *
- * Verifies that PeerRow action buttons use --skin-r-ctl for border-radius
- * (via inline style) rather than the hardcoded rounded-ide Tailwind class,
- * ensuring the radius adapts correctly across classic / quiet / vapor skins.
+ * Verifies that PeerRow action buttons use the fixed --r-ctl token for
+ * border-radius (via inline style) rather than the hardcoded rounded-ide
+ * Tailwind class, ensuring correct radius with the two-axis design system.
  *
- * Classic = 9px, Quiet = 7px, Vapor = 12px (§2.2 SkinTokens contract).
  * The test does NOT assert pixel values because CSS vars are unresolved in
  * jsdom; it asserts that the inline style references the token so that the
- * browser picks up whatever value the active skin defines.
+ * browser picks up whatever value the active theme defines.
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -36,8 +35,8 @@ const MOCK_PEER: PairedDevice = {
 
 const NOOP = vi.fn();
 
-describe("PeerRow W-C7: skin token compliance", () => {
-  it("action buttons use --skin-r-ctl via inline borderRadius (not rounded-ide class)", () => {
+describe("PeerRow W-C7: fixed-radius token compliance", () => {
+  it("action buttons use --r-ctl via inline borderRadius (not rounded-ide class)", () => {
     const { container } = render(
       <PeerRow
         peer={MOCK_PEER}

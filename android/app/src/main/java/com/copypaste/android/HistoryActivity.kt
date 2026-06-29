@@ -82,7 +82,7 @@ import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.IdeColors
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.Motion
-// Liquid glass / palette tokens for aurora backdrop and cinematic motion.
+// Two-axis theme: motionDuration helper (STYLEGUIDE §6, reduced-motion aware).
 import com.copypaste.android.ui.theme.motionDuration
 // A-C1: skin axis tokens for screen-level treatment (background, row, nav).
 import kotlinx.coroutines.delay
@@ -151,9 +151,9 @@ fun HistoryScreen(
     showBackButton: Boolean = true,
     onBack: () -> Unit = {},
     /**
-     * §1: paint the aurora canvas backdrop on this screen's own Scaffold. True when
+     * §1: paint the canvas backdrop on this screen's own Scaffold. True when
      * the screen is the window root (standalone activity); false when embedded in
-     * MainShell, which already paints a single full-window aurora behind everything
+     * MainShell, which already paints a single full-window gradient behind everything
      * (avoids a per-screen vs shell-sized double-paint seam at the nav-bar edge).
      */
     paintCanvasBackdrop: Boolean = true,
@@ -546,7 +546,7 @@ fun HistoryScreen(
     }
 
     Scaffold(
-        // Calm screen backdrop (STYLEGUIDE §6 — no aurora). When embedded in
+        // Calm screen backdrop (STYLEGUIDE §6). When embedded in
         // MainShell (paintCanvasBackdrop=false) the shell already paints it.
         modifier = if (paintCanvasBackdrop && translucent) modifier.screenCanvas(dark) else modifier,
         containerColor = if (translucent) Color.Transparent else c.bg,
@@ -1282,8 +1282,8 @@ private fun HistoryList(
         if (shouldLoadMore) onLoadMore()
     }
 
-    // §1 aurora: let the Scaffold's aurora backdrop show through the list when
-    // translucency is on. c.bg fill only in the solid (accessibility) mode.
+    // §1: let the Scaffold's canvas backdrop show through the list when
+    // translucency is on. c.bg fill only in the solid (non-translucent) mode.
     val listTranslucent = rememberTranslucency()
     // Hoist entrance duration once at list scope so it is NOT recomputed per row
     // inside itemsIndexed (avoids per-item composition state entries).

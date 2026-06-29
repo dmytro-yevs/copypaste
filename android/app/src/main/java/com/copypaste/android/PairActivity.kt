@@ -833,7 +833,7 @@ fun PairScreen(
     // Entrance alpha fade removed — card appears instantly (no idle animation).
 
     Box(Modifier.fillMaxSize()) {
-    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+    // Calm screen backdrop (STYLEGUIDE §6). Frosted only when translucent.
     val scaffoldModifier: Modifier = if (translucent) modifier.screenCanvas(dark) else modifier
     Scaffold(
         modifier = scaffoldModifier,

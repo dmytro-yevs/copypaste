@@ -1,6 +1,6 @@
 /**
- * Phase 4: Popup uses fixed design tokens (--r-card), no data-skin attribute.
- * Updated from W-C5: skin system removed.
+ * Phase 4: Popup uses fixed design tokens (--r-card).
+ * Updated from W-C5: legacy skin system removed; two-axis (theme × accent) only.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -61,12 +61,21 @@ describe("Phase 4: Popup root uses var(--r-card) for borderRadius", () => {
     expect(popupRoot!.style.borderRadius).toBe("var(--r-card)");
   });
 
-  it("does NOT set data-skin attribute on <html> (skin system removed)", async () => {
+  it("html element has only two-axis appearance attributes (theme + accent, no legacy axes)", async () => {
     mockEmptyHistory();
 
     const { Popup } = await import("./Popup");
     await act(async () => { render(<Popup />); });
 
-    expect(document.documentElement.hasAttribute("data-skin")).toBe(false);
+    // Collect all data-* attributes set on <html>.
+    const dataAttrs = Array.from(document.documentElement.attributes)
+      .filter((a) => a.name.startsWith("data-"))
+      .map((a) => a.name);
+
+    // Only data-theme and data-accent are permitted (two-axis system, Phase 4).
+    const unexpected = dataAttrs.filter(
+      (a) => a !== "data-theme" && a !== "data-accent",
+    );
+    expect(unexpected).toEqual([]);
   });
 });
