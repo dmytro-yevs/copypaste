@@ -59,7 +59,7 @@ internal fun chipColorFor(kind: String, c: IdeColors): Color = when (kind) {
     "JSON"    -> c.danger
     "CODE"    -> c.violet
     "IMAGE"   -> c.violet  // 1jms.14: PARITY-SPEC §6 canonical: IMAGE → violet (not sky/info)
-    "FILE"    -> c.faint   // izio: was dim, now faint (parity web .b-file)
+    "FILE"    -> c.dim     // CopyPaste-crh3.41: PARITY-SPEC §6 + macOS = dim (izio's faint diverged)
     "PRIVATE" -> c.danger
     else      -> c.faint   // unknown text kinds default to the TEXT slot
 }
