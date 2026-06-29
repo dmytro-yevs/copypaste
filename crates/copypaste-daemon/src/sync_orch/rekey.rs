@@ -7,8 +7,8 @@ use std::sync::Arc;
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
-    encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, ClipboardItem, ItemId,
-    SyncKey, V1Key, V2Key, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+    encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, ClipboardItem, SyncKey,
+    V1Key, V2Key, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 // c7fp: encrypt_chunks / IMAGE_CHUNK_SIZE / ImageMeta are only used in
 // `rewrap_inbound_blob` and `read_png_dimensions` which are macOS-only
@@ -361,7 +361,7 @@ pub(super) fn rekey_blob_outbound_with_key(
         );
         return RekeyOutcome::Failed;
     }
-    match encrypt_for_cloud(shared, &ItemId::from(wire.item_id.as_str()), &plaintext) {
+    match encrypt_for_cloud(shared, &wire.item_id, &plaintext) {
         Ok(blob) => {
             wire.content = Some(blob);
             // Self-framed blob → no item-level nonce; `None` is the receiver's
@@ -460,7 +460,7 @@ pub(super) fn rekey_outbound_text_with_key(
         wire.key_version,
         V1Key(&crypto.v1_key),
         V2Key(&crypto.v2_key),
-        &ItemId::from(wire.item_id.as_str()),
+        &wire.item_id,
         &nonce,
         ciphertext,
     ) {
@@ -471,7 +471,7 @@ pub(super) fn rekey_outbound_text_with_key(
         }
     };
 
-    match encrypt_for_cloud(peer_key, &ItemId::from(wire.item_id.as_str()), &plaintext) {
+    match encrypt_for_cloud(peer_key, &wire.item_id, &plaintext) {
         Ok(blob) => {
             wire.content = Some(blob);
             // The cloud blob is self-framed (nonce prefix), so there is no
@@ -577,7 +577,7 @@ pub(super) fn rekey_inbound(
     let plaintext = {
         let mut found: Option<Vec<u8>> = None;
         for key in &peer_keys {
-            match decrypt_from_cloud(key, &ItemId::from(wire.item_id.as_str()), &blob) {
+            match decrypt_from_cloud(key, &wire.item_id, &blob) {
                 Ok(pt) => {
                     found = Some(pt);
                     break;
@@ -596,11 +596,7 @@ pub(super) fn rekey_inbound(
 
     // Re-encrypt under this device's local v2 key + v4 AAD so the stored row is
     // readable by the production read path (`decrypt_item_by_version` at v2).
-    let aad = build_item_aad_v2(
-        &ItemId::from(wire.item_id.as_str()),
-        AAD_SCHEMA_VERSION_V4,
-        2,
-    );
+    let aad = build_item_aad_v2(&wire.item_id, AAD_SCHEMA_VERSION_V4, 2);
     let (nonce, ciphertext) = match encrypt_item_with_aad(&plaintext, &crypto.v2_key, &aad) {
         Ok(out) => out,
         Err(e) => {
@@ -698,15 +694,13 @@ pub(super) fn rewrap_inbound_blob(
     // original `content`. The borrow of `wire.content` ends before each
     // `Err(Box::new(wire))` move (NLL), so returning `wire` is sound.
     let plaintext = match wire.content.as_deref() {
-        Some(blob) => {
-            match decrypt_from_cloud(shared, &ItemId::from(wire.item_id.as_str()), blob) {
-                Ok(pt) => pt,
-                Err(e) => {
-                    warn!(item_id = %wire.item_id, "sync_orch: inbound blob shared-decrypt failed: {e}");
-                    return Err(Box::new(wire));
-                }
+        Some(blob) => match decrypt_from_cloud(shared, &wire.item_id, blob) {
+            Ok(pt) => pt,
+            Err(e) => {
+                warn!(item_id = %wire.item_id, "sync_orch: inbound blob shared-decrypt failed: {e}");
+                return Err(Box::new(wire));
             }
-        }
+        },
         None => return Err(Box::new(wire)),
     };
 

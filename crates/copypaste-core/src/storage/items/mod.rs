@@ -1,6 +1,5 @@
 mod delete;
 mod fts;
-pub mod ids;
 mod insert;
 mod pinned;
 mod query;
@@ -33,7 +32,6 @@ pub use fts::{
     compute_content_hash, fetch_text_preview, fetch_text_previews_batch, get_device_names,
     search_items, search_items_filtered, upsert_fts, MAX_PREVIEW_BYTES,
 };
-pub use ids::{ItemId, RowId};
 pub use insert::{
     backfill_origin_device_id, get_key_version, insert_item, insert_item_with_fts, insert_tombstone,
 };

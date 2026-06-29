@@ -6,7 +6,7 @@ use tokio::sync::{Mutex, RwLock};
 use copypaste_core::storage::items::soft_delete_item;
 use copypaste_core::{
     decrypt_from_cloud, exists_item_by_item_id, get_item_by_item_id, insert_item, insert_tombstone,
-    prune_to_cap, Database, ItemId, SyncKey,
+    prune_to_cap, Database, SyncKey,
 };
 use copypaste_supabase::auth::AuthClient;
 use copypaste_sync::merge::{remote_wins, RemoteMeta};
@@ -669,7 +669,7 @@ pub(crate) async fn poll_once(
             // upload.
             let plaintext = {
                 let tmp_key = SyncKey::from_bytes(key_arr);
-                match decrypt_from_cloud(&tmp_key, &ItemId::from(item_id), &blob) {
+                match decrypt_from_cloud(&tmp_key, item_id, &blob) {
                     Ok(p) => p,
                     Err(e) => {
                         // Never log plaintext or the key.

@@ -20,7 +20,7 @@
 //! All migrations MUST run inside a single transaction so user_version advances
 //! atomically with the schema change (never partially applied).
 
-use copypaste_core::{Database, ItemId, RowId};
+use copypaste_core::Database;
 use rusqlite::Connection;
 use tempfile::tempdir;
 
@@ -482,8 +482,8 @@ fn migrate_v2_to_v3_adds_origin_device_id_column_with_empty_default() {
     // Simulate a legacy v2 row: insert with empty origin (the value an
     // `ALTER ADD COLUMN … DEFAULT ''` would have stamped on a real upgrade).
     let mut legacy = ClipboardItem::new_text(vec![0xAA], vec![0u8; 24], 1);
-    legacy.id = RowId::from("legacy-1");
-    legacy.item_id = ItemId::from("i-legacy-1");
+    legacy.id = "legacy-1".to_string();
+    legacy.item_id = "i-legacy-1".to_string();
     legacy.wall_time = 1_000;
     legacy.origin_device_id = String::new(); // matches v2->v3 ALTER default
     insert_item(&db, &legacy).unwrap();
@@ -529,8 +529,8 @@ fn migrate_v2_to_v3_adds_origin_device_id_column_with_empty_default() {
     // must NOT be overwritten by backfill, so cross-device provenance is
     // preserved through subsequent merge tie-breaks.
     let mut peer_row = ClipboardItem::new_text(vec![0xBB], vec![0u8; 24], 2);
-    peer_row.id = RowId::from("peer-1");
-    peer_row.item_id = ItemId::from("i-peer-1");
+    peer_row.id = "peer-1".to_string();
+    peer_row.item_id = "i-peer-1".to_string();
     peer_row.origin_device_id = "peer-A".to_string();
     insert_item(&db, &peer_row).unwrap();
 

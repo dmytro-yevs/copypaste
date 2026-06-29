@@ -44,7 +44,6 @@ use copypaste_core::{
     unpin_item,
     Database,
     DbRead,
-    ItemId,
     SensitiveDetector,
     V1Key,
     V2Key,

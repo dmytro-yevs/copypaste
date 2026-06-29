@@ -6,7 +6,7 @@ use tokio::sync::{Mutex, RwLock};
 use copypaste_core::storage::items::soft_delete_item;
 use copypaste_core::{
     decrypt_from_cloud, exists_item_by_item_id, get_item_by_item_id, insert_item, insert_tombstone,
-    prune_to_cap, Database, ItemId, SyncKey,
+    prune_to_cap, Database, SyncKey,
 };
 use copypaste_supabase::protocol::ChangeType;
 use copypaste_supabase::{RealtimeClient, RealtimeConfig};
@@ -459,7 +459,7 @@ pub(super) async fn ws_ingest_loop(
                                 };
                                 let tmp_key = SyncKey::from_bytes(key_arr);
                                 let plaintext =
-                                    match decrypt_from_cloud(&tmp_key, &ItemId::from(item_id_owned.as_str()), &blob) {
+                                    match decrypt_from_cloud(&tmp_key, &item_id_owned, &blob) {
                                         Ok(p) => p,
                                         Err(e) => {
                                             tracing::warn!(

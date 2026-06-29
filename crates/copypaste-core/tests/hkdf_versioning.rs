@@ -17,7 +17,7 @@
 //! verify the rotation property end-to-end via the public API.
 
 use copypaste_core::{
-    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad, DeviceKeypair, ItemId,
+    build_item_aad, decrypt_item_with_aad, encrypt_item_with_aad, DeviceKeypair,
     AAD_SCHEMA_VERSION, NONCE_SIZE,
 };
 use hkdf::Hkdf;
@@ -158,7 +158,7 @@ fn key_length_matches_xchacha_requirement_32_bytes() {
 
     // Round-trip sanity: the derived key actually works with the AEAD layer.
     let plaintext = b"hkdf-versioning-roundtrip";
-    let aad = build_item_aad(&ItemId::from("hkdf-roundtrip"), AAD_SCHEMA_VERSION);
+    let aad = build_item_aad("hkdf-roundtrip", AAD_SCHEMA_VERSION);
     let (nonce, ct) = encrypt_item_with_aad(plaintext, &net_key, &aad).unwrap();
     assert_eq!(nonce.len(), NONCE_SIZE);
     let pt = decrypt_item_with_aad(&ct, &nonce, &net_key, &aad).unwrap();
@@ -196,7 +196,7 @@ fn v1_key_isolates_from_v2_salt_derived_key() {
     let v2_key = derive_with_salt(&alice, &bob_pub, "alice", "bob", HKDF_SALT_V2_CANDIDATE);
 
     let plaintext = b"legacy v1 ciphertext";
-    let aad = build_item_aad(&ItemId::from("hkdf-migration"), AAD_SCHEMA_VERSION);
+    let aad = build_item_aad("hkdf-migration", AAD_SCHEMA_VERSION);
     let (nonce, ct) = encrypt_item_with_aad(plaintext, &v1_key, &aad).unwrap();
 
     // (a) V1 key decrypts V1 ciphertext — round-trip regression.

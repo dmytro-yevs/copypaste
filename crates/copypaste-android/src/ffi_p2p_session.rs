@@ -5,7 +5,7 @@
 //! `is_fingerprint_revoked`, and the `P2P_SYNC_KEY_SALT` / `P2P_WIRE_KEY_VERSION`
 //! constants.
 
-use copypaste_core::{decrypt_from_cloud, encrypt_for_cloud, ItemId, ITEM_KEY_VERSION_CURRENT};
+use copypaste_core::{decrypt_from_cloud, encrypt_for_cloud, ITEM_KEY_VERSION_CURRENT};
 
 use crate::{ffi_pairing::runtime, panic_boundary, CopypasteError};
 
@@ -332,7 +332,7 @@ pub fn sync_with_peer(
             } else {
                 it.id.clone()
             };
-            let blob = encrypt_for_cloud(&shared, &ItemId::from(item_id.as_str()), &it.plaintext)
+            let blob = encrypt_for_cloud(&shared, &item_id, &it.plaintext)
                 .map_err(|_| CopypasteError::EncryptionFailed)?;
             outbound.push(WireItem {
                 id,
@@ -544,7 +544,7 @@ pub fn sync_with_peer(
                 items_skipped_missing_blob = items_skipped_missing_blob.saturating_add(1);
                 continue;
             };
-            match decrypt_from_cloud(&shared, &ItemId::from(wire.item_id.as_str()), blob) {
+            match decrypt_from_cloud(&shared, &wire.item_id, blob) {
                 Ok(plaintext) => items.push(SyncedItem {
                     id: wire.id.clone(),
                     // Carry the peer's STABLE item_id through so Kotlin can
