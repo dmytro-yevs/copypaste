@@ -226,10 +226,17 @@ async fn coregistration_with_wrong_pop_is_rejected() {
         "pop_b64": attacker_pop,
     });
     let (status2, resp_body2) = post_register(app, attacker_body).await;
+    // CopyPaste-crh3.12: rejected with a GENERIC 401 (not a verbose 400 that
+    // would confirm the device_id is already registered — a registration
+    // oracle). The body must not reveal registration state.
     assert_eq!(
         status2,
-        StatusCode::BAD_REQUEST,
-        "co-registration with wrong pop_b64 must be rejected with 400; got {status2} body={resp_body2}"
+        StatusCode::UNAUTHORIZED,
+        "co-registration with wrong pop_b64 must be a generic 401; got {status2} body={resp_body2}"
+    );
+    assert!(
+        !resp_body2.to_string().contains("does not match"),
+        "401 body must not leak registration state: {resp_body2}"
     );
 }
 

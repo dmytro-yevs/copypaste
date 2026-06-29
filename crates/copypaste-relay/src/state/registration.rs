@@ -222,10 +222,15 @@ impl super::RelayStore {
         if let Some(existing) = self.devices.get(&device_id) {
             use subtle::ConstantTimeEq;
             if existing.registered_pop.ct_eq(&pop_bytes).unwrap_u8() != 1 {
-                return Err(RelayError::BadRequest(
-                    "pop_b64 does not match the registered proof-of-possession for this device_id"
-                        .into(),
-                ));
+                // CopyPaste-crh3.12: return a generic 401 instead of a verbose
+                // 400 ("does not match the registered proof-of-possession").
+                // The old message confirmed the device_id was already
+                // registered, a registration oracle observable by anyone with
+                // access to relay logs / plaintext HTTP. A generic Unauthorized
+                // collapses wrong-PoP into the same opaque auth failure and
+                // never reveals registration state. Legitimate clients
+                // re-derive the PoP deterministically, so no real flow breaks.
+                return Err(RelayError::Unauthorized);
             }
         }
         // On first registration: the PoP is accepted as-is and stored below.

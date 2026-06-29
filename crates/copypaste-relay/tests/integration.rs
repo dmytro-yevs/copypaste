@@ -285,6 +285,43 @@ async fn test_register_invalid_base64_key_is_400() {
 }
 
 #[tokio::test]
+async fn test_coregister_wrong_pop_is_generic_401() {
+    // CopyPaste-crh3.12: co-registering an already-registered device_id with a
+    // WRONG proof-of-possession must return a GENERIC 401 — not the old verbose
+    // 400 ("does not match the registered proof-of-possession"), which was a
+    // registration oracle (it confirmed the device_id was already registered).
+    let (app, _state) = make_app();
+    let (status, _b, app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
+    assert!(status.is_success(), "first registration must succeed: {status}");
+
+    // Re-register the SAME device_id with a DIFFERENT (valid-format) PoP.
+    let wrong_pop = B64.encode([0xAB_u8; 32]);
+    let (status, body) = post_json(
+        app,
+        "/devices",
+        None,
+        json!({
+            "device_id": DEVICE_A,
+            "device_name": "Attacker Device",
+            "public_key_b64": valid_pub_key(),
+            "pop_b64": wrong_pop,
+        }),
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "wrong-PoP co-registration must be a generic 401: {body}"
+    );
+    // The response must NOT reveal that the device_id is already registered.
+    let body_str = body.to_string();
+    assert!(
+        !body_str.contains("does not match"),
+        "401 body must not leak registration state: {body_str}"
+    );
+}
+
+#[tokio::test]
 async fn test_push_requires_auth() {
     let (app, _state) = make_app();
     let (_, _, app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
