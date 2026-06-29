@@ -292,7 +292,10 @@ async fn test_coregister_wrong_pop_is_generic_401() {
     // registration oracle (it confirmed the device_id was already registered).
     let (app, _state) = make_app();
     let (status, _b, app) = register_device(app, DEVICE_A, &valid_pub_key()).await;
-    assert!(status.is_success(), "first registration must succeed: {status}");
+    assert!(
+        status.is_success(),
+        "first registration must succeed: {status}"
+    );
 
     // Re-register the SAME device_id with a DIFFERENT (valid-format) PoP.
     let wrong_pop = B64.encode([0xAB_u8; 32]);

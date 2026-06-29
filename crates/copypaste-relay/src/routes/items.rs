@@ -6,8 +6,6 @@ use axum::http::{HeaderValue, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::IntoResponse;
 use axum::Json;
-use base64::engine::general_purpose::STANDARD as B64;
-use base64::Engine;
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -91,6 +89,33 @@ pub async fn delete_item(
 // GET  /devices/:id/items?since=<wall_time> — pull items newer than wall_time.
 // ---------------------------------------------------------------------------
 
+/// CopyPaste-crh3.72: exact decoded byte length of a STANDARD (padded) base64
+/// string, computed in O(1) from the encoded length WITHOUT allocating the
+/// decoded bytes. Returns `None` when the length is not a valid padded-base64
+/// length (not a multiple of 4). Character validity is NOT checked here — the
+/// quota only needs the size, and `push_item_decoded` re-decodes (and rejects
+/// malformed base64) under the store lock.
+fn decoded_len_padded_b64(s: &str) -> Option<usize> {
+    let n = s.len();
+    if n == 0 {
+        return Some(0);
+    }
+    if !n.is_multiple_of(4) {
+        return None;
+    }
+    let bytes = s.as_bytes();
+    let pad = if bytes[n - 1] == b'=' {
+        if bytes[n - 2] == b'=' {
+            2
+        } else {
+            1
+        }
+    } else {
+        0
+    };
+    Some(n / 4 * 3 - pad)
+}
+
 /// POST /devices/:device_id/items
 ///
 /// Body: `{ "content_type": "text"|"image"|"file", "content_b64": "<base64>", "wall_time": <u64> }`
@@ -127,10 +152,12 @@ pub async fn push(
     // store mutex for the actual insert. We decode `content_b64` once here to
     // measure the true ciphertext size; `push_item_decoded` re-validates the
     // base64 (and the operator body cap) under the lock.
-    let decoded_len = B64
-        .decode(&body.content_b64)
-        .map_err(|_| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?
-        .len();
+    // CopyPaste-crh3.72: compute the decoded length in O(1) from the encoded
+    // string length WITHOUT allocating the (up to ~10 MiB) decoded Vec just to
+    // measure it. Full base64 character validation is deferred to
+    // `push_item_decoded`, which re-decodes under the store lock anyway.
+    let decoded_len = decoded_len_padded_b64(&body.content_b64)
+        .ok_or_else(|| RelayError::BadRequest("content_b64 must be valid base64".to_string()))?;
     // Free-tier limits are applied conservatively for all senders (the relay
     // does not yet look up the sender's tier from the bearer token).
     quota::check_item_size(Tier::Free, decoded_len, &body.content_type).map_err(|v| match v {
@@ -457,4 +484,37 @@ fn sse_item_event(item: &PullItem) -> Result<Event, ()> {
         .map_err(|e| {
             tracing::warn!(item_id = item.id, error = %e, "failed to serialize SSE item event");
         })
+}
+
+#[cfg(test)]
+mod decoded_len_tests {
+    use super::decoded_len_padded_b64;
+    use base64::engine::general_purpose::STANDARD as B64;
+    use base64::Engine as _;
+
+    /// CopyPaste-crh3.72: the O(1) length must equal a real decode for every
+    /// padding case (len % 3 == 0/1/2 → pad 0/2/1), without allocating.
+    #[test]
+    fn matches_real_decode_for_all_lengths() {
+        for len in 0..200usize {
+            let data: Vec<u8> = (0..len).map(|i| (i % 256) as u8).collect();
+            let encoded = B64.encode(&data);
+            assert_eq!(
+                decoded_len_padded_b64(&encoded),
+                Some(data.len()),
+                "len={len} encoded={encoded}",
+            );
+        }
+        for len in [1024usize, 4096, 10_000] {
+            let encoded = B64.encode(vec![0xABu8; len]);
+            assert_eq!(decoded_len_padded_b64(&encoded), Some(len));
+        }
+    }
+
+    #[test]
+    fn rejects_invalid_padded_length() {
+        assert_eq!(decoded_len_padded_b64("abc"), None); // length 3
+        assert_eq!(decoded_len_padded_b64("abcde"), None); // length 5
+        assert_eq!(decoded_len_padded_b64(""), Some(0));
+    }
 }
