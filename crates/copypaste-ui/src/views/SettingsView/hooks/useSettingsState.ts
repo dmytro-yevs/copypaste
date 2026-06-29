@@ -725,11 +725,15 @@ export function useSettingsState() {
       } finally {
         setSyncRestarting(false);
       }
+      // CopyPaste-crh3.50: signal success so handleTestConnection can abort on a
+      // failed save instead of testing against the stale daemon config.
+      return true;
     } catch (err) {
       const msg = ipcErrorMessage(err, "Save failed");
       setSaveError(msg);
       if (saveErrTimer.current !== null) clearTimeout(saveErrTimer.current);
       saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
+      return false;
     }
   }, [config.p2p_enabled, config.supabase_anon_key, supabaseUrl, supabaseKey, supabaseEmail, supabasePassword, relayUrl, saveErrTimer]);
 
@@ -737,7 +741,13 @@ export function useSettingsState() {
     setTesting(true);
     setTestMsg(null);
     try {
-      await handleSaveConfig();
+      // CopyPaste-crh3.50: do NOT test against the previous config when the save
+      // silently failed — handleSaveConfig already surfaced the error.
+      const saved = await handleSaveConfig();
+      if (!saved) {
+        setTestMsg({ text: "Fix the save error above, then test again.", ok: false });
+        return;
+      }
       const result = await api.testCloudConnection();
       setTestMsg({ text: result.message, ok: result.ok });
     } catch (err) {
