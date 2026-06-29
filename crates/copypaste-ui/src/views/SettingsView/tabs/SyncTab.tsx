@@ -41,6 +41,7 @@ export type SyncTabProps = {
   passphrase: string;
   setPassphrase: (v: string) => void;
   passphraseSavedMsg: string | null;
+  passphraseSaveOk: boolean;
   testMsg: { text: string; ok: boolean } | null;
   testing: boolean;
   savedMsg: boolean;
@@ -93,6 +94,7 @@ export function SyncTab({
   passphrase,
   setPassphrase,
   passphraseSavedMsg,
+  passphraseSaveOk,
   testMsg,
   testing,
   savedMsg,
@@ -368,7 +370,7 @@ export function SyncTab({
               <span
                 className={[
                   "text-[11px]",
-                  passphraseSavedMsg === "Saved" ? "text-ide-success" : "text-ide-danger",
+                  passphraseSaveOk ? "text-ide-success" : "text-ide-danger",
                 ].join(" ")}
               >
                 {passphraseSavedMsg}

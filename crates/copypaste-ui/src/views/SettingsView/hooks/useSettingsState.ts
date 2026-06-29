@@ -94,6 +94,10 @@ export function useSettingsState() {
   // Cloud sync passphrase
   const [passphrase, setPassphrase] = useState("");
   const [passphraseSavedMsg, setPassphraseSavedMsg] = useState<string | null>(null);
+  // CopyPaste-crh3.51: explicit success flag for the passphrase feedback colour,
+  // so SyncTab no longer infers success from a fragile `=== "Saved"` text match
+  // (any wording change would silently turn a success message red).
+  const [passphraseSaveOk, setPassphraseSaveOk] = useState(false);
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   // CopyPaste-yw2k: paired peers list, loaded alongside the other settings so
   // cloudAccountMismatch can be derived by comparing each peer's supabase_account_id
@@ -912,11 +916,13 @@ export function useSettingsState() {
       setSyncStatus(status);
       setPassphrase("");
       setPassphraseSavedMsg("Saved");
+      setPassphraseSaveOk(true);
       if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
       passphraseTimerRef.current = setTimeout(() => setPassphraseSavedMsg(null), 2500);
     } catch (err) {
       const msg = ipcErrorMessage(err, "Error");
       setPassphraseSavedMsg(msg);
+      setPassphraseSaveOk(false);
       if (passphraseTimerRef.current !== null) clearTimeout(passphraseTimerRef.current);
       passphraseTimerRef.current = setTimeout(() => setPassphraseSavedMsg(null), 3000);
     }
@@ -1150,6 +1156,7 @@ export function useSettingsState() {
     passphrase,
     setPassphrase,
     passphraseSavedMsg,
+    passphraseSaveOk,
     syncStatus,
     // Shortcuts
     pendingShortcut,

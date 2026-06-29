@@ -69,7 +69,7 @@ export function SettingsView() {
                     supabasePassword={s.supabasePassword} setSupabasePassword={s.setSupabasePassword}
                     relayUrl={s.relayUrl} setRelayUrl={s.setRelayUrl}
                     passphrase={s.passphrase} setPassphrase={s.setPassphrase}
-                    passphraseSavedMsg={s.passphraseSavedMsg} testMsg={s.testMsg} testing={s.testing}
+                    passphraseSavedMsg={s.passphraseSavedMsg} passphraseSaveOk={s.passphraseSaveOk} testMsg={s.testMsg} testing={s.testing}
                     savedMsg={s.savedMsg} saveError={s.saveError} syncStatus={s.syncStatus}
                     limitsMsg={s.limitsMsg} inputCls={INPUT_CLS} btnCls={BTN_CLS} btnStyle={BTN_STYLE}
                     handleWifiOnlyToggle={s.handleWifiOnlyToggle}
