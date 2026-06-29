@@ -300,4 +300,21 @@ mod sync_badge_tests {
             "badge-recency window must be 5 minutes (300_000 ms)"
         );
     }
+
+    /// CopyPaste-crh3.96: the REAL cross-crate parity guard. The two tests above
+    /// only check the Android-local mirror against itself; this asserts the local
+    /// mirror equals the authoritative `copypaste_ipc::SYNC_BADGE_RECENT_MS`. If
+    /// IPC changes the window (e.g. 5min → 3min) and the Android mirror is not
+    /// updated, this fails — instead of the badge silently using the wrong window
+    /// (wrong "recently synced" color) on Android. copypaste-ipc is a dev-only
+    /// dep so the shipped cdylib stays lean.
+    #[test]
+    fn sync_badge_recent_ms_matches_ipc_source_of_truth() {
+        assert_eq!(
+            SYNC_BADGE_RECENT_MS_LOCAL as u64,
+            copypaste_ipc::SYNC_BADGE_RECENT_MS,
+            "Android SYNC_BADGE_RECENT_MS_LOCAL must equal copypaste_ipc::SYNC_BADGE_RECENT_MS — \
+             update the Android mirror when the IPC window changes"
+        );
+    }
 }

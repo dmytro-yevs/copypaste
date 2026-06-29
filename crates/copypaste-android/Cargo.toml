@@ -90,6 +90,11 @@ uniffi = { version = "0.27", features = ["build"] }
 [dev-dependencies]
 # getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.96. Pin removed 2026-06-14.
 tempfile = "3"
+# CopyPaste-crh3.96: test-ONLY dep so a parity test can assert
+# SYNC_BADGE_RECENT_MS_LOCAL == copypaste_ipc::SYNC_BADGE_RECENT_MS. Kept out of
+# [dependencies] so the shipped cdylib stays lean (the production const is a
+# deliberate local mirror); the dev-dep catches drift between the two values.
+copypaste-ipc = { path = "../copypaste-ipc" }
 # Cross-language conformance fixture (tests/conformance_vectors.rs): emit golden
 # AEAD vectors as JSON for the Kotlin instrumented test to consume. (serde_json
 # is now also a normal dependency — used by `sync_with_peer`'s framed protocol.)
