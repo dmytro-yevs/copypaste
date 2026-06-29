@@ -367,16 +367,6 @@
   100% { transform: scale(1); }
 }
 
-/* Tab active indicator grow */
-.tab-indicator {
-  animation: tabIndicator calc(.42s * var(--speed, .72)) cubic-bezier(.2,1.24,.28,1) both;
-  transform-origin: center;
-}
-@keyframes tabIndicator {
-  from { transform: scaleX(.4); opacity: 0; }
-  to   { transform: scaleX(1);  opacity: 1; }
-}
-
 /* Terminal cursor blink (logs) — ~530 ms = standard OS cadence (MOT-13) */
 .cursor-blink { animation: cursorBlink 530ms steps(1) infinite; }
 @keyframes cursorBlink {
@@ -397,7 +387,7 @@
   .row-press, .copy-flash, .online-pulse,
   .toast-enter, .toast-exit, .toast-in,
   .popup-enter, .card-in, .reveal-up, .list-item-in,
-  .toggle-pop, .tab-indicator,
+  .toggle-pop,
   .cursor-blink {
     animation: none !important;
   }

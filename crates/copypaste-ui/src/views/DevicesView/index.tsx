@@ -280,11 +280,11 @@ function DevicesViewInner({
           ~every 5 s (idle: 30 s) by App.tsx's startPeerPresencePolling() loop);
           falls back to peer.online from the last 10 s list_peers poll when the
           store has no entry yet. */}
-      {/* zxv2: SectionHeader replaces raw <p> tag; faint=true keeps the
-          DevicesView style (text-ide-faint vs SubsectionHeader's text-ide-dim). */}
+      {/* zxv2: SectionHeader replaces raw <p> tag.
+          crh3.43: faint removed — PARITY-SPEC §3 canonical colour is text-ide-dim. */}
       <div className="mb-2 flex items-center justify-between">
         {/* bdac.48: sentence case to match other section headers */}
-        <SectionHeader label="Paired devices" faint />
+        <SectionHeader label="Paired devices" />
         {loadState === "ready" && peers.length > 0 && (
           <span className="inline-flex items-center gap-1 text-[11px] text-ide-faint">
             <StatusDot online={true} />
@@ -370,7 +370,7 @@ function DevicesViewInner({
           reachable even when passive polling hasn't surfaced any peer yet. */}
       {/* zxv2: SectionHeader replaces raw <p> tag. */}
       <div className="mb-2 mt-5 flex items-center justify-between">
-        <SectionHeader label="Discovered on your network" faint />
+        <SectionHeader label="Discovered on your network" />
         <button
           type="button"
           onClick={() => void handleRescan()}
@@ -438,7 +438,7 @@ function DevicesViewInner({
       {/* ── Pair via QR — full width, compact code ───────────────── */}
       {/* zxv2: SectionHeader replaces raw <p> tag for consistency */}
       <div className="reveal-up mb-2">
-        <SectionHeader label="Pair a new device" faint />
+        <SectionHeader label="Pair a new device" />
       </div>
 
       {/* card-in: glass card entrance (styleguide §device-card).

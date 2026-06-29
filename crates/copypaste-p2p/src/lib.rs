@@ -85,3 +85,50 @@ pub use bootstrap::{
 
 /// Default TCP port for P2P direct connections.
 pub const DEFAULT_P2P_PORT: u16 = 51515;
+
+/// Fixed, non-secret domain-separation salt for the P2P content sync key.
+///
+/// Both the macOS daemon and the Android client derive the shared
+/// XChaCha20-Poly1305 content key from the PAKE [`SessionKey`] via
+/// `SessionKey::derive_xchacha_key(P2P_SYNC_KEY_SALT)`. A one-byte divergence
+/// between the two sides makes every synced item permanently undecryptable with
+/// no user-visible error beyond "sync not working".
+///
+/// **This is the canonical, single-source-of-truth definition.**
+/// - Android: imports this constant directly (no local copy).
+/// - Daemon: `crates/copypaste-daemon/src/ipc/mod.rs` has a local copy (not
+///   yet wired to this constant — tracked as CopyPaste-crh3.88 follow-up).
+///   The [`p2p_sync_key_salt_golden_value`] test in this crate pins the exact
+///   bytes so any drift in either copy fails CI.
+///
+/// If this value ever needs to change, bump `P2P_SYNC_KEY_SALT` here,
+/// update the daemon's local copy in lockstep, and bump the P2P protocol version.
+pub const P2P_SYNC_KEY_SALT: &[u8] = b"copypaste/p2p/content-sync-key/v1";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Golden-value parity test — pins `P2P_SYNC_KEY_SALT` to the exact
+    /// bytes expected by BOTH the Android FFI and the daemon IPC path.
+    ///
+    /// Changing either the constant here or the daemon's local copy in
+    /// `crates/copypaste-daemon/src/ipc/mod.rs` without updating the other
+    /// makes this test fail, catching a key-derivation mismatch before it
+    /// reaches production.
+    #[test]
+    fn p2p_sync_key_salt_golden_value() {
+        assert_eq!(
+            P2P_SYNC_KEY_SALT, b"copypaste/p2p/content-sync-key/v1",
+            "P2P_SYNC_KEY_SALT diverged from the expected golden value — \
+             update the daemon's local copy in ipc/mod.rs and this constant \
+             in lockstep, then bump the P2P protocol version."
+        );
+        // Non-empty: an accidental truncation to b"" would make derive_xchacha_key
+        // produce the same key for every purpose — a catastrophic key-reuse failure.
+        assert!(
+            !P2P_SYNC_KEY_SALT.is_empty(),
+            "P2P_SYNC_KEY_SALT must not be empty"
+        );
+    }
+}

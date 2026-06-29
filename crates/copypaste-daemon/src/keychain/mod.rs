@@ -7,6 +7,24 @@ use security_framework::base::Error as SfError;
 #[cfg(target_os = "macos")]
 use security_framework::passwords::{delete_generic_password, get_generic_password};
 
+// ── Non-macOS in-memory Supabase password slot (CopyPaste-crh3.104) ─────────
+//
+// On non-macOS there is no system Keychain. `store_supabase_password_to_keychain`
+// returns `Err(Unsupported)` so the IPC caller correctly reports `persisted: false`
+// (the password will be lost on daemon restart). However the password MUST be
+// readable by `CloudConfig::from_env` (via `read_supabase_password_from_keychain`)
+// within the same daemon session so that `cloud_sign_in` can authenticate.
+//
+// The process-global `OnceLock<Mutex<Option<Zeroizing<String>>>>` is the bridge:
+// `store_supabase_password_to_keychain` writes here as a side effect (before
+// returning the error), and `read_supabase_password_from_keychain` reads from
+// here on non-macOS. `delete_supabase_password_from_keychain` clears the slot
+// so `cloud_sign_out` leaves no lingering credential in memory.
+#[cfg(not(target_os = "macos"))]
+static IN_MEMORY_SUPABASE_PASSWORD: std::sync::OnceLock<
+    std::sync::Mutex<Option<zeroize::Zeroizing<String>>>,
+> = std::sync::OnceLock::new();
+
 #[cfg(target_os = "macos")]
 pub mod acl;
 pub mod file_store;
@@ -51,8 +69,19 @@ pub fn read_supabase_password_from_keychain() -> Option<String> {
             Err(_) => None,
         }
     }
+    // Non-macOS: read from the in-memory slot populated by
+    // `store_supabase_password_to_keychain`. This is the fourth lookup in
+    // `CloudConfig::from_env` (env → Keychain → config.json → here) and the
+    // only path that makes `cloud_sign_in` work on Linux within the same
+    // daemon session.
     #[cfg(not(target_os = "macos"))]
-    None
+    {
+        let slot = IN_MEMORY_SUPABASE_PASSWORD.get_or_init(|| std::sync::Mutex::new(None));
+        // Clone out of the guard so the lock is released before returning.
+        slot.lock()
+            .ok()
+            .and_then(|g| g.as_deref().map(str::to_owned))
+    }
 }
 
 /// Store the Supabase GoTrue password in the macOS Keychain.
@@ -72,9 +101,21 @@ pub fn store_supabase_password_to_keychain(password: &str) -> Result<(), Keychai
         // ThisDeviceOnly accessibility and never syncs to iCloud Keychain.
         set_generic_password_locked_down(SERVICE, SUPABASE_PASSWORD_ACCOUNT, password.as_bytes())
     }
+    // Non-macOS: no Keychain is available. Write the password to the
+    // in-memory global so `read_supabase_password_from_keychain` can find
+    // it within the same daemon session, then return Err(Unsupported) so the
+    // IPC caller correctly reports `persisted: false` (the password is
+    // session-scoped and will be lost on daemon restart).
+    //
+    // Security: the password is wrapped in Zeroizing so the heap buffer is
+    // scrubbed when the slot is overwritten or the process exits. It is never
+    // logged — the caller must ensure it is not present in error payloads.
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = password;
+        let slot = IN_MEMORY_SUPABASE_PASSWORD.get_or_init(|| std::sync::Mutex::new(None));
+        if let Ok(mut g) = slot.lock() {
+            *g = Some(zeroize::Zeroizing::new(password.to_owned()));
+        }
         Err(KeychainError::Unsupported)
     }
 }
@@ -99,8 +140,15 @@ pub fn delete_supabase_password_from_keychain() -> Result<(), KeychainError> {
             Err(e) => Err(KeychainError::from(e)),
         }
     }
+    // Non-macOS: clear the in-memory slot so `cloud_sign_out` removes the
+    // credential from memory. Idempotent — clearing an already-None slot
+    // is a no-op.
     #[cfg(not(target_os = "macos"))]
     {
+        let slot = IN_MEMORY_SUPABASE_PASSWORD.get_or_init(|| std::sync::Mutex::new(None));
+        if let Ok(mut g) = slot.lock() {
+            *g = None;
+        }
         Ok(())
     }
 }
@@ -749,6 +797,61 @@ mod tests {
             result.is_ok(),
             "delete must be a no-op Ok in bypass mode: {result:?}"
         );
+    }
+
+    /// CopyPaste-crh3.104: on non-macOS, `store_supabase_password_to_keychain`
+    /// must write the password to the in-memory global so that
+    /// `read_supabase_password_from_keychain` returns it within the same daemon
+    /// session (enabling `cloud_sign_in` on Linux). `delete_supabase_password_from_keychain`
+    /// must clear it (mirroring the macOS Keychain delete path).
+    ///
+    /// We hold the TEST_ENV_LOCK to serialise with all other tests that mutate
+    /// the keychain bypass env var or the global password slot.
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn store_then_read_in_memory_password_round_trips_on_non_macos() {
+        let _guard = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Ensure the bypass is OFF so the non-macOS real path runs (not the
+        // bypass that returns Ok(()) before touching the global).
+        let prev = std::env::var_os("COPYPASTE_EPHEMERAL_KEY");
+        // SAFETY: single-threaded under TEST_ENV_LOCK.
+        unsafe { std::env::remove_var("COPYPASTE_EPHEMERAL_KEY") };
+
+        // Use a unique password to avoid contamination from parallel test runs
+        // on the same process (tests are serialised by TEST_ENV_LOCK, but we
+        // use a distinctive value for clarity).
+        let pw = "crh3-104-unit-test-password-xyz";
+
+        // store_supabase_password_to_keychain writes to the global AND returns Err.
+        let store_result = store_supabase_password_to_keychain(pw);
+        assert!(
+            matches!(store_result, Err(KeychainError::Unsupported)),
+            "non-macOS must return Unsupported so caller reports persisted:false; got {store_result:?}"
+        );
+
+        // read_supabase_password_from_keychain must now find the in-memory value.
+        let got = read_supabase_password_from_keychain();
+        assert_eq!(
+            got.as_deref(),
+            Some(pw),
+            "read after store must return the stored password"
+        );
+
+        // delete must clear the slot (mirrors cloud_sign_out behaviour).
+        delete_supabase_password_from_keychain().unwrap();
+        assert_eq!(
+            read_supabase_password_from_keychain(),
+            None,
+            "read after delete must return None"
+        );
+
+        // Restore original env.
+        match prev {
+            Some(v) => unsafe { std::env::set_var("COPYPASTE_EPHEMERAL_KEY", v) },
+            None => unsafe { std::env::remove_var("COPYPASTE_EPHEMERAL_KEY") },
+        }
     }
 
     /// CopyPaste-nkro: on non-macOS, `store_supabase_password_to_keychain` must

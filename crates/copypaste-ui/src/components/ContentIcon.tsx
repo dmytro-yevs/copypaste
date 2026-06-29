@@ -95,7 +95,7 @@ export interface ContentIconProps {
  * color class based on the content type category:
  *
  *   text   → <Type>       text-ide-faint
- *   url    → <Link>       text-ide-sky
+ *   url    → <Link>       text-ide-info
  *   image  → <Image>      text-ide-violet
  *   code   → <Code>       text-ide-violet
  *   email  → <Mail>       text-ide-success
@@ -123,8 +123,9 @@ export function ContentIcon({ contentType, size = 14 }: ContentIconProps) {
       // 5917.80: TEXT → faint (grey), not accent (blue); matches KindChip fallback + Android c.faint
       return <Type {...shared} className="shrink-0 text-ide-faint" />;
     case "url":
-      // 1hqt: URL uses sky token (20 120 170 in light, teal in dark)
-      return <Link {...shared} className="shrink-0 text-ide-sky" />;
+      // crh3.42: PARITY-SPEC §6 canonical URL token = ide-info (teal).
+      // Reverts 1hqt (sky), which deviated from spec; Android uses c.info.
+      return <Link {...shared} className="shrink-0 text-ide-info" />;
     case "image":
       // 1jms.14: IMAGE → violet per PARITY-SPEC §6 (distinct from URL=sky; matches Android c.violet)
       return <Image {...shared} className="shrink-0 text-ide-violet" />;
@@ -250,7 +251,7 @@ export function kindFallback(contentType: string): string {
  *
  * Canonical kind→color table (spec §6, ICON-2 update):
  *   TEXT                        → faint (grey) — ICON-2: was accent/blue; spec .b-text wants faint
- *   URL                         → sky (teal)
+ *   URL                         → info (teal) — PARITY-SPEC §6; crh3.42 reverts 1hqt sky
  *   EMAIL / PHONE               → success (green)
  *   COLOR / NUMBER / PATH       → warning (amber)
  *   JSON                        → danger (red)
@@ -266,11 +267,12 @@ export function KindChip({ contentType, kind }: KindChipProps) {
   // and keep the semantic text colour; the heavier fill + the AA-darkened
   // danger/faint tokens lift the badge to AA. (The text colour itself is the
   // "one step darker" semantic token, not a lighter decorative tint.)
-  // 1hqt: URL uses sky token; lplk: violet is now 128 90 213 (AA-darkened via CSS var)
-  // 1jms.14: IMAGE → violet per PARITY-SPEC §6 (distinct from URL=sky; matches Android c.violet)
+  // crh3.42: URL uses ide-info token (PARITY-SPEC §6); 1hqt sky reverted.
+  // lplk: violet is now 128 90 213 (AA-darkened via CSS var)
+  // 1jms.14: IMAGE → violet per PARITY-SPEC §6 (distinct from URL=info; matches Android c.violet)
   const colorClass =
     label === "URL"
-      ? "text-ide-sky border-ide-sky/45 bg-ide-sky/14"
+      ? "text-ide-info border-ide-info/45 bg-ide-info/14"
       : label === "EMAIL" || label === "PHONE"
       ? "text-ide-success border-ide-success/45 bg-ide-success/14"
       : label === "COLOR" || label === "NUMBER" || label === "PATH"

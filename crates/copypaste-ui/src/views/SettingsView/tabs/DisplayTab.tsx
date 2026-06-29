@@ -192,7 +192,7 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
             immediately without the extra confirmation step. */}
         {/* bdac.104: InfoPopover moved to info= slot */}
         <SettingsRow
-          title="Warn before revealing sensitive"
+          title="Warn before revealing sensitive items"
           info={<InfoPopover text="Show a confirmation overlay before revealing blurred sensitive content. Matches the Android warning sheet behaviour. Turn off if you find the extra step redundant." />}
         >
           <Toggle

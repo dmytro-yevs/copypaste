@@ -13,16 +13,15 @@ interface SectionHeaderProps {
   label: string;
   hint?: string;
   /**
-   * bdac.89: canonical section-label colour is text-ide-faint, matching
-   * Android SectionLabel (Components.kt:1256 — c.faint per PARITY-SPEC §3).
-   * Default changed to true so all section headers are faint by default.
-   * Pass faint={false} explicitly only when a higher-contrast dim label
-   * is intentionally needed (non-standard use case).
+   * crh3.43: canonical section-label colour is text-ide-dim per PARITY-SPEC §3.
+   * Android Components.kt:544 uses c.dim (not c.faint — bdac.89 comment was wrong).
+   * Default is false (→ text-ide-dim). Pass faint={true} only for deliberately
+   * lighter decorative labels (non-standard; deviates from spec).
    */
   faint?: boolean;
 }
 
-export function SectionHeader({ label, hint, faint = true }: SectionHeaderProps) {
+export function SectionHeader({ label, hint, faint = false }: SectionHeaderProps) {
   // CopyPaste-hffp: tighter top margin in compact density to reduce whitespace.
   const density = useUI((s) => s.prefs.density ?? "comfortable");
   const mt =

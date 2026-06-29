@@ -32,12 +32,14 @@ describe("ContentIcon", () => {
     expect(svg!.className.baseVal).toContain("text-ide-faint");
   });
 
-  it("renders url icon with sky class", () => {
+  it("renders url icon with info class (PARITY-SPEC §6)", () => {
     const { container } = render(<ContentIcon contentType="url" />);
     const svg = container.querySelector("svg");
     expect(svg).not.toBeNull();
-    // 1hqt: URL uses the sky token (was info)
-    expect(svg!.className.baseVal).toContain("text-ide-sky");
+    // crh3.42: URL uses ide-info token per PARITY-SPEC §6 (matches Android c.info).
+    // Reverts 1hqt (sky) which deviated from spec.
+    expect(svg!.className.baseVal).toContain("text-ide-info");
+    expect(svg!.className.baseVal).not.toContain("text-ide-sky");
   });
 
   it("renders image icon with violet class for 'image'", () => {
@@ -106,10 +108,12 @@ describe("KindChip", () => {
     expect(el.className).not.toContain("text-ide-accent");
   });
 
-  it("renders URL label with sky class", () => {
+  it("renders URL label with info class (PARITY-SPEC §6)", () => {
     const { getByText } = render(<KindChip contentType="url" />);
     const el = getByText("URL");
-    expect(el.className).toContain("text-ide-sky");
+    // crh3.42: URL chip uses ide-info per PARITY-SPEC §6 (Android c.info).
+    expect(el.className).toContain("text-ide-info");
+    expect(el.className).not.toContain("text-ide-sky");
   });
 
   it("renders IMAGE label with violet class", () => {

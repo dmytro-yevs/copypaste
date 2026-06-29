@@ -302,10 +302,10 @@ describe("KindChip canonical content-type → color mapping (TST-1 / CopyPaste-o
     // TEXT — faint (grey) per styleguide .b-text (ICON-2): plain text must not look accent-highlighted
     { desc: "text → TEXT/faint",        contentType: "text",             expectedClass: "text-ide-faint",   expectedLabel: "TEXT"  },
     { desc: "text/plain → TEXT/faint",  contentType: "text/plain",       kind: "TEXT",  expectedClass: "text-ide-faint",   expectedLabel: "TEXT"  },
-    // URL — sky (teal)
-    { desc: "url → URL/sky",            contentType: "url",              expectedClass: "text-ide-sky",     expectedLabel: "URL"   },
-    { desc: "kind=URL → URL/sky",       contentType: "text", kind: "URL", expectedClass: "text-ide-sky",    expectedLabel: "URL"   },
-    // IMAGE — violet (1jms.14: PARITY-SPEC §6, distinct from URL=sky; matches Android c.violet)
+    // URL — info (teal) — crh3.42: PARITY-SPEC §6 canonical = ide-info (matches Android c.info)
+    { desc: "url → URL/info",            contentType: "url",              expectedClass: "text-ide-info",    expectedLabel: "URL"   },
+    { desc: "kind=URL → URL/info",       contentType: "text", kind: "URL", expectedClass: "text-ide-info",   expectedLabel: "URL"   },
+    // IMAGE — violet (1jms.14: PARITY-SPEC §6, distinct from URL=info; matches Android c.violet)
     { desc: "image → IMAGE/violet",     contentType: "image",            expectedClass: "text-ide-violet",  expectedLabel: "IMAGE" },
     { desc: "image/png → IMAGE/violet", contentType: "image/png",        expectedClass: "text-ide-violet",  expectedLabel: "IMAGE" },
     { desc: "kind=IMAGE → IMAGE/violet",contentType: "text", kind: "IMAGE", expectedClass: "text-ide-violet", expectedLabel: "IMAGE" },

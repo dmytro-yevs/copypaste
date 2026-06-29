@@ -6,6 +6,7 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Duration;
 
 use mdns_sd::{ResolvedService, ScopedIp, ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::task::{AbortHandle, JoinHandle};
@@ -57,6 +58,20 @@ const DNS_LABEL_MAX: usize = 63;
 /// v1 peers lack the `bport` TXT key; they appear in the discovered list but
 /// the UI disables the "Pair" button because bootstrap is unavailable.
 pub const PROTOCOL_VERSION_V1: &str = "1";
+
+/// How often own mDNS service is unconditionally re-announced even without a
+/// detected network-change event.
+///
+/// This self-heals stale IP advertisements that arise after a Wi-Fi roam, VPN
+/// connect/disconnect, or DHCP renew — events that change the host IP without
+/// triggering an explicit re-register. RFC 6762 §11.3 recommends re-announcing
+/// at a multiple of the record TTL; 5 minutes is conservative enough to avoid
+/// unnecessary multicast traffic while still recovering within one TTL period.
+///
+/// Platform-specific change detection (RTNetlink on Linux, SCDynamicStore on
+/// macOS) would allow immediate re-announce; the periodic fallback here avoids
+/// that platform-specific complexity while meeting the functional requirement.
+pub const MDNS_REANNOUNCE_INTERVAL: Duration = Duration::from_secs(300);
 
 /// Maximum number of distinct peers retained in `known_peers`.
 ///
@@ -124,6 +139,9 @@ pub struct DiscoveryService {
     /// Retained so [`Drop`] can abort it, preventing the browse loop from
     /// outliving the service across P2P toggle / reconfigure cycles.
     browse_abort: Arc<Mutex<Option<AbortHandle>>>,
+    /// Abort handle for the periodic mDNS re-announcement task (crh3.103).
+    /// Aborted alongside `browse_abort` in `shutdown_inner` / `Drop`.
+    reannounce_abort: Arc<Mutex<Option<AbortHandle>>>,
     /// Clone of the mDNS [`ServiceDaemon`] created in [`DiscoveryService::start`]. Retained so
     /// [`Drop`] can shut it down, releasing the mDNS socket.
     daemon: Arc<Mutex<Option<ServiceDaemon>>>,
@@ -152,6 +170,7 @@ impl DiscoveryService {
             registration: Arc::new(Mutex::new(None)),
             rate_limiter: Arc::new(MdnsRateLimiter::new()),
             browse_abort: Arc::new(Mutex::new(None)),
+            reannounce_abort: Arc::new(Mutex::new(None)),
             daemon: Arc::new(Mutex::new(None)),
         }
     }
@@ -273,6 +292,8 @@ impl DiscoveryService {
         let known_peers = Arc::clone(&self.known_peers);
         let rate_limiter = Arc::clone(&self.rate_limiter);
         let own_id: Option<String> = reg_opt.map(|r| r.device_id);
+        // Capture whether we registered before `own_id` is moved into the browse task.
+        let had_registration = own_id.is_some();
 
         // Retain a daemon handle (`ServiceDaemon` is a cheap clonable handle to
         // the same background daemon) so `Drop` can shut it down and release the
@@ -367,6 +388,45 @@ impl DiscoveryService {
         // in turn aborts the inner browse task via the `AbortOnDrop` guard.
         lock_safe(&self.browse_abort).replace(handle.abort_handle());
 
+        // ── Periodic re-announce task (CopyPaste-crh3.103) ──────────────────
+        //
+        // mDNS advertisements carry the IP addresses resolved at registration
+        // time. After a Wi-Fi roam, VPN connect, or DHCP renew the host IP
+        // changes but the mDNS record stays stale — peers dial the old address
+        // and fail. Re-announcing every MDNS_REANNOUNCE_INTERVAL self-heals
+        // the record without requiring platform-specific netlink / SCDynamicStore
+        // change detection.
+        //
+        // The task holds clones of the daemon and registration Arcs (not self)
+        // so it can be spawned as a 'static future.
+        if had_registration {
+            // Only start re-announce task if we actually registered a service.
+            let reannounce_daemon_arc = Arc::clone(&self.daemon);
+            let reannounce_reg_arc = Arc::clone(&self.registration);
+            let reannounce_task = tokio::spawn(async move {
+                let mut timer = tokio::time::interval(MDNS_REANNOUNCE_INTERVAL);
+                // MissedTickBehavior::Skip: if a tick is missed (e.g. the task
+                // was descheduled for longer than the interval), skip the missed
+                // ticks rather than bursting — we never want a burst of
+                // re-announcements on a congested LAN.
+                timer.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                // Skip the immediate first tick; we just registered in start().
+                timer.tick().await;
+                loop {
+                    timer.tick().await;
+                    let daemon_opt = lock_safe(&reannounce_daemon_arc).clone();
+                    let reg_opt = lock_safe(&reannounce_reg_arc).clone();
+                    if let (Some(ref daemon), Some(ref reg)) = (daemon_opt, reg_opt) {
+                        match reannounce_once(daemon, reg) {
+                            Ok(()) => debug!("mDNS service re-announced (periodic IP refresh)"),
+                            Err(e) => warn!("periodic mDNS re-announcement failed: {e}"),
+                        }
+                    }
+                }
+            });
+            lock_safe(&self.reannounce_abort).replace(reannounce_task.abort_handle());
+        }
+
         Ok(handle)
     }
 
@@ -389,6 +449,11 @@ impl DiscoveryService {
     /// [`start`](Self::start) (restart-in-place) and [`Drop`].
     fn shutdown_inner(&self) {
         if let Some(abort) = lock_safe(&self.browse_abort).take() {
+            abort.abort();
+        }
+        // Abort the periodic re-announce task too so it doesn't fire against a
+        // daemon that's already been shut down.
+        if let Some(abort) = lock_safe(&self.reannounce_abort).take() {
             abort.abort();
         }
         if let Some(daemon) = lock_safe(&self.daemon).take() {
@@ -861,11 +926,99 @@ fn build_txt_properties(device_id: &str) -> Vec<(&'static str, String)> {
     ]
 }
 
+// ── periodic re-announcement helper ──────────────────────────────────────────
+
+/// Re-announce own mDNS service with fresh interface addresses.
+///
+/// Unregisters the existing record (ignoring errors — the daemon may have
+/// already removed it if the interface disappeared) then re-registers with
+/// the addresses returned by [`crate::interfaces::usable_advertise_addrs`]
+/// at the moment of the call.
+///
+/// Called by the periodic re-announce task spawned in [`DiscoveryService::start`].
+/// The service-info building mirrors [`DiscoveryService::advertise`] — keep
+/// both in sync if the advertisement format changes.
+fn reannounce_once(daemon: &ServiceDaemon, reg: &Registration) -> Result<(), DiscoveryError> {
+    // Compute the deterministic fullname for the currently registered record.
+    // ServiceInfo::get_fullname() returns "{instance}.{service_type}"; since both
+    // components are derived solely from reg.device_id and the fixed SERVICE_TYPE,
+    // we can reconstruct it without keeping a copy from the original advertise() call.
+    let fullname = format!("{}.{}", opaque_instance_label(&reg.device_id), SERVICE_TYPE);
+
+    // Unregister the stale record. Fire-and-forget the status receiver — we do
+    // not wait for the DNS goodbye packet; the follow-up register() takes effect
+    // regardless. Errors are ignored: the record may already be absent if the
+    // network interface went down.
+    let _ = daemon.unregister(&fullname);
+
+    // Re-register with the current interface address list (mirrors advertise()).
+    let instance_name = opaque_instance_label(&reg.device_id);
+    let hostname = format!("{}.local.", opaque_hostname_label(&reg.device_id));
+    let base_props = build_txt_properties(&reg.device_id);
+    let bport_str: String;
+    let mut properties: Vec<(&str, &str)> =
+        base_props.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    if let Some(bp) = reg.bport {
+        bport_str = bp.to_string();
+        properties.push((TXT_BPORT, bport_str.as_str()));
+    }
+    let usable_addrs = crate::interfaces::usable_advertise_addrs();
+    let service_info = if usable_addrs.is_empty() {
+        warn!("re-announce: no usable LAN interface; letting mdns-sd auto-detect addresses");
+        ServiceInfo::new(
+            SERVICE_TYPE,
+            &instance_name,
+            &hostname,
+            (),
+            reg.port,
+            &properties[..],
+        )
+    } else {
+        ServiceInfo::new(
+            SERVICE_TYPE,
+            &instance_name,
+            &hostname,
+            &usable_addrs[..],
+            reg.port,
+            &properties[..],
+        )
+    }
+    .map_err(|e| DiscoveryError::Register(e.to_string()))?;
+
+    daemon
+        .register(service_info)
+        .map_err(|e| DiscoveryError::Register(e.to_string()))
+}
+
 // ── tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── MDNS_REANNOUNCE_INTERVAL ─────────────────────────────────────────────
+
+    /// Guard that the re-announce interval is in a sane range: tight enough
+    /// to recover from a network change within one TTL but not so short that
+    /// it floods the LAN with multicast.
+    ///
+    /// Manual QA for the full re-announce path: bring up the daemon, verify
+    /// mDNS advertisement, change the host IP (VPN connect / `sudo ifconfig`),
+    /// wait ≤ MDNS_REANNOUNCE_INTERVAL, and confirm peers re-discover the
+    /// new IP via `dns-sd -B _copypaste._tcp` on another host.
+    #[test]
+    fn mdns_reannounce_interval_is_in_valid_range() {
+        // ≥ 60 s: no more multicast than once per minute.
+        assert!(
+            MDNS_REANNOUNCE_INTERVAL >= Duration::from_secs(60),
+            "MDNS_REANNOUNCE_INTERVAL too short — would flood the LAN"
+        );
+        // ≤ 30 min: recovery within a reasonable time after network change.
+        assert!(
+            MDNS_REANNOUNCE_INTERVAL <= Duration::from_secs(1800),
+            "MDNS_REANNOUNCE_INTERVAL too long — post-roam recovery delayed"
+        );
+    }
 
     // ── sanitize_label ───────────────────────────────────────────────────────
 

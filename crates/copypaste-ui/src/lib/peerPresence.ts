@@ -45,11 +45,15 @@ export const PEER_PRESENCE_TTL_MS = 15_000;
 
 interface PeerPresenceState {
   /**
-   * Map from canonical fingerprint → true (online) | false (offline).
+   * Map from canonical fingerprint → tri-state:
+   *   true   — explicit `connected` event received within PEER_PRESENCE_TTL_MS.
+   *   false  — explicit `disconnected` event received (or daemon restart via resetAllOffline).
+   *   absent — either never seen, OR stale (TTL expired via expireStale).
+   *            Consumers MUST fall back to the daemon's `list_peers` truth (`peer.online`)
+   *            when the key is absent.
    *
-   * NOTE: this value is derived at read-time by comparing `seenAt[fp]` with
-   * `Date.now()`.  Consumers should call `isOnline(fp)` rather than reading
-   * this map directly so the expiry logic is always applied.
+   * Only read this through the fall-back expression used in DevicesView:
+   *   `const live = presenceOnline[fp]; return live !== undefined ? live : peer.online === true;`
    */
   online: Record<string, boolean>;
   /**
@@ -65,6 +69,11 @@ interface PeerPresenceState {
    * Expire any peer whose last-seen timestamp is older than PEER_PRESENCE_TTL_MS.
    * Called periodically by the polling loop so stale entries don't stay green
    * forever after a daemon outage or restart.
+   *
+   * 5917.11 tri-state fix: expired `connected` entries are DELETED from the map
+   * (not set to `false`) so consumers fall back to the daemon's `list_peers` truth
+   * (`peer.online`) instead of lying Offline.  An explicit `disconnected` event
+   * (false) is never expired — only `true` entries are eligible.
    */
   expireStale: () => void;
   /**
@@ -98,16 +107,22 @@ export const usePeerPresence = create<PeerPresenceState>()((set) => ({
     set((state) => {
       let changed = false;
       const nextOnline = { ...state.online };
+      const nextSeenAt = { ...state.seenAt };
       for (const fp of Object.keys(nextOnline)) {
-        if (nextOnline[fp]) {
+        // Only expire entries that are explicitly true (connected).
+        // false = explicit disconnect — never expire; absent = already unknown.
+        if (nextOnline[fp] === true) {
           const last = state.seenAt[fp] ?? 0;
           if (now - last > PEER_PRESENCE_TTL_MS) {
-            nextOnline[fp] = false;
+            // 5917.11: DELETE the entry (tri-state unknown/absent) so consumers
+            // fall back to daemon list_peers truth rather than forcing Offline.
+            delete nextOnline[fp];
+            delete nextSeenAt[fp];
             changed = true;
           }
         }
       }
-      return changed ? { online: nextOnline } : state;
+      return changed ? { online: nextOnline, seenAt: nextSeenAt } : state;
     });
   },
   resetAllOffline() {

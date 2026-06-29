@@ -114,18 +114,9 @@ export function SyncTab({
 }: SyncTabProps) {
   return (
     <div className="space-y-2">
-      {/* Status banner */}
-      {syncStatus !== null && syncStatus.supabase_configured && (
-        <div className="border border-ide-success/30 bg-ide-success/5 px-3 py-2 text-[13px] text-ide-success" style={{ borderRadius: "var(--skin-r-ctl)" }}>
-          Connected ✓
-          {syncStatus.signed_in && syncStatus.email
-            ? ` — signed in as ${syncStatus.email}`
-            : syncStatus.signed_in
-            ? " — signed in"
-            : " — not signed in"}
-          {syncStatus.passphrase_set ? " — passphrase set ✓" : ""}
-        </div>
-      )}
+      {/* crh3.15: single canonical signed-in banner — surface-card only.
+          The former raw bg-ide-success/5 div duplicated this when signed_in && email;
+          merged into one element so only one status row ever renders. */}
       {syncStatus !== null &&
         syncStatus.supabase_configured &&
         syncStatus.signed_in &&
@@ -283,7 +274,8 @@ export function SyncTab({
              These are WRITE-ONLY — the daemon never returns them; only the
              supabase_email_set / supabase_password_set presence flags come back.
              Inputs are cleared after a successful Save. Password is always masked. */}
-        <SettingsRow title="Supabase email">
+        {/* crh3.17: "Email" matches "Anon key" pattern (no prefix; bdac.80) */}
+        <SettingsRow title="Email">
           <div className="flex flex-col items-end gap-0.5">
             <input
               type="email"
@@ -304,7 +296,8 @@ export function SyncTab({
             )}
           </div>
         </SettingsRow>
-        <SettingsRow title="Supabase password">
+        {/* crh3.17: "Password" matches "Anon key" / "Email" pattern (no prefix) */}
+        <SettingsRow title="Password">
           <div className="flex flex-col items-end gap-0.5">
             <input
               type="password"

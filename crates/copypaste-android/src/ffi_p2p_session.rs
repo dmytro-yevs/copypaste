@@ -22,24 +22,15 @@ use crate::{ffi_pairing::runtime, panic_boundary, CopypasteError};
 
 /// Fixed, non-secret domain-separation salt for the P2P content sync key.
 ///
-/// **MUST stay byte-for-byte identical to the macOS daemon's constant.**
-/// Canonical location: `crates/copypaste-daemon/src/ipc.rs`, constant
-/// `PEER_SYNC_KEY_SALT` (search for `copypaste/p2p/content-sync-key/v1`).
-/// Both sides derive the shared XChaCha20-Poly1305 content key from the same
-/// PAKE `SessionKey` via `SessionKey::derive_xchacha_key(P2P_SYNC_KEY_SALT)`,
-/// so a mismatch here makes every synced item undecryptable on the peer.
+/// **Single-source-of-truth is `copypaste_p2p::P2P_SYNC_KEY_SALT`.**
+/// Re-exported here so callers in this crate can use the short path
+/// `crate::P2P_SYNC_KEY_SALT` (or `crate::ffi_p2p_session::P2P_SYNC_KEY_SALT`).
 ///
-/// If this value ever needs to change, update BOTH locations in lockstep and
-/// bump the P2P protocol version. A shared-crate constant is the correct long-
-/// term fix but requires a workspace restructure (out of scope for this patch).
-pub const P2P_SYNC_KEY_SALT: &[u8] = b"copypaste/p2p/content-sync-key/v1";
-
-/// Compile-time assertion that `P2P_SYNC_KEY_SALT` is non-empty.
-/// This catches accidental truncation to `b""` during a merge conflict.
-const _: () = assert!(
-    !P2P_SYNC_KEY_SALT.is_empty(),
-    "P2P_SYNC_KEY_SALT must not be empty — check daemon ipc.rs for the canonical value",
-);
+/// Both sides derive the shared XChaCha20-Poly1305 content key from the PAKE
+/// `SessionKey` via `SessionKey::derive_xchacha_key(P2P_SYNC_KEY_SALT)`.
+/// A parity test in `copypaste-p2p` pins the exact bytes — any drift between
+/// the Android import path and the daemon's local constant fails CI.
+pub use copypaste_p2p::P2P_SYNC_KEY_SALT;
 
 /// `key_version` stamped on outbound `WireItem`s during P2P sync.
 ///

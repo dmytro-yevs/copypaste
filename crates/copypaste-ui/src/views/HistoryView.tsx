@@ -112,6 +112,18 @@ export function HistoryViewInner() {
     filtered,
   } = useHistoryFilter(items, ownDeviceId, sortByDevice, setPrefs);
 
+  // crh3.106: when a search is active, ensure the full history is loaded so FTS
+  // hits beyond the initial PAGE_SIZE (200) are not silently absent.
+  // Each time items.length grows (a page loads), this effect re-fires and calls
+  // handleNearBottom() again until items.length >= totalCount.
+  // handleNearBottom() is internally guarded against concurrent calls (loadingMoreRef).
+  useEffect(() => {
+    if (!search.trim()) return;                           // no-op when not searching
+    if (totalCount === null || items.length >= totalCount) return; // all loaded
+    if (loadState !== "ready") return;                    // don't load while not ready
+    handleNearBottom();
+  }, [search, items.length, totalCount, loadState, handleNearBottom]);
+
   // -------------------------------------------------------------------------
   // Multi-select
   // -------------------------------------------------------------------------

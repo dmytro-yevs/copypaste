@@ -320,9 +320,21 @@ fn is_dangerous_extension(ext: &str) -> bool {
         | "jar" | "class"
         // Windows executables / scripts (not primary target but included for safety)
         | "exe" | "bat" | "cmd" | "com" | "msi" | "ps1"
-        | "vb" | "vbs" | "ws" | "wsf" | "scr"
+        | "vb" | "vbs" | "ws" | "wsf" | "wsh" | "scr"
         // Native libraries that can be injected
         | "dylib" | "so" | "dll"
+        // CopyPaste-crh3.73: kept in parity with the canonical denylist in
+        // copypaste-core/src/filename_security.rs. The architecture boundary
+        // (the Tauri shell never links copypaste-core) forces this duplication,
+        // so these trailing groups had drifted out — they are restored here.
+        // Android package (APK) — dangerous on Android, included for parity
+        | "apk"
+        // Web/scripting vectors
+        | "html" | "htm" | "jse"
+        // Registry / shortcut (Windows)
+        | "reg" | "lnk"
+        // Package installers
+        | "dmg" | "pkg"
     )
 }
 
@@ -515,4 +527,40 @@ fn render_svg(payload: &str) -> Result<String, String> {
         .light_color(svg::Color("#ffffff"))
         .build();
     Ok(svg)
+}
+
+#[cfg(test)]
+mod dangerous_extension_tests {
+    use super::is_dangerous_extension;
+
+    /// CopyPaste-crh3.73: these 9 extensions had drifted out of the Tauri-shell
+    /// denylist while present in the canonical copypaste-core list. They must all
+    /// be flagged dangerous. Keep this denylist in parity with
+    /// `copypaste-core/src/filename_security.rs::is_dangerous_extension` (the
+    /// Tauri shell deliberately does not link copypaste-core, so the list is
+    /// duplicated and this test guards against re-drift).
+    #[test]
+    fn restored_extensions_are_dangerous() {
+        for ext in [
+            "apk", "dmg", "html", "htm", "jse", "reg", "lnk", "pkg", "wsh",
+        ] {
+            assert!(
+                is_dangerous_extension(ext),
+                "{ext} must be treated as a dangerous extension (crh3.73 parity)"
+            );
+        }
+    }
+
+    /// Case-insensitive matching plus a representative sample of the rest of the
+    /// denylist, with a few genuinely-safe extensions, so an accidental future
+    /// deletion is caught.
+    #[test]
+    fn denylist_is_case_insensitive_and_excludes_safe_types() {
+        for ext in ["APK", "Dmg", "EXE", "sh", "js", "py", "dylib", "scpt"] {
+            assert!(is_dangerous_extension(ext), "{ext} must be dangerous");
+        }
+        for ext in ["txt", "png", "pdf", "md", "json"] {
+            assert!(!is_dangerous_extension(ext), "{ext} must be safe");
+        }
+    }
 }

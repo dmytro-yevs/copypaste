@@ -1,10 +1,13 @@
 /**
  * Tests for SCRD-1, SCRD-2, SCRD-3 / SYNC-5 (bd CopyPaste-5917.11, .8, .5, 1jms.26)
  *
- * SCRD-3 / SYNC-5: stale peer presence expiry
+ * SCRD-3 / SYNC-5 + 5917.11 tri-state fix:
  *   - A peer whose last `connected` event is older than PEER_PRESENCE_TTL_MS
- *     must be reported as offline by `expireStale()`.
- *   - `resetAllOffline()` immediately flips all online peers to offline.
+ *     must be REMOVED from the presence map (tri-state absent), NOT set to false.
+ *     Consumers (DevicesView, PeerRow) fall back to daemon list_peers truth when
+ *     the key is absent, preventing a live peer from appearing Offline after 15s.
+ *   - An explicit `disconnected` event (false) must survive expireStale unchanged.
+ *   - `resetAllOffline()` immediately flips all online peers to false (daemon-restart path).
  *
  * SCRD-2: duplicate last-sync time in PeerRow
  *   - The "Synced X" paragraph below the metadata grid must be absent; only
@@ -57,7 +60,9 @@ describe("peerPresence store — stale expiry (SCRD-3 / SYNC-5)", () => {
     usePeerPresence.setState({ online: {}, seenAt: {} });
   });
 
-  it("expireStale flips a peer offline when its seenAt is older than PEER_PRESENCE_TTL_MS", () => {
+  it("expireStale removes a stale connected peer from the map (tri-state absent)", () => {
+    // 5917.11: expired presence must become absent (undefined), not false, so
+    // DevicesView falls back to daemon list_peers truth instead of forcing Offline.
     const staleTs = Date.now() - PEER_PRESENCE_TTL_MS - 1000; // clearly expired
     usePeerPresence.setState({
       online: { "peer-fp-1": true },
@@ -66,7 +71,10 @@ describe("peerPresence store — stale expiry (SCRD-3 / SYNC-5)", () => {
 
     usePeerPresence.getState().expireStale();
 
-    expect(usePeerPresence.getState().online["peer-fp-1"]).toBe(false);
+    // Key must be absent — not false. Consumers check `live !== undefined` to distinguish.
+    expect(usePeerPresence.getState().online["peer-fp-1"]).toBeUndefined();
+    // seenAt entry must also be cleaned up.
+    expect(usePeerPresence.getState().seenAt["peer-fp-1"]).toBeUndefined();
   });
 
   it("expireStale keeps a fresh peer online when seenAt is within TTL", () => {
@@ -81,7 +89,9 @@ describe("peerPresence store — stale expiry (SCRD-3 / SYNC-5)", () => {
     expect(usePeerPresence.getState().online["peer-fp-2"]).toBe(true);
   });
 
-  it("expireStale does not touch already-offline peers", () => {
+  it("expireStale does NOT touch an explicit disconnect entry (false stays false)", () => {
+    // 5917.11: only true (connected) entries are eligible for expiry.
+    // A false entry from a disconnected event must survive so Offline stays Offline.
     const staleTs = Date.now() - PEER_PRESENCE_TTL_MS - 5000;
     usePeerPresence.setState({
       online: { "peer-fp-3": false },
@@ -90,7 +100,7 @@ describe("peerPresence store — stale expiry (SCRD-3 / SYNC-5)", () => {
 
     usePeerPresence.getState().expireStale();
 
-    // Must remain false (no spurious flip)
+    // Must remain false (explicit disconnect — never expired to absent).
     expect(usePeerPresence.getState().online["peer-fp-3"]).toBe(false);
   });
 
@@ -131,6 +141,71 @@ describe("peerPresence store — stale expiry (SCRD-3 / SYNC-5)", () => {
     usePeerPresence.getState().expireStale();
 
     expect(usePeerPresence.getState().online["peer-fp-5"]).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5917.11 tri-state acceptance tests
+// ---------------------------------------------------------------------------
+
+describe("peerPresence store — 5917.11 tri-state fallback", () => {
+  beforeEach(() => {
+    usePeerPresence.setState({ online: {}, seenAt: {} });
+  });
+
+  it("Connected→20s: after TTL expiry the key is absent, consumer falls back to peer.online=true", () => {
+    // Simulate: connected event received 20s ago (well past 15s TTL).
+    const staleTs = Date.now() - PEER_PRESENCE_TTL_MS - 5000;
+    usePeerPresence.setState({
+      online: { "fp-live": true },
+      seenAt: { "fp-live": staleTs },
+    });
+
+    usePeerPresence.getState().expireStale();
+
+    // Presence key must be absent — not false.
+    const live = usePeerPresence.getState().online["fp-live"];
+    expect(live).toBeUndefined();
+
+    // Simulate the consumer fall-back used in DevicesView / PeerRow:
+    //   liveOnline !== undefined ? liveOnline : peer.online === true
+    const peerOnline = true; // daemon list_peers says still connected
+    const resolved = live !== undefined ? live : peerOnline;
+    expect(resolved).toBe(true); // must stay Online, not flip to Offline
+  });
+
+  it("Explicit Disconnected: expireStale does not remove a false entry, peer stays Offline", () => {
+    // Peer explicitly disconnected (false entry from disconnected event).
+    const staleTs = Date.now() - PEER_PRESENCE_TTL_MS - 5000;
+    usePeerPresence.setState({
+      online: { "fp-disc": false },
+      seenAt: { "fp-disc": staleTs },
+    });
+
+    usePeerPresence.getState().expireStale();
+
+    const live = usePeerPresence.getState().online["fp-disc"];
+    // explicit disconnect survives expiry
+    expect(live).toBe(false);
+
+    // Consumer: live === false → Offline even if peer.online were true
+    const peerOnline = true;
+    const resolved = live !== undefined ? live : peerOnline;
+    expect(resolved).toBe(false); // explicit disconnect wins
+  });
+
+  it("resetAllOffline clears all entries to false (daemon-restart path)", () => {
+    usePeerPresence.setState({
+      online: { "fp-a": true, "fp-b": true },
+      seenAt: { "fp-a": Date.now(), "fp-b": Date.now() },
+    });
+
+    usePeerPresence.getState().resetAllOffline();
+
+    const { online } = usePeerPresence.getState();
+    // On daemon restart we KNOW all peers are offline — set false (authoritative).
+    expect(online["fp-a"]).toBe(false);
+    expect(online["fp-b"]).toBe(false);
   });
 });
 

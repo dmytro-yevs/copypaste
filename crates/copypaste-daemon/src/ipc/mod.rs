@@ -2833,6 +2833,24 @@ impl IpcServer {
             if extract_json_string_field(line.as_bytes(), "method").as_deref()
                 == Some(copypaste_ipc::METHOD_WATCH_SUBSCRIBE)
             {
+                // CopyPaste-crh3.105: apply the SAME protocol-version + readiness
+                // gates that dispatch() enforces. Without this, a degraded daemon
+                // accepted the subscription and handed the client a silent empty
+                // stream with no indication it was unavailable. watch_subscribe
+                // streams item metadata, so it requires a ready DB even though it
+                // is (deliberately) absent from the requires_db allow-list.
+                if let Ok(req) = serde_json::from_str::<Request>(line) {
+                    if let Some(err) = self.check_request_gates(&req, true) {
+                        let mut out = serde_json::to_string(&err)?;
+                        out.push('\n');
+                        let _ = tokio::time::timeout(
+                            IPC_WRITE_TIMEOUT,
+                            writer.write_all(out.as_bytes()),
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                }
                 return self.handle_watch_subscribe(line, writer).await;
             }
 
@@ -3040,6 +3058,58 @@ impl IpcServer {
     }
 
     #[tracing::instrument(skip(self), fields(method), name = "ipc_dispatch")]
+    /// Shared request admission gate: the protocol-version check (ADR-007) and
+    /// the readiness check. Returns `Some(err_response)` when the request must be
+    /// rejected, else `None`. Centralised so `dispatch` and the streaming
+    /// `watch_subscribe` path (intercepted before `dispatch`) apply the SAME
+    /// gates (CopyPaste-crh3.105).
+    ///
+    /// `force_requires_ready` is for methods dispatched OUTSIDE `dispatch` that
+    /// must still require a ready DB even though they are absent from the
+    /// `requires_db` allow-list (e.g. `watch_subscribe`, which streams item
+    /// metadata and must not hand a degraded daemon's client a silent empty
+    /// stream).
+    fn check_request_gates(&self, req: &Request, force_requires_ready: bool) -> Option<Response> {
+        // Protocol-version gate (ADR-007).
+        if req.protocol_version < MIN_SUPPORTED_PROTOCOL_VERSION
+            || req.protocol_version > CURRENT_PROTOCOL_VERSION
+        {
+            tracing::warn!(
+                method = %req.method,
+                id = %req.id,
+                client_version = req.protocol_version,
+                supported = format!("{MIN_SUPPORTED_PROTOCOL_VERSION}..={CURRENT_PROTOCOL_VERSION}"),
+                "rejecting request: unsupported protocol version"
+            );
+            return Some(Response::err_with_code(
+                req.id.clone(),
+                ERR_CODE_VERSION_MISMATCH,
+                format!(
+                    "unsupported protocol version {} (daemon supports {}..={})",
+                    req.protocol_version, MIN_SUPPORTED_PROTOCOL_VERSION, CURRENT_PROTOCOL_VERSION
+                ),
+            ));
+        }
+
+        // Readiness gate — reject DB-touching methods before init is done.
+        if (force_requires_ready || Self::requires_db(req.method.as_str()))
+            && !self.ready.load(Ordering::Relaxed)
+        {
+            tracing::debug!(
+                method = %req.method,
+                id = %req.id,
+                "rejecting DB-touching request: server not ready"
+            );
+            return Some(Response::err_with_code(
+                req.id.clone(),
+                ERR_CODE_IPC_NOT_READY,
+                ERR_IPC_NOT_READY,
+            ));
+        }
+
+        None
+    }
+
     async fn dispatch(&self, line: &str) -> Response {
         let req: Request = match serde_json::from_str(line) {
             Ok(r) => r,
@@ -3070,40 +3140,12 @@ impl IpcServer {
         tracing::Span::current().record("method", req.method.as_str());
         tracing::debug!(method = %req.method, id = %req.id, "IPC request");
 
-        // Protocol-version gate (ADR-007) — reject before touching any
-        // method-specific logic so clients get a deterministic upgrade signal.
-        if req.protocol_version < MIN_SUPPORTED_PROTOCOL_VERSION
-            || req.protocol_version > CURRENT_PROTOCOL_VERSION
-        {
-            tracing::warn!(
-                method = %req.method,
-                id = %req.id,
-                client_version = req.protocol_version,
-                supported = format!("{MIN_SUPPORTED_PROTOCOL_VERSION}..={CURRENT_PROTOCOL_VERSION}"),
-                "rejecting request: unsupported protocol version"
-            );
-            return Response::err_with_code(
-                req.id,
-                // ADR-007: version gate must use ERR_CODE_VERSION_MISMATCH so
-                // the CLI can surface the "please upgrade" prompt. The previous
-                // ERR_CODE_INVALID_ARGUMENT caused the prompt to never fire
-                // (CLI checks for "version_mismatch" specifically). P2-ptb8.
-                ERR_CODE_VERSION_MISMATCH,
-                format!(
-                    "unsupported protocol version {} (daemon supports {}..={})",
-                    req.protocol_version, MIN_SUPPORTED_PROTOCOL_VERSION, CURRENT_PROTOCOL_VERSION
-                ),
-            );
-        }
-
-        // Readiness gate — reject DB-touching methods before init is done.
-        if !self.ready.load(Ordering::Relaxed) && Self::requires_db(req.method.as_str()) {
-            tracing::debug!(
-                method = %req.method,
-                id = %req.id,
-                "rejecting DB-touching request: server not ready"
-            );
-            return Response::err_with_code(req.id, ERR_CODE_IPC_NOT_READY, ERR_IPC_NOT_READY);
+        // Protocol-version gate (ADR-007) + readiness gate. ADR-007: the version
+        // gate uses ERR_CODE_VERSION_MISMATCH so the CLI can surface the "please
+        // upgrade" prompt (P2-ptb8). Shared with the watch_subscribe path via
+        // check_request_gates (CopyPaste-crh3.105).
+        if let Some(err) = self.check_request_gates(&req, false) {
+            return err;
         }
 
         match req.method.as_str() {
@@ -4500,7 +4542,7 @@ impl IpcServer {
                 .await;
                 // Snapshot the own device id outside the blocking task (it lives on self).
                 let own_device_id = self.local_device_id.clone().unwrap_or_default();
-                return match join {
+                match join {
                     Ok(Ok((json_items, total))) => Response::ok(
                         req.id,
                         serde_json::json!({
@@ -4515,7 +4557,7 @@ impl IpcServer {
                         ERR_CODE_INTERNAL_ERROR,
                         format!("blocking task failed: {e}"),
                     ),
-                };
+                }
             }
             "get_config" => {
                 // Never ship account credentials over IPC. `get_config` feeds
@@ -6923,7 +6965,7 @@ impl IpcServer {
                                     "revoke_peer: P2P revoked + sync key auto-rotated (random); \
                                      remaining devices must re-provision to keep syncing",
                                 );
-                                return Response::ok(
+                                Response::ok(
                                     req.id,
                                     serde_json::json!({
                                         "ok": true,
@@ -6932,7 +6974,7 @@ impl IpcServer {
                                         "fingerprint": fingerprint,
                                         "sync_key_rotated": true,
                                     }),
-                                );
+                                )
                             } else {
                                 // No sync key installed — P2P-only revocation is
                                 // the complete action; nothing to rotate.
@@ -6941,7 +6983,7 @@ impl IpcServer {
                                     "revoke_peer: P2P-only revocation (no sync key installed); \
                                      cloud/relay sync was not active",
                                 );
-                                return Response::ok(
+                                Response::ok(
                                     req.id,
                                     serde_json::json!({
                                         "ok": true,
@@ -6950,7 +6992,7 @@ impl IpcServer {
                                         "fingerprint": fingerprint,
                                         "sync_key_rotated": false,
                                     }),
-                                );
+                                )
                             }
                         }
                         #[cfg(not(any(feature = "cloud-sync", feature = "relay-sync")))]
@@ -16200,6 +16242,39 @@ mod tests {
             resp2["error_code"].as_str().unwrap_or_default(),
             "ipc_not_ready",
             "vacuum must return ipc_not_ready when degraded: {resp2}"
+        );
+    }
+
+    /// CopyPaste-crh3.105: watch_subscribe is intercepted before dispatch(), so
+    /// it previously bypassed the readiness gate — a degraded daemon accepted the
+    /// subscription and streamed nothing. It must now return ipc_not_ready.
+    #[tokio::test]
+    async fn watch_subscribe_rejected_when_not_ready() {
+        let dir = safe_tempdir();
+        let sock = dir.path().join("watch_not_ready.sock");
+        start_not_ready_server(&sock).await;
+
+        let mut stream = UnixStream::connect(&sock).await.unwrap();
+        stream
+            .write_all(b"{\"id\":\"ws-nr\",\"method\":\"watch_subscribe\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        let mut lines = BufReader::new(&mut stream).lines();
+        let resp: serde_json::Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(
+            resp["ok"], false,
+            "watch_subscribe must be rejected when degraded: {resp}"
+        );
+        assert_eq!(
+            resp["error_code"].as_str().unwrap_or_default(),
+            "ipc_not_ready",
+            "watch_subscribe must return ipc_not_ready when degraded: {resp}"
+        );
+        assert_eq!(
+            resp["id"].as_str(),
+            Some("ws-nr"),
+            "must echo the request id: {resp}"
         );
     }
 
