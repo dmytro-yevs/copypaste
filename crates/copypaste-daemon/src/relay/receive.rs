@@ -466,7 +466,12 @@ pub(super) async fn receive_loop(
                         // CopyPaste-hf40 / CopyPaste-1jms.24: persist the
                         // advanced watermark so a daemon restart resumes
                         // from the last-seen cursor instead of zero.
-                        save_watermark(wm);
+                        // CopyPaste-crh3.79: save_watermark does write + fsync
+                        // (sync_all), which can take 50-200ms on APFS/NFS. Run it
+                        // on the blocking pool so this async receive worker is not
+                        // parked; awaiting yields the worker (runs other tasks)
+                        // while the fsync proceeds, and preserves save ordering.
+                        let _ = tokio::task::spawn_blocking(move || save_watermark(wm)).await;
                     }
                     if stored > 0 {
                         // CopyPaste-28br: a non-empty batch — reset idle

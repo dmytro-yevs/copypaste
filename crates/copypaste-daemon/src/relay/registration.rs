@@ -100,7 +100,17 @@ pub(super) async fn ensure_token(
         return Ok(t.clone());
     }
     let token = register(client, relay_url, sync_key_bytes, device_name).await?;
-    store_cached_token(&token, local_key, device_id);
+    // CopyPaste-crh3.79: store_cached_token does write_token_0600 -> fsync
+    // (sync_all), which can park a tokio worker for 50-200ms on APFS/NFS. Run it
+    // on the blocking pool so this async path is not stalled.
+    {
+        let token_for_cache = token.clone();
+        let lk = local_key.clone();
+        let did = device_id.to_string();
+        let _ =
+            tokio::task::spawn_blocking(move || store_cached_token(&token_for_cache, &lk, &did))
+                .await;
+    }
     *cached = Some(token.clone());
     Ok(token)
 }
