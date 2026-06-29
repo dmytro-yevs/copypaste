@@ -26,8 +26,11 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "logg
 webpki-roots = "0.26"
 # SHA-256 SPKI hash computation for cert pinning.
 sha2.workspace = true
-# Shared backoff scheduler (CopyPaste-nq31): consolidate duplicate backoff.
-copypaste-sync = { path = "../copypaste-sync" }
+# Shared backoff scheduler (CopyPaste-nq31, re-homed CopyPaste-crh3.53):
+# BackoffScheduler lives in copypaste-ipc (pure Duration math, light deps) so
+# this crate stays a standalone Supabase client — no transitive copypaste-core
+# (SQLCipher/crypto/storage, 40+ crates) just for backoff arithmetic.
+copypaste-ipc = { path = "../copypaste-ipc" }
 # Shared
 tokio.workspace = true
 serde.workspace = true

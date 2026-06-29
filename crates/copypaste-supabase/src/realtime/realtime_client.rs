@@ -24,7 +24,7 @@ use crate::protocol::{ChangeEvent, PhoenixEvent, PhoenixMessage};
 use crate::realtime::{
     build_rustls_connector, build_ws_request, redact_payload, scrub_ws_url, RealtimeConfig,
 };
-use copypaste_sync::backoff::BackoffScheduler;
+use copypaste_ipc::backoff::BackoffScheduler;
 use futures_util::{SinkExt, StreamExt};
 
 // ── Error type ────────────────────────────────────────────────────────────────

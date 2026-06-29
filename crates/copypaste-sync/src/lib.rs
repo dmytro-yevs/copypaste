@@ -62,7 +62,6 @@
 /// # Ok(())
 /// # }
 /// ```
-pub mod backoff;
 pub mod clock;
 pub mod engine;
 pub mod inbox;
@@ -71,9 +70,6 @@ pub mod metrics;
 pub mod protocol;
 
 // Convenience re-exports.
-pub use backoff::{
-    BackoffScheduler, DEFAULT_BASE_DELAY, DEFAULT_MAX_DELAY, DEFAULT_SUCCESS_HOLD_THRESHOLD,
-};
 pub use clock::LamportClock;
 pub use engine::{PeerState, SyncEngine, SyncError, SyncResult};
 pub use inbox::{SyncInboxForwarder, SyncInboxSender};

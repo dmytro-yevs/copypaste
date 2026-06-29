@@ -1031,7 +1031,7 @@ dependencies = [
 name = "copypaste-supabase"
 version = "0.3.1"
 dependencies = [
- "copypaste-sync",
+ "copypaste-ipc",
  "futures-util",
  "mockito",
  "reqwest 0.12.28",

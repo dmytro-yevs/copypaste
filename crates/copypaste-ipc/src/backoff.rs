@@ -33,36 +33,30 @@
 //! # Usage sketch
 //!
 //! ```rust,no_run
-//! use copypaste_sync::backoff::BackoffScheduler;
-//! # async fn try_connect() -> Result<(), std::io::Error> { Ok(()) }
-//! # async fn run_session() -> Result<std::time::Duration, std::io::Error> {
-//! #   Ok(std::time::Duration::from_secs(0))
-//! # }
-//!
-//! # async fn driver() {
+//! use copypaste_ipc::backoff::BackoffScheduler;
+//! # fn try_connect() -> Result<(), std::io::Error> { Ok(()) }
+//! # fn run_session() -> std::time::Duration { std::time::Duration::from_secs(0) }
+//! // CopyPaste-crh3.53: this crate (copypaste-ipc) has no async runtime dep, so
+//! // the sketch uses std primitives; real callers (relay/P2P/Supabase reconnect
+//! // loops) drive the same API from their own tokio task + tracing.
 //! let mut backoff = BackoffScheduler::default();
 //! loop {
-//!     match try_connect().await {
+//!     match try_connect() {
 //!         Ok(()) => {
 //!             // connection established — drive the session
-//!             let held = run_session().await.unwrap_or_default();
+//!             let held = run_session();
 //!             if held >= backoff.success_hold_threshold() {
 //!                 backoff.on_success_held();
 //!             }
 //!         }
 //!         Err(_e) => {
 //!             let delay = backoff.next_delay();
-//!             tracing::info!(
-//!                 attempt = backoff.attempt(),
-//!                 backoff_ms = delay.as_millis(),
-//!                 "relay reconnect"
-//!             );
-//!             tokio::time::sleep(delay).await;
+//!             let _attempt = backoff.attempt();
+//!             std::thread::sleep(delay);
 //!             backoff.on_failure();
 //!         }
 //!     }
 //! }
-//! # }
 //! ```
 //!
 //! Note the order: `next_delay()` returns the delay *for the current*
