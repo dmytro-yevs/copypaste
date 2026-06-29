@@ -156,10 +156,7 @@ export default function App() {
   const setView = useUI((s) => s.setView);
   const translucency = useUI((s) => s.prefs.translucency);
   const theme = useUI((s) => s.prefs.theme);
-  const palette = useUI((s) => s.prefs.palette);
-  const skin = useUI((s) => s.prefs.skin);
-  const density = useUI((s) => s.prefs.density);
-  const motionReduced = useUI((s) => s.prefs.motionReduced);
+  const accent = useUI((s) => s.prefs.accent);
   const { Component: View, label } = VIEWS[view];
 
   // The popup window emits "open-settings" (after showing this main window) when
@@ -240,92 +237,22 @@ export default function App() {
     }
   }, [translucency]);
 
-  // Apply the data-palette attribute whenever the pref changes.
-  // Each html[data-palette="<key>"] block in index.css overrides all liquid
-  // tokens AND re-derives --ide-*-rgb channels so existing components retheme.
-  // Default: "graphite-mist" (set in DEFAULT_PREFS and index.html).
+  // Apply data-theme and data-accent whenever either pref changes.
+  // §2 STYLEGUIDE: theme × accent are the only two appearance axes.
+  // <html data-theme="dark|light" data-accent="indigo|blue|teal|green|amber|rose">
+  // Also syncs the native NSWindow appearance so NSVisualEffectView (vibrancy)
+  // uses the correct glass tint. No-op in browser/mock and on non-macOS (the
+  // Rust command is cfg-gated). Best-effort — never block on this.
   useEffect(() => {
-    const p = palette ?? "graphite-mist";
-    document.documentElement.setAttribute("data-palette", p);
-  }, [palette]);
-
-  // Apply the data-skin attribute whenever the skin pref changes (W-F2).
-  // Each html[data-skin="<id>"] block in index.css (W-F3) defines the
-  // structural / material token bundle for that skin.
-  // Default: "classic" (current Liquid Glass look — no visual change).
-  useEffect(() => {
-    document.documentElement.setAttribute("data-skin", skin ?? "classic");
-  }, [skin]);
-
-  // Apply the data-density attribute whenever the pref changes.
-  // html[data-density="<v>"] in index.css scales --pad/--gap/--row-h/--radius
-  // so the whole UI tightens/loosens. Default: "compact" (CopyPaste-52mz).
-  useEffect(() => {
-    document.documentElement.setAttribute("data-density", density ?? "compact");
-  }, [density]);
-
-  // Apply the data-theme attribute whenever the pref changes.
-  // CSS custom property overrides in :root[data-theme="light"] take effect
-  // immediately; no JS class toggling needed beyond setting this one attribute.
-  //
-  // theme:"system" follows the OS `prefers-color-scheme` LIVE — we resolve it
-  // here via matchMedia and re-resolve when the OS preference flips (no manual
-  // refresh). "light"/"dark" are applied verbatim. Dark-first default: an
-  // absent pref resolves to "dark" (Graphite Mist default — CopyPaste-52mz).
-  useEffect(() => {
-    const resolve = (t: typeof theme): "light" | "dark" => {
-      if (t === "dark" || t === "light") return t;
-      // t === "system" (or undefined/legacy): follow the OS preference.
-      if (t === "system" && typeof window !== "undefined" && window.matchMedia) {
-        return window.matchMedia("(prefers-color-scheme: dark)").matches
-          ? "dark"
-          : "light";
-      }
-      // Graphite Mist is the new default — fall back to dark (CopyPaste-52mz).
-      return "dark";
-    };
-
-    const resolved = resolve(theme);
-    document.documentElement.setAttribute("data-theme", resolved);
-
-    // Sync the native NSWindow appearance so NSVisualEffectView (vibrancy) uses
-    // the correct glass tint instead of following the OS dark/light setting.
-    // No-op in browser/mock (HAS_TAURI is false) and on non-macOS (the Rust
-    // command is a cfg-gated no-op there). Best-effort — never block on this.
+    const el = document.documentElement;
+    el.dataset.theme = theme;
+    el.dataset.accent = accent;
     if (HAS_TAURI) {
-      void invoke("set_native_appearance", { appearance: resolved }).catch(() => {
+      void invoke("set_native_appearance", { appearance: theme }).catch(() => {
         // Non-fatal — the window still renders correctly; only vibrancy tint is off.
       });
     }
-
-    // Only the "system" theme needs to react to OS-preference changes.
-    if (theme !== "system" || typeof window === "undefined" || !window.matchMedia) {
-      return;
-    }
-    const mql = window.matchMedia("(prefers-color-scheme: dark)");
-    const onChange = () => {
-      const r = resolve("system");
-      document.documentElement.setAttribute("data-theme", r);
-      if (HAS_TAURI) {
-        void invoke("set_native_appearance", { appearance: r }).catch(() => {});
-      }
-    };
-    mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
-  }, [theme]);
-
-  // Apply the data-motion attribute whenever the motionReduced pref changes.
-  // "calm"      → slow aurora (--speed: 1.45, --motion-opacity: .55)
-  // "cinematic" → default aurora (--speed: .72, --motion-opacity: 1)
-  // The aurora CSS already defines both profiles in index.css; we just switch
-  // the attribute.  @media (prefers-reduced-motion) independently zeroes the
-  // aurora regardless of this value (already in index.css, no JS needed).
-  useEffect(() => {
-    document.documentElement.setAttribute(
-      "data-motion",
-      motionReduced ? "calm" : "cinematic",
-    );
-  }, [motionReduced]);
+  }, [theme, accent]);
 
   // ---------------------------------------------------------------------------
   // Protocol-version mismatch banner (dismissible)

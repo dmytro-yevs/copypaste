@@ -3,25 +3,23 @@ import { create } from "zustand";
 export type ViewId = "history" | "devices" | "settings" | "about" | "logs";
 
 // ---------------------------------------------------------------------------
-// Skin type — W-F2: shim until W-F1 lands and exports from ./lib/skins
-// TODO: import SkinId from ./lib/skins once W-F1 lands
+// AccentId — §2 STYLEGUIDE two-axis appearance: theme × accent.
+// Six hues; "indigo" is the default. Drives data-accent on <html>.
 // ---------------------------------------------------------------------------
-// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
-export type SkinId = "classic" | "quiet" | "vapor";
+export type AccentId = "indigo" | "blue" | "teal" | "green" | "amber" | "rose";
 
 // ---------------------------------------------------------------------------
 // UI preferences persisted to localStorage
 // ---------------------------------------------------------------------------
 
-const PREFS_KEY = "copypaste-ui-prefs-v3";
+// v4 key — Phase 2 redesign: Liquid Glass system (skin/palette/density/motion)
+// replaced by two-axis theming (theme × accent). Migrates from v3/v2/v1.
+const PREFS_KEY = "copypaste-ui-prefs-v4";
+// v3 key — introduced skin axis (W-F2). Migrated to v4: drop skin/density/motion.
+const LEGACY_PREFS_V3_KEY = "copypaste-ui-prefs-v3";
 // v2 key — introduced with Liquid Glass redesign (skin pref did not exist yet).
-// On upgrade we migrate all v2 fields and inject skin:"classic" for existing users.
-// See loadPrefs() v2→v3 migration block.
 const LEGACY_PREFS_V2_KEY = "copypaste-ui-prefs-v2";
-// Pre-Liquid-Glass key. v1 persisted theme:"dark" as the old default; on upgrade
-// we migrate non-theme fields and DROP the stored theme so the new light-first
-// default applies once (otherwise the stale "dark" overrides it and the user
-// keeps seeing the old palette). See loadPrefs().
+// Pre-Liquid-Glass key (v1). See loadPrefs() migration block.
 const LEGACY_PREFS_KEY = "copypaste-ui-prefs-v1";
 
 export interface UIPrefs {
@@ -62,36 +60,20 @@ export interface UIPrefs {
    */
   translucency: boolean;
   /**
-   * UI color theme.
-   *   "light"  (default) — Light palette (PARITY-SPEC §0 light-first default).
-   *   "dark"             — Graphite Mist dark palette.
-   *   "system"           — follow the OS `prefers-color-scheme` live (App.tsx
-   *                        resolves it via matchMedia and re-resolves on change).
-   * Applied via <html data-theme="light|dark"> in App.tsx.
+   * UI color theme — §2 STYLEGUIDE two-axis appearance axis 1.
+   *   "dark"  (default) — Graphite dark palette. §2 STYLEGUIDE mandates dark-first.
+   *   "light"           — Light palette.
+   * Applied via <html data-theme="dark|light"> in App.tsx.
+   * Note: the "system" value from v1–v3 is removed; old stored "system" is
+   * mapped to "dark" by the migration shim in loadPrefs().
    */
-  theme: "dark" | "light" | "system";
+  theme: "dark" | "light";
   /**
-   * Row density for the History view (Design System v2 §9 — Liquid Glass redesign).
-   * "comfortable" = standard row spacing; "compact" (default) = reduced row height.
-   * "spacious" = larger row height with more breathing room.
-   * Compact matches the Graphite Mist styleguide default density.
-   * CSS rule for spacious is at index.css html[data-density='spacious'] (already defined).
+   * Active accent color — §2 STYLEGUIDE two-axis appearance axis 2.
+   * Drives data-accent on <html>. Default: "indigo".
+   * Six allowed values: indigo · blue · teal · green · amber · rose.
    */
-  density: "comfortable" | "compact" | "spacious";
-  /**
-   * Active palette key. Drives data-palette attribute on <html>.
-   * Default: "graphite-mist" (dark grey — CopyPaste-52mz).
-   * A future palette picker writes this via setPrefs({ palette: "..." }).
-   * Consuming code: App.tsx sets document.documentElement.setAttribute("data-palette", ...).
-   */
-  palette: string;
-  /**
-   * When true, the UI uses the "calm" motion profile (slow aurora, reduced
-   * opacity) instead of the default "cinematic" profile.  Also syncs to
-   * document.documentElement data-motion="calm"|"cinematic" in App.tsx.
-   * Default: false (cinematic — the Liquid Glass launch default).
-   */
-  motionReduced: boolean;
+  accent: AccentId;
   /**
    * Maximum number of items rendered in the HistoryView list.
    * This is a UI-only display filter — the daemon may store more items on disk
@@ -108,17 +90,6 @@ export interface UIPrefs {
    * lets users who find the warning redundant disable it (default on = same behaviour).
    */
   showSensitiveWarnings: boolean;
-  /**
-   * Active skin key. Governs the visual language (structure + material) orthogonal
-   * to color palette and theme.  Drives the data-skin attribute on <html>.
-   *   "classic" (default) — byte-identical to today's Liquid Glass look.
-   *   "quiet"             — flat material, no glass blur.
-   *   "vapor"             — refined glass with stronger sheen.
-   * Consuming code: App.tsx sets document.documentElement.setAttribute("data-skin", …).
-   * W-F2: shim type (SkinId) defined locally; replace with import from ./lib/skins
-   * once W-F1 lands.
-   */
-  skin: SkinId;
   /**
    * When true, the History list groups items by the device they originated from,
    * with the local device shown first. Matches Android's "Group by device" pref
@@ -137,18 +108,15 @@ const DEFAULT_PREFS: UIPrefs = {
   playSoundOnCopy: true,
   notifyOnCopy: true,
   translucency: true,
-  // PARITY-SPEC §0: light-first — default is "light"; saved pref overrides on load.
-  theme: "light",
-  density: "compact",
-  palette: "graphite-mist",
-  // Cinematic (false) is the Liquid Glass launch default — full aurora animation.
-  motionReduced: false,
+  // §2 STYLEGUIDE dark-first: "dark" is the default theme. The former
+  // PARITY-SPEC §0 light-first default is superseded by this redesign (CopyPaste-2hfj.3).
+  theme: "dark",
+  // §2 STYLEGUIDE: "indigo" is the default accent.
+  accent: "indigo",
   // 1000 items is a sensible default — fast to render, shows plenty of history.
   historyDisplayLimit: 1000,
   // Show the "Sensitive — preview hidden · click to reveal" overlay by default (Android parity).
   showSensitiveWarnings: true,
-  // Classic is the default skin — reproduces today's Liquid Glass look exactly.
-  skin: "classic",
   // Off by default — matches Android's default (sortByDevice is opt-in on both platforms).
   sortByDevice: false,
 };
@@ -156,10 +124,20 @@ const DEFAULT_PREFS: UIPrefs = {
 function loadPrefs(): UIPrefs {
   try {
     let raw = localStorage.getItem(PREFS_KEY);
-    // ── Skin-axis upgrade migration (v2 → v3) ─────────────────────────────
-    // If only v2 prefs exist, adopt them and inject skin:"classic" so existing
-    // users get the default skin (Classic = current Liquid Glass look, no change).
-    // Then re-persist under v3 and remove v2.
+    // ── Two-axis theming upgrade migration (v3 → v4) ──────────────────────
+    // Phase 2 (CopyPaste-2hfj.3): drop Liquid Glass system fields (skin, palette,
+    // density, motionReduced) which no longer exist in UIPrefs v4.
+    // If only v3 prefs exist, adopt them and run the cleanup below.
+    let migratedFromV3 = false;
+    if (!raw) {
+      const v3 = localStorage.getItem(LEGACY_PREFS_V3_KEY);
+      if (v3) {
+        raw = v3;
+        migratedFromV3 = true;
+      }
+    }
+    // ── Skin-axis upgrade migration (v2 → v4) ─────────────────────────────
+    // If only v2 prefs exist, adopt them and run the cleanup below.
     let migratedFromV2 = false;
     if (!raw) {
       const v2 = localStorage.getItem(LEGACY_PREFS_V2_KEY);
@@ -168,10 +146,7 @@ function loadPrefs(): UIPrefs {
         migratedFromV2 = true;
       }
     }
-    // ── Liquid Glass upgrade migration (v1 → v2) ──────────────────────────
-    // If only the legacy v1 prefs exist, adopt them but DROP the persisted
-    // theme so the PARITY-SPEC §0 light default applies once.
-    // Then re-persist under v3.
+    // ── Pre-Liquid-Glass upgrade migration (v1 → v4) ──────────────────────
     let migratedFromLegacy = false;
     if (!raw) {
       const legacy = localStorage.getItem(LEGACY_PREFS_KEY);
@@ -183,21 +158,24 @@ function loadPrefs(): UIPrefs {
       }
     }
     const parsed = JSON.parse(raw) as Record<string, unknown>;
-    if (migratedFromLegacy) {
-      // The old v1 default was "dark" (pre-Liquid-Glass). PARITY-SPEC §0 now
-      // mandates light-first. Only reset theme when it was the v1 DEFAULT ("dark")
-      // — a v1 user who explicitly chose "light"/"system" keeps their choice
-      // (deleting unconditionally would silently override an explicit pick).
-      if (parsed.theme === "dark") delete parsed.theme;
-      delete parsed.palette;
+
+    // ── Drop all Liquid Glass system keys (applies on every upgrade path) ─
+    // palette, skin, density, motionReduced were removed in Phase 2 (CopyPaste-2hfj.3).
+    // Also drop contrast which was proposed but never shipped.
+    delete parsed.palette;
+    delete parsed.skin;
+    delete parsed.density;
+    delete parsed.motionReduced;
+    delete parsed.contrast;
+    // "system" was a valid theme value in v1–v3; §2 STYLEGUIDE removes it.
+    // Map to "dark" (the new §2 default — graphite is the design-language default).
+    if (parsed.theme === "system") {
+      parsed.theme = "dark";
     }
-    if (migratedFromV2 || migratedFromLegacy) {
-      // Inject skin:"classic" for users upgrading from v2 (or v1 which also
-      // lacks the field). Classic = current look, so this is a no-op visually.
-      if (parsed.skin === undefined) {
-        parsed.skin = "classic";
-      }
-    }
+    // v1 used "dark" as its default; former PARITY-SPEC §0 reset it to "light"
+    // on upgrade. That reset is removed — §2 STYLEGUIDE restores dark as default.
+    // v1 users who stored "dark" (explicitly or via old default) keep it; "light"
+    // is also preserved as-is (an explicit user choice).
 
     // ── v0.5.3 migration ──────────────────────────────────────────────────
     // Migrate the legacy `previewLines` (shared) field to the new split fields.
@@ -216,14 +194,19 @@ function loadPrefs(): UIPrefs {
     delete parsed.previewDelay;
     // ──────────────────────────────────────────────────────────────────────
 
-    const merged = { ...DEFAULT_PREFS, ...parsed };
+    const merged = { ...DEFAULT_PREFS, ...parsed } as UIPrefs;
+    if (migratedFromV3) {
+      // Persist under v4 and drop the v3 key so this runs exactly once.
+      savePrefs(merged);
+      try { localStorage.removeItem(LEGACY_PREFS_V3_KEY); } catch { /* ignore */ }
+    }
     if (migratedFromV2) {
-      // Persist under v3 and drop the v2 key so this runs exactly once.
+      // Persist under v4 and drop the v2 key so this runs exactly once.
       savePrefs(merged);
       try { localStorage.removeItem(LEGACY_PREFS_V2_KEY); } catch { /* ignore */ }
     }
     if (migratedFromLegacy) {
-      // Persist under v3 and drop the legacy v1 key so this runs exactly once.
+      // Persist under v4 and drop the legacy v1 key so this runs exactly once.
       savePrefs(merged);
       try { localStorage.removeItem(LEGACY_PREFS_KEY); } catch { /* ignore */ }
     }
