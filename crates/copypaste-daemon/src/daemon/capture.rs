@@ -672,45 +672,49 @@ pub(crate) async fn handle_text(
                 // to the row's own prior lamport AND time-ordered. Previously
                 // this used bare `now_ms`, which a later pin/delete deriving from
                 // a small counter could never overtake under lamport-only LWW.
-                let existing_lamport = get_item_by_id(&*db_guard, &existing_id)
-                    .ok()
-                    .flatten()
-                    .map(|r| r.lamport_ts)
-                    .unwrap_or(0);
+                // CopyPaste-crh3.68: fetch the existing row ONCE and reuse it for
+                // both the lamport read and the broadcast value, instead of
+                // re-fetching after the bump (was 4 DB queries on every dedup hit;
+                // now 2 query_row calls + the UPDATE).
+                let mut existing_row = match get_item_by_id(&*db_guard, &existing_id) {
+                    Ok(Some(row)) => row,
+                    // Row already gone (raced with a delete) — nothing to bump or
+                    // broadcast; the next poll re-captures on a fresh changeCount.
+                    Ok(None) => return None,
+                    Err(e) => {
+                        tracing::warn!("text dedup: could not read existing item: {e}");
+                        return None;
+                    }
+                };
                 let new_lamport =
-                    copypaste_core::next_lamport_ts(existing_lamport, now_ms);
+                    copypaste_core::next_lamport_ts(existing_row.lamport_ts, now_ms);
                 match bump_item_recency(&db_guard, &existing_id, now_ms, new_lamport, None) {
                     Ok(changed) if changed > 0 => {
                         tracing::debug!(
                             existing = %existing_id,
                             "text dedup: bumped existing row to top (same content_hash)"
                         );
+                        // Reuse the already-fetched row — only wall_time +
+                        // lamport_ts changed — so broadcast subscribers (P2P, sync)
+                        // see the recency update without a 4th DB read.
+                        existing_row.wall_time = now_ms;
+                        existing_row.lamport_ts = new_lamport;
+                        return Some(existing_row);
                     }
                     Ok(_) => {
                         // Row disappeared between find and bump (race on delete) —
-                        // fall through to a fresh insert on next poll. This poll
-                        // produces no item for the broadcast channel, which is
-                        // safe: the next poll sees a new changeCount and captures
-                        // again.
+                        // produce no broadcast item; the next poll re-captures.
                         tracing::debug!(
                             existing = %existing_id,
                             "text dedup: existing row disappeared before bump (deleted concurrently)"
                         );
+                        return None;
                     }
                     Err(e) => {
                         tracing::warn!("text dedup bump failed: {e}");
+                        return None;
                     }
                 }
-                // Return the bumped item so broadcast subscribers (P2P, sync) see
-                // the recency update. Fetch the full row for up-to-date fields.
-                return match get_item_by_id(&*db_guard, &existing_id) {
-                    Ok(Some(bumped)) => Some(bumped),
-                    Ok(None) => None,
-                    Err(e) => {
-                        tracing::warn!("text dedup: could not re-fetch bumped item: {e}");
-                        None
-                    }
-                };
             }
             Ok(None) => {
                 // No existing row with this hash — proceed with a fresh insert.
