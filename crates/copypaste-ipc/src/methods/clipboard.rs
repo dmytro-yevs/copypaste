@@ -4,8 +4,13 @@ use serde::{Deserialize, Serialize};
 
 // ── Core clipboard methods ──────────────────────────────────────────────────
 
-/// Fetch a paginated list of clipboard items.
-pub const METHOD_LIST: &str = "list";
+// CopyPaste-crh3.76: the legacy `METHOD_LIST` / `METHOD_COPY` / `METHOD_DELETE`
+// constants were removed — they had zero consumers (all callers migrated to the
+// `*_item` / `history_page` variants, CopyPaste-abg1 / crh3.99). The daemon's
+// back-compat dispatch arms for the bare "list"/"copy"/"paste"/"delete" verbs
+// are dispatched by STRING LITERAL (not via these constants) and are retained,
+// independently tested, to keep wire back-compat + emit the helpful
+// "use history_page" deprecation error to any old client.
 
 /// Fetch one page of clipboard history items (with pagination).
 ///
@@ -24,17 +29,11 @@ pub const METHOD_SEARCH: &str = "search";
 /// richer response (including the decrypted text for paste-back).
 pub const METHOD_COPY_ITEM: &str = "copy_item";
 
-/// Copy a clipboard item back to the system clipboard by id.
-pub const METHOD_COPY: &str = "copy";
-
 /// Delete a single clipboard item by id.
 ///
 /// Params: `{ id: String }`.  Deletes the item with the given UUID from the
 /// encrypted database and removes it from the FTS index.
 pub const METHOD_DELETE_ITEM: &str = "delete_item";
-
-/// Delete a single clipboard item by id.
-pub const METHOD_DELETE: &str = "delete";
 
 /// Delete all clipboard items (clear history).
 pub const METHOD_DELETE_ALL: &str = "delete_all";
