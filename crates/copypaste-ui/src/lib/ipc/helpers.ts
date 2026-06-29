@@ -81,7 +81,6 @@ export function friendlyIpcError(err: unknown): string {
     case "daemon_offline":
       return "The background service is not running.";
     case "ipc_not_ready":
-    case "IPC_NOT_READY":
       return "The background service is starting up. Please wait a moment.";
     case "not_found":
     case "NotFound":
@@ -105,13 +104,16 @@ export function friendlyIpcError(err: unknown): string {
 /**
  * Returns true when the error represents the daemon being alive but not yet
  * ready to serve requests (e.g. still initialising its database). Daemon
- * error code: `"ipc_not_ready"` or the legacy uppercase variant
- * `"IPC_NOT_READY"`. Views should show a friendly "starting up" state rather
- * than a hard error when this returns true.
+ * error code: `"ipc_not_ready"`. Views should show a friendly "starting up"
+ * state rather than a hard error when this returns true.
+ *
+ * CopyPaste-crh3.9: the legacy uppercase `"IPC_NOT_READY"` compat branch was
+ * removed — the wire `error_code` (transport.ts) is always lowercase, so it was
+ * unreachable dead code.
  */
 export function isIpcNotReady(err: unknown): boolean {
   if (!(err instanceof IpcError)) return false;
-  return err.code === "ipc_not_ready" || err.code === "IPC_NOT_READY";
+  return err.code === "ipc_not_ready";
 }
 
 /**
