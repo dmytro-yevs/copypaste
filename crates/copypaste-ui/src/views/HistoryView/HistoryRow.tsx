@@ -34,7 +34,7 @@ function PinIndicator() {
       strokeWidth={0}
       fill="currentColor"
       aria-label="Pinned"
-      className="shrink-0 text-ide-badge-warning"
+      className="shrink-0 text-ide-warning"
     />
   );
 }
@@ -55,7 +55,7 @@ function SyncBlockedIndicator() {
       fill="currentColor"
       aria-label="Too large to sync"
       // 8qzb: uses badge-warning (#D9A343) to match PinIndicator amber
-      className="shrink-0 text-ide-badge-warning"
+      className="shrink-0 text-ide-warning"
     >
       {/* Warning triangle with an exclamation mark */}
       <path
@@ -332,9 +332,9 @@ export const HistoryRow = React.memo(function HistoryRow({
   const rowStyle: React.CSSProperties = {
     ...staggerStyle,
     ...(dragHandleProps?.dropIndicator === "above"
-      ? { boxShadow: "inset 0 2px 0 0 var(--ide-accent)" }
+      ? { boxShadow: "inset 0 2px 0 0 var(--accent)" }
       : dragHandleProps?.dropIndicator === "below"
-      ? { boxShadow: "inset 0 -2px 0 0 var(--ide-accent)" }
+      ? { boxShadow: "inset 0 -2px 0 0 var(--accent)" }
       : {}),
   };
 
@@ -364,16 +364,17 @@ export const HistoryRow = React.memo(function HistoryRow({
         ].join(" "),
         // §8 copy-flash: .copy-flash approved motion primitive (§MO-4, 90ms keyframe).
         copyFlash ? "copy-flash" : "",
-        // 8qzb: pinned rows use badge-warning (#D9A343) for left edge + tint.
+        // uhed: pinned rows use the spec --warn token (§3.6) for left edge + tint
+        // (was off-spec badge-warning #D9A343 whose --ide-badge-warning-rgb is undefined).
         entry.pinned
-          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-badge-warning bg-ide-badge-warning/10 hover:border-b-ide-accent/35"
+          ? "border-b border-ide-divider/50 border-l-2 border-l-ide-warning bg-ide-warning/10 hover:border-b-ide-accent/35"
           : "border-b border-ide-divider/50 hover:border-b-ide-accent/35",
         multiSelected
           ? "bg-ide-selection text-ide-text"
           : selected
           ? "bg-ide-selection text-ide-text"
           : entry.pinned
-          ? "text-ide-text hover:bg-ide-badge-warning/15"
+          ? "text-ide-text hover:bg-ide-warning/15"
           : "text-ide-text hover:bg-ide-hover",   // panel surface: hover is ide-hover (darker than panel)
         dragHandleProps?.dragging ? "opacity-50" : "",
       ].join(" ")}
@@ -420,7 +421,7 @@ export const HistoryRow = React.memo(function HistoryRow({
           onChange={() => {/* controlled via onClick above */}}
           className={[
             // accent-ide-accent removed: the custom index.css checkbox (appearance:none +
-            // background:var(--ide-accent) on :checked + ::after checkmark) drives the visual.
+            // background:var(--accent) on :checked + ::after checkmark) drives the visual.
             // Keeping accent-color (via the utility) would let native accent-color compete
             // with the appearance:none custom styles — one or the other, not both. (CopyPaste-5917.104)
             "h-4 w-4 rounded cursor-pointer",

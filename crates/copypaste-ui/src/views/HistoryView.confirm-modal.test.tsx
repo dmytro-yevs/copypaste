@@ -67,7 +67,6 @@ function setupInvokeWithItems(
 describe("CopyPaste-fjvz: bulk delete requires confirmation modal", () => {
   beforeEach(() => {
     invoke.mockReset();
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
   });
 
   it("shows a confirmation modal when Delete is clicked in the bulk bar", async () => {
@@ -159,7 +158,6 @@ describe("CopyPaste-fjvz: bulk delete requires confirmation modal", () => {
 describe("CopyPaste-xhns: private-mode empty state messaging", () => {
   beforeEach(() => {
     invoke.mockReset();
-    useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
   });
 
   it("shows private-mode messaging when private mode is active and history is empty", async () => {

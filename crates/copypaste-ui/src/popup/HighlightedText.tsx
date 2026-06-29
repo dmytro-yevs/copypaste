@@ -17,8 +17,8 @@ export function HighlightedText({ text, positions }: { text: string; positions: 
         <span
           key={i}
           style={{
-            color: "var(--ide-accent)",
-            background: "var(--ide-selection)",  /* rgba(61,139,255,0.16) — §3 selected fill */
+            color: "var(--accent)",
+            background: "var(--selected)",  /* rgba(61,139,255,0.16) — §3 selected fill */
             borderRadius: 2,
             // Deliberately NO fontWeight change — prevents width-shift on highlight
           }}

@@ -55,7 +55,6 @@ function setupDegradedDaemon() {
 
 beforeEach(() => {
   invoke.mockReset();
-  useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
 });
 
 afterEach(() => {

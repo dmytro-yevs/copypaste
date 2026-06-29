@@ -65,7 +65,6 @@ beforeEach(() => {
   listenHandlers.clear();
   emitMock.mockClear();
   listenMock.mockClear();
-  useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
 });
 
 afterEach(() => {

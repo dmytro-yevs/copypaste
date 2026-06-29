@@ -72,7 +72,7 @@ export function TabBar({
           left: indicatorStyle.left,
           width: indicatorStyle.width,
           // 180ms ease-standard as per §6/§8 spec — use token, not inline curve
-          transition: "left 180ms var(--mo-ease-standard), width 180ms var(--mo-ease-standard)",
+          transition: "left 180ms var(--ease), width 180ms var(--ease)",
         }}
       />
     </div>

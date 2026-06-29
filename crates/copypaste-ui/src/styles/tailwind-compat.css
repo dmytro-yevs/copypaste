@@ -1,0 +1,52 @@
+/* ============================================================
+   Tailwind `ide-*` utility compatibility layer.
+   The tailwind.config.js `ide` color/shadow namespace (text-ide-*, bg-ide-*,
+   border-ide-*, shadow-ide-*) consumes channel-triplet + pre-composited custom
+   properties that skin.css used to provide. skin.css was deleted in the two-axis
+   migration (CopyPaste-crh3); rather than rewrite ~300 className utilities, these
+   legacy names are defined here as thin aliases onto the §3 spec tokens in
+   tokens.css. tokens.css stays the pure spec source of truth (STYLEGUIDE §10);
+   this shim is intentionally kept out of it so the token-parity gate only sees
+   spec tokens. New code should reference the spec tokens / tailwind keys directly.
+   Channels are space-separated R G B so Tailwind's `<alpha-value>` opacity
+   modifiers (bg-ide-panel/60) keep working.
+   ============================================================ */
+:root, :root[data-theme="dark"]{
+  --ide-bg-rgb:14 15 20; --ide-panel-rgb:22 24 31; --ide-elevated-rgb:30 32 39; --ide-raised-rgb:40 43 51;
+  --ide-border-rgb:51 54 63; --ide-divider-rgb:36 38 45;
+  --ide-text-rgb:231 233 238; --ide-dim-rgb:156 161 172; --ide-faint-rgb:126 131 142; --ide-mute-rgb:92 97 107;
+  --ide-danger-rgb:229 100 95; --ide-success-rgb:79 184 102; --ide-warning-rgb:224 163 63; --ide-info-rgb:91 157 255;
+  --ide-violet-rgb:167 139 250; --ide-sky-rgb:52 209 191; --ide-badge-warning-rgb:224 163 63;
+  /* pre-composited / theme-tracking (resolve per-theme via var()) */
+  --ide-selection:var(--selected); --ide-hover:var(--hover); --ide-pressed:var(--pressed);
+  --ide-ghost:var(--faint); --ide-ghost-deco:var(--mute);
+  --ide-accent-dim:color-mix(in srgb,var(--accent) 14%,transparent);
+  --ide-danger-dim:color-mix(in srgb,var(--err) 14%,transparent);
+  --ide-success-dim:color-mix(in srgb,var(--ok) 14%,transparent);
+  --ide-warning-dim:color-mix(in srgb,var(--warn) 14%,transparent);
+  --ide-info-dim:color-mix(in srgb,var(--info) 14%,transparent);
+  --ide-violet-dim:color-mix(in srgb,var(--c-code) 14%,transparent);
+  --ide-sky-dim:color-mix(in srgb,var(--c-url) 14%,transparent);
+  --ide-e0:var(--sh1); --ide-e1:var(--sh1); --ide-e2:var(--sh2); --ide-e3:var(--sh3);
+}
+:root[data-theme="light"]{
+  --ide-bg-rgb:245 246 248; --ide-panel-rgb:255 255 255; --ide-elevated-rgb:255 255 255; --ide-raised-rgb:239 241 244;
+  --ide-border-rgb:225 228 233; --ide-divider-rgb:236 238 241;
+  --ide-text-rgb:26 28 34; --ide-dim-rgb:86 91 102; --ide-faint-rgb:113 118 127; --ide-mute-rgb:162 167 177;
+  --ide-danger-rgb:214 69 69; --ide-success-rgb:31 168 91; --ide-warning-rgb:199 127 26; --ide-info-rgb:37 99 235;
+  --ide-violet-rgb:124 92 230; --ide-sky-rgb:14 158 140; --ide-badge-warning-rgb:199 127 26;
+}
+/* accent channels (text-ide-accent / bg-ide-accent + alpha modifiers) */
+:root[data-accent="indigo"]{--ide-accent-rgb:110 91 255;--ide-accent-hover-rgb:110 91 255}
+:root[data-accent="blue"]  {--ide-accent-rgb:59 130 246;--ide-accent-hover-rgb:59 130 246}
+:root[data-accent="teal"]  {--ide-accent-rgb:19 184 166;--ide-accent-hover-rgb:19 184 166}
+:root[data-accent="green"] {--ide-accent-rgb:70 197 106;--ide-accent-hover-rgb:70 197 106}
+:root[data-accent="amber"] {--ide-accent-rgb:245 165 36;--ide-accent-hover-rgb:245 165 36}
+:root[data-accent="rose"]  {--ide-accent-rgb:244 63 126;--ide-accent-hover-rgb:244 63 126}
+:root:not([data-accent])   {--ide-accent-rgb:110 91 255;--ide-accent-hover-rgb:110 91 255}
+:root[data-theme="light"][data-accent="indigo"]{--ide-accent-rgb:91 73 224;--ide-accent-hover-rgb:91 73 224}
+:root[data-theme="light"][data-accent="blue"]  {--ide-accent-rgb:37 99 235;--ide-accent-hover-rgb:37 99 235}
+:root[data-theme="light"][data-accent="teal"]  {--ide-accent-rgb:14 158 140;--ide-accent-hover-rgb:14 158 140}
+:root[data-theme="light"][data-accent="green"] {--ide-accent-rgb:31 168 91;--ide-accent-hover-rgb:31 168 91}
+:root[data-theme="light"][data-accent="amber"] {--ide-accent-rgb:199 127 26;--ide-accent-hover-rgb:199 127 26}
+:root[data-theme="light"][data-accent="rose"]  {--ide-accent-rgb:225 29 107;--ide-accent-hover-rgb:225 29 107}

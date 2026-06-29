@@ -171,7 +171,7 @@ export function DetailsModal({
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
       // Modal scrim: uses --ide-scrim token so dark theme (55%) and light theme (35%)
       // apply the correct overlay opacity — not surface-glass (CopyPaste-5917.42 / 5917.106).
-      style={{ background: "var(--ide-scrim)", backdropFilter: "blur(4px)" }}
+      style={{ background: "var(--scrim)", backdropFilter: "blur(4px)" }}
     >
       <div
         ref={modalRef}

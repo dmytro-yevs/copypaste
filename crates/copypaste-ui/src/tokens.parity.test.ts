@@ -190,6 +190,7 @@ describe("§1 Token-name parity: CpColors ↔ tokens.css", () => {
     "--pressed",     // computed overlay
     "--selected",    // computed from accent
     "--scrim",       // modal backdrop
+    "--focus-ring",  // §7 computed focus ring (accent box-shadow)
     "--sh1", "--sh2", "--sh3",
     "--f-ui", "--f-mono",
     "--r-chip", "--r-pill", "--r-ctl", "--r-input", "--r-card", "--r-window",

@@ -89,7 +89,7 @@ export const PopupRow = React.memo(function PopupRow({
         // §4/§8 glide: row background is always transparent — the GlideHighlight
         // layer provides the selection colour via absolute positioning.
         // Pinned rows keep their warm tint since it's a persistent state marker.
-        background: item.pinned ? "var(--ide-warning-dim)" : "transparent",
+        background: item.pinned ? "color-mix(in srgb,var(--warn) 14%,transparent)" : "transparent",
         // No per-row transition needed — GlideHighlight handles animation.
         zIndex: 1,
       }}
@@ -107,7 +107,7 @@ export const PopupRow = React.memo(function PopupRow({
           className="flex-1 min-w-0 text-[13px]"
           style={{
             // Token text (was hardcoded white) — legible on light + dark glass.
-            color: blurred ? "var(--ide-faint)" : "var(--ide-text)",
+            color: blurred ? "var(--faint)" : "var(--text)",
             // M4: multi-line clamp when previewLines > 1, single-line ellipsis otherwise
             ...(previewLines > 1
               ? {
@@ -158,9 +158,9 @@ export const PopupRow = React.memo(function PopupRow({
             // Theme-aware subtle pill (was hardcoded white fill/border, invisible on light).
             className="flex shrink-0 items-center gap-1 text-[10.5px] leading-none px-1 py-0.5"
             style={{
-              color: "var(--ide-ghost)",
-              background: "var(--ide-hover)",
-              border: "1px solid var(--ide-divider)",
+              color: "var(--faint)",
+              background: "var(--hover)",
+              border: "1px solid var(--divider)",
               borderRadius: "var(--r-chip)",
             }}
             title={item.app_bundle_id ?? undefined}
@@ -180,7 +180,7 @@ export const PopupRow = React.memo(function PopupRow({
         {/* Relative time (tabular-nums, 11px) */}
         <span
           className="text-[11px]"
-          style={{ color: "var(--ide-ghost)", fontVariantNumeric: "tabular-nums" }}
+          style={{ color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}
         >
           {relTime}
         </span>
@@ -201,7 +201,7 @@ export const PopupRow = React.memo(function PopupRow({
               fill="currentColor"
               aria-label="Pinned"
               className="absolute group-hover:opacity-0 transition-opacity"
-              style={{ color: "var(--ide-warning)", transitionDuration: "120ms", zIndex: 1 }}
+              style={{ color: "var(--warn)", transitionDuration: "120ms", zIndex: 1 }}
             />
           )}
 
@@ -225,7 +225,7 @@ export const PopupRow = React.memo(function PopupRow({
                 strokeWidth={0}
                 fill="currentColor"
                 aria-hidden={true}
-                style={{ color: "var(--ide-warning)" }}
+                style={{ color: "var(--warn)" }}
               />
             ) : (
               // Outline star = unpinned; inherits button's text-ide-dim / hover:text-white

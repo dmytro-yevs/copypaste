@@ -34,7 +34,7 @@ export function EmptyState({
         .trim()}
     >
       {/* Decorative icon: --ide-ghost-deco = 3.01:1 on panel (WCAG AA large/decorative ≥3:1). */}
-      <span style={{ color: "var(--ide-ghost-deco)", fontSize: 28, lineHeight: 1 }}>
+      <span style={{ color: "var(--mute)", fontSize: 28, lineHeight: 1 }}>
         {icon}
       </span>
       {/* Title: --ide-dim = #9da0a8, contrast > 4.5:1 on panel. */}
@@ -42,7 +42,7 @@ export function EmptyState({
         {title}
       </p>
       {/* Body: --ide-ghost = rgba(255,255,255,0.46) = 4.56:1 on panel (WCAG AA). */}
-      <p className="text-[11px]" style={{ color: "var(--ide-ghost)" }}>
+      <p className="text-[11px]" style={{ color: "var(--faint)" }}>
         {body}
       </p>
       {action}

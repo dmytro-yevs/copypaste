@@ -14,10 +14,9 @@
  *     the MetaRow "Last sync" entry inside the grid should appear.
  *
  * SCRD-1: online status-dot glow
- *   - The glow `boxShadow` uses `var(--success)` which is globally aliased to
- *     `var(--ide-success)` in index.css — rendering is correct. This test
- *     verifies the inline style is present on the dot when online=true and
- *     absent when online=false.
+ *   - The glow `boxShadow` references the spec `var(--ok)` success token
+ *     (defined in tokens.css). This test verifies the inline style is present
+ *     on the dot when online=true and absent when online=false.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
@@ -255,11 +254,11 @@ describe("PeerRow — no duplicate last-sync time (SCRD-2)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// SCRD-1: online status-dot glow via var(--success)
+// SCRD-1: online status-dot glow via var(--ok)
 // ---------------------------------------------------------------------------
 
-describe("StatusDot — glow renders with --success token (SCRD-1)", () => {
-  it("online dot has a boxShadow inline style referencing --success", () => {
+describe("StatusDot — glow renders with --ok token (SCRD-1)", () => {
+  it("online dot has a boxShadow inline style referencing --ok", () => {
     const { container } = render(<StatusDot online={true} lastSeenSecs={2} />);
 
     // The inner dot span (not the pulse ring) carries the boxShadow.
@@ -268,8 +267,8 @@ describe("StatusDot — glow renders with --success token (SCRD-1)", () => {
 
     const dotEl = dotSpans[0] as HTMLElement;
     // jsdom doesn't resolve CSS vars but the raw style attribute must
-    // reference --success so the browser can resolve it.
-    expect(dotEl.style.boxShadow).toContain("--success");
+    // reference the spec --ok success token so the browser can resolve it.
+    expect(dotEl.style.boxShadow).toContain("--ok");
   });
 
   it("offline dot has no boxShadow glow", () => {

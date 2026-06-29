@@ -222,8 +222,8 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
           width: 80,
           height: Math.min(maxHeight, 40),
           borderRadius: 3,
-          background: "var(--ide-elevated)",
-          border: "1px solid var(--ide-divider)",
+          background: "var(--elevated)",
+          border: "1px solid var(--divider)",
           flexShrink: 0,
           // Subtle shimmer animation defined in index.css (.skeleton-pulse).
           // Falls back gracefully when the class is absent (static muted rect).
@@ -246,8 +246,8 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
           width: 48,
           height: Math.min(maxHeight, 32),
           borderRadius: 3,
-          background: "var(--ide-elevated)",
-          border: "1px solid var(--ide-divider)",
+          background: "var(--elevated)",
+          border: "1px solid var(--divider)",
           flexShrink: 0,
         }}
         aria-label="Image unavailable"
@@ -263,7 +263,7 @@ export function ImageThumb({ id, maxHeight, className = "" }: ImageThumbProps) {
           strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
-          style={{ color: "var(--ide-faint)" }}
+          style={{ color: "var(--faint)" }}
           aria-hidden="true"
         >
           <rect x="1.5" y="2.5" width="13" height="11" rx="1" />

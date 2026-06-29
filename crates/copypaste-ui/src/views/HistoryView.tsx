@@ -772,7 +772,7 @@ export function HistoryViewInner() {
           "border border-ide-border bg-ide-elevated/80 text-ide-text placeholder:text-ide-faint",
           "transition-[border-color,box-shadow] duration-200 ease-out",
           "focus:outline-none focus:border-ide-accent/60",
-          "focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--ide-accent)_18%,transparent)]",
+          "focus:[box-shadow:0_0_0_3px_color-mix(in_srgb,var(--accent)_18%,transparent)]",
         ].join(" ")}
         style={{ borderRadius: "var(--r-ctl)" }}
       />
@@ -1090,8 +1090,8 @@ export function HistoryViewInner() {
               height: 6,
               borderRadius: "50%",
               flexShrink: 0,
-              // CopyPaste-bdac.30: fallback matches dark-mode --ide-danger token (#E05C5C).
-              background: "var(--ide-danger, #e05c5c)",
+              // uhed: spec error/destructive token (§3.6 --err = #E5645F dark / #D64545 light).
+              background: "var(--err)",
             }}
           />
           <span className="text-[12px] text-ide-text">

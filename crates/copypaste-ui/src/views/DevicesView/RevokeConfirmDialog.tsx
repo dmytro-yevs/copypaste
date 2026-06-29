@@ -35,7 +35,7 @@ export function RevokeConfirmDialog({
   return (
     <div
       className="modal-scrim-enter fixed inset-0 z-50 flex items-center justify-center p-6"
-      style={{ background: "var(--ide-scrim)" }}
+      style={{ background: "var(--scrim)" }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="revoke-modal-title"

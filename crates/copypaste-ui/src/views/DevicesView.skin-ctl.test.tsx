@@ -6,8 +6,8 @@
  * `borderRadius: "var(--r-ctl)"` (controls) or
  * `borderRadius: "var(--r-card)"` (card containers).
  *
- * Classic skin values: --r-ctl = 9px, --r-card = 14px — so
- * existing visual output is byte-identical to the pre-migration state.
+ * STYLEGUIDE §5 radii: --r-ctl = 8px, --r-card = 13px. The assertions below
+ * check the token references (var(--r-ctl)/var(--r-card)), not literal px.
  *
  * Sites audited (DevicesView.tsx line ~):
  *   §1  SAS code copy button ~354       → --r-ctl

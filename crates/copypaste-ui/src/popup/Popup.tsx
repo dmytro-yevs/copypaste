@@ -326,7 +326,7 @@ export function Popup() {
         style={{
           height: 44,
           // Token divider (was hardcoded white) so it's visible on light glass too.
-          borderBottom: "1px solid var(--ide-divider)",
+          borderBottom: "1px solid var(--divider)",
         }}
       >
         {/* Search icon — lucide-react, 16px stroke 1.5 */}
@@ -334,7 +334,7 @@ export function Popup() {
           size={16}
           strokeWidth={1.5}
           aria-hidden
-          style={{ color: "var(--ide-ghost)", flexShrink: 0 }}
+          style={{ color: "var(--faint)", flexShrink: 0 }}
         />
 
         <input
@@ -351,7 +351,7 @@ export function Popup() {
             boxShadow: "none",
             borderRadius: 0,
             // Token text (was hardcoded white) — legible on light + dark glass.
-            color: "var(--ide-text)",
+            color: "var(--text)",
             fontSize: "13px",
             outline: "none",
             flex: 1,
@@ -364,13 +364,13 @@ export function Popup() {
         {!loading && filtered.length > 0 && (
           <span
             className="shrink-0 text-[11px]"
-            style={{ color: "var(--ide-ghost)", fontVariantNumeric: "tabular-nums" }}
+            style={{ color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}
           >
             {showQuery ? `${Math.min(selectedIdx + 1, filtered.length)} of ${filtered.length}` : `${filtered.length}`}
           </span>
         )}
         {loading && (
-          <span className="text-[11px] shrink-0" style={{ color: "var(--ide-ghost)" }}>
+          <span className="text-[11px] shrink-0" style={{ color: "var(--faint)" }}>
             …
           </span>
         )}
@@ -478,8 +478,8 @@ export function Popup() {
         className="flex items-center justify-between px-3 py-1.5 shrink-0"
         style={{
           // Token divider (was hardcoded white) so it shows on light glass too.
-          borderTop: "1px solid var(--ide-divider)",
-          color: "var(--ide-ghost)",
+          borderTop: "1px solid var(--divider)",
+          color: "var(--faint)",
         }}
       >
         <span className="text-[10.5px] flex items-center gap-1">
@@ -506,7 +506,7 @@ export function Popup() {
             title="Open settings"
             onClick={() => void openSettings()}
             className="relative flex h-7 w-7 items-center justify-center rounded hover:bg-ide-hover transition-colors"
-            style={{ border: "none", background: "none", cursor: "pointer", color: "var(--ide-ghost)" }}
+            style={{ border: "none", background: "none", cursor: "pointer", color: "var(--faint)" }}
           >
             <svg
               width="13" height="13" viewBox="0 0 24 24"

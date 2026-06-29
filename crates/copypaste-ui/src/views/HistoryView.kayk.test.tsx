@@ -66,7 +66,6 @@ function setupOnlineWithItems(items: ReturnType<typeof makeEntry>[]) {
 
 beforeEach(() => {
   invoke.mockReset();
-  useUI.setState((s) => ({ prefs: { ...s.prefs, skin: "classic" } }));
 });
 
 afterEach(() => {

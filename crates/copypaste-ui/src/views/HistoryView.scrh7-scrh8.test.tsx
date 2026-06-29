@@ -94,7 +94,6 @@ beforeEach(() => {
       ...s.prefs,
       maskSensitive: true,
       showSensitiveWarnings: true,
-      skin: "classic",
     },
   }));
 });

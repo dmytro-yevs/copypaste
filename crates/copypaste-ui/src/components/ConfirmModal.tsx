@@ -46,7 +46,7 @@ function ConfirmModalInner({
     <div
       // modal-scrim-enter: approved motion entrance for modal backdrop (§MO-1).
       className="modal-scrim-enter fixed inset-0 z-[9998] flex items-center justify-center p-6"
-      style={{ background: "var(--ide-scrim)" }}
+      style={{ background: "var(--scrim)" }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="confirm-modal-title"

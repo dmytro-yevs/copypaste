@@ -20,7 +20,10 @@
   color-scheme: light;
   --bg:#F5F6F8; --panel:#FFFFFF; --elevated:#FFFFFF; --card:#FFFFFF; --raised:#EFF1F4; --raised-2:#E2E5EA;
   --border:#E1E4E9; --divider:#ECEEF1;
-  --text:#1A1C22; --dim:#565B66; --faint:#767B86; --mute:#A2A7B1;
+  /* u3x7 (A11y): --faint darkened #767B86 → #71767F so 11–12px meta text reaches
+     4.57:1 on --panel #FFFFFF (was 4.24:1, below AA 4.5). STYLEGUIDE §3.3 lists
+     #767B86 as "verified" — that value is wrong for small text; this is the fix. */
+  --text:#1A1C22; --dim:#565B66; --faint:#71767F; --mute:#A2A7B1;
   --hover:rgba(15,18,26,.045); --pressed:rgba(15,18,26,.075);
   --selected:color-mix(in srgb,var(--accent) 12%,transparent); --scrim:rgba(20,22,30,.28);
   --ok:#1FA85B; --warn:#C77F1A; --err:#D64545; --info:#2563EB;
@@ -29,22 +32,32 @@
   --sh1:0 1px 2px rgba(20,22,30,.06); --sh2:0 8px 24px -8px rgba(20,22,30,.12); --sh3:0 24px 64px -12px rgba(20,22,30,.18);
 }
 
-/* accents (both themes) */
+/* accents (both themes)
+   eud9 (A11y): STYLEGUIDE §3.5 ships several --on-accent values that fail AA
+   (<4.5:1) on a filled accent button. The combos below override the spec where
+   white-on-accent (or the spec dark token) is too low-contrast, choosing the
+   minimal --on-accent that reaches ≥4.5:1. Ratios (text on accent base):
+     dark  blue  #08152C on #3B82F6 = 4.95   (was #fff 3.68)
+     dark  rose  #240812 on #F43F7E = 5.24   (was #fff 3.58)
+     light teal  #042722 on #0E9E8C = 4.77   (was #fff 3.34; spec #06302C only 4.29)
+     light green #062A12 on #1FA85B = 5.05   (was #fff 3.08)
+     light amber #2A1B05 on #C77F1A = 5.15   (was #fff 3.24)
+   Android Color.kt mirror must use these same hex values for onDark/onLight. */
 :root[data-accent="indigo"]{--accent:#6E5BFF;--accent-2:#9C8FFF;--on-accent:#fff}
-:root[data-accent="blue"]  {--accent:#3B82F6;--accent-2:#7CB0FF;--on-accent:#fff}
+:root[data-accent="blue"]  {--accent:#3B82F6;--accent-2:#7CB0FF;--on-accent:#08152C}
 :root[data-accent="teal"]  {--accent:#13B8A6;--accent-2:#5FE0D2;--on-accent:#06302C}
 :root[data-accent="green"] {--accent:#46C56A;--accent-2:#84E29A;--on-accent:#062A12}
 :root[data-accent="amber"] {--accent:#F5A524;--accent-2:#FFC56B;--on-accent:#2A1B05}
-:root[data-accent="rose"]  {--accent:#F43F7E;--accent-2:#FF85AC;--on-accent:#fff}
+:root[data-accent="rose"]  {--accent:#F43F7E;--accent-2:#FF85AC;--on-accent:#240812}
 :root:not([data-accent])   {--accent:#6E5BFF;--accent-2:#9C8FFF;--on-accent:#fff}
 
 /* light-theme accent tuning (AA on white) */
 :root[data-theme="light"][data-accent="indigo"]{--accent:#5B49E0}
-:root[data-theme="light"][data-accent="blue"]  {--accent:#2563EB}
-:root[data-theme="light"][data-accent="teal"]  {--accent:#0E9E8C;--on-accent:#fff}
-:root[data-theme="light"][data-accent="green"] {--accent:#1FA85B;--on-accent:#fff}
-:root[data-theme="light"][data-accent="amber"] {--accent:#C77F1A;--on-accent:#fff}
-:root[data-theme="light"][data-accent="rose"]  {--accent:#E11D6B}
+:root[data-theme="light"][data-accent="blue"]  {--accent:#2563EB;--on-accent:#fff}
+:root[data-theme="light"][data-accent="teal"]  {--accent:#0E9E8C;--on-accent:#042722}
+:root[data-theme="light"][data-accent="green"] {--accent:#1FA85B;--on-accent:#062A12}
+:root[data-theme="light"][data-accent="amber"] {--accent:#C77F1A;--on-accent:#2A1B05}
+:root[data-theme="light"][data-accent="rose"]  {--accent:#E11D6B;--on-accent:#fff}
 
 :root{
   --f-ui:'Inter',-apple-system,system-ui,sans-serif;
@@ -52,5 +65,9 @@
   --r-chip:7px; --r-pill:999px; --r-ctl:8px; --r-input:9px; --r-card:13px; --r-window:12px;
   --s-1:2px;--s-2:4px;--s-3:6px;--s-4:8px;--s-5:11px;--s-6:14px;--s-7:16px;--s-8:20px;--s-9:24px;
   --dur-fast:120ms; --dur:200ms; --dur-theme:300ms; --ease:cubic-bezier(.2,.8,.2,1);
+  /* §7 focus ring — 2px accent ring used as a box-shadow on inputs/controls that
+     can't take an outline cleanly. focus-visible elements use outline directly. */
+  --focus-ring:0 0 0 2px color-mix(in srgb,var(--accent) 55%,transparent);
 }
 @media (prefers-reduced-motion: reduce){ :root{--dur-fast:0ms;--dur:0ms;--dur-theme:0ms} }
+

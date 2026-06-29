@@ -68,10 +68,12 @@ export default {
         mono: ['"JetBrains Mono"', '"SF Mono"', "ui-monospace", "Menlo", "monospace"],
       },
       borderRadius: {
-        ide:      "9px",   // ix8u: inputs, buttons, controls — styleguide --radius-ctl 9px
-        "ide-sm": "7px",   // ix8u: chips, keycaps — styleguide --radius-chip 7px
-        "ide-lg": "14px",  // ix8u: cards + modals — styleguide --radius-card 14px
-        "ide-xl": "14px",  // popup
+        // e0p7: aligned to STYLEGUIDE §5 — chip 7 / ctl 8 / input 9 / card 13.
+        ide:        "8px",   // buttons / controls — --r-ctl 8px
+        "ide-sm":   "7px",   // chips, keycaps — --r-chip 7px
+        "ide-input":"9px",   // inputs / search — --r-input 9px
+        "ide-lg":   "13px",  // cards, banners, modals — --r-card 13px
+        "ide-xl":   "13px",  // popup — matches card radius
       },
       boxShadow: {
         // Theme-aware elevation §3 E0-E3 — the actual shadow values live in

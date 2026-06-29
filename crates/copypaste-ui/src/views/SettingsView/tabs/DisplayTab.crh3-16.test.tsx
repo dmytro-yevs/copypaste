@@ -8,12 +8,24 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { DisplayTab } from "./DisplayTab";
+import type { UIPrefs } from "../../../store";
 
-const defaultPrefs = {
-  theme: "dark" as const,
-  density: "comfortable" as const,
-  skin: "classic" as const,
-  palette: "graphite-mist" as const,
+// i3a7: dead v3 appearance fields (density/skin/palette) removed — UIPrefs v4 is
+// the two-axis shape (theme + accent + the booleans below).
+const defaultPrefs: UIPrefs = {
+  previewLinesApp: 1,
+  previewLinesPopup: 1,
+  previewSize: 28,
+  maskSensitive: true,
+  imageMaxHeight: 40,
+  playSoundOnCopy: true,
+  notifyOnCopy: true,
+  translucency: true,
+  theme: "dark",
+  accent: "indigo",
+  historyDisplayLimit: 1000,
+  showSensitiveWarnings: true,
+  sortByDevice: false,
 };
 
 describe("DisplayTab crh3.16 — sensitive-warning label completeness", () => {

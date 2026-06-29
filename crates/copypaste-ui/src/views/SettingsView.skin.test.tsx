@@ -4,8 +4,8 @@
  * Verifies that SettingsView uses --r-card / --r-ctl CSS variable
  * references via inline styles instead of hardcoded Tailwind classes
  * (rounded-ide / rounded-ide-lg) for all card panels, status banners, and
- * interactive controls. Classic skin: --r-ctl=9px / --r-card=14px,
- * so the visual output is byte-identical for the default skin.
+ * interactive controls. STYLEGUIDE §5 radii: --r-ctl=8px / --r-card=13px
+ * (the assertions check token references, not literal px).
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

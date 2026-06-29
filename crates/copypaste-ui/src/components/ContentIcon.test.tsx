@@ -4,13 +4,10 @@
  * Verifies:
  *  1. ContentIcon renders the right aria-label / class for each content type.
  *  2. KindChip renders the correct label and color class.
- *  3. density pref round-trips through the store.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { render } from "@testing-library/react";
 import { ContentIcon, KindChip, kindFallback } from "./ContentIcon";
-import { useUI } from "../store";
-import { act } from "react";
 
 // ---------------------------------------------------------------------------
 // ContentIcon
@@ -185,40 +182,5 @@ describe("kindFallback", () => {
 
   it("returns 'TEXT' for unknown/json string", () => {
     expect(kindFallback("json")).toBe("TEXT");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// density pref in the Zustand store
-// ---------------------------------------------------------------------------
-
-describe("store: density pref", () => {
-  beforeEach(() => {
-    // Reset the store to defaults before each test.
-    act(() => {
-      useUI.getState().setPrefs({ density: "comfortable" });
-    });
-  });
-
-  it("defaults to 'comfortable'", () => {
-    expect(useUI.getState().prefs.density).toBe("comfortable");
-  });
-
-  it("can be set to 'compact' via setPrefs", () => {
-    act(() => {
-      useUI.getState().setPrefs({ density: "compact" });
-    });
-    expect(useUI.getState().prefs.density).toBe("compact");
-  });
-
-  it("persists round-trip through setPrefs back to 'comfortable'", () => {
-    act(() => {
-      useUI.getState().setPrefs({ density: "compact" });
-    });
-    expect(useUI.getState().prefs.density).toBe("compact");
-    act(() => {
-      useUI.getState().setPrefs({ density: "comfortable" });
-    });
-    expect(useUI.getState().prefs.density).toBe("comfortable");
   });
 });

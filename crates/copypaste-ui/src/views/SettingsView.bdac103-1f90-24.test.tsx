@@ -1,6 +1,6 @@
 /**
  * CopyPaste-bdac.103 — excluded-apps chips use bg-ide-elevated/40 (not bg-ide-bg)
- * CopyPaste-1f90.24  — tab indicator uses var(--mo-ease-standard) (not inline cubic-bezier)
+ * CopyPaste-1f90.24  — tab indicator uses var(--ease) (not inline cubic-bezier)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
@@ -134,7 +134,7 @@ describe("CopyPaste-bdac.103: excluded-apps chips use bg-ide-elevated/40", () =>
 });
 
 // ---------------------------------------------------------------------------
-// 1f90.24: tab indicator must use var(--mo-ease-standard) not inline cubic-bezier
+// 1f90.24: tab indicator must use var(--ease) not inline cubic-bezier
 // ---------------------------------------------------------------------------
 describe("CopyPaste-1f90.24: settings tab indicator uses --mo-ease-standard token", () => {
   it("tab indicator transition does not contain a hardcoded cubic-bezier string", async () => {
@@ -163,8 +163,8 @@ describe("CopyPaste-1f90.24: settings tab indicator uses --mo-ease-standard toke
     ).toBe(false);
 
     expect(
-      transition.includes("var(--mo-ease-standard)"),
-      `Tab indicator must reference var(--mo-ease-standard), got: "${transition}"`
+      transition.includes("var(--ease)"),
+      `Tab indicator must reference var(--ease), got: "${transition}"`
     ).toBe(true);
   });
 });

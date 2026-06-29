@@ -20,10 +20,10 @@
   to   { opacity: 0; transform: translateY(8px) scale(.985); }
 }
 
-.modal-scrim-enter { animation: modalScrimIn  var(--mo-base) var(--mo-ease-standard) both; }
-.modal-scrim-exit  { animation: modalScrimOut var(--mo-base) var(--mo-ease-standard) both; }
-.modal-card-enter  { animation: modalCardIn   var(--mo-slow) var(--mo-ease-emphasized) both; }
-.modal-card-exit   { animation: modalCardOut  var(--mo-slow) var(--mo-ease-emphasized) both; }
+.modal-scrim-enter { animation: modalScrimIn  var(--dur) var(--ease) both; }
+.modal-scrim-exit  { animation: modalScrimOut var(--dur) var(--ease) both; }
+.modal-card-enter  { animation: modalCardIn   var(--dur-theme) var(--ease) both; }
+.modal-card-exit   { animation: modalCardOut  var(--dur-theme) var(--ease) both; }
 
 /* ── §MO-2 Page/panel transition (translateX ±18–24px + opacity) ─────────── */
 @keyframes panelSlideInRight {
@@ -43,10 +43,10 @@
   to   { opacity: 0; transform: translateX(20px); }
 }
 
-.panel-enter-right { animation: panelSlideInRight  var(--mo-slow) var(--mo-ease-emphasized) both; }
-.panel-exit-left   { animation: panelSlideOutLeft  var(--mo-slow) var(--mo-ease-emphasized) both; }
-.panel-enter-left  { animation: panelSlideInLeft   var(--mo-slow) var(--mo-ease-emphasized) both; }
-.panel-exit-right  { animation: panelSlideOutRight var(--mo-slow) var(--mo-ease-emphasized) both; }
+.panel-enter-right { animation: panelSlideInRight  var(--dur-theme) var(--ease) both; }
+.panel-exit-left   { animation: panelSlideOutLeft  var(--dur-theme) var(--ease) both; }
+.panel-enter-left  { animation: panelSlideInLeft   var(--dur-theme) var(--ease) both; }
+.panel-exit-right  { animation: panelSlideOutRight var(--dur-theme) var(--ease) both; }
 
 /* ── §MO-3 Row hover + press ─────────────────────────────────────────────── */
 /* hover: background switches to surface-hover via transition (fast, standard) */
@@ -57,13 +57,13 @@
 }
 
 .row-interactive {
-  transition: background-color var(--mo-fast) var(--mo-ease-standard);
+  transition: background-color var(--dur-fast) var(--ease);
 }
 .row-interactive:hover {
-  background-color: var(--surface-hover, var(--ide-hover));
+  background-color: var(--surface-hover, var(--hover));
 }
 .row-press {
-  animation: rowPress var(--mo-fast) var(--mo-ease-standard);
+  animation: rowPress var(--dur-fast) var(--ease);
 }
 
 /* ── §MO-4 Copy-flash (instant keyframe, 90ms) ───────────────────────────── */
@@ -71,8 +71,8 @@
 @keyframes copyFlash {
   0%  { outline: 2px solid transparent; background-color: transparent; }
   45% {
-    outline: 2px solid var(--ide-success);
-    background-color: var(--ide-success-dim, rgba(95,173,101,.10));
+    outline: 2px solid var(--ok);
+    background-color: color-mix(in srgb,var(--ok) 10%,transparent);
   }
   100% { outline: 2px solid transparent; background-color: transparent; }
 }
@@ -82,7 +82,7 @@
      the CSS animation duration agrees with the JS setTimeout in HistoryRow.tsx
      (COPY_FLASH_MS = MO_BASE_MS = 180ms from lib/motion-tokens.ts).
      Single source of truth: both CSS and JS reference --mo-base / MO_BASE_MS. */
-  animation: copyFlash var(--mo-base) var(--mo-ease-standard) both;
+  animation: copyFlash var(--dur) var(--ease) both;
   outline-offset: 2px;
   border-radius: inherit;
 }
@@ -90,13 +90,13 @@
 /* ── §MO-5 Online-pulse (ONE-SHOT, triggered on connect/recent-sync) ─────── */
 /* box-shadow ring 0→9px→transparent over 2s. NOT infinite — apply class once. */
 @keyframes onlinePulse {
-  0%   { box-shadow: 0 0 0 0   var(--ide-success); opacity: 1; }
-  70%  { box-shadow: 0 0 0 9px var(--ide-success); opacity: 0; }
+  0%   { box-shadow: 0 0 0 0   var(--ok); opacity: 1; }
+  70%  { box-shadow: 0 0 0 9px var(--ok); opacity: 0; }
   100% { box-shadow: 0 0 0 9px transparent;         opacity: 0; }
 }
 
 .online-pulse {
-  animation: onlinePulse 2s var(--mo-ease-standard) forwards;
+  animation: onlinePulse 2s var(--ease) forwards;
   /* Remove class after animation ends via JS to allow re-trigger on next connect */
 }
 
@@ -111,7 +111,7 @@
 }
 
 .syncing-dot {
-  animation: syncingBreath 1.4s var(--mo-ease-standard) infinite;
+  animation: syncingBreath 1.4s var(--ease) infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -131,8 +131,8 @@
 /* CopyPaste-crh3.75: removed dead .toast-in / @keyframes toastIn — Toast.tsx
  * uses .toast-enter (MO-6); the "legacy compat" alias had zero references. */
 
-.toast-enter { animation: toastEnter var(--mo-base) var(--mo-ease-emphasized) both; }
-.toast-exit  { animation: toastExit  var(--mo-base) var(--mo-ease-emphasized) both; }
+.toast-enter { animation: toastEnter var(--dur) var(--ease) both; }
+.toast-exit  { animation: toastExit  var(--dur) var(--ease) both; }
 
 /* ── §MO-7 QR code hidden/reveal state ──────────────────────────────────── */
 /* Default hidden — blurred + faded + slightly scaled up.
@@ -143,9 +143,9 @@
   opacity: .46;
   transform: scale(1.015);
   transition:
-    filter    var(--mo-slow) var(--mo-ease-emphasized),
-    opacity   var(--mo-slow) var(--mo-ease-emphasized),
-    transform var(--mo-slow) var(--mo-ease-emphasized);
+    filter    var(--dur-theme) var(--ease),
+    opacity   var(--dur-theme) var(--ease),
+    transform var(--dur-theme) var(--ease);
 }
 
 .qr-visible .qr-grid {
@@ -153,17 +153,17 @@
   opacity: 1;
   transform: scale(1);
   transition:
-    filter    var(--mo-slow) var(--mo-ease-emphasized),
-    opacity   var(--mo-slow) var(--mo-ease-emphasized),
-    transform var(--mo-slow) var(--mo-ease-emphasized);
+    filter    var(--dur-theme) var(--ease),
+    opacity   var(--dur-theme) var(--ease),
+    transform var(--dur-theme) var(--ease);
 }
 
 .qr-overlay {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   transition:
-    backdrop-filter var(--mo-slow) var(--mo-ease-emphasized),
-    opacity         var(--mo-slow) var(--mo-ease-emphasized);
+    backdrop-filter var(--dur-theme) var(--ease),
+    opacity         var(--dur-theme) var(--ease);
 }
 
 /* qr-scan and scan-line keyframes removed per spec (NO laser scan-line). */
@@ -182,10 +182,10 @@
   position: absolute;
   top: 0; bottom: 0; left: 0;
   /* Width is set by JS to match the active segment width */
-  transition: transform var(--mo-base) var(--mo-ease-emphasized);
-  /* Visual treatment: glass card fill for the active pill */
-  background: rgba(var(--surface-rgb), calc(var(--glass-opacity, .40) + .12));
-  border: 1px solid var(--glass-border, rgba(255,255,255,.16));
+  transition: transform var(--dur) var(--ease);
+  /* Active segment fill — §9.2 segmented control: --raised + hairline. */
+  background: var(--raised);
+  border: 1px solid var(--border);
   border-radius: var(--r-ctl);
   pointer-events: none;
 }
@@ -193,12 +193,12 @@
 .segmented-item {
   position: relative;
   z-index: 1;
-  transition: color var(--mo-base) var(--mo-ease-emphasized);
+  transition: color var(--dur) var(--ease);
 }
 
 .segmented-item[aria-selected="true"],
 .segmented-item.active {
-  color: var(--ide-accent);
+  color: var(--accent);
 }
 
 /* ── §MO-9 Switch / toggle track + knob ─────────────────────────────────── */
@@ -206,16 +206,16 @@
    .on state → accent-strong bg. No glow halo. */
 
 .switch-track {
-  transition: background-color var(--mo-fast) var(--mo-ease-standard);
-  background-color: var(--ide-raised, rgba(255,255,255,.10));
+  transition: background-color var(--dur-fast) var(--ease);
+  background-color: var(--raised, rgba(255,255,255,.10));
 }
 
 .switch-track.on {
-  background-color: var(--accent-strong, var(--ide-accent));
+  background-color: var(--accent-strong, var(--accent));
 }
 
 .switch-knob {
-  transition: transform var(--mo-fast) var(--mo-ease-standard);
+  transition: transform var(--dur-fast) var(--ease);
   transform: translateX(0);
 }
 
@@ -230,14 +230,14 @@
 @media (hover: hover) and (pointer: fine) {
   .card-hover {
     transition:
-      transform    var(--mo-base) var(--mo-ease-emphasized),
-      border-color var(--mo-base) var(--mo-ease-emphasized),
-      box-shadow   var(--mo-base) var(--mo-ease-emphasized);
+      transform    var(--dur) var(--ease),
+      border-color var(--dur) var(--ease),
+      box-shadow   var(--dur) var(--ease);
   }
 
   .card-hover:hover {
     transform:    translateY(-2px);
-    border-color: var(--accent-line, rgba(var(--ide-accent-rgb), .40));
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
     box-shadow:
       0 8px 24px rgba(0,0,0,.22),
       0 2px 8px  rgba(0,0,0,.16),
@@ -421,7 +421,7 @@
   line-height: 1;
   border: 1px solid rgba(255,255,255,0.12);
   background: rgba(255,255,255,0.06);
-  color: var(--ide-faint);
+  color: var(--faint);
   font-variant-numeric: tabular-nums;
 }
 
@@ -433,7 +433,7 @@
 .keycap-selected {
   border-color: rgba(77,141,255,0.40);
   background: rgba(77,141,255,0.18);
-  color: var(--ide-accent);
+  color: var(--accent);
 }
 
 /* ── Selected row: 2px accent left-bar ──────────────────────────────────── */
@@ -447,6 +447,6 @@
   top: 0;
   bottom: 0;
   width: 2px;
-  background: var(--ide-accent);
+  background: var(--accent);
   border-radius: 0 2px 2px 0;
 }

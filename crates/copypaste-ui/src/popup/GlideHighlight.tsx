@@ -80,7 +80,7 @@ export function GlideHighlight({
         top,
         height,
         // §3 selection fill — token so it re-themes in light mode.
-        background: "var(--ide-selection)",
+        background: "var(--selected)",
         // zuzu: suppress the 130ms transition during scroll so the glide layer
         // doesn't visibly slide out of the container during momentum scroll.
         // Also hide (opacity 0) if the selected item is outside the viewport.

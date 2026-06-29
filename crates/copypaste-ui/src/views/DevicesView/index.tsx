@@ -410,8 +410,8 @@ function DevicesViewInner({
             aria-hidden="true"
             className="network-rings shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-xl text-ide-accent"
             style={{
-              background: "color-mix(in srgb, var(--accent) 15%, var(--ide-elevated))",
-              border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--ide-border))",
+              background: "color-mix(in srgb, var(--accent) 15%, var(--elevated))",
+              border: "1px solid color-mix(in srgb, var(--accent) 28%, var(--border))",
             }}
           >
             {/* Wifi-style discovery icon (inline SVG, lucide signal shape) */}

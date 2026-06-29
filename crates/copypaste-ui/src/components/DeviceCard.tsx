@@ -75,7 +75,7 @@ export function StatusDot({
           online
             ? {
                 boxShadow:
-                  "0 0 10px color-mix(in srgb, var(--success) 55%, transparent)",
+                  "0 0 10px color-mix(in srgb, var(--ok) 55%, transparent)",
               }
             : undefined
         }
