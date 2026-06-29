@@ -108,8 +108,8 @@ fn read_text_row_via_read_path(
     let v2_key = copypaste_core::derive_v2(local_key);
     copypaste_core::decrypt_item_by_version(
         key_version as u8,
-        &v1_key,
-        &v2_key,
+        copypaste_core::V1Key(&v1_key),
+        copypaste_core::V2Key(&v2_key),
         &item_id,
         &nonce,
         &content,

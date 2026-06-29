@@ -14,7 +14,8 @@ pub use config::AppConfig;
 pub use crypto::chunks::{decrypt_chunks, encrypt_chunks, ChunkError, EncryptedChunk};
 pub use crypto::encrypt::{
     build_item_aad, build_item_aad_v2, decrypt_item_by_version, decrypt_item_with_aad,
-    encrypt_item_with_aad, EncryptError, AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+    encrypt_item_with_aad, EncryptError, V1Key, V2Key, AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4,
+    NONCE_SIZE,
 };
 pub use relay::{derive_relay_inbox_id, derive_relay_public_key, derive_relay_registration_pop};
 // `encrypt_item` / `decrypt_item` were deprecated empty-AAD wrappers.

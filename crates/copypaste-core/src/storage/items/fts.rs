@@ -379,9 +379,8 @@ pub fn search_items_filtered<D: DbRead + ?Sized>(
     // the borrow checker enough scope information.
     let rows: Vec<ClipboardItem> = if let Some(ct) = content_type_filter {
         let conn = db.conn();
-        let mut stmt = conn.prepare_cached(
-            &format!(
-                "SELECT {ITEM_SELECT_COLUMNS_CI} \
+        let mut stmt = conn.prepare_cached(&format!(
+            "SELECT {ITEM_SELECT_COLUMNS_CI} \
                  FROM clipboard_fts fts
              JOIN clipboard_items ci ON ci.id = fts.id
              WHERE clipboard_fts MATCH ?1
@@ -390,24 +389,21 @@ pub fn search_items_filtered<D: DbRead + ?Sized>(
                AND ci.content_type = ?3
              ORDER BY rank
              LIMIT ?2"
-            ),
-        )?;
+        ))?;
         let r: Vec<ClipboardItem> = stmt
             .query_map(params![safe_query, limit_i64, ct], row_to_item)?
             .collect::<Result<Vec<_>, _>>()?;
         r
     } else {
         let conn = db.conn();
-        let mut stmt = conn.prepare_cached(
-            &format!(
-                "SELECT {ITEM_SELECT_COLUMNS_CI} \
+        let mut stmt = conn.prepare_cached(&format!(
+            "SELECT {ITEM_SELECT_COLUMNS_CI} \
                  FROM clipboard_fts fts
              JOIN clipboard_items ci ON ci.id = fts.id
              WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0
              ORDER BY rank
              LIMIT ?2"
-            ),
-        )?;
+        ))?;
         let r: Vec<ClipboardItem> = stmt
             .query_map(params![safe_query, limit_i64], row_to_item)?
             .collect::<Result<Vec<_>, _>>()?;

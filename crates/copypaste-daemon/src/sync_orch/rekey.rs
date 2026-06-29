@@ -8,7 +8,7 @@ use std::sync::Arc;
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
     encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, ClipboardItem, SyncKey,
-    AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+    V1Key, V2Key, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 // c7fp: encrypt_chunks / IMAGE_CHUNK_SIZE / ImageMeta are only used in
 // `rewrap_inbound_blob` and `read_png_dimensions` which are macOS-only
@@ -458,8 +458,8 @@ pub(super) fn rekey_outbound_text_with_key(
 
     let plaintext = match decrypt_item_by_version(
         wire.key_version,
-        &crypto.v1_key,
-        &crypto.v2_key,
+        V1Key(&crypto.v1_key),
+        V2Key(&crypto.v2_key),
         &wire.item_id,
         &nonce,
         ciphertext,

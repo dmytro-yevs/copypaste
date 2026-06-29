@@ -333,8 +333,8 @@ mod tests {
         narr.copy_from_slice(&stored_nonce);
         let read_back = copypaste_core::decrypt_item_by_version(
             stored.key_version,
-            &seed_b, // v1
-            &b_v2,   // v2
+            copypaste_core::V1Key(&seed_b),
+            copypaste_core::V2Key(&b_v2),
             &stored.item_id,
             &narr,
             &stored.content.expect("content"),

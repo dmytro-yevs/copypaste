@@ -1438,8 +1438,8 @@ mod tests {
         let nonce: [u8; 24] = nonce_vec.as_slice().try_into().expect("24-byte nonce");
         let pt = copypaste_core::decrypt_item_by_version(
             row.key_version,
-            &v1,
-            &v2,
+            copypaste_core::V1Key(&v1),
+            copypaste_core::V2Key(&v2),
             &row.item_id,
             &nonce,
             row.content.as_ref().expect("content"),

@@ -563,8 +563,8 @@ mod tests {
         let v2_key = derive_v2(seed);
         decrypt_item_by_version(
             key_version as u8,
-            &v1_key,
-            &v2_key,
+            copypaste_core::V1Key(&v1_key),
+            copypaste_core::V2Key(&v2_key),
             &item_id,
             &nonce,
             &content,

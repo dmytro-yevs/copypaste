@@ -517,8 +517,8 @@ mod tests {
 
         let recovered = decrypt_item_by_version(
             received.key_version,
-            &v1_key,
-            &v2_key,
+            copypaste_core::V1Key(&v1_key),
+            copypaste_core::V2Key(&v2_key),
             &received.item_id,
             &nonce_arr,
             &stored_content,

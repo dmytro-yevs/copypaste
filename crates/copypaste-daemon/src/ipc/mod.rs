@@ -44,6 +44,8 @@ use copypaste_core::{
     Database,
     DbRead,
     SensitiveDetector,
+    V1Key,
+    V2Key,
 };
 // l07l: EncryptError is only matched on the macOS pasteboard decrypt path, so
 // gate it to macOS — otherwise it's an unused import on non-macOS (-D warnings).
@@ -8439,8 +8441,8 @@ impl IpcServer {
                         // (encode errors, serialisation failure, etc.).
                         let plaintext = match decrypt_item_by_version(
                             key_version,
-                            &local_key_v1,
-                            &v2_key,
+                            V1Key(&local_key_v1),
+                            V2Key(&v2_key),
                             &item_id,
                             nonce,
                             &content,
@@ -8764,8 +8766,8 @@ impl IpcServer {
                     let v2_key = derive_v2(&v1_key);
                     let plaintext_bytes = decrypt_item_by_version(
                         item.key_version,
-                        &v1_key,
-                        &v2_key,
+                        V1Key(&v1_key),
+                        V2Key(&v2_key),
                         &item.item_id,
                         nonce,
                         content,

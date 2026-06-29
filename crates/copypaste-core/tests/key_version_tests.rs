@@ -15,7 +15,7 @@
 
 use copypaste_core::{
     build_item_aad, build_item_aad_v2, decrypt_item_by_version, decrypt_item_with_aad,
-    encrypt_item_with_aad, ClipboardItem, Database, EncryptError, MigrationState,
+    encrypt_item_with_aad, ClipboardItem, Database, EncryptError, MigrationState, V1Key, V2Key,
     AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 use rusqlite::params;
@@ -137,7 +137,15 @@ fn t1_2_mixed_v1_and_v2_rows_decrypt_by_version() {
     {
         let (ct, nonce, kv) = read_row(&db, &v1_row);
         assert_eq!(kv, 1);
-        let pt = decrypt_item_by_version(kv, &v1_key(), &v2_key(), &v1_item, &nonce, &ct).unwrap();
+        let pt = decrypt_item_by_version(
+            kv,
+            V1Key(&v1_key()),
+            V2Key(&v2_key()),
+            &v1_item,
+            &nonce,
+            &ct,
+        )
+        .unwrap();
         assert_eq!(&pt, pt_v1);
     }
 
@@ -145,7 +153,15 @@ fn t1_2_mixed_v1_and_v2_rows_decrypt_by_version() {
     {
         let (ct, nonce, kv) = read_row(&db, &v2_row);
         assert_eq!(kv, 2);
-        let pt = decrypt_item_by_version(kv, &v1_key(), &v2_key(), &v2_item, &nonce, &ct).unwrap();
+        let pt = decrypt_item_by_version(
+            kv,
+            V1Key(&v1_key()),
+            V2Key(&v2_key()),
+            &v2_item,
+            &nonce,
+            &ct,
+        )
+        .unwrap();
         assert_eq!(&pt, pt_v2);
     }
 }
@@ -174,8 +190,15 @@ fn t1_3_v2_row_inserted_while_v1_rows_exist_decrypts_correctly() {
     // The v2 straggler must decrypt correctly.
     let (ct, nonce, kv) = read_row(&db, &straggler_row);
     assert_eq!(kv, 2, "straggler must be at key_version=2");
-    let pt =
-        decrypt_item_by_version(kv, &v1_key(), &v2_key(), &straggler_item, &nonce, &ct).unwrap();
+    let pt = decrypt_item_by_version(
+        kv,
+        V1Key(&v1_key()),
+        V2Key(&v2_key()),
+        &straggler_item,
+        &nonce,
+        &ct,
+    )
+    .unwrap();
     assert_eq!(&pt, straggler_pt);
 
     // The v1 rows must still be v1.
@@ -198,7 +221,7 @@ fn t1_4_unknown_key_version_255_returns_error_not_panic() {
     let nonce = [0u8; NONCE_SIZE];
     let ct = b"some ciphertext bytes";
 
-    let result = decrypt_item_by_version(255, &v1, &v2, "item-corrupt", &nonce, ct);
+    let result = decrypt_item_by_version(255, V1Key(&v1), V2Key(&v2), "item-corrupt", &nonce, ct);
     assert!(
         matches!(result, Err(EncryptError::UnknownKeyVersion(255))),
         "key_version=255 must return UnknownKeyVersion(255), not panic; got {:?}",
@@ -225,7 +248,7 @@ fn t1_5_all_key_versions_never_panic() {
         for nonce in nonces {
             for ct in cts {
                 // Must not panic — we only care about the Result variant.
-                let _ = decrypt_item_by_version(kv, &v1, &v2, "item-prop", nonce, ct);
+                let _ = decrypt_item_by_version(kv, V1Key(&v1), V2Key(&v2), "item-prop", nonce, ct);
             }
         }
     }
@@ -233,24 +256,24 @@ fn t1_5_all_key_versions_never_panic() {
     // for garbage ciphertext.
     let nonce = [0u8; NONCE_SIZE];
     assert!(matches!(
-        decrypt_item_by_version(0, &v1, &v2, "x", &nonce, b"garbage"),
+        decrypt_item_by_version(0, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
         Err(EncryptError::UnknownKeyVersion(0))
     ));
     assert!(matches!(
-        decrypt_item_by_version(255, &v1, &v2, "x", &nonce, b"garbage"),
+        decrypt_item_by_version(255, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
         Err(EncryptError::UnknownKeyVersion(255))
     ));
     assert!(matches!(
-        decrypt_item_by_version(3, &v1, &v2, "x", &nonce, b"garbage"),
+        decrypt_item_by_version(3, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
         Err(EncryptError::UnknownKeyVersion(3))
     ));
     // Versions 1 and 2 should return AuthFailed (wrong ciphertext), not panic.
     assert!(matches!(
-        decrypt_item_by_version(1, &v1, &v2, "x", &nonce, b"garbage"),
+        decrypt_item_by_version(1, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
         Err(EncryptError::AuthFailed)
     ));
     assert!(matches!(
-        decrypt_item_by_version(2, &v1, &v2, "x", &nonce, b"garbage"),
+        decrypt_item_by_version(2, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
         Err(EncryptError::AuthFailed)
     ));
 }

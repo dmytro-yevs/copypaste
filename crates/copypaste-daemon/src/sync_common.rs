@@ -24,7 +24,7 @@
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_item_by_version, derive_v2, encrypt_item_with_aad,
-    is_sensitive_for_autowipe, ClipboardItem, Database, AAD_SCHEMA_VERSION_V4,
+    is_sensitive_for_autowipe, ClipboardItem, Database, V1Key, V2Key, AAD_SCHEMA_VERSION_V4,
     ITEM_KEY_VERSION_CURRENT,
 };
 
@@ -112,8 +112,8 @@ pub(crate) fn decrypt_item_plaintext(
     let v2_key = derive_v2(&v1_key);
     decrypt_item_by_version(
         item.key_version,
-        &v1_key,
-        &v2_key,
+        V1Key(&v1_key),
+        V2Key(&v2_key),
         &item.item_id,
         nonce,
         content,

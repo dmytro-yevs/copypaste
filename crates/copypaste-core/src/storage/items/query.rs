@@ -1,7 +1,7 @@
 use super::super::db::Database;
 use super::super::pool::DbRead;
 use super::types::{row_to_item, ClipboardItem, ItemsError};
-use crate::crypto::encrypt::{decrypt_item_by_version, NONCE_SIZE};
+use crate::crypto::encrypt::{decrypt_item_by_version, V1Key, V2Key, NONCE_SIZE};
 use rusqlite::params;
 
 /// CopyPaste-crh3.85: single source of truth for the 19-column clipboard_items
@@ -34,12 +34,10 @@ pub fn get_page<D: DbRead + ?Sized>(
     // CopyPaste-jvzm.4: prepare_cached on the hot history_page path so the
     // statement is compiled once per connection and reused, not re-parsed on
     // every page fetch.
-    let mut stmt = db.conn().prepare_cached(
-        &format!(
-            "SELECT {ITEM_SELECT_COLUMNS} \
+    let mut stmt = db.conn().prepare_cached(&format!(
+        "SELECT {ITEM_SELECT_COLUMNS} \
              FROM clipboard_items WHERE deleted = 0 ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2"
-        ),
-    )?;
+    ))?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
@@ -67,9 +65,8 @@ pub fn get_page_pinned_first<D: DbRead + ?Sized>(
     // CopyPaste-jvzm.4: prepare_cached on the hot history_page path so the
     // statement is compiled once per connection and reused, not re-parsed on
     // every page fetch.
-    let mut stmt = db.conn().prepare_cached(
-        &format!(
-            "SELECT {ITEM_SELECT_COLUMNS} \
+    let mut stmt = db.conn().prepare_cached(&format!(
+        "SELECT {ITEM_SELECT_COLUMNS} \
              FROM clipboard_items
          WHERE deleted = 0
          ORDER BY
@@ -78,8 +75,7 @@ pub fn get_page_pinned_first<D: DbRead + ?Sized>(
            pin_order ASC,
            wall_time DESC
          LIMIT ?1 OFFSET ?2"
-        ),
-    )?;
+    ))?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
@@ -115,9 +111,8 @@ pub fn get_page_pinned_first_lamport<D: DbRead + ?Sized>(
     // CopyPaste-jvzm.4: prepare_cached on the hot history_page path so the
     // statement is compiled once per connection and reused, not re-parsed on
     // every page fetch.
-    let mut stmt = db.conn().prepare_cached(
-        &format!(
-            "SELECT {ITEM_SELECT_COLUMNS} \
+    let mut stmt = db.conn().prepare_cached(&format!(
+        "SELECT {ITEM_SELECT_COLUMNS} \
              FROM clipboard_items
          WHERE deleted = 0
          ORDER BY
@@ -128,8 +123,7 @@ pub fn get_page_pinned_first_lamport<D: DbRead + ?Sized>(
            wall_time DESC,
            origin_device_id ASC
          LIMIT ?1 OFFSET ?2"
-        ),
-    )?;
+    ))?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
         .collect::<Result<Vec<_>, _>>()?;
@@ -301,8 +295,8 @@ fn try_decrypt_row(row: &ClipboardItem, v1_key: &[u8; 32], v2_key: &[u8; 32]) ->
     let nonce: [u8; NONCE_SIZE] = nonce_slice.try_into().ok()?;
     decrypt_item_by_version(
         row.key_version,
-        v1_key,
-        v2_key,
+        V1Key(v1_key),
+        V2Key(v2_key),
         &row.item_id,
         &nonce,
         content,
@@ -321,9 +315,7 @@ pub fn get_item_by_id<D: DbRead + ?Sized>(
     id: &str,
 ) -> Result<Option<ClipboardItem>, ItemsError> {
     let result = db.conn().query_row(
-        &format!(
-            "SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items WHERE id = ?1"
-        ),
+        &format!("SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items WHERE id = ?1"),
         params![id],
         row_to_item,
     );
@@ -357,9 +349,7 @@ pub fn get_item_by_item_id(
     // tombstone rows (deleted = 1) so LWW can determine whether an incoming
     // remote version beats the local tombstone or vice-versa.
     let result = db.conn().query_row(
-        &format!(
-            "SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items WHERE item_id = ?1"
-        ),
+        &format!("SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items WHERE item_id = ?1"),
         params![item_id],
         row_to_item,
     );

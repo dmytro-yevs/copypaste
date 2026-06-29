@@ -152,6 +152,18 @@ pub fn decrypt_item_with_aad(
         .map_err(|_| EncryptError::AuthFailed)
 }
 
+/// CopyPaste-crh3.82: distinct wrapper types for the two version-specific keys
+/// accepted by [`decrypt_item_by_version`]. Both were a bare `&[u8; 32]`, so a
+/// caller that swapped them compiled cleanly and decrypted v1 items with the v2
+/// key (wrong AAD scheme) — a silent `AuthFailed`. Wrapping makes the ordering a
+/// compile-time contract: `decrypt_item_by_version(kv, V1Key(&v1), V2Key(&v2), …)`.
+#[derive(Clone, Copy)]
+pub struct V1Key<'a>(pub &'a [u8; 32]);
+
+/// See [`V1Key`].
+#[derive(Clone, Copy)]
+pub struct V2Key<'a>(pub &'a [u8; 32]);
+
 /// Decrypt a clipboard item, dispatching on `key_version` to select the
 /// correct key and AAD format.
 ///
@@ -163,15 +175,16 @@ pub fn decrypt_item_with_aad(
 ///
 /// Callers supply BOTH `v1_key` and `v2_key` so this function can select the
 /// right one without requiring the caller to know the version ahead of time.
-/// On `key_version = 2` the `v1_key` argument is ignored.
+/// On `key_version = 2` the `v1_key` argument is ignored. The [`V1Key`]/[`V2Key`]
+/// newtypes make an argument swap a compile error.
 ///
 /// # Errors
 /// - `AuthFailed` — ciphertext, nonce, or key is wrong for the version
 /// - `UnknownKeyVersion(v)` — `key_version` is not 1 or 2
 pub fn decrypt_item_by_version(
     key_version: u8,
-    v1_key: &[u8; 32],
-    v2_key: &[u8; 32],
+    v1_key: V1Key<'_>,
+    v2_key: V2Key<'_>,
     item_id: &str,
     nonce: &[u8; NONCE_SIZE],
     ciphertext: &[u8],
@@ -179,14 +192,14 @@ pub fn decrypt_item_by_version(
     match key_version {
         1 => {
             let aad = build_item_aad(item_id, AAD_SCHEMA_VERSION);
-            decrypt_item_with_aad(ciphertext, nonce, v1_key, &aad)
+            decrypt_item_with_aad(ciphertext, nonce, v1_key.0, &aad)
         }
         v @ 2 => {
             // Bind the AAD's key_version to the actual matched version rather
             // than a hardcoded literal, so the value stays correct if the v2
             // arm ever widens to a range.
             let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, u32::from(v));
-            decrypt_item_with_aad(ciphertext, nonce, v2_key, &aad)
+            decrypt_item_with_aad(ciphertext, nonce, v2_key.0, &aad)
         }
         v => Err(EncryptError::UnknownKeyVersion(v)),
     }
@@ -391,7 +404,8 @@ mod tests {
         let item_id = "item-v1-test";
         let aad = build_item_aad(item_id, AAD_SCHEMA_VERSION);
         let (nonce, ct) = encrypt_item_with_aad(b"hello v1", &v1_key, &aad).unwrap();
-        let pt = decrypt_item_by_version(1, &v1_key, &v2_key, item_id, &nonce, &ct).unwrap();
+        let pt = decrypt_item_by_version(1, V1Key(&v1_key), V2Key(&v2_key), item_id, &nonce, &ct)
+            .unwrap();
         assert_eq!(pt, b"hello v1");
     }
 
@@ -403,7 +417,8 @@ mod tests {
         let item_id = "item-v2-test";
         let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2);
         let (nonce, ct) = encrypt_item_with_aad(b"hello v2", &v2_key, &aad).unwrap();
-        let pt = decrypt_item_by_version(2, &v1_key, &v2_key, item_id, &nonce, &ct).unwrap();
+        let pt = decrypt_item_by_version(2, V1Key(&v1_key), V2Key(&v2_key), item_id, &nonce, &ct)
+            .unwrap();
         assert_eq!(pt, b"hello v2");
     }
 
@@ -414,7 +429,8 @@ mod tests {
         let v2_key = [0x66u8; 32];
         let nonce = [0u8; NONCE_SIZE];
         let ct = b"garbage";
-        let result = decrypt_item_by_version(255, &v1_key, &v2_key, "item-x", &nonce, ct);
+        let result =
+            decrypt_item_by_version(255, V1Key(&v1_key), V2Key(&v2_key), "item-x", &nonce, ct);
         assert!(
             matches!(result, Err(EncryptError::UnknownKeyVersion(255))),
             "key_version=255 must return UnknownKeyVersion(255), got {:?}",
@@ -428,7 +444,8 @@ mod tests {
         let v1_key = [0x77u8; 32];
         let v2_key = [0x88u8; 32];
         let nonce = [0u8; NONCE_SIZE];
-        let result = decrypt_item_by_version(0, &v1_key, &v2_key, "item-y", &nonce, b"ct");
+        let result =
+            decrypt_item_by_version(0, V1Key(&v1_key), V2Key(&v2_key), "item-y", &nonce, b"ct");
         assert!(matches!(result, Err(EncryptError::UnknownKeyVersion(0))));
     }
 
