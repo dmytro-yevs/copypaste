@@ -25,23 +25,69 @@ import com.copypaste.android.ui.theme.MonoFontFamily
 
 /**
  * Transport chip variants shown on each peer card.
- * P2P = direct local network; Cloud = relay/Supabase.
+ *
+ * P2P   = direct local network. Relay = the encrypted-blob relay (amber).
+ * Cloud = Supabase (or an unknown secondary transport).
+ *
+ * CopyPaste-crh3.30: a 3-way chip at parity with macOS DeviceCard.tsx, which
+ * distinguishes Relay from Supabase ("Cloud") because they have different
+ * latency/privacy/cost. The old enum collapsed both into "Cloud".
  */
-internal enum class TransportChip { P2P, Cloud }
+internal enum class TransportChip { P2P, Relay, Cloud }
 
 /**
- * Derive the transport chip for [peer]:
+ * The active secondary (non-P2P) transport on THIS device, derived from local
+ * sync configuration.
+ *
+ * On macOS the daemon owns this and surfaces a per-peer `transport` string over
+ * IPC (handlers_peers.rs: live P2P sink > relay active > supabase active). Android
+ * has no separate daemon — the app IS the sync engine — so the authoritative
+ * source is the device's own sync config, and `transport` is NOT a persisted
+ * field on [PairedPeer]. We compute it the same way macOS does: relay, then
+ * Supabase, then none.
+ */
+internal enum class CloudTransport { RELAY, SUPABASE, NONE }
+
+/**
+ * Pick the active secondary transport, mirroring the macOS daemon priority
+ * (relay is checked before Supabase). Pure so it is unit-testable on a plain JVM.
+ *
+ * @param relayActive    relay enabled AND configured ([Settings.relayEnabled] &&
+ *                       [Settings.isRelayConfigured]).
+ * @param supabaseActive supabase enabled AND configured ([Settings.supabaseEnabled]
+ *                       && [Settings.isSupabaseConfigured]).
+ */
+internal fun activeCloudTransport(
+    relayActive: Boolean,
+    supabaseActive: Boolean,
+): CloudTransport = when {
+    relayActive -> CloudTransport.RELAY
+    supabaseActive -> CloudTransport.SUPABASE
+    else -> CloudTransport.NONE
+}
+
+/**
+ * Derive the transport chip for [peer], at parity with the macOS authoritative
+ * priority (live P2P > relay > supabase):
  * - P2P when [PairedPeer.syncAddr] or [PairedPeer.peerLocalIp] is non-blank,
- *   meaning we have a local-network address for this peer.
- * - Cloud otherwise (relay or Supabase-only peer).
+ *   meaning we have a local-network address for this peer (takes precedence).
+ * - Otherwise the device's [cloudTransport]: RELAY → Relay (amber), and
+ *   SUPABASE / NONE → Cloud (Supabase or unknown secondary route).
+ *
+ * [cloudTransport] defaults to [CloudTransport.NONE], preserving the old
+ * P2P-vs-Cloud heuristic for callers that do not yet thread the active transport.
  *
  * Defensive: never throws on null/blank fields.
  */
-internal fun transportChipFor(peer: PairedPeer): TransportChip =
-    if (peer.syncAddr.isNotBlank() || peer.peerLocalIp?.isNotBlank() == true)
+internal fun transportChipFor(
+    peer: PairedPeer,
+    cloudTransport: CloudTransport = CloudTransport.NONE,
+): TransportChip = when {
+    peer.syncAddr.isNotBlank() || peer.peerLocalIp?.isNotBlank() == true ->
         TransportChip.P2P
-    else
-        TransportChip.Cloud
+    cloudTransport == CloudTransport.RELAY -> TransportChip.Relay
+    else -> TransportChip.Cloud
+}
 
 /**
  * Format the own-device fingerprint: always shown in full (no truncation).

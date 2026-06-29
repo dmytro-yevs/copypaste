@@ -843,6 +843,15 @@ fun DevicesScreen(
             // bdac.48: sentence case to match all other section headers on this screen.
             SectionLabel("Paired devices")
 
+            // CopyPaste-crh3.30: the device's active secondary (non-P2P) transport,
+            // mirroring the macOS daemon's relay>supabase priority. Read from the
+            // live sync config so a cloud-only peer is labelled Relay vs Cloud
+            // instead of collapsing both into "Cloud".
+            val cloudTransport = activeCloudTransport(
+                relayActive = settings.relayEnabled && settings.isRelayConfigured,
+                supabaseActive = settings.supabaseEnabled && settings.isSupabaseConfigured,
+            )
+
             // Assemble the ordered row list so we know where dividers go (a
             // divider is drawn BEFORE every row except the first).
             val deviceRows: List<@Composable () -> Unit> = buildList {
@@ -858,6 +867,7 @@ fun DevicesScreen(
                             peer = peer,
                             online = onlineByFingerprint[peer.fingerprint] ?: false,
                             nowMs = nowMs,
+                            cloudTransport = cloudTransport,
                             onUnpair = { unpairTarget = peer },
                             onRevoke = { revokeTarget = peer },
                         )

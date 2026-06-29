@@ -81,6 +81,63 @@ class DevicesLiquidGlassTest {
         assertEquals(TransportChip.Cloud, transportChipFor(peer))
     }
 
+    // ── CopyPaste-crh3.30: authoritative active-transport → 3-way chip ──────────
+    // Mirrors the macOS daemon priority (live P2P > relay > supabase): a cloud-only
+    // peer is labelled Relay vs Cloud from the device's active secondary transport,
+    // not collapsed into a single "Cloud" chip.
+
+    @Test
+    fun `cloud-only peer shows Relay chip when relay is the active transport`() {
+        val peer = peer(syncAddr = "", peerLocalIp = null)
+        assertEquals(
+            TransportChip.Relay,
+            transportChipFor(peer, CloudTransport.RELAY),
+        )
+    }
+
+    @Test
+    fun `cloud-only peer shows Cloud chip when supabase is the active transport`() {
+        val peer = peer(syncAddr = "", peerLocalIp = null)
+        assertEquals(
+            TransportChip.Cloud,
+            transportChipFor(peer, CloudTransport.SUPABASE),
+        )
+    }
+
+    @Test
+    fun `P2P address takes precedence over the active cloud transport`() {
+        val peer = peer(syncAddr = "192.168.1.10:7007", peerLocalIp = null)
+        assertEquals(
+            TransportChip.P2P,
+            transportChipFor(peer, CloudTransport.RELAY),
+        )
+    }
+
+    @Test
+    fun `cloud-only peer falls back to Cloud when no secondary transport is active`() {
+        val peer = peer(syncAddr = "", peerLocalIp = null)
+        assertEquals(
+            TransportChip.Cloud,
+            transportChipFor(peer, CloudTransport.NONE),
+        )
+    }
+
+    @Test
+    fun `activeCloudTransport prefers relay over supabase`() {
+        assertEquals(
+            CloudTransport.RELAY,
+            activeCloudTransport(relayActive = true, supabaseActive = true),
+        )
+        assertEquals(
+            CloudTransport.SUPABASE,
+            activeCloudTransport(relayActive = false, supabaseActive = true),
+        )
+        assertEquals(
+            CloudTransport.NONE,
+            activeCloudTransport(relayActive = false, supabaseActive = false),
+        )
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     // §7 QR countdown drain bar progress
     // ────────────────────────────────────────────────────────────────────────

@@ -1657,8 +1657,8 @@ data class Config (
     var `notifyOnCopy`: kotlin.Boolean, 
     var `maskSensitiveContent`: kotlin.Boolean, 
     var `syncOnWifiOnly`: kotlin.Boolean, 
-    var `p2pEnabled`: kotlin.Boolean,
-    var `imageMaxHeight`: kotlin.UInt,
+    var `p2pEnabled`: kotlin.Boolean, 
+    var `imageMaxHeight`: kotlin.UInt, 
     var `collectPublicIp`: kotlin.Boolean, 
     var `pasteAsPlainText`: kotlin.Boolean, 
     var `excludedAppBundleIds`: List<kotlin.String>

@@ -55,6 +55,13 @@ internal fun PeerRow(
     online: Boolean,
     /** Current epoch millis from the 1-second ticker in [DevicesScreen]. */
     nowMs: Long,
+    /**
+     * CopyPaste-crh3.30: the device's active secondary (non-P2P) transport, used
+     * to label a cloud-only peer Relay vs Cloud. Derived once in [DevicesScreen]
+     * from [Settings] via [activeCloudTransport]. Defaults to
+     * [CloudTransport.NONE] (preserves the old P2P-vs-Cloud heuristic).
+     */
+    cloudTransport: CloudTransport = CloudTransport.NONE,
     onUnpair: () -> Unit,
     onRevoke: () -> Unit,
 ) {
@@ -62,7 +69,7 @@ internal fun PeerRow(
     // PG-37 parity: offline status dot uses danger (red) to match the macOS
     // DeviceCard offline indicator (was c.faint/grey, which diverged).
     val dotColor = if (online) c.success else c.danger
-    val chip = transportChipFor(peer)
+    val chip = transportChipFor(peer, cloudTransport)
 
     // Row content only — the enclosing CopyPasteCard provides the glass surface,
     // 12dp radius, and 1dp hairline border (PARITY-SPEC §8 grouped inset list).

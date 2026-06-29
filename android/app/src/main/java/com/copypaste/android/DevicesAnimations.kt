@@ -160,9 +160,11 @@ internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
 
 /**
  * Transport chip pill: 10 sp label in a tinted rounded pill.
- * P2P = info teal; Cloud = accent blue (theme-adaptive via [LocalIdeColors]).
- * Label casing matches web's DevicesView ("P2P" / "Cloud" — task #5: lowercase
- * "Cloud", not all-caps "CLOUD").
+ * P2P = info teal; Relay = warning amber; Cloud = accent blue (theme-adaptive
+ * via [LocalIdeColors]). Label casing matches web's DevicesView ("P2P" / "Relay"
+ * / "Cloud").
+ * CopyPaste-crh3.30: Relay is rendered amber (c.warning) at parity with macOS
+ * DeviceCard.tsx, distinguishing the relay route from Supabase ("Cloud").
  * Defensive: never crashes on absent transport info — callers derive [chip]
  * via [transportChipFor] which is always non-null.
  *
@@ -174,6 +176,7 @@ internal fun TransportChipLabel(chip: TransportChip) {
     val c = LocalIdeColors.current
     val (text, fg, bg) = when (chip) {
         TransportChip.P2P -> Triple("P2P", c.info, c.infoDim)
+        TransportChip.Relay -> Triple("Relay", c.warning, c.warningDim)
         TransportChip.Cloud -> Triple("Cloud", c.accent, c.accentDim)
     }
 
