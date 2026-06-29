@@ -301,8 +301,17 @@ impl SyncInboxForwarder {
         let notify = Arc::clone(&self.notify);
         let downstream = self.downstream;
 
-        tokio::spawn(async move {
+        // CopyPaste-crh3.93: supervise the forwarding task. Previously the
+        // JoinHandle was dropped immediately, so a panic inside `forward_loop`
+        // was swallowed by tokio's default hook — all P2P deliveries for this
+        // session would stop silently while callers kept enqueuing into a
+        // never-drained ring buffer. We now await the handle in a supervisor and
+        // log a panic at ERROR.
+        let forward = tokio::spawn(async move {
             forward_loop(state, notify, downstream).await;
+        });
+        tokio::spawn(async move {
+            let _ = supervise_forward_task(forward).await;
         });
 
         SyncInboxSender {
@@ -312,6 +321,27 @@ impl SyncInboxForwarder {
             // this sender (i.e. this mTLS connection).
             guard: ReplayGuard::new(REPLAY_GUARD_CAPACITY),
         }
+    }
+}
+
+/// CopyPaste-crh3.93: await a forwarding task's `JoinHandle` and, if it ended in
+/// a panic, log at ERROR rather than letting tokio's default hook swallow it.
+///
+/// Returns `true` iff the task panicked (used by tests). A *cancelled* task is a
+/// normal shutdown path and is not logged. This turns a silent "P2P deliveries
+/// stopped" failure mode into a visible operator-facing error.
+async fn supervise_forward_task(handle: tokio::task::JoinHandle<()>) -> bool {
+    match handle.await {
+        Ok(()) => false,
+        Err(join_err) if join_err.is_panic() => {
+            tracing::error!(
+                error = %join_err,
+                "SyncInboxForwarder forward_loop panicked — P2P deliveries for this \
+                 session have stopped; the ring buffer will no longer drain"
+            );
+            true
+        }
+        Err(_cancelled) => false,
     }
 }
 
@@ -353,6 +383,24 @@ async fn forward_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CopyPaste-crh3.93: a panicking forwarding task must be observed (logged)
+    /// by the supervisor, not silently swallowed; a clean exit must report no
+    /// panic. The supervisor itself must never propagate the panic.
+    #[tokio::test]
+    async fn supervise_forward_task_reports_panic_and_clean_exit() {
+        let panicking = tokio::spawn(async { panic!("forward_loop boom") });
+        assert!(
+            supervise_forward_task(panicking).await,
+            "a panicked forward task must be reported (true), not swallowed"
+        );
+
+        let clean = tokio::spawn(async {});
+        assert!(
+            !supervise_forward_task(clean).await,
+            "a cleanly-exited forward task must report no panic (false)"
+        );
+    }
 
     fn wire_item(id: &str, lamport: i64) -> WireItem {
         WireItem {
