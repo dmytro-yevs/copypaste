@@ -1,14 +1,33 @@
-// DisplayTab.tsx
-// Extracted from SettingsView.tsx renderDisplay() (CopyPaste-g06m.14 split) — cut/paste only.
+// DisplayTab.tsx — Phase 3 redesign (CopyPaste-2hfj.4)
+// Appearance tab: Theme segmented control + Accent swatch picker + optional toggles.
+// Source of truth: docs/design/STYLEGUIDE.md §9.2 (segmented), §3.5 (accents), §2 (two-axis).
+//
+// Removed from this tab (§2 STYLEGUIDE — "Everything else from the old appearance panel is deleted"):
+//   - Palette grid (liquid-tokens PALETTE_KEYS/PALETTES — deleted in Phase 1)
+//   - Skin selector (skins SKIN_IDS — deleted in Phase 1)
+//   - Row density control (density field removed in Phase 2)
+//   - Reduce motion toggle (motionReduced field removed in Phase 2)
+//   - Color theme "System" option (§2: dark|light only)
 import { SectionHeader } from "../../../components/SectionHeader";
 import { SettingsRow } from "../../../components/SettingsRow";
 import { Toggle } from "../../../components/Toggle";
 import { Panel } from "../../../components/Panel";
 import { SliderRow } from "../../../components/SliderRow";
 import { InfoPopover } from "../components/InfoPopover";
-import { PALETTE_KEYS, PALETTES } from "../../../lib/liquid-tokens";
-import { SKIN_IDS } from "../../../lib/skins";
-import type { UIPrefs } from "../../../store";
+import type { AccentId, UIPrefs } from "../../../store";
+
+// §3.5 accent swatch preview colors (dark-theme base values).
+// Hardcoded hex is intentional here — these are the static preview swatches,
+// not interactive color tokens. The live --accent CSS variable takes over for
+// all other interactive/brand uses once the accent is selected.
+const ACCENT_SWATCHES: ReadonlyArray<{ id: AccentId; label: string; color: string }> = [
+  { id: "indigo", label: "Indigo", color: "#6E5BFF" },
+  { id: "blue",   label: "Blue",   color: "#3B82F6" },
+  { id: "teal",   label: "Teal",   color: "#13B8A6" },
+  { id: "green",  label: "Green",  color: "#46C56A" },
+  { id: "amber",  label: "Amber",  color: "#F5A524" },
+  { id: "rose",   label: "Rose",   color: "#F43F7E" },
+];
 
 export type DisplayTabProps = {
   prefs: UIPrefs;
@@ -16,82 +35,41 @@ export type DisplayTabProps = {
 };
 
 export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
-  const activePalette = prefs.palette ?? "graphite-mist";
-  const activeDensity = prefs.density ?? "compact";
-  // W-F4: skin picker — read current value from store, set via setPrefs({skin}).
-  const activeSkin = prefs.skin ?? "classic";
+  // §2: two axes — theme defaults to dark, accent defaults to indigo.
+  const activeTheme = prefs.theme ?? "dark";
+  const activeAccent = prefs.accent ?? "indigo";
 
   return (
     <div className="space-y-2">
-      {/* ── Appearance ──────────────────────────────────────────────────────
-          CopyPaste-hn5v: full palette + density + theme controls.
-          Palette picker re-themes the whole app live via App.tsx
-          data-palette attribute sync (already wired). */}
+      {/* ── Appearance ─────────────────────────────────────────────────────── */}
+      {/* §2 STYLEGUIDE: The only appearance choices are theme (dark/light) and  */}
+      {/* accent (6 hues). Palette, skin, density, contrast, motion removed.     */}
       <SectionHeader label="Appearance" />
       <Panel>
-        {/* Palette picker — grid of 10 swatches.
-            bdac.105: converted raw <div> with hardcoded 12px/text-ide-dim/mb-2
-            to SettingsRow with fullWidth so label typography is density-aware. */}
-        <SettingsRow title="Color palette" fullWidth>
+        {/* Theme — §9.2 segmented control: Light / Dark.
+            Container: --card bg + --border + --r-ctl radius.
+            Active segment: --raised bg + --text + font-medium + --r-chip.
+            Inactive: --dim color. */}
+        <SettingsRow title="Theme">
           <div
-            data-testid="palette-picker"
-            className="grid grid-cols-5 gap-2"
+            data-testid="theme-segmented"
+            className="flex items-center gap-0.5 rounded-[var(--r-ctl)] border border-[var(--border)] bg-[var(--card)] p-0.5"
           >
-            {PALETTE_KEYS.map((key) => {
-              const def = PALETTES[key];
-              const isActive = activePalette === key;
+            {(["Light", "Dark"] as const).map((label) => {
+              const value = label.toLowerCase() as "light" | "dark";
+              const selected = activeTheme === value;
               return (
                 <button
-                  key={key}
-                  type="button"
-                  aria-label={def.name}
-                  aria-pressed={isActive}
-                  title={def.name}
-                  onClick={() => setPrefs({ palette: key })}
-                  className={[
-                    "group relative flex flex-col items-center gap-1 rounded-[8px] p-1.5 transition-all",
-                    isActive
-                      ? "ring-2 ring-ide-accent ring-offset-1 ring-offset-transparent bg-ide-elevated shadow-ide-e1"
-                      : "hover:bg-ide-faint/12",
-                  ].join(" ")}
-                >
-                  {/* Swatch circle using the palette's accent colour inline */}
-                  <span
-                    className="h-7 w-7 rounded-full shadow-ide-xs"
-                    style={{ background: def.accent }}
-                    aria-hidden="true"
-                  />
-                  <span className="max-w-full truncate text-center text-[10.5px] leading-tight text-ide-dim group-hover:text-ide-text">
-                    {def.name}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </SettingsRow>
-
-        {/* W-F4: Skin picker — Visual style segmented control (Classic / Quiet / Vapor).
-            Mirrors the density/theme segmented control pattern exactly.
-            Labels are Title-Cased skin ids. Updates live via setPrefs({skin}). */}
-        <SettingsRow title="Visual style">
-          <div
-            data-testid="skin-picker"
-            className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5"
-          >
-            {SKIN_IDS.map((id) => {
-              const label = id.charAt(0).toUpperCase() + id.slice(1);
-              return (
-                <button
-                  key={id}
+                  key={value}
                   type="button"
                   aria-label={label}
-                  aria-pressed={activeSkin === id}
-                  onClick={() => setPrefs({ skin: id })}
+                  aria-pressed={selected}
+                  onClick={() => setPrefs({ theme: value })}
                   className={[
-                    "rounded-[7px] px-2.5 py-1 text-[12px] transition-colors",
-                    activeSkin === id
-                      ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                      : "text-ide-dim hover:text-ide-text",
+                    "rounded-[var(--r-chip)] px-3 py-1 text-[12px] font-medium transition-colors",
+                    selected
+                      ? "bg-[var(--raised)] text-[var(--text)]"
+                      : "text-[var(--dim)] hover:text-[var(--text)]",
                   ].join(" ")}
                 >
                   {label}
@@ -101,103 +79,65 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
           </div>
         </SettingsRow>
 
-        {/* Density segmented control — compact / comfortable / spacious */}
-        <SettingsRow title="Row density">
-          {/* bpax/itsu: styleguide §form-controls segmented control — mute/.18 group bg,
-              selected = white/.90 + e1 shadow, 7px inner radius.
-              itsu: hairline border + mute token (was faint, now mute per spec) */}
-          <div className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5">
-            {(["compact", "comfortable", "spacious"] as const).map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                aria-label={opt}
-                onClick={() => setPrefs({ density: opt })}
-                className={[
-                  "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
-                  activeDensity === opt
-                    ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                    : "text-ide-dim hover:text-ide-text",
-                ].join(" ")}
-              >
-                {opt.charAt(0).toUpperCase() + opt.slice(1)}
-              </button>
-            ))}
-          </div>
-        </SettingsRow>
-
-        {/* Color theme — matches styleguide §form-controls segmented control */}
-        {/* bdac.104: InfoPopover moved to info= slot (label column) */}
-        {/* bdac.107: description added for Color theme row */}
-        <SettingsRow
-          title="Color theme"
-          description="Overrides the system appearance for this app only."
-          info={<InfoPopover text="Light uses a warm-white surface palette with WCAG AA contrast. Dark uses the default Design System v2 palette. System follows your OS appearance." />}
-        >
-          {/* bpax/web parity (CopyPaste-7qy §0): Light / Dark / System segmented control.
-              Styleguide §form-controls: mute/.18 bg, selected=white/.90+shadow, 7px radius.
-              itsu: hairline border + mute token (was faint, now mute per spec) */}
-          <div className="flex items-center gap-0.5 rounded-[10px] border border-ide-border/30 bg-ide-mute/18 p-0.5">
-            {(["light", "dark", "system"] as const).map((opt) => {
-              const selected = (prefs.theme ?? "dark") === opt;
+        {/* Accent — §3.5 six-swatch picker.
+            Each swatch renders its dark-base color as a filled circle.
+            Selected swatch: 2px solid outline in --accent with 2px offset.
+            Ring uses outline (not box-shadow) so it works on any bg.  */}
+        <SettingsRow title="Accent color" fullWidth>
+          <div
+            data-testid="accent-picker"
+            className="flex items-center gap-3"
+          >
+            {ACCENT_SWATCHES.map(({ id, label, color }) => {
+              const selected = activeAccent === id;
               return (
                 <button
-                  key={opt}
+                  key={id}
                   type="button"
-                  aria-label={opt}
-                  onClick={() => setPrefs({ theme: opt })}
-                  className={[
-                    "rounded-[7px] px-2.5 py-1 text-[12px] capitalize transition-colors",
-                    selected
-                      ? "bg-ide-elevated text-ide-accent shadow-ide-e1"
-                      : "text-ide-dim hover:text-ide-text",
-                  ].join(" ")}
+                  aria-label={label}
+                  aria-pressed={selected}
+                  title={label}
+                  onClick={() => setPrefs({ accent: id })}
+                  className="relative rounded-full p-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2"
+                  style={selected
+                    ? { outline: "2px solid var(--accent)", outlineOffset: "3px" }
+                    : undefined}
                 >
-                  {opt}
+                  {/* Swatch circle — hex is the §3.5 dark-base preview color only */}
+                  <span
+                    aria-hidden="true"
+                    className="block h-[22px] w-[22px] rounded-full"
+                    style={{ background: color }}
+                  />
                 </button>
               );
             })}
           </div>
         </SettingsRow>
 
-        {/* Translucency — kept here so all visual appearance controls are together */}
-        {/* bdac.104: InfoPopover moved to info= slot */}
+        {/* Translucency — §2 optional boolean; backdrop-blur / vibrancy on/off.
+            Default true. Disable for solid backgrounds or accessibility needs. */}
         <SettingsRow
           title="Translucency"
-          info={<InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds." />}
+          info={<InfoPopover text="Blur + transparency behind surfaces. Disable for solid backgrounds or low-end GPUs." />}
         >
           <Toggle
+            aria-label="Translucency"
             checked={prefs.translucency ?? true}
             onChange={(v) => setPrefs({ translucency: v })}
           />
         </SettingsRow>
 
-        {/* Reduce motion — switches aurora from cinematic to calm profile.
-            "calm" slows the aurora (--speed: 1.45) and dims it (--motion-opacity: .55).
-            OS prefers-reduced-motion still zeroes the aurora automatically via CSS. */}
-        {/* bdac.104: InfoPopover moved to info= slot */}
+        {/* Mask sensitive data — §2 optional boolean; blur sensitive clipboard previews.
+            Default true. Controls whether sensitive_spans ranges are redacted. */}
         <SettingsRow
-          title="Reduce motion"
-          info={<InfoPopover text="Slow and dim the aurora background animation. The OS 'Reduce Motion' accessibility setting stops it entirely regardless of this toggle." />}
+          title="Mask sensitive data"
+          info={<InfoPopover text="Blur sensitive clipboard content (passwords, tokens, secrets) in history previews. Click a blurred item to reveal it." />}
         >
           <Toggle
-            checked={prefs.motionReduced ?? false}
-            onChange={(v) => setPrefs({ motionReduced: v })}
-          />
-        </SettingsRow>
-
-        {/* n9gp (PG-34): sensitive-reveal warning toggle — Android parity.
-            When on (default), a "Sensitive — preview hidden · click to reveal" overlay appears
-            before the blur is lifted. When off, clicking the blur reveals
-            immediately without the extra confirmation step. */}
-        {/* bdac.104: InfoPopover moved to info= slot */}
-        <SettingsRow
-          title="Warn before revealing sensitive items"
-          info={<InfoPopover text="Show a confirmation overlay before revealing blurred sensitive content. Matches the Android warning sheet behaviour. Turn off if you find the extra step redundant." />}
-        >
-          <Toggle
-            checked={prefs.showSensitiveWarnings ?? true}
-            onChange={(v) => setPrefs({ showSensitiveWarnings: v })}
+            aria-label="Mask sensitive data"
+            checked={prefs.maskSensitive ?? true}
+            onChange={(v) => setPrefs({ maskSensitive: v })}
           />
         </SettingsRow>
       </Panel>
@@ -205,7 +145,6 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
       <SectionHeader label="History list" />
       <Panel>
         {/* M4: split previewLines — main window has its own independent setting */}
-        {/* bdac.104: InfoPopover moved to info= slot */}
         <SettingsRow
           title="Preview lines"
           info={<InfoPopover text="Number of text lines shown per clip in the main history window. Independent from the popup setting." />}
@@ -220,9 +159,7 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
           />
         </SettingsRow>
         {/* Image preview height controls the thumbnail bounding box in both
-            the history list and the popup. Moved here from "Popup appearance"
-            so users looking for list image sizing find it in the list section. */}
-        {/* bdac.104: InfoPopover moved to info= slot */}
+            the history list and the popup. */}
         <SettingsRow
           title="Image preview height"
           info={<InfoPopover text="Max height (px) of image thumbnails in the history list and the popup. The image scales to fit within 340 × height, aspect-preserving, never upscaled." />}
@@ -236,9 +173,7 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
             formatValue={(v) => `${v}px`}
           />
         </SettingsRow>
-        {/* bdac.91: Group by device — persists the sort mode chosen in the History toolbar.
-            Android parity: Android Settings.kt:627 sortByDevice, default false. */}
-        {/* bdac.104: InfoPopover moved to info= slot */}
+        {/* bdac.91: Group by device — persists the sort mode chosen in the History toolbar. */}
         <SettingsRow
           title="Group by device"
           info={<InfoPopover text="Group clipboard items by the device they came from, with your device shown first. You can also toggle this from the History toolbar when multiple devices are paired." />}
@@ -248,6 +183,18 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
             onChange={(v) => setPrefs({ sortByDevice: v })}
           />
         </SettingsRow>
+        {/* n9gp (PG-34): sensitive-reveal warning toggle — Android parity.
+            Moved from Appearance panel (§2 removes all non-two-axis controls from
+            Appearance) to History list where it governs display behavior. */}
+        <SettingsRow
+          title="Warn before revealing sensitive items"
+          info={<InfoPopover text="Show a confirmation overlay before revealing blurred sensitive content. Matches the Android warning sheet behaviour. Turn off if you find the extra step redundant." />}
+        >
+          <Toggle
+            checked={prefs.showSensitiveWarnings ?? true}
+            onChange={(v) => setPrefs({ showSensitiveWarnings: v })}
+          />
+        </SettingsRow>
         {/* M5: historySize removed — history uses lazy pagination now */}
         {/* M6: previewDelay removed — replaced by explicit Eye preview button */}
       </Panel>
@@ -255,7 +202,6 @@ export function DisplayTab({ prefs, setPrefs }: DisplayTabProps) {
       <SectionHeader label="Popup appearance" hint="How the popup looks when triggered." />
       <Panel>
         {/* M4: popup gets its own independent preview-lines setting */}
-        {/* bdac.104: InfoPopover moved to info= slot */}
         <SettingsRow
           title="Preview lines"
           info={<InfoPopover text="Number of text lines shown per clip in the Quick-Paste popup. Independent from the main window setting." />}
