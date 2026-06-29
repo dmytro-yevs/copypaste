@@ -1,5 +1,6 @@
 use super::super::db::Database;
 use super::super::pool::DbRead;
+use super::query::ITEM_SELECT_COLUMNS_CI;
 use super::types::{row_to_item, ClipboardItem, ItemsError};
 use rusqlite::{params, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -379,18 +380,17 @@ pub fn search_items_filtered<D: DbRead + ?Sized>(
     let rows: Vec<ClipboardItem> = if let Some(ct) = content_type_filter {
         let conn = db.conn();
         let mut stmt = conn.prepare_cached(
-            "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
-                    ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
-                    ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version,
-                    ci.pinned, ci.pin_order, ci.thumb, ci.deleted
-             FROM clipboard_fts fts
+            &format!(
+                "SELECT {ITEM_SELECT_COLUMNS_CI} \
+                 FROM clipboard_fts fts
              JOIN clipboard_items ci ON ci.id = fts.id
              WHERE clipboard_fts MATCH ?1
                AND ci.deleted = 0
                AND ci.is_sensitive = 0
                AND ci.content_type = ?3
              ORDER BY rank
-             LIMIT ?2",
+             LIMIT ?2"
+            ),
         )?;
         let r: Vec<ClipboardItem> = stmt
             .query_map(params![safe_query, limit_i64, ct], row_to_item)?
@@ -399,15 +399,14 @@ pub fn search_items_filtered<D: DbRead + ?Sized>(
     } else {
         let conn = db.conn();
         let mut stmt = conn.prepare_cached(
-            "SELECT ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref,
-                    ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at,
-                    ci.app_bundle_id, ci.content_hash, ci.origin_device_id, ci.key_version,
-                    ci.pinned, ci.pin_order, ci.thumb, ci.deleted
-             FROM clipboard_fts fts
+            &format!(
+                "SELECT {ITEM_SELECT_COLUMNS_CI} \
+                 FROM clipboard_fts fts
              JOIN clipboard_items ci ON ci.id = fts.id
              WHERE clipboard_fts MATCH ?1 AND ci.deleted = 0 AND ci.is_sensitive = 0
              ORDER BY rank
-             LIMIT ?2",
+             LIMIT ?2"
+            ),
         )?;
         let r: Vec<ClipboardItem> = stmt
             .query_map(params![safe_query, limit_i64], row_to_item)?

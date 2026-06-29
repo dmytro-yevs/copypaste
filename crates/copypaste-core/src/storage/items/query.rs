@@ -4,6 +4,24 @@ use super::types::{row_to_item, ClipboardItem, ItemsError};
 use crate::crypto::encrypt::{decrypt_item_by_version, NONCE_SIZE};
 use rusqlite::params;
 
+/// CopyPaste-crh3.85: single source of truth for the 19-column clipboard_items
+/// projection that `row_to_item` consumes BY POSITION. Previously duplicated
+/// verbatim across query.rs (5x) and fts.rs (2x); a missed edit when adding a
+/// column caused an off-by-one panic in `row_to_item`. The ORDER must stay
+/// aligned with `row_to_item` and the INSERT list (insert.rs::ITEM_INSERT_COLUMNS).
+pub(crate) const ITEM_SELECT_COLUMNS: &str =
+    "id, item_id, content_type, content, content_nonce, blob_ref, \
+     is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id, \
+     content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted";
+
+/// The same projection aliased to `ci.` for the FTS JOIN (fts.rs), where a bare
+/// `id` would be ambiguous against `clipboard_fts`. Keep aligned with
+/// [`ITEM_SELECT_COLUMNS`] — same 19 columns, same order.
+pub(crate) const ITEM_SELECT_COLUMNS_CI: &str =
+    "ci.id, ci.item_id, ci.content_type, ci.content, ci.content_nonce, ci.blob_ref, \
+     ci.is_sensitive, ci.is_synced, ci.lamport_ts, ci.wall_time, ci.expires_at, ci.app_bundle_id, \
+     ci.content_hash, ci.origin_device_id, ci.key_version, ci.pinned, ci.pin_order, ci.thumb, ci.deleted";
+
 pub fn get_page<D: DbRead + ?Sized>(
     db: &D,
     limit: usize,
@@ -17,10 +35,10 @@ pub fn get_page<D: DbRead + ?Sized>(
     // statement is compiled once per connection and reused, not re-parsed on
     // every page fetch.
     let mut stmt = db.conn().prepare_cached(
-        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
-         FROM clipboard_items WHERE deleted = 0 ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2",
+        &format!(
+            "SELECT {ITEM_SELECT_COLUMNS} \
+             FROM clipboard_items WHERE deleted = 0 ORDER BY wall_time DESC LIMIT ?1 OFFSET ?2"
+        ),
     )?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
@@ -50,17 +68,17 @@ pub fn get_page_pinned_first<D: DbRead + ?Sized>(
     // statement is compiled once per connection and reused, not re-parsed on
     // every page fetch.
     let mut stmt = db.conn().prepare_cached(
-        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
-         FROM clipboard_items
+        &format!(
+            "SELECT {ITEM_SELECT_COLUMNS} \
+             FROM clipboard_items
          WHERE deleted = 0
          ORDER BY
            CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC,
            pin_order IS NULL ASC,
            pin_order ASC,
            wall_time DESC
-         LIMIT ?1 OFFSET ?2",
+         LIMIT ?1 OFFSET ?2"
+        ),
     )?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
@@ -98,10 +116,9 @@ pub fn get_page_pinned_first_lamport<D: DbRead + ?Sized>(
     // statement is compiled once per connection and reused, not re-parsed on
     // every page fetch.
     let mut stmt = db.conn().prepare_cached(
-        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
-         FROM clipboard_items
+        &format!(
+            "SELECT {ITEM_SELECT_COLUMNS} \
+             FROM clipboard_items
          WHERE deleted = 0
          ORDER BY
            CASE WHEN pinned = 1 THEN 0 ELSE 1 END ASC,
@@ -110,7 +127,8 @@ pub fn get_page_pinned_first_lamport<D: DbRead + ?Sized>(
            lamport_ts DESC,
            wall_time DESC,
            origin_device_id ASC
-         LIMIT ?1 OFFSET ?2",
+         LIMIT ?1 OFFSET ?2"
+        ),
     )?;
     let items = stmt
         .query_map(params![limit_i64, offset_i64], row_to_item)?
@@ -303,10 +321,9 @@ pub fn get_item_by_id<D: DbRead + ?Sized>(
     id: &str,
 ) -> Result<Option<ClipboardItem>, ItemsError> {
     let result = db.conn().query_row(
-        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
-         FROM clipboard_items WHERE id = ?1",
+        &format!(
+            "SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items WHERE id = ?1"
+        ),
         params![id],
         row_to_item,
     );
@@ -340,10 +357,9 @@ pub fn get_item_by_item_id(
     // tombstone rows (deleted = 1) so LWW can determine whether an incoming
     // remote version beats the local tombstone or vice-versa.
     let result = db.conn().query_row(
-        "SELECT id, item_id, content_type, content, content_nonce, blob_ref,
-                is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-                content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted
-         FROM clipboard_items WHERE item_id = ?1",
+        &format!(
+            "SELECT {ITEM_SELECT_COLUMNS} FROM clipboard_items WHERE item_id = ?1"
+        ),
         params![item_id],
         row_to_item,
     );
