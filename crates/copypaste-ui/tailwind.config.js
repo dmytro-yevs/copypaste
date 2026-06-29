@@ -112,106 +112,25 @@ export default {
         // Legacy
         ide: "ease",
       },
+      // CopyPaste-crh3.74: animations.css is the canonical animation system —
+      // components apply raw CSS classes (.toast-enter, .popup-enter, .card-in,
+      // …). Every Tailwind keyframe/animation here EXCEPT online-pulse was a dead
+      // duplicate (zero animate-* utility references in TSX) that double-emitted
+      // @keyframes into the bundle. Only `animate-online-pulse` (DeviceCard online
+      // dot, §MO-5 / crh3.18) is actually used, so only it is kept. (Spinners use
+      // Tailwind's built-in `animate-spin`.)
       keyframes: {
-        // Popup entrance §4: scale .97→1 + opacity + translateY 4→0, 160ms out-expo
-        popupEnter: {
-          "0%":   { opacity: "0", transform: "scale(0.97) translateY(4px)" },
-          "100%": { opacity: "1", transform: "scale(1) translateY(0)" },
-        },
-        // §MO-6 Toast enter/exit
-        toastEnter: {
-          "0%":   { opacity: "0", transform: "translateX(-50%) translateY(8px) scale(.985)" },
-          "100%": { opacity: "1", transform: "translateX(-50%) translateY(0) scale(1)" },
-        },
-        toastExit: {
-          "0%":   { opacity: "1", transform: "translateX(-50%) translateY(0) scale(1)" },
-          "100%": { opacity: "0", transform: "translateX(-50%) translateY(7px) scale(.992)" },
-        },
-        // Legacy toast (kept for compat)
-        fadeIn: {
-          "0%":   { opacity: "0", transform: "translateY(2px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
-        },
-        // §MO-1 Modal scrim + card
-        modalScrimIn:  { "0%": { opacity: "0" }, "100%": { opacity: "1" } },
-        modalScrimOut: { "0%": { opacity: "1" }, "100%": { opacity: "0" } },
-        modalCardIn: {
-          "0%":   { opacity: "0", transform: "translateY(8px) scale(.985)" },
-          "100%": { opacity: "1", transform: "translateY(0) scale(1)" },
-        },
-        modalCardOut: {
-          "0%":   { opacity: "1", transform: "translateY(0) scale(1)" },
-          "100%": { opacity: "0", transform: "translateY(8px) scale(.985)" },
-        },
-        // §MO-2 Page panel slide
-        panelSlideInRight: {
-          "0%":   { opacity: "0", transform: "translateX(20px)" },
-          "100%": { opacity: "1", transform: "translateX(0)" },
-        },
-        panelSlideOutLeft: {
-          "0%":   { opacity: "1", transform: "translateX(0)" },
-          "100%": { opacity: "0", transform: "translateX(-20px)" },
-        },
-        // §MO-4 Copy-flash (instant, 90ms)
-        copyFlash: {
-          "0%":   { outlineColor: "transparent", backgroundColor: "transparent" },
-          "45%":  { outlineColor: "var(--ide-success)", backgroundColor: "var(--ide-success-dim)" },
-          "100%": { outlineColor: "transparent", backgroundColor: "transparent" },
-        },
         // §MO-5 Online pulse ONE-SHOT (2s forwards — not infinite)
         onlinePulse: {
           "0%":   { boxShadow: "0 0 0 0 var(--ide-success)", opacity: "1" },
           "70%":  { boxShadow: "0 0 0 9px var(--ide-success)", opacity: "0" },
           "100%": { boxShadow: "0 0 0 9px transparent", opacity: "0" },
         },
-        // §MO-3 Row press scale
-        rowPress: {
-          "0%":   { transform: "scale(1)" },
-          "50%":  { transform: "scale(.992)" },
-          "100%": { transform: "scale(1)" },
-        },
-        // auroraSpin removed — perpetual spin was "loud/gimmicky" per spec.
-        // glowDrift removed — replaced with static ambient blob.
-        // glassShine removed — replaced with permanent ::before diagonal sheen (VISM-5).
-        // Premium entrance animations (CopyPaste-52mz) — spring cubic-bezier, NOT bounce
-        cardIn: {
-          "0%":   { opacity: "0", transform: "scale(.96) translateY(10px)" },
-          "100%": { opacity: "1", transform: "scale(1) translateY(0)" },
-        },
-        revealUp: {
-          "0%":   { opacity: "0", transform: "translateY(6px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
-        },
-        listItemIn: {
-          "0%":   { opacity: "0", transform: "translateY(4px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
-        },
       },
       animation: {
-        "popup-enter":         "popupEnter 160ms cubic-bezier(.16,1,.3,1) both",
-        // §MO-6 Toast
-        "toast-enter":         "toastEnter 180ms cubic-bezier(.16,1,.3,1) both",
-        "toast-exit":          "toastExit 180ms cubic-bezier(.16,1,.3,1) both",
-        "fade-in":             "fadeIn 130ms ease both",
-        // §MO-1 Modal
-        "modal-scrim-enter":   "modalScrimIn 180ms cubic-bezier(.2,0,.2,1) both",
-        "modal-scrim-exit":    "modalScrimOut 180ms cubic-bezier(.2,0,.2,1) both",
-        "modal-card-enter":    "modalCardIn 240ms cubic-bezier(.16,1,.3,1) both",
-        "modal-card-exit":     "modalCardOut 240ms cubic-bezier(.16,1,.3,1) both",
-        // §MO-2 Page panel
-        "panel-enter-right":   "panelSlideInRight 240ms cubic-bezier(.16,1,.3,1) both",
-        "panel-exit-left":     "panelSlideOutLeft 240ms cubic-bezier(.16,1,.3,1) both",
-        // §MO-4 Copy-flash — 180ms (--mo-base) to match CSS primitive + JS timer (crh3.20)
-        "copy-flash":          "copyFlash 180ms cubic-bezier(.2,0,.2,1) both",
-        // §MO-5 Online pulse (ONE-SHOT, not infinite)
+        // §MO-5 Online pulse (ONE-SHOT, not infinite) — the only animate-*
+        // utility referenced in production TSX.
         "online-pulse":        "onlinePulse 2s cubic-bezier(.2,0,.2,1) forwards",
-        // §MO-3 Row press
-        "row-press":           "rowPress 130ms cubic-bezier(.2,0,.2,1)",
-        // aurora-spin, glow-drift, glass-shine REMOVED (loud/gimmicky per spec)
-        // Entrance (CopyPaste-52mz)
-        "card-in":       "cardIn 158ms cubic-bezier(.16,1,.3,1) both",    /* 220ms × 0.72 */
-        "reveal-up":     "revealUp 130ms cubic-bezier(.16,1,.3,1) both",  /* 180ms × 0.72 */
-        "list-item-in":  "listItemIn 101ms cubic-bezier(.16,1,.3,1) both", /* 140ms × 0.72 */
       },
     }
   },
