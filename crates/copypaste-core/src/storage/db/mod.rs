@@ -210,17 +210,25 @@ impl Database {
         Self::open_with_cache_mb(path, key, cache_mb)
     }
 
-    /// Open an in-memory (unencrypted) database.
+    /// Open an in-memory (unencrypted) `:memory:` database.
     ///
-    /// **Test-only (CopyPaste-9vcn).** This function creates a database WITHOUT
-    /// SQLCipher encryption. The `#[cfg(any(test, feature = "test-helpers"))]`
-    /// gate ensures no production build can call it accidentally and expose
-    /// clipboard contents in plaintext. All production callers must use
-    /// `Database::open` which requires a 32-byte encryption key.
+    /// CopyPaste-9vcn / CopyPaste-crh3.4: gated behind
+    /// `#[cfg(any(test, feature = "test-helpers"))]`. The gate keeps this OUT of
+    /// arbitrary external builds, but — to be accurate — it IS reachable in the
+    /// **copypaste-daemon production binary**, which intentionally enables the
+    /// `test-helpers` feature in its `[dependencies]` (not only `[dev-dependencies]`).
+    /// Production callers are the in-place DB-recovery quiesce (`reset_database`
+    /// and `db_restore`, which swap the live handle to a throwaway `:memory:` DB so
+    /// the on-disk files can be replaced) and the relay's transient in-memory store.
     ///
-    /// Within this crate the function is always available under `#[cfg(test)]`.
-    /// External crates (e.g. copypaste-daemon's unit tests) must opt in via the
-    /// `test-helpers` feature in their `[dev-dependencies]` entry for this crate.
+    /// This is SAFE even though the DB is unencrypted: `Connection::open_in_memory`
+    /// is a `:memory:` connection that lives only in RAM and is NEVER written to
+    /// disk, so it cannot leak clipboard plaintext the way an unkeyed on-disk file
+    /// would. Durable, key-protected storage still goes exclusively through
+    /// [`Database::open`] (32-byte SQLCipher key). The `test-helpers` feature gates
+    /// ONLY these two `:memory:` constructors — no other production-reachable
+    /// surface — so enabling it in the daemon exposes nothing beyond this transient
+    /// RAM database.
     ///
     /// Uses the default 8 MiB cache; see
     /// [`Database::open_in_memory_with_cache_mb`] to tune it.
@@ -230,9 +238,9 @@ impl Database {
     }
 
     /// Like [`Database::open_in_memory`] but applies `cache_mb` MiB of page
-    /// cache instead of the 8 MiB default.
-    ///
-    /// **Test-only** for the same reason as `open_in_memory` (CopyPaste-9vcn).
+    /// cache instead of the 8 MiB default. Same gating + production-reachability
+    /// (transient `:memory:`, no disk leak) as [`Database::open_in_memory`]
+    /// (CopyPaste-9vcn / CopyPaste-crh3.4).
     #[cfg(any(test, feature = "test-helpers"))]
     pub fn open_in_memory_with_cache_mb(cache_mb: u32) -> Result<Self, DbError> {
         let conn = Connection::open_in_memory()?;
