@@ -163,10 +163,14 @@ internal fun PeerRow(
             peer.latencyMs?.let {
                 MetaRow(label = "RTT", value = "$it ms")
             }
-            // PG-45: show truncated peer fingerprint so the user can verify the
-            // peer's identity inline — mirrors macOS DeviceCard which shows a
-            // truncated fingerprint in the MetaGrid. Format: first16…last8.
-            // formatPeerFingerprint() is the shared helper at the top of this file.
+            // PG-45 / CopyPaste-crh3.45: show the truncated peer fingerprint so the
+            // user can verify a peer's identity inline at ANY time. NOTE: this is an
+            // Android-specific superset — macOS shows the fingerprint only in the SAS
+            // pairing modal (SasPairingModal.tsx), NOT in its device card. Android
+            // surfaces it in BOTH the SAS dialog (CopyPaste-crh3.29) and here, so a
+            // user can re-verify after pairing. (Earlier comment falsely claimed this
+            // mirrors macOS DeviceCard — it does not.) Format: first16…last8 via the
+            // shared formatPeerFingerprint() helper at the top of this file.
             peer.fingerprint.takeIf { it.isNotBlank() }?.let {
                 MetaRow(label = "Fingerprint", value = formatPeerFingerprint(it))
             }
