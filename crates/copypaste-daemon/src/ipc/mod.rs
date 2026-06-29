@@ -1166,6 +1166,46 @@ impl IpcServer {
         self
     }
 
+    /// CopyPaste-crh3.86: run a read-only DB closure on the blocking pool with
+    /// the canonical pool-then-writer-lock fallback, in ONE place.
+    ///
+    /// Every read IPC handler previously copy-pasted ~15 lines: clone the read
+    /// pool + `self.db`, `spawn_blocking`, try `pool.get()` → [`ReadHandle`] else
+    /// `db.blocking_lock()`, run the query, then `await`/join. Any fix to the
+    /// fallback (or its error mapping) had to be applied at every site or the
+    /// behaviour silently diverged. This helper centralises it; callers pass a
+    /// closure over `&dyn DbRead` (the read fns are generic over `DbRead`, so the
+    /// SAME closure body serves both the pooled connection and the writer lock —
+    /// removing the in-branch duplication too) and map the returned value to a
+    /// [`Response`].
+    ///
+    /// Returns `Err(String)` only when the blocking task itself failed (panic /
+    /// runtime shutdown); the inner `Result<T, E>` is the query outcome.
+    async fn with_read_db<T, E, F>(&self, f: F) -> Result<Result<T, E>, String>
+    where
+        F: FnOnce(&dyn DbRead) -> Result<T, E> + Send + 'static,
+        T: Send + 'static,
+        E: Send + 'static,
+    {
+        let pool_opt = self
+            .read_pool
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let db_arc = self.db.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some(pool) = pool_opt {
+                if let Ok(conn) = pool.get() {
+                    return f(&copypaste_core::ReadHandle(conn));
+                }
+            }
+            let db = db_arc.blocking_lock();
+            f(&*db)
+        })
+        .await
+        .map_err(|e| format!("blocking task failed: {e}"))
+    }
+
     /// Share the live relay-handle slot with `daemon::run` (CopyPaste-44rq.67).
     ///
     /// `daemon::run` owns the same `Arc` and writes the started
@@ -3190,34 +3230,11 @@ impl IpcServer {
                     Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
                 }
             }
-            "count" => {
-                let pool_opt = self
-                    .read_pool
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .clone();
-                let db_arc = self.db.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    if let Some(pool) = pool_opt {
-                        if let Ok(conn) = pool.get() {
-                            let handle = copypaste_core::ReadHandle(conn);
-                            return count_items(&handle);
-                        }
-                    }
-                    let db = db_arc.blocking_lock();
-                    count_items(&*db)
-                })
-                .await;
-                match join {
-                    Ok(Ok(n)) => Response::ok(req.id, serde_json::json!({"count": n})),
-                    Ok(Err(e)) => Response::err(req.id, e.to_string()),
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
-                }
-            }
+            "count" => match self.with_read_db(|db| count_items(db)).await {
+                Ok(Ok(n)) => Response::ok(req.id, serde_json::json!({"count": n})),
+                Ok(Err(e)) => Response::err(req.id, e.to_string()),
+                Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
+            },
             "search" => {
                 let query = match req.params.get("query").and_then(|v| v.as_str()) {
                     Some(s) => s.to_string(),
@@ -3250,48 +3267,30 @@ impl IpcServer {
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let pool_opt = self
-                    .read_pool
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .clone();
-                let db_arc = self.db.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    let kf = kind_filter.as_deref();
-                    if let Some(pool) = pool_opt {
-                        if let Ok(conn) = pool.get() {
-                            let handle = copypaste_core::ReadHandle(conn);
-                            // CopyPaste-tteo: batch-fetch previews from FTS after
-                            // the search so search response matches history_page.
-                            let items = search_items_filtered(&handle, &query, limit, kf)?;
-                            let preview_ids: Vec<&str> = items
-                                .iter()
-                                .filter(|it| !it.is_sensitive && it.content_type == "text")
-                                .map(|it| it.id.as_str())
-                                .collect();
-                            let previews = fetch_text_previews_batch(&handle, &preview_ids)
-                                .unwrap_or_default();
-                            return Ok((items, previews));
-                        }
-                    }
-                    let db = db_arc.blocking_lock();
-                    let items = search_items_filtered(&*db, &query, limit, kf)?;
-                    let preview_ids: Vec<&str> = items
-                        .iter()
-                        .filter(|it| !it.is_sensitive && it.content_type == "text")
-                        .map(|it| it.id.as_str())
-                        .collect();
-                    let previews =
-                        fetch_text_previews_batch(&*db, &preview_ids).unwrap_or_default();
-                    Ok::<
-                        (
-                            Vec<copypaste_core::ClipboardItem>,
-                            std::collections::HashMap<String, String>,
-                        ),
-                        copypaste_core::ItemsError,
-                    >((items, previews))
-                })
-                .await;
+                // CopyPaste-crh3.86: single-body closure via with_read_db — the
+                // pool/writer branches used to duplicate this query verbatim.
+                let join = self
+                    .with_read_db(move |db| {
+                        let kf = kind_filter.as_deref();
+                        // CopyPaste-tteo: batch-fetch previews from FTS after the
+                        // search so search response matches history_page.
+                        let items = search_items_filtered(db, &query, limit, kf)?;
+                        let preview_ids: Vec<&str> = items
+                            .iter()
+                            .filter(|it| !it.is_sensitive && it.content_type == "text")
+                            .map(|it| it.id.as_str())
+                            .collect();
+                        let previews =
+                            fetch_text_previews_batch(db, &preview_ids).unwrap_or_default();
+                        Ok::<
+                            (
+                                Vec<copypaste_core::ClipboardItem>,
+                                std::collections::HashMap<String, String>,
+                            ),
+                            copypaste_core::ItemsError,
+                        >((items, previews))
+                    })
+                    .await;
                 match join {
                     Ok(Ok((items, preview_map))) => {
                         let json_items: Vec<_> = items
@@ -3348,11 +3347,9 @@ impl IpcServer {
                     Ok(Err(e)) => {
                         Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e.to_string())
                     }
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
+                    // CopyPaste-crh3.86: with_read_db already formats the join
+                    // failure; surface it directly (no double "blocking task failed").
+                    Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
                 }
             }
             "copy" | "paste" => {
@@ -3563,58 +3560,36 @@ impl IpcServer {
                     ),
                 }
             }
-            "stats" => {
-                let pool_opt = self
-                    .read_pool
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .clone();
-                let db_arc = self.db.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    // Helper closure: compute (total, sensitive_count) from any
-                    // connection that implements DbRead. The sensitive count uses
-                    // a raw SQL query directly on conn() rather than a helper.
-                    macro_rules! stats_from_conn {
-                        ($c:expr) => {{
-                            let total = copypaste_core::count_items($c).unwrap_or(0);
-                            let sensitive_count: i64 = $c
-                                .conn()
-                                .query_row(
-                                    "SELECT COUNT(*) FROM clipboard_items WHERE is_sensitive = 1",
-                                    [],
-                                    |row| row.get(0),
-                                )
-                                .unwrap_or(0);
-                            (total, sensitive_count)
-                        }};
-                    }
-                    if let Some(pool) = pool_opt {
-                        if let Ok(conn) = pool.get() {
-                            let handle = copypaste_core::ReadHandle(conn);
-                            return stats_from_conn!(&handle);
-                        }
-                    }
-                    let db = db_arc.blocking_lock();
-                    stats_from_conn!(&*db)
+            "stats" => match self
+                .with_read_db(|db| {
+                    // CopyPaste-crh3.86: single-body closure over &dyn DbRead
+                    // (the sensitive count is a raw query on the trait's conn()).
+                    let total = copypaste_core::count_items(db).unwrap_or(0);
+                    let sensitive_count: i64 = db
+                        .conn()
+                        .query_row(
+                            "SELECT COUNT(*) FROM clipboard_items WHERE is_sensitive = 1",
+                            [],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0);
+                    Ok::<_, std::convert::Infallible>((total, sensitive_count))
                 })
-                .await;
-                match join {
-                    Ok((total, sensitive_count)) => Response::ok(
-                        req.id,
-                        serde_json::json!({
-                            "total_items": total,
-                            "sensitive_items": sensitive_count,
-                            "version": "1",
-                            "build_version": BUILD_VERSION,
-                        }),
-                    ),
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
-                }
-            }
+                .await
+            {
+                Ok(Ok((total, sensitive_count))) => Response::ok(
+                    req.id,
+                    serde_json::json!({
+                        "total_items": total,
+                        "sensitive_items": sensitive_count,
+                        "version": "1",
+                        "build_version": BUILD_VERSION,
+                    }),
+                ),
+                // `Infallible` — the closure never returns Err.
+                Ok(Err(never)) => match never {},
+                Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
+            },
             "pin" => {
                 // Pin an item (remove expiry so it's never auto-deleted)
                 let id = match req.params.get("id").and_then(|v| v.as_str()) {
@@ -4409,21 +4384,12 @@ impl IpcServer {
                     .get("offset")
                     .and_then(|v| v.as_u64())
                     .unwrap_or(0) as usize;
-                let pool_opt = self
-                    .read_pool
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .clone();
-                let db_arc = self.db.clone();
-                let join = tokio::task::spawn_blocking(move || {
-                    // Build the history page using a common helper that accepts
-                    // &dyn DbRead.  We branch here to acquire the right resource
-                    // (pooled connection vs write-mutex guard) before calling
-                    // through to the shared logic below.
-
+                // CopyPaste-crh3.86: with_read_db centralises the pool/writer
+                // fallback; build_page already accepts &dyn DbRead so the branch
+                // collapses to a single call.
+                let join = self
+                    .with_read_db(move |db| {
                     // Helper: build json_items + total from any DbRead source.
-                    // Defined inline so it captures `limit`/`offset` from the
-                    // surrounding closure without needing a function pointer.
                     fn build_page(
                         db: &dyn copypaste_core::DbRead,
                         limit: usize,
@@ -4535,16 +4501,9 @@ impl IpcServer {
                         Ok((json_items, total))
                     }
 
-                    if let Some(pool) = pool_opt {
-                        if let Ok(conn) = pool.get() {
-                            let handle = copypaste_core::ReadHandle(conn);
-                            return build_page(&handle, limit, offset);
-                        }
-                    }
-                    let db = db_arc.blocking_lock();
-                    build_page(&*db, limit, offset)
-                })
-                .await;
+                    build_page(db, limit, offset)
+                    })
+                    .await;
                 // Snapshot the own device id outside the blocking task (it lives on self).
                 let own_device_id = self.local_device_id.clone().unwrap_or_default();
                 match join {
@@ -4557,11 +4516,8 @@ impl IpcServer {
                         }),
                     ),
                     Ok(Err(e)) => Response::err(req.id, e.to_string()),
-                    Err(e) => Response::err_with_code(
-                        req.id,
-                        ERR_CODE_INTERNAL_ERROR,
-                        format!("blocking task failed: {e}"),
-                    ),
+                    // CopyPaste-crh3.86: with_read_db already formats the join failure.
+                    Err(e) => Response::err_with_code(req.id, ERR_CODE_INTERNAL_ERROR, e),
                 }
             }
             "get_config" => {
