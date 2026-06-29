@@ -5,7 +5,6 @@ use std::sync::{
     Arc,
 };
 
-use base64::Engine as _;
 use copypaste_core::{derive_relay_inbox_id, encrypt_for_cloud, AppConfig, ClipboardItem, SyncKey};
 use tokio::sync::{Mutex, Notify};
 
@@ -14,12 +13,21 @@ use crate::sync_in_flight::SyncInFlightGuard;
 
 use super::pasteboard::relay_should_skip_wifi;
 use super::registration::{ensure_token, load_initial_token, snapshot_sync_key};
-use super::types::{PushBody, RelayEnvelope, RelayError};
+use super::types::{PushBody, RelayError};
+use super::wire::{encode_v2, RelayWireMeta};
 
 // ── Envelope build ────────────────────────────────────────────────────────────
 
-/// Build the relay `content_b64` for one item: encrypt the wrapped plaintext for
-/// the cloud (sync key + item_id AAD), wrap it in the JSON envelope, base64 it.
+/// Build the relay `content_b64` for one item.
+///
+/// CopyPaste-crh3.69: this now emits the **V2 single-base64 frame**
+/// (`base64(0x01 || u32_le(meta_len) || meta_json || raw_ciphertext)`) instead
+/// of the legacy double-base64 envelope (`base64(JSON{..,ct_b64:base64(ct)})`),
+/// eliminating the ~33 % bloat from base64-ing the already-base64 ciphertext a
+/// second time. The ciphertext is the SAME `encrypt_for_cloud` blob (sync key +
+/// item_id AAD) the Supabase path produces — only the wire framing changed.
+/// Receivers decode BOTH formats (see [`super::wire::decode_payload`]) so
+/// in-flight legacy inbox items still ingest.
 ///
 /// Returns `Ok(None)` when the item should be skipped (e.g. oversized, decrypt
 /// failure) — never logs plaintext.
@@ -29,11 +37,11 @@ pub(super) fn build_content_b64(
     sync_key: &SyncKey,
 ) -> Option<String> {
     // CopyPaste-cm0u: a tombstone has content = NULL — there is nothing to
-    // decrypt. Emit a delete envelope (empty ct_b64, deleted=true) instead of
+    // decrypt. Emit a delete frame (empty ciphertext, deleted=true) instead of
     // calling decrypt_item_plaintext on NULL (which Err'd and dropped the
     // delete, so deletes never propagated over relay-only topologies).
-    let ct_b64 = if item.deleted {
-        String::new()
+    let ct: Vec<u8> = if item.deleted {
+        Vec::new()
     } else {
         let plaintext = match decrypt_item_plaintext(item, local_key) {
             Ok(p) => p,
@@ -49,7 +57,7 @@ pub(super) fn build_content_b64(
                 return None;
             }
         };
-        let blob = match encrypt_for_cloud(sync_key, &item.item_id, &wrapped) {
+        match encrypt_for_cloud(sync_key, &item.item_id, &wrapped) {
             Ok(b) => b,
             Err(e) => {
                 tracing::warn!(
@@ -58,13 +66,11 @@ pub(super) fn build_content_b64(
                 );
                 return None;
             }
-        };
-        base64::engine::general_purpose::STANDARD.encode(&blob)
+        }
     };
-    let envelope = RelayEnvelope {
+    let meta = RelayWireMeta {
         item_id: item.item_id.clone(),
         lamport_ts: item.lamport_ts,
-        ct_b64,
         // CopyPaste-cm0u: carry delete + pin state so they propagate over relay.
         deleted: item.deleted,
         pinned: item.pinned,
@@ -73,17 +79,16 @@ pub(super) fn build_content_b64(
         wall_time: item.wall_time,
         origin_device_id: item.origin_device_id.clone(),
     };
-    let json = match serde_json::to_vec(&envelope) {
-        Ok(j) => j,
-        Err(e) => {
+    match encode_v2(&meta, &ct) {
+        Some(s) => Some(s),
+        None => {
             tracing::warn!(
-                "relay-sync: envelope encode id={} failed: {e}; skipping",
+                "relay-sync: v2 frame encode id={} failed; skipping",
                 item.id
             );
-            return None;
+            None
         }
-    };
-    Some(base64::engine::general_purpose::STANDARD.encode(json))
+    }
 }
 
 // ── Push ──────────────────────────────────────────────────────────────────────

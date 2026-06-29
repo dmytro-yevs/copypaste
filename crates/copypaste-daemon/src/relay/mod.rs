@@ -81,6 +81,7 @@ mod registration;
 mod token;
 mod types;
 mod watermark;
+mod wire;
 
 // ── Public re-exports ─────────────────────────────────────────────────────────
 
@@ -545,12 +546,13 @@ mod tests {
         assert_eq!(items[0].wall_time, 99);
     }
 
-    /// Envelope round-trip: build_content_b64 → decode (base64 → JSON → ct_b64 →
-    /// decrypt_from_cloud) recovers the original plaintext, proving the relay
-    /// envelope carries the SAME blob shape the Supabase path produces.
+    /// Envelope round-trip: build_content_b64 (now the CopyPaste-crh3.69 V2
+    /// single-base64 frame) → wire::decode_payload → decrypt_from_cloud recovers
+    /// the original plaintext, proving the V2 frame carries the SAME ciphertext
+    /// blob the Supabase path produces.
     #[test]
     fn envelope_round_trips_through_cloud_crypto() {
-        use crate::sync_common::decode_payload_ct;
+        use super::wire::{decode_payload, RELAY_WIRE_V2};
         use base64::Engine as _;
         use copypaste_core::decrypt_from_cloud;
 
@@ -564,15 +566,18 @@ mod tests {
         let content_b64 =
             build_content_b64(&item, &local_key, &sync_key).expect("build content_b64");
 
-        // Decode the envelope exactly as the receiver does.
-        let env_bytes = base64::engine::general_purpose::STANDARD
+        // The new wire is a single-base64 V2 frame: the first decoded byte is the
+        // V2 marker, NOT a JSON brace (proving the outer base64 is gone).
+        let raw = base64::engine::general_purpose::STANDARD
             .decode(&content_b64)
-            .expect("b64 decode envelope");
-        let env: RelayEnvelope = serde_json::from_slice(&env_bytes).expect("parse envelope");
+            .expect("b64 decode frame");
+        assert_eq!(raw[0], RELAY_WIRE_V2, "send path must emit V2 frame");
+        assert_ne!(raw[0], b'{', "must NOT be a legacy double-base64 envelope");
+
+        let env = decode_payload(&content_b64).expect("decode v2 payload");
         assert_eq!(env.item_id, "item-rt-1");
         assert_eq!(env.lamport_ts, 5);
-        let blob = decode_payload_ct(&env.ct_b64).expect("decode ct_b64");
-        let recovered = decrypt_from_cloud(&sync_key, &env.item_id, &blob).expect("decrypt");
+        let recovered = decrypt_from_cloud(&sync_key, &env.item_id, &env.ct).expect("decrypt");
         assert_eq!(recovered, plaintext);
     }
 
@@ -1007,10 +1012,11 @@ mod tests {
     }
 
     /// A tombstone built from a deleted ClipboardItem encodes as a
-    /// `deleted=true` envelope WITHOUT attempting to decrypt NULL content.
+    /// `deleted=true` V2 frame WITHOUT attempting to decrypt NULL content, and
+    /// the frame's raw ciphertext tail is empty.
     #[test]
     fn build_content_b64_emits_tombstone_envelope_for_deleted_item() {
-        use base64::Engine as _;
+        use super::wire::decode_payload;
 
         let local_key = zeroize::Zeroizing::new([6u8; 32]);
         let sync_key = SyncKey::from_bytes(skey("relay-build-tomb-pass"));
@@ -1023,12 +1029,12 @@ mod tests {
 
         let content_b64 =
             build_content_b64(&item, &local_key, &sync_key).expect("tombstone must build");
-        let env_bytes = base64::engine::general_purpose::STANDARD
-            .decode(&content_b64)
-            .expect("b64");
-        let env: RelayEnvelope = serde_json::from_slice(&env_bytes).expect("parse env");
-        assert!(env.deleted, "tombstone envelope carries deleted=true");
-        assert!(env.ct_b64.is_empty(), "tombstone envelope has empty ct_b64");
+        let env = decode_payload(&content_b64).expect("decode tombstone frame");
+        assert!(env.deleted, "tombstone frame carries deleted=true");
+        assert!(
+            env.ct.is_empty(),
+            "tombstone frame has empty ciphertext tail"
+        );
         assert_eq!(env.item_id, "item-tomb");
     }
 

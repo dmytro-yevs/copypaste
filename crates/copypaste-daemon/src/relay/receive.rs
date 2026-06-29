@@ -6,7 +6,6 @@ use std::sync::{
     Arc,
 };
 
-use base64::Engine as _;
 use copypaste_core::{
     decrypt_from_cloud, exists_item_by_item_id, get_item_by_item_id, insert_item, insert_tombstone,
     prune_to_cap, soft_delete_item, AppConfig, Database, SyncKey,
@@ -17,7 +16,7 @@ use copypaste_core::{
 use copypaste_sync::merge::{remote_wins, RemoteMeta};
 use tokio::sync::{Mutex, Notify};
 
-use crate::sync_common::{build_local_item, decode_payload_ct, replace_cloud_item_by_item_id};
+use crate::sync_common::{build_local_item, replace_cloud_item_by_item_id};
 use crate::sync_in_flight::SyncInFlightGuard;
 
 use super::pasteboard::{
@@ -25,8 +24,9 @@ use super::pasteboard::{
     relay_should_skip_wifi,
 };
 use super::registration::{ensure_token, load_initial_token, snapshot_sync_key};
-use super::types::{PullItem, RelayEnvelope, RelayError};
+use super::types::{PullItem, RelayError};
 use super::watermark::{load_watermark, save_watermark, Watermark};
+use super::wire::decode_payload;
 
 // ── Pull ─────────────────────────────────────────────────────────────────────
 
@@ -93,37 +93,22 @@ pub(super) fn ingest_page_blocking(
             };
         }
 
-        // Decode the envelope: base64 → JSON → ct_b64 → ciphertext.
-        let env_bytes = match base64::engine::general_purpose::STANDARD.decode(&row.content_b64) {
-            Ok(b) => b,
+        // CopyPaste-crh3.69: version-gated decode of EITHER wire format —
+        // legacy V1 `base64(JSON{..,ct_b64})` (in-flight inbox items written by
+        // older daemons) OR the new V2 single-base64 frame
+        // `base64(0x01||u32_le(meta_len)||meta_json||raw_ct)`. Both funnel into
+        // the same metadata + raw ciphertext shape.
+        let env = match decode_payload(&row.content_b64) {
+            Ok(d) => d,
             Err(e) => {
                 tracing::warn!(
-                    "relay-sync: id={} content_b64 decode failed: {e}; skipping",
+                    "relay-sync: id={} wire decode failed: {e}; skipping",
                     row.id
                 );
                 continue;
             }
         };
-        let env: RelayEnvelope = match serde_json::from_slice(&env_bytes) {
-            Ok(e) => e,
-            Err(e) => {
-                tracing::warn!(
-                    "relay-sync: id={} envelope parse failed: {e}; skipping",
-                    row.id
-                );
-                continue;
-            }
-        };
-        let blob = match decode_payload_ct(&env.ct_b64) {
-            Ok(b) => b,
-            Err(e) => {
-                tracing::warn!(
-                    "relay-sync: id={} ct_b64 decode failed: {e}; skipping",
-                    row.id
-                );
-                continue;
-            }
-        };
+        let blob: &[u8] = &env.ct;
 
         // LWW dedup on the cross-device item_id.
         let existing = match get_item_by_item_id(db, &env.item_id) {
@@ -209,7 +194,7 @@ pub(super) fn ingest_page_blocking(
         }
 
         // Decrypt with the sync key (AAD = item_id + cloud schema v5).
-        let plaintext = match decrypt_from_cloud(&sk, &env.item_id, &blob) {
+        let plaintext = match decrypt_from_cloud(&sk, &env.item_id, blob) {
             Ok(p) => p,
             Err(e) => {
                 tracing::warn!(

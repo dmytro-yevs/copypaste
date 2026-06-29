@@ -449,6 +449,166 @@ class SyncManager(
                     null
                 }
             }
+
+            // ── CopyPaste-crh3.69: single-base64 V2 wire framing ──────────────────
+            //
+            // The legacy V1 wire was base64(JSON{..,ct_b64:base64(ct)}) — the
+            // ciphertext was base64-encoded into ct_b64 then the WHOLE JSON
+            // base64-encoded again (~33 % bloat). V2 carries the ciphertext RAW as
+            // the frame tail so it is base64-encoded exactly once:
+            //
+            //   base64( 0x01 || u32_le(metaLen) || metaJson || rawCiphertext )
+            //
+            // Byte-compatible with the daemon's `relay::wire` module. The leading
+            // decoded byte is the version discriminator: '{' (0x7B) → legacy V1
+            // JSON envelope; 0x01 → V2 frame.
+            //
+            // The pure framing ([buildV2FrameBytes] / [parseV2FrameBytes]) is split
+            // out from the base64 boundary so it is unit-testable WITHOUT the
+            // (unit-test-stubbed) android.util.Base64.
+
+            /** Wire version marker for the V2 single-base64 frame (CopyPaste-crh3.69). */
+            const val RELAY_WIRE_V2: Byte = 0x01
+
+            /** A V2 frame parsed to metadata + RAW ciphertext (pre-base64). */
+            class WireFrameV2(
+                val itemId: String,
+                val lamportTs: Long,
+                val deleted: Boolean,
+                val pinned: Boolean,
+                val pinOrder: Double?,
+                val wallTime: Long,
+                val originDeviceId: String,
+                val ct: ByteArray,
+            )
+
+            /**
+             * Build the RAW V2 frame bytes (NO base64):
+             * `0x01 || u32_le(metaLen) || metaJson || ct`. [ct] is the RAW
+             * cloud-encrypted blob (empty for a tombstone). The metadata JSON uses
+             * the SAME field names the daemon's `RelayWireMeta` serde expects (no
+             * `ct_b64` — the ciphertext is the frame tail).
+             */
+            fun buildV2FrameBytes(
+                itemId: String,
+                lamportTs: Long,
+                deleted: Boolean,
+                pinned: Boolean,
+                pinOrder: Double?,
+                wallTime: Long,
+                originDeviceId: String,
+                ct: ByteArray,
+            ): ByteArray {
+                val metaJson = org.json.JSONObject().apply {
+                    put("item_id", itemId)
+                    put("lamport_ts", lamportTs)
+                    put("deleted", deleted)
+                    put("pinned", pinned)
+                    if (pinOrder != null) put("pin_order", pinOrder) else put("pin_order", org.json.JSONObject.NULL)
+                    put("wall_time", wallTime)
+                    put("origin_device_id", originDeviceId)
+                }.toString().toByteArray(Charsets.UTF_8)
+                val metaLen = metaJson.size
+                return java.io.ByteArrayOutputStream(1 + 4 + metaLen + ct.size).apply {
+                    write(RELAY_WIRE_V2.toInt())
+                    // u32 little-endian length prefix (matches Rust `to_le_bytes`).
+                    write(metaLen and 0xFF)
+                    write((metaLen ushr 8) and 0xFF)
+                    write((metaLen ushr 16) and 0xFF)
+                    write((metaLen ushr 24) and 0xFF)
+                    write(metaJson)
+                    write(ct)
+                }.toByteArray()
+            }
+
+            /**
+             * Parse RAW V2 frame bytes (already base64-decoded, including the
+             * leading [RELAY_WIRE_V2] marker) into metadata + raw ciphertext. Null
+             * on a malformed/truncated frame. Does NOT touch base64.
+             */
+            fun parseV2FrameBytes(bytes: ByteArray): WireFrameV2? {
+                if (bytes.size < 5 || bytes[0] != RELAY_WIRE_V2) return null
+                val metaLen = (bytes[1].toInt() and 0xFF) or
+                    ((bytes[2].toInt() and 0xFF) shl 8) or
+                    ((bytes[3].toInt() and 0xFF) shl 16) or
+                    ((bytes[4].toInt() and 0xFF) shl 24)
+                if (metaLen < 0) return null
+                val metaStart = 5
+                val metaEnd = metaStart + metaLen
+                if (metaEnd < metaStart || metaEnd > bytes.size) return null
+                return try {
+                    val o = org.json.JSONObject(String(bytes, metaStart, metaLen, Charsets.UTF_8))
+                    val itemId = o.optString("item_id").takeIf { it.isNotBlank() } ?: return null
+                    val pinOrder = if (o.isNull("pin_order")) null else o.optDouble("pin_order").takeUnless { it.isNaN() }
+                    WireFrameV2(
+                        itemId = itemId,
+                        lamportTs = o.optLong("lamport_ts", 0L),
+                        deleted = o.optBoolean("deleted", false),
+                        pinned = o.optBoolean("pinned", false),
+                        pinOrder = pinOrder,
+                        wallTime = o.optLong("wall_time", 0L),
+                        originDeviceId = o.optString("origin_device_id", ""),
+                        ct = bytes.copyOfRange(metaEnd, bytes.size),
+                    )
+                } catch (_: Exception) {
+                    null
+                }
+            }
+
+            /**
+             * Encode a V2 frame and base64-wrap it for `content_b64`. Thin
+             * android.util.Base64 boundary over [buildV2FrameBytes].
+             */
+            fun encodeWireV2(
+                itemId: String,
+                lamportTs: Long,
+                deleted: Boolean,
+                pinned: Boolean,
+                pinOrder: Double?,
+                wallTime: Long,
+                originDeviceId: String,
+                ct: ByteArray,
+            ): String = Base64.encodeToString(
+                buildV2FrameBytes(itemId, lamportTs, deleted, pinned, pinOrder, wallTime, originDeviceId, ct),
+                Base64.NO_WRAP,
+            )
+
+            /**
+             * Version-gated decode of a relay `content_b64` into a [RelayEnvelope].
+             * Accepts BOTH the legacy V1 double-base64 envelope (decoded bytes start
+             * with `{`) and the V2 single-base64 frame (decoded bytes start with
+             * [RELAY_WIRE_V2]). Returns null on malformed/undecodable input.
+             *
+             * For V2 the raw ciphertext tail is re-exposed as [RelayEnvelope.ctB64]
+             * (base64) so the downstream decrypt path is byte-for-byte unchanged.
+             */
+            fun decodeWire(contentB64: String): RelayEnvelope? {
+                val bytes = try {
+                    Base64.decode(contentB64, Base64.DEFAULT)
+                } catch (_: Exception) {
+                    return null
+                }
+                if (bytes.isEmpty()) return null
+                return when (bytes[0]) {
+                    RELAY_WIRE_V2 -> {
+                        val f = parseV2FrameBytes(bytes) ?: return null
+                        // Reject empty ciphertext for live items; tombstones carry empty ct.
+                        if (f.ct.isEmpty() && !f.deleted) return null
+                        RelayEnvelope(
+                            itemId = f.itemId,
+                            lamportTs = f.lamportTs,
+                            ctB64 = if (f.ct.isEmpty()) "" else Base64.encodeToString(f.ct, Base64.NO_WRAP),
+                            deleted = f.deleted,
+                            pinned = f.pinned,
+                            pinOrder = f.pinOrder,
+                            wallTime = f.wallTime,
+                            originDeviceId = f.originDeviceId,
+                        )
+                    }
+                    '{'.code.toByte() -> parse(String(bytes, Charsets.UTF_8))
+                    else -> null
+                }
+            }
         }
     }
 
@@ -486,14 +646,12 @@ class SyncManager(
         // via the Supabase-independent resolveCloudSyncKey — the same source
         // relayRegistration()/pushToRelay() already use.
 
-        val envelopeJson = try {
-            String(Base64.decode(item.contentB64, Base64.DEFAULT), Charsets.UTF_8)
-        } catch (e: Exception) {
-            Log.w(TAG, "ingestRelaySseItem: content_b64 not valid base64 (id=${item.id})")
-            return@withContext false
-        }
-        val envelope = RelayEnvelope.parse(envelopeJson) ?: run {
-            Log.w(TAG, "ingestRelaySseItem: malformed envelope (id=${item.id})")
+        // CopyPaste-crh3.69: version-gated decode — accepts BOTH the legacy V1
+        // double-base64 envelope (in-flight inbox items written by older daemons)
+        // and the new V2 single-base64 frame. The decoder re-exposes the raw
+        // ciphertext as ctB64 so the downstream decrypt path is unchanged.
+        val envelope = RelayEnvelope.decodeWire(item.contentB64) ?: run {
+            Log.w(TAG, "ingestRelaySseItem: malformed/undecodable content_b64 (id=${item.id})")
             return@withContext false
         }
 
@@ -774,32 +932,32 @@ class SyncManager(
             return@withContext false
         }
 
-        // Build the envelope. For live items, cloud_encrypt binds item_id into the
-        // AEAD AAD; for tombstones, ct_b64 is empty (no content to encrypt) and
-        // deleted=true so the receiver takes the tombstone fast-path — mirrors daemon.
+        // Build the V2 wire frame (CopyPaste-crh3.69: single-base64). For live
+        // items, cloud_encrypt binds item_id into the AEAD AAD; the raw blob is
+        // carried as the frame tail (NOT base64'd into ct_b64 + base64'd again).
+        // For tombstones the ciphertext is empty and deleted=true so the receiver
+        // takes the tombstone fast-path — mirrors daemon `relay::wire::encode_v2`.
         val syncKeyBytes = if (!deleted) resolveCloudSyncKey(s) ?: run {
             Log.w(TAG, "pushToRelay: no cloud sync key")
             return@withContext false
         } else null
         val wallTime = System.currentTimeMillis()
         val contentB64 = try {
-            val ctB64 = if (deleted) {
-                ""
+            val ct = if (deleted) {
+                ByteArray(0)
             } else {
-                val blob = cloud_encrypt(itemId, plaintext, syncKeyBytes!!)
-                Base64.encodeToString(blob, Base64.NO_WRAP)
+                cloud_encrypt(itemId, plaintext, syncKeyBytes!!)
             }
-            val envelopeJson = RelayEnvelope(
+            RelayEnvelope.encodeWireV2(
                 itemId = itemId,
                 lamportTs = lamportTs,
-                ctB64 = ctB64,
                 deleted = deleted,
                 pinned = pinned,
                 pinOrder = pinOrder,
                 wallTime = wallTime,
                 originDeviceId = originDeviceId,
-            ).encode()
-            Base64.encodeToString(envelopeJson.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)
+                ct = ct,
+            )
         } catch (e: Exception) {
             Log.w(TAG, "pushToRelay: envelope build failed: ${e.message}")
             return@withContext false
