@@ -24,6 +24,9 @@
     <!-- History screen — §9 empty states + search filter -->
     <string name="empty_history">Nothing copied yet</string>
     <string name="empty_history_subtitle">Copy something and it will appear here.</string>
+    <!-- CopyPaste-crh3.31: private-mode empty state (parity with macOS HistoryView). -->
+    <string name="empty_history_private">Private mode is on</string>
+    <string name="empty_history_private_subtitle">Clipboard is not recorded while private mode is active.</string>
     <string name="empty_search_title">No results for \"%1$s\"</string>
     <string name="empty_search_subtitle">Try a different search term.</string>
     <string name="history_filter_placeholder">Filter…</string>

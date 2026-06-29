@@ -75,7 +75,7 @@ internal fun LoadingBox(padding: PaddingValues) {
  *   - Entrance: fade + scale-in, motionDuration(Motion.Slow), EaseOutExpo.
  */
 @Composable
-internal fun EmptyHistoryState(padding: PaddingValues) {
+internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = false) {
     val c = LocalIdeColors.current
     val translucent = rememberTranslucency()
     val reducedMotion = rememberReducedMotion()
@@ -139,13 +139,22 @@ internal fun EmptyHistoryState(padding: PaddingValues) {
                         }
                     }
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // CopyPaste-crh3.31: tailor the empty state to private mode
+                        // (parity with macOS HistoryView), so the user is not misled
+                        // into thinking nothing was ever copied.
                         Text(
-                            text = stringResource(R.string.empty_history),
+                            text = stringResource(
+                                if (isPrivateMode) R.string.empty_history_private
+                                else R.string.empty_history,
+                            ),
                             style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                             color = c.text,
                         )
                         Text(
-                            text = stringResource(R.string.empty_history_subtitle),
+                            text = stringResource(
+                                if (isPrivateMode) R.string.empty_history_private_subtitle
+                                else R.string.empty_history_subtitle,
+                            ),
                             style = MaterialTheme.typography.bodyMedium,
                             color = c.dim,
                         )

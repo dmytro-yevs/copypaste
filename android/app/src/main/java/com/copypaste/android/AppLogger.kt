@@ -90,23 +90,32 @@ object AppLogger {
         }
     }
 
+    // CopyPaste-crh3.25: the message is [redact]ed BEFORE going to logcat as
+    // well as to the on-disk file. logcat is READ_LOGS-protected, but redacting
+    // here is defense-in-depth so a future call site that accidentally passes a
+    // token/UUID/JWT cannot leak it via `adb logcat`. Note: an attached
+    // Throwable's stack trace is still logged to logcat unredacted by android's
+    // Log (the on-disk path redacts it via write()); callers MUST NOT pass
+    // exceptions whose message/stack carries secret material.
     fun d(tag: String, msg: String) {
-        Log.d(tag, msg)
+        Log.d(tag, redact(msg))
         write("D", tag, msg, null)
     }
 
     fun i(tag: String, msg: String) {
-        Log.i(tag, msg)
+        Log.i(tag, redact(msg))
         write("I", tag, msg, null)
     }
 
     fun w(tag: String, msg: String, t: Throwable? = null) {
-        if (t != null) Log.w(tag, msg, t) else Log.w(tag, msg)
+        val safe = redact(msg)
+        if (t != null) Log.w(tag, safe, t) else Log.w(tag, safe)
         write("W", tag, msg, t)
     }
 
     fun e(tag: String, msg: String, t: Throwable? = null) {
-        if (t != null) Log.e(tag, msg, t) else Log.e(tag, msg)
+        val safe = redact(msg)
+        if (t != null) Log.e(tag, safe, t) else Log.e(tag, safe)
         write("E", tag, msg, t)
     }
 

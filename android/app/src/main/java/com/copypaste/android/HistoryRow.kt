@@ -536,6 +536,12 @@ internal fun HistoryRow(
                 // Shows the originating app icon so users know where the image came from.
                 // Mirrors the badge already present on text rows (line 3275+).
                 SourceAppBadge(sourceApp = item.sourceApp, ctx = ctx, colors = c)
+                // CopyPaste-crh3.32: origin-device badge on image rows (parity with
+                // text rows / macOS, which renders DeviceBadge for all content types).
+                val imageOriginId = item.originDeviceId
+                if (!selectionMode && imageOriginId != null && ownDeviceId.isNotBlank()) {
+                    OriginDeviceBadge(deviceId = imageOriginId, ownDeviceId = ownDeviceId, peers = peers)
+                }
                 if (!selectionMode) {
                     Spacer(Modifier.width(4.dp))
                     if (reorderMode && item.pinned) {
@@ -650,6 +656,12 @@ internal fun HistoryRow(
                             maxLines = 1,
                         )
                         SourceAppBadge(sourceApp = item.sourceApp, ctx = ctx, colors = c)
+                        // CopyPaste-crh3.32: origin-device badge on file rows (parity
+                        // with text rows / macOS — DeviceBadge on all content types).
+                        val fileOriginId = item.originDeviceId
+                        if (!selectionMode && fileOriginId != null && ownDeviceId.isNotBlank()) {
+                            OriginDeviceBadge(deviceId = fileOriginId, ownDeviceId = ownDeviceId, peers = peers)
+                        }
                     }
                 }
                 if (!selectionMode) {

@@ -698,8 +698,9 @@ fun HistoryScreen(
         Box(modifier = Modifier.fillMaxSize()) {
             when {
                 loading && sortedItems.isEmpty() -> LoadingBox(innerPadding)
-                // §9: history completely empty
-                sortedItems.isEmpty() -> EmptyHistoryState(innerPadding)
+                // §9: history completely empty — CopyPaste-crh3.31: show the
+                // private-mode message when recording is paused (parity w/ macOS).
+                sortedItems.isEmpty() -> EmptyHistoryState(innerPadding, isPrivateMode = settings.privateMode)
                 // §9: search returned no results (counting device filter too)
                 deviceFilteredItems.isEmpty() -> EmptySearchState(innerPadding, searchQuery.trim())
                 else -> HistoryList(
