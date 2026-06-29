@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
-import com.copypaste.android.ui.theme.SkinBackground
 
 // ─────────────────────────────────────────────────────────────────────────────
 // §7 Liquid Glass Devices parity — pure logic helpers (testable without SDK)
@@ -144,39 +143,14 @@ internal fun pulseDotColorRole(online: Boolean): PulseDotColorRole =
     if (online) PulseDotColorRole.ONLINE else PulseDotColorRole.OFFLINE
 
 /**
- * True when the aurora animated canvas should be painted as the screen backdrop.
- *
- * Gating rules (A-C2):
- *  - [background] must be [SkinBackground.AURORA] (Classic only).
- *  - [translucent] must be true (user pref; same gate as before).
- *  - [paintCanvasBackdrop] must be true (standalone vs. embedded gate; same as before).
- *
- * Classic keeps the SAME condition as before — byte-identical output.
- * Quiet (FLAT) and Vapor (TINT_BLOB) return false here.
- *
- * Extracted so it can be unit-tested without the Compose runtime.
+ * True when the calm screen-canvas backdrop should be painted (STYLEGUIDE §6 —
+ * the aurora/tint-blob skin gating is removed). A frosted backdrop is painted
+ * only when translucency is on and the screen owns its backdrop.
  */
-internal fun shouldPaintAurora(
-    background: SkinBackground,
+internal fun shouldPaintCanvas(
     translucent: Boolean,
     paintCanvasBackdrop: Boolean,
-): Boolean = background == SkinBackground.AURORA && translucent && paintCanvasBackdrop
-
-/**
- * True when a static tinted blob should be painted as the screen backdrop.
- *
- * Gating rules (A-C2):
- *  - [background] must be [SkinBackground.TINT_BLOB] (Vapor only).
- *  - [translucent] must be true (same pref gate as aurora).
- *  - [paintCanvasBackdrop] must be true (standalone vs. embedded gate).
- *
- * Extracted so it can be unit-tested without the Compose runtime.
- */
-internal fun shouldPaintTintBlob(
-    background: SkinBackground,
-    translucent: Boolean,
-    paintCanvasBackdrop: Boolean,
-): Boolean = background == SkinBackground.TINT_BLOB && translucent && paintCanvasBackdrop
+): Boolean = translucent && paintCanvasBackdrop
 
 /**
  * CopyPaste-mgkr / CopyPaste-1jms.4 (NG-3): trust label for a paired peer.

@@ -56,16 +56,10 @@ import com.copypaste.android.ui.theme.EmptyStateCard
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalPalette
-import com.copypaste.android.ui.theme.LocalSkin
-import com.copypaste.android.ui.theme.SkinBackground
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.ideTextFieldColors
-import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.skinTokens
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -113,22 +107,10 @@ fun LogViewerScreen(onBack: () -> Unit) {
     val scope = rememberCoroutineScope()
     val listState: LazyListState = rememberLazyListState()
 
-    // ── Skin / background tokens (A-C6) ────────────────────────────────────
-    // Gate the aurora/canvas backdrop by tok.background so CLASSIC gets the
-    // animated aurora, QUIET gets a plain solid background, and VAPOR gets a
-    // tint-blob canvas. CLASSIC must remain byte-identical (always AURORA).
-    val skin = LocalSkin.current
-    val tok = skinTokens(skin)
+    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-
-    // Which background variant to draw:
-    //   AURORA    → full palette-aware animated aurora (auroraCanvas modifier)
-    //   TINT_BLOB → canonical tintBlobCanvas() — same helper used on every other screen
-    //               (VISA-6: was falling through to auroraCanvas; now uses the shared
-    //                implementation so Vapor looks identical on LogViewer and History/About).
-    //   FLAT      → no canvas — plain c.bg solid fill
-    val paintCanvas = translucent && tok.background != SkinBackground.FLAT
+    val paintCanvas = translucent
 
     // ── State ──────────────────────────────────────────────────────────────
     val toastState = remember { GlassToastState() }
@@ -230,17 +212,7 @@ fun LogViewerScreen(onBack: () -> Unit) {
         }
     }
 
-    // A-C6 / VISA-6: three-way background canvas driven by tok.background.
-    //   AURORA    (Classic) → animated palette aurora.
-    //   TINT_BLOB (Vapor)   → canonical shared tintBlobCanvas() (was auroraCanvas fallback).
-    //   FLAT      (Quiet)   → no canvas; opaque c.bg.
-    val paintAurora   = paintCanvas && tok.background == SkinBackground.AURORA
-    val paintTintBlob = paintCanvas && tok.background == SkinBackground.TINT_BLOB
-    val scaffoldModifier = when {
-        paintAurora   -> Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
-        paintTintBlob -> Modifier.tintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
-        else          -> Modifier
-    }
+    val scaffoldModifier = if (paintCanvas) Modifier.screenCanvas(dark) else Modifier
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(

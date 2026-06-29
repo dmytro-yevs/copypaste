@@ -45,13 +45,11 @@ import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.RadiusControl
 import com.copypaste.android.ui.theme.SharedSettingsNavRow
 import com.copypaste.android.ui.theme.SharedSettingsRow
 import com.copypaste.android.ui.theme.ideTextFieldColors
-import com.copypaste.android.ui.theme.skinTokens
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Grouped-card primitives (spec §8 — Apple grouped-inset style)
@@ -112,12 +110,11 @@ internal fun IdeSegmentedControl(
     modifier: Modifier = Modifier,
 ) {
     val c = LocalIdeColors.current
-    // CopyPaste-fiht: use skin-token corner radius so Quiet=7dp and Vapor=12dp
-    // replace the hardcoded 9dp (Classic only). tok.radiusControl is 9/7/12 per skin.
-    val tok = skinTokens(LocalSkin.current)
-    val outerShape = RoundedCornerShape(tok.radiusControl)
+    // Fixed control radius (STYLEGUIDE §5 --r-ctl 8dp) — no skin.
+    val ctlRadius = 8.dp
+    val outerShape = RoundedCornerShape(ctlRadius)
     // Inner pill: outer radius - 2dp padding (mirrors web control's border-radius shrink).
-    val innerShape = RoundedCornerShape((tok.radiusControl - 2.dp).coerceAtLeast(0.dp))
+    val innerShape = RoundedCornerShape((ctlRadius - 2.dp).coerceAtLeast(0.dp))
     // Outer container: mute@.18 fill + 0.5dp hairline border.
     // 2dp inner padding matches the web control's p-0.5 padding.
     Row(

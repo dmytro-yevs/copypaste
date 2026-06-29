@@ -66,15 +66,9 @@ import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalPalette
-import com.copypaste.android.ui.theme.LocalSkin
-import com.copypaste.android.ui.theme.SkinBackground
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.skinTokens
-import com.copypaste.android.ui.theme.tintBlobCanvas
 
 /**
  * Standalone "Permissions" screen reachable from Settings.
@@ -281,29 +275,10 @@ fun PermissionsScreen(
     val translucent = rememberTranslucency()
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
-    val tok = skinTokens(LocalSkin.current)
-    val palette = LocalPalette.current
 
-    val scaffoldModifier: Modifier = when {
-        !translucent                                      -> Modifier
-        tok.background == SkinBackground.FLAT             -> Modifier
-        tok.background == SkinBackground.AURORA           -> {
-            // CLASSIC: byte-identical aurora canvas (pre-calibrated blob alphas preserved).
-            Modifier.auroraCanvas(dark, paletteAurora(palette))
-        }
-        tok.background == SkinBackground.TINT_BLOB        -> {
-            // CopyPaste-uya3: use shared tintBlobCanvas from Components.kt.
-            Modifier.tintBlobCanvas(dark, paletteAurora(palette), tok.glow)
-        }
-        else                                              -> Modifier
-    }
-    val scaffoldContainerColor: Color = when {
-        !translucent                                      -> c.bg
-        tok.background == SkinBackground.FLAT             -> c.bg
-        tok.background == SkinBackground.AURORA           -> Color.Transparent
-        tok.background == SkinBackground.TINT_BLOB        -> Color.Transparent
-        else                                              -> c.bg
-    }
+    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+    val scaffoldModifier: Modifier = if (translucent) Modifier.screenCanvas(dark) else Modifier
+    val scaffoldContainerColor: Color = if (translucent) Color.Transparent else c.bg
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(

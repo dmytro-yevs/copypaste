@@ -49,16 +49,10 @@ import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalPalette
-import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.SectionLabel
-import com.copypaste.android.ui.theme.SkinRowTreatment
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.skinTokens
-import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -133,11 +127,9 @@ fun DevicesScreen(
     val settings = remember { Settings(ctx) }
     val deviceKeyStore = remember { DeviceKeyStore(ctx) }
     val scope = rememberCoroutineScope()
-    // §1 aurora canvas backdrop (glass surfaces frost over real colour).
+    // Calm screen backdrop (glass surfaces frost over real colour).
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-    // A-C2: skin token bundle drives background mode and row layout.
-    val tok = skinTokens(LocalSkin.current)
 
     // ── Direct camera scan launcher (Deliverable 2) ───────────────────────────
     // The scan button on this screen launches the ZXing scanner directly —
@@ -707,31 +699,14 @@ fun DevicesScreen(
         )
     }
 
-    // A-C2: three-way background canvas gating driven by tok.background.
-    //
-    // CLASSIC (AURORA, glow=.62): animated aurora canvas — same condition as before;
-    //   byte-identical for Classic (shouldPaintAurora reproduces the prior guard exactly).
-    // QUIET (FLAT, glow=0): no canvas — Scaffold uses plain solid c.bg; containerColor
-    //   stays opaque so the FLAT surface reads clean.
-    // VAPOR (TINT_BLOB, glow=.45): static tinted radial blob — a single large
-    //   accent-tinted radial gradient centred on the canvas, painted at glow-modulated
-    //   alpha to anchor the frosted glass panels without animated motion.
-    val paintAurora = shouldPaintAurora(tok.background, translucent, paintCanvasBackdrop)
-    val paintTintBlob = shouldPaintTintBlob(tok.background, translucent, paintCanvasBackdrop)
-    // Hoist LocalPalette.current out of drawBehind (DrawScope is not composable).
-    val currentPalette = paletteAurora(LocalPalette.current)
-    val scaffoldModifier = when {
-        paintAurora -> modifier.auroraCanvas(dark, currentPalette)
-        paintTintBlob -> modifier.tintBlobCanvas(dark, currentPalette, tok.glow)
-        else -> modifier
-    }
+    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent
+    // and this screen owns its backdrop (standalone, not embedded in MainShell).
+    val paintCanvas = shouldPaintCanvas(translucent, paintCanvasBackdrop)
+    val scaffoldModifier = if (paintCanvas) modifier.screenCanvas(dark) else modifier
 
     Scaffold(
-        // CopyPaste-7em1/1a61: pass the active palette's AuroraDef so light palettes
-        // render their soft aurora blobs instead of hardcoded Liquid Blue legacy blobs.
-        // A-C2: replaced inline ternary with scaffoldModifier (three-way background gate).
         modifier = scaffoldModifier,
-        containerColor = if (translucent && tok.background != com.copypaste.android.ui.theme.SkinBackground.FLAT) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_devices),
@@ -840,17 +815,10 @@ fun DevicesScreen(
 
             if (deviceRows.isNotEmpty()) {
                 CopyPasteCard(accent = c.border) {
-                    // A-C2: row separator driven by tok.rowTreatment.
-                    // CARD (Classic): hairline RowDivider — byte-identical.
-                    // LINE (Quiet): same hairline divider — line treatment uses dividers.
-                    // INSET (Vapor): gap spacer (tok.rowGap = 3dp) instead of a divider line.
+                    // STYLEGUIDE §3.2: rows separated by a single hairline divider.
                     deviceRows.forEachIndexed { index, row ->
                         if (index > 0) {
-                            if (tok.rowTreatment == SkinRowTreatment.INSET && tok.rowGap > 0.dp) {
-                                Spacer(Modifier.height(tok.rowGap))
-                            } else {
-                                RowDivider()
-                            }
+                            RowDivider()
                         }
                         row()
                     }

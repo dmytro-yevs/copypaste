@@ -131,18 +131,12 @@ fun CopyPasteTopBar(
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
 
-    // A-F4: skin-aware radius and shadow.
-    val skin = LocalSkin.current
-    val tok = skinTokens(skin)
-
-    // Header radius: maps to tok.radiusCard (floating panel, not a modal).
-    // Classic=12dp (CopyPaste-xxjt: token corrected from 14dp); Quiet=10dp; Vapor=16dp.
-    val headerRadius = tok.radiusCard
+    // Fixed radius (STYLEGUIDE §5 --r-card 13dp) — no skin.
+    val headerRadius = 13.dp
     val headerShape = RoundedCornerShape(headerRadius)
 
-    // Float shadow: shown when translucent AND skin elevation is GLASS_FLOAT.
-    // Quiet (NONE elevation) omits the shadow even when translucency is on.
-    val showHeaderShadow = translucent && tok.elevation == SkinElevation.GLASS_FLOAT
+    // Float shadow only when the surface is translucent (glass float).
+    val showHeaderShadow = translucent
 
     // §2/P0: outer Box carries the horizontal inset padding + float shadow so the header
     // appears to hover above content — the liquid-glass floating feel.
@@ -233,24 +227,17 @@ fun CopyPasteCard(
 ) {
     val dark = isDarkTheme()
 
-    // A-F4: skin-aware radius and shadow.
-    val skin = LocalSkin.current
-    val tok = skinTokens(skin)
-
-    // CopyPaste-xxjt: card radius reads tok.radiusCard uniformly — no Classic branch.
-    // ClassicSkinTokens.radiusCard was corrected from 14dp to 12dp (PG-57 match),
-    // so Classic rendering is byte-identical. All skins now go through the token.
-    val cardRadius = tok.radiusCard
+    // Fixed card radius (STYLEGUIDE §5 --r-card 13dp) — no skin.
+    val cardRadius = 13.dp
     val cardShape = RoundedCornerShape(cardRadius)
 
     // Only paint an explicit Material border when the caller overrides `accent`
     // with a SEMANTIC tint; the default outline is superseded by the bright glass
-    // rim that LiquidGlassSurface draws (1k3i — no opaque grey 1dp ring).
+    // rim that LiquidGlassSurface draws.
     val semanticBorder = accent != MaterialTheme.colorScheme.outline
 
-    // Card shadow: tok.shadowCard drives whether a shadow is shown.
-    // NONE (Quiet, Vapor) → no card shadow; E2 (Classic) → CARD tier float shadow.
-    val showCardShadow = translucent && tok.shadowCard == SkinShadowCard.E2
+    // Card float shadow only when translucent.
+    val showCardShadow = translucent
 
     // vk12: drop Material tonal elevation entirely; the soft tinted float shadow
     // is drawn behind the card via glassFloatShadow (CARD tier 0 4px 14px).
@@ -340,19 +327,12 @@ fun GlassAlertDialog(
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
 
-    // A-F4: skin-aware modal radius and float shadow.
-    val skin = LocalSkin.current
-    val tok = skinTokens(skin)
-
-    // Modal radius: tok.radiusModal (Classic=16, Quiet=12, Vapor=16).
-    // Classic tok.radiusModal=16dp matches current hardcode — consistent.
-    val modalRadius = tok.radiusModal
+    // Fixed modal radius (STYLEGUIDE §5 --r-card 13dp) — no skin.
+    val modalRadius = 13.dp
     val dialogShape = RoundedCornerShape(modalRadius)
 
-    // Float shadow: shown when translucent AND elevation is GLASS_FLOAT.
-    // Quiet (NONE elevation) uses a lighter shadow; we omit the strong shadow
-    // since tok.elevation=NONE for Quiet (no dramatic float).
-    val showDialogShadow = translucent && tok.elevation == SkinElevation.GLASS_FLOAT
+    // Float shadow only when translucent.
+    val showDialogShadow = translucent
 
     Dialog(
         onDismissRequest = onDismissRequest,
@@ -589,11 +569,8 @@ fun CopyPasteButton(
     val c = LocalIdeColors.current
     val dark = isDarkTheme()
 
-    // A-F4: skin-aware control radius.
-    // tok.radiusControl: Classic=9dp (matches RadiusControl), Quiet=7dp, Vapor=12dp.
-    val skin = LocalSkin.current
-    val tok = skinTokens(skin)
-    val shape = RoundedCornerShape(tok.radiusControl)
+    // Fixed control radius (STYLEGUIDE §5 --r-ctl 8dp) — no skin.
+    val shape = RoundedCornerShape(8.dp)
 
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()

@@ -6,7 +6,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import android.util.Log
-import com.copypaste.android.ui.theme.Skin
+import com.copypaste.android.ui.theme.AccentColor
 import java.security.KeyStore
 import java.security.SecureRandom
 import java.util.UUID
@@ -599,24 +599,6 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("translucency", v).apply()
 
     /**
-     * Reduce-motion preference — mirrors the web `data-motion="calm"` attribute
-     * and the [motionDuration] gate in Theme.kt.
-     *
-     * When true, [motionDuration] returns 0 for all animation durations, producing
-     * instantaneous transitions (calm/minimal motion profile). When false (default),
-     * the active palette's [LiquidTokens.motionScale] is applied in full (cinematic).
-     *
-     * This is the user-controlled app-level toggle; the OS-level signals
-     * (ValueAnimator.areAnimatorsEnabled / ANIMATOR_DURATION_SCALE) continue to
-     * gate motion independently — either signal alone is sufficient to disable animation.
-     *
-     * Key "motion_reduced" (Boolean). Default false = cinematic (full motion).
-     */
-    var motionReduced: Boolean
-        get() = prefs.getBoolean("motion_reduced", false)
-        set(v) = prefs.edit().putBoolean("motion_reduced", v).apply()
-
-    /**
      * UI density preference — comfortable (34dp rows, default) or compact (28dp).
      *
      * Mirrors the macOS/web `prefs.density` setting (§2/§6 of DESIGN-SYSTEM-v2.md).
@@ -668,54 +650,32 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putString("theme_mode", v.name).apply()
 
     /**
-     * Active visual palette (c48e Liquid-Glass refresh).
+     * Active accent hue (STYLEGUIDE §2/§11) — one of the six [AccentColor] hues.
      *
-     * Default is "GRAPHITE_MIST" (dark, cool grey) per c48e spec. Stored as the
-     * [com.copypaste.android.ui.theme.Palette] enum name string so new variants can be added
-     * without a migration. Falls back to DEFAULT (GRAPHITE_MIST) on an
-     * unrecognised value.
-     *
-     * Theme.kt's [com.copypaste.android.ui.theme.rememberPalette] reads this and
-     * resolves the enum; callers that want to write call `settings.paletteName =
-     * Palette.XXXX.name`.
+     * The accent is one of the two appearance axes (the other is [themeMode]).
+     * Stored as the [AccentColor] enum name string (key "accent"); unrecognised
+     * or absent values fall back to [AccentColor.DEFAULT] (indigo).
      */
-    var paletteName: String
-        get() = prefs.getString("palette", "GRAPHITE_MIST") ?: "GRAPHITE_MIST"
-        set(v) = prefs.edit().putString("palette", v).apply()
+    var accent: AccentColor
+        get() = AccentColor.fromName(prefs.getString("accent", AccentColor.DEFAULT.name))
+        set(v) = prefs.edit().putString("accent", v.name).apply()
 
     /**
-     * Active structural skin — governs the visual language (radius scale,
-     * elevation model, row treatment, surface material, motion baseline).
-     *
-     * Stored as the [Skin] enum name string so future skins can be added without
-     * a migration. Unrecognised values (e.g. from a future downgrade) fall back
-     * to [Skin.DEFAULT] (CLASSIC) so the current look is preserved exactly.
-     *
-     * Key: "skin". Default: [Skin.CLASSIC] — byte-identical to today's Liquid
-     * Glass; choosing CLASSIC never changes the visual appearance.
-     *
-     * [rememberSkin] reads this in a @Composable context; [saveScreenSettings]
-     * persists it alongside the other display prefs in the force-stop-safe
-     * synchronous batch write (A-F2).
+     * One-time migration to the two-axis theme (STYLEGUIDE §11/§12): drops the
+     * stale Liquid-Glass appearance keys (palette / skin / density / motion /
+     * contrast) so the new isDark × accent defaults apply cleanly. The user's
+     * later choices then persist. Latches a flag so this runs only once.
      */
-    var skin: Skin
-        get() = when (prefs.getString("skin", Skin.DEFAULT.name)) {
-            Skin.QUIET.name -> Skin.QUIET
-            Skin.VAPOR.name -> Skin.VAPOR
-            else            -> Skin.CLASSIC  // default: CLASSIC preserves today's look
-        }
-        set(v) = prefs.edit().putString("skin", v.name).apply()
-
-    /**
-     * One-time upgrade migration to the Apple "Liquid Glass" light-first release.
-     * Pre-Liquid-Glass builds persisted `theme_mode` (often SYSTEM, which follows
-     * OS night mode → dark). Clear it ONCE so the new LIGHT default applies, then
-     * latch a flag so the user's later choices persist. Mirrors the desktop
-     * store.ts v1→v2 migration that drops the stale persisted theme.
-     */
-    fun migrateThemeForLiquidGlass() {
-        if (prefs.getBoolean("theme_migrated_lg", false)) return
-        prefs.edit().remove("theme_mode").putBoolean("theme_migrated_lg", true).apply()
+    fun migrateThemeForTwoAxis() {
+        if (prefs.getBoolean("theme_migrated_2axis", false)) return
+        prefs.edit()
+            .remove("palette")
+            .remove("skin")
+            .remove("density")
+            .remove("motion_reduced")
+            .remove("contrast")
+            .putBoolean("theme_migrated_2axis", true)
+            .apply()
     }
 
     /**
@@ -1584,8 +1544,6 @@ class Settings(context: Context) {
         notifyOnSensitiveSkip: Boolean,
         maskSensitiveContent: Boolean,
         translucency: Boolean,
-        /** User-controlled reduce-motion toggle; mirrors web data-motion=calm. Default false = cinematic. */
-        motionReduced: Boolean,
         imageMaxHeight: Int,
         previewDelayMs: Long,
         maxTextSizeBytes: Long,
@@ -1603,8 +1561,8 @@ class Settings(context: Context) {
         notifyOnCopy: Boolean,
         soundOnCopy: Boolean,
         logcatCaptureEnabled: Boolean,
-        /** A-F2: structural skin (default [Skin.CLASSIC] = today's Liquid Glass look). */
-        skin: Skin = Skin.DEFAULT,
+        /** Accent hue axis (STYLEGUIDE §11); default indigo. */
+        accent: AccentColor = AccentColor.DEFAULT,
     ) {
         // Clamp the size/quota knobs through the SAME native clampConfig the macOS
         // daemon uses so a force-stop-safe batch write can never persist a
@@ -1623,7 +1581,6 @@ class Settings(context: Context) {
             .putBoolean("notify_on_sensitive_skip", notifyOnSensitiveSkip)
             .putBoolean("mask_sensitive_content", maskSensitiveContent)
             .putBoolean("translucency", translucency)
-            .putBoolean("motion_reduced", motionReduced)
             .putInt("image_max_height", imageMaxHeight.coerceIn(1, 200))
             .putLong("preview_delay_ms", previewDelayMs.coerceIn(200L, 100_000L))
             .putLong("max_text_size_bytes", clamped.maxTextSizeBytes.toLong())
@@ -1640,7 +1597,7 @@ class Settings(context: Context) {
             .putBoolean("notify_on_copy", notifyOnCopy)
             .putBoolean("sound_on_copy", soundOnCopy)
             .putBoolean("logcat_capture_enabled", logcatCaptureEnabled)
-            .putString("skin", skin.name)  // A-F2: skin axis (default CLASSIC = no visual change)
+            .putString("accent", accent.name)  // STYLEGUIDE §11 accent axis (default indigo)
             .commit() // synchronous: survives an immediate force-stop (SIGKILL)
     }
 

@@ -22,10 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.IdeColors
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.SkinNavActive
-import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.skinTokens
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Device filter strip — parity with macOS HistoryView deviceFilter.
@@ -84,41 +81,17 @@ internal fun DeviceChip(
     onClick: () -> Unit,
 ) {
     val c = LocalIdeColors.current
-    // A-C1: skin-aware active indicator for the selected device-filter chip.
-    // Reads the skin token once per composition (staticCompositionLocalOf, stable).
-    val tok = skinTokens(LocalSkin.current)
 
-    // Inactive chip bg/fg are the same across all skins (only the ACTIVE indicator varies).
+    // Inactive chip bg/fg.
     val inactiveBg = if (isOwn) c.accentDim else c.elevated
     val inactiveFg = if (isOwn) c.accent else c.dim
 
-    // Active chip bg/fg and optional ring: driven by tok.navActive.
-    //   FILL_GLOW  — Classic: solid accent fill, accentOn text. No ring.
-    //   TINT       — Quiet: light tinted accent background, accent text. No ring.
-    //   GLASS_RING — Vapor: elevated background + 1dp accent outline ring, accent text.
-    val activeBg = when (tok.navActive) {
-        SkinNavActive.FILL_GLOW  -> c.accent            // Classic: solid accent pill
-        SkinNavActive.TINT       -> c.accentDim          // Quiet: subtle tint, no glow
-        SkinNavActive.GLASS_RING -> c.elevated           // Vapor: elevated surface + ring
-    }
-    val activeFg = when (tok.navActive) {
-        SkinNavActive.FILL_GLOW  -> c.accentOn          // on-accent text
-        SkinNavActive.TINT       -> c.accent             // accent-coloured text on tint
-        SkinNavActive.GLASS_RING -> c.accent             // accent-coloured text on glass
-    }
-    val showRing = isSelected && tok.navActive == SkinNavActive.GLASS_RING
-
-    val bg = if (isSelected) activeBg else inactiveBg
-    val fg = if (isSelected) activeFg else inactiveFg
+    // Active chip: solid accent pill with on-accent text (STYLEGUIDE §9.4 — no skin).
+    val bg = if (isSelected) c.accent else inactiveBg
+    val fg = if (isSelected) c.accentOn else inactiveFg
 
     val baseModifier = Modifier
         .background(color = bg, shape = RoundedCornerShape(12.dp))
-        .then(
-            // GLASS_RING: 1dp accent outline ring on the selected chip (Vapor nav spec).
-            // Classic and Quiet do not add a border — Classic is visually byte-identical.
-            if (showRing) Modifier.border(1.dp, c.accent, RoundedCornerShape(12.dp))
-            else Modifier
-        )
         .clickable(onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 4.dp)
 

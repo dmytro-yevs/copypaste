@@ -510,6 +510,7 @@
     <!-- CopyPaste-bdac.61: SettingsActivity — Appearance section strings -->
     <string name="section_appearance">Appearance</string>
     <string name="setting_color_scheme_label">Color scheme</string>
+    <string name="setting_accent_label">Accent</string>
     <string name="palette_dark_label">Dark</string>
     <string name="palette_light_label">Light</string>
     <string name="skin_visual_style_label">Visual style</string>

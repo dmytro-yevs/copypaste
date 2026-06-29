@@ -30,7 +30,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.RadiusChip
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -70,14 +69,13 @@ internal fun rememberReducedMotion(): Boolean {
 @Composable
 internal fun PulseDot(online: Boolean, modifier: Modifier = Modifier) {
     val c = LocalIdeColors.current
-    val tokens = LocalLiquidTokens.current
     val reducedMotion = rememberReducedMotion()
     // PG-37 parity: offline status dot uses danger (red) to match the macOS
     // DeviceCard offline indicator (was c.faint/grey, which diverged).
     val dotColor = if (online) c.success else c.danger
 
-    // Duration mirrors styleguide 2.4s × motionScale (cinematic = 1.3 → ~3.1 s).
-    val pingDurationMs = (2400 * tokens.motionScale).toInt()
+    // Fixed presence-ping duration (STYLEGUIDE §6 — no palette motion scale).
+    val pingDurationMs = 2400
 
     // Animatables hold the ring's current scale and alpha between recompositions.
     // Starting at the "rest" (invisible) values so no ring shows on initial composition.

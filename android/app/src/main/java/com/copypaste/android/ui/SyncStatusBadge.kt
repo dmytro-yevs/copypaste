@@ -58,12 +58,8 @@ import com.copypaste.android.Settings
 import com.copypaste.android.ui.theme.GlassTier
 import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalSkin
-import com.copypaste.android.ui.theme.Skin
-import com.copypaste.android.ui.theme.SkinMaterial
 import com.copypaste.android.ui.theme.isDarkTheme
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.skinTokens
 import java.text.DateFormat
 import java.util.Date
 import kotlinx.coroutines.delay
@@ -151,13 +147,9 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
     val settings = remember { Settings(context) }
     val c = LocalIdeColors.current
 
-    // A-C9: skin-aware sheet container color.
-    // syncSheetEffectiveTranslucent is a pure function (testable without Compose).
-    val skin = LocalSkin.current
     val translucent = rememberTranslucency()
-    // Transparent when glass skin + user pref on → sheet scrim shows through.
-    // Opaque (c.bg) when FLAT skin (Quiet) or user pref off → solid sheet.
-    val sheetContainerColor = if (syncSheetEffectiveTranslucent(skin, translucent)) {
+    // Transparent when the user pref is on → sheet scrim shows through.
+    val sheetContainerColor = if (syncSheetEffectiveTranslucent(translucent)) {
         Color.Transparent
     } else {
         c.bg
@@ -400,7 +392,7 @@ fun SyncStatusBadge(modifier: Modifier = Modifier) {
                 settings = settings,
                 // CopyPaste-ohki: pass translucent so SyncStatusSheet can wrap its
                 // Column in LiquidGlassSurface for glass skins. Mirrors GlassAlertDialog.
-                translucent = syncSheetEffectiveTranslucent(skin, translucent),
+                translucent = syncSheetEffectiveTranslucent(translucent),
                 modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
             )
             // Bottom spacing so the sheet content clears system gesture bar.
@@ -828,17 +820,10 @@ internal fun syncSheetGlassTier(): GlassTier = GlassTier.STRONG
 
 /**
  * Returns `true` when the sync-status bottom sheet should use a transparent
- * container (letting the background show through for the glass effect).
- *
- * Mirrors the LiquidGlassSurface effectiveTranslucent gate in Components.kt:
- *   `effectiveTranslucent = userPref && tok.material == SkinMaterial.GLASS`
- *
- * FLAT material (Quiet) always returns `false` — the sheet uses an opaque
- * solid fill ([IdeColors.bg]) regardless of the user's translucency preference.
+ * container (letting the background show through for the glass effect). With the
+ * skin system removed (STYLEGUIDE §11), this is just the user translucency pref.
  *
  * Pure function — usable in JVM unit tests (no Compose runtime needed).
  */
-internal fun syncSheetEffectiveTranslucent(skin: Skin, userPrefTranslucent: Boolean): Boolean {
-    val tok = skinTokens(skin)
-    return userPrefTranslucent && tok.material == SkinMaterial.GLASS
-}
+internal fun syncSheetEffectiveTranslucent(userPrefTranslucent: Boolean): Boolean =
+    userPrefTranslucent

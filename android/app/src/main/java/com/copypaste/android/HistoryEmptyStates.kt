@@ -32,8 +32,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.EaseOutExpo
+import com.copypaste.android.ui.theme.LocalAccent
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalLiquidTokens
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.motionDuration
 import com.copypaste.android.ui.theme.rememberReducedMotion
@@ -133,7 +133,7 @@ internal fun EmptyHistoryState(padding: PaddingValues, isPrivateMode: Boolean = 
                             Icon(
                                 imageVector = Icons.Outlined.ContentCopy,
                                 contentDescription = null,
-                                tint = LocalLiquidTokens.current.accent2,
+                                tint = LocalAccent.current.variant,
                                 modifier = Modifier.size(26.dp),
                             )
                         }
@@ -218,7 +218,7 @@ internal fun EmptySearchState(padding: PaddingValues, query: String) {
                         Icon(
                             imageVector = Icons.Outlined.SearchOff,
                             contentDescription = null,
-                            tint = LocalLiquidTokens.current.accent2,
+                            tint = LocalAccent.current.variant,
                             modifier = Modifier.size(24.dp),
                         )
                     }

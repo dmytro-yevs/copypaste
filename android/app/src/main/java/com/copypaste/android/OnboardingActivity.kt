@@ -78,20 +78,14 @@ import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalPalette
-import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.RadiusChip
-import com.copypaste.android.ui.theme.SkinBackground
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
+import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.motionDuration
-import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.skinTokens
-import com.copypaste.android.ui.theme.tintBlobCanvas
 import android.content.ClipData
 import android.content.ClipboardManager
 
@@ -365,12 +359,6 @@ fun OnboardingScreen(
         }
     }
 
-    // Skin-gated background: read tok.background and tok.glow to decide which
-    // canvas to apply. CLASSIC/VAPOR use translucent + aurora/tint-blob;
-    // QUIET is always opaque solid (tok.background == FLAT).
-    val tok = skinTokens(LocalSkin.current)
-    val palette = LocalPalette.current
-
     // Re-evaluated every recomposition (triggered by refreshTrigger)
     val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) ==
@@ -402,37 +390,9 @@ fun OnboardingScreen(
     var entered by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { entered = true }
 
-    // Determine background canvas based on tok.background (gated by translucency pref).
-    // tok.glow informs the intensity of the canvas; each branch uses it appropriately:
-    //   AURORA (Classic)   → animated aurora canvas; palette blobs are pre-calibrated
-    //   TINT_BLOB (Vapor)  → static accent-tinted single blob scaled by tok.glow
-    //   FLAT (Quiet)       → solid opaque bg, no canvas modifier at all
-    //
-    // CLASSIC is byte-identical: translucent=true + AURORA path reproduces the
-    // existing auroraCanvas(dark, paletteAurora(...)) call exactly.
-    val scaffoldContainerColor = when {
-        !translucent                           -> c.bg
-        tok.background == SkinBackground.FLAT  -> c.bg        // QUIET: solid even if pref is on
-        else                                   -> Color.Transparent
-    }
-    val scaffoldModifier: Modifier = when {
-        !translucent                                     -> Modifier
-        tok.background == SkinBackground.FLAT            -> Modifier
-        tok.background == SkinBackground.AURORA          -> {
-            // CLASSIC is the only skin with AURORA background today. Pass the palette
-            // AuroraDef unscaled so the existing calibrated blob alphas are preserved
-            // byte-for-byte (CLASSIC byte-identical guarantee). Future non-Classic AURORA
-            // skins should supply pre-tuned AuroraDef blobs of their own, so glow
-            // scaling is NOT applied here — the tok.glow token records the design
-            // intent but the blobs carry the actual calibrated alpha values.
-            Modifier.auroraCanvas(dark, paletteAurora(palette))
-        }
-        tok.background == SkinBackground.TINT_BLOB       -> {
-            // CopyPaste-uya3: use shared tintBlobCanvas from Components.kt.
-            Modifier.tintBlobCanvas(dark, paletteAurora(palette), tok.glow)
-        }
-        else                                             -> Modifier
-    }
+    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+    val scaffoldContainerColor = if (translucent) Color.Transparent else c.bg
+    val scaffoldModifier: Modifier = if (translucent) Modifier.screenCanvas(dark) else Modifier
 
     Box(Modifier.fillMaxSize()) {
     Scaffold(

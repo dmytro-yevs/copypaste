@@ -61,15 +61,10 @@ import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.GlassTier
 import com.copypaste.android.ui.theme.LiquidGlassSurface
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalPalette
-import com.copypaste.android.ui.theme.LocalSkin
-import com.copypaste.android.ui.theme.SkinNavActive
-import com.copypaste.android.ui.theme.skinTokens
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.glassFloatShadow
 import com.copypaste.android.ui.theme.glassFloatShadowExplicit
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
 import kotlinx.coroutines.Dispatchers
@@ -289,7 +284,6 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     val c = LocalIdeColors.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-    val palette = LocalPalette.current
     val density = LocalDensity.current
 
     // Styleguide floating tab bar geometry:
@@ -309,13 +303,12 @@ private fun MainShell(viewModel: ClipboardViewModel) {
     var tabBarHeightDp by remember { mutableStateOf(74.dp) }
     val contentBottomPadding = tabBarHeightDp + 10.dp + navBarInsetDp
 
-    // §1 aurora canvas backdrop: a COLOURED radial-glow gradient behind the whole
-    // shell so the glass surfaces (tab bar, cards) frost over real colour instead
-    // of a flat fill. Only when translucent — otherwise keep the opaque c.bg so the
-    // solid look is unchanged. The Scaffold container goes transparent so this shows.
+    // Calm screen backdrop (STYLEGUIDE §6 — no aurora): a neutral gradient behind
+    // the whole shell so the glass surfaces (tab bar, cards) frost over real colour.
+    // Only when translucent — otherwise keep the opaque c.bg.
     Box(
         modifier = Modifier.fillMaxSize().then(
-            if (translucent) Modifier.auroraCanvas(dark, paletteAurora(palette)) else Modifier
+            if (translucent) Modifier.screenCanvas(dark) else Modifier
         ),
     ) {
         Scaffold(
@@ -421,9 +414,6 @@ private fun FloatingTabBar(
     onTabSelected: (Int) -> Unit,
 ) {
     val c = LocalIdeColors.current
-    // CopyPaste-jr5a: skin-aware active indicator for the nav tab bar.
-    // Reads the skin token once per composition (staticCompositionLocalOf, stable).
-    val tok = skinTokens(LocalSkin.current)
     val reducedMotion = rememberReducedMotion()
     // Spring spec for the active-tab scale pop: stiffness Low → smooth spring,
     // dampingRatio NoBouncy → one clean overshoot then settle.
@@ -473,41 +463,21 @@ private fun FloatingTabBar(
                     label = "tabScale_$index",
                 )
 
-                // CopyPaste-jr5a: skin-aware active pill — driven by tok.navActive.
-                //   FILL_GLOW  — Classic: solid accent fill, accentOn text. No ring. (byte-identical to old behaviour)
-                //   TINT       — Quiet: accentDim tinted background, accent text. No ring.
-                //   GLASS_RING — Vapor: elevated background + 1dp accent outline ring, accent text.
-                val activePillBg = when (tok.navActive) {
-                    SkinNavActive.FILL_GLOW  -> c.accent     // Classic: solid accent pill
-                    SkinNavActive.TINT       -> c.accentDim  // Quiet: subtle tint
-                    SkinNavActive.GLASS_RING -> c.elevated   // Vapor: elevated surface + ring
-                }
-                val activeIconColor = when (tok.navActive) {
-                    SkinNavActive.FILL_GLOW  -> c.accentOn  // on-accent icon
-                    SkinNavActive.TINT       -> c.accent    // accent-coloured icon on tint
-                    SkinNavActive.GLASS_RING -> c.accent    // accent-coloured icon on glass
-                }
+                // Active tab pill (STYLEGUIDE §9.12): icon in an accent@18% rounded
+                // "ti" pill, label + icon in the accent. Inactive tabs are faint.
+                val activeIconColor = c.accent
                 val iconColor = if (isSelected) activeIconColor else c.faint
                 val textColor = if (isSelected) activeIconColor else c.faint
-                val pillColor = if (isSelected) activePillBg else Color.Transparent
-                val showRing = isSelected && tok.navActive == SkinNavActive.GLASS_RING
+                val pillColor = if (isSelected) c.accent.copy(alpha = 0.18f) else Color.Transparent
 
-                // VISA-10: pill radius reads tok.radiusCard instead of hardcoded 18.dp so
-                // the active-pill corners scale with the active skin
-                // (Classic=12dp, Quiet=10dp, Vapor=16dp).
-                val pillRadius = tok.radiusCard
+                // Fixed active-pill radius (STYLEGUIDE §5 --r-chip 7dp).
+                val pillRadius = 7.dp
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .scale(scale)
                         .clip(RoundedCornerShape(pillRadius))
                         .background(pillColor)
-                        .then(
-                            // GLASS_RING: 1dp accent outline ring on the selected tab (Vapor nav spec).
-                            // Classic and Quiet do not add a border — Classic is visually byte-identical.
-                            if (showRing) Modifier.border(1.dp, c.accent, RoundedCornerShape(pillRadius))
-                            else Modifier
-                        )
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,

@@ -61,21 +61,15 @@ import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.CopyPasteCard
 import com.copypaste.android.ui.theme.CopyPasteTheme
 import com.copypaste.android.ui.theme.CopyPasteTopBar
+import com.copypaste.android.ui.theme.LocalAccent
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalLiquidTokens
-import com.copypaste.android.ui.theme.LocalPalette
-import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.Motion
 import com.copypaste.android.ui.theme.RadiusChip
-import com.copypaste.android.ui.theme.SkinBackground
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.copypaste.android.ui.theme.motionDuration
-import com.copypaste.android.ui.theme.paletteAurora
 import com.copypaste.android.ui.theme.rememberReducedMotion
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.skinTokens
+import com.copypaste.android.ui.theme.screenCanvas
 
 /**
  * "About" screen — mirrors the macOS About view
@@ -108,23 +102,11 @@ class AboutActivity : ComponentActivity() {
                 val dark = isDarkTheme()
                 val translucent = rememberTranslucency()
 
-                // A-C3: gate the background canvas by tok.background so each skin
-                // gets its intended backdrop — AURORA for CLASSIC, FLAT (no canvas)
-                // for QUIET, TINT_BLOB (static accent blob) for VAPOR.
-                val tok = skinTokens(LocalSkin.current)
-                val showAurora = translucent && tok.background == SkinBackground.AURORA
-                val showTintBlob = translucent && tok.background == SkinBackground.TINT_BLOB
-                val showCanvas = showAurora || showTintBlob
-
-                val canvasModifier = when {
-                    showAurora   -> Modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
-                    showTintBlob -> Modifier.tintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
-                    else         -> Modifier
-                }
+                // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+                val showCanvas = translucent
+                val canvasModifier = if (showCanvas) Modifier.screenCanvas(dark) else Modifier
 
                 Scaffold(
-                    // Container is transparent whenever a canvas backdrop is active so
-                    // the aurora or tint-blob gradient shows through. CLASSIC is unchanged.
                     containerColor = if (showCanvas) Color.Transparent else c.bg,
                     modifier = canvasModifier,
                 ) { innerPadding ->
@@ -179,7 +161,7 @@ fun AboutScreen(
 ) {
     val context = LocalContext.current
     val c = LocalIdeColors.current
-    val lt = LocalLiquidTokens.current
+    val accentVariant = LocalAccent.current.variant
     val reduced = rememberReducedMotion()
     val slowDur = motionDuration(Motion.Slow)
     val baseDur = motionDuration(Motion.Base)
@@ -291,7 +273,7 @@ fun AboutScreen(
                             fontWeight = FontWeight.SemiBold,
                             letterSpacing = 0.8.sp,
                         ),
-                        color = lt.accent2.copy(alpha = 0.70f),
+                        color = accentVariant.copy(alpha = 0.70f),
                     )
                     ABOUT_FEATURES.forEachIndexed { idx, feature ->
                         // Each feature row fades in with a small stagger delay.

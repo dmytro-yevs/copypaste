@@ -70,9 +70,8 @@ import com.copypaste.android.ui.GlassToastHost
 import com.copypaste.android.ui.GlassToastKind
 import com.copypaste.android.ui.GlassToastState
 import com.copypaste.android.ui.theme.CopyPasteTheme
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.tintBlobCanvas
+import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
 import com.copypaste.android.ui.theme.EaseOutExpo
 import com.copypaste.android.ui.theme.rememberReducedMotion
@@ -84,15 +83,8 @@ import com.copypaste.android.ui.theme.IdeColors
 import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.Motion
 // Liquid glass / palette tokens for aurora backdrop and cinematic motion.
-import com.copypaste.android.ui.theme.LocalPalette
 import com.copypaste.android.ui.theme.motionDuration
-import com.copypaste.android.ui.theme.paletteAurora
 // A-C1: skin axis tokens for screen-level treatment (background, row, nav).
-import com.copypaste.android.ui.theme.LocalSkin
-import com.copypaste.android.ui.theme.SkinBackground
-import com.copypaste.android.ui.theme.SkinRowTreatment
-import com.copypaste.android.ui.theme.SkinTokens
-import com.copypaste.android.ui.theme.skinTokens
 import kotlinx.coroutines.delay
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -191,8 +183,6 @@ fun HistoryScreen(
     // reuse for every token below so the chrome (scaffold, top bar, dialogs) themes
     // light/dark in lockstep with CopyPasteTheme.
     val c = LocalIdeColors.current
-    // A-C1: skin tokens for screen-level treatment (background, row, nav).
-    val tok = skinTokens(LocalSkin.current)
     // §8 a11y: skip animated transitions when the user has requested reduced motion
     // (Accessibility → Remove animations, or Developer Options → Animator duration scale = 0).
     val reducedMotion = rememberReducedMotion()
@@ -556,26 +546,9 @@ fun HistoryScreen(
     }
 
     Scaffold(
-        // A-C1 + §1 aurora canvas: gated by tok.background to support all three skins.
-        //   AURORA    — current full animated aurora (Classic). Painted here when standalone;
-        //               the MainShell paints it when embedded (paintCanvasBackdrop=false).
-        //   FLAT      — plain solid bg, no aurora (Quiet). The FLAT check precedes translucent
-        //               so even with translucency ON the Quiet skin stays solid.
-        //   TINT_BLOB — single static accent-tinted blob (Vapor). Painted via a simplified
-        //               auroraCanvas call using only the palette's primary glow blob.
-        // Classic with paintCanvasBackdrop=false returns the base modifier unchanged —
-        // the MainShell backdrop is already in place. FLAT always returns base modifier.
-        modifier = when {
-            !paintCanvasBackdrop                          -> modifier
-            !translucent                                  -> modifier
-            tok.background == SkinBackground.AURORA       ->
-                modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
-            tok.background == SkinBackground.TINT_BLOB    ->
-                // CopyPaste-uya3: use shared tintBlobCanvas from Components.kt
-                // (canonical AboutActivity calibration: base gradient + glowA + glowB + centre).
-                modifier.tintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
-            else                                          -> modifier // FLAT: solid, no canvas
-        },
+        // Calm screen backdrop (STYLEGUIDE §6 — no aurora). When embedded in
+        // MainShell (paintCanvasBackdrop=false) the shell already paints it.
+        modifier = if (paintCanvasBackdrop && translucent) modifier.screenCanvas(dark) else modifier,
         containerColor = if (translucent) Color.Transparent else c.bg,
         topBar = {
             if (selectionMode) {
@@ -706,7 +679,6 @@ fun HistoryScreen(
                 else -> HistoryList(
                     items = deviceFilteredItems,
                     padding = innerPadding,
-                    tok = tok,
                     hasMore = hasMore,
                     onLoadMore = { viewModel.loadMore() },
                     ownDeviceId = ownDeviceId,
@@ -1081,8 +1053,6 @@ fun HistoryScreen(
 private fun HistoryList(
     items: List<ClipboardItem>,
     padding: PaddingValues,
-    /** A-C1: skin tokens for row treatment (CARD/LINE/INSET) and row gap (INSET only). */
-    tok: SkinTokens,
     selectionMode: Boolean,
     selectedIds: Set<String>,
     reorderMode: Boolean = false,
@@ -1316,14 +1286,11 @@ private fun HistoryList(
     // translucency is on. c.bg fill only in the solid (accessibility) mode.
     val listTranslucent = rememberTranslucency()
     // Hoist entrance duration once at list scope so it is NOT recomputed per row
-    // inside itemsIndexed (motionDuration reads LocalLiquidTokens — stable, but
-    // calling remember per-item still adds per-item composition state entries).
+    // inside itemsIndexed (avoids per-item composition state entries).
     val rowEnterDurMs = motionDuration(Motion.Base)
-    // A-C1: row gap driven by tok.rowGap (0 for CARD/LINE, tok.rowGap for INSET).
-    // Classic path: tok.rowGap=0 → Arrangement.spacedBy(0.dp) — byte-identical to pre-skin.
-    val rowGap = tok.rowGap
-    // A-C1: INSET treatment adds horizontal padding to inset the rows inside a recessed look.
-    val isInset = tok.rowTreatment == SkinRowTreatment.INSET
+    // STYLEGUIDE §9.5: rows are divider-separated (LINE), no inset gap.
+    val rowGap = 0.dp
+    val isInset = false
 
     LazyColumn(
         state = listState,
@@ -1386,24 +1353,7 @@ private fun HistoryList(
                             onPinned = onPreviewPin,
                             onDismissPeek = onPreviewDismiss,
                         )
-                        .then(
-                            // INSET: add horizontal inset margin + rounded card background.
-                            // The radius matches tok.radiusCard (Vapor=16dp) for visual harmony.
-                            // CARD/LINE: no extra modifier — preserves byte-identical Classic look.
-                            //
-                            // Q7: background alpha derived from tok.fillAlpha so it tracks the
-                            // skin's surface-fill opacity (fillAlpha * 0.76 ≈ 0.38 for Vapor 0.50).
-                            // Q8: horizontal inset = tok.rowGap × (8/3) so the gap between
-                            // the card edge and the list rail scales with the skin's row rhythm
-                            // (Vapor rowGap=3dp → 8dp, future skins auto-scale).
-                            if (isInset) Modifier
-                                .padding(horizontal = tok.rowGap * (8f / 3f), vertical = 0.dp)
-                                .background(
-                                    color = c.elevated.copy(alpha = tok.fillAlpha * 0.76f),
-                                    shape = RoundedCornerShape(tok.radiusCard),
-                                )
-                            else Modifier
-                        ),
+                    ,
                 ) {
                     HistoryRow(
                         item = item,
@@ -1435,15 +1385,11 @@ private fun HistoryList(
                         onPreviewPin = onPreviewPin,
                         onPreviewDismiss = onPreviewDismiss,
                     )
-                    // A-C1: divider shown for CARD and LINE treatments; suppressed for INSET
-                    // (spacing between cards replaces the divider line in the Vapor skin).
-                    // Classic (CARD) shows the divider — byte-identical to pre-skin behaviour.
-                    if (tok.rowTreatment != SkinRowTreatment.INSET) {
-                        HorizontalDivider(
-                            color = c.divider,
-                            thickness = 1.dp,
-                        )
-                    }
+                    // STYLEGUIDE §9.5 / §3.2: a single hairline row divider.
+                    HorizontalDivider(
+                        color = c.divider,
+                        thickness = 1.dp,
+                    )
                 }
             }
         }

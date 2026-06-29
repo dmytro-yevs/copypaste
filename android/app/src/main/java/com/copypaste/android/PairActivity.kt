@@ -76,15 +76,9 @@ import com.copypaste.android.ui.theme.LocalIdeColors
 import com.copypaste.android.ui.theme.MonoFontFamily
 import com.copypaste.android.ui.theme.RadiusChip
 import com.copypaste.android.ui.theme.CopyPasteTopBar
-import com.copypaste.android.ui.theme.LocalPalette
-import com.copypaste.android.ui.theme.LocalSkin
-import com.copypaste.android.ui.theme.SkinBackground
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.paletteAurora
+import com.copypaste.android.ui.theme.screenCanvas
 import com.copypaste.android.ui.theme.rememberTranslucency
-import com.copypaste.android.ui.theme.skinTokens
-import com.copypaste.android.ui.theme.tintBlobCanvas
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import kotlinx.coroutines.Dispatchers
@@ -834,29 +828,16 @@ fun PairScreen(
     val c = LocalIdeColors.current
     val translucent = rememberTranslucency()
     val dark = isDarkTheme()
-    // A-C5: skin token gate — read once per composition, same pattern as DevicesScreen/SettingsScreen.
-    val tok = skinTokens(LocalSkin.current)
 
     // CopyPaste-wfba: progress-bar pulse removed — static progress bar is calmer.
     // Entrance alpha fade removed — card appears instantly (no idle animation).
 
     Box(Modifier.fillMaxSize()) {
-    // 9g57: aurora canvas backdrop — mirrors DevicesScreen pattern.
-    // A-C5 / CopyPaste-a8ne: three-way background gate by tok.background:
-    //   CLASSIC (AURORA)   → animated aurora canvas (byte-identical)
-    //   VAPOR   (TINT_BLOB)→ static palette-glowA tint blob (no animation)
-    //   QUIET   (FLAT)     → plain solid c.bg, no canvas
-    val paintAurora = translucent && tok.background == SkinBackground.AURORA
-    val paintTintBlob = translucent && tok.background == SkinBackground.TINT_BLOB
-    val auroraDef = paletteAurora(LocalPalette.current)
-    val scaffoldModifier: Modifier = when {
-        paintAurora   -> modifier.auroraCanvas(dark, auroraDef)
-        paintTintBlob -> modifier.tintBlobCanvas(dark, auroraDef, tok.glow)
-        else          -> modifier
-    }
+    // Calm screen backdrop (STYLEGUIDE §6 — no aurora). Frosted only when translucent.
+    val scaffoldModifier: Modifier = if (translucent) modifier.screenCanvas(dark) else modifier
     Scaffold(
         modifier = scaffoldModifier,
-        containerColor = if (paintAurora || paintTintBlob) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        containerColor = if (translucent) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_pair),

@@ -72,8 +72,9 @@ class CopyPasteApp : Application() {
         // syncState auto-enables when READ_LOGS is granted and the user has not
         // explicitly disabled the toggle (survives app updates; reset on factory reset/data clear).
         val settings = Settings(this)
-        // One-time: reset a stale pre-Liquid-Glass theme_mode so light-first applies.
-        settings.migrateThemeForLiquidGlass()
+        // One-time: drop stale Liquid-Glass appearance keys (palette/skin/density/
+        // motion/contrast) so the two-axis isDark × accent defaults apply.
+        settings.migrateThemeForTwoAxis()
         LogcatCaptureService.syncState(this, settings)
 
         // CopyPaste-jhz2: re-establish the foreground ClipboardService after a

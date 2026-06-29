@@ -50,18 +50,11 @@ import com.copypaste.android.ui.theme.FILE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.GlassAlertDialog
 import com.copypaste.android.ui.theme.IMAGE_SIZE_STEP_VALUES
 import com.copypaste.android.ui.theme.LocalIdeColors
-import com.copypaste.android.ui.theme.LocalPalette
-import com.copypaste.android.ui.theme.LocalSkin
 import com.copypaste.android.ui.theme.MAX_ITEMS_STEP_VALUES
 import com.copypaste.android.ui.theme.QUOTA_STEP_VALUES
-import com.copypaste.android.ui.theme.Skin
-import com.copypaste.android.ui.theme.SkinBackground
 import com.copypaste.android.ui.theme.TEXT_SIZE_STEP_VALUES
-import com.copypaste.android.ui.theme.auroraCanvas
 import com.copypaste.android.ui.theme.isDarkTheme
-import com.copypaste.android.ui.theme.paletteAurora
-import com.copypaste.android.ui.theme.skinTokens
-import com.copypaste.android.ui.theme.tintBlobCanvas
+import com.copypaste.android.ui.theme.screenCanvas
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
@@ -156,15 +149,10 @@ fun SettingsScreen(
     var revealGuard by remember { mutableStateOf(settings.showSensitiveWarnings) }
     var maskSensitive by remember { mutableStateOf(settings.maskSensitiveContent) }
     var translucency by remember { mutableStateOf(settings.translucency) }
-    // hujj: user-facing reduce-motion toggle (calm ↔ cinematic), mirrors web data-motion attr.
-    var motionReduced by remember { mutableStateOf(settings.motionReduced) }
     var imageMaxHeight by remember { mutableStateOf(settings.imageMaxHeight.coerceIn(10, 200)) }
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
     // §3/P1#9: preview lines per history row (mirrors web niApp, 1–6).
     var previewLines by remember { mutableStateOf(settings.previewLines) }
-    // A-F5: structural skin — immediate-effect pref like palette/theme (writes + recreates on select).
-    // Also threaded into persistAll() so saveScreenSettings() always receives the current skin.
-    var skin by remember { mutableStateOf(settings.skin) }
 
     // ── Storage ──
     var maxTextSizeBytes by remember {
@@ -261,7 +249,6 @@ fun SettingsScreen(
             notifyOnSensitiveSkip = showWarnings, // CopyPaste-bdac.32: renamed param
             maskSensitiveContent = maskSensitive,
             translucency = translucency,
-            motionReduced = motionReduced,
             imageMaxHeight = imageMaxHeight,
             previewDelayMs = previewDelay.toLong(),
             maxTextSizeBytes = maxTextSizeBytes,
@@ -278,10 +265,9 @@ fun SettingsScreen(
             notifyOnCopy = notifyOnCopy,
             soundOnCopy = soundOnCopy,
             logcatCaptureEnabled = logcatEnabled,
-            // A-F5: pass the draft skin state so the batch write persists it alongside
-            // the other display prefs (skin is also written immediately on select via
-            // settings.skin + recreate(), but the batch write ensures a consistent snapshot).
-            skin = skin,
+            // Accent is written immediately on picker select; pass the persisted
+            // value so the batch write keeps a consistent snapshot.
+            accent = settings.accent,
         )
         settings.maxFileSizeBytes = maxFileSizeBytes
         settings.sensitiveTtlSecs = sensitiveTtlSecs
@@ -308,11 +294,7 @@ fun SettingsScreen(
     var selectedTab by rememberSaveable { mutableStateOf(TAB_GENERAL) }
     val tabs = listOf("General", "Display", "Sync", "Storage", "Notifications")
 
-    // §1 aurora canvas backdrop — reacts live to the Display→Translucency toggle.
     val dark = isDarkTheme()
-    // CopyPaste-y94e: gate background canvas by skin so Vapor gets tint-blob and
-    // Quiet stays plain — mirrors DevicesScreen/AboutActivity three-way pattern.
-    val tok = skinTokens(LocalSkin.current)
 
     // ── Discard-changes confirmation dialog ──
     if (showDiscardDialog) {
@@ -359,27 +341,12 @@ fun SettingsScreen(
         onSaved()
     }
 
-    // CopyPaste-y94e: three-way background canvas driven by tok.background:
-    //   AURORA    (Classic) → animated aurora canvas (byte-identical to previous behaviour).
-    //   TINT_BLOB (Vapor)   → canonical tintBlobCanvas() — same helper used on every other screen
-    //                         (VISA-5/6: was an inline single-blob drawBehind; unified to the
-    //                          shared implementation in Components.kt so Vapor looks consistent).
-    //   FLAT      (Quiet)   → no canvas; containerColor stays opaque c.bg.
-    val paintAurora   = tok.background == SkinBackground.AURORA    && translucency && paintCanvasBackdrop
-    val paintTintBlob = tok.background == SkinBackground.TINT_BLOB && translucency && paintCanvasBackdrop
-    val scaffoldModifier = when {
-        paintAurora   -> modifier.auroraCanvas(dark, paletteAurora(LocalPalette.current))
-        // VISA-5/6: use the canonical shared tintBlobCanvas() from Components.kt so Vapor
-        // renders identically on Settings as it does on History/About/Devices/etc.
-        paintTintBlob -> modifier.tintBlobCanvas(dark, paletteAurora(LocalPalette.current), tok.glow)
-        else          -> modifier
-    }
+    // Calm solid backdrop (STYLEGUIDE §6 — no aurora). When translucent, glass
+    // surfaces frost over the screen-canvas gradient; otherwise the bg is opaque.
+    val scaffoldModifier = if (translucency && paintCanvasBackdrop) modifier.screenCanvas(dark) else modifier
     Scaffold(
-        // CopyPaste-7em1/1a61: pass paletteAurora so Settings screen uses the active palette's
-        // aurora blobs instead of the hardcoded legacy aurora (matches HistoryActivity pattern).
-        // CopyPaste-y94e: replaced inline ternary with three-way scaffoldModifier (skin-gated).
         modifier = scaffoldModifier,
-        containerColor = if (translucency && tok.background != SkinBackground.FLAT) androidx.compose.ui.graphics.Color.Transparent else c.bg,
+        containerColor = if (translucency && paintCanvasBackdrop) androidx.compose.ui.graphics.Color.Transparent else c.bg,
         topBar = {
             CopyPasteTopBar(
                 title = stringResource(R.string.title_settings),
@@ -493,7 +460,6 @@ fun SettingsScreen(
                     )
                     TAB_DISPLAY -> DisplayTab(
                         density = density,
-                        onDensityChange = { density = it; dirty = true },
                         showWarnings = showWarnings,
                         onShowWarningsChange = { showWarnings = it; dirty = true },
                         revealGuard = revealGuard,
@@ -502,19 +468,12 @@ fun SettingsScreen(
                         onMaskSensitiveChange = { maskSensitive = it; dirty = true },
                         translucency = translucency,
                         onTranslucencyChange = { translucency = it; dirty = true },
-                        motionReduced = motionReduced,
-                        onMotionReducedChange = { motionReduced = it; dirty = true },
                         imageMaxHeight = imageMaxHeight,
                         onImageMaxHeightChange = { imageMaxHeight = it; dirty = true },
                         previewDelay = previewDelay,
                         onPreviewDelayChange = { previewDelay = it; dirty = true },
                         previewLines = previewLines,
                         onPreviewLinesChange = { previewLines = it; dirty = true },
-                        // A-F5: skin is an immediate-effect pref (like palette/theme); the picker
-                        // writes directly and recreates, so onSkinChange just keeps the draft state
-                        // consistent for the persistAll() batch write.
-                        skin = skin,
-                        onSkinChange = { skin = it },
                         settings = settings,
                         ctx = ctx,
                     )
