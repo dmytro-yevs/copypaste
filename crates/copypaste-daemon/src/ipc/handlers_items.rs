@@ -193,7 +193,7 @@ impl IpcServer {
                 })
                 .await;
                 match join {
-                    Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item) {
+                    Ok(Ok(Some(item))) => match self.write_to_pasteboard(&item).await {
                         Ok(()) => {
                             // C. PROMOTE-ON-COPY: bump wall_time/lamport so this
                             // item sorts to the top of history_page on the next
@@ -623,7 +623,7 @@ impl IpcServer {
                 })
                 .await;
                 match join {
-                    Ok(Ok((Some(item), preview))) => match self.write_to_pasteboard(&item) {
+                    Ok(Ok((Some(item), preview))) => match self.write_to_pasteboard(&item).await {
                         Ok(()) => {
                             // C. PROMOTE-ON-COPY: bump wall_time/lamport so this
                             // item sorts to the top of history_page on the next
@@ -1483,18 +1483,158 @@ impl IpcServer {
     ///    `encode_image` re-encodes raw clipboard bytes to PNG before
     ///    chunking. Anything already shaped like a UTI (`public.*`,
     ///    `com.*`, `org.*`) is passed through unchanged.
-    pub(crate) fn write_to_pasteboard(
+    pub(crate) async fn write_to_pasteboard(
         &self,
         item: &copypaste_core::ClipboardItem,
     ) -> Result<(), PasteboardError> {
         #[cfg(target_os = "macos")]
         {
-            // Drain the autorelease pool around the entire Cocoa body. Without
-            // this, every paste-back (NSString::from_str, NSData::with_bytes for
-            // multi-MB images, clearContents/setData_forType, and the
-            // changeCount read in `record_self_write`) leaks autoreleased Cocoa
-            // objects on this tokio worker thread — the same leak class fixed in
-            // `clipboard.rs::poll`.
+            // crh3.77: the file branch writes up to 100 MiB of decrypted data to
+            // the local filesystem (create_dir_all + fs::write). Running that on
+            // the tokio async worker stalls the IPC loop for seconds on slow APFS.
+            // The file branch runs its decode (CPU) synchronously then offloads the
+            // blocking I/O to spawn_blocking; the NSPasteboard write happens in a
+            // separate autoreleasepool afterwards. Text, image, and unknown branches
+            // have no blocking I/O and remain in the existing autoreleasepool below.
+            if item.content_type == "file" {
+                // ── Part A: parse + decrypt (CPU, sync) ────────────────────────────
+                let content = match &item.content {
+                    Some(bytes) => bytes.as_slice(),
+                    None => return Err(PasteboardError::other("item has no content")),
+                };
+                let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
+                    PasteboardError::other("file item missing blob_ref metadata")
+                })?;
+                let file_meta = parse_file_meta(meta_json).map_err(|e| {
+                    PasteboardError::other(format!("file item blob_ref parse error: {e}"))
+                })?;
+                let chunks = chunks_from_blob(content).map_err(|e| {
+                    PasteboardError::other(format!("file chunks_from_blob failed: {e}"))
+                })?;
+                // Dispatch on key_version: v1 rows use the raw seed; v2 rows use derive_v2.
+                // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop.
+                let v1_key = zeroize::Zeroizing::new(**self.local_key);
+                let v2_key = derive_v2(&v1_key);
+                let key_to_use: &[u8; 32] = if item.key_version == 1 {
+                    &v1_key
+                } else {
+                    &v2_key
+                };
+                let raw_bytes =
+                    decode_file(&chunks, key_to_use, &file_meta.file_id).map_err(|e| {
+                        PasteboardError::decrypt(format!("file decode failed: {e}"))
+                    })?;
+                // Sanitise the filename: strip any leading path separators so the
+                // stored name cannot escape the cache directory.
+                let safe_name = std::path::Path::new(&file_meta.filename)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("paste-file") // infallible fallback — filename came from our own capture
+                    .to_string();
+
+                // ── Part B: blocking fs I/O on a spawn_blocking thread (crh3.77) ──
+                // raw_bytes (up to 100 MiB) is moved into the closure so the large
+                // allocation is written from a dedicated blocking thread, not the
+                // async worker. The `?` propagates PasteboardError through the async
+                // fn's return type.
+                let dest = tokio::task::spawn_blocking(move || {
+                    let paste_dir = paste_file_cache_dir();
+                    // Prune stale entries before writing so the directory stays bounded;
+                    // errors inside prune are logged at DEBUG and never propagate.
+                    prune_old_paste_files(&paste_dir);
+                    std::fs::create_dir_all(&paste_dir).map_err(|e| {
+                        PasteboardError::other(format!(
+                            "failed to create paste-files dir {paste_dir:?}: {e}"
+                        ))
+                    })?;
+                    let dest = paste_dir.join(&safe_name);
+                    std::fs::write(&dest, &raw_bytes).map_err(|e| {
+                        PasteboardError::other(format!(
+                            "failed to write paste file {dest:?}: {e}"
+                        ))
+                    })?;
+                    Ok::<_, PasteboardError>(dest)
+                })
+                .await
+                .map_err(|e| {
+                    // JoinError: spawn_blocking panicked or runtime is shutting down.
+                    self.self_write_change_count
+                        .store(-1, std::sync::atomic::Ordering::Release);
+                    PasteboardError::other(format!(
+                        "write_to_pasteboard blocking task panicked: {e}"
+                    ))
+                })??; // outer ? = JoinError mapped above; inner ? = PasteboardError from closure
+
+                // ── Part C: NSPasteboard write (quick Cocoa calls) in autoreleasepool ──
+                // The file is already on disk; this only constructs the NSURL and
+                // writes the file-url string to the pasteboard.
+                return objc2::rc::autoreleasepool(|_pool| {
+                    use objc2_app_kit::NSPasteboard;
+                    use objc2_foundation::{NSString, NSURL};
+
+                    // Fix-4 (dup-on-copy race): stamp the self-write sentinel
+                    // BEFORE calling clearContents/setString.
+                    let pre_count =
+                        unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                    let expected_after_write = pre_count + 2;
+                    self.self_write_change_count
+                        .store(expected_after_write, std::sync::atomic::Ordering::Release);
+                    let post_stamp = |self_write_cc: &Arc<std::sync::atomic::AtomicI64>| {
+                        let actual =
+                            unsafe { NSPasteboard::generalPasteboard().changeCount() } as i64;
+                        if actual == expected_after_write {
+                            self_write_cc.store(actual, std::sync::atomic::Ordering::Release);
+                        }
+                        tracing::debug!(
+                            change_count = actual,
+                            expected = expected_after_write,
+                            racing_write = actual != expected_after_write,
+                            "clipboard: post-write changeCount check (self-write sentinel)"
+                        );
+                    };
+
+                    // Build the file:// URL string for the temp file.
+                    // `public.file-url` data is the absolute URL string (percent-encoded),
+                    // e.g. "file:///Users/.../paste-files/foo.txt".  This is what Finder,
+                    // Terminal, and most Cocoa apps accept when reading `public.file-url`
+                    // from the pasteboard.  We construct it via NSURL so percent-encoding
+                    // is handled correctly, then write the absolute-string as NSString data.
+                    let file_url_str: String = unsafe {
+                        let path_ns = NSString::from_str(
+                            dest.to_str().unwrap_or_default(), // UTF-8 path; infallible on macOS
+                        );
+                        // fileURLWithPath: produces "file:///…" with proper percent-encoding.
+                        let nsurl = NSURL::fileURLWithPath(&path_ns);
+                        // absoluteString returns the full URL string; unwrap_or_default is
+                        // infallible in practice — a file URL always has an absolute string.
+                        nsurl
+                            .absoluteString()
+                            .map(|s| s.to_string())
+                            .unwrap_or_else(|| format!("file://{}", dest.display()))
+                    };
+                    let write_ok = unsafe {
+                        let pb = NSPasteboard::generalPasteboard();
+                        pb.clearContents();
+                        let uti = NSString::from_str("public.file-url");
+                        let url_ns = NSString::from_str(&file_url_str);
+                        pb.setString_forType(&url_ns, &uti)
+                    };
+                    if !write_ok {
+                        self.self_write_change_count
+                            .store(-1, std::sync::atomic::Ordering::Release);
+                        return Err(PasteboardError::other(
+                            "NSPasteboard setString:forType: returned false for public.file-url",
+                        ));
+                    }
+                    post_stamp(&self.self_write_change_count);
+                    Ok(())
+                });
+            }
+
+            // Non-file branches (text, image, unknown): synchronous Cocoa calls
+            // with no blocking fs I/O. Drain the autorelease pool around the Cocoa
+            // body to prevent leaks of autoreleased objects on the tokio worker
+            // thread — the same leak class fixed in `clipboard.rs::poll`.
             objc2::rc::autoreleasepool(|_pool| {
                 let content = match &item.content {
                     Some(bytes) => bytes.as_slice(),
@@ -1714,109 +1854,6 @@ impl IpcServer {
                             .store(-1, std::sync::atomic::Ordering::Release);
                         return Err(PasteboardError::other(
                             "NSPasteboard setData:forType: returned false for public.png",
-                        ));
-                    }
-                    post_stamp(&self.self_write_change_count);
-                    Ok(())
-                } else if item.content_type == "file" {
-                    // ----- file: reassemble chunks → decrypt → write as file-URL -----
-                    //
-                    // 1. Parse FileMeta (filename, mime, file_id) from blob_ref JSON.
-                    // 2. Decrypt via chunks_from_blob → decode_file (v1 local_key, same as
-                    //    get_item_file / handle_file).
-                    // 3. Write bytes to ~/Library/Caches/CopyPaste/paste-files/<filename>.
-                    // 4. Put an NSURL file-URL for that path on the pasteboard as
-                    //    `public.file-url`.  The URL must outlive the paste so we do NOT
-                    //    delete immediately; prune_old_paste_files() removes files >10 min
-                    //    old on each call so the directory stays bounded.
-                    let meta_json = item.blob_ref.as_deref().ok_or_else(|| {
-                        self.self_write_change_count
-                            .store(-1, std::sync::atomic::Ordering::Release);
-                        PasteboardError::other("file item missing blob_ref metadata")
-                    })?;
-                    let file_meta = parse_file_meta(meta_json).map_err(|e| {
-                        self.self_write_change_count
-                            .store(-1, std::sync::atomic::Ordering::Release);
-                        PasteboardError::other(format!("file item blob_ref parse error: {e}"))
-                    })?;
-
-                    let chunks = chunks_from_blob(content).map_err(|e| {
-                        self.self_write_change_count
-                            .store(-1, std::sync::atomic::Ordering::Release);
-                        PasteboardError::other(format!("file chunks_from_blob failed: {e}"))
-                    })?;
-                    // Dispatch on key_version: v1 rows use the raw seed; v2 rows use derive_v2.
-                    // P2-iqkm: wrap in Zeroizing so the key copy is wiped on drop.
-                    let v1_key = zeroize::Zeroizing::new(**self.local_key);
-                    let v2_key = derive_v2(&v1_key);
-                    let key_to_use: &[u8; 32] = if item.key_version == 1 {
-                        &v1_key
-                    } else {
-                        &v2_key
-                    };
-                    let raw_bytes =
-                        decode_file(&chunks, key_to_use, &file_meta.file_id).map_err(|e| {
-                            self.self_write_change_count
-                                .store(-1, std::sync::atomic::Ordering::Release);
-                            PasteboardError::decrypt(format!("file decode failed: {e}"))
-                        })?;
-
-                    // Sanitise the filename: strip any leading path separators so the
-                    // stored name cannot escape the cache directory.
-                    let safe_name = std::path::Path::new(&file_meta.filename)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("paste-file"); // infallible fallback — filename came from our own capture
-                    let paste_dir = paste_file_cache_dir();
-                    // Prune stale entries before writing so the directory stays bounded;
-                    // errors inside prune are logged at DEBUG and never propagate.
-                    prune_old_paste_files(&paste_dir);
-                    std::fs::create_dir_all(&paste_dir).map_err(|e| {
-                        self.self_write_change_count
-                            .store(-1, std::sync::atomic::Ordering::Release);
-                        PasteboardError::other(format!(
-                            "failed to create paste-files dir {paste_dir:?}: {e}"
-                        ))
-                    })?;
-                    let dest = paste_dir.join(safe_name);
-                    std::fs::write(&dest, &raw_bytes).map_err(|e| {
-                        self.self_write_change_count
-                            .store(-1, std::sync::atomic::Ordering::Release);
-                        PasteboardError::other(format!("failed to write paste file {dest:?}: {e}"))
-                    })?;
-
-                    // Build the file:// URL string for the temp file.
-                    // `public.file-url` data is the absolute URL string (percent-encoded),
-                    // e.g. "file:///Users/.../paste-files/foo.txt".  This is what Finder,
-                    // Terminal, and most Cocoa apps accept when reading `public.file-url`
-                    // from the pasteboard.  We construct it via NSURL so percent-encoding
-                    // is handled correctly, then write the absolute-string as NSString data.
-                    use objc2_foundation::{NSString, NSURL};
-                    let file_url_str: String = unsafe {
-                        let path_ns = NSString::from_str(
-                            dest.to_str().unwrap_or_default(), // UTF-8 path; infallible on macOS
-                        );
-                        // fileURLWithPath: produces "file:///…" with proper percent-encoding.
-                        let nsurl = NSURL::fileURLWithPath(&path_ns);
-                        // absoluteString returns the full URL string; unwrap_or_default is
-                        // infallible in practice — a file URL always has an absolute string.
-                        nsurl
-                            .absoluteString()
-                            .map(|s| s.to_string())
-                            .unwrap_or_else(|| format!("file://{}", dest.display()))
-                    };
-                    let write_ok = unsafe {
-                        let pb = NSPasteboard::generalPasteboard();
-                        pb.clearContents();
-                        let uti = NSString::from_str("public.file-url");
-                        let url_ns = NSString::from_str(&file_url_str);
-                        pb.setString_forType(&url_ns, &uti)
-                    };
-                    if !write_ok {
-                        self.self_write_change_count
-                            .store(-1, std::sync::atomic::Ordering::Release);
-                        return Err(PasteboardError::other(
-                            "NSPasteboard setString:forType: returned false for public.file-url",
                         ));
                     }
                     post_stamp(&self.self_write_change_count);

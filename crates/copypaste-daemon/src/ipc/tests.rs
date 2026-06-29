@@ -5594,6 +5594,51 @@ async fn write_to_pasteboard_file_branch_is_reached() {
 }
 
 // -----------------------------------------------------------------------
+// crh3.77: write_to_pasteboard async-signature enforcement
+// -----------------------------------------------------------------------
+
+/// write_to_pasteboard must be an async fn so its file branch can offload
+/// blocking fs::write (up to 100 MiB) to a spawn_blocking thread instead
+/// of stalling the tokio async worker.
+///
+/// Before crh3.77: write_to_pasteboard was a sync fn — calling .await on it
+/// is a compile error (the expected "failing test" state).
+/// After crh3.77: the function is async; non-macOS stub always returns Ok(()).
+#[tokio::test]
+async fn write_to_pasteboard_is_async_fn() {
+    let db = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+    let private_mode = Arc::new(AtomicBool::new(false));
+    let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
+    let device_pub = Arc::new([0u8; 32]);
+    let server = IpcServer::new(db, private_mode, local_key, device_pub);
+
+    // Build a properly encoded file item (same all-zero key as the server).
+    let raw = b"crh3.77 async enforcement payload";
+    let key = [0u8; 32];
+    let file_id = [0xCCu8; 16];
+    let (meta, chunks) =
+        copypaste_core::encode_file(raw, "crh377.txt", "text/plain", &key, &file_id, 0)
+            .expect("encode_file must succeed");
+    let blob = copypaste_core::chunks_to_blob(&chunks).expect("chunks_to_blob must succeed");
+    let meta_json = crate::clipboard::build_file_meta_json(&meta);
+    let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
+    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+
+    // .await here statically enforces that write_to_pasteboard is async.
+    // A sync fn cannot be awaited, so this is a compile-time assertion.
+    // On non-macOS the stub always returns Ok(()) without touching the FS.
+    let result = server.write_to_pasteboard(&item).await;
+    #[cfg(not(target_os = "macos"))]
+    assert!(
+        result.is_ok(),
+        "non-macOS stub must return Ok(()): {result:?}"
+    );
+    // On macOS: Ok(()) when the pasteboard is available, Err otherwise —
+    // either is acceptable; the invariant is that the function is awaitable.
+    let _ = result;
+}
+
+// -----------------------------------------------------------------------
 // CopyPaste-7mf regression: responder-side persist race
 // -----------------------------------------------------------------------
 
