@@ -730,12 +730,15 @@ class FgsSyncLoop(
                     }
                 } else if (isFile) {
                     // File row: store actual bytes so the user can save/copy them.
-                    // Cloud-poll (DecryptedItem) has no file_name/mime columns in the
-                    // SELECT — those live in the encrypted payload, not separate columns.
+                    // CopyPaste-1jms.35: decryptRow decodes the in-band file-identity
+                    // header, so DecryptedItem.fileName/fileMime ARE populated for
+                    // cloud-polled files — pass them through (like the relay/P2P path)
+                    // so the row shows "[file: report.pdf]" with its real MIME instead
+                    // of "[file]" + null metadata.
                     if (item.plaintext.isEmpty()) {
                         false
                     } else {
-                        val label = SyncFileHelper.buildFileLabel(null)
+                        val label = SyncFileHelper.buildFileLabel(item.fileName)
                         val storedId = repository.storeItem(
                             plaintext = label,
                             key = settings.encryptionKey,
@@ -746,7 +749,7 @@ class FgsSyncLoop(
                         )
                         if (storedId.isNotEmpty()) {
                             repository.storeFileBytes(storedId, item.plaintext)
-                            repository.storeFileMeta(storedId, null, null)
+                            repository.storeFileMeta(storedId, item.fileName, item.fileMime)
                             true
                         } else {
                             false
