@@ -154,6 +154,28 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("sync_enabled", v).apply()
 
     /**
+     * CopyPaste-26zi: independent per-transport enable flags.
+     *
+     * Relay and Supabase are ADDITIVE, not mutually exclusive — the runtime fans
+     * out to both when each is enabled AND configured (see [transportFanoutSet] /
+     * [ClipboardService.notifySyncManager]). These replace the old exclusive
+     * `syncBackend` segmented selector as the runtime gate; [syncBackend] remains
+     * only as a legacy UI hint. Default true preserves prior behaviour (a
+     * configured transport fires).
+     *
+     * Disabling a transport here must actually prevent that transport's send —
+     * the fan-out reads these flags directly.
+     */
+    var relayEnabled: Boolean
+        get() = prefs.getBoolean("relay_enabled", true)
+        set(v) = prefs.edit().putBoolean("relay_enabled", v).apply()
+
+    /** CopyPaste-26zi: independent Supabase transport enable flag (see [relayEnabled]). */
+    var supabaseEnabled: Boolean
+        get() = prefs.getBoolean("supabase_enabled", true)
+        set(v) = prefs.edit().putBoolean("supabase_enabled", v).apply()
+
+    /**
      * When true (default), post a brief [ClipboardService.CHANNEL_COPY_EVENT]
      * notification each time a new clipboard item is captured. One per capture,
      * debounced against rapid consecutive copies by a 500 ms guard in

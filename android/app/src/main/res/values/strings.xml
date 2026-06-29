@@ -556,6 +556,20 @@
     <string name="setting_sync_backend_relay">Relay</string>
     <string name="setting_sync_backend_supabase">Supabase</string>
 
+    <!-- CopyPaste-26zi: independent, additive transport toggles (replace the
+         exclusive Relay|Supabase segmented control). Both transports can be active
+         at once; the runtime fans out to every enabled + configured transport. -->
+    <string name="setting_sync_transports_title">Sync transports</string>
+    <string name="setting_sync_transports_subtitle">Relay and Supabase cloud sync are independent — enable either or both. When both are on, clips sync over both at once. All transports are end-to-end encrypted.</string>
+    <string name="setting_relay_enabled_title">Relay sync</string>
+    <string name="setting_relay_enabled_subtitle">Sync via the relay server (pair-based, local-network friendly). Turning this off stops relay sends even when a relay URL is configured.</string>
+    <string name="setting_supabase_enabled_title">Supabase cloud sync</string>
+    <string name="setting_supabase_enabled_subtitle">Sync via Supabase (cross-device, cloud-based). Turning this off stops Supabase pushes and polling even when Supabase is configured.</string>
+
+    <!-- CopyPaste-crh3.38: cloud account-mismatch banner (parity with macOS CloudAccountMismatchBanner) -->
+    <string name="setting_cloud_account_mismatch_title">Supabase account mismatch detected</string>
+    <string name="setting_cloud_account_mismatch_body">Two or more paired devices are using different Supabase accounts or projects. Clipboard items will not sync — Supabase RLS only allows rows owned by the same account to be shared. Make sure every device signs in with the same Supabase email and points to the same Supabase project URL.</string>
+
     <!-- CopyPaste-1jms.33: PairActivity — post-PAKE peer-review card strings -->
     <string name="pair_review_title">Peer device</string>
     <string name="pair_review_subtitle">Verify the device details before confirming</string>

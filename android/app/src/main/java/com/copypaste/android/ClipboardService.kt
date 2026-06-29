@@ -1656,11 +1656,24 @@ class ClipboardService : Service() {
         ) {
             // CopyPaste-26zi: additive fan-out — each transport fires independently.
             // macOS daemon fans out to relay AND cloud; Android must do the same.
+            //
+            // The send set is computed by transportFanoutSet (the SAME pure function
+            // the unit tests verify): a transport fires iff it is BOTH enabled (the
+            // user's independent toggle) AND configured. Disabling a transport in the
+            // UI (settings.relayEnabled / settings.supabaseEnabled) provably removes
+            // it from this set, preventing its send.
+            val transports = transportFanoutSet(
+                relayEnabled = settings.relayEnabled,
+                relayConfigured = settings.isRelayConfigured,
+                supabaseEnabled = settings.supabaseEnabled,
+                supabaseConfigured = settings.isSupabaseConfigured,
+            )
 
             // ── Supabase transport ────────────────────────────────────────────
-            // Gate: Supabase is fully configured (url + anonKey + sync key).
-            // Independent of syncBackend enum — the mode setting is for UI only.
-            if (settings.isSupabaseConfigured) {
+            // CopyPaste-otb7: publish the ACTUAL backend op result so Sync Diagnostics
+            // derives the Supabase Connection status from real push outcomes, not P2P
+            // peer presence.
+            if (SyncTransport.SUPABASE in transports) {
                 try {
                     val id = syncManager.pushToSupabase(
                         plaintext = payload,
@@ -1670,20 +1683,22 @@ class ClipboardService : Service() {
                         lamportTs = lamportTs,
                     )
                     if (id != null) {
+                        DevicesOnlineState.setSupabaseOpResult(success = true)
                         // CopyPaste-g4ik: guard item id (UUID) in log — stripped from release by R8.
                         if (BuildConfig.DEBUG) Log.d(TAG, "Supabase push ok: $id ($contentType)")
                     } else {
+                        DevicesOnlineState.setSupabaseOpResult(success = false)
                         Log.w(TAG, "Supabase push returned null (logged above)")
                     }
                 } catch (e: Exception) {
+                    DevicesOnlineState.setSupabaseOpResult(success = false)
                     Log.w(TAG, "Supabase push failed: ${e.message}")
                 }
             }
 
             // ── Relay transport ───────────────────────────────────────────────
-            // Gate: relay URL is non-blank and not loopback.
             // Independent of Supabase — both may fire on the same capture.
-            if (settings.isRelayConfigured) {
+            if (SyncTransport.RELAY in transports) {
                 try {
                     val ok = syncManager.pushToRelay(
                         itemId = itemId,
@@ -1692,12 +1707,15 @@ class ClipboardService : Service() {
                         lamportTs = lamportTs,
                     )
                     if (ok) {
+                        DevicesOnlineState.setRelayOpResult(success = true)
                         // CopyPaste-g4ik: guard itemId (UUID) in log — stripped from release by R8.
                         if (BuildConfig.DEBUG) Log.d(TAG, "Relay push ok: $itemId ($contentType)")
                     } else {
+                        DevicesOnlineState.setRelayOpResult(success = false)
                         Log.w(TAG, "Relay push returned false (logged above)")
                     }
                 } catch (e: Exception) {
+                    DevicesOnlineState.setRelayOpResult(success = false)
                     Log.w(TAG, "Relay push failed: ${e.message}")
                 }
             }

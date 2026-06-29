@@ -73,6 +73,110 @@ internal fun isPeerOnline(
     return recentSync || isMdnsDiscovered
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CopyPaste-26zi / otb7 / crh3.38: pure sync-settings logic.
+//
+// These are platform-free, unit-testable functions shared by the runtime
+// (ClipboardService / FgsSyncLoop) and the SyncTab UI so that the SAME logic that
+// the tests verify is the logic that actually runs. No Android runtime deps.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A cloud sync transport. The two are INDEPENDENT and additive (both may run). */
+enum class SyncTransport { RELAY, SUPABASE }
+
+/**
+ * CopyPaste-26zi: per-transport additive fan-out gate.
+ *
+ * A transport is included in the send set iff it is BOTH enabled (the user's
+ * independent toggle) AND configured. The old `when (syncBackend)` XOR switch was
+ * wrong: the segmented Relay|Supabase control implied exclusivity while the
+ * runtime fanned out to both additively. This function is the single source of
+ * truth for the fan-out decision — used by [ClipboardService.notifySyncManager].
+ */
+fun transportFanoutSet(
+    relayEnabled: Boolean,
+    relayConfigured: Boolean,
+    supabaseEnabled: Boolean,
+    supabaseConfigured: Boolean,
+): Set<SyncTransport> = buildSet {
+    if (relayEnabled && relayConfigured) add(SyncTransport.RELAY)
+    if (supabaseEnabled && supabaseConfigured) add(SyncTransport.SUPABASE)
+}
+
+/**
+ * CopyPaste-otb7: a backend (Relay/Supabase) connection state DERIVED FROM ACTUAL
+ * backend operation results — never from P2P peer presence.
+ */
+enum class BackendConnState { Connected, Error, Idle, Unknown }
+
+/**
+ * CopyPaste-otb7: the last-known result of a backend transport's network op
+ * (push/poll). Published by [ClipboardService.notifySyncManager] (push result)
+ * and [FgsSyncLoop] (Supabase poll result). Timestamps are wall-clock ms; 0 = none.
+ */
+data class BackendOpResult(
+    val lastSuccessMs: Long = 0L,
+    val lastErrorMs: Long = 0L,
+    val lastErrorIsAuth: Boolean = false,
+)
+
+/**
+ * CopyPaste-otb7: derive a backend's connection state from its op history ONLY.
+ *
+ * Priority:
+ *  1. No op ever → [BackendConnState.Unknown] (don't fabricate a status).
+ *  2. Last error newer than last success → [BackendConnState.Error]
+ *     (e.g. bad cloud creds — shows Error even when a P2P peer is online).
+ *  3. Recent success → [BackendConnState.Connected]
+ *     (healthy cloud shows Connected even with zero P2P peers).
+ *  4. Otherwise (stale success) → [BackendConnState.Idle].
+ *
+ * Peer presence (onlineCount / lastActivityMs) is deliberately NOT a parameter:
+ * that is a separate signal rendered in its own row.
+ */
+fun deriveBackendConnState(
+    lastSuccessMs: Long,
+    lastErrorMs: Long,
+    nowMs: Long,
+    recentMs: Long,
+): BackendConnState = when {
+    lastSuccessMs <= 0L && lastErrorMs <= 0L -> BackendConnState.Unknown
+    lastErrorMs > lastSuccessMs -> BackendConnState.Error
+    lastSuccessMs > 0L && (nowMs - lastSuccessMs) <= recentMs -> BackendConnState.Connected
+    else -> BackendConnState.Idle
+}
+
+/**
+ * CopyPaste-otb7: signed-in is true ONLY when there is a confirmed backend session
+ * AND a saved (persisted) account email — never inferred from a draft email the
+ * user is still typing into the field.
+ */
+fun isSupabaseSignedIn(savedEmail: String, hasActiveSession: Boolean): Boolean =
+    hasActiveSession && savedEmail.isNotBlank()
+
+/**
+ * CopyPaste-crh3.38: cloud account-mismatch predicate — Android parity with the
+ * macOS `cloudAccountMismatch` detection.
+ *
+ * Returns true when [localAccountId] is known AND at least one peer carries an
+ * account id that differs from it. Mirrors macOS exactly:
+ *  - null local id (cloud off / not signed in) → false
+ *  - peers with null ids are ignored (legacy / not-yet-plumbed)
+ *  - any differing peer id → true
+ *
+ * NOTE: peer Supabase account ids are not yet plumbed into [PairedPeer] (parity
+ * with the macOS CopyPaste-1jms.35 deferral), so callers currently pass an empty
+ * list → banner hidden, no false positives. The logic is in place for when peer
+ * account ids become available.
+ */
+fun detectCloudAccountMismatch(
+    localAccountId: String?,
+    peerAccountIds: List<String?>,
+): Boolean {
+    if (localAccountId == null) return false
+    return peerAccountIds.any { it != null && it != localAccountId }
+}
+
 /**
  * Shared online-count state published by [DevicesScreen] and consumed by
  * [com.copypaste.android.ui.SyncStatusBadge] so both the footer dot+count AND
@@ -164,6 +268,46 @@ object DevicesOnlineState {
      */
     fun setSyncError(error: Boolean) {
         _isSyncError.value = error
+    }
+
+    // ── CopyPaste-otb7: per-backend op-result state ──────────────────────────
+    // Sourced from ACTUAL backend network ops (push success/failure in
+    // ClipboardService.notifySyncManager; Supabase poll success/failure in
+    // FgsSyncLoop), NOT from P2P peer presence. The Sync Diagnostics card derives
+    // each backend's Connection row from these via [deriveBackendConnState].
+
+    private val _supabaseOpResult = MutableStateFlow(BackendOpResult())
+    val supabaseOpResult: StateFlow<BackendOpResult> = _supabaseOpResult.asStateFlow()
+
+    private val _relayOpResult = MutableStateFlow(BackendOpResult())
+    val relayOpResult: StateFlow<BackendOpResult> = _relayOpResult.asStateFlow()
+
+    /** Record a Supabase backend op outcome. Safe to call from any thread. */
+    fun setSupabaseOpResult(
+        success: Boolean,
+        isAuthError: Boolean = false,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        val prev = _supabaseOpResult.value
+        _supabaseOpResult.value = if (success) {
+            prev.copy(lastSuccessMs = nowMs)
+        } else {
+            prev.copy(lastErrorMs = nowMs, lastErrorIsAuth = isAuthError)
+        }
+    }
+
+    /** Record a Relay backend op outcome. Safe to call from any thread. */
+    fun setRelayOpResult(
+        success: Boolean,
+        isAuthError: Boolean = false,
+        nowMs: Long = System.currentTimeMillis(),
+    ) {
+        val prev = _relayOpResult.value
+        _relayOpResult.value = if (success) {
+            prev.copy(lastSuccessMs = nowMs)
+        } else {
+            prev.copy(lastErrorMs = nowMs, lastErrorIsAuth = isAuthError)
+        }
     }
 
     /**

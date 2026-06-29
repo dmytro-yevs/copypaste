@@ -456,7 +456,11 @@ class FgsSyncLoop(
                 // (safe: skip rather than push sensitive data on metered networks).
                 val isWifiRequired = settings.syncOnWifiOnly
                 val isWifi = !isWifiRequired || isOnWifi(context)
+                // CopyPaste-26zi: also gate on the independent per-transport enable
+                // flag. Disabling Supabase in Settings must stop its poll, even when
+                // it is otherwise fully configured. Relay/Supabase are additive.
                 val enabled = settings.syncEnabled &&
+                    settings.supabaseEnabled &&
                     settings.isSupabaseConfigured &&
                     isWifi
 
@@ -492,6 +496,10 @@ class FgsSyncLoop(
                         // delay), while the comment falsely claimed exponential
                         // backoff. Now a single backoff governs the next wait.
                         consecutiveFailures++
+                        // CopyPaste-otb7: publish the ACTUAL Supabase poll outcome so the
+                        // Sync Diagnostics Supabase Connection row is sourced from backend
+                        // op results, not P2P peer presence.
+                        DevicesOnlineState.setSupabaseOpResult(success = false, isAuthError = true)
                         val backoff = backoffMs(consecutiveFailures)
                         Log.w(TAG, "Poll failed (#$consecutiveFailures): ${pollError.message} — backing off ${backoff}ms")
                         // CopyPaste-234q: publish authoritative badge state via Rust FFI
@@ -517,6 +525,10 @@ class FgsSyncLoop(
                     }
 
                     consecutiveFailures = 0
+                    // CopyPaste-otb7: publish the successful Supabase poll outcome so the
+                    // Sync Diagnostics Supabase Connection row reflects real backend
+                    // health independently of P2P peer presence.
+                    DevicesOnlineState.setSupabaseOpResult(success = true)
                     consecutiveEmpty = if (newCount > 0) 0 else consecutiveEmpty + 1
                     if (newCount > 0) {
                         Log.d(TAG, "FgsSyncLoop: $newCount new item(s) stored")

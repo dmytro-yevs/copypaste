@@ -11,7 +11,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -22,8 +21,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.copypaste.android.ui.SyncBadgeState
-import com.copypaste.android.ui.resolveSyncBadgeState
 import com.copypaste.android.ui.theme.ButtonVariant
 import com.copypaste.android.ui.theme.CopyPasteButton
 import com.copypaste.android.ui.theme.LocalIdeColors
@@ -69,6 +66,13 @@ internal fun SyncTab(
     onTestConnection: (() -> Unit)? = null,
 ) {
     val c = LocalIdeColors.current
+    val ctx = LocalContext.current
+    // CopyPaste-26zi: self-contained Settings handle for the independent transport
+    // toggles. These apply immediately (like a Switch) and are read by the runtime
+    // fan-out (ClipboardService/FgsSyncLoop) — no Save round-trip needed.
+    val settings = remember { Settings(ctx) }
+    var relayEnabled by remember { mutableStateOf(settings.relayEnabled) }
+    var supabaseEnabled by remember { mutableStateOf(settings.supabaseEnabled) }
     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
         // CopyPaste-dxq2: display sync error banner when the sync loop has written an
         // error to Settings.lastSyncError. A 401 Unauthorized is shown with a distinct
@@ -148,37 +152,62 @@ internal fun SyncTab(
                 density = density,
             )
             SettingsCardDivider()
-            // CopyPaste-bdac.57: replace boolean Switch ("Use Supabase Cloud Sync") with
-            // a segmented control "Relay | Supabase" so the label makes clear that "Off"
-            // means relay mode (not no-sync), matching the density/skin segmented controls.
+            // CopyPaste-26zi: INDEPENDENT, ADDITIVE transport toggles.
+            //
+            // The previous segmented "Relay | Supabase" control implied the two were
+            // mutually exclusive, but the runtime fans out to BOTH additively when
+            // each is configured (see ClipboardService.notifySyncManager /
+            // transportFanoutSet). These per-transport switches make that explicit:
+            // enable either or both. Disabling a transport here actually stops its
+            // send (the fan-out reads settings.relayEnabled / settings.supabaseEnabled).
             Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                 Text(
-                    text = stringResource(R.string.setting_sync_backend_title),
+                    text = stringResource(R.string.setting_sync_transports_title),
                     style = MaterialTheme.typography.bodyMedium,
                     color = c.dim,
                     modifier = Modifier.padding(bottom = 4.dp),
                 )
                 Text(
-                    text = stringResource(R.string.setting_sync_backend_subtitle),
+                    text = stringResource(R.string.setting_sync_transports_subtitle),
                     style = MaterialTheme.typography.bodySmall,
                     color = c.dim,
-                    modifier = Modifier.padding(bottom = 8.dp),
-                )
-                IdeSegmentedControl(
-                    options = listOf(
-                        stringResource(R.string.setting_sync_backend_relay),
-                        stringResource(R.string.setting_sync_backend_supabase),
-                    ),
-                    selectedIndex = if (syncBackend == SyncBackend.SUPABASE) 1 else 0,
-                    onSelect = { idx ->
-                        onSyncBackendChange(if (idx == 1) SyncBackend.SUPABASE else SyncBackend.RELAY)
-                    },
                 )
             }
+            SettingsRow(
+                title = stringResource(R.string.setting_relay_enabled_title),
+                subtitle = stringResource(R.string.setting_relay_enabled_subtitle),
+                checked = relayEnabled,
+                onCheckedChange = { v ->
+                    relayEnabled = v
+                    settings.relayEnabled = v
+                    // Keep the legacy syncBackend enum hint coherent for any code that
+                    // still reads it: point it at whichever transport remains enabled.
+                    onSyncBackendChange(
+                        if (supabaseEnabled && !v) SyncBackend.SUPABASE else SyncBackend.RELAY,
+                    )
+                },
+                density = density,
+            )
+            SettingsCardDivider()
+            SettingsRow(
+                title = stringResource(R.string.setting_supabase_enabled_title),
+                subtitle = stringResource(R.string.setting_supabase_enabled_subtitle),
+                checked = supabaseEnabled,
+                onCheckedChange = { v ->
+                    supabaseEnabled = v
+                    settings.supabaseEnabled = v
+                    onSyncBackendChange(
+                        if (v) SyncBackend.SUPABASE else SyncBackend.RELAY,
+                    )
+                },
+                density = density,
+            )
         }
 
         // ── SUPABASE CONFIG ────────────────────────────────────────────────
-        if (syncBackend == SyncBackend.SUPABASE) {
+        // CopyPaste-26zi: gate on the independent supabaseEnabled toggle (additive),
+        // not on the old exclusive syncBackend enum.
+        if (supabaseEnabled) {
             SectionLabel(stringResource(R.string.section_supabase_config))
             SettingsCard {
                 Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -206,6 +235,41 @@ internal fun SyncTab(
             }
 
             SectionLabel(stringResource(R.string.section_supabase_account))
+            // CopyPaste-crh3.38: cloud account-mismatch banner (Android parity with
+            // macOS CloudAccountMismatchBanner). Shown when the local cloud account
+            // differs from a paired peer's account — Supabase RLS only shares rows
+            // owned by the same GoTrue user, so a mismatch silently breaks sync.
+            //
+            // Peer account ids are not yet plumbed into PairedPeer (parity with the
+            // macOS CopyPaste-1jms.35 deferral), so peerAccountIds is empty → the
+            // banner stays hidden, no false positives. The detection logic is wired
+            // and unit-tested so it activates the moment peer ids become available.
+            val localAccountId = settings.supabaseEmail.ifBlank { null }
+            val peerAccountIds: List<String?> = emptyList()
+            if (detectCloudAccountMismatch(localAccountId, peerAccountIds)) {
+                androidx.compose.material3.Card(
+                    colors = androidx.compose.material3.CardDefaults.cardColors(
+                        containerColor = c.warning.copy(alpha = 0.12f),
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = stringResource(R.string.setting_cloud_account_mismatch_title),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = c.warning,
+                        )
+                        Text(
+                            text = stringResource(R.string.setting_cloud_account_mismatch_body),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = c.text,
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
+            }
             SettingsCard {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
                     Text(
@@ -214,11 +278,21 @@ internal fun SyncTab(
                         color = c.dim,
                         modifier = Modifier.padding(bottom = 4.dp),
                     )
+                    // CopyPaste-otb7: "signed in" must reflect an ACTUAL backend session
+                    // (a successful Supabase op against the SAVED account), never a draft
+                    // email the user is still typing. We read the persisted email and gate
+                    // it on a real op success.
+                    val supabaseOp by DevicesOnlineState.supabaseOpResult.collectAsState()
+                    val savedEmail = settings.supabaseEmail
+                    val signedIn = isSupabaseSignedIn(
+                        savedEmail = savedEmail,
+                        hasActiveSession = supabaseOp.lastSuccessMs > 0L,
+                    )
                     Text(
-                        text = if (supabaseEmail.isBlank())
-                            stringResource(R.string.setting_supabase_account_anon)
+                        text = if (signedIn)
+                            stringResource(R.string.setting_supabase_account_signed_in, savedEmail)
                         else
-                            stringResource(R.string.setting_supabase_account_signed_in, supabaseEmail),
+                            stringResource(R.string.setting_supabase_account_anon),
                         style = MaterialTheme.typography.bodyMedium,
                         color = c.text,
                     )
@@ -269,7 +343,8 @@ internal fun SyncTab(
         // the selected backend. No secrets are exposed.
         SectionLabel(stringResource(R.string.section_sync_diagnostics))
         SyncDiagnosticsCard(
-            syncBackend = syncBackend,
+            relayEnabled = relayEnabled,
+            supabaseEnabled = supabaseEnabled,
             supabaseUrl = supabaseUrl,
             supabaseAnonKey = supabaseAnonKey,
             relayUrl = relayUrl,
@@ -314,164 +389,154 @@ internal fun SyncTab(
 /**
  * Cloud-sync diagnostics card (otb7) — parity with the macOS Settings diagnostics surface.
  *
- * Shows:
- *  - Connection state (derived from [DevicesOnlineState] + OS connectivity, same signal
- *    as [com.copypaste.android.ui.SyncStatusBadge] — PG-10 / 5qbe alignment).
- *  - Last successful sync timestamp (relative, from [DevicesOnlineState.lastActivityMs]).
- *  - Misconfig hint for the active backend when relevant fields are blank.
+ * CopyPaste-otb7 fix: each backend's Connection row is sourced from that backend's
+ * ACTUAL operation results ([DevicesOnlineState.supabaseOpResult] /
+ * [DevicesOnlineState.relayOpResult]) via [deriveBackendConnState] — NOT from
+ * paired-peer P2P presence. Bad cloud creds therefore surface as "Error" even when a
+ * peer is online, and a healthy cloud with no peer surfaces as "Connected" rather than
+ * "Idle". P2P peer presence is rendered in its OWN clearly-labelled row so the two
+ * signals never bleed into each other.
  *
+ * Only enabled transports' rows are shown (additive model, CopyPaste-26zi).
  * No credentials or secrets are displayed. Read-only — no Save action needed.
- * Live: recomposes whenever [DevicesOnlineState] emits a new value.
  */
 @Composable
 private fun SyncDiagnosticsCard(
-    syncBackend: SyncBackend,
+    relayEnabled: Boolean,
+    supabaseEnabled: Boolean,
     supabaseUrl: String,
     supabaseAnonKey: String,
     relayUrl: String,
 ) {
     val c = LocalIdeColors.current
-    val ctx = LocalContext.current
 
-    // Primary signal: daemon-derived connectivity (same source as SyncStatusBadge).
+    // Backend op results — the AUTHORITATIVE per-backend health source (otb7).
+    val supabaseOp by DevicesOnlineState.supabaseOpResult.collectAsState()
+    val relayOp by DevicesOnlineState.relayOpResult.collectAsState()
+    // P2P peer presence — SEPARATE signal, shown in its own row; never used to
+    // derive backend Connection state.
     val liveOnlineCount by DevicesOnlineState.onlineCount.collectAsState()
-    val lastActivityMs by DevicesOnlineState.lastActivityMs.collectAsState()
 
-    // OS-level internet: secondary signal (distinguishes NetworkOffline from DaemonUnreachable).
-    var hasInternet by remember { mutableStateOf(true) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            val cm = ctx.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
-                as? android.net.ConnectivityManager
-            val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
-            hasInternet = caps?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) == true &&
-                caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-            kotlinx.coroutines.delay(10_000L)
-        }
-    }
-
-    val count = if (liveOnlineCount >= 0) liveOnlineCount else 0
-    val badgeState = resolveSyncBadgeState(
-        liveOnlineCount = count,
-        lastActivityMs = lastActivityMs,
-        recentSyncMs = RECENT_SYNC_MS,
-        hasInternet = hasInternet,
+    val nowMs = System.currentTimeMillis()
+    val supaState = deriveBackendConnState(
+        lastSuccessMs = supabaseOp.lastSuccessMs,
+        lastErrorMs = supabaseOp.lastErrorMs,
+        nowMs = nowMs,
+        recentMs = RECENT_SYNC_MS,
+    )
+    val relayState = deriveBackendConnState(
+        lastSuccessMs = relayOp.lastSuccessMs,
+        lastErrorMs = relayOp.lastErrorMs,
+        nowMs = nowMs,
+        recentMs = RECENT_SYNC_MS,
     )
 
-    // Last-sync label — mirrors SyncStatusSheet format.
-    val nowMs = System.currentTimeMillis()
-    val lastSyncLabel: String = if (lastActivityMs <= 0L) {
+    fun stateLabelColor(s: BackendConnState): Pair<String, androidx.compose.ui.graphics.Color> = when (s) {
+        BackendConnState.Connected -> "Connected" to c.success
+        BackendConnState.Error     -> "Error (check config)" to c.danger
+        BackendConnState.Idle      -> "Idle (no recent sync)" to c.faint
+        BackendConnState.Unknown   -> "Not reporting yet" to c.dim
+    }
+
+    fun lastSyncLabel(lastSuccessMs: Long): String = if (lastSuccessMs <= 0L) {
         "Never"
     } else {
-        val elapsed = (nowMs - lastActivityMs) / 1_000L
+        val elapsed = (nowMs - lastSuccessMs) / 1_000L
         when {
             elapsed < 60     -> "${elapsed}s ago"
             elapsed < 3_600  -> "${elapsed / 60}m ago"
             elapsed < 86_400 -> "${elapsed / 3_600}h ago"
             else -> DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
-                .format(Date(lastActivityMs))
+                .format(Date(lastSuccessMs))
         }
     }
 
-    // Connection-state label + colour — mirrors macOS Settings diagnostics row.
-    // CopyPaste-5qbe: Idle (grey) = configured but no recent sync — not an error.
-    val (stateLabel, stateColor) = when (badgeState) {
-        SyncBadgeState.Connected         -> "Connected" to c.success
-        SyncBadgeState.Idle              -> "Idle (no recent sync)" to c.faint
-        SyncBadgeState.NetworkOffline    -> "Offline (no internet)" to c.danger
-        SyncBadgeState.DaemonUnreachable -> "Unreachable (sync not working)" to c.danger
-    }
-
-    // Misconfig hint — actionable text guiding the user toward the root cause.
-    // Checks draft values (not yet saved) so the hint updates as the user edits.
-    val misconfigHint: String? = when {
-        syncBackend == SyncBackend.SUPABASE && supabaseUrl.isBlank() ->
+    // Misconfig hints — actionable text per ENABLED transport (draft-aware).
+    val supabaseHint: String? = when {
+        !supabaseEnabled -> null
+        supabaseUrl.isBlank() ->
             "Supabase URL is not set. Enter it in Supabase Configuration above."
-        syncBackend == SyncBackend.SUPABASE && supabaseAnonKey.isBlank() ->
+        supabaseAnonKey.isBlank() ->
             "Supabase Anon Key is not set. Enter it in Supabase Configuration above."
-        syncBackend == SyncBackend.SUPABASE &&
-            supabaseUrl.isNotBlank() && !supabaseUrl.startsWith("https://") ->
+        !supabaseUrl.startsWith("https://") ->
             "Supabase URL must start with https://."
-        syncBackend == SyncBackend.RELAY &&
-            (relayUrl.isBlank() || relayUrl.contains("localhost") || relayUrl.contains("127.0.0.1")) ->
+        supaState == BackendConnState.Error ->
+            "Supabase sync failed. Check your URL, anon key, passphrase, and RLS policies."
+        else -> null
+    }
+    val relayHint: String? = when {
+        !relayEnabled -> null
+        relayUrl.isBlank() || relayUrl.contains("localhost") || relayUrl.contains("127.0.0.1") ->
             "Relay URL is blank or points to localhost, which is unreachable on a real device."
-        badgeState is SyncBadgeState.DaemonUnreachable && syncBackend == SyncBackend.SUPABASE ->
-            "Sync not working. Check your Supabase URL, anon key, passphrase, and RLS policies."
-        badgeState is SyncBadgeState.DaemonUnreachable && syncBackend == SyncBackend.RELAY ->
-            "Relay unreachable. Verify the relay URL and that the relay server is running."
+        relayState == BackendConnState.Error ->
+            "Relay sync failed. Verify the relay URL and that the relay server is running."
         else -> null
     }
 
     SettingsCard {
         Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-            // Connection state row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Connection",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.dim,
-                )
-                Text(
-                    text = stateLabel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = stateColor,
-                )
+            var first = true
+            // Supabase backend row (only when enabled).
+            if (supabaseEnabled) {
+                val (label, color) = stateLabelColor(supaState)
+                DiagnosticsRow("Supabase", label, color, c)
+                DiagnosticsDivider(c)
+                DiagnosticsRow("Supabase last sync", lastSyncLabel(supabaseOp.lastSuccessMs), c.text, c)
+                first = false
             }
-            Spacer(modifier = Modifier.height(8.dp))
-            HorizontalDivider(color = c.divider, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(8.dp))
-            // Last sync row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = "Last sync",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.dim,
-                )
-                Text(
-                    text = lastSyncLabel,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.text,
-                )
+            // Relay backend row (only when enabled).
+            if (relayEnabled) {
+                if (!first) DiagnosticsDivider(c)
+                val (label, color) = stateLabelColor(relayState)
+                DiagnosticsRow("Relay", label, color, c)
+                DiagnosticsDivider(c)
+                DiagnosticsRow("Relay last sync", lastSyncLabel(relayOp.lastSuccessMs), c.text, c)
+                first = false
             }
-            // Backend row
-            Spacer(modifier = Modifier.height(8.dp))
-            HorizontalDivider(color = c.divider, thickness = 1.dp)
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
+            // P2P peer presence — SEPARATE from backend status (otb7).
+            if (!first) DiagnosticsDivider(c)
+            val peerCount = if (liveOnlineCount >= 0) liveOnlineCount else 0
+            DiagnosticsRow(
+                label = "Peers online (P2P)",
+                value = peerCount.toString(),
+                valueColor = if (peerCount > 0) c.success else c.faint,
+                c = c,
+            )
+            // Misconfig hints — one per enabled transport with a detected issue.
+            for (hint in listOfNotNull(supabaseHint, relayHint)) {
+                DiagnosticsDivider(c)
                 Text(
-                    text = "Backend",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.dim,
-                )
-                Text(
-                    text = if (syncBackend == SyncBackend.SUPABASE) "Supabase" else "Relay",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = c.text,
-                )
-            }
-            // Misconfig hint — shown only when there is a detected issue.
-            if (misconfigHint != null) {
-                Spacer(modifier = Modifier.height(8.dp))
-                HorizontalDivider(color = c.divider, thickness = 1.dp)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = misconfigHint,
+                    text = hint,
                     style = MaterialTheme.typography.bodySmall,
                     color = c.danger,
                 )
             }
         }
     }
+}
+
+/** A single label/value diagnostics row. */
+@Composable
+private fun DiagnosticsRow(
+    label: String,
+    value: String,
+    valueColor: androidx.compose.ui.graphics.Color,
+    c: com.copypaste.android.ui.theme.IdeColors,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(text = label, style = MaterialTheme.typography.bodyMedium, color = c.dim)
+        Text(text = value, style = MaterialTheme.typography.bodyMedium, color = valueColor)
+    }
+}
+
+/** A standard divider with vertical breathing room between diagnostics rows. */
+@Composable
+private fun DiagnosticsDivider(c: com.copypaste.android.ui.theme.IdeColors) {
+    Spacer(modifier = Modifier.height(8.dp))
+    HorizontalDivider(color = c.divider, thickness = 1.dp)
+    Spacer(modifier = Modifier.height(8.dp))
 }
