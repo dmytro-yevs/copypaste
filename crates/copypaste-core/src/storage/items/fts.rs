@@ -105,7 +105,7 @@ pub fn fetch_text_previews_batch<D: DbRead + ?Sized>(
 
 /// Clamp `text` to at most `max_bytes` bytes, truncating at a UTF-8 character
 /// boundary and appending `…` when truncation occurs.
-pub(super) fn clamp_preview(text: String, max_bytes: usize) -> String {
+pub(crate) fn clamp_preview(text: String, max_bytes: usize) -> String {
     if text.len() <= max_bytes {
         return text;
     }
@@ -225,7 +225,7 @@ pub fn get_device_names<D: DbRead + ?Sized>(
 ///
 /// This is a whitelist approach: only known-safe characters pass through, preventing
 /// FTS5 operator injection (e.g. `NOT`, `OR`, `NEAR`, column filters).
-pub(super) fn sanitize_fts5_query(raw: &str) -> Option<String> {
+pub(crate) fn sanitize_fts5_query(raw: &str) -> Option<String> {
     // Keep only alphanum, underscore, quote, asterisk, and whitespace.
     //
     // `-` (hyphen/minus) is an FTS5 operator: in a MATCH expression `foo -bar`

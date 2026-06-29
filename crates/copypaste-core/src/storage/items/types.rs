@@ -70,7 +70,7 @@ pub fn next_lamport_ts(prev_lamport: i64, now_ms: i64) -> i64 {
 /// Degrades to `0` (epoch) on a pathological pre-epoch clock rather than
 /// panicking — matching the `unwrap_or_default()` contract used by the
 /// `ClipboardItem::new_*` constructors.
-pub(super) fn now_ms_epoch() -> i64 {
+pub(crate) fn now_ms_epoch() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
