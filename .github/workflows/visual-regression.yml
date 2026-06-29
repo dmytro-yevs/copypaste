@@ -1,0 +1,141 @@
+name: Visual Regression
+
+# Run on every PR and every push to main so regressions are caught immediately.
+# Snapshot updates must be committed; failing diffs block the merge.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/copypaste-ui/src/**"
+      - "crates/copypaste-ui/e2e/**"
+      - "crates/copypaste-ui/playwright.config.ts"
+      - "crates/copypaste-ui/package.json"
+      - "crates/copypaste-ui/index.html"
+      - "crates/copypaste-ui/popup.html"
+      - ".github/workflows/visual-regression.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "crates/copypaste-ui/src/**"
+      - "crates/copypaste-ui/e2e/**"
+      - "crates/copypaste-ui/playwright.config.ts"
+      - "crates/copypaste-ui/package.json"
+      - "crates/copypaste-ui/index.html"
+      - "crates/copypaste-ui/popup.html"
+      - ".github/workflows/visual-regression.yml"
+
+concurrency:
+  group: visual-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  visual-regression:
+    name: Playwright Visual Regression
+    # macOS runner matches the primary dev platform so fonts and rendering are
+    # consistent with the committed baseline snapshots.
+    runs-on: macos-14
+
+    defaults:
+      run:
+        working-directory: crates/copypaste-ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: crates/copypaste-ui/pnpm-lock.yaml
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium browser
+        # Only install the Chromium browser to keep the step fast.
+        run: npx playwright install --with-deps chromium
+
+      - name: Run visual-regression tests
+        # CI=true forces a fresh Vite dev server instead of reusing one.
+        run: npx playwright test
+        env:
+          CI: "true"
+
+      # Upload the Playwright HTML report and any diff images as artifacts so
+      # failing runs can be inspected in the GitHub Actions UI without having
+      # to reproduce locally.
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: crates/copypaste-ui/playwright-report/
+          retention-days: 30
+
+      - name: Upload snapshot diffs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-diffs-${{ github.run_id }}
+          path: crates/copypaste-ui/test-results/
+          retention-days: 14
+
+  # ── Baseline capture job ────────────────────────────────────────────────────
+  # Run ONLY when this workflow file itself changes or when the `[update-snapshots]`
+  # commit message token is present. Captures new baselines and opens a PR.
+  update-baselines:
+    name: Update Snapshot Baselines
+    runs-on: macos-14
+    # Only run when explicitly requested; never auto-update on feature PRs.
+    if: |
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      (
+        contains(github.event.head_commit.message, '[update-snapshots]') ||
+        contains(github.event.head_commit.modified, '.github/workflows/visual-regression.yml')
+      )
+
+    defaults:
+      run:
+        working-directory: crates/copypaste-ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "pnpm"
+          cache-dependency-path: crates/copypaste-ui/pnpm-lock.yaml
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright Chromium browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Capture / update snapshot baselines
+        run: npx playwright test --update-snapshots
+        env:
+          CI: "true"
+
+      - name: Commit updated baselines
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add e2e/visual/__snapshots__/
+          git diff --cached --quiet || \
+            git commit -m "test(ui): update Playwright visual-regression baselines [skip ci]"
+          git push
