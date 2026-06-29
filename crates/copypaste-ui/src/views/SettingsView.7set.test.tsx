@@ -49,7 +49,7 @@ function makeBaseInvoke(configOverrides: Record<string, unknown> = {}) {
             auto_apply_synced_clip: true, collect_public_ip: false,
             paste_as_plain_text: false, excluded_apps: [], max_text_size_bytes: null,
             max_image_size_bytes: null, max_file_size_bytes: null,
-            storage_quota_bytes: null, sensitive_ttl_secs: null, image_quality: null,
+            storage_quota_bytes: null, sensitive_ttl_secs: null,
             ...configOverrides,
           },
           error: null, error_code: null,

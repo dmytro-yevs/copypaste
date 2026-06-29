@@ -1657,9 +1657,8 @@ data class Config (
     var `notifyOnCopy`: kotlin.Boolean, 
     var `maskSensitiveContent`: kotlin.Boolean, 
     var `syncOnWifiOnly`: kotlin.Boolean, 
-    var `p2pEnabled`: kotlin.Boolean, 
-    var `imageQuality`: kotlin.UInt, 
-    var `imageMaxHeight`: kotlin.UInt, 
+    var `p2pEnabled`: kotlin.Boolean,
+    var `imageMaxHeight`: kotlin.UInt,
     var `collectPublicIp`: kotlin.Boolean, 
     var `pasteAsPlainText`: kotlin.Boolean, 
     var `excludedAppBundleIds`: List<kotlin.String>
@@ -1683,7 +1682,6 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterUInt.read(buf),
-            FfiConverterUInt.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterBoolean.read(buf),
             FfiConverterSequenceString.read(buf),
@@ -1702,7 +1700,6 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterBoolean.allocationSize(value.`maskSensitiveContent`) +
             FfiConverterBoolean.allocationSize(value.`syncOnWifiOnly`) +
             FfiConverterBoolean.allocationSize(value.`p2pEnabled`) +
-            FfiConverterUInt.allocationSize(value.`imageQuality`) +
             FfiConverterUInt.allocationSize(value.`imageMaxHeight`) +
             FfiConverterBoolean.allocationSize(value.`collectPublicIp`) +
             FfiConverterBoolean.allocationSize(value.`pasteAsPlainText`) +
@@ -1721,7 +1718,6 @@ public object FfiConverterTypeConfig: FfiConverterRustBuffer<Config> {
             FfiConverterBoolean.write(value.`maskSensitiveContent`, buf)
             FfiConverterBoolean.write(value.`syncOnWifiOnly`, buf)
             FfiConverterBoolean.write(value.`p2pEnabled`, buf)
-            FfiConverterUInt.write(value.`imageQuality`, buf)
             FfiConverterUInt.write(value.`imageMaxHeight`, buf)
             FfiConverterBoolean.write(value.`collectPublicIp`, buf)
             FfiConverterBoolean.write(value.`pasteAsPlainText`, buf)

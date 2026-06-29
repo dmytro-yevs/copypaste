@@ -113,9 +113,6 @@
     <string name="setting_density_subtitle_compact">Compact rows (28 dp) — more items visible at once.</string>
     <string name="setting_density_subtitle_comfortable">Comfortable rows (34 dp, default).</string>
 
-    <!-- Settings — Display (HW-A14: image quality) -->
-    <string name="setting_image_quality_label">Image capture quality</string>
-
     <!-- Settings — Sync (HW-A9: P2P toggle) -->
     <string name="setting_p2p_sync_title">P2P sync (LAN)</string>
     <string name="setting_p2p_sync_subtitle">Direct device-to-device sync over your local network. Requires a paired device. Disable for cloud-only sync.</string>

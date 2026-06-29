@@ -50,7 +50,6 @@ pub struct AppConfig {
     pub sensitive_ttl_local_secs: u64,
     /// Local auto-wipe TTL for sensitive items (seconds). Default: 30.
     pub sensitive_ttl_secs: u64,
-    pub image_quality: u8,
     pub sqlite_cache_mb: u32,
     pub encryption_chunk_kb: u32,
     pub sync_on_wifi_only: bool,
@@ -156,7 +155,6 @@ impl Default for AppConfig {
             sensitive_ttl_relay_secs: SENSITIVE_TTL_RELAY_SECS,
             sensitive_ttl_local_secs: SENSITIVE_TTL_LOCAL_SECS,
             sensitive_ttl_secs: SENSITIVE_TTL_SECS,
-            image_quality: IMAGE_QUALITY,
             sqlite_cache_mb: SQLITE_CACHE_MB,
             encryption_chunk_kb: ENCRYPTION_CHUNK_KB,
             sync_on_wifi_only: false,
@@ -252,7 +250,6 @@ impl AppConfig {
         self.poll_interval_ms = self
             .poll_interval_ms
             .clamp(POLL_INTERVAL_MIN_MS, POLL_INTERVAL_MAX_MS);
-        self.image_quality = self.image_quality.clamp(1, 100);
         self.encryption_chunk_kb = self.encryption_chunk_kb.clamp(16, 4096);
         // Bound the SQLite page-cache knob so a bad/hand-edited config cannot
         // request a 0 MiB (ineffective) or multi-GiB (memory-pinning) cache.
@@ -516,6 +513,26 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "config_version = 1\nunknown_future_key = true\n").unwrap();
         AppConfig::load(&path).unwrap();
+    }
+
+    /// crh3.101: image_quality was removed as a documented NO-OP.
+    /// Verify the serialised TOML of a default config does NOT contain the key,
+    /// and that an old config.toml that still carries image_quality loads
+    /// without error (serde ignores unknown keys; no deny_unknown_fields).
+    #[test]
+    fn image_quality_absent_from_app_config() {
+        let cfg = AppConfig::default();
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        assert!(
+            !toml_str.contains("image_quality"),
+            "image_quality must not appear in serialized AppConfig after removal: {toml_str}"
+        );
+        // Backwards compat: old config.toml files that still carry the removed
+        // field must load cleanly (unknown fields are silently ignored by serde).
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "config_version = 1\nimage_quality = 85\n").unwrap();
+        AppConfig::load(&path).expect("old config with image_quality must load without error");
     }
 
     // ── lan_visibility tests ──────────────────────────────────────────────────

@@ -943,15 +943,6 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putBoolean("private_mode", v).apply()
 
     /**
-     * JPEG compression quality for captured image clipboard items (1–100).
-     * 100 = lossless / original quality. Matches IMAGE_QUALITY in defaults.rs.
-     * Default: 100 (no compression).
-     */
-    var imageQuality: Int
-        get() = prefs.getInt("image_quality", 100).coerceIn(1, 100)
-        set(v) = prefs.edit().putInt("image_quality", v.coerceIn(1, 100)).apply()
-
-    /**
      * Whether P2P (LAN, direct device-to-device) sync is enabled.
      *
      * When true (default), the background P2P dialer (FgsSyncLoop) is allowed
@@ -1597,7 +1588,6 @@ class Settings(context: Context) {
         motionReduced: Boolean,
         imageMaxHeight: Int,
         previewDelayMs: Long,
-        imageQuality: Int,
         maxTextSizeBytes: Long,
         maxImageSizeBytes: Long,
         storageQuotaBytes: Long,
@@ -1636,7 +1626,6 @@ class Settings(context: Context) {
             .putBoolean("motion_reduced", motionReduced)
             .putInt("image_max_height", imageMaxHeight.coerceIn(1, 200))
             .putLong("preview_delay_ms", previewDelayMs.coerceIn(200L, 100_000L))
-            .putInt("image_quality", imageQuality.coerceIn(1, 100))
             .putLong("max_text_size_bytes", clamped.maxTextSizeBytes.toLong())
             .putLong("max_image_size_bytes", clamped.maxImageSizeBytes.toLong())
             .putLong("storage_quota_bytes", clamped.storageQuotaBytes.toLong())

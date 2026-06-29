@@ -1060,7 +1060,6 @@ private fun fallbackDefaultConfig(): uniffi.copypaste_android.Config =
         maskSensitiveContent = true,                       // DEFAULT_MASK_SENSITIVE_CONTENT
         syncOnWifiOnly = false,
         p2pEnabled = false,                                // DEFAULT_P2P_ENABLED
-        imageQuality = 100u,                               // IMAGE_QUALITY
         imageMaxHeight = 680u,                             // DEFAULT_IMAGE_MAX_HEIGHT
         collectPublicIp = true,
         pasteAsPlainText = false,

@@ -45,7 +45,6 @@ function makeOnlineInvoke() {
               max_file_size_bytes: 134217728,
               storage_quota_bytes: 5368709120,
               sensitive_ttl_secs: 300,
-              image_quality: 85,
               sync_on_wifi_only: false,
               sound_on_copy: false,
               notify_on_copy: false,

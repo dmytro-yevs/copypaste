@@ -76,7 +76,6 @@ mod tests {
             "max_file_size_bytes": 104857600,
             "storage_quota_bytes": 1073741824,
             "sensitive_ttl_secs": 30,
-            "image_quality": 85,
             "sync_on_wifi_only": false,
             "sound_on_copy": true,
             "notify_on_copy": true,
@@ -97,7 +96,6 @@ mod tests {
         assert_eq!(cfg.relay_url.as_deref(), Some("https://relay.example.com"));
         assert_eq!(cfg.max_text_size_bytes, Some(1_048_576));
         assert_eq!(cfg.storage_quota_bytes, Some(1_073_741_824));
-        assert_eq!(cfg.image_quality, Some(85));
         assert_eq!(cfg.sync_on_wifi_only, Some(false));
         assert_eq!(cfg.sound_on_copy, Some(true));
         assert_eq!(cfg.lan_visibility, Some(true));

@@ -52,7 +52,7 @@ function makeOnlineInvoke(notifyOnCopy = true, notifPermGranted = false) {
             collect_public_ip: false, paste_as_plain_text: false,
             excluded_apps: [], max_text_size_bytes: null,
             max_image_size_bytes: null, max_file_size_bytes: null,
-            storage_quota_bytes: null, sensitive_ttl_secs: null, image_quality: null,
+            storage_quota_bytes: null, sensitive_ttl_secs: null,
             notify_on_copy: notifyOnCopy,
           },
           error: null, error_code: null,

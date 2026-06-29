@@ -5,20 +5,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * CopyPaste-ctmv: imageQuality slider writes a pref but capture hardcoded PNG@100.
+ * crh3.101: image_quality was removed as a documented NO-OP.
  *
- * Root-cause: ClipboardService.captureImageClip re-encoded the decoded bitmap with
- * Bitmap.CompressFormat.PNG and quality=100, ignoring Settings.imageQuality entirely.
- * PNG ignores the quality parameter anyway (always lossless), so even passing a lower
- * value would not reduce file size.
+ * The old ctmv tests verified that settings.imageQuality drove a JPEG vs PNG branch
+ * in captureImageClip. That branch is now gone: the capture path always uses
+ * Bitmap.CompressFormat.PNG with quality=100 (lossless, as it always was in practice).
  *
- * Fix: Read settings.imageQuality at encode time. When quality < 100, switch to JPEG
- * (which honours the 1–99 quality value); quality == 100 keeps PNG (lossless) as before.
- *
- * Structural (source-scan) test — verifies the production code references the
- * settings.imageQuality property and the JPEG branch rather than hardcoding PNG@100.
- * Runtime image-encode tests require the Android Bitmap codec which is not available
- * in the JVM unit-test environment.
+ * This structural test verifies the REMOVAL: no settings.imageQuality reference
+ * and no JPEG branch remain in ClipboardService.
  */
 class ImageQualityApplyTest {
 
@@ -43,40 +37,24 @@ class ImageQualityApplyTest {
     }
 
     /**
-     * captureImageClip must read settings.imageQuality (not hardcode quality=100).
+     * captureImageClip must NOT reference settings.imageQuality after crh3.101 removal.
      */
     @Test
-    fun `captureImageClip reads imageQuality from settings`() {
-        assertTrue(
-            "captureImageClip must read settings.imageQuality to honour the user's quality pref",
+    fun `captureImageClip does not reference removed imageQuality setting`() {
+        assertFalse(
+            "captureImageClip must not reference settings.imageQuality after crh3.101 removal",
             serviceSource.contains("settings.imageQuality"),
         )
     }
 
     /**
-     * captureImageClip must not hardcode Bitmap.CompressFormat.PNG with quality 100.
-     * After the fix, quality 100 still uses PNG but the value comes from settings,
-     * so the literal "PNG, 100" pattern must not appear.
+     * captureImageClip must use PNG lossless capture (always quality=100, no JPEG branch).
      */
     @Test
-    fun `captureImageClip does not hardcode PNG at quality 100`() {
-        // The old implementation always called bitmap.compress(PNG, 100, baos).
-        // After the fix the format and quality come from variables (encodeFormat, encodeQuality).
+    fun `captureImageClip uses PNG lossless encode without a JPEG branch`() {
         assertFalse(
-            "captureImageClip must not hardcode CompressFormat.PNG, 100 — quality must come from settings",
-            serviceSource.contains("CompressFormat.PNG, 100"),
-        )
-    }
-
-    /**
-     * captureImageClip must have a JPEG branch so quality < 100 produces smaller files.
-     */
-    @Test
-    fun `captureImageClip includes a JPEG encode branch`() {
-        assertTrue(
-            "captureImageClip must include a JPEG encode path for quality < 100",
-            serviceSource.contains("CompressFormat.JPEG") ||
-                serviceSource.contains("encodeFormat") && serviceSource.contains("useJpeg"),
+            "captureImageClip must not have a JPEG encode branch after crh3.101 removal",
+            serviceSource.contains("CompressFormat.JPEG"),
         )
     }
 }

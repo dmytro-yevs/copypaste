@@ -274,8 +274,6 @@ internal fun DisplayTab(
     onPreviewDelayChange: (Int) -> Unit,
     previewLines: Int,
     onPreviewLinesChange: (Int) -> Unit,
-    imageQuality: Int,
-    onImageQualityChange: (Int) -> Unit,
     // A-F5: structural skin — immediate-effect pref (writes + recreates on select like palette/theme).
     // onSkinChange updates the draft state in SettingsScreen for the persistAll() batch write.
     skin: Skin,
@@ -484,16 +482,6 @@ internal fun DisplayTab(
                     max = 6,
                     formatValue = { if (it == 1) "1 line" else "$it lines" },
                     onRelease = onPreviewLinesChange,
-                )
-                SettingsCardDivider()
-                // HW-A14: image quality slider — no separate Save button; persisted via main Save.
-                ContinuousSliderRow(
-                    label = stringResource(R.string.setting_image_quality_label),
-                    value = imageQuality,
-                    min = 1,
-                    max = 100,
-                    formatValue = { "${it}%" },
-                    onRelease = onImageQualityChange,
                 )
             }
         }

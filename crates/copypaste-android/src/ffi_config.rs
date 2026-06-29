@@ -35,7 +35,6 @@ pub struct Config {
     pub sync_on_wifi_only: bool,
     /// Android-only runtime toggle (no `AppConfig` field). Preserved verbatim.
     pub p2p_enabled: bool,
-    pub image_quality: u32,
     /// Android-only display knob (no `AppConfig` field). Preserved verbatim.
     pub image_max_height: u32,
     pub collect_public_ip: bool,
@@ -80,9 +79,6 @@ pub fn config_from_appconfig(
         mask_sensitive_content,
         sync_on_wifi_only: ac.sync_on_wifi_only,
         p2p_enabled,
-        // `image_quality` is `u8` in AppConfig (1..=100); widen to `u32` for
-        // the FFI dict. Always in range, so the cast is lossless.
-        image_quality: ac.image_quality as u32,
         image_max_height,
         collect_public_ip: ac.collect_public_ip,
         paste_as_plain_text: ac.paste_as_plain_text,
@@ -92,8 +88,7 @@ pub fn config_from_appconfig(
 
 /// Overlay a `Config`'s AppConfig-backed fields onto `AppConfig::default()`.
 /// Fields with no AppConfig counterpart are ignored here (they are clamped/kept
-/// by the caller). `image_quality` is narrowed back to `u8` with a clamp so an
-/// out-of-range FFI value cannot wrap.
+/// by the caller).
 pub fn appconfig_from_config(cfg: &Config) -> copypaste_core::AppConfig {
     copypaste_core::AppConfig {
         max_text_size_bytes: cfg.max_text_size_bytes,
@@ -105,9 +100,6 @@ pub fn appconfig_from_config(cfg: &Config) -> copypaste_core::AppConfig {
         sound_on_copy: cfg.sound_on_copy,
         notify_on_copy: cfg.notify_on_copy,
         sync_on_wifi_only: cfg.sync_on_wifi_only,
-        // Narrow u32 → u8 safely: clamp into the valid quality range first so a
-        // hostile/garbage value can never wrap on the `as u8` cast.
-        image_quality: cfg.image_quality.clamp(1, 100) as u8,
         collect_public_ip: cfg.collect_public_ip,
         paste_as_plain_text: cfg.paste_as_plain_text,
         excluded_app_bundle_ids: cfg.excluded_app_bundle_ids.clone(),

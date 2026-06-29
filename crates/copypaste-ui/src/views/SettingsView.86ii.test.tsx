@@ -37,7 +37,7 @@ function makeOnlineInvoke() {
     const method = (args as { method?: string } | undefined)?.method;
     switch (method) {
       case "status": return Promise.resolve({ ok: true, data: { ready: true, degraded: false, build_version: "0.7.5" }, error: null, error_code: null });
-      case "get_config": return Promise.resolve({ ok: true, data: { p2p_enabled: true, supabase_url: null, supabase_anon_key: null, relay_url: null, sync_enabled: true, sync_on_wifi_only: false, lan_visibility: true, auto_apply_synced_clip: true, collect_public_ip: false, paste_as_plain_text: false, excluded_apps: [], max_text_size_bytes: null, max_image_size_bytes: null, max_file_size_bytes: null, storage_quota_bytes: null, sensitive_ttl_secs: null, image_quality: null }, error: null, error_code: null });
+      case "get_config": return Promise.resolve({ ok: true, data: { p2p_enabled: true, supabase_url: null, supabase_anon_key: null, relay_url: null, sync_enabled: true, sync_on_wifi_only: false, lan_visibility: true, auto_apply_synced_clip: true, collect_public_ip: false, paste_as_plain_text: false, excluded_apps: [], max_text_size_bytes: null, max_image_size_bytes: null, max_file_size_bytes: null, storage_quota_bytes: null, sensitive_ttl_secs: null }, error: null, error_code: null });
       case "get_private_mode": return Promise.resolve({ ok: true, data: { private_mode: false }, error: null, error_code: null });
       case "get_sync_status": return Promise.resolve({ ok: true, data: { last_sync_ms: null, supabase_url: null }, error: null, error_code: null });
       default: return Promise.resolve({ ok: true, data: null, error: null, error_code: null });

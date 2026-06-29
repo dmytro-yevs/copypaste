@@ -63,7 +63,6 @@ pub(crate) fn build_config_response(cfg: &AppConfig) -> copypaste_ipc::AppConfig
         max_file_size_bytes,
         storage_quota_bytes,
         sensitive_ttl_secs,
-        image_quality,
         sync_on_wifi_only,
         sound_on_copy,
         notify_on_copy,
@@ -87,7 +86,6 @@ pub(crate) fn build_config_response(cfg: &AppConfig) -> copypaste_ipc::AppConfig
         max_file_size_bytes: *max_file_size_bytes,
         storage_quota_bytes: *storage_quota_bytes,
         sensitive_ttl_secs: *sensitive_ttl_secs,
-        image_quality: *image_quality,
         sync_on_wifi_only: *sync_on_wifi_only,
         sound_on_copy: *sound_on_copy,
         notify_on_copy: *notify_on_copy,
@@ -177,7 +175,6 @@ pub(crate) fn read_config() -> AppConfig {
             max_file_size_bytes: Some(core.max_file_size_bytes),
             storage_quota_bytes: Some(core.storage_quota_bytes),
             sensitive_ttl_secs: Some(core.sensitive_ttl_secs),
-            image_quality: Some(core.image_quality),
             sync_on_wifi_only: Some(core.sync_on_wifi_only),
             collect_public_ip: Some(core.collect_public_ip),
             paste_as_plain_text: Some(core.paste_as_plain_text),
@@ -226,7 +223,6 @@ pub(crate) fn read_config() -> AppConfig {
     cfg.max_file_size_bytes = Some(core.max_file_size_bytes);
     cfg.storage_quota_bytes = Some(core.storage_quota_bytes);
     cfg.sensitive_ttl_secs = Some(core.sensitive_ttl_secs);
-    cfg.image_quality = Some(core.image_quality);
     cfg.sync_on_wifi_only = Some(core.sync_on_wifi_only);
     cfg.sound_on_copy = Some(core.sound_on_copy);
     cfg.notify_on_copy = Some(core.notify_on_copy);
@@ -265,9 +261,6 @@ pub(crate) fn update_core_config(
     }
     if let Some(v) = incoming.sensitive_ttl_secs {
         core.sensitive_ttl_secs = v;
-    }
-    if let Some(v) = incoming.image_quality {
-        core.image_quality = v;
     }
     if let Some(v) = incoming.sync_on_wifi_only {
         core.sync_on_wifi_only = v;
@@ -308,8 +301,8 @@ pub(crate) fn update_core_config(
     }
     // Clamp the merged config into valid ranges ONCE, here, before both the
     // disk write and the returned (hot-loaded) value — otherwise an unclamped
-    // set_config (e.g. image_quality:0) would be persisted and pushed straight
-    // into the live core_config Arc, taking effect until the next restart.
+    // set_config value would be persisted and pushed straight into the live
+    // core_config Arc, taking effect until the next restart.
     // sensitive_ttl_secs:0 is preserved as the "disabled" sentinel (see
     // AppConfig::clamp_values).
     core.clamp_values();

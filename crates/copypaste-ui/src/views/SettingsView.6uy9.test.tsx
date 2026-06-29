@@ -80,7 +80,6 @@ function makeBaseInvoke({
             max_file_size_bytes: null,
             storage_quota_bytes: null,
             sensitive_ttl_secs: null,
-            image_quality: null,
           },
           error: null,
           error_code: null,

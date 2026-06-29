@@ -162,7 +162,6 @@ fun SettingsScreen(
     var previewDelay by remember { mutableStateOf(settings.previewDelay.toInt().coerceIn(200, 30_000)) }
     // §3/P1#9: preview lines per history row (mirrors web niApp, 1–6).
     var previewLines by remember { mutableStateOf(settings.previewLines) }
-    var imageQuality by remember { mutableStateOf(settings.imageQuality) }
     // A-F5: structural skin — immediate-effect pref like palette/theme (writes + recreates on select).
     // Also threaded into persistAll() so saveScreenSettings() always receives the current skin.
     var skin by remember { mutableStateOf(settings.skin) }
@@ -265,7 +264,6 @@ fun SettingsScreen(
             motionReduced = motionReduced,
             imageMaxHeight = imageMaxHeight,
             previewDelayMs = previewDelay.toLong(),
-            imageQuality = imageQuality,
             maxTextSizeBytes = maxTextSizeBytes,
             maxImageSizeBytes = maxImageSizeBytes,
             storageQuotaBytes = storageQuotaBytes,
@@ -512,8 +510,6 @@ fun SettingsScreen(
                         onPreviewDelayChange = { previewDelay = it; dirty = true },
                         previewLines = previewLines,
                         onPreviewLinesChange = { previewLines = it; dirty = true },
-                        imageQuality = imageQuality,
-                        onImageQualityChange = { imageQuality = it; dirty = true },
                         // A-F5: skin is an immediate-effect pref (like palette/theme); the picker
                         // writes directly and recreates, so onSkinChange just keeps the draft state
                         // consistent for the persistAll() batch write.

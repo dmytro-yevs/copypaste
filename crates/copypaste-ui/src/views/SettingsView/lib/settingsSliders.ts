@@ -75,5 +75,4 @@ export const DEFAULT_MAX_TEXT_BYTES = 10 * 1024 * 1024;          // 10 MiB
 export const DEFAULT_MAX_IMAGE_BYTES = 64 * 1024 * 1024;          // 64 MiB
 export const DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024;          // 100 MiB (= crate::file::MAX_FILE_BYTES, the storable hard cap)
 export const DEFAULT_STORAGE_QUOTA_BYTES = 10 * 1024 * 1024 * 1024; // 10 GiB
-export const DEFAULT_IMAGE_QUALITY = 100;
 export const DEFAULT_SENSITIVE_TTL_SECS = 30;

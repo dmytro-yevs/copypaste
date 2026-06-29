@@ -102,7 +102,6 @@ export function SettingsView() {
                     maxFileBytes={s.maxFileBytes} setMaxFileBytes={s.setMaxFileBytes}
                     quotaBytes={s.quotaBytes} setQuotaBytes={s.setQuotaBytes}
                     sensitiveTtlSecs={s.sensitiveTtlSecs} setSensitiveTtlSecs={s.setSensitiveTtlSecs}
-                    imageQuality={s.imageQuality} setImageQuality={s.setImageQuality}
                     exportInProgress={s.exportInProgress} exportMsg={s.exportMsg}
                     exportIncludeSensitive={s.exportIncludeSensitive}
                     setExportIncludeSensitive={s.setExportIncludeSensitive}

@@ -52,7 +52,7 @@ function makeInvokeWithExcludedApp(bundleId: string) {
             excluded_app_bundle_ids: [bundleId],
             max_text_size_bytes: null, max_image_size_bytes: null,
             max_file_size_bytes: null, storage_quota_bytes: null,
-            sensitive_ttl_secs: null, image_quality: null,
+            sensitive_ttl_secs: null,
           },
           error: null, error_code: null,
         });

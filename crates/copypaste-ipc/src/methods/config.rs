@@ -92,10 +92,6 @@ pub struct AppConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitive_ttl_secs: Option<u64>,
 
-    /// Image quality (1–100; 100 = lossless).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image_quality: Option<u8>,
-
     /// If `true`, skip cloud/P2P sync when not on Wi-Fi.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_on_wifi_only: Option<bool>,
@@ -217,10 +213,6 @@ pub struct AppConfigResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sensitive_ttl_secs: Option<u64>,
 
-    /// See [`AppConfig::image_quality`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub image_quality: Option<u8>,
-
     /// See [`AppConfig::sync_on_wifi_only`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_on_wifi_only: Option<bool>,
@@ -281,7 +273,6 @@ mod tests {
         assert!(cfg.max_file_size_bytes.is_none(), "max_file_size_bytes");
         assert!(cfg.storage_quota_bytes.is_none(), "storage_quota_bytes");
         assert!(cfg.sensitive_ttl_secs.is_none(), "sensitive_ttl_secs");
-        assert!(cfg.image_quality.is_none(), "image_quality");
         assert!(cfg.sync_on_wifi_only.is_none(), "sync_on_wifi_only");
         assert!(cfg.sound_on_copy.is_none(), "sound_on_copy");
         assert!(cfg.notify_on_copy.is_none(), "notify_on_copy");
@@ -360,7 +351,6 @@ mod tests {
             max_file_size_bytes: Some(104_857_600),
             storage_quota_bytes: Some(1_073_741_824),
             sensitive_ttl_secs: Some(30),
-            image_quality: Some(85),
             sync_on_wifi_only: Some(false),
             sound_on_copy: Some(true),
             notify_on_copy: Some(true),

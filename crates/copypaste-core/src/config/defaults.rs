@@ -49,12 +49,6 @@ pub const SYNC_TTL_SECS: u64 = 2_592_000;
 pub const SENSITIVE_TTL_RELAY_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_LOCAL_SECS: u64 = 1_800;
 pub const SENSITIVE_TTL_SECS: u64 = 30;
-// 100 = lossless / original quality. NO-OP for the default PNG capture path:
-// PNG is a lossless format and ignores this knob entirely, so changing it has
-// zero effect on stored screenshots today. Retained as the wiring point for a
-// future lossy JPEG/WebP path (where 1..=100 would map to encoder quality);
-// never compress by default.
-pub const IMAGE_QUALITY: u8 = 100;
 // sqlite_cache_mb is the per-connection SQLite page-cache size in MiB. It is
 // wired through `Database::open_with_cache_mb` /
 // `Database::open_in_memory_with_cache_mb` (and the pooled

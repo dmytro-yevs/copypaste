@@ -31,8 +31,6 @@ export type StorageTabProps = {
   setQuotaBytes: (v: number) => void;
   sensitiveTtlSecs: number;
   setSensitiveTtlSecs: (v: number) => void;
-  imageQuality: number;
-  setImageQuality: (v: number) => void;
   exportInProgress: boolean;
   exportMsg: { text: string; isError: boolean } | null;
   exportIncludeSensitive: boolean;
@@ -69,8 +67,6 @@ export function StorageTab({
   setQuotaBytes,
   sensitiveTtlSecs,
   setSensitiveTtlSecs,
-  imageQuality,
-  setImageQuality,
   exportInProgress,
   exportMsg,
   exportIncludeSensitive,
@@ -215,31 +211,6 @@ export function StorageTab({
             void saveLimitsField("sensitive_ttl_secs", { sensitive_ttl_secs: v }, () => setSensitiveTtlSecs(prev));
           }}
         />
-        {/* ctmv: image_quality is persisted to daemon config via set_config on release.
-            The capture encode path reads this value: quality < 100 → JPEG, 100 → PNG lossless.
-            bdac.68: removed "(1–100)" from label — range shown by the slider control itself */}
-        <SettingsRow
-          title="Image quality"
-          description="Saved to daemon. Values below 100 use JPEG encoding (smaller files); 100 uses lossless PNG."
-        >
-          <div className="flex items-center gap-2">
-            <SliderRow
-              min={1}
-              max={100}
-              step={1}
-              value={imageQuality}
-              onChange={(v) => setImageQuality(v)}
-              onRelease={(v) => {
-                // Autosave on commit (mouse-up / touch-end / key-up), matching the
-                // neighbouring limit sliders — no dedicated Save button.
-                const prev = imageQuality;
-                void saveLimitsField("image_quality", { image_quality: v }, () => setImageQuality(prev));
-              }}
-              formatValue={(v) => String(v)}
-            />
-            <LimitsMsg field="image_quality" limitsMsg={limitsMsg} />
-          </div>
-        </SettingsRow>
         {/* bdac.88: History display limit — UI-only display filter (localStorage / UIPrefs).
             No daemon IPC: the daemon stores items until the byte quota is reached.
             This slider filters how many items the UI renders — it does NOT delete items.

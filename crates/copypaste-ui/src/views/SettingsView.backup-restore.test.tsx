@@ -114,7 +114,7 @@ function makeOnlineInvoke(
         case "get_config":
           return Promise.resolve({
             ok: true,
-            data: { p2p_enabled: true, supabase_url: null, supabase_anon_key: null, max_text_size_bytes: 10 * 1024 * 1024, max_image_size_bytes: 25 * 1024 * 1024, max_file_size_bytes: 100 * 1024 * 1024, storage_quota_bytes: 10 * 1024 * 1024 * 1024, sensitive_ttl_secs: 30, image_quality: 100, sync_on_wifi_only: false, sound_on_copy: false, notify_on_copy: false },
+            data: { p2p_enabled: true, supabase_url: null, supabase_anon_key: null, max_text_size_bytes: 10 * 1024 * 1024, max_image_size_bytes: 25 * 1024 * 1024, max_file_size_bytes: 100 * 1024 * 1024, storage_quota_bytes: 10 * 1024 * 1024 * 1024, sensitive_ttl_secs: 30, sync_on_wifi_only: false, sound_on_copy: false, notify_on_copy: false },
             error: null,
             error_code: null,
           });

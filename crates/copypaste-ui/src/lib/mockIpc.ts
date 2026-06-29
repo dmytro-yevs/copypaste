@@ -369,7 +369,6 @@ const APP_SETTINGS: AppSettings = {
   max_file_size_bytes: 52_428_800,
   storage_quota_bytes: 1_073_741_824,
   sensitive_ttl_secs: 86_400,
-  image_quality: 85,
   sync_on_wifi_only: false,
   sound_on_copy: true,
   notify_on_copy: false,

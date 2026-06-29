@@ -22,7 +22,7 @@ import org.junit.Test
  *   STORAGE_QUOTA_BYTES      = 10 * 1024 * 1024 * 1024 (10 GiB)
  *   SENSITIVE_TTL_SECS       = 30
  *   POLL_INTERVAL_MS         = 500
- *   IMAGE_QUALITY            = 100
+ *   (IMAGE_QUALITY removed crh3.101 — was a NO-OP, always PNG lossless)
  *
  * Booleans:
  *   soundOnCopy              = true   (notify-on-copy default)
@@ -107,18 +107,6 @@ class FallbackDefaultConfigParityTest {
                 "update fallbackDefaultConfig() in CopypasteBindings.kt if defaults.rs changes",
             500L,
             cfg.pollIntervalMs.toLong(),
-        )
-    }
-
-    // ── Image quality ──────────────────────────────────────────────────────────
-
-    @Test
-    fun `imageQuality matches Rust IMAGE_QUALITY 100`() {
-        assertEquals(
-            "imageQuality must be 100 (Rust IMAGE_QUALITY = 100, lossless default) — " +
-                "update fallbackDefaultConfig() in CopypasteBindings.kt if defaults.rs changes",
-            100,
-            cfg.imageQuality.toInt(),
         )
     }
 

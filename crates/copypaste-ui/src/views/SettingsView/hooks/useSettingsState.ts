@@ -37,7 +37,6 @@ import {
   DEFAULT_MAX_IMAGE_BYTES,
   DEFAULT_MAX_FILE_BYTES,
   DEFAULT_STORAGE_QUOTA_BYTES,
-  DEFAULT_IMAGE_QUALITY,
   DEFAULT_SENSITIVE_TTL_SECS,
 } from "../lib/settingsSliders";
 
@@ -132,7 +131,6 @@ export function useSettingsState() {
   const [sensitiveTtlSecs, setSensitiveTtlSecs] = useState(
     snapToNearest(SENSITIVE_TTL_STEPS as unknown as readonly number[], DEFAULT_SENSITIVE_TTL_SECS)
   );
-  const [imageQuality, setImageQuality] = useState(DEFAULT_IMAGE_QUALITY);
   // §6.3: History display limit — read from and written to the persisted UIPrefs store.
   // maxItems computed inside StorageTab (CopyPaste-g06m.14 split).
   // Per-field save feedback: key = field name, value typed {ok, message} | null.
@@ -379,7 +377,6 @@ export function useSettingsState() {
           SENSITIVE_TTL_STEPS as unknown as readonly number[],
           rawCfg.sensitive_ttl_secs ?? DEFAULT_SENSITIVE_TTL_SECS
         ));
-        setImageQuality(rawCfg.image_quality ?? DEFAULT_IMAGE_QUALITY);
 
         // Sync parity
         setSyncOnWifiOnly(rawCfg.sync_on_wifi_only ?? false);
@@ -554,7 +551,6 @@ export function useSettingsState() {
       max_file_size_bytes: maxFileBytes,
       storage_quota_bytes: quotaBytes,
       sensitive_ttl_secs: sensitiveTtlSecs,
-      image_quality: imageQuality,
       sync_on_wifi_only: syncOnWifiOnly,
       sound_on_copy: prefs.playSoundOnCopy,
       notify_on_copy: prefs.notifyOnCopy,
@@ -1175,8 +1171,6 @@ export function useSettingsState() {
     setQuotaBytes,
     sensitiveTtlSecs,
     setSensitiveTtlSecs,
-    imageQuality,
-    setImageQuality,
     exportInProgress,
     exportMsg,
     exportIncludeSensitive,

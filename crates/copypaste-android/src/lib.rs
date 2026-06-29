@@ -1938,7 +1938,6 @@ mod tests {
         assert_eq!(cfg.sound_on_copy, ac.sound_on_copy);
         assert_eq!(cfg.notify_on_copy, ac.notify_on_copy);
         assert_eq!(cfg.sync_on_wifi_only, ac.sync_on_wifi_only);
-        assert_eq!(cfg.image_quality, ac.image_quality as u32);
         assert_eq!(cfg.collect_public_ip, ac.collect_public_ip);
         assert_eq!(cfg.paste_as_plain_text, ac.paste_as_plain_text);
 

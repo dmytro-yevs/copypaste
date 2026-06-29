@@ -112,7 +112,6 @@ export interface AppSettings {
   max_file_size_bytes?: number | null;
   storage_quota_bytes?: number | null;
   sensitive_ttl_secs?: number | null;
-  image_quality?: number | null;
   // Sync parity
   sync_on_wifi_only?: boolean | null;
   // Sound / notification on copy — wired to daemon config.toml.

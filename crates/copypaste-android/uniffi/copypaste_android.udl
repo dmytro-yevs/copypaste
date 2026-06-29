@@ -816,8 +816,6 @@ dictionary Config {
   // Whether P2P sync is enabled. (Android runtime toggle; no direct AppConfig
   // field — preserved verbatim through clamp.)
   boolean p2p_enabled;
-  // 1..=100; clamped. Currently a no-op for PNG (kept for future JPEG).
-  u32 image_quality;
   // Max decoded image height in px (Android display). Maps to AppConfig
   // `max_decoded_image_mb` is NOT this; kept as an Android display knob and
   // preserved verbatim through clamp.
