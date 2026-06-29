@@ -215,6 +215,13 @@ path = "tests/poison_row_guard.rs"
 name = "harness_single_daemon"
 path = "tests/harness_single_daemon.rs"
 
+# CopyPaste-crh3.66: settings persistence across IpcServer restart.
+# Verifies set_config values survive a simulated daemon restart (fresh
+# IpcServer reading config.toml + config.json from the same temp dir).
+[[test]]
+name = "settings_persistence"
+path = "tests/settings_persistence.rs"
+
 [dev-dependencies]
 # CopyPaste-9vcn: expose Database::open_in_memory for daemon unit tests.
 # The feature is intentionally absent from the production [dependencies] entry
