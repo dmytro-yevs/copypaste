@@ -112,10 +112,15 @@ pub struct ResetDatabaseRequest {
 /// method) succeeds against the new empty DB without a process restart.
 ///
 /// The outer `Response.ok` envelope is the authoritative success indicator.
-/// The former `reset: bool` field (always `true` on success) was removed as
-/// redundant (c4q2.22); callers must check the envelope `ok` field instead.
+/// Both fields are always `true` on success; they are kept for explicitness and
+/// because the TypeScript `ResetDatabaseResult` interface (and its callers)
+/// depend on both being present on the wire.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct ResetDatabaseResponse {
+    /// Always `true` on success — confirms that the wipe-and-recreate was
+    /// performed. The TypeScript `ResetDatabaseResult` interface declares this
+    /// field; omitting it would break UI consumers that read `data.reset`.
+    pub reset: bool,
     /// `true` when the daemon recovered IN-PLACE (no restart needed): the new
     /// empty DB is live and the daemon is now ready. The current implementation
     /// always recovers in-place, so this is always `true` on success.
@@ -309,16 +314,25 @@ mod tests {
         assert!(s.contains("\"confirm\":true"));
     }
 
-    /// c4q2.22: ResetDatabaseResponse no longer has a `reset` field.
+    /// ResetDatabaseResponse must carry both `reset` and `ready` on the wire.
+    /// The TypeScript ResetDatabaseResult interface declares both fields and
+    /// callers read `data.reset` — omitting it breaks the UI contract.
     #[test]
     fn reset_response_roundtrip() {
-        let resp = ResetDatabaseResponse { ready: true };
+        let resp = ResetDatabaseResponse {
+            reset: true,
+            ready: true,
+        };
         let s = serde_json::to_string(&resp).unwrap();
         let back: ResetDatabaseResponse = serde_json::from_str(&s).unwrap();
         assert_eq!(resp, back);
         assert!(
-            !s.contains("\"reset\""),
-            "c4q2.22: reset field must not appear in wire: {s}"
+            s.contains("\"reset\":true"),
+            "reset field must appear on wire: {s}"
+        );
+        assert!(
+            s.contains("\"ready\":true"),
+            "ready field must appear on wire: {s}"
         );
     }
 
