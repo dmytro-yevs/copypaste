@@ -3,6 +3,15 @@ use super::types::{validate_key_version, ClipboardItem, ItemsError};
 use super::ITEM_KEY_VERSION_CURRENT;
 use rusqlite::params;
 
+/// CopyPaste-crh3.83: single source of truth for the 19-column clipboard_items
+/// INSERT column list, previously duplicated verbatim in three insert functions
+/// (a missed edit when adding a column silently corrupts positional writes). The
+/// column ORDER must stay aligned with each call's `params!`/VALUES list and with
+/// `row_to_item`'s SELECT order.
+const ITEM_INSERT_COLUMNS: &str = "(id, item_id, content_type, content, content_nonce, blob_ref, \
+     is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id, \
+     content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted)";
+
 pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError> {
     // Gate: reject writes while the v4 key-version sweep is running so that
     // no key_version=2 row can corrupt the cursor-based resume (last_processed_id).
@@ -23,11 +32,10 @@ pub fn insert_item(db: &Database, item: &ClipboardItem) -> Result<(), ItemsError
         item.thumb.as_deref()
     };
     db.conn().execute(
-        "INSERT INTO clipboard_items
-         (id, item_id, content_type, content, content_nonce, blob_ref,
-          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+        &format!(
+            "INSERT INTO clipboard_items {ITEM_INSERT_COLUMNS} \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"
+        ),
         params![
             item.id,
             item.item_id,
@@ -114,11 +122,10 @@ pub fn insert_item_with_fts(
     let conn = db.conn();
     let tx = conn.unchecked_transaction()?;
     let insert_res = tx.execute(
-        "INSERT INTO clipboard_items
-         (id, item_id, content_type, content, content_nonce, blob_ref,
-          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted)
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)",
+        &format!(
+            "INSERT INTO clipboard_items {ITEM_INSERT_COLUMNS} \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"
+        ),
         params![
             item.id,
             item.item_id,
@@ -269,13 +276,12 @@ pub fn insert_tombstone(
         return Err(ItemsError::MigrationInProgress);
     }
     let inserted = db.conn().execute(
-        "INSERT INTO clipboard_items
-         (id, item_id, content_type, content, content_nonce, blob_ref,
-          is_sensitive, is_synced, lamport_ts, wall_time, expires_at, app_bundle_id,
-          content_hash, origin_device_id, key_version, pinned, pin_order, thumb, deleted)
-         VALUES (?1, ?2, 'text', NULL, NULL, NULL,
-                 0, 1, ?3, ?4, NULL, NULL,
-                 NULL, ?5, ?6, 0, NULL, NULL, 1)",
+        &format!(
+            "INSERT INTO clipboard_items {ITEM_INSERT_COLUMNS} \
+             VALUES (?1, ?2, 'text', NULL, NULL, NULL, \
+                     0, 1, ?3, ?4, NULL, NULL, \
+                     NULL, ?5, ?6, 0, NULL, NULL, 1)"
+        ),
         params![
             id,
             item_id,
