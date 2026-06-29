@@ -25,7 +25,12 @@ fn default_true() -> bool {
 #[serde(default)]
 pub struct AppConfig {
     pub config_version: u32,
-    /// Deprecated: no longer used for pruning; retained for config back-compat.
+    /// Deprecated (CopyPaste-crh3.114): no longer read anywhere — the
+    /// `storage_quota_bytes` byte-cap governs retention. Retained for config
+    /// back-compat (still (de)serialised); [`AppConfig::load`] logs a deprecation
+    /// warning when a config carries a non-default value. Candidate for removal
+    /// in a future major version. (It is NOT in the `copypaste-ipc` wire DTO, so
+    /// it cannot be set via the `set_config` IPC — only by editing config.toml.)
     pub history_limit: usize,
     pub poll_interval_ms: u64,
     pub max_text_size_bytes: u64,
@@ -167,7 +172,33 @@ impl AppConfig {
         let text = std::fs::read_to_string(path)?;
         let mut cfg: Self = toml::from_str(&text)?;
         cfg.clamp_values();
+        // CopyPaste-crh3.114: surface deprecated-but-set fields at load so a user
+        // whose config.toml still carries them learns the value has no effect.
+        for warning in cfg.deprecation_warnings() {
+            tracing::warn!("config: {warning}");
+        }
         Ok(cfg)
+    }
+
+    /// CopyPaste-crh3.114: human-readable warnings for deprecated config fields
+    /// that are set to a non-default value but no longer have any effect.
+    ///
+    /// Returned (not only logged) so the set is unit-testable; [`Self::load`]
+    /// logs each entry at WARN. Currently flags `history_limit`, which was
+    /// superseded by the `storage_quota_bytes` byte-cap for retention.
+    pub fn deprecation_warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        // history_limit is clamped to >= 1 (a vestigial guard) and defaults to
+        // HISTORY_LIMIT, so "set to a non-default value" — not "!= 0" — is the
+        // signal that a user deliberately configured this dead field.
+        if self.history_limit != HISTORY_LIMIT {
+            warnings.push(format!(
+                "`history_limit` ({}) is deprecated and ignored for pruning — use \
+                 `storage_quota_bytes` instead; this value has no effect",
+                self.history_limit
+            ));
+        }
+        warnings
     }
 
     pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
@@ -250,6 +281,26 @@ impl AppConfig {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    /// CopyPaste-crh3.114: a default config has no deprecation warnings; a
+    /// non-zero `history_limit` produces exactly one that names the replacement.
+    #[test]
+    fn deprecation_warnings_flags_nonzero_history_limit() {
+        let mut cfg = AppConfig::default();
+        assert!(
+            cfg.deprecation_warnings().is_empty(),
+            "default config must have no deprecation warnings"
+        );
+        cfg.history_limit = HISTORY_LIMIT + 1;
+        let warnings = cfg.deprecation_warnings();
+        assert_eq!(warnings.len(), 1, "expected one warning: {warnings:?}");
+        assert!(warnings[0].contains("history_limit"));
+        assert!(
+            warnings[0].contains("storage_quota_bytes"),
+            "warning must point to the replacement: {}",
+            warnings[0]
+        );
+    }
 
     #[test]
     fn default_config_serializes_and_roundtrips() {
