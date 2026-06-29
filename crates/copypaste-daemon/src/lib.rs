@@ -17,6 +17,9 @@
 #![allow(dead_code)]
 
 pub mod app_icon;
+/// Upload bandwidth throttler (token-bucket) for the relay and cloud push
+/// paths (CopyPaste-crh3.107).
+pub mod bandwidth;
 pub mod clipboard;
 /// Shared IPC config type re-export + structural-consistency tests.
 /// See [`copypaste_ipc::AppConfig`] for the canonical definition.

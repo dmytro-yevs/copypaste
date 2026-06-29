@@ -216,6 +216,10 @@ pub(super) async fn push_loop(
     // Track whether we've already warned about a missing sync key so we don't
     // spam the log on every item in a burst.
     let mut warned_no_key = false;
+    // crh3.107: one token bucket per push loop (not shared; no lock needed).
+    // Starts unlimited; rate is updated from the live config on each item so
+    // hot-reload of max_bandwidth_kbps takes effect without a restart.
+    let mut bw_bucket = crate::bandwidth::TokenBucket::new(0);
 
     // In-memory retry queue: (item, pre-computed payload_ct_b64).
     // The cloud ciphertext is stored alongside the item so re-encryption
@@ -344,6 +348,24 @@ pub(super) async fn push_loop(
         // touching new items, recovery is observable and old items are not
         // perpetually starved by a steady stream of new work.
         if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
+            // crh3.107: pace the outbound upload (0 = unlimited, no sleep).
+            {
+                let kbps = core_config
+                    .read()
+                    .map(|g| g.max_bandwidth_kbps)
+                    .unwrap_or(0);
+                bw_bucket.set_rate_kbps(kbps);
+                let byte_count = payload_ct_b64.as_deref().map_or(0, |s| s.len()) as u64;
+                let delay = bw_bucket.acquire(byte_count);
+                if !delay.is_zero() {
+                    tracing::debug!(
+                        "cloud-sync push_loop: bandwidth throttle {delay:?} \
+                         for id={} ({byte_count} B)",
+                        item.id,
+                    );
+                    tokio::time::sleep(delay).await;
+                }
+            }
             // CopyPaste-1jms.22: arm the in-flight guard for this push
             // round-trip so get_sync_status emits SyncBadgeState::Syncing.
             let _push_guard = SyncInFlightGuard::new(std::sync::Arc::clone(&sync_in_flight));
@@ -504,6 +526,27 @@ pub(super) async fn push_loop(
                             // Park it first (already in retry_queue) then pop
                             // from the front so older queued items drain first.
                             if let Some((item, payload_ct_b64)) = retry_queue.pop_front() {
+                                // crh3.107: pace the outbound upload.
+                                {
+                                    let kbps = core_config
+                                        .read()
+                                        .map(|g| g.max_bandwidth_kbps)
+                                        .unwrap_or(0);
+                                    bw_bucket.set_rate_kbps(kbps);
+                                    let byte_count = payload_ct_b64
+                                        .as_deref()
+                                        .map_or(0, |s| s.len())
+                                        as u64;
+                                    let delay = bw_bucket.acquire(byte_count);
+                                    if !delay.is_zero() {
+                                        tracing::debug!(
+                                            "cloud-sync push_loop: bandwidth throttle \
+                                             {delay:?} for id={} ({byte_count} B)",
+                                            item.id,
+                                        );
+                                        tokio::time::sleep(delay).await;
+                                    }
+                                }
                                 // CopyPaste-1jms.22: arm in-flight guard for
                                 // this push round-trip (new item from broadcast).
                                 let _push_guard = SyncInFlightGuard::new(

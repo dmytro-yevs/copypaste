@@ -144,6 +144,10 @@ pub(super) async fn push_loop(
 ) {
     let mut cached_token = load_initial_token(&local_key, &device_id);
     let mut warned_no_key = false;
+    // crh3.107: one token bucket per push loop (not shared; no lock needed).
+    // Starts unlimited; rate is updated from the live config on each item so
+    // hot-reload of max_bandwidth_kbps takes effect without a restart.
+    let mut bw_bucket = crate::bandwidth::TokenBucket::new(0);
 
     loop {
         tokio::select! {
@@ -255,6 +259,27 @@ pub(super) async fn push_loop(
                     continue;
                 };
                 let wall_time = item.wall_time.max(0) as u64;
+
+                // crh3.107: pace the upload so throughput stays at or below
+                // max_bandwidth_kbps.  Reading from the live config on every
+                // item honours hot-reload.  kbps=0 → unlimited (no sleep).
+                {
+                    let kbps = core_config
+                        .read()
+                        .map(|g| g.max_bandwidth_kbps)
+                        .unwrap_or(0);
+                    bw_bucket.set_rate_kbps(kbps);
+                    let delay = bw_bucket.acquire(content_b64.len() as u64);
+                    if !delay.is_zero() {
+                        tracing::debug!(
+                            "relay-sync push_loop: bandwidth throttle {delay:?} \
+                             for id={} ({} B payload)",
+                            item.id,
+                            content_b64.len(),
+                        );
+                        tokio::time::sleep(delay).await;
+                    }
+                }
 
                 // CopyPaste-1jms.22: arm in-flight guard for this relay push
                 // round-trip. Resets on drop (error or success).

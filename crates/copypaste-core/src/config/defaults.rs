@@ -67,8 +67,11 @@ pub const SQLITE_CACHE_MB_MIN: u32 = 1;
 pub const SQLITE_CACHE_MB_MAX: u32 = 256;
 pub const ENCRYPTION_CHUNK_KB: u32 = 64;
 pub const MAX_DECODED_IMAGE_MB: u32 = 50;
-// TODO: not yet enforced — `max_bandwidth_kbps` is stored in `AppConfig` and
-// propagated to config serialisation, but no code path in the daemon reads this
-// value to throttle upload or download throughput. Value of 0 means "unlimited"
-// by convention; the field exists as a future wiring point.
+// Upload bandwidth ceiling in kilobits per second.  0 = unlimited (no pacing).
+// Enforced in `copypaste-daemon` via a per-push-loop token bucket
+// (`bandwidth::TokenBucket`) applied to both the relay and cloud push paths
+// (CopyPaste-crh3.107).  The bucket starts full (1-second burst credit) so
+// the very first upload is not penalised; subsequent rapid uploads are slowed
+// to keep the long-run average at or below this ceiling.  Hot-reload is
+// honoured: the live config is re-read on every outbound item.
 pub const MAX_BANDWIDTH_KBPS: u32 = 0;
