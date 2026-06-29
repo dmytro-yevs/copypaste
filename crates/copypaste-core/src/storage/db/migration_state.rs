@@ -1,5 +1,17 @@
 use super::error::DbError;
 
+/// CopyPaste-crh3.84: single source of truth for the `migration_state` table DDL.
+/// Previously duplicated verbatim in `migration_state`,
+/// `migration_v4_sweep_resumable`, and `force_migration_complete`; adding a
+/// column meant three coordinated edits. Idempotent (`IF NOT EXISTS`).
+const MIGRATION_STATE_DDL: &str = "CREATE TABLE IF NOT EXISTS migration_state (
+                key                     TEXT PRIMARY KEY,
+                key_version_in_progress INTEGER,
+                last_processed_id       INTEGER NOT NULL DEFAULT 0,
+                started_at              INTEGER,
+                completed_at            INTEGER
+            );";
+
 /// Tracks the progress of the v4 key-version sweep through `migration_state`.
 ///
 /// The row is keyed on `'v4-key-version-sweep'` and persists across restarts
@@ -30,15 +42,7 @@ impl super::Database {
     /// otherwise.
     pub fn migration_state(&self) -> Result<MigrationState, DbError> {
         // Ensure the migration_state table exists (idempotent DDL).
-        self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS migration_state (
-                key                     TEXT PRIMARY KEY,
-                key_version_in_progress INTEGER,
-                last_processed_id       INTEGER NOT NULL DEFAULT 0,
-                started_at              INTEGER,
-                completed_at            INTEGER
-            );",
-        )?;
+        self.conn.execute_batch(MIGRATION_STATE_DDL)?;
 
         let result = self.conn.query_row(
             "SELECT last_processed_id, completed_at \
@@ -80,15 +84,7 @@ impl super::Database {
         const SWEEP_KEY: &str = "v4-key-version-sweep";
 
         // Ensure the table exists and the row is seeded.
-        self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS migration_state (
-                key                     TEXT PRIMARY KEY,
-                key_version_in_progress INTEGER,
-                last_processed_id       INTEGER NOT NULL DEFAULT 0,
-                started_at              INTEGER,
-                completed_at            INTEGER
-            );",
-        )?;
+        self.conn.execute_batch(MIGRATION_STATE_DDL)?;
         self.conn.execute(
             "INSERT OR IGNORE INTO migration_state \
              (key, key_version_in_progress, last_processed_id, started_at) \
@@ -236,15 +232,7 @@ impl super::Database {
         const SWEEP_KEY: &str = "v4-key-version-sweep";
 
         // Ensure the table + row exist so the UPDATE has something to hit.
-        self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS migration_state (
-                key                     TEXT PRIMARY KEY,
-                key_version_in_progress INTEGER,
-                last_processed_id       INTEGER NOT NULL DEFAULT 0,
-                started_at              INTEGER,
-                completed_at            INTEGER
-            );",
-        )?;
+        self.conn.execute_batch(MIGRATION_STATE_DDL)?;
         self.conn.execute(
             "INSERT OR IGNORE INTO migration_state \
              (key, key_version_in_progress, last_processed_id, started_at) \
