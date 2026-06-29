@@ -161,18 +161,18 @@ class MainActivity : ComponentActivity() {
         // disabled (SyncBackend.RELAY is a no-op) so the listener still works.
         try {
             val relayClient = RelayClient(settings.relayUrl)
-            // [P1] The relay bearer token (used by RelayClient.uploadItem) is obtained
-            // from RelayClient.registerDevice() at pairing time and was never persisted
-            // to Settings — there is no relayToken field on Settings. The SyncBackend.RELAY
-            // cloud upload path is DISABLED (ClipboardService.notifySyncManager logs a
-            // warning and returns without calling uploadItem), so token="" causes no 401s
-            // in practice. If the relay path is ever re-enabled, store the Device.token
-            // returned by registerDevice() in Settings and pass it here.
-            syncManager = SyncManager(relayClient, settings.deviceId, token = "", settings = settings)
+            // CopyPaste-crh3.102: the relay cloud-upload path is re-enabled. The
+            // server-issued bearer token is persisted into Settings.relayToken at
+            // registration time (SyncManager.ensureRelayToken / RelaySubscriptionClient)
+            // and the producer (pushToRelay → ensureRelayToken) reads it from there,
+            // self-registering on a miss and re-registering once on a 401. We seed the
+            // SyncManager with the last-cached token here for parity; an empty/stale
+            // value is transparently refreshed by ensureRelayToken before the first push.
+            syncManager = SyncManager(relayClient, settings.deviceId, token = settings.relayToken, settings = settings)
         } catch (e: Exception) {
             Log.w(TAG, "SyncManager init failed — proceeding without relay sync: ${e.javaClass.simpleName} ${e.message}")
             val fallback = RelayClient("")
-            syncManager = SyncManager(fallback, settings.deviceId, token = "", settings = settings)
+            syncManager = SyncManager(fallback, settings.deviceId, token = settings.relayToken, settings = settings)
         }
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboardManager.addPrimaryClipChangedListener(clipListener)

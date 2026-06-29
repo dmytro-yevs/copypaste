@@ -193,7 +193,10 @@ class ClipboardService : Service() {
         repository = ClipboardRepository(this)
 
         val relayHttp = RelayClient(settings.relayUrl)
-        syncManager = SyncManager(relayHttp, settings.deviceId, token = "", settings = settings)
+        // CopyPaste-crh3.102: seed with the persisted relay token (re-enabled relay
+        // upload). pushToRelay → ensureRelayToken refreshes it from Settings.relayToken
+        // on a miss / 401, so a stale or empty seed is transparently re-registered.
+        syncManager = SyncManager(relayHttp, settings.deviceId, token = settings.relayToken, settings = settings)
         // CopyPaste-3ox2: bind the FGS scope so thumbnail generation tasks in
         // SyncManager are tied to the service lifecycle and cancelled on destroy.
         syncManager.bindScope(scope)

@@ -477,10 +477,14 @@ class SyncManager(
             Log.w(TAG, "ingestRelaySseItem: no Settings instance provided")
             return@withContext false
         }
-        val ctx = resolveSyncContext() ?: run {
-            Log.w(TAG, "ingestRelaySseItem: no sync context (no key/credentials)")
-            return@withContext false
-        }
+        // CopyPaste-crh3.112: the relay decrypt path needs ONLY the cross-device
+        // sync key — NOT a full Supabase sync context. The old Supabase context
+        // resolver short-circuited to null whenever !settings.isSupabaseConfigured
+        // (it builds a SupabaseClient + bearer the relay never uses), so a
+        // relay-only install dropped EVERY received item. The key itself is now
+        // resolved lazily below (after the tombstone fast-path, which needs no key)
+        // via the Supabase-independent resolveCloudSyncKey — the same source
+        // relayRegistration()/pushToRelay() already use.
 
         val envelopeJson = try {
             String(Base64.decode(item.contentB64, Base64.DEFAULT), Charsets.UTF_8)
@@ -517,13 +521,25 @@ class SyncManager(
             Log.w(TAG, "ingestRelaySseItem: ct_b64 not valid base64 (id=${item.id})")
             return@withContext false
         }
+        // CopyPaste-crh3.112: resolve the cross-device sync key directly (Supabase-
+        // independent). resolveCloudSyncKey prefers the QR-provisioned direct key,
+        // else the passphrase-derived key; null only when NO key exists at all (the
+        // relay stream still runs — undecryptable items are simply skipped). The
+        // returned array is a defensive copy and is scrubbed after decryption.
+        val syncKey = resolveCloudSyncKey(s) ?: run {
+            Log.w(TAG, "ingestRelaySseItem: no cloud sync key — cannot decrypt relay item (id=${item.id})")
+            return@withContext false
+        }
         val plaintext = try {
-            cloud_decrypt(envelope.itemId, blob, ctx.syncKey)
+            cloud_decrypt(envelope.itemId, blob, syncKey)
         } catch (e: Exception) {
             // Wrong key, tampered blob, or wrong item_id AAD — expected for items
             // encrypted under a different passphrase; not fatal.
             Log.w(TAG, "ingestRelaySseItem: cloud_decrypt failed (id=${item.id}) — wrong key or tampered")
             return@withContext false
+        } finally {
+            // resolveCloudSyncKey hands back a defensive copy — scrub it.
+            syncKey.fill(0)
         }
 
         val isImage = item.contentType == "image" || item.contentType.startsWith("image/")
