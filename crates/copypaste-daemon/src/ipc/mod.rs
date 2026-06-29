@@ -5636,7 +5636,10 @@ impl IpcServer {
                             "reset_database COMPLETE: fresh empty database created, daemon \
                              recovered in-place (no longer degraded, ready=true)"
                         );
-                        Response::ok(req.id, serde_json::json!({ "reset": true, "ready": true }))
+                        // CopyPaste-crh3.117: match ResetDatabaseResponse ({ ready }).
+                        // The `reset` field was removed as redundant in c4q2.22; the
+                        // wire must not carry a field absent from the DTO.
+                        Response::ok(req.id, serde_json::json!({ "ready": true }))
                     }
                     Ok(Err(msg)) => {
                         tracing::error!(

@@ -412,14 +412,16 @@ async fn reset_database_clears_items() {
         reset_resp["ok"], true,
         "reset_database with confirm=true must succeed: {reset_resp}"
     );
-    // The response must carry reset=true and ready=true.
-    assert_eq!(
-        reset_resp["data"]["reset"], true,
-        "response must include reset=true: {reset_resp}"
-    );
+    // CopyPaste-crh3.117: the response carries only `ready` (the `reset` field
+    // was removed from ResetDatabaseResponse as redundant in c4q2.22; the wire
+    // must match the DTO).
     assert_eq!(
         reset_resp["data"]["ready"], true,
         "response must include ready=true: {reset_resp}"
+    );
+    assert!(
+        reset_resp["data"].get("reset").is_none(),
+        "response must NOT carry the removed `reset` field: {reset_resp}"
     );
 
     // Post-condition: all items gone.

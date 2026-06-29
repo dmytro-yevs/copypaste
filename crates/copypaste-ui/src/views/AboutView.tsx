@@ -50,12 +50,16 @@ export function AboutView() {
     // opened ("degraded") from an unreachable daemon ("offline"). Previously this
     // view showed green "connected" for ANY resolving status call, masking the
     // degraded case entirely.
-    probeStatus().then((probe: StatusProbe) => {
-      if (probe.kind === "ok") setDaemon({ kind: "connected" });
-      else if (probe.kind === "degraded")
-        setDaemon({ kind: "degraded", reason: probe.reason });
-      else setDaemon({ kind: "offline" });
-    });
+    probeStatus()
+      .then((probe: StatusProbe) => {
+        if (probe.kind === "ok") setDaemon({ kind: "connected" });
+        else if (probe.kind === "degraded")
+          setDaemon({ kind: "degraded", reason: probe.reason });
+        else setDaemon({ kind: "offline" });
+      })
+      // CopyPaste-crh3.116: without this, a network/IPC rejection is unhandled
+      // and the view is stuck on {kind:"pending"} (spinner never resolves).
+      .catch(() => setDaemon({ kind: "offline" }));
   }, []);
 
   useEffect(() => {
