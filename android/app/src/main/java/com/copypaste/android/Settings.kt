@@ -292,9 +292,22 @@ class Settings(context: Context) {
      * Supabase account email for sign-in via GoTrue.
      * Optional: when blank the anonKey is used as bearer (no Row Level Security).
      */
+    // CopyPaste-crh3.24: KEK-wrapped at rest (AndroidKeyStore AES-GCM-256), same
+    // path as supabasePassword. Email is PII; a rooted device or unencrypted ADB
+    // backup could read the old plaintext XML. readWrappedSecret auto-migrates the
+    // legacy plaintext "supabase_email" value on first read.
     var supabaseEmail: String
-        get() = prefs.getString("supabase_email", "") ?: ""
-        set(v) = prefs.edit().putString("supabase_email", v.trim()).apply()
+        get() = readWrappedSecret(
+            KEY_SUPABASE_EMAIL_WRAPPED_B64,
+            KEY_SUPABASE_EMAIL_IV_B64,
+            KEY_LEGACY_SUPABASE_EMAIL_PLAIN,
+        )
+        set(v) = writeWrappedSecret(
+            KEY_SUPABASE_EMAIL_WRAPPED_B64,
+            KEY_SUPABASE_EMAIL_IV_B64,
+            KEY_LEGACY_SUPABASE_EMAIL_PLAIN,
+            v.trim(),
+        )
 
     /**
      * Supabase account password for sign-in via GoTrue.
@@ -1856,6 +1869,13 @@ class Settings(context: Context) {
         private const val KEY_LEGACY_SUPABASE_PW_PLAIN = "supabase_password"
         private const val KEY_SUPABASE_PW_WRAPPED_B64 = "supabase_password_wrapped_b64"
         private const val KEY_SUPABASE_PW_IV_B64 = "supabase_password_iv_b64"
+
+        // CopyPaste-crh3.24: the Supabase account email is PII and was the only
+        // cloud secret still stored as raw plaintext. KEK-wrap it like the
+        // password (legacy plain key "supabase_email" auto-migrates on first read).
+        private const val KEY_LEGACY_SUPABASE_EMAIL_PLAIN = "supabase_email"
+        private const val KEY_SUPABASE_EMAIL_WRAPPED_B64 = "supabase_email_wrapped_b64"
+        private const val KEY_SUPABASE_EMAIL_IV_B64 = "supabase_email_iv_b64"
 
         // bd CopyPaste-44rq.53: KEK-wrapped relay bearer token.
         // The plaintext SharedPreferences key "relay_token" becomes the legacy key
