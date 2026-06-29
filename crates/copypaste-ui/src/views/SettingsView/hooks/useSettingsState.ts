@@ -1,7 +1,7 @@
 // useSettingsState.ts — extracted from SettingsView.tsx (CopyPaste-g06m.35)
 // Contains all state, refs, effects, and handlers for the Settings screen.
 // SettingsView.tsx is now a thin composition root that calls this hook.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type LoadState } from "../../../lib/loadState";
 import { emit, listen } from "@tauri-apps/api/event";
 import {
@@ -1083,6 +1083,20 @@ export function useSettingsState() {
     }
   }, [importPending, importMsgTimerRef]);
 
+  // CopyPaste-crh3.49: memoize the cloud account-mismatch detection so the
+  // pairedPeers iteration only re-runs when the inputs change, not on every
+  // render of this 30+ state-var hook (vacuum timer, passphrase timer, etc.).
+  const cloudAccountMismatch = useMemo(() => {
+    const localId = syncStatus?.supabase_account_id ?? null;
+    // If we don't know our own id, we can't detect a mismatch.
+    if (localId == null) return false;
+    // If no peers loaded yet, stay false (no false positives).
+    if (pairedPeers == null) return false;
+    return pairedPeers.some(
+      (p) => p.supabase_account_id != null && p.supabase_account_id !== localId,
+    );
+  }, [syncStatus?.supabase_account_id, pairedPeers]);
+
   return {
     // Display prefs
     prefs,
@@ -1175,16 +1189,7 @@ export function useSettingsState() {
     //   - all peers with ids match the local id
     // This drives the CloudAccountMismatchBanner already wired in SettingsView.
     localSupabaseAccountId: syncStatus?.supabase_account_id ?? null,
-    cloudAccountMismatch: (() => {
-      const localId = syncStatus?.supabase_account_id ?? null;
-      // If we don't know our own id, we can't detect a mismatch.
-      if (localId == null) return false;
-      // If no peers loaded yet, stay false (no false positives).
-      if (pairedPeers == null) return false;
-      return pairedPeers.some(
-        (p) => p.supabase_account_id != null && p.supabase_account_id !== localId,
-      );
-    })(),
+    cloudAccountMismatch,
     // Helpers (functions read live state via closure)
     buildConfigPatch,
     showLimitsMsg,
