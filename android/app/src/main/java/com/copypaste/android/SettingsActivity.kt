@@ -688,29 +688,58 @@ fun SettingsScreen(
                         syncError = syncError,
                         syncErrorIsUnauthorized = syncErrorIsUnauthorized,
                         // CopyPaste-bdac.42: wire test-connection probe (macOS parity).
-                        // Uses RelayClient.health() (GET /health → 200 OK) for the
-                        // relay backend. Relay URL comes from the live draft field so
-                        // the user can test before saving. Supabase health is covered
-                        // by the SyncDiagnosticsCard above; relay is the one without a
-                        // live indicator. Toast shows SUCCESS / DANGER based on the
-                        // HTTP result or network error.
+                        // Fix: probe the ENABLED+CONFIGURED backend(s), not hardcoded relay.
+                        // Uses selectTestBackends() to pick which transports to test (additive
+                        // model, CopyPaste-26zi). Draft URL values are used so the user can
+                        // test before saving. Per-transport results are reported in a single
+                        // toast: "Relay: OK  Supabase: failed" etc. relayEnabled /
+                        // supabaseEnabled are read from settings (they apply immediately on
+                        // toggle, no Save needed — see SyncTab transport switches).
                         onTestConnection = {
                             settingsScope.launch(Dispatchers.IO) {
-                                val url = relayUrl.trim().ifBlank { settings.relayUrl }
-                                val ok = runCatching {
-                                    RelayClient(url).health()
-                                }.getOrDefault(false)
-                                if (ok) {
+                                val draftRelayUrl = relayUrl.trim().ifBlank { settings.relayUrl }
+                                val draftSupabaseUrl = supabaseUrl.trim().ifBlank { settings.supabaseUrl }
+                                val draftAnonKey = supabaseAnonKey.trim().ifBlank { settings.supabaseAnonKey }
+
+                                val spec = selectTestBackends(
+                                    relayEnabled = settings.relayEnabled,
+                                    relayUrl = draftRelayUrl,
+                                    supabaseEnabled = settings.supabaseEnabled,
+                                    supabaseUrl = draftSupabaseUrl,
+                                    supabaseAnonKey = draftAnonKey,
+                                )
+
+                                if (!spec.relay && !spec.supabase) {
                                     toastState.show(
-                                        ctx.getString(R.string.toast_test_connection_ok),
-                                        GlassToastKind.SUCCESS,
-                                    )
-                                } else {
-                                    toastState.show(
-                                        ctx.getString(R.string.toast_test_connection_fail),
+                                        "No enabled transport to test — enable Relay or Supabase above.",
                                         GlassToastKind.DANGER,
                                     )
+                                    return@launch
                                 }
+
+                                val parts = mutableListOf<String>()
+                                var allOk = true
+
+                                if (spec.relay) {
+                                    val ok = runCatching {
+                                        RelayClient(draftRelayUrl).health()
+                                    }.getOrDefault(false)
+                                    parts += if (ok) "Relay: OK" else "Relay: failed"
+                                    if (!ok) allOk = false
+                                }
+
+                                if (spec.supabase) {
+                                    val ok = runCatching {
+                                        SupabaseClient(draftSupabaseUrl, draftAnonKey).health()
+                                    }.getOrDefault(false)
+                                    parts += if (ok) "Supabase: OK" else "Supabase: failed"
+                                    if (!ok) allOk = false
+                                }
+
+                                toastState.show(
+                                    parts.joinToString("  "),
+                                    if (allOk) GlassToastKind.SUCCESS else GlassToastKind.DANGER,
+                                )
                             }
                         },
                     )

@@ -617,6 +617,38 @@ class SupabaseClient(
         }
     }
 
+    // ── Connectivity probe ───────────────────────────────────────────────────
+
+    /**
+     * CopyPaste-bdac.42: lightweight reachability probe for the "Test connection" button.
+     *
+     * Hits `GET /rest/v1/` with only the [anonKey] header. Any HTTP response —
+     * even 401/403 — means the Supabase project URL is reachable; only a network
+     * exception (DNS failure, connection refused, timeout) returns false.
+     *
+     * This deliberately does NOT test credentials or RLS: the goal is to confirm
+     * that the configured URL points at a live Supabase instance. Credential
+     * errors are visible in the SyncDiagnosticsCard above.
+     */
+    suspend fun health(): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val url = URL("$supabaseUrl/rest/v1/")
+            val conn = url.openConnection() as HttpURLConnection
+            conn.requestMethod = "GET"
+            conn.setRequestProperty("apikey", anonKey)
+            conn.connectTimeout = 10_000
+            conn.readTimeout = 10_000
+            val code = conn.responseCode
+            conn.disconnect()
+            // Any HTTP status (1xx–5xx) means the server is reachable.
+            // Only a network-level exception (caught below) means unreachable.
+            code in 100..599
+        } catch (e: Exception) {
+            Log.w(TAG, "Supabase health check failed: ${e.javaClass.simpleName}: ${e.message}", e)
+            false
+        }
+    }
+
     // ── HTTP helpers ─────────────────────────────────────────────────────────
 
     private data class HttpResponse(val code: Int, val body: String)
