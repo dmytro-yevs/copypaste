@@ -1403,6 +1403,31 @@ class ClipboardRepository(context: Context) {
         pruneToLimits()
     }
 
+    /**
+     * CopyPaste-bdac.88: Compute how many items reducing the "Maximum stored
+     * items" cap to [newMax] would PERMANENTLY tombstone — WITHOUT mutating the
+     * store. Used by Settings to populate the confirmation dialog before the
+     * destructive [applyHistoryCap] runs.
+     *
+     * Counts LIVE (non-tombstone) items only; PINNED items are never evicted, so
+     * the result is the number of live UNPINNED items that would be removed to
+     * bring the live count down to [newMax]. Returns 0 when [newMax] is >= the
+     * current live item count — a non-destructive change that needs no
+     * confirmation (matching the macOS display-filter, which deletes nothing).
+     *
+     * Delegates to the shared [planCountCapEvictions] planner so the dialog count
+     * and the actual [pruneToLimits] count-cap pass can never disagree.
+     */
+    fun countPrunableByMaxItems(newMax: Int): Int =
+        synchronized(idsWriteLock) {
+            val pinnedSet = storedPinnedIds()
+            val liveIds = storedIds().filter { id ->
+                val raw = prefs.getString("item_$id", null) ?: return@filter false
+                !isDeletedBlob(raw)
+            }
+            planCountCapEvictions(liveIds, pinnedSet, newMax).size
+        }
+
     private fun pruneToLimits() {
         val quotaBytes = settings.storageQuotaBytes.coerceAtLeast(0L)
         // Settings.maxHistoryItems default 1000; coerceAtLeast(1) guards against
@@ -1427,7 +1452,18 @@ class ClipboardRepository(context: Context) {
             }
 
             var totalBytes = blobSizes.values.sumOf { it.toLong() }
-            val unpinned = ids.filter { it !in pinnedSet }.toMutableList()
+            // LIVE (non-tombstone) ids: tombstones remain in KEY_ITEM_IDS to block
+            // re-sync resurrection, but must NOT be re-counted or re-evicted. Both the
+            // byte pass and the count-cap pass operate on live items only, and
+            // `liveCount` is the running live total shared across both passes so the
+            // count-cap math matches the pure [planCountCapEvictions] planner
+            // (crh3.108). Counting tombstones as live previously over-evicted live rows.
+            val liveIds = ids.filter { id ->
+                val raw = prefs.getString("item_$id", null)
+                raw != null && !isDeletedBlob(raw)
+            }
+            var liveCount = liveIds.size
+            val unpinned = liveIds.filter { it !in pinnedSet }.toMutableList()
 
             val editor = prefs.edit()
             var didEvict = false
@@ -1494,21 +1530,23 @@ class ClipboardRepository(context: Context) {
                 val sz = blobSizes[evictId] ?: 0
                 totalBytes -= sz
                 tombstoneEvict(evictId)
+                liveCount-- // byte-pass eviction also reduces the live count
                 didEvict = true
                 evictedCount++
                 Log.d(TAG, "pruneToLimits: evicted $evictId (blob ${sz}B, totalNow=${totalBytes}B)")
             }
 
-            // Pass 2: count-cap eviction.  Settings.maxHistoryItems (default 1000)
-            // was previously stored but never enforced — it only controlled the
-            // display cap in HistoryActivity/ClipboardViewModel via PAGE_SIZE.
-            // This pass evicts the OLDEST unpinned items until the LIVE item count
-            // (pinned + unpinned, excluding tombstones) is <= maxItems. Pinned items
-            // count toward the limit but are never evicted (same policy as the quota pass).
+            // Pass 2: count-cap eviction (crh3.108 continuous enforcement). This pass
+            // evicts the OLDEST unpinned items until the LIVE item count (pinned +
+            // unpinned, excluding tombstones) is <= maxItems. Pinned items count toward
+            // the limit but are never evicted (same policy as the quota pass). Mirrors
+            // the pure [planCountCapEvictions] planner that also drives the Settings
+            // confirmation count (bdac.88), so the predicted and actual deletion counts
+            // always agree.
             //
-            // `liveCount` tracks live (non-tombstoned) items; `ids` itself is not
-            // reduced here so tombstone entries remain in KEY_ITEM_IDS (see INVARIANT 3).
-            var liveCount = ids.size
+            // `liveCount` is the running live total (initialised above, decremented by
+            // Pass 1); `ids` itself is NOT reduced so tombstone entries remain in
+            // KEY_ITEM_IDS (see INVARIANT 3).
             while (unpinned.isNotEmpty() && liveCount > maxItems) {
                 val evictId = unpinned.removeAt(0)
                 // Do NOT remove from ids — the tombstone must stay in KEY_ITEM_IDS.
@@ -1849,6 +1887,51 @@ class ClipboardRepository(context: Context) {
          */
         fun nextLamportTs(prevLamport: Long, nowMs: Long): Long =
             maxOf(prevLamport + 1L, nowMs)
+
+        /**
+         * CopyPaste-bdac.88 / crh3.39 / crh3.108 — PURE count-cap planner.
+         *
+         * Given the LIVE (non-tombstone) item ids oldest-first, the pinned set, and
+         * the configured cap, returns the ids the count-cap pass would evict — the
+         * OLDEST UNPINNED items first — to bring the live item count down to
+         * [maxItems]. PINNED ids count toward the cap but are NEVER evicted, so the
+         * result is always disjoint from [pinned].
+         *
+         * This is the single source of truth shared by:
+         *  - [countPrunableByMaxItems], which feeds the deletion count shown in the
+         *    Settings "Maximum stored items" confirmation dialog (bdac.88); and
+         *  - the count-cap pass in [pruneToLimits], the continuous post-insert
+         *    enforcement that keeps the store at/under the cap (crh3.108).
+         *
+         * ## Cross-platform semantics (crh3.39)
+         *
+         * Android's cap is a STORED (destructive) cap — a non-empty return here means
+         * rows are permanently tombstoned. This deliberately differs from macOS, where
+         * the equivalent "Max history items" slider is a DISPLAY-ONLY filter that
+         * deletes nothing (the daemon retains every clip; see
+         * crates/copypaste-ui/src/views/SettingsView/tabs/StorageTab.tsx). The Android
+         * UI therefore labels the control "Maximum stored items" and gates a reduction
+         * behind a confirmation dialog stating scope + permanence.
+         *
+         * Extracted as a pure function so it is unit-testable without an Android runtime.
+         */
+        internal fun planCountCapEvictions(
+            liveIds: List<String>,
+            pinned: Set<String>,
+            maxItems: Int,
+        ): List<String> {
+            // coerceAtLeast(1): a persisted 0 must never evict the entire store
+            // (which would also wipe pinned items by exhausting the unpinned pool).
+            val cap = maxItems.coerceAtLeast(1)
+            val unpinned = liveIds.filter { it !in pinned }.toMutableList()
+            var liveCount = liveIds.size
+            val evicted = ArrayList<String>()
+            while (unpinned.isNotEmpty() && liveCount > cap) {
+                evicted.add(unpinned.removeAt(0)) // oldest unpinned first
+                liveCount--
+            }
+            return evicted
+        }
 
         /**
          * Sync size ceiling in bytes (8 MiB). Delegates to [ClipboardBlobCodec.SYNC_MAX_BLOB_BYTES]

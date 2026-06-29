@@ -101,8 +101,16 @@
     <string name="setting_storage_quota_hint">50–20480 MB (default 10240)</string>
     <string name="setting_max_file_size_label">Max clip file size</string>
     <string name="setting_sensitive_ttl_label">Auto-clear sensitive after</string>
-    <!-- §6/§10 max-items slider — pref-only, Unlimited sentinel = 100 000 -->
-    <string name="setting_max_items_label">Max history items</string>
+    <!-- §6/§10 max-items slider — Unlimited sentinel = 100 000.
+         CopyPaste-crh3.39: unlike macOS (display-only filter that deletes nothing),
+         the Android cap is a STORED cap that permanently tombstones older unpinned
+         items — labelled "Maximum stored items" to make the destructive scope clear. -->
+    <string name="setting_max_items_label">Maximum stored items</string>
+    <string name="setting_max_items_subtitle">Older unpinned items are permanently deleted when the store exceeds this limit. Pinned items are always kept.</string>
+    <!-- CopyPaste-bdac.88: confirmation shown before a destructive cap reduction on Save. -->
+    <string name="dialog_max_items_reduce_title">Delete older items?</string>
+    <string name="dialog_max_items_reduce_body">Lowering the maximum stored items will permanently delete %1$d older unpinned item(s). Pinned items are kept. This cannot be undone.</string>
+    <string name="dialog_max_items_reduce_confirm">Delete and save</string>
     <!-- CopyPaste-wuek NG-1: clear-all in Settings (canonical location, parity with macOS) -->
     <string name="section_data">Data</string>
     <string name="setting_clear_history_label">Clear clipboard history</string>

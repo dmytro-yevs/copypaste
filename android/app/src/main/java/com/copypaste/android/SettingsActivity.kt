@@ -131,6 +131,12 @@ fun SettingsScreen(
     // ── Discard-confirmation dialog state ──
     var showDiscardDialog by remember { mutableStateOf(false) }
     var pendingProceed by remember { mutableStateOf<(() -> Unit)?>(null) }
+    // CopyPaste-bdac.88: confirmation before a DESTRUCTIVE "Maximum stored items"
+    // reduction on Save. pendingCapPruneCount holds the number of older unpinned
+    // items the reduction would permanently delete (computed via
+    // ClipboardRepository.countPrunableByMaxItems). Cancel = non-destructive (no prune).
+    var showCapReductionConfirm by remember { mutableStateOf(false) }
+    var pendingCapPruneCount by remember { mutableStateOf(0) }
 
     // ── General ──
     // Private mode (ON = this device stops recording new clips). Mirrors the
@@ -335,10 +341,57 @@ fun SettingsScreen(
 
     // Shared save action — called from both the header button and the sticky bottom bar.
     // Extracted here so neither call site duplicates the persistence / dirty-reset logic.
-    fun doSave() {
+    fun commitSave() {
         persistAll()
         dirty = false
         onSaved()
+    }
+
+    // CopyPaste-bdac.88: gate Save behind a confirmation when lowering the
+    // "Maximum stored items" cap would PERMANENTLY delete older unpinned items.
+    // Unlike macOS (display-only filter), the Android cap is a stored/destructive
+    // cap, so a reduction must be explicitly acknowledged. A non-destructive Save
+    // (cap unchanged or raised — prune count 0) commits immediately. Cancelling the
+    // dialog performs no prune and leaves the draft dirty (see dialog below).
+    fun doSave() {
+        val newCap = maxItems.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        val prunable = ClipboardRepository(ctx).countPrunableByMaxItems(newCap)
+        if (prunable > 0) {
+            pendingCapPruneCount = prunable
+            showCapReductionConfirm = true
+        } else {
+            commitSave()
+        }
+    }
+
+    // CopyPaste-bdac.88: "Maximum stored items" reduction confirmation.
+    // Confirm = persist the lower cap and run the destructive prune (commitSave →
+    // persistAll → applyHistoryCap). Cancel = dismiss only: NO prune, nothing
+    // persisted, the draft stays dirty so the user can raise the slider and retry.
+    // (Pinned items are never pruned — see ClipboardRepository.planCountCapEvictions.)
+    if (showCapReductionConfirm) {
+        GlassAlertDialog(
+            onDismissRequest = { showCapReductionConfirm = false },
+            title = { Text(stringResource(R.string.dialog_max_items_reduce_title)) },
+            text = {
+                Text(stringResource(R.string.dialog_max_items_reduce_body, pendingCapPruneCount))
+            },
+            confirmButton = {
+                CopyPasteButton(
+                    onClick = {
+                        showCapReductionConfirm = false
+                        commitSave()
+                    },
+                    variant = ButtonVariant.DANGER,
+                ) { Text(stringResource(R.string.dialog_max_items_reduce_confirm)) }
+            },
+            dismissButton = {
+                CopyPasteButton(
+                    onClick = { showCapReductionConfirm = false },
+                    variant = ButtonVariant.GHOST,
+                ) { Text(stringResource(R.string.dialog_cancel)) }
+            },
+        )
     }
 
     // Calm solid backdrop (STYLEGUIDE §6). When translucent, glass surfaces frost

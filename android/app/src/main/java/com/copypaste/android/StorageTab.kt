@@ -236,14 +236,27 @@ internal fun StorageTab(
                     onRelease = onSensitiveTtlSecsChange,
                 )
                 SettingsCardDivider()
-                // §6/§10 max-items slider — pref-only; Unlimited sentinel = 100_000.
-                // TODO(daemon): wire to daemon max_history_items config field when IPC lands.
+                // §6/§10 "Maximum stored items" slider — Unlimited sentinel = 100_000.
+                //
+                // CopyPaste-bdac.88/crh3.39: this is a STORED (destructive) cap. Unlike
+                // macOS, whose "Max history items" slider is a DISPLAY-ONLY filter that
+                // deletes nothing (crates/copypaste-ui/.../tabs/StorageTab.tsx), lowering
+                // this slider permanently tombstones older UNPINNED items via
+                // ClipboardRepository.pruneToLimits (continuously enforced after every
+                // insert — crh3.108). The label + subtitle make the deletion explicit, and
+                // SettingsActivity gates a REDUCTION behind a confirmation dialog.
                 SteppedSliderRow(
                     label = stringResource(R.string.setting_max_items_label),
                     stepValues = MAX_ITEMS_STEP_VALUES,
                     stepLabels = MAX_ITEMS_STEP_LABELS,
                     currentValue = maxItems,
                     onRelease = onMaxItemsChange,
+                )
+                Text(
+                    text = stringResource(R.string.setting_max_items_subtitle),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = LocalIdeColors.current.dim,
+                    modifier = Modifier.padding(horizontal = 16.dp).padding(bottom = 8.dp),
                 )
             }
         }
