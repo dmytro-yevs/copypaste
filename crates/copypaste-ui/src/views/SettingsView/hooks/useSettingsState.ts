@@ -650,7 +650,7 @@ export function useSettingsState() {
         pmErrTimer.current = setTimeout(() => setPrivateModeError(null), 3500);
       }
     },
-    [pmErrTimer]
+    []
   );
 
   // -------------------------------------------------------------------------
@@ -672,7 +672,7 @@ export function useSettingsState() {
         allowScreenshotsErrTimer.current = setTimeout(() => setAllowScreenshotsError(null), 3500);
       }
     },
-    [allowScreenshotsErrTimer]
+    []
   );
 
   // -------------------------------------------------------------------------
@@ -739,7 +739,7 @@ export function useSettingsState() {
       saveErrTimer.current = setTimeout(() => setSaveError(null), 3500);
       return false;
     }
-  }, [config.p2p_enabled, config.supabase_anon_key, supabaseUrl, supabaseKey, supabaseEmail, supabasePassword, relayUrl, saveErrTimer]);
+  }, [config.p2p_enabled, config.supabase_anon_key, supabaseUrl, supabaseKey, supabaseEmail, supabasePassword, relayUrl]);
 
   const handleTestConnection = useCallback(async () => {
     setTesting(true);
@@ -973,7 +973,7 @@ export function useSettingsState() {
     } finally {
       setVacuumBusy(false);
     }
-  }, [vacuumBusy, vacuumMsgTimerRef]);
+  }, [vacuumBusy]);
 
   // -------------------------------------------------------------------------
   // 85n9: Backup — export clipboard history as a downloaded JSON file
@@ -1013,7 +1013,7 @@ export function useSettingsState() {
     } finally {
       setExportInProgress(false);
     }
-  }, [exportInProgress, exportIncludeSensitive, exportMsgTimerRef]);
+  }, [exportInProgress, exportIncludeSensitive]);
 
   // -------------------------------------------------------------------------
   // 85n9: Restore — import clipboard history from a JSON backup file
@@ -1065,7 +1065,7 @@ export function useSettingsState() {
         importMsgTimerRef.current = setTimeout(() => setImportMsg(null), 5000);
       }
     },
-    [importMsgTimerRef],
+    [],
   );
 
   // vcnv: perform the actual import after the user confirmed the modal.
@@ -1097,7 +1097,7 @@ export function useSettingsState() {
     } finally {
       setImportInProgress(false);
     }
-  }, [importPending, importMsgTimerRef]);
+  }, [importPending]);
 
   // CopyPaste-crh3.49: memoize the cloud account-mismatch detection so the
   // pairedPeers iteration only re-runs when the inputs change, not on every

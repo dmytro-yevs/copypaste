@@ -272,6 +272,19 @@ impl DiscoveryService {
         // If a previous browse task / daemon is still alive on this instance
         // (restart-in-place), tear it down first so we never accumulate
         // orphaned tasks or mDNS sockets.
+        //
+        // CopyPaste-crh3.95: `shutdown_inner` aborts the previous browse/reannounce
+        // tasks via `AbortHandle::abort()`, which is fire-and-forget — it does NOT
+        // await the old task. So for a brief window (until the next scheduler tick
+        // delivers the abort) the OLD browse task and the NEW one started below may
+        // both be live. This overlap is SAFE and intentional: (1) inbound peer
+        // events are de-duplicated through the shared `known_peers` HashMap (a
+        // second observation of the same peer is a no-op), and (2) the shared
+        // `rate_limiter` throttles repeated callbacks for the same peer — so a
+        // transient double-browse cannot double-fire `on_found`/`on_lost` or leak a
+        // duplicate peer. Awaiting the old task here is not possible without
+        // retaining its `JoinHandle` (we keep only an `AbortHandle`), and is
+        // unnecessary given those two guards.
         self.shutdown_inner();
 
         let daemon = ServiceDaemon::new().map_err(|e| DiscoveryError::Daemon(e.to_string()))?;
