@@ -18,6 +18,46 @@ use crate::quota::{self, QuotaViolation, Tier};
 use super::device::{DeviceRecord, TokenEntry};
 use super::{REG_LIMIT_MAX_ATTEMPTS, REG_LIMIT_MAX_KEYS, REG_LIMIT_WINDOW};
 
+/// CopyPaste-crh3.89 / CopyPaste-n2l: validate a presented proof-of-possession
+/// (PoP) in isolation so the security invariant is unit-testable without the
+/// full registration path (DB, quota, token-gen).
+///
+/// Decodes `pop_b64`, which MUST be exactly 32 bytes (an HMAC-SHA256 output).
+/// On CO-registration (`existing_pop = Some`), the presented PoP must match the
+/// stored one under a CONSTANT-TIME comparison; a mismatch is a generic
+/// [`RelayError::Unauthorized`] (CopyPaste-crh3.12 — no registration oracle).
+/// On FIRST registration (`existing_pop = None`) the PoP is accepted as-is and
+/// returned for storage: the relay never learns the sync key so it cannot
+/// independently recompute the HMAC, but requiring a correct 32-byte HMAC still
+/// closes the attack where someone who only knows the (secret-derived)
+/// `device_id` co-registers to siphon the victim's inbox ciphertext.
+fn validate_pop(pop_b64: &str, existing_pop: Option<&[u8; 32]>) -> Result<[u8; 32], RelayError> {
+    if pop_b64.is_empty() {
+        return Err(RelayError::BadRequest(
+            "pop_b64 is required for registration".into(),
+        ));
+    }
+    let pop_bytes_vec = B64
+        .decode(pop_b64)
+        .map_err(|_| RelayError::BadRequest("invalid base64 for pop_b64".into()))?;
+    if pop_bytes_vec.len() != 32 {
+        return Err(RelayError::BadRequest(format!(
+            "pop_b64 must decode to exactly 32 bytes (HMAC-SHA256 output), got {}",
+            pop_bytes_vec.len()
+        )));
+    }
+    let mut pop_bytes = [0u8; 32];
+    pop_bytes.copy_from_slice(&pop_bytes_vec);
+
+    if let Some(existing) = existing_pop {
+        use subtle::ConstantTimeEq;
+        if existing.ct_eq(&pop_bytes).unwrap_u8() != 1 {
+            return Err(RelayError::Unauthorized);
+        }
+    }
+    Ok(pop_bytes)
+}
+
 impl super::RelayStore {
     // -----------------------------------------------------------------------
     // Per-device registration rate limiter (security MEDIUM #13)
@@ -201,42 +241,14 @@ impl super::RelayStore {
         // This closes the attack where an adversary who has learned the secret
         // `device_id` (e.g. via traffic analysis) co-registers and receives the
         // victim's inbox ciphertext.
-        if pop_b64.is_empty() {
-            return Err(RelayError::BadRequest(
-                "pop_b64 is required for registration".into(),
-            ));
-        }
-        let pop_bytes_vec = B64
-            .decode(&pop_b64)
-            .map_err(|_| RelayError::BadRequest("invalid base64 for pop_b64".into()))?;
-        if pop_bytes_vec.len() != 32 {
-            return Err(RelayError::BadRequest(format!(
-                "pop_b64 must decode to exactly 32 bytes (HMAC-SHA256 output), got {}",
-                pop_bytes_vec.len()
-            )));
-        }
-        let mut pop_bytes = [0u8; 32];
-        pop_bytes.copy_from_slice(&pop_bytes_vec);
-
-        // On co-registration: constant-time compare against stored PoP.
-        if let Some(existing) = self.devices.get(&device_id) {
-            use subtle::ConstantTimeEq;
-            if existing.registered_pop.ct_eq(&pop_bytes).unwrap_u8() != 1 {
-                // CopyPaste-crh3.12: return a generic 401 instead of a verbose
-                // 400 ("does not match the registered proof-of-possession").
-                // The old message confirmed the device_id was already
-                // registered, a registration oracle observable by anyone with
-                // access to relay logs / plaintext HTTP. A generic Unauthorized
-                // collapses wrong-PoP into the same opaque auth failure and
-                // never reveals registration state. Legitimate clients
-                // re-derive the PoP deterministically, so no real flow breaks.
-                return Err(RelayError::Unauthorized);
-            }
-        }
-        // On first registration: the PoP is accepted as-is and stored below.
-        // (We cannot independently verify it — the relay never learns the sync
-        // key — but this still closes the attack: an attacker who only knows the
-        // device_id cannot compute the correct HMAC without the sync key.)
+        // CopyPaste-crh3.89: the PoP decode + length check + constant-time
+        // co-registration compare are extracted into `validate_pop` so this
+        // security invariant is unit-testable in isolation (a short-circuit that
+        // skips the verify is now caught by a focused test, not only the full
+        // registration path). `existing_pop` is COPIED out (it's `[u8;32]`) so we
+        // hold no borrow of `self.devices` across the call.
+        let existing_pop = self.devices.get(&device_id).map(|r| r.registered_pop);
+        let pop_bytes = validate_pop(&pop_b64, existing_pop.as_ref())?;
 
         // Enforce the device-count quota *within this scope* only for a NEW
         // device record. Co-registration reuses an existing record (one inbox),
@@ -406,5 +418,76 @@ impl super::RelayStore {
             pop_b64,
             Tier::Free,
         )
+    }
+}
+
+#[cfg(test)]
+mod validate_pop_tests {
+    //! CopyPaste-crh3.89: the PoP security invariant, now testable in isolation
+    //! (previously only exercisable through the full 245-line registration path).
+    use super::{validate_pop, B64};
+    use crate::error::RelayError;
+    use base64::Engine as _;
+
+    fn b64_of(bytes: &[u8]) -> String {
+        B64.encode(bytes)
+    }
+
+    #[test]
+    fn first_registration_accepts_valid_32_byte_pop() {
+        let pop = [7u8; 32];
+        let got = validate_pop(&b64_of(&pop), None).expect("valid PoP on first registration");
+        assert_eq!(
+            got, pop,
+            "returned PoP must equal the decoded input for storage"
+        );
+    }
+
+    #[test]
+    fn empty_pop_is_bad_request() {
+        assert!(matches!(
+            validate_pop("", None),
+            Err(RelayError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn invalid_base64_is_bad_request() {
+        assert!(matches!(
+            validate_pop("not valid base64 @@@", None),
+            Err(RelayError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn wrong_length_is_bad_request() {
+        // Too short and too long both rejected — must be exactly 32 bytes.
+        assert!(matches!(
+            validate_pop(&b64_of(&[1u8; 16]), None),
+            Err(RelayError::BadRequest(_))
+        ));
+        assert!(matches!(
+            validate_pop(&b64_of(&[1u8; 33]), None),
+            Err(RelayError::BadRequest(_))
+        ));
+    }
+
+    #[test]
+    fn co_registration_matching_pop_is_accepted() {
+        let pop = [0xAB_u8; 32];
+        let got = validate_pop(&b64_of(&pop), Some(&pop)).expect("matching co-registration PoP");
+        assert_eq!(got, pop);
+    }
+
+    #[test]
+    fn co_registration_mismatched_pop_is_unauthorized() {
+        // The core security check: a co-registrant with the wrong PoP (does not
+        // hold the sync key) gets a generic Unauthorized, never BadRequest.
+        let stored = [0xAB_u8; 32];
+        let presented = [0xCD_u8; 32];
+        assert!(matches!(
+            validate_pop(&b64_of(&presented), Some(&stored)),
+            Err(RelayError::Unauthorized)
+        ));
     }
 }
