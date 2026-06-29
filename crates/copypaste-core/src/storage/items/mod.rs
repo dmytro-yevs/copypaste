@@ -1789,6 +1789,48 @@ mod tests {
     /// Dedup simulation: inserting the same content hash a second time via
     /// find_recent_by_hash + bump avoids a second row, and the bumped item
     /// sorts to the top.
+    /// CopyPaste-fuxl: re-copying content that was soft-deleted within the SAME
+    /// `wall_time / 60` bucket must create a FRESH LIVE row, not silently dedup
+    /// against the tombstone. Before the v15 index rebuild + the lookup
+    /// `deleted = 0` filter, the re-insert hit the dedup UNIQUE violation and fell
+    /// back to the tombstone id, so the re-copy vanished.
+    #[test]
+    fn recopy_after_same_bucket_soft_delete_inserts_fresh_live_row() {
+        let db = Database::open_in_memory().unwrap();
+        let hash = "fuxlhash".to_string();
+
+        // Capture in minute bucket 1000 (60_000 / 60 == 1000).
+        let mut first = make_item(1);
+        first.wall_time = 60_000;
+        first.content_hash = Some(hash.clone());
+        let first_id = first.id.clone();
+        insert_item(&db, &first).unwrap();
+        assert_eq!(
+            get_page(&db, 100, 0).unwrap().len(),
+            1,
+            "one live row after capture"
+        );
+
+        // Soft-delete it — the tombstone keeps content_hash + the same bucket.
+        soft_delete_item(&db, &first_id, 100, 60_010).unwrap();
+        assert!(
+            get_page(&db, 100, 0).unwrap().is_empty(),
+            "no live rows after delete"
+        );
+
+        // Re-copy the SAME content in the SAME minute bucket (60_030 / 60 == 1000).
+        let mut recopy = make_item(2);
+        recopy.wall_time = 60_030;
+        recopy.content_hash = Some(hash.clone());
+        insert_item(&db, &recopy).unwrap();
+
+        // The re-copy must be a fresh LIVE row, not deduped to the tombstone.
+        let live = get_page(&db, 100, 0).unwrap();
+        assert_eq!(live.len(), 1, "re-copy must appear as a fresh live row");
+        assert_eq!(live[0].content_hash.as_deref(), Some(hash.as_str()));
+        assert_ne!(live[0].id, first_id, "must be a NEW row, not the tombstone");
+    }
+
     #[test]
     fn dedup_bump_prevents_duplicate_row_and_sorts_to_top() {
         let db = Database::open_in_memory().unwrap();

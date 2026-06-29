@@ -22,6 +22,12 @@
 -- `WHERE content_hash IS NOT NULL` mirrors the partial index that v2
 -- already created over the same column — image rows have NULL
 -- content_hash and would otherwise all collide on the bucket.
+-- NOTE: this v5 snapshot creates the index BEFORE the `deleted` column is added
+-- (further down this same script), so the predicate can only reference
+-- content_hash here. Migration v15 (CopyPaste-fuxl) later DROPs and recreates
+-- this index with `AND deleted = 0` — once `deleted` exists — so soft-delete
+-- tombstones are excluded from the dedup index on every database (fresh installs
+-- run v15 in the same chain; existing DBs get it on upgrade).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup_hash_minute
     ON clipboard_items(content_hash, (wall_time / 60))
     WHERE content_hash IS NOT NULL;

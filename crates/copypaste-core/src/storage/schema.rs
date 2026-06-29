@@ -83,7 +83,7 @@ pub enum SchemaError {
 ///     SQLite can split the pinned-first ORDER BY into two bounded index range
 ///     scans (pinned=1 rows, then pinned=0 rows), keeping each call O(log n +
 ///     page_size). No data change; index only.
-pub const SCHEMA_VERSION: i64 = 14;
+pub const SCHEMA_VERSION: i64 = 15;
 
 /// Baseline (v1) schema as a single SQL script. Made `pub(crate)` so the
 /// crate-internal `db` and `schema` tests can stage a legacy plaintext DB
@@ -262,6 +262,20 @@ pub(crate) const V14_INDEX: &str = "\
 CREATE INDEX IF NOT EXISTS idx_clipboard_history_page\n\
     ON clipboard_items(pinned DESC, pin_order, wall_time DESC)\n\
     WHERE deleted = 0;\n";
+
+/// CopyPaste-fuxl: rebuild the per-minute dedup UNIQUE index to EXCLUDE
+/// soft-deleted rows. The original predicate (`content_hash IS NOT NULL`) kept
+/// tombstones (`deleted = 1`) in the index, so re-copying content that was
+/// soft-deleted within the SAME `wall_time / 60` bucket hit a UNIQUE violation
+/// and the insert silently fell back to the tombstone id — the re-copy vanished.
+/// Restricting to `deleted = 0` lets a re-copy create a fresh live row. The new
+/// index covers a strict SUBSET of the old one's rows, so DROP+CREATE can never
+/// fail on existing data (uniqueness over the deleted=0 subset was already held).
+pub(crate) const V15_DEDUP_INDEX_FIX: &str = "\
+DROP INDEX IF EXISTS idx_dedup_hash_minute;\n\
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dedup_hash_minute\n\
+    ON clipboard_items(content_hash, (wall_time / 60))\n\
+    WHERE content_hash IS NOT NULL AND deleted = 0;\n";
 
 /// Return `true` if `column` already exists in `table`.
 ///
@@ -518,6 +532,14 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
         // index range scan instead of a full-table scan + filesort on every
         // history_page IPC call. Index-only change — no data modified.
         script.push_str(V14_INDEX);
+    }
+
+    if current_version < 15 {
+        // Migration v15 (CopyPaste-fuxl): exclude soft-deleted rows from the
+        // per-minute dedup UNIQUE index so a re-copy after a same-bucket delete
+        // creates a fresh live row instead of being silently dropped. See
+        // V15_DEDUP_INDEX_FIX.
+        script.push_str(V15_DEDUP_INDEX_FIX);
     }
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));

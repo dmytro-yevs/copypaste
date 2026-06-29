@@ -198,8 +198,11 @@ fn lookup_existing_id_in_tx(
     if let Some(hash) = &item.content_hash {
         let minute_bucket = item.wall_time / 60;
         let by_hash = tx.query_row(
+            // CopyPaste-fuxl: `AND deleted = 0` — never dedup against a soft-deleted
+            // tombstone, so a re-copy within the same minute bucket inserts a fresh
+            // live row (the UNIQUE index now also excludes deleted=1 rows).
             "SELECT id FROM clipboard_items
-             WHERE content_hash = ?1 AND (wall_time / 60) = ?2
+             WHERE content_hash = ?1 AND (wall_time / 60) = ?2 AND deleted = 0
              ORDER BY wall_time DESC LIMIT 1",
             params![hash, minute_bucket],
             |row| row.get::<_, String>(0),
