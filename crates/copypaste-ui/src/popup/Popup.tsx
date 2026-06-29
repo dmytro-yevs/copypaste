@@ -244,10 +244,14 @@ export function Popup() {
         const page = await api.historyPage(50, 0);
         setItems(page.items);
       } catch (e) {
+        // CopyPaste-crh3.110: surface the failure to the user — every other
+        // error path in this component calls setError; a failed pin previously
+        // only logged to the console, leaving the user with no indication.
         console.error("Popup pin failed", e);
+        setError(String(e));
       }
     },
-    [setItems]
+    [setItems, setError]
   );
 
   const confirmSelection = useCallback(async () => {

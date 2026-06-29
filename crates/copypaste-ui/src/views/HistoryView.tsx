@@ -384,7 +384,11 @@ export function HistoryViewInner() {
           const text = item?.preview ?? "";
           await pasteAsPlainText(text);
         } catch (err) {
+          // CopyPaste-crh3.111: surface the failure like every other
+          // handleKeyDown path (Cmd+C, Delete, Enter) — this Alt+Enter case was
+          // the sole one that only logged to the console.
           console.error("paste-as-plain-text failed:", err);
+          showToast("Failed to paste as plain text", "error");
         }
       } else if (e.key === "Enter" && selectedId !== null) {
         e.preventDefault();
