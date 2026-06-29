@@ -202,11 +202,11 @@ impl DeviceKeypair {
         zeroize::Zeroizing::new(*self.secret.diffie_hellman(&peer).as_bytes())
     }
 
-    /// Returns the raw 32-byte ECDH shared secret wrapped in [`zeroize::Zeroizing`].
-    /// See [`Self::secret_key_bytes_zeroizing`] for the migration story.
+    /// Alias of [`Self::ecdh`] kept for API symmetry. CopyPaste-crh3.81: this now
+    /// DELEGATES to `ecdh` instead of duplicating the body byte-for-byte, so any
+    /// future ECDH hardening lives in exactly one place.
     pub fn ecdh_zeroizing(&self, peer_public_bytes: &[u8; 32]) -> zeroize::Zeroizing<[u8; 32]> {
-        let peer = PublicKey::from(*peer_public_bytes);
-        zeroize::Zeroizing::new(*self.secret.diffie_hellman(&peer).as_bytes())
+        self.ecdh(peer_public_bytes)
     }
 
     pub fn derive_enc_key(
