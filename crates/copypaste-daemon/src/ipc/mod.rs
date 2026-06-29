@@ -222,10 +222,13 @@ const MAX_IMPORT_ITEM_BYTES: usize = 4 * 1024 * 1024;
 /// unbounded resource growth from a buggy or hostile client.
 const MAX_CONCURRENT_CONNECTIONS: usize = 64;
 
-/// Error code returned when an IPC method is called before the server's
-/// backing state (database, etc.) has finished initializing. Clients should
-/// back off and retry rather than treat this as a hard failure.
-const ERR_IPC_NOT_READY: &str = "IPC_NOT_READY";
+/// Human-readable `error` message returned when an IPC method is called before
+/// the server's backing state (database, etc.) has finished initializing.
+/// Clients branch on the machine-readable `error_code` (`ERR_CODE_IPC_NOT_READY`
+/// = "ipc_not_ready") and should back off and retry rather than treat this as a
+/// hard failure. CopyPaste-crh3.8: this is the user-facing string, so it is a
+/// real sentence rather than the bare Rust constant name "IPC_NOT_READY".
+const ERR_IPC_NOT_READY: &str = "daemon is still starting up; retry shortly";
 
 // ---------------------------------------------------------------------------
 // Submodules (behaviour-preserving split of the original ipc.rs god-file).
