@@ -231,14 +231,14 @@ impl SyncEngine {
         // identity every device agrees on.
         let local_clock_map: HashMap<String, i64> = local_items
             .iter()
-            .map(|i| (i.item_id.clone(), i.lamport_ts))
+            .map(|i| (i.item_id.to_string(), i.lamport_ts))
             .collect();
         let local_ids: HashSet<&String> = local_clock_map.keys().collect();
 
         let my_have = Message::Have {
             items: local_items
                 .iter()
-                .map(|i| (i.item_id.clone(), i.lamport_ts))
+                .map(|i| (i.item_id.to_string(), i.lamport_ts))
                 .collect(),
         };
         send_message(stream, &my_have).await?;
@@ -546,8 +546,8 @@ mod tests {
     fn make_item(id: &str, lamport: i64) -> ClipboardItem {
         ClipboardItem {
             deleted: false,
-            id: id.to_string(),
-            item_id: format!("{id}-item"),
+            id: id.to_string().into(),
+            item_id: format!("{id}-item").into(),
             content_type: "text".to_string(),
             content: Some(vec![0xAA, 0xBB]),
             content_nonce: Some(vec![0u8; 24]),
@@ -791,8 +791,8 @@ mod tests {
         // negative lamport_ts; engine must clamp and not panic from the cast.
         let item = ClipboardItem {
             deleted: false,
-            id: "neg".to_string(),
-            item_id: "neg-item".to_string(),
+            id: "neg".to_string().into(),
+            item_id: "neg-item".to_string().into(),
             content_type: "text".to_string(),
             content: Some(vec![0x01]),
             content_nonce: Some(vec![0u8; 24]),
@@ -862,12 +862,12 @@ mod tests {
     async fn same_item_id_different_row_id_converges_to_one_row() {
         // Device A: row id A1, item_id X, lamport 5.
         let mut a = make_item("A1", 5);
-        a.item_id = "X".to_string();
+        a.item_id = "X".to_string().into();
         a.content = Some(vec![0xAA]);
         // Device B: row id B9 (different!), item_id X (same logical item),
         // lamport 7, different content → B's version must win LWW.
         let mut b = make_item("B9", 7);
-        b.item_id = "X".to_string();
+        b.item_id = "X".to_string().into();
         b.content = Some(vec![0xBB]);
 
         let mut engine_a = SyncEngine::new("device-A");
@@ -919,10 +919,10 @@ mod tests {
         // A holds item_id X1; B holds item_id X2 — identical content, distinct
         // logical items.
         let mut a = make_item("rowA", 3);
-        a.item_id = "X1".to_string();
+        a.item_id = "X1".to_string().into();
         a.content = Some(vec![0xEE]);
         let mut b = make_item("rowB", 3);
-        b.item_id = "X2".to_string();
+        b.item_id = "X2".to_string().into();
         b.content = Some(vec![0xEE]); // SAME content as A
 
         let mut engine_a = SyncEngine::new("device-A");
@@ -956,13 +956,13 @@ mod tests {
     async fn crdt_have_want_keyed_on_item_id_not_row_id() {
         // Device A captured item_id "shared-clip" and assigned row id "row-AAA".
         let mut item_a = make_item("row-AAA", 10);
-        item_a.item_id = "shared-clip".to_string();
+        item_a.item_id = "shared-clip".to_string().into();
         item_a.content = Some(b"hello from A".to_vec());
 
         // Device B captured the SAME logical item (same item_id) but assigned a
         // completely different row id "row-BBB" and has a higher lamport clock.
         let mut item_b = make_item("row-BBB", 15);
-        item_b.item_id = "shared-clip".to_string();
+        item_b.item_id = "shared-clip".to_string().into();
         item_b.content = Some(b"hello from B (newer)".to_vec());
 
         let mut engine_a = SyncEngine::new("device-A");
@@ -1022,7 +1022,7 @@ mod tests {
         // Simulate a peer whose lamport_ts reflects a small logical counter (42).
         // Our local clock starts at 0.  After the session our clock must be > 42.
         let mut peer_item = make_item("peer-row", 42);
-        peer_item.item_id = "peer-item".to_string();
+        peer_item.item_id = "peer-item".to_string().into();
 
         let mut engine_local = SyncEngine::new("device-local");
         let mut engine_peer = SyncEngine::new("device-peer");

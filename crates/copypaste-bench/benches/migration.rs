@@ -75,7 +75,7 @@ fn fresh_db() -> Database {
 /// writes `key_version = 2` (current). This mirrors the `seed_v1_row` helper
 /// used in `migration_v4`'s own unit tests.
 fn seed_v1_text_rows(db: &Database, n: usize) {
-    let aad = build_item_aad("bench-item-id-fixed", AAD_SCHEMA_V3);
+    let aad = build_item_aad(&"bench-item-id-fixed".into(), AAD_SCHEMA_V3);
     let plaintext = b"bench plaintext payload 64 bytes xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
     let (nonce, ciphertext) =
         encrypt_item_with_aad(plaintext, &V1_KEY, &aad).expect("encrypt v1 row");
@@ -211,7 +211,7 @@ fn bench_migration_noop_scan(c: &mut Criterion) {
                 let db = fresh_db();
                 // Insert plain kv=2 text rows directly so there is nothing
                 // for migrate_v1_to_v2_keys to do.
-                let aad = build_item_aad("bench-noop-item", AAD_SCHEMA_VERSION);
+                let aad = build_item_aad(&"bench-noop-item".into(), AAD_SCHEMA_VERSION);
                 let plaintext = b"already v2";
                 let (nonce, ct) = encrypt_item_with_aad(plaintext, &V2_KEY, &aad).expect("encrypt");
                 let nonce_bytes = nonce.to_vec();

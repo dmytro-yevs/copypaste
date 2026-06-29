@@ -257,7 +257,7 @@ mod tests {
         // SENDER A: item is stored encrypted under A's v2 local key (exactly as
         // a freshly-captured text item is).
         let a_v2 = derive_v2(&seed_a);
-        let aad_a = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let aad_a = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
         let (nonce_a, ct_a) =
             encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
 
@@ -626,7 +626,7 @@ mod tests {
         let item_id = "fanout-716-item".to_string();
         let plaintext = b"the shared secret content for 3-device test";
         let a_v2 = derive_v2(&seed_a);
-        let aad_a = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let aad_a = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
         let (nonce_a, ct_a) =
             encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
 
@@ -758,12 +758,12 @@ mod tests {
         let item_id = "catchup-716-item".to_string();
         let plaintext = b"catchup per-peer key test";
         let a_v2 = derive_v2(&seed_a);
-        let aad_a = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let aad_a = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
         let (nonce_a, ct_a) =
             encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
 
         let mut local = copypaste_core::ClipboardItem::new_text(ct_a, nonce_a.to_vec(), 1);
-        local.item_id = item_id.clone();
+        local.item_id = item_id.clone().into();
         {
             let g = db.lock().await;
             insert_item(&g, &local).unwrap();
@@ -919,8 +919,8 @@ mod tests {
         let db = make_db();
         // Local row pinned=true; lamport 3 < wire lamport 9 → TakeRemote fires.
         let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 3);
-        local.id = "shared-id".to_string();
-        local.item_id = "shared-id-iid".to_string();
+        local.id = "shared-id".to_string().into();
+        local.item_id = "shared-id-iid".to_string().into();
         local.pinned = true;
         {
             let g = db.lock().await;
@@ -959,8 +959,8 @@ mod tests {
         // Pre-insert a local row with a higher lamport clock. Its `item_id`
         // matches the incoming wire's so they are recognised as the SAME item.
         let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 50);
-        local.id = "shared".to_string();
-        local.item_id = "shared-iid".to_string();
+        local.id = "shared".to_string().into();
+        local.item_id = "shared-iid".to_string().into();
         {
             let g = db.lock().await;
             insert_item(&g, &local).unwrap();
@@ -1039,8 +1039,8 @@ mod tests {
         let db = make_db();
         // Local row: PK "local-pk", item_id "X", lamport 5.
         let mut local = ClipboardItem::new_text(vec![0x11], vec![0u8; 24], 5);
-        local.id = "local-pk".to_string();
-        local.item_id = "X".to_string();
+        local.id = "local-pk".to_string().into();
+        local.item_id = "X".to_string().into();
         {
             let g = db.lock().await;
             insert_item(&g, &local).unwrap();
@@ -1328,8 +1328,8 @@ mod tests {
         // by clearing content_nonce (simulates a sync-key-wrapped blob that was
         // stored before the nonce was applied — exactly the pattern sweep detects).
         let item = copypaste_core::ClipboardItem {
-            id: "poison-id".to_string(),
-            item_id: "poison-item-id".to_string(),
+            id: "poison-id".to_string().into(),
+            item_id: "poison-item-id".to_string().into(),
             content_type: "text".to_string(),
             content: Some(b"ciphertext without nonce".to_vec()),
             content_nonce: Some(vec![0u8; 24]), // valid on insert …

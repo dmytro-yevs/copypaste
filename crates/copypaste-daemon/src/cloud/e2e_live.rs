@@ -144,7 +144,7 @@ fn local_item(local_key: &[u8; 32], plaintext: &[u8], device_id: &str) -> Clipbo
         .as_millis() as i64;
     let v2_key = derive_v2(local_key);
     let aad = build_item_aad_v2(
-        &item_id,
+        &copypaste_core::ItemId::from(item_id.as_str()),
         AAD_SCHEMA_VERSION_V4,
         ITEM_KEY_VERSION_CURRENT as u32,
     );
@@ -152,8 +152,8 @@ fn local_item(local_key: &[u8; 32], plaintext: &[u8], device_id: &str) -> Clipbo
         encrypt_item_with_aad(plaintext, &v2_key, &aad).expect("local encrypt");
     ClipboardItem {
         deleted: false,
-        id,
-        item_id,
+        id: id.into(),
+        item_id: item_id.into(),
         content_type: "text".to_owned(),
         content: Some(ciphertext),
         content_nonce: Some(nonce.to_vec()),

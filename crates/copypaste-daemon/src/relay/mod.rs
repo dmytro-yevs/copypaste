@@ -843,15 +843,15 @@ mod tests {
         let v1: [u8; 32] = **local_key;
         let v2 = derive_v2(&v1);
         let aad = build_item_aad_v2(
-            item_id,
+            &copypaste_core::ItemId::from(item_id),
             AAD_SCHEMA_VERSION_V4,
             ITEM_KEY_VERSION_CURRENT as u32,
         );
         let (nonce, ct) = encrypt_item_with_aad(plaintext, &v2, &aad).expect("encrypt");
         ClipboardItem {
             deleted: false,
-            id: item_id.to_owned(),
-            item_id: item_id.to_owned(),
+            id: item_id.to_owned().into(),
+            item_id: item_id.to_owned().into(),
             content_type: "text".to_owned(),
             content: Some(ct),
             content_nonce: Some(nonce.to_vec()),

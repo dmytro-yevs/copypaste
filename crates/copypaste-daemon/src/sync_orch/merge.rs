@@ -159,7 +159,7 @@ pub async fn merge_incoming_with_crypto(
                 // On TakeRemote we patch `to_insert.id` so FTS / copy_item / pins that
                 // are keyed on the local `id` keep pointing at the same row — mirroring
                 // the cloud path's `preserved_pk` pattern.
-                let local_pk: Option<String> = existing.as_ref().map(|r| r.id.clone());
+                let local_pk: Option<String> = existing.as_ref().map(|r| r.id.to_string());
                 let exists = existing.is_some();
                 let take_remote = match existing.as_ref() {
                     Some(local) => matches!(resolve(local, &wire), MergeOutcome::TakeRemote),
@@ -302,7 +302,7 @@ pub async fn merge_incoming_with_crypto(
                 // `to_insert.id`; we overwrite it here with the local row's PK
                 // when one exists.
                 if let Some(pk) = local_pk {
-                    to_insert.id = pk;
+                    to_insert.id = pk.into();
                 }
 
                 // `wire_to_local` now propagates `pinned` and `pin_order` directly

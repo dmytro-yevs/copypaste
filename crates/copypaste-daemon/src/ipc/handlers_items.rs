@@ -112,7 +112,7 @@ impl IpcServer {
                                     format!("[sensitive — id:{}]", &item.id[..8])
                                 } else if item.content_type == "text" {
                                     preview_map
-                                        .get(&item.id)
+                                        .get(item.id.as_str())
                                         .cloned()
                                         .unwrap_or_else(|| format!("[text — id:{}]", &item.id[..8]))
                                 } else if item.content_type == "file" {
@@ -1231,7 +1231,7 @@ impl IpcServer {
                                     let preview = if item.is_sensitive {
                                         format!("[sensitive — id:{}]", &item.id[..8])
                                     } else if item.content_type == "text" {
-                                        preview_map.get(&item.id).cloned().unwrap_or_else(|| {
+                                        preview_map.get(item.id.as_str()).cloned().unwrap_or_else(|| {
                                             format!("[text — id:{}]", &item.id[..8])
                                         })
                                     } else if item.content_type == "file" {
@@ -1436,7 +1436,7 @@ impl IpcServer {
                     let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
                     // Stable cross-device identity: derive item_id from the
                     // content-hash file_id (mirrors handle_file in daemon.rs).
-                    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+                    item.item_id = uuid::Uuid::from_bytes(file_id).to_string().into();
 
                     let db_guard = db_arc.blocking_lock();
                     let stored_id = copypaste_core::insert_item_with_fts(&db_guard, &item, "")

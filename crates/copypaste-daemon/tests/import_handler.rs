@@ -110,7 +110,7 @@ fn read_text_row_via_read_path(
         key_version as u8,
         copypaste_core::V1Key(&v1_key),
         copypaste_core::V2Key(&v2_key),
-        &item_id,
+        &copypaste_core::ItemId::from(item_id.as_str()),
         &nonce,
         &content,
     )

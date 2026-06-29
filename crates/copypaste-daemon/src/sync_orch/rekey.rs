@@ -7,7 +7,8 @@ use std::sync::Arc;
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
-    encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, ClipboardItem, SyncKey,
+    encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, ClipboardItem, ItemId,
+    SyncKey,
     V1Key, V2Key, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 // c7fp: encrypt_chunks / IMAGE_CHUNK_SIZE / ImageMeta are only used in
@@ -460,7 +461,7 @@ pub(super) fn rekey_outbound_text_with_key(
         wire.key_version,
         V1Key(&crypto.v1_key),
         V2Key(&crypto.v2_key),
-        &wire.item_id,
+        &ItemId::from(wire.item_id.as_str()),
         &nonce,
         ciphertext,
     ) {
@@ -596,7 +597,7 @@ pub(super) fn rekey_inbound(
 
     // Re-encrypt under this device's local v2 key + v4 AAD so the stored row is
     // readable by the production read path (`decrypt_item_by_version` at v2).
-    let aad = build_item_aad_v2(&wire.item_id, AAD_SCHEMA_VERSION_V4, 2);
+    let aad = build_item_aad_v2(&ItemId::from(wire.item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
     let (nonce, ciphertext) = match encrypt_item_with_aad(&plaintext, &crypto.v2_key, &aad) {
         Ok(out) => out,
         Err(e) => {

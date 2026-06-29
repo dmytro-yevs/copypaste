@@ -248,8 +248,8 @@ fn unique_id() -> String {
 fn make_item(id: &str, item_id: &str) -> ClipboardItem {
     ClipboardItem {
         deleted: false,
-        id: id.to_owned(),
-        item_id: item_id.to_owned(),
+        id: id.to_owned().into(),
+        item_id: item_id.to_owned().into(),
         content_type: "text".to_owned(),
         content: Some(b"local-ct".to_vec()),
         content_nonce: Some(vec![0u8; 24]),
@@ -572,8 +572,8 @@ fn cloud_file_empty_fields_form_valid_header() {
 fn file_item(id: &str, name: &str, mime: &str, original_size: usize) -> ClipboardItem {
     ClipboardItem {
         deleted: false,
-        id: id.to_owned(),
-        item_id: id.to_owned(),
+        id: id.to_owned().into(),
+        item_id: id.to_owned().into(),
         content_type: "file".to_owned(),
         content: Some(Vec::new()),
         content_nonce: None,

@@ -61,8 +61,8 @@ async fn peer_recv(stream: &mut DuplexStream) -> Message {
 
 fn make_item(id: &str, lamport: i64) -> ClipboardItem {
     ClipboardItem {
-        id: id.to_string(),
-        item_id: format!("{id}-item"),
+        id: id.to_string().into(),
+        item_id: format!("{id}-item").into(),
         content_type: "text".to_string(),
         content: Some(vec![0xAA, 0xBB]),
         content_nonce: Some(vec![0u8; 24]),
@@ -88,8 +88,8 @@ fn wire_from_local(item: &ClipboardItem, origin: &str) -> WireItem {
         deleted: false,
         pinned: false,
         pin_order: None,
-        id: item.id.clone(),
-        item_id: item.item_id.clone(),
+        id: item.id.to_string(),
+        item_id: item.item_id.to_string(),
         content_type: item.content_type.clone(),
         content: item.content.clone(),
         content_nonce: item.content_nonce.clone(),
@@ -234,7 +234,7 @@ async fn both_sides_have_identical_state_yields_done_immediately() {
         peer_send(
             &mut peer_side,
             &Message::Have {
-                items: vec![(shared_for_peer.item_id.clone(), shared_for_peer.lamport_ts)],
+                items: vec![(shared_for_peer.item_id.to_string(), shared_for_peer.lamport_ts)],
             },
         )
         .await;
@@ -318,7 +318,7 @@ async fn one_side_has_more_items_other_requests_via_want_then_receives_items() {
             &mut peer_side,
             &Message::Have {
                 items: vec![(
-                    peer_item_for_clone.item_id.clone(),
+                    peer_item_for_clone.item_id.to_string(),
                     peer_item_for_clone.lamport_ts,
                 )],
             },

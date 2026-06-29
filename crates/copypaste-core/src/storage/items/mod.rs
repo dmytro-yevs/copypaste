@@ -1,5 +1,6 @@
 mod delete;
 mod fts;
+mod ids;
 mod insert;
 mod pinned;
 mod query;
@@ -41,6 +42,7 @@ pub use query::{
     get_item_by_id, get_item_by_item_id, get_page, get_page_meta, get_page_pinned_first,
     get_page_pinned_first_lamport, DecryptedPage,
 };
+pub use ids::{ItemId, RowId};
 pub use types::{next_lamport_ts, ClipboardItem, ItemsError};
 
 // Test-only re-exports of private helpers accessed from tests.rs.

@@ -24,7 +24,8 @@
 
 use copypaste_core::{
     build_item_aad_v2, decrypt_item_by_version, derive_v2, encrypt_item_with_aad,
-    is_sensitive_for_autowipe, ClipboardItem, Database, V1Key, V2Key, AAD_SCHEMA_VERSION_V4,
+    is_sensitive_for_autowipe, ClipboardItem, Database, ItemId, V1Key, V2Key,
+    AAD_SCHEMA_VERSION_V4,
     ITEM_KEY_VERSION_CURRENT,
 };
 
@@ -353,7 +354,7 @@ pub(crate) fn build_local_item(
     // takes u32 and ClipboardItem.key_version is u8 — cast explicitly.
     // Value is 2 (v2 HKDF key), which fits both u32 and u8.
     let aad = build_item_aad_v2(
-        item_id,
+        &ItemId::from(item_id),
         AAD_SCHEMA_VERSION_V4,
         ITEM_KEY_VERSION_CURRENT as u32,
     );
@@ -371,8 +372,8 @@ pub(crate) fn build_local_item(
     };
 
     Ok(ClipboardItem {
-        id: id.to_owned(),
-        item_id: item_id.to_owned(),
+        id: id.into(),
+        item_id: item_id.into(),
         content_type: content_type.to_owned(),
         content: Some(ciphertext),
         content_nonce: Some(nonce.to_vec()),
@@ -490,8 +491,8 @@ fn build_local_blob_item(
     };
 
     Ok(ClipboardItem {
-        id: id.to_owned(),
-        item_id: item_id.to_owned(),
+        id: id.into(),
+        item_id: item_id.into(),
         content_type: content_type.to_owned(),
         content: Some(content),
         // Chunks are self-framed per-chunk; there is no item-level nonce.
@@ -765,8 +766,8 @@ mod tests {
 
         // Seed a v2 item that the remote will overwrite via LWW.
         let seed = ClipboardItem {
-            id: "local-row-id".to_string(),
-            item_id: "shared-item-id".to_string(),
+            id: "local-row-id".to_string().into(),
+            item_id: "shared-item-id".to_string().into(),
             content_type: "text".to_string(),
             content: Some(b"old ciphertext".to_vec()),
             content_nonce: Some(vec![0u8; 24]),
@@ -789,8 +790,8 @@ mod tests {
 
         // Build a replacement that is v1-keyed (chunk from an older peer).
         let replacement = ClipboardItem {
-            id: "local-row-id".to_string(),
-            item_id: "shared-item-id".to_string(),
+            id: "local-row-id".to_string().into(),
+            item_id: "shared-item-id".to_string().into(),
             content_type: "file".to_string(),
             content: None,
             content_nonce: None,
@@ -833,8 +834,8 @@ mod tests {
 
         let old_plaintext = "super secret old clipboard content";
         let seed = ClipboardItem {
-            id: "fts-row-id".to_string(),
-            item_id: "fts-item-id".to_string(),
+            id: "fts-row-id".to_string().into(),
+            item_id: "fts-item-id".to_string().into(),
             content_type: "text".to_string(),
             content: Some(b"old ciphertext".to_vec()),
             content_nonce: Some(vec![0u8; 24]),
@@ -868,8 +869,8 @@ mod tests {
 
         // Replace with an item that has the same item_id but a different row id.
         let replacement = ClipboardItem {
-            id: "fts-row-id-v2".to_string(),
-            item_id: "fts-item-id".to_string(),
+            id: "fts-row-id-v2".to_string().into(),
+            item_id: "fts-item-id".to_string().into(),
             content_type: "text".to_string(),
             content: Some(b"new ciphertext".to_vec()),
             content_nonce: Some(vec![1u8; 24]),
@@ -916,8 +917,8 @@ mod tests {
         let item_id = "pu-item-id";
 
         let seed = ClipboardItem {
-            id: "pu-row-id".to_string(),
-            item_id: item_id.to_string(),
+            id: "pu-row-id".to_string().into(),
+            item_id: item_id.to_string().into(),
             content_type: "file".to_string(),
             content: Some(b"old ciphertext".to_vec()),
             content_nonce: Some(vec![0u8; 24]),
@@ -966,7 +967,7 @@ mod tests {
 
         // LWW overwrite: same item_id, new content/row id.
         let replacement = ClipboardItem {
-            id: "pu-row-id-v2".to_string(),
+            id: "pu-row-id-v2".to_string().into(),
             is_synced: true,
             lamport_ts: 2,
             wall_time: 1_700_000_001_000,
@@ -1004,14 +1005,14 @@ mod tests {
 
         // Seed a live (not deleted) item with a thumbnail.
         let mut seed = ClipboardItem::new_text(vec![1, 2, 3], vec![0u8; 24], 1);
-        seed.id = "jvzm2-row-v1".to_string();
-        seed.item_id = item_id.to_string();
+        seed.id = "jvzm2-row-v1".to_string().into();
+        seed.item_id = item_id.to_string().into();
         seed.thumb = Some(vec![0xAB; 8]);
         insert_item(&db, &seed).expect("insert seed");
 
         // LWW replace with a TOMBSTONE (deleted=true) carrying a new thumb.
         let replacement = ClipboardItem {
-            id: "jvzm2-row-v2".to_string(),
+            id: "jvzm2-row-v2".to_string().into(),
             deleted: true,
             thumb: Some(vec![0xCD; 4]),
             lamport_ts: 2,

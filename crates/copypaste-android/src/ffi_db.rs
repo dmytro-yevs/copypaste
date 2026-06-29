@@ -19,7 +19,8 @@ use crate::{panic_boundary, CopypasteError};
 // These imports are only used by the live feature path.
 #[cfg(feature = "android-uniffi-live")]
 use copypaste_core::{
-    build_item_aad_v2, encrypt_item_with_aad, is_sensitive_for_autowipe, AAD_SCHEMA_VERSION_V4,
+    build_item_aad_v2, encrypt_item_with_aad, is_sensitive_for_autowipe, ItemId,
+    AAD_SCHEMA_VERSION_V4,
     ITEM_KEY_VERSION_CURRENT,
 };
 
@@ -293,7 +294,7 @@ fn store_clipboard_item_inner(
     // (build_item_aad_v2). Using the 2-arg form ("{item_id}|3") causes an
     // auth-tag mismatch and makes every FFI-inserted item undecryptable on
     // the daemon side.
-    let item_id = uuid::Uuid::new_v4().to_string();
+    let item_id = ItemId::from(uuid::Uuid::new_v4().to_string());
     let aad = build_item_aad_v2(
         &item_id,
         AAD_SCHEMA_VERSION_V4,

@@ -656,7 +656,7 @@ mod tests {
     fn seed_unrotatable_v1_text_row(db: &Database, foreign_v1_key: &[u8; 32]) {
         use crate::crypto::encrypt::{build_item_aad, encrypt_item_with_aad, AAD_SCHEMA_VERSION};
         let row_id = uuid::Uuid::new_v4().to_string();
-        let item_id = uuid::Uuid::new_v4().to_string();
+        let item_id = crate::storage::items::ItemId::from(uuid::Uuid::new_v4().to_string());
         let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
         let (nonce, ciphertext) =
             encrypt_item_with_aad(b"legacy payload", foreign_v1_key, &aad).unwrap();

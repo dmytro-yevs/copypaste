@@ -15,7 +15,8 @@
 
 use copypaste_core::{
     build_item_aad, build_item_aad_v2, decrypt_item_by_version, decrypt_item_with_aad,
-    encrypt_item_with_aad, ClipboardItem, Database, EncryptError, MigrationState, V1Key, V2Key,
+    encrypt_item_with_aad, ClipboardItem, Database, EncryptError, ItemId, MigrationState, V1Key,
+    V2Key,
     AAD_SCHEMA_VERSION, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 use rusqlite::params;
@@ -34,9 +35,9 @@ fn v2_key() -> [u8; 32] {
 
 /// Seed a row encrypted with the v1 key family (key_version=1, AAD schema v3).
 /// Returns (row_id, item_id).
-fn seed_v1_row(db: &Database, plaintext: &[u8]) -> (String, String) {
+fn seed_v1_row(db: &Database, plaintext: &[u8]) -> (String, ItemId) {
     let row_id = uuid::Uuid::new_v4().to_string();
-    let item_id = uuid::Uuid::new_v4().to_string();
+    let item_id = ItemId::from(uuid::Uuid::new_v4().to_string());
     let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION); // schema version 3
     let (nonce, ct) = encrypt_item_with_aad(plaintext, &v1_key(), &aad).unwrap();
     db.conn()
@@ -53,9 +54,9 @@ fn seed_v1_row(db: &Database, plaintext: &[u8]) -> (String, String) {
 
 /// Seed a row encrypted with the v2 key family (key_version=2, AAD schema v4).
 /// Returns (row_id, item_id).
-fn seed_v2_row(db: &Database, plaintext: &[u8]) -> (String, String) {
+fn seed_v2_row(db: &Database, plaintext: &[u8]) -> (String, ItemId) {
     let row_id = uuid::Uuid::new_v4().to_string();
-    let item_id = uuid::Uuid::new_v4().to_string();
+    let item_id = ItemId::from(uuid::Uuid::new_v4().to_string());
     let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
     let (nonce, ct) = encrypt_item_with_aad(plaintext, &v2_key(), &aad).unwrap();
     db.conn()
@@ -98,7 +99,7 @@ fn t1_1_fresh_v2_row_round_trips() {
     // ClipboardItem::new_text now stamps key_version=2 automatically.
     let item = ClipboardItem::new_text(
         {
-            let aad_tmp = build_item_aad_v2("placeholder", AAD_SCHEMA_VERSION_V4, 2);
+            let aad_tmp = build_item_aad_v2(&"placeholder".into(), AAD_SCHEMA_VERSION_V4, 2);
             let (_, ct) = encrypt_item_with_aad(plaintext, &v2_key(), &aad_tmp).unwrap();
             ct
         },
@@ -221,7 +222,7 @@ fn t1_4_unknown_key_version_255_returns_error_not_panic() {
     let nonce = [0u8; NONCE_SIZE];
     let ct = b"some ciphertext bytes";
 
-    let result = decrypt_item_by_version(255, V1Key(&v1), V2Key(&v2), "item-corrupt", &nonce, ct);
+    let result = decrypt_item_by_version(255, V1Key(&v1), V2Key(&v2), &"item-corrupt".into(), &nonce, ct);
     assert!(
         matches!(result, Err(EncryptError::UnknownKeyVersion(255))),
         "key_version=255 must return UnknownKeyVersion(255), not panic; got {:?}",
@@ -248,7 +249,7 @@ fn t1_5_all_key_versions_never_panic() {
         for nonce in nonces {
             for ct in cts {
                 // Must not panic — we only care about the Result variant.
-                let _ = decrypt_item_by_version(kv, V1Key(&v1), V2Key(&v2), "item-prop", nonce, ct);
+                let _ = decrypt_item_by_version(kv, V1Key(&v1), V2Key(&v2), &"item-prop".into(), nonce, ct);
             }
         }
     }
@@ -256,24 +257,24 @@ fn t1_5_all_key_versions_never_panic() {
     // for garbage ciphertext.
     let nonce = [0u8; NONCE_SIZE];
     assert!(matches!(
-        decrypt_item_by_version(0, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
+        decrypt_item_by_version(0, V1Key(&v1), V2Key(&v2), &"x".into(), &nonce, b"garbage"),
         Err(EncryptError::UnknownKeyVersion(0))
     ));
     assert!(matches!(
-        decrypt_item_by_version(255, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
+        decrypt_item_by_version(255, V1Key(&v1), V2Key(&v2), &"x".into(), &nonce, b"garbage"),
         Err(EncryptError::UnknownKeyVersion(255))
     ));
     assert!(matches!(
-        decrypt_item_by_version(3, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
+        decrypt_item_by_version(3, V1Key(&v1), V2Key(&v2), &"x".into(), &nonce, b"garbage"),
         Err(EncryptError::UnknownKeyVersion(3))
     ));
     // Versions 1 and 2 should return AuthFailed (wrong ciphertext), not panic.
     assert!(matches!(
-        decrypt_item_by_version(1, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
+        decrypt_item_by_version(1, V1Key(&v1), V2Key(&v2), &"x".into(), &nonce, b"garbage"),
         Err(EncryptError::AuthFailed)
     ));
     assert!(matches!(
-        decrypt_item_by_version(2, V1Key(&v1), V2Key(&v2), "x", &nonce, b"garbage"),
+        decrypt_item_by_version(2, V1Key(&v1), V2Key(&v2), &"x".into(), &nonce, b"garbage"),
         Err(EncryptError::AuthFailed)
     ));
 }
@@ -287,11 +288,11 @@ fn t1_5_all_key_versions_never_panic() {
 #[test]
 fn t4_build_item_aad_golden_bytes() {
     // Pin the exact bytes for a known item_id at AAD_SCHEMA_VERSION=3.
-    let aad = build_item_aad("abc-123-def", AAD_SCHEMA_VERSION);
+    let aad = build_item_aad(&"abc-123-def".into(), AAD_SCHEMA_VERSION);
     assert_eq!(aad, b"abc-123-def|3");
 
     // Empty item_id edge case.
-    let aad_empty = build_item_aad("", 3);
+    let aad_empty = build_item_aad(&"".into(), 3);
     assert_eq!(aad_empty, b"|3");
 }
 
@@ -300,11 +301,11 @@ fn t4_build_item_aad_golden_bytes() {
 #[test]
 fn t4_build_item_aad_v2_golden_bytes() {
     // Pin the exact bytes for key_version=2 at AAD_SCHEMA_VERSION_V4=4.
-    let aad = build_item_aad_v2("item-xyz", AAD_SCHEMA_VERSION_V4, 2);
+    let aad = build_item_aad_v2(&"item-xyz".into(), AAD_SCHEMA_VERSION_V4, 2);
     assert_eq!(aad, b"item-xyz|4|2");
 
     // Key_version=1 variant (used in migration sweep decrypt-with-v1 step).
-    let aad_kv1 = build_item_aad_v2("item-xyz", AAD_SCHEMA_VERSION_V4, 1);
+    let aad_kv1 = build_item_aad_v2(&"item-xyz".into(), AAD_SCHEMA_VERSION_V4, 1);
     assert_eq!(aad_kv1, b"item-xyz|4|1");
 
     // AAD_SCHEMA_VERSION_V4 must equal 4 — pin the constant too.
@@ -317,12 +318,12 @@ fn t4_build_item_aad_v2_golden_bytes() {
 /// This is the core property that makes key_version binding meaningful.
 #[test]
 fn t4_v3_and_v4_aad_are_not_interchangeable() {
-    let item_id = "item-interop-test";
+    let item_id = ItemId::from("item-interop-test");
     // v3 AAD: "item-interop-test|3"
-    let aad_v3 = build_item_aad(item_id, AAD_SCHEMA_VERSION);
+    let aad_v3 = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
     // v4 AAD with key_version=1: "item-interop-test|3|1" (note: same schema=3,
     // just with key_version appended)
-    let aad_v4_kv1 = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION, 1);
+    let aad_v4_kv1 = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION, 1);
 
     assert_ne!(
         aad_v3, aad_v4_kv1,

@@ -23,8 +23,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn make_item(id: &str, lamport: i64) -> ClipboardItem {
     ClipboardItem {
-        id: id.to_string(),
-        item_id: format!("{id}-iid"),
+        id: id.to_string().into(),
+        item_id: format!("{id}-iid").into(),
         content_type: "text".to_string(),
         content: Some(vec![0xAA]),
         content_nonce: Some(vec![0u8; 24]),

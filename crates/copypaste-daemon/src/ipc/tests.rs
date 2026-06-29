@@ -4264,7 +4264,7 @@ async fn export_limit_returns_most_recent_n_oldest_first() {
         for i in 0..TOTAL {
             let plaintext = format!("item-{i}").into_bytes();
             let item_id = uuid::Uuid::new_v4().to_string();
-            let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+            let aad = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
             let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &v2_key, &aad).unwrap();
             // Use a distinct wall_time per item (base 1000 + i ms).
             let wall_time = 1_000_000i64 + i as i64;
@@ -4384,7 +4384,7 @@ async fn export_excludes_sensitive_by_default_and_includes_with_flag() {
         for (i, is_sensitive) in [(0i64, false), (1i64, true)] {
             let plaintext = format!("item-sens-{i}").into_bytes();
             let item_id = uuid::Uuid::new_v4().to_string();
-            let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+            let aad = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
             let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &v2_key, &aad).unwrap();
             let wall_time = 2_000_000i64 + i;
             guard
@@ -4672,7 +4672,7 @@ async fn get_item_thumbnail_serves_thumb_and_null_sentinel() {
         crate::clipboard::build_image_meta_json(&meta, &thumb_file_id, thumb_w, thumb_h);
 
     let mut item = copypaste_core::ClipboardItem::new_image(blob, meta_json, 0, Some(thumb_blob));
-    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+    item.item_id = uuid::Uuid::from_bytes(file_id).to_string().into();
     let with_thumb_id = item.id.clone();
 
     // A second image item with NO thumbnail (full-image-only legacy path).
@@ -4684,8 +4684,8 @@ async fn get_item_thumbnail_serves_thumb_and_null_sentinel() {
         meta2.width, meta2.height, meta2.original_size, meta2.chunk_count, meta2.file_id
     );
     let mut item2 = copypaste_core::ClipboardItem::new_image(blob2, meta_json2, 0, None);
-    item2.item_id = uuid::Uuid::new_v4().to_string();
-    item2.id = uuid::Uuid::new_v4().to_string();
+    item2.item_id = uuid::Uuid::new_v4().to_string().into();
+    item2.id = uuid::Uuid::new_v4().to_string().into();
     let no_thumb_id = item2.id.clone();
 
     {
@@ -4794,8 +4794,8 @@ async fn get_item_thumbnail_lazy_backfill_missing_thumb() {
     );
 
     let mut item = copypaste_core::ClipboardItem::new_image(blob, meta_json, 0, None);
-    item.item_id = uuid::Uuid::new_v4().to_string();
-    item.id = uuid::Uuid::new_v4().to_string();
+    item.item_id = uuid::Uuid::new_v4().to_string().into();
+    item.id = uuid::Uuid::new_v4().to_string().into();
     let item_id = item.id.clone();
 
     {
@@ -5320,7 +5320,7 @@ async fn get_item_file_round_trips_bytes_and_meta() {
     let blob = copypaste_core::chunks_to_blob(&chunks).expect("chunks_to_blob must succeed");
     let meta_json = crate::clipboard::build_file_meta_json(&meta);
     let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
-    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+    item.item_id = uuid::Uuid::from_bytes(file_id).to_string().into();
 
     let item_id = item.id.clone();
     {
@@ -5536,7 +5536,7 @@ async fn write_to_pasteboard_file_branch_is_reached() {
     let meta_json = crate::clipboard::build_file_meta_json(&meta);
     let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
     // Align item_id with file_id (mirrors get_item_file_round_trips test).
-    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+    item.item_id = uuid::Uuid::from_bytes(file_id).to_string().into();
     let item_id = item.id.clone();
     {
         let db_guard = db.lock().await;
@@ -5622,7 +5622,7 @@ async fn write_to_pasteboard_is_async_fn() {
     let blob = copypaste_core::chunks_to_blob(&chunks).expect("chunks_to_blob must succeed");
     let meta_json = crate::clipboard::build_file_meta_json(&meta);
     let mut item = copypaste_core::ClipboardItem::new_file(blob, meta_json, 0);
-    item.item_id = uuid::Uuid::from_bytes(file_id).to_string();
+    item.item_id = uuid::Uuid::from_bytes(file_id).to_string().into();
 
     // .await here statically enforces that write_to_pasteboard is async.
     // A sync fn cannot be awaited, so this is a compile-time assertion.

@@ -26,8 +26,8 @@ use copypaste_sync::{resolve, MergeOutcome};
 fn local_item(id: &str, lamport: i64, wall: i64, content: &[u8]) -> ClipboardItem {
     ClipboardItem {
         deleted: false,
-        id: id.to_string(),
-        item_id: format!("iid-{id}"),
+        id: id.to_string().into(),
+        item_id: format!("iid-{id}").into(),
         content_type: "text".to_string(),
         content: Some(content.to_vec()),
         content_nonce: Some(vec![0u8; 24]),
@@ -85,8 +85,8 @@ fn apply(local: ClipboardItem, remote: &WireItem) -> ClipboardItem {
         MergeOutcome::KeepLocal => local,
         MergeOutcome::TakeRemote => ClipboardItem {
             deleted: false,
-            id: remote.id.clone(),
-            item_id: remote.item_id.clone(),
+            id: remote.id.clone().into(),
+            item_id: remote.item_id.clone().into(),
             content_type: remote.content_type.clone(),
             content: remote.content.clone(),
             content_nonce: remote.content_nonce.clone(),

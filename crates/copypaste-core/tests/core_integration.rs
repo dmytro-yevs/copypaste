@@ -37,7 +37,7 @@ fn full_encrypt_store_retrieve_decrypt_flow() {
     // the stub content. This mirrors the production flow where the row id
     // is generated, then content is encrypted with AAD = (id, schema).
     let mut item = ClipboardItem::new_text(Vec::new(), Vec::new(), 1);
-    let aad = build_item_aad(&item.id, AAD_SCHEMA_VERSION);
+    let aad = build_item_aad(&item.item_id, AAD_SCHEMA_VERSION);
     let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &enc_key, &aad).unwrap();
     item.content = Some(ciphertext);
     item.content_nonce = Some(nonce.to_vec());
@@ -53,7 +53,7 @@ fn full_encrypt_store_retrieve_decrypt_flow() {
         .as_slice()
         .try_into()
         .unwrap();
-    let stored_aad = build_item_aad(&stored.id, AAD_SCHEMA_VERSION);
+    let stored_aad = build_item_aad(&stored.item_id, AAD_SCHEMA_VERSION);
     let decrypted = decrypt_item_with_aad(
         stored.content.as_ref().unwrap(),
         &nonce_arr,

@@ -26,7 +26,7 @@ fn fresh_db() -> (tempfile::TempDir, Database) {
 fn insert_with_text(db: &Database, lamport: i64, plaintext: &str) -> String {
     // Real content bytes are irrelevant for FTS — we only index `plaintext`.
     let item = ClipboardItem::new_text(vec![0u8; 4], vec![0u8; 24], lamport);
-    let id = item.id.clone();
+    let id = item.id.to_string();
     insert_item(db, &item).expect("insert_item");
     upsert_fts(db, &id, plaintext).expect("upsert_fts");
     id

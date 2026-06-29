@@ -412,16 +412,17 @@ async fn reset_database_clears_items() {
         reset_resp["ok"], true,
         "reset_database with confirm=true must succeed: {reset_resp}"
     );
-    // CopyPaste-crh3.117: the response carries only `ready` (the `reset` field
-    // was removed from ResetDatabaseResponse as redundant in c4q2.22; the wire
-    // must match the DTO).
+    // CopyPaste-oe5j: the response carries BOTH `reset` and `ready` — the TS
+    // ResetDatabaseResult interface declares both and tauriCommands reads
+    // `data.reset`; c4q2.22 wrongly dropped `reset` from the Rust DTO, oe5j
+    // restored it so the wire matches the DTO.
     assert_eq!(
         reset_resp["data"]["ready"], true,
         "response must include ready=true: {reset_resp}"
     );
-    assert!(
-        reset_resp["data"].get("reset").is_none(),
-        "response must NOT carry the removed `reset` field: {reset_resp}"
+    assert_eq!(
+        reset_resp["data"]["reset"], true,
+        "response must carry reset=true (oe5j: matches the TS DTO): {reset_resp}"
     );
 
     // Post-condition: all items gone.

@@ -281,8 +281,8 @@ fn preflight_rejects_sqlcipher_encrypted_db() {
 fn test_item(id: &str) -> copypaste_core::ClipboardItem {
     copypaste_core::ClipboardItem {
         deleted: false,
-        id: id.to_owned(),
-        item_id: id.to_owned(),
+        id: id.to_owned().into(),
+        item_id: id.to_owned().into(),
         content_type: "text".to_owned(),
         content: Some(b"hello".to_vec()),
         content_nonce: Some(b"nonce-12-bytes".to_vec()),

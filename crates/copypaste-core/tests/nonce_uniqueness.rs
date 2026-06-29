@@ -19,7 +19,7 @@ fn nonces_are_unique_over_100k_encryptions() {
     const N: usize = 100_000;
 
     let key = [0x42u8; 32];
-    let aad = build_item_aad("test-item-id", AAD_SCHEMA_VERSION);
+    let aad = build_item_aad(&"test-item-id".into(), AAD_SCHEMA_VERSION);
     let plaintext = b"x";
 
     let mut seen: HashSet<[u8; 24]> = HashSet::with_capacity(N);
@@ -45,7 +45,7 @@ fn nonces_are_unique_over_100k_encryptions() {
 #[test]
 fn no_zero_nonces_in_1000_encryptions() {
     let key = [0xBEu8; 32];
-    let aad = build_item_aad("no-zero-nonce", AAD_SCHEMA_VERSION);
+    let aad = build_item_aad(&"no-zero-nonce".into(), AAD_SCHEMA_VERSION);
     let plaintext = b"hello";
     let zero_nonce = [0u8; 24];
 

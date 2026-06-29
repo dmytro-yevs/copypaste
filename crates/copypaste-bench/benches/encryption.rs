@@ -25,7 +25,7 @@ const KEY: [u8; 32] = [0x42u8; 32];
 const BENCH_ITEM_ID: &str = "bench-encryption-fixed-uuid-0000000000000000";
 
 fn bench_aad() -> Vec<u8> {
-    build_item_aad(BENCH_ITEM_ID, AAD_SCHEMA_VERSION)
+    build_item_aad(&BENCH_ITEM_ID.into(), AAD_SCHEMA_VERSION)
 }
 
 const SIZES: &[(&str, usize)] = &[

@@ -69,6 +69,7 @@ use crate::crypto::encrypt::{
     NONCE_SIZE,
 };
 use crate::image::{chunks_from_blob, chunks_to_blob, ImageError, IMAGE_CHUNK_SIZE};
+use crate::storage::items::ItemId;
 use rusqlite::params;
 use thiserror::Error;
 
@@ -260,7 +261,7 @@ pub fn migrate_v1_to_v2_keys(
 /// Minimal projection of a v1-key row needed for re-encryption.
 struct V1Row {
     id: String,
-    item_id: String,
+    item_id: ItemId,
     content: Vec<u8>,
     content_nonce: Vec<u8>,
 }
@@ -345,7 +346,7 @@ fn rotate_one(
 /// the `content` blob); the `file_id` AAD context is carried in `blob_ref`.
 struct V1ImageRow {
     id: String,
-    item_id: String,
+    item_id: ItemId,
     content: Vec<u8>,
     blob_ref: Option<String>,
 }
@@ -794,7 +795,7 @@ mod tests {
     ) -> (String, String, Vec<u8>) {
         let row_id = Uuid::new_v4().to_string();
         let item_id = Uuid::new_v4().to_string();
-        let aad = build_item_aad(&item_id, AAD_SCHEMA_V3);
+        let aad = build_item_aad(&ItemId::from(item_id.as_str()), AAD_SCHEMA_V3);
         let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, v1_key, &aad).unwrap();
 
         db.conn()
@@ -852,7 +853,7 @@ mod tests {
 
             let mut nonce = [0u8; NONCE_SIZE];
             nonce.copy_from_slice(&nonce_blob);
-            let aad_v2 = build_item_aad_v2(&item_id, AAD_SCHEMA_V4, 2);
+            let aad_v2 = build_item_aad_v2(&ItemId::from(item_id.as_str()), AAD_SCHEMA_V4, 2);
             let pt = decrypt_item_with_aad(&content, &nonce, &v2_key, &aad_v2).unwrap();
             assert_eq!(&pt, expected_pt, "v2 plaintext must match v1 plaintext");
         }
@@ -908,11 +909,11 @@ mod tests {
         nonce.copy_from_slice(&nonce_blob);
 
         // Attempt #1: v1 key + v3 AAD (legacy combo)
-        let aad_v3 = build_item_aad(&item_id, AAD_SCHEMA_V3);
+        let aad_v3 = build_item_aad(&ItemId::from(item_id.as_str()), AAD_SCHEMA_V3);
         assert!(decrypt_item_with_aad(&content, &nonce, &v1_key, &aad_v3).is_err());
 
         // Attempt #2: v1 key + v4 AAD with key_version=2
-        let aad_v4 = build_item_aad_v2(&item_id, AAD_SCHEMA_V4, 2);
+        let aad_v4 = build_item_aad_v2(&ItemId::from(item_id.as_str()), AAD_SCHEMA_V4, 2);
         assert!(decrypt_item_with_aad(&content, &nonce, &v1_key, &aad_v4).is_err());
     }
 
@@ -1289,7 +1290,7 @@ mod tests {
         let (text_id, _text_item, _text_pt) = {
             let row_id = Uuid::new_v4().to_string();
             let item_id = Uuid::new_v4().to_string();
-            let aad = build_item_aad(&item_id, AAD_SCHEMA_V3);
+            let aad = build_item_aad(&ItemId::from(item_id.as_str()), AAD_SCHEMA_V3);
             let (nonce, ct) = encrypt_item_with_aad(b"text payload", &v1_key, &aad).unwrap();
             db.conn()
                 .execute(

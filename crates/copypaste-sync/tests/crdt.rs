@@ -31,8 +31,8 @@ fn mk_local_with_device(
     device_id: &str,
 ) -> ClipboardItem {
     ClipboardItem {
-        id: id.to_string(),
-        item_id: format!("iid-{id}"),
+        id: id.to_string().into(),
+        item_id: format!("iid-{id}").into(),
         content_type: "text".to_string(),
         content: Some(vec![payload]),
         content_nonce: Some(vec![0u8; 24]),
@@ -100,7 +100,7 @@ fn apply(state: &mut HashMap<String, ClipboardItem>, remote: WireItem) {
 fn snapshot(state: &HashMap<String, ClipboardItem>) -> Vec<(String, i64, i64, Option<Vec<u8>>)> {
     let mut out: Vec<_> = state
         .values()
-        .map(|i| (i.id.clone(), i.lamport_ts, i.wall_time, i.content.clone()))
+        .map(|i| (i.id.to_string(), i.lamport_ts, i.wall_time, i.content.clone()))
         .collect();
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out

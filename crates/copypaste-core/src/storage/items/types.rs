@@ -1,4 +1,5 @@
 use super::super::db::DbError;
+use super::ids::{ItemId, RowId};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -79,8 +80,10 @@ pub(crate) fn now_ms_epoch() -> i64 {
 
 #[derive(Debug, Clone)]
 pub struct ClipboardItem {
-    pub id: String,
-    pub item_id: String,
+    /// Local DB row primary key. See [`RowId`].
+    pub id: RowId,
+    /// Cross-device logical identity, bound into the AEAD AAD. See [`ItemId`].
+    pub item_id: ItemId,
     pub content_type: String,
     pub content: Option<Vec<u8>>,
     pub content_nonce: Option<Vec<u8>>,
@@ -168,8 +171,8 @@ impl ClipboardItem {
             .unwrap_or_default()
             .as_millis() as i64;
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            item_id: uuid::Uuid::new_v4().to_string(),
+            id: RowId(uuid::Uuid::new_v4().to_string()),
+            item_id: ItemId(uuid::Uuid::new_v4().to_string()),
             content_type: "text".to_string(),
             content: Some(encrypted_content),
             content_nonce: Some(nonce),
@@ -223,8 +226,8 @@ impl ClipboardItem {
             .unwrap_or_default()
             .as_millis() as i64;
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            item_id: uuid::Uuid::new_v4().to_string(),
+            id: RowId(uuid::Uuid::new_v4().to_string()),
+            item_id: ItemId(uuid::Uuid::new_v4().to_string()),
             content_type: "image".to_string(),
             content: Some(encrypted_blob),
             content_nonce: None,
@@ -271,8 +274,8 @@ impl ClipboardItem {
             .unwrap_or_default()
             .as_millis() as i64;
         Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            item_id: uuid::Uuid::new_v4().to_string(),
+            id: RowId(uuid::Uuid::new_v4().to_string()),
+            item_id: ItemId(uuid::Uuid::new_v4().to_string()),
             content_type: "file".to_string(),
             content: Some(encrypted_blob),
             content_nonce: None,

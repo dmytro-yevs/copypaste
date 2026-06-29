@@ -254,7 +254,7 @@ async fn concurrent_clients_no_state_corruption() {
         for i in 0..N {
             let item =
                 ClipboardItem::new_text(vec![b'x', b'_', i as u8], vec![0u8; 24], (i as i64) + 1);
-            ids.push(item.id.clone());
+            ids.push(item.id.to_string());
             insert_item(&g, &item).expect("seed insert");
         }
         assert_eq!(count_items(&*g).expect("seed count"), N as i64);

@@ -161,8 +161,8 @@ fn merge_observed_remote_clock_takes_max_plus_one() {
 fn make_local(id: &str, lamport: i64, wall: i64) -> ClipboardItem {
     ClipboardItem {
         deleted: false,
-        id: id.to_string(),
-        item_id: format!("iid-{id}"),
+        id: id.to_string().into(),
+        item_id: format!("iid-{id}").into(),
         content_type: "text".to_string(),
         content: Some(b"local-payload".to_vec()),
         content_nonce: Some(vec![0u8; 24]),

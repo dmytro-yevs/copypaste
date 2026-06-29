@@ -132,8 +132,8 @@ mod tests {
 
     fn item(id: &str, sensitive: bool) -> ClipboardItem {
         let mut it = ClipboardItem::new_text(vec![1, 2, 3], vec![0u8; 24], 1);
-        it.id = id.to_owned();
-        it.item_id = id.to_owned();
+        it.id = id.to_owned().into();
+        it.item_id = id.to_owned().into();
         it.is_sensitive = sensitive;
         it
     }

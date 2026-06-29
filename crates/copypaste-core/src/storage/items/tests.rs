@@ -57,12 +57,12 @@ fn decrypt_page_skips_undecryptable_legacy_rows_and_counts_them() {
 
     // Seed a row encrypted under `enc_key` with key_version=2 (v4 AAD).
     fn seed_v2(db: &Database, enc_key: &[u8; 32], plaintext: &[u8], lamport: i64) -> String {
-        let item_id = Uuid::new_v4().to_string();
+        let item_id = ItemId::from(Uuid::new_v4().to_string());
         let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
         let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, enc_key, &aad).unwrap();
         let mut item = ClipboardItem::new_text(ciphertext, nonce.to_vec(), lamport);
         item.item_id = item_id;
-        let id = item.id.clone();
+        let id = item.id.to_string();
         insert_item(db, &item).unwrap();
         id
     }
@@ -91,7 +91,7 @@ fn decrypt_page_skips_undecryptable_legacy_rows_and_counts_them() {
     let mut got: Vec<(String, Vec<u8>)> = page
         .items
         .into_iter()
-        .map(|(row, pt)| (row.id, pt))
+        .map(|(row, pt)| (row.id.into_string(), pt))
         .collect();
     got.sort();
     let mut want = vec![(good_a, b"hello-A".to_vec()), (good_b, b"hello-B".to_vec())];
@@ -456,7 +456,7 @@ fn get_item_by_id_finds_row_beyond_first_page() {
         if i == 0 {
             // Oldest row (sorts last under ORDER BY wall_time DESC) — would
             // fall outside a 1000-row window once 1200 rows exist.
-            target_id = item.id.clone();
+            target_id = item.id.to_string();
         }
         insert_item(&db, &item).unwrap();
     }
@@ -1337,19 +1337,19 @@ fn fetch_text_previews_batch_returns_map_for_present_ids() {
     let ids = [a.id.as_str(), b.id.as_str(), c.id.as_str()];
     let map = fetch_text_previews_batch(&db, &ids).unwrap();
 
-    assert_eq!(map.get(&a.id).map(String::as_str), Some("alpha snippet"));
-    assert_eq!(map.get(&b.id).map(String::as_str), Some("beta snippet"));
+    assert_eq!(map.get(a.id.as_str()).map(String::as_str), Some("alpha snippet"));
+    assert_eq!(map.get(b.id.as_str()).map(String::as_str), Some("beta snippet"));
     assert!(
-        !map.contains_key(&c.id),
+        !map.contains_key(c.id.as_str()),
         "id with no FTS entry must be absent from the batch map"
     );
     // Parity with the per-item helper for both present ids.
     assert_eq!(
-        map.get(&a.id).cloned(),
+        map.get(a.id.as_str()).cloned(),
         fetch_text_preview(&db, &a.id).unwrap()
     );
     assert_eq!(
-        map.get(&b.id).cloned(),
+        map.get(b.id.as_str()).cloned(),
         fetch_text_preview(&db, &b.id).unwrap()
     );
 }
@@ -1373,7 +1373,7 @@ fn fetch_text_previews_batch_clamps_large_text() {
     upsert_fts(&db, &item.id, &big_text).unwrap();
 
     let map = fetch_text_previews_batch(&db, &[item.id.as_str()]).unwrap();
-    let got = map.get(&item.id).expect("present");
+    let got = map.get(item.id.as_str()).expect("present");
     assert!(got.len() <= MAX_PREVIEW_BYTES + "…".len());
     assert!(got.ends_with('…'));
 }
@@ -1716,7 +1716,7 @@ fn find_recent_by_hash_finds_any_row_with_wide_window() {
     let found = find_recent_by_hash(&db, "aabbcc", now_ms, i64::MAX).unwrap();
     assert_eq!(
         found,
-        Some(item.id),
+        Some(item.id.to_string()),
         "should find the row with matching hash"
     );
 }
@@ -2214,7 +2214,7 @@ fn prune_to_cap_large_dataset_matches_naive_eviction() {
     }
 
     // Pin the 3 most-recent items so they survive unconditionally.
-    let pinned_ids: HashSet<String> = items[47..].iter().map(|i| i.id.clone()).collect();
+    let pinned_ids: HashSet<String> = items[47..].iter().map(|i| i.id.to_string()).collect();
     for id in &pinned_ids {
         pin_item(&db, id).unwrap();
     }
@@ -2236,7 +2236,7 @@ fn prune_to_cap_large_dataset_matches_naive_eviction() {
     for it in &items[..47] {
         let row_bytes = it.content.as_ref().map_or(0, |c| c.len() as i64);
         if cum < excess {
-            naive_delete.insert(it.id.clone());
+            naive_delete.insert(it.id.to_string());
             cum += row_bytes;
         }
     }

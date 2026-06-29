@@ -31,7 +31,7 @@ fn v2_key_from_seed(seed: &[u8; 32]) -> [u8; 32] {
 fn make_item(seed: &[u8; 32]) -> (ClipboardItem, String) {
     let v2_key = v2_key_from_seed(seed);
     let item_id = uuid::Uuid::new_v4().to_string();
-    let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
+    let aad = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
     let (nonce, ct) =
         encrypt_item_with_aad(b"hello from test", &v2_key, &aad).expect("encrypt must succeed");
     let item = ClipboardItem::new_text(ct, nonce.to_vec(), 1);
@@ -127,7 +127,7 @@ fn migration_gate_clears_after_sweep_with_v1_rows() {
     // Insert a raw v1 row (bypassing the gate — direct SQL as the schema migration would).
     let row_id = uuid::Uuid::new_v4().to_string();
     let item_id = uuid::Uuid::new_v4().to_string();
-    let aad = copypaste_core::build_item_aad(&item_id, copypaste_core::AAD_SCHEMA_VERSION);
+    let aad = copypaste_core::build_item_aad(&copypaste_core::ItemId::from(item_id.as_str()), copypaste_core::AAD_SCHEMA_VERSION);
     let (nonce, ct) = encrypt_item_with_aad(b"legacy v1 content", &v1_key, &aad).expect("encrypt");
     db.conn()
         .execute(

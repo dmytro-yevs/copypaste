@@ -115,8 +115,8 @@ pub fn remote_wins(
 /// be persisted locally, marking it as synced.
 pub fn wire_to_local(wire: WireItem) -> ClipboardItem {
     ClipboardItem {
-        id: wire.id,
-        item_id: wire.item_id,
+        id: wire.id.into(),
+        item_id: wire.item_id.into(),
         content_type: wire.content_type,
         content: wire.content,
         content_nonce: wire.content_nonce,
@@ -179,8 +179,8 @@ pub fn local_to_wire(item: &ClipboardItem, local_device_id: &str) -> WireItem {
     };
 
     WireItem {
-        id: item.id.clone(),
-        item_id: item.item_id.clone(),
+        id: item.id.to_string(),
+        item_id: item.item_id.to_string(),
         content_type: item.content_type.clone(),
         content: item.content.clone(),
         content_nonce: item.content_nonce.clone(),
@@ -228,8 +228,8 @@ pub fn local_to_wire_owned(item: ClipboardItem, local_device_id: &str) -> WireIt
     };
 
     WireItem {
-        id: item.id,
-        item_id: item.item_id,
+        id: item.id.into_string(),
+        item_id: item.item_id.into_string(),
         content_type: item.content_type,
         content: item.content,
         content_nonce: item.content_nonce,
@@ -279,8 +279,8 @@ mod tests {
 
     fn make_local(lamport: i64, wall: i64) -> ClipboardItem {
         ClipboardItem {
-            id: "item-001".to_string(),
-            item_id: "iid-001".to_string(),
+            id: "item-001".to_string().into(),
+            item_id: "iid-001".to_string().into(),
             content_type: "text".to_string(),
             content: Some(vec![1, 2, 3]),
             content_nonce: Some(vec![0u8; 24]),
@@ -471,12 +471,12 @@ mod tests {
     fn wire_round_trip_preserves_key_version_so_receiver_can_decrypt() {
         use copypaste_core::{
             build_item_aad_v2, decrypt_item_by_version, derive_v2, encrypt_item_with_aad,
-            AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+            ItemId, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
         };
 
         // The device's v1 storage seed (stands in for `load_local_key()`).
         let seed = [0x42u8; 32];
-        let item_id = "iid-roundtrip".to_string();
+        let item_id = ItemId::from("iid-roundtrip");
         let plaintext = b"sensitive clipboard payload synced from a peer";
 
         // SENDER: encrypt exactly as `encrypt_text_for_storage` does —

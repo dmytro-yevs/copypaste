@@ -8,7 +8,7 @@ use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criteri
 /// Bench-local AAD constant. v0.3 removed the legacy empty-AAD wrappers, so
 /// every encrypt/decrypt call must supply an AAD bound to (item_id, schema).
 fn bench_aad(label: &str) -> Vec<u8> {
-    build_item_aad(label, AAD_SCHEMA_VERSION)
+    build_item_aad(&label.into(), AAD_SCHEMA_VERSION)
 }
 
 fn bench_keypair(c: &mut Criterion) {

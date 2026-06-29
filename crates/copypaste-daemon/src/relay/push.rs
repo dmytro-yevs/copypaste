@@ -69,7 +69,7 @@ pub(super) fn build_content_b64(
         }
     };
     let meta = RelayWireMeta {
-        item_id: item.item_id.clone(),
+        item_id: item.item_id.to_string(),
         lamport_ts: item.lamport_ts,
         // CopyPaste-cm0u: carry delete + pin state so they propagate over relay.
         deleted: item.deleted,

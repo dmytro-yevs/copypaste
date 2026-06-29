@@ -117,7 +117,7 @@ fn daemon_v2_ciphertext_decrypts_via_ffi_decrypt_text_v2() {
     let plaintext = b"daemon wrote this with key_version=2";
 
     // Daemon-side encryption path (mirrors decrypt_item_by_version arm for v=2).
-    let daemon_aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2);
+    let daemon_aad = build_item_aad_v2(&item_id.into(), AAD_SCHEMA_VERSION_V4, 2);
     let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &daemon_aad)
         .expect("daemon-side encrypt must succeed");
 
@@ -147,7 +147,7 @@ fn daemon_v1_ciphertext_decrypts_via_ffi_decrypt_text_v1() {
     let item_id = "daemon-written-v1-item";
     let plaintext = b"daemon wrote this with key_version=1 (legacy)";
 
-    let daemon_aad = build_item_aad(item_id, AAD_SCHEMA_VERSION);
+    let daemon_aad = build_item_aad(&item_id.into(), AAD_SCHEMA_VERSION);
     let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, &key, &daemon_aad)
         .expect("daemon v1 encrypt must succeed");
 

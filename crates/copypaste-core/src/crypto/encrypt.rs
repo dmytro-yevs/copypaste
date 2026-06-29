@@ -1,3 +1,4 @@
+use crate::storage::items::ItemId;
 use chacha20poly1305::{
     aead::{Aead, KeyInit, OsRng, Payload},
     XChaCha20Poly1305, XNonce,
@@ -70,7 +71,7 @@ pub enum EncryptError {
 /// one row into another (or replays an old-schema blob into a new-schema
 /// row) is detected by the AEAD auth tag — `decrypt_item_with_aad` will
 /// reject the substituted ciphertext with `EncryptError::AuthFailed`.
-pub fn build_item_aad(item_id: &str, schema_version: u32) -> Vec<u8> {
+pub fn build_item_aad(item_id: &ItemId, schema_version: u32) -> Vec<u8> {
     format!("{item_id}|{schema_version}").into_bytes()
 }
 
@@ -89,7 +90,7 @@ pub fn build_item_aad(item_id: &str, schema_version: u32) -> Vec<u8> {
 /// v1 key and the v3-schema AAD; that path remains supported for backward
 /// compatibility (notably the daemon's existing call sites and the
 /// migration sweep's decrypt-with-v1 step).
-pub fn build_item_aad_v2(item_id: &str, schema_version: u32, key_version: u32) -> Vec<u8> {
+pub fn build_item_aad_v2(item_id: &ItemId, schema_version: u32, key_version: u32) -> Vec<u8> {
     format!("{item_id}|{schema_version}|{key_version}").into_bytes()
 }
 
@@ -182,7 +183,7 @@ pub fn decrypt_item_by_version(
     key_version: u8,
     v1_key: V1Key<'_>,
     v2_key: V2Key<'_>,
-    item_id: &str,
+    item_id: &ItemId,
     nonce: &[u8; NONCE_SIZE],
     ciphertext: &[u8],
 ) -> Result<Vec<u8>, EncryptError> {
@@ -219,7 +220,7 @@ mod tests {
     }
 
     fn test_aad() -> Vec<u8> {
-        build_item_aad("test-item", AAD_SCHEMA_VERSION)
+        build_item_aad(&"test-item".into(), AAD_SCHEMA_VERSION)
     }
 
     #[test]
@@ -285,8 +286,8 @@ mod tests {
     #[serial]
     fn aad_mismatch_with_real_aad_blob_returns_authfailed() {
         let key = test_key();
-        let aad_a = build_item_aad("item-A", AAD_SCHEMA_VERSION);
-        let aad_b = build_item_aad("item-B", AAD_SCHEMA_VERSION);
+        let aad_a = build_item_aad(&"item-A".into(), AAD_SCHEMA_VERSION);
+        let aad_b = build_item_aad(&"item-B".into(), AAD_SCHEMA_VERSION);
         let (nonce, ct) = encrypt_item_with_aad(b"payload", &key, &aad_a).unwrap();
         let err = decrypt_item_with_aad(&ct, &nonce, &key, &aad_b).unwrap_err();
         assert!(matches!(err, EncryptError::AuthFailed));
@@ -329,7 +330,7 @@ mod tests {
     /// a test failure rather than as silently-undecryptable on-disk rows.
     #[test]
     fn build_item_aad_v2_layout_is_pipe_delimited_triplet() {
-        let aad = build_item_aad_v2("item-xyz", 4, 2);
+        let aad = build_item_aad_v2(&"item-xyz".into(), 4, 2);
         assert_eq!(aad, b"item-xyz|4|2");
     }
 
@@ -340,12 +341,12 @@ mod tests {
     #[test]
     fn tampering_key_version_in_aad_fails_decryption() {
         let key = test_key();
-        let aad_v2 = build_item_aad_v2("item-xyz", AAD_SCHEMA_VERSION_V4, 2);
+        let aad_v2 = build_item_aad_v2(&"item-xyz".into(), AAD_SCHEMA_VERSION_V4, 2);
         let (nonce, ciphertext) = encrypt_item_with_aad(b"secret", &key, &aad_v2).unwrap();
 
         // Attempt decrypt with the *same* (item_id, schema_version) but a
         // different key_version → auth tag rejects.
-        let aad_wrong_kv = build_item_aad_v2("item-xyz", AAD_SCHEMA_VERSION_V4, 1);
+        let aad_wrong_kv = build_item_aad_v2(&"item-xyz".into(), AAD_SCHEMA_VERSION_V4, 1);
         let result = decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_wrong_kv);
         assert!(
             matches!(result, Err(EncryptError::AuthFailed)),
@@ -359,12 +360,12 @@ mod tests {
     #[test]
     fn v3_and_v4_aad_are_incompatible() {
         let key = test_key();
-        let aad_v3 = build_item_aad("item-xyz", AAD_SCHEMA_VERSION);
+        let aad_v3 = build_item_aad(&"item-xyz".into(), AAD_SCHEMA_VERSION);
         let (nonce, ciphertext) = encrypt_item_with_aad(b"secret", &key, &aad_v3).unwrap();
 
         // Decrypting with v4 AAD (even with key_version=1) must fail —
         // the on-the-wire AAD bytes are physically different.
-        let aad_v4 = build_item_aad_v2("item-xyz", AAD_SCHEMA_VERSION, 1);
+        let aad_v4 = build_item_aad_v2(&"item-xyz".into(), AAD_SCHEMA_VERSION, 1);
         assert!(decrypt_item_with_aad(&ciphertext, &nonce, &key, &aad_v4).is_err());
     }
 
@@ -384,12 +385,12 @@ mod tests {
     fn build_item_aad_v2_golden_bytes() {
         // AAD for key_version=2 item "item-abc" at schema version 4:
         // b"item-abc|4|2"
-        let aad = build_item_aad_v2("item-abc", AAD_SCHEMA_VERSION_V4, 2);
+        let aad = build_item_aad_v2(&"item-abc".into(), AAD_SCHEMA_VERSION_V4, 2);
         assert_eq!(aad, b"item-abc|4|2");
 
         // AAD for key_version=1 item at schema version 3 (legacy):
         // b"item-abc|3"
-        let aad_v1 = build_item_aad("item-abc", AAD_SCHEMA_VERSION);
+        let aad_v1 = build_item_aad(&"item-abc".into(), AAD_SCHEMA_VERSION);
         assert_eq!(aad_v1, b"item-abc|3");
     }
 
@@ -398,10 +399,10 @@ mod tests {
     fn decrypt_item_by_version_v1_roundtrip() {
         let v1_key = [0x11u8; 32];
         let v2_key = [0x22u8; 32];
-        let item_id = "item-v1-test";
-        let aad = build_item_aad(item_id, AAD_SCHEMA_VERSION);
+        let item_id = ItemId::from("item-v1-test");
+        let aad = build_item_aad(&item_id, AAD_SCHEMA_VERSION);
         let (nonce, ct) = encrypt_item_with_aad(b"hello v1", &v1_key, &aad).unwrap();
-        let pt = decrypt_item_by_version(1, V1Key(&v1_key), V2Key(&v2_key), item_id, &nonce, &ct)
+        let pt = decrypt_item_by_version(1, V1Key(&v1_key), V2Key(&v2_key), &item_id, &nonce, &ct)
             .unwrap();
         assert_eq!(pt, b"hello v1");
     }
@@ -411,10 +412,10 @@ mod tests {
     fn decrypt_item_by_version_v2_roundtrip() {
         let v1_key = [0x33u8; 32];
         let v2_key = [0x44u8; 32];
-        let item_id = "item-v2-test";
-        let aad = build_item_aad_v2(item_id, AAD_SCHEMA_VERSION_V4, 2);
+        let item_id = ItemId::from("item-v2-test");
+        let aad = build_item_aad_v2(&item_id, AAD_SCHEMA_VERSION_V4, 2);
         let (nonce, ct) = encrypt_item_with_aad(b"hello v2", &v2_key, &aad).unwrap();
-        let pt = decrypt_item_by_version(2, V1Key(&v1_key), V2Key(&v2_key), item_id, &nonce, &ct)
+        let pt = decrypt_item_by_version(2, V1Key(&v1_key), V2Key(&v2_key), &item_id, &nonce, &ct)
             .unwrap();
         assert_eq!(pt, b"hello v2");
     }
@@ -427,7 +428,7 @@ mod tests {
         let nonce = [0u8; NONCE_SIZE];
         let ct = b"garbage";
         let result =
-            decrypt_item_by_version(255, V1Key(&v1_key), V2Key(&v2_key), "item-x", &nonce, ct);
+            decrypt_item_by_version(255, V1Key(&v1_key), V2Key(&v2_key), &"item-x".into(), &nonce, ct);
         assert!(
             matches!(result, Err(EncryptError::UnknownKeyVersion(255))),
             "key_version=255 must return UnknownKeyVersion(255), got {:?}",
@@ -442,7 +443,7 @@ mod tests {
         let v2_key = [0x88u8; 32];
         let nonce = [0u8; NONCE_SIZE];
         let result =
-            decrypt_item_by_version(0, V1Key(&v1_key), V2Key(&v2_key), "item-y", &nonce, b"ct");
+            decrypt_item_by_version(0, V1Key(&v1_key), V2Key(&v2_key), &"item-y".into(), &nonce, b"ct");
         assert!(matches!(result, Err(EncryptError::UnknownKeyVersion(0))));
     }
 
