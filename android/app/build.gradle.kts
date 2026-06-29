@@ -381,4 +381,12 @@ dependencies {
     // with UnsatisfiedLinkError. Adding the AAR here packages the per-ABI
     // libjnidispatch.so into the test build. pickFirsts (above) dedupes it.
     androidTestImplementation("net.java.dev.jna:jna:5.14.0@aar")
+
+    // Compose UI testing — TalkBack a11y regression test (CopyPaste-crh3.55).
+    // ui-test-junit4 provides createComposeRule() for on-device semantics assertions.
+    // ui-test-manifest adds a ComponentActivity to the debug manifest so
+    // createComposeRule() can launch it without a hand-written manifest entry.
+    androidTestImplementation(platform(libs.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
