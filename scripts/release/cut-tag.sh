@@ -81,11 +81,44 @@ else
     exit 1
 fi
 
+# CopyPaste-crh3.64: also bump the Android Gradle dev-default versionName /
+# versionCode so a LOCAL `gradlew assembleRelease` after a tag cut produces a
+# correctly-versioned APK. (CI release overrides these from the git tag, so
+# released APKs were already correct — this fixes the latent local/non-overriding
+# path.) versionCode = major*10000 + minor*100 + patch from the numeric core of
+# the version (any -prerelease/+build suffix is stripped for the integer code).
+GRADLE="android/app/build.gradle.kts"
+if [[ -f "$GRADLE" ]]; then
+    NUMERIC_VERSION="${VERSION%%-*}"
+    IFS='.' read -r VMAJOR VMINOR VPATCH <<< "$NUMERIC_VERSION"
+    if [[ -z "$VMAJOR" || -z "$VMINOR" || -z "$VPATCH" ]]; then
+        echo "ERROR: cannot derive Android versionCode from '$VERSION' (need major.minor.patch)" >&2
+        exit 1
+    fi
+    VERSION_CODE=$(( VMAJOR * 10000 + VMINOR * 100 + VPATCH ))
+    echo "==> Bumping $GRADLE versionName=$VERSION versionCode=$VERSION_CODE"
+    GTMP="$(mktemp)"
+    sed \
+        -e 's/\(versionName = (project\.findProperty("versionName") as String?) ?: \)"[^"]*"/\1"'"$VERSION"'"/' \
+        -e 's/\(versionCode = (project\.findProperty("versionCode") as String?)?\.toInt() ?: \)[0-9][0-9]*/\1'"$VERSION_CODE"'/' \
+        "$GRADLE" > "$GTMP"
+    if rg -qF "?: \"${VERSION}\"" "$GTMP" && rg -qF "?: ${VERSION_CODE}" "$GTMP"; then
+        mv "$GTMP" "$GRADLE"
+    else
+        echo "ERROR: Android version bump failed — $GRADLE unchanged (regex did not match the dev-default lines)" >&2
+        rm -f "$GTMP"
+        exit 1
+    fi
+fi
+
 echo "==> Regenerating Cargo.lock"
 cargo generate-lockfile
 
 echo "==> Committing"
 git add Cargo.toml Cargo.lock "$TAURI_CONF"
+if [[ -f "$GRADLE" ]]; then
+    git add "$GRADLE"
+fi
 git commit -m "chore(release): cut $TAG"
 
 echo "==> Tagging $TAG"
