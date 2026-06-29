@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-29
+
+Audit hardening release — correctness, security, and cross-platform parity fixes.
+
+- **Data-loss fix (P0):** `db_restore` now validates a backup (key + integrity +
+  schema) on a staging copy before touching the live database, and rolls back on
+  any failure — a wrong-key or corrupt backup can no longer destroy history.
+- Restore resolves the real Keychain key (not the degraded dummy) and rebuilds
+  the read pool so reads never serve stale pre-restore data.
+- Soft-delete tombstones are no longer evicted by cap-pruning and no longer block
+  re-copying a previously deleted item.
+- `db_backup`/`vacuum` are refused in degraded mode (no misleading empty backup);
+  `watch_subscribe` and `cloud_sign_out` now behave correctly (gated stream;
+  persistent sign-out that clears Keychain + config).
+- Battery: Wi-Fi status is cached (5 s TTL) instead of forking `networksetup`
+  on every sync event.
+- Relay catch-up on broadcast lag; mDNS re-announces after network change;
+  P2P sync-key salt unified with a parity test.
+- CLI `copy --list`/`copy <index>` fixed; CLI retries on `ipc_not_ready`.
+- UI: presence no longer falsely shows an active peer Offline; search covers the
+  full history; dangerous-extension denylist re-synced; several Settings and
+  motion/token parity fixes.
+- CI: formatting, coverage threshold, and `cargo audit` failure surfacing.
+
 ## [0.3.0] - 2026-06-22
 
 > **Note:** This entry appears above 0.7.x entries because it is a re-launch
