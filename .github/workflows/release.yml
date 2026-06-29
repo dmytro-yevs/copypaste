@@ -79,6 +79,11 @@ env:
 jobs:
   build-macos:
     name: Build macOS (arm64)
+    # CopyPaste-crh3.62 / ADR-016: macOS ships an arm64-native binary built and
+    # tested on macos-14 (Apple silicon). Intel Macs are supported via Rosetta 2;
+    # we intentionally do NOT build a universal (lipo) binary or run a native
+    # macos-13 job. To add native Intel coverage, flip build-macos.sh to its
+    # universal build here and add a macos-13 matrix job (both already supported).
     runs-on: macos-14
     permissions:
       contents: write
