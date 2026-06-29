@@ -43,6 +43,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -727,15 +730,23 @@ fun PairScreen(
     // Gated: if the success popup is showing, skip the auto-regenerate so the
     // QR doesn't refresh underneath the dialog and the pairedPeerForPopup state
     // stays stable while the user reads the card.
+    //
+    // CopyPaste-crh3.28: the countdown + auto-regenerate run ONLY while the
+    // screen is RESUMED (repeatOnLifecycle). Backgrounding the activity cancels
+    // the block, so the QR no longer silently mints and burns one-time pairing
+    // tokens off-screen; it resumes counting when the user returns.
+    val lifecycleOwner = LocalLifecycleOwner.current
     LaunchedEffect(qr) {
         if (qr == null) return@LaunchedEffect
-        remainingSeconds = PAIR_TOKEN_TTL_SECONDS
-        while (remainingSeconds > 0) {
-            delay(1000)
-            remainingSeconds -= 1
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            remainingSeconds = PAIR_TOKEN_TTL_SECONDS
+            while (remainingSeconds > 0) {
+                delay(1000)
+                remainingSeconds -= 1
+            }
+            // QR expired — auto-regenerate only when the success popup is not up.
+            if (pairedPeerForPopup == null) generateQr()
         }
-        // QR expired — auto-regenerate only when the success popup is not up.
-        if (pairedPeerForPopup == null) generateQr()
     }
 
     // AND2: Auto-start pairing when the screen opens so the QR appears

@@ -430,6 +430,7 @@
     <string name="sas_paired_ok">Paired ✓</string>
     <string name="sas_ended">Pairing ended — check the other device.</string>
     <string name="sas_timed_out">Pairing timed out.</string>
+    <string name="sas_watchdog_timeout">Pairing timed out. Check that both devices are on the same network and try again.</string>
     <string name="sas_rejected">Pairing was rejected.</string>
     <string name="sas_cancelled">Pairing was cancelled.</string>
     <string name="sas_btn_match">Match</string>

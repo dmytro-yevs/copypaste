@@ -59,15 +59,23 @@ private fun SasPeerMetadataCard(status: PairStatus) {
     // it cannot be called inside a non-@Composable lambda like buildList).
     val labelModel = stringResource(R.string.meta_label_model)
     val labelOs = stringResource(R.string.meta_label_os)
+    val labelVersion = stringResource(R.string.meta_label_version)
     val labelLocalIp = stringResource(R.string.meta_label_local_ip)
     val labelPublicIp = stringResource(R.string.meta_label_public_ip)
+    val labelFingerprint = stringResource(R.string.meta_label_fingerprint)
 
-    // Collect the non-blank field pairs we have.
+    // Collect the non-blank field pairs we have. Order + fields mirror the macOS
+    // SasPairingModal: Model, OS, Version, Local/Public IP, then Fingerprint.
     val fields = buildList {
         status.peerModel?.takeIf { it.isNotBlank() }?.let { add(labelModel to it) }
         status.peerOs?.takeIf { it.isNotBlank() }?.let { add(labelOs to it) }
+        // CopyPaste-crh3.35: show the partner's app version (parity with macOS).
+        status.peerAppVersion?.takeIf { it.isNotBlank() }?.let { add(labelVersion to it) }
         status.peerLocalIp?.takeIf { it.isNotBlank() }?.let { add(labelLocalIp to it) }
         status.peerPublicIp?.takeIf { it.isNotBlank() }?.let { add(labelPublicIp to it) }
+        // CopyPaste-crh3.29: show the partner's fingerprint so a user can verify
+        // it out-of-band (parity with macOS — impossible to verify without it).
+        status.peerFingerprint?.takeIf { it.isNotBlank() }?.let { add(labelFingerprint to it) }
     }
     // Nothing to show yet — the card is silent (not even a placeholder).
     if (fields.isEmpty()) return
@@ -233,9 +241,22 @@ internal fun SasPairingDialog(
     // Poll pair_get_sas until a terminal state. The native state machine resets to
     // idle after a terminal outcome, so a trailing idle (after an active state) is
     // itself terminal — never re-poll on it.
+    // CopyPaste-crh3.27: pre-resolve the watchdog timeout message — stringResource
+    // is @Composable and cannot be called inside the LaunchedEffect coroutine.
+    val watchdogTimeoutMsg = stringResource(R.string.sas_watchdog_timeout)
     LaunchedEffect(peer.deviceId) {
         var sawActive = false
+        // CopyPaste-crh3.27: UI watchdog — give up after SAS_WATCHDOG_MS (parity
+        // with the macOS SasPairingModal) so the dialog never hangs forever on a
+        // peer that never reaches a terminal state. Surfaces a timeout error;
+        // Close then aborts the native pairing via handleClose (terminal stays
+        // false, mirroring macOS where the watchdog sets an error, not a state).
+        val watchdogDeadline = System.currentTimeMillis() + SAS_WATCHDOG_MS
         while (true) {
+            if (System.currentTimeMillis() >= watchdogDeadline) {
+                error = watchdogTimeoutMsg
+                return@LaunchedEffect
+            }
             val next = try {
                 withContext(Dispatchers.IO) { pairGetSas() }
             } catch (e: Exception) {

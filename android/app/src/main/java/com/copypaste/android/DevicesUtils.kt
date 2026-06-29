@@ -336,6 +336,14 @@ internal fun discoveredSectionPresence(
 internal const val SAS_POLL_MS = 500L
 
 /**
+ * CopyPaste-crh3.27: UI-side watchdog for the SAS pairing dialog. If no terminal
+ * state is reached within this window the dialog stops waiting and surfaces a
+ * timeout instead of hanging forever. Mirrors the macOS `SAS_WATCHDOG_MS`
+ * (30 s) in `SasPairingModal.tsx`.
+ */
+internal const val SAS_WATCHDOG_MS = 30_000L
+
+/**
  * CopyPaste-1jms.33: format the peer's device metadata returned by the PAKE bootstrap
  * (BootstrapResult.peerModel/peerOs/peerAppVersion) into a list of label→value pairs
  * for display on the post-PAKE peer-review card.
