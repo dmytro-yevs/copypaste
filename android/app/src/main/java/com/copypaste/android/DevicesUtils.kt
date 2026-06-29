@@ -371,3 +371,29 @@ internal fun peerMetaReviewRows(
 // `internal` so the always-on [ClipboardService] FGS owns the discovery
 // lifecycle with the SAME well-known bport (HB-2).
 internal const val SAS_BPORT = 47_654
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CopyPaste-crh3.34: "Revoke all" parity with macOS DevicesView
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * CopyPaste-crh3.34: "Revoke all" button is enabled only when there is at least
+ * one paired peer to revoke. Mirrors macOS `disabled={peers.length === 0}` in
+ * DevicesView/index.tsx (line 172).
+ *
+ * Extracted as a pure function so the enabled-state gate is unit-testable on a
+ * plain JVM without Compose or Android SDK.
+ */
+internal fun revokeAllEnabled(peerCount: Int): Boolean = peerCount > 0
+
+/**
+ * CopyPaste-crh3.34: Confirmation body text for the "Revoke all" dialog.
+ * Mirrors the macOS confirmation modal body in DevicesView/index.tsx (lines 183-185):
+ *   "This will immediately break trust with all paired devices."
+ *   "All devices will need to re-pair before syncing can resume."
+ *
+ * Extracted as a pure function so the copy is unit-testable without Compose.
+ */
+internal fun revokeAllConfirmBody(): String =
+    "This will immediately break trust with all paired devices. " +
+        "All devices will need to re-pair before syncing can resume."

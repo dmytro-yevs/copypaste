@@ -416,6 +416,10 @@ fun DevicesScreen(
     // True while the revokeDeviceAndRotateKey FFI call is in-flight.
     var revokeRotateInFlight by remember { mutableStateOf(false) }
 
+    // CopyPaste-crh3.34: "Revoke all" state — mirrors macOS revokeAllConfirm/revokeAllPending.
+    var revokeAllConfirmOpen by remember { mutableStateOf(false) }
+    var revokeAllInFlight by remember { mutableStateOf(false) }
+
     // ── Unpair confirmation ──────────────────────────────────────────────────
     unpairTarget?.let { target ->
         // §8 glass dialog (audit #10) — appearance only; unpair logic unchanged.
@@ -677,6 +681,84 @@ fun DevicesScreen(
         )
     }
 
+    // ── CopyPaste-crh3.34: "Revoke all" confirmation dialog ──────────────────
+    // Mirrors macOS: title "Revoke all paired devices?" + two-sentence body +
+    // DANGER confirm button + GHOST cancel button.
+    if (revokeAllConfirmOpen) {
+        GlassAlertDialog(
+            onDismissRequest = { if (!revokeAllInFlight) revokeAllConfirmOpen = false },
+            title = { Text("Revoke all paired devices?") },
+            text = { Text(revokeAllConfirmBody()) },
+            confirmButton = {
+                CopyPasteButton(
+                    enabled = !revokeAllInFlight,
+                    onClick = {
+                        revokeAllConfirmOpen = false
+                        revokeAllInFlight = true
+                        // Snapshot the peer list before launching the coroutine so
+                        // mutations during the IO loop don't see a stale iterator.
+                        val peersToRevoke = peers.toList()
+                        scope.launch {
+                            var anyFailed = false
+                            for (p in peersToRevoke) {
+                                // CopyPaste-94o4 ordering: write the audit record first;
+                                // only remove the peer from the roster once the DB write
+                                // succeeds — same guarantee as the single-peer "Revoke only" path.
+                                val ok = withContext(Dispatchers.IO) {
+                                    runCatching {
+                                        revokeDeviceAudit(
+                                            dbPath = settings.dbPath,
+                                            key = settings.encryptionKey,
+                                            fingerprint = p.fingerprint,
+                                            name = p.displayName(),
+                                        )
+                                    }
+                                }.fold(
+                                    onSuccess = { true },
+                                    onFailure = { e ->
+                                        Log.e(
+                                            TAG,
+                                            "revokeAll: audit failed for ${p.fingerprint.take(8)}: ${e.message}",
+                                            e,
+                                        )
+                                        false
+                                    },
+                                )
+                                if (ok) {
+                                    // CopyPaste-1jms.8: local removal only — no outbound unpair
+                                    // signal on Android (no durable pending-unpair queue yet).
+                                    settings.removePeer(p.fingerprint)
+                                } else {
+                                    anyFailed = true
+                                }
+                            }
+                            revokeAllInFlight = false
+                            if (anyFailed) {
+                                revokeError = "Some devices could not be fully revoked. " +
+                                    "Remaining devices were NOT removed — please retry."
+                            }
+                            refresh()
+                        }
+                    },
+                    variant = ButtonVariant.DANGER,
+                ) {
+                    if (revokeAllInFlight) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text("Revoke all")
+                    }
+                }
+            },
+            dismissButton = {
+                CopyPasteButton(
+                    enabled = !revokeAllInFlight,
+                    onClick = { revokeAllConfirmOpen = false },
+                    variant = ButtonVariant.GHOST,
+                ) { Text("Cancel") }
+            },
+        )
+    }
+
     // ── SAS pairing modal (port of macOS SasPairingModal) ─────────────────────
     pairingPeer?.let { peer ->
         SasPairingDialog(
@@ -713,6 +795,19 @@ fun DevicesScreen(
                 showBackButton = showBackButton,
                 onBack = onBack,
                 backContentDescription = "Back",
+                // CopyPaste-crh3.34: "Revoke all" action mirrors macOS DevicesView
+                // actions bar. DANGER variant matches macOS border-ide-danger/35 styling
+                // (STYLEGUIDE §9.1). Disabled when no peers or an operation is in flight.
+                actions = {
+                    CopyPasteButton(
+                        onClick = { revokeAllConfirmOpen = true },
+                        variant = ButtonVariant.DANGER,
+                        enabled = revokeAllEnabled(peers.size) && !revokeAllInFlight,
+                        modifier = Modifier.padding(end = 8.dp),
+                    ) {
+                        Text("Revoke all")
+                    }
+                },
             )
         },
     ) { innerPadding ->
