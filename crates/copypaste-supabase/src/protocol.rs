@@ -42,14 +42,13 @@ impl PhoenixMessage {
     pub fn from_wire(s: &str) -> Result<Self, serde_json::Error> {
         let raw: (Value, Value, String, String, Value) = serde_json::from_str(s)?;
         Ok(Self {
-            join_ref: match &raw.0 {
-                Value::Null => None,
-                v => Some(v.as_str().unwrap_or("").to_owned()),
-            },
-            msg_ref: match &raw.1 {
-                Value::Null => None,
-                v => Some(v.as_str().unwrap_or("").to_owned()),
-            },
+            // CopyPaste-crh3.97: map non-string refs (incl. numeric) to None
+            // instead of Some(""). `Value::as_str()` returns None for Null AND
+            // for numbers, so a numeric `msg_ref` no longer becomes Some("") —
+            // which would never match a `Some("<hb-ref>")` heartbeat-reply check
+            // and silently drop heartbeat replies.
+            join_ref: raw.0.as_str().map(str::to_owned),
+            msg_ref: raw.1.as_str().map(str::to_owned),
             topic: raw.2,
             event: raw.3,
             payload: raw.4,
@@ -205,6 +204,35 @@ mod tests {
         // Only 4 elements — should fail
         let bad = r#"[null,"1","phoenix","heartbeat"]"#;
         assert!(PhoenixMessage::from_wire(bad).is_err());
+    }
+
+    #[test]
+    fn from_wire_numeric_refs_become_none_not_empty_string() {
+        // CopyPaste-crh3.97: a numeric join_ref/msg_ref must parse to None, not
+        // Some("") — otherwise a `msg_ref == Some(hb_ref)` heartbeat-reply check
+        // never fires and heartbeat replies are silently dropped.
+        let m = PhoenixMessage::from_wire(r#"[1,2,"phoenix","phx_reply",{}]"#)
+            .expect("numeric refs are valid wire");
+        assert_eq!(m.join_ref, None, "numeric join_ref must map to None");
+        assert_eq!(m.msg_ref, None, "numeric msg_ref must map to None");
+    }
+
+    #[test]
+    fn from_wire_string_refs_are_preserved() {
+        // String refs (the common case) still round-trip so heartbeat-reply
+        // matching on Some("<ref>") keeps working.
+        let m = PhoenixMessage::from_wire(r#"["3","7","phoenix","phx_reply",{}]"#)
+            .expect("string refs parse");
+        assert_eq!(m.join_ref.as_deref(), Some("3"));
+        assert_eq!(m.msg_ref.as_deref(), Some("7"));
+    }
+
+    #[test]
+    fn from_wire_null_refs_remain_none() {
+        let m = PhoenixMessage::from_wire(r#"[null,null,"phoenix","phx_reply",{}]"#)
+            .expect("null refs parse");
+        assert_eq!(m.join_ref, None);
+        assert_eq!(m.msg_ref, None);
     }
 
     // ── ChangeEvent extraction ────────────────────────────────────────────────
