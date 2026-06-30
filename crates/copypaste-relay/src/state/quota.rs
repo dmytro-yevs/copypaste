@@ -64,6 +64,39 @@ pub(crate) fn history_cap_for_limit(tier_limit: Option<usize>) -> usize {
 // Unit tests
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// RelayStore: quota queries
+// ---------------------------------------------------------------------------
+
+impl super::RelayStore {
+    /// CopyPaste-crh3.115: the subscription [`Tier`] registered for `device_id`,
+    /// so the push path can apply the sender's ACTUAL per-tier item-size quota
+    /// instead of conservatively assuming `Tier::Free` for everyone.
+    ///
+    /// Returns `Tier::Free` for an unknown device — a conservative default that
+    /// never over-grants. In production (no `quota-tiers` feature) `Tier::Free`
+    /// is the only variant, so this is a no-op there; it future-proofs the push
+    /// quota for when paid tiers ship.
+    pub fn device_tier(&self, device_id: &str) -> Tier {
+        self.devices
+            .get(device_id)
+            .map(|r| r.tier)
+            .unwrap_or(Tier::Free)
+    }
+
+    /// Returns `(device_count, total_inbox_items)`.
+    // Not called from any current route handler (CopyPaste-j21: counts stripped
+    // from unauthenticated endpoints). When `quota-tiers` is enabled (e.g.
+    // --all-features) it is included but has no non-test caller — allow
+    // suppresses dead_code.
+    #[cfg(any(test, feature = "quota-tiers"))]
+    #[allow(dead_code)] // intentional: test helper, no production caller today
+    pub fn stats(&self) -> (usize, usize) {
+        let total = self.sync_items.values().map(|v| v.len()).sum();
+        (self.devices.len(), total)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::quota::Tier;
@@ -108,38 +141,5 @@ mod tests {
     #[test]
     fn history_cap_for_limit_none_gives_hard_cap() {
         assert_eq!(history_cap_for_limit(None), MAX_PUSH_ITEMS_PER_DEVICE);
-    }
-}
-
-// ---------------------------------------------------------------------------
-// RelayStore: quota queries
-// ---------------------------------------------------------------------------
-
-impl super::RelayStore {
-    /// CopyPaste-crh3.115: the subscription [`Tier`] registered for `device_id`,
-    /// so the push path can apply the sender's ACTUAL per-tier item-size quota
-    /// instead of conservatively assuming `Tier::Free` for everyone.
-    ///
-    /// Returns `Tier::Free` for an unknown device — a conservative default that
-    /// never over-grants. In production (no `quota-tiers` feature) `Tier::Free`
-    /// is the only variant, so this is a no-op there; it future-proofs the push
-    /// quota for when paid tiers ship.
-    pub fn device_tier(&self, device_id: &str) -> Tier {
-        self.devices
-            .get(device_id)
-            .map(|r| r.tier)
-            .unwrap_or(Tier::Free)
-    }
-
-    /// Returns `(device_count, total_inbox_items)`.
-    // Not called from any current route handler (CopyPaste-j21: counts stripped
-    // from unauthenticated endpoints). When `quota-tiers` is enabled (e.g.
-    // --all-features) it is included but has no non-test caller — allow
-    // suppresses dead_code.
-    #[cfg(any(test, feature = "quota-tiers"))]
-    #[allow(dead_code)] // intentional: test helper, no production caller today
-    pub fn stats(&self) -> (usize, usize) {
-        let total = self.sync_items.values().map(|v| v.len()).sum();
-        (self.devices.len(), total)
     }
 }
