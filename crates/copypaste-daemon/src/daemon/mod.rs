@@ -1727,6 +1727,45 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
     Ok(())
 }
 
+// Suppress unused import warnings for items imported for mod.rs use only.
+// These are used in cfg-gated and test-only paths so the compiler may
+// flag them as unused in certain build configurations.
+// Kept BEFORE the test module so clippy::items_after_test_module is satisfied.
+#[allow(unused_imports)]
+use build_item_aad_v2 as _;
+#[allow(unused_imports)]
+use bump_item_recency as _;
+#[allow(unused_imports)]
+use chunks_to_blob as _;
+#[allow(unused_imports)]
+use derive_v2 as _;
+#[allow(unused_imports)]
+use encode_image_full as _;
+#[allow(unused_imports)]
+use encrypt_item_with_aad as _;
+#[allow(unused_imports)]
+use find_recent_by_hash as _;
+#[allow(unused_imports)]
+use get_item_by_id as _;
+#[allow(unused_imports)]
+use insert_item_with_fts as _;
+#[allow(unused_imports)]
+use is_sensitive_for_autowipe as _;
+#[allow(unused_imports)]
+use prune_to_cap as _;
+#[allow(unused_imports)]
+use ClipboardContent as _;
+#[allow(unused_imports)]
+use ClipboardMonitor as _;
+#[allow(unused_imports)]
+use Database as _;
+#[allow(unused_imports)]
+use DeviceKeypair as _;
+#[allow(unused_imports)]
+use AAD_SCHEMA_VERSION_V4 as _;
+#[allow(unused_imports)]
+use ITEM_KEY_VERSION_CURRENT as _;
+
 #[cfg(test)]
 mod lifecycle_tests {
     use super::*;
@@ -1767,41 +1806,3 @@ mod lifecycle_tests {
         run_poison_row_sweep(&db).await;
     }
 }
-
-// Suppress unused import warnings for items imported for mod.rs use only.
-// These are used in cfg-gated and test-only paths so the compiler may
-// flag them as unused in certain build configurations.
-#[allow(unused_imports)]
-use build_item_aad_v2 as _;
-#[allow(unused_imports)]
-use bump_item_recency as _;
-#[allow(unused_imports)]
-use chunks_to_blob as _;
-#[allow(unused_imports)]
-use derive_v2 as _;
-#[allow(unused_imports)]
-use encode_image_full as _;
-#[allow(unused_imports)]
-use encrypt_item_with_aad as _;
-#[allow(unused_imports)]
-use find_recent_by_hash as _;
-#[allow(unused_imports)]
-use get_item_by_id as _;
-#[allow(unused_imports)]
-use insert_item_with_fts as _;
-#[allow(unused_imports)]
-use is_sensitive_for_autowipe as _;
-#[allow(unused_imports)]
-use prune_to_cap as _;
-#[allow(unused_imports)]
-use ClipboardContent as _;
-#[allow(unused_imports)]
-use ClipboardMonitor as _;
-#[allow(unused_imports)]
-use Database as _;
-#[allow(unused_imports)]
-use DeviceKeypair as _;
-#[allow(unused_imports)]
-use AAD_SCHEMA_VERSION_V4 as _;
-#[allow(unused_imports)]
-use ITEM_KEY_VERSION_CURRENT as _;

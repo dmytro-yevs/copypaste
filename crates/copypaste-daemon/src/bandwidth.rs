@@ -162,7 +162,7 @@ mod tests {
                                         // Allow ±1 ms for integer division rounding.
         let us = delay.as_micros() as u64;
         assert!(
-            us >= 499_000 && us <= 501_000,
+            (499_000..=501_000).contains(&us),
             "expected ~500 ms delay, got {us} µs"
         );
     }
