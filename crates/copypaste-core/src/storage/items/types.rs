@@ -101,7 +101,7 @@ pub struct ClipboardItem {
     /// UUID of the device that originated this item. Used as the deterministic
     /// tie-break in the LWW merge (see `copypaste-sync::merge::resolve`).
     /// Empty string for pre-v3 rows until backfilled via
-    /// [`backfill_origin_device_id`].
+    /// [`crate::storage::items::backfill_origin_device_id`].
     pub origin_device_id: String,
     /// HKDF key generation used to encrypt this item's content. Corresponds
     /// to the `key_version` column in `clipboard_items`.
@@ -129,7 +129,7 @@ pub struct ClipboardItem {
     /// Small capture-time encrypted thumbnail blob for image items (schema v9).
     ///
     /// `None` for text rows and for image rows captured before the thumbnail
-    /// pipeline existed (lazily backfillable via [`set_thumb`]). When present
+    /// pipeline existed (lazily backfillable via [`crate::set_thumb`]). When present
     /// it is the serialized encrypted chunk blob produced by
     /// `image::encode_thumbnail` / `image::encode_image_full`, keyed by a
     /// distinct `thumb_file_id` (recorded in the image `blob_ref` meta JSON).
@@ -140,7 +140,7 @@ pub struct ClipboardItem {
     /// A soft-deleted item is a tombstone: its content is wiped but the row
     /// remains so the LWW sync protocol can propagate the deletion to peer
     /// devices. `false` for all freshly-captured and synced items. Set to
-    /// `true` by [`soft_delete_item`], which also NULLs `content`,
+    /// `true` by [`crate::soft_delete_item`], which also NULLs `content`,
     /// `content_nonce`, and `thumb`. UI list queries filter `deleted = 0`;
     /// `get_item_by_item_id` intentionally does NOT filter so the merge
     /// layer can apply tombstone wins correctly.
@@ -211,7 +211,7 @@ impl ClipboardItem {
     /// `thumb` is the optional capture-time encrypted thumbnail blob
     /// (`image::encode_image_full` produces it alongside the full chunks). Pass
     /// `None` when no thumbnail was generated; it can be backfilled later via
-    /// [`set_thumb`].
+    /// [`crate::set_thumb`].
     pub fn new_image(
         encrypted_blob: Vec<u8>,
         image_meta_json: String,

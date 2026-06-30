@@ -18,7 +18,7 @@ use tracing::{debug, warn};
 
 /// Write decrypted plaintext for a synced item directly to NSPasteboard.
 ///
-/// Called from [`merge_incoming_with_crypto`] after determining that the
+/// Called from [`crate::sync_orch::merge::merge_incoming_with_crypto`] after determining that the
 /// incoming item is the freshest thing in the DB and `auto_apply_synced_clip`
 /// is enabled.
 ///
@@ -37,7 +37,7 @@ use tracing::{debug, warn};
 /// # Content types
 ///
 /// * `text` — writes `NSPasteboardTypeString`.  `plaintext` is the raw UTF-8
-///   bytes returned by [`rekey_inbound`].
+///   bytes returned by `rekey_inbound`.
 /// * `image` — `plaintext` is an empty-vec sentinel (set in the merge loop
 ///   because the full PNG was not re-materialised there).  We re-decode it
 ///   here from the stored chunks in the DB row.

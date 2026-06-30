@@ -8,7 +8,7 @@
 //! `in_flight` to [`copypaste_ipc::compute_sync_badge_state_with_inflight`].
 //!
 //! Each sync path (cloud poll, cloud push, relay receive, relay push, P2P
-//! handshake) holds a [`SyncInFlightGuard`] for the duration of its active
+//! handshake) holds a [`crate::sync_in_flight::SyncInFlightGuard`] for the duration of its active
 //! network exchange.  On construction the guard sets the flag to `true`; on
 //! `Drop` it resets to `false`.  Using a guard (instead of manual `store(true)`
 //! / `store(false)` pairs) guarantees that **every exit path** — normal return,

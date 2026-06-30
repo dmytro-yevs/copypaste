@@ -5,7 +5,7 @@
 //! compiled in — the feature gate controls whether the `reqwest` dep is present).
 //!
 //! Two background tasks are spawned:
-//! - **push_loop**: receives new [`ClipboardItem`]s from a broadcast channel and
+//! - **push_loop**: receives new [`copypaste_core::ClipboardItem`]s from a broadcast channel and
 //!   POSTs them to `POST /rest/v1/clipboard_items`.
 //! - **realtime_loop**: polls `GET /rest/v1/clipboard_items?order=wall_time.asc&limit=20`
 //!   every 10 seconds (forward pagination from a persisted watermark) and inserts

@@ -31,7 +31,7 @@
 /// can reference it without pulling in the full daemon crate.
 ///
 /// The daemon's `ipc.rs` re-declares a structurally identical struct; the
-/// [`consistent_field_set`] test below enforces that the two never drift.
+/// `consistent_field_set` test below enforces that the two never drift.
 pub use copypaste_ipc::AppConfig;
 
 #[cfg(test)]

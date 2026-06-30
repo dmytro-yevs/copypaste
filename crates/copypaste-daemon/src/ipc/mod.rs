@@ -118,7 +118,7 @@ pub const IPC_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs
 /// buffer fills (~128 KiB on macOS), `write_all` parks until the peer drains its
 /// recv buffer. A client that sends a valid request and then never reads the
 /// reply would pin its connection slot — and the `conn_semaphore` permit — for
-/// the lifetime of the daemon. With [`MAX_CONCURRENT_CONNECTIONS`] such clients,
+/// the lifetime of the daemon. With `MAX_CONCURRENT_CONNECTIONS` such clients,
 /// IPC stops accepting connections and the UI/CLI become inaccessible (a
 /// same-UID local DoS).
 ///

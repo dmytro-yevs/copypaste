@@ -20,13 +20,13 @@
 //!   public_key_b64}` → 201 `{auth_token}`. Token cached in a `0600` file. On a
 //!   401 during push/pull the token is dropped and re-registered.
 //! - **push:** subscribe the `new_item_tx` broadcast; for each local item reuse
-//!   [`sync_common::decrypt_item_plaintext`] →
-//!   [`sync_common::wrap_and_check_cloud_upload_plaintext`] →
+//!   `sync_common::decrypt_item_plaintext` →
+//!   `sync_common::wrap_and_check_cloud_upload_plaintext` →
 //!   `encrypt_for_cloud(sync_key, item_id, ...)` (the SAME blob the Supabase path
 //!   produces) → build the envelope → `POST {relay_url}/devices/{inbox}/items`.
 //! - **receive:** poll `GET {relay_url}/devices/{inbox}/items?since=&since_id=`,
 //!   decode each item's envelope, `decrypt_from_cloud`, then reuse
-//!   [`sync_common::build_local_item`] + [`copypaste_core::insert_item`] with the
+//!   `sync_common::build_local_item` + [`copypaste_core::insert_item`] with the
 //!   exact LWW + quota-prune the Supabase poll path uses. A `(wall_time, id)`
 //!   watermark is held in memory across ticks.
 //! - **self-echo:** the daemon both pushes to and subscribes to the same inbox,

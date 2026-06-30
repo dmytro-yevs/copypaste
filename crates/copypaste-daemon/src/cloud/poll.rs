@@ -54,7 +54,7 @@ const POLL_BATCH_SIZE: usize = 20;
 /// Download path:
 /// 1. `GET /rest/v1/clipboard_items` → raw JSON rows.
 /// 2. For each row, base64-decode `payload_ct` → `decrypt_from_cloud(sync_key, item_id, blob)` → plaintext.
-/// 3. Re-encrypt plaintext with the local key → local [`ClipboardItem`].
+/// 3. Re-encrypt plaintext with the local key → local [`copypaste_core::ClipboardItem`].
 /// 4. Insert via `insert_item` (dedup by `id`).
 ///
 /// If no sync key is set, the poll is skipped with a one-time warning.
@@ -884,7 +884,7 @@ pub(crate) async fn poll_once(
 
 /// Outcome of a single `fetch_remote_rows` attempt.
 ///
-/// Mirrors the push-side [`PushOutcome`]: the poll path needs to distinguish
+/// Mirrors the push-side `PushOutcome`: the poll path needs to distinguish
 /// "bearer expired" (refresh-and-retry), "rate-limited" (sleep Retry-After),
 /// and every other failure (log + wait for the next tick).
 pub(crate) enum FetchOutcome {
@@ -954,7 +954,7 @@ pub(crate) async fn fetch_remote_rows(
 /// Fetch rows, transparently refreshing the shared bearer on a single 401.
 ///
 /// This is the poll-side counterpart of the `Unauthorized` arm in
-/// [`push_item_with_retries`]: the `refreshed` single-shot guard guarantees we
+/// `push_item_with_retries`: the `refreshed` single-shot guard guarantees we
 /// refresh-and-retry at most once per call, so a refresh that itself yields a
 /// still-401 token cannot spin into an infinite loop — the second 401 falls
 /// through to `FetchOutcome::Unauthorized` and is reported as an error.

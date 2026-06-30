@@ -2,12 +2,12 @@
 //!
 //! Handles:
 //! - [`RealtimeConfig`]: all tunables (URL, key, topic, timers, SPKI pins)
-//! - [`build_ws_url`]: `https://` → `wss://` conversion with loopback bypass
-//! - [`build_ws_request`]: HTTP upgrade request with `apikey` in a header
+//! - `build_ws_url`: `https://` → `wss://` conversion with loopback bypass
+//! - `build_ws_request`: HTTP upgrade request with `apikey` in a header
 //!   (CopyPaste-lnjm: never in the URL query string)
 //! - [`scrub_ws_url`]: strip query string before logging
-//! - [`redact_payload`]: PII-safe payload summary for log sites
-//! - [`is_loopback_host`], [`extract_host`], [`is_truthy`]: helpers
+//! - `redact_payload`: PII-safe payload summary for log sites
+//! - `is_loopback_host`, `extract_host`, `is_truthy`: helpers
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -96,7 +96,7 @@ pub struct RealtimeConfig {
     /// An empty string means no per-user RLS (anon-key-only access).
     ///
     /// **Contract for the daemon agent:** call
-    /// [`RealtimeClient::update_jwt`] with the new access token whenever the
+    /// [`super::RealtimeClient::update_jwt`] with the new access token whenever the
     /// GoTrue session is refreshed.  The next WebSocket reconnect (or explicit
     /// disconnect + reconnect) will use the updated token.
     pub user_jwt: Arc<RwLock<String>>,

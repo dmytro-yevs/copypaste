@@ -102,7 +102,7 @@ pub const ARGON2_P_COST: u32 = 1;
 ///   2. Existing v1 ciphertexts must remain decryptable.
 ///
 /// In the **v2** scheme this constant is reused as the HKDF input keying
-/// material (see [`derive_per_account_salt`]) so the per-account salt remains
+/// material (see `derive_per_account_salt`) so the per-account salt remains
 /// domain-separated from any other use of the same byte string.
 ///
 /// Changing this constant is a hard-fork of all existing v1 cloud ciphertexts —
@@ -384,7 +384,7 @@ pub fn derive_sync_key(passphrase: &str) -> Result<SyncKey, SyncKeyError> {
 /// Derive the **v2 (per-account)** 32-byte shared sync key from `passphrase`.
 ///
 /// Feeds Argon2id a deterministic per-account salt derived from `account_id`
-/// (see [`derive_per_account_salt`]). Because the salt is unique per account,
+/// (see `derive_per_account_salt`). Because the salt is unique per account,
 /// an attacker who scrapes the untrusted cloud's E2E ciphertext corpus cannot
 /// reuse a single Argon2id dictionary precompute across accounts. Because the
 /// salt is deterministic, both devices of the same account derive the identical

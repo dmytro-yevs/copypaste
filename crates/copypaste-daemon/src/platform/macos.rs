@@ -90,7 +90,7 @@ static WIFI_CACHE: std::sync::Mutex<Option<(std::time::Instant, bool)>> =
     std::sync::Mutex::new(None);
 
 /// Return `true` when the machine is currently connected via Wi-Fi, answering
-/// from a [`WIFI_CACHE_TTL`] cache so `networksetup` is forked at most once per
+/// from a `WIFI_CACHE_TTL` cache so `networksetup` is forked at most once per
 /// TTL regardless of how many sync events fire (CopyPaste-crh3.71). Mirrors the
 /// `FrontmostAppCache` TTL pattern but as a process-global because the callers
 /// are independent async tasks rather than the single capture loop.

@@ -98,7 +98,7 @@ pub const DEFAULT_P2P_PORT: u16 = 51515;
 /// - Android: imports this constant directly (no local copy).
 /// - Daemon: `crates/copypaste-daemon/src/ipc/mod.rs` has a local copy (not
 ///   yet wired to this constant — tracked as CopyPaste-crh3.88 follow-up).
-///   The [`p2p_sync_key_salt_golden_value`] test in this crate pins the exact
+///   The `p2p_sync_key_salt_golden_value` test in this crate pins the exact
 ///   bytes so any drift in either copy fails CI.
 ///
 /// If this value ever needs to change, bump `P2P_SYNC_KEY_SALT` here,

@@ -86,7 +86,7 @@ pub const REPLAY_GUARD_CAPACITY: usize = 4096;
 /// (returns `false`) — it is a valid CRDT update, not a replay.
 pub struct ReplayGuard {
     /// Maps item_id → set of lamport_ts values seen for that item.
-    /// Using a Vec<i64> per item_id instead of HashSet<(String,i64)> lets us
+    /// Using a `Vec<i64>` per item_id instead of HashSet<(String,i64)> lets us
     /// store multiple lamport timestamps for the same item cheaply without a
     /// nested HashMap or a second string allocation.
     seen: HashMap<String, Vec<i64>>,

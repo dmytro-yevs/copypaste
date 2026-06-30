@@ -1,15 +1,15 @@
 // ── CloudHandle ───────────────────────────────────────────────────────────────
 
-/// Handle returned by [`start_cloud`].  Drop it to abandon the background tasks
+/// Handle returned by [`crate::cloud::start_cloud`].  Drop it to abandon the background tasks
 /// (they will exit when the shutdown channel is signalled).
 ///
 /// Audit-concurrency HIGH #3 (cloud-side): the daemon used to expose
 /// `shutdown_tx` as a public field that the caller had to explicitly send on,
 /// and in practice the daemon shutdown path never did — letting the cloud
 /// tasks run until process exit. Two safeguards make that impossible now:
-///   1. `shutdown_tx` is wrapped in `Option<...>` so [`shutdown`] can take it
+///   1. `shutdown_tx` is wrapped in `Option<...>` so [`Self::shutdown`] can take it
 ///      out behind a `&mut self`-style API.
-///   2. `Drop` calls [`shutdown`] automatically so dropping the handle (e.g.
+///   2. `Drop` calls [`Self::shutdown`] automatically so dropping the handle (e.g.
 ///      losing the binding on a panic, or daemon teardown forgetting to call
 ///      it explicitly) still signals both loops.
 pub struct CloudHandle {
@@ -58,7 +58,7 @@ impl CloudHandle {
 }
 
 impl Drop for CloudHandle {
-    /// Belt-and-braces: if the caller forgot to call [`shutdown`] explicitly
+    /// Belt-and-braces: if the caller forgot to call [`CloudHandle::shutdown`] explicitly
     /// (or dropped the handle on a panic/early return), still signal the
     /// background tasks and abort the auth-refresh task so they don't outlive
     /// the daemon.

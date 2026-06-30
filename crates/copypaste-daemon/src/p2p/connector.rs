@@ -241,7 +241,7 @@ pub(super) fn dialable_peers_from_path(path: &std::path::Path) -> Vec<DialablePe
 /// is **not** already in `peer_sinks`, dials it with
 /// [`PeerTransport::connect_with_retry`]. On success the per-connection sink is
 /// registered in `peer_sinks` (keyed by fingerprint) and the SAME
-/// [`run_peer_connection`] handler the accept loop uses is spawned, so inbound
+/// `run_peer_connection` handler the accept loop uses is spawned, so inbound
 /// items flow to `incoming_tx` and outbound items fan out.
 ///
 /// # Avoiding deadlock / thrash

@@ -1472,7 +1472,7 @@ impl IpcServer {
     /// implementation wrote `item.content` raw, so users saw ciphertext on
     /// paste. This now:
     ///
-    /// 1. Decrypts text via [`decrypt_item_with_aad`] with the per-item nonce,
+    /// 1. Decrypts text via [`copypaste_core::decrypt_item_with_aad`] with the per-item nonce,
     ///    rebuilding the AAD from the row's `item_id` so a tampered or
     ///    misbound ciphertext surfaces as `AuthFailed` instead of garbage.
     /// 2. Reassembles + decrypts image chunks via [`chunks_from_blob`] +

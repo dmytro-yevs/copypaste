@@ -12,7 +12,7 @@ use crate::keychain;
 /// build a discovery service, and call `register()` for mDNS-SD.
 ///
 /// The returned `P2pState` is safe to share across IPC handlers. A real
-/// `TcpListener` is *not* bound here — the long-running [`start_p2p`] entry
+/// `TcpListener` is *not* bound here — the long-running [`crate::p2p::start_p2p`] entry
 /// point owns the accept loop. `init` is intended for the lightweight IPC
 /// query path (list/pair/unpair/own_fingerprint).
 ///

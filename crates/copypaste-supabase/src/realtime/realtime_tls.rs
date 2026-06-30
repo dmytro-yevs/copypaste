@@ -2,11 +2,11 @@
 //!
 //! Handles:
 //! - SPKI SHA-256 pin set ([`SpkiPins`])
-//! - [`PinningVerifier`]: rustls `ServerCertVerifier` that runs WebPKI chain
+//! - `PinningVerifier`: rustls `ServerCertVerifier` that runs WebPKI chain
 //!   validation first, then enforces SPKI pinning
-//! - [`DerReader`] + [`extract_spki_der`]: minimal ASN.1 DER navigator for
+//! - `DerReader` + `extract_spki_der`: minimal ASN.1 DER navigator for
 //!   extracting the SubjectPublicKeyInfo field from an X.509 certificate
-//! - [`build_rustls_connector`]: assembles a `tokio_tungstenite::Connector`
+//! - `build_rustls_connector`: assembles a `tokio_tungstenite::Connector`
 //!   with the custom verifier
 
 use sha2::Digest as _;

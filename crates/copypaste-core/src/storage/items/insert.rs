@@ -254,7 +254,7 @@ pub fn backfill_origin_device_id(
 /// Persisting the tombstone (deleted=1, content/nonce/thumb NULL, with the
 /// incoming `lamport_ts` / `wall_time`) closes the window: the subsequent create
 /// is routed through the normal LWW resolve and loses to this tombstone unless
-/// it is *strictly newer*, honouring the [`soft_delete_item`] "an inbound delete
+/// it is *strictly newer*, honouring the [`crate::soft_delete_item`] "an inbound delete
 /// cannot resurrect the item" contract.
 ///
 /// `origin_device_id` is preserved so the LWW tie-break (lamport → wall_time →

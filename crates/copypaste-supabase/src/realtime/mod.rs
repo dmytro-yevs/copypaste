@@ -11,7 +11,7 @@
 //!
 //! | Sub-module | Responsibility |
 //! |---|---|
-//! | [`realtime_tls`] | TLS cert-pinning ([`SpkiPins`], [`PinningVerifier`], [`DerReader`], [`build_rustls_connector`]) |
+//! | [`realtime_tls`] | TLS cert-pinning ([`SpkiPins`], `PinningVerifier`, `DerReader`, `build_rustls_connector`) |
 //! | [`realtime_config`] | URL helpers, config struct, PII redaction ([`RealtimeConfig`], [`scrub_ws_url`], …) |
 //! | [`realtime_client`] | WS client, connection loop, Phoenix dispatch ([`RealtimeClient`], [`ClientHandle`], …) |
 

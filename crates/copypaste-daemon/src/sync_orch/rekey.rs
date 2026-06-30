@@ -19,7 +19,7 @@ use copypaste_core::{encrypt_chunks, ImageMeta, IMAGE_CHUNK_SIZE};
 use copypaste_sync::{merge::wire_to_local, protocol::WireItem};
 use tracing::{debug, warn};
 
-/// Context passed to [`merge_incoming_with_crypto`] to enable the
+/// Context passed to [`crate::sync_orch::merge::merge_incoming_with_crypto`] to enable the
 /// Universal Clipboard auto-apply feature: when a genuinely fresh remote
 /// item wins the LWW merge, write its decrypted plaintext directly to
 /// NSPasteboard so it is ready to paste immediately.
@@ -489,7 +489,7 @@ pub(super) fn rekey_outbound_text_with_key(
 /// Re-encrypt an outgoing item under the pairwise sync key for `peer_fingerprint`.
 ///
 /// CopyPaste-716: this is the correct per-peer fanout call. Unlike
-/// [`rekey_outbound`] (which uses the first cached key for legacy/catchup
+/// `rekey_outbound` (which uses the first cached key for legacy/catchup
 /// compatibility), this function looks up the sync key specific to
 /// `peer_fingerprint` from the per-peer cache. The caller (fanout + catchup
 /// paths) must clone the `WireItem` before calling so each peer gets its own

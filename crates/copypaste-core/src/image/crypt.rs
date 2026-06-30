@@ -266,7 +266,7 @@ pub fn decode_thumbnail_zeroizing(
 /// to `png_bytes` first (via [`decode_image`]), then passes them here.
 ///
 /// Pipeline:
-///   `png_bytes` → [`decode_clipboard_image`] → [`encode_thumbnail`]
+///   `png_bytes` → [`crate::decode_clipboard_image`] → [`encode_thumbnail`]
 ///
 /// On success returns `(thumb_blob, thumb_w, thumb_h)` — the same shape
 /// produced by [`encode_image_full`] — so the caller can persist it via

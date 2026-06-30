@@ -133,7 +133,7 @@ struct PairedPeersInner {
 ///
 /// When a peer rotates its certificate, the new fingerprint is unknown to us
 /// until we learn it out-of-band. Meanwhile any TLS handshake already in flight
-/// (or retried by [`PeerTransport::connect_with_retry`]) still presents the
+/// (or retried by [`crate::PeerTransport::connect_with_retry`]) still presents the
 /// *old* cert. To close that race, [`rotate_peer`](Self::rotate_peer) installs
 /// the new fingerprint as current while keeping the previous one valid for a
 /// bounded grace window ([`CERT_ROTATION_GRACE`]). [`is_known`](Self::is_known)

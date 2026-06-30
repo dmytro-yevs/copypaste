@@ -330,7 +330,7 @@ impl IpcServer {
     /// the canonical pool-then-writer-lock fallback, in ONE place.
     ///
     /// Every read IPC handler previously copy-pasted ~15 lines: clone the read
-    /// pool + `self.db`, `spawn_blocking`, try `pool.get()` → [`ReadHandle`] else
+    /// pool + `self.db`, `spawn_blocking`, try `pool.get()` → [`copypaste_core::ReadHandle`] else
     /// `db.blocking_lock()`, run the query, then `await`/join. Any fix to the
     /// fallback (or its error mapping) had to be applied at every site or the
     /// behaviour silently diverged. This helper centralises it; callers pass a

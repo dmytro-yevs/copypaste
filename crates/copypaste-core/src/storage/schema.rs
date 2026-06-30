@@ -23,10 +23,10 @@ pub enum SchemaError {
 ///     (see `copypaste-sync::merge::resolve`).
 ///   * 3 → 4 (v0.3 T5): added `key_version` column to `clipboard_items` to
 ///     track which HKDF key generation (v1 or v2) encrypted each row's
-///     ciphertext. See [`V4_ALTER_SQL`] and `super::migration_v4`.
+///     ciphertext. See `V4_ALTER_SQL` and `super::migration_v4`.
 ///   * 4 → 5 (beta.6 merge): added two UNIQUE INDEXes — `content_hash`+minute
 ///     bucket for TOCTOU dedup, `item_id` for sync replay protection.
-///     See [`V5_INDEXES_SQL`] / `schema_v2.sql`.
+///     See `V5_INDEXES_SQL` / `schema_v2.sql`.
 ///   * 5 → 6 (wave1a-atomic): added `migration_state` table for resumable
 ///     v4 key-rotation sweep tracking. Seeds the initial row so
 ///     `Database::migration_state()` always returns a valid state.
@@ -59,7 +59,7 @@ pub enum SchemaError {
 ///     unpinned rows so `prune_to_cap`'s per-write size gate can compute the
 ///     running `SUM(LENGTH(content))` as an index-only scan rather than a
 ///     full-table scan that reads every encrypted BLOB. No data change; index
-///     only. See [`V11_INDEX`].
+///     only. See `V11_INDEX`.
 ///   * 11 → 12 (CopyPaste-61fu): moved `revoked_devices` audit table creation
 ///     from an ad-hoc `CREATE TABLE IF NOT EXISTS` call in `devices::ensure_revoked_devices_table`
 ///     into the versioned migration chain. Previously the table was created lazily

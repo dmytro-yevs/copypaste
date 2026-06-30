@@ -3,15 +3,15 @@
 //!
 //! These functions are the platform-independent crypto + storage glue:
 //!
-//! - **Upload side:** [`decrypt_item_plaintext`] (local ciphertext → plaintext)
-//!   and [`wrap_and_check_cloud_upload_plaintext`] (prepend the file-identity
+//! - **Upload side:** `decrypt_item_plaintext` (local ciphertext → plaintext)
+//!   and `wrap_and_check_cloud_upload_plaintext` (prepend the file-identity
 //!   header + enforce the sync size ceiling). The caller then runs
 //!   `encrypt_for_cloud(sync_key, item_id, wrapped)` to produce the SAME opaque
 //!   blob for either transport.
-//! - **Download side:** [`build_local_item`] / [`build_local_blob_item`]
-//!   (decrypted plaintext → a locally-re-encrypted [`ClipboardItem`]) and
-//!   [`replace_cloud_item_by_item_id`] (atomic LWW in-place replace).
-//! - [`decode_payload_ct`] decodes a PostgREST `bytea` (`\x<hex>`) or bare
+//! - **Download side:** `build_local_item` / `build_local_blob_item`
+//!   (decrypted plaintext → a locally-re-encrypted [`copypaste_core::ClipboardItem`]) and
+//!   `replace_cloud_item_by_item_id` (atomic LWW in-place replace).
+//! - `decode_payload_ct` decodes a PostgREST `bytea` (`\x<hex>`) or bare
 //!   base64 ciphertext field.
 //!
 //! Extracted from `cloud.rs` so the relay client can reuse the byte-for-byte

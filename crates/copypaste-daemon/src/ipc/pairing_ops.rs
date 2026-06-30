@@ -80,7 +80,7 @@ impl IpcServer {
             .unwrap_or_else(|poisoned| poisoned.into_inner().clone().unwrap_or_default())
     }
 
-    /// Like [`own_sync_addr`] but waits (bounded by `timeout`) for the P2P sync
+    /// Like [`Self::own_sync_addr`] but waits (bounded by `timeout`) for the P2P sync
     /// listener to populate the slot before returning. A pairing initiated
     /// immediately after daemon startup can otherwise race the listener bind and
     /// advertise an EMPTY address, leaving the peer with no reachable sync addr
@@ -150,7 +150,7 @@ impl IpcServer {
         }
     }
 
-    /// Build THIS device's [`SyncProvisioning`] to advertise over the
+    /// Build THIS device's [`copypaste_p2p::bootstrap::SyncProvisioning`] to advertise over the
     /// authenticated bootstrap tunnel ("QR fully provisions all sync").
     ///
     /// Populates the non-secret Supabase connection params from the persisted
@@ -224,7 +224,7 @@ impl IpcServer {
         None
     }
 
-    /// Apply a peer's received [`SyncProvisioning`] ("QR fully provisions all
+    /// Apply a peer's received [`copypaste_p2p::bootstrap::SyncProvisioning`] ("QR fully provisions all
     /// sync"): fill in any sync-account field this device currently LACKS, but
     /// NEVER overwrite an existing local value.
     ///

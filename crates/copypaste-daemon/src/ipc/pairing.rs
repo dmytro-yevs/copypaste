@@ -541,7 +541,7 @@ pub(crate) fn compute_peer_online(
 /// Sessions are keyed by a UUID `session_id` that is returned to the caller
 /// and echoed back in the follow-up call. Each entry is timestamped
 /// ([`StampedPakeSession`]) and bounded by [`PAKE_SESSION_TTL`] /
-/// [`MAX_PAKE_SESSIONS`] — see [`IpcServer::insert_pake_session`].
+/// [`MAX_PAKE_SESSIONS`] — see [`crate::ipc::IpcServer::insert_pake_session`].
 pub(crate) enum PakeSession {
     /// Initiator waiting for the server's `CredentialResponse` (message2)
     /// to call `PakeInitiator::finish`. Boxed to equalise variant sizes and

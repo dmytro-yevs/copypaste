@@ -55,7 +55,7 @@ pub(super) async fn run_peer_connection(
 /// Manage one authenticated **outbound** (connector-side) peer connection.
 ///
 /// Identical duplex pump as [`run_peer_connection`] but for the client-side TLS
-/// stream type returned by [`PeerTransport::connect_with_retry`].
+/// stream type returned by [`copypaste_p2p::PeerTransport::connect_with_retry`].
 pub(super) async fn run_peer_connection_client(
     framed: copypaste_p2p::transport::PeerClientStream,
     peer_rx: mpsc::Receiver<PeerFrame>,

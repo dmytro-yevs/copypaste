@@ -21,7 +21,7 @@ use anyhow::Context as _;
 /// **separate** internal type; `read_config`/`update_core_config` bridge the two
 /// (the limit fields are mirrored into config.toml, credentials stay in
 /// config.json). `get_config` never returns the credentials — see
-/// [`build_config_response`].
+/// `build_config_response`.
 pub use copypaste_ipc::AppConfig;
 
 /// Build the redacted, read-only [`copypaste_ipc::AppConfigResponse`] that

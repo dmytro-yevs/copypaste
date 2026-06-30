@@ -25,7 +25,7 @@ pub fn exists_item(db: &Database, id: &str) -> Result<bool, anyhow::Error> {
 ///   * `id`               — item UUID (PK)
 ///   * `item_id`          — stable item identity UUID
 ///   * `content_type`     — "text" | "image" | ...
-///   * `payload_ct`       — base64(nonce[24]||ciphertext) from `encrypt_for_cloud`
+///   * `payload_ct`       — base64(nonce\[24\]||ciphertext) from `encrypt_for_cloud`
 ///   * `lamport_ts`       — LWW clock
 ///   * `wall_time`        — Unix ms
 ///   * `expires_at`       — TTL (nullable)

@@ -3,7 +3,7 @@
 //! When `max_bandwidth_kbps > 0`, upload calls acquire tokens from this
 //! bucket before transmitting so the daemon's outbound sync throughput stays
 //! at or below the configured ceiling.  `max_bandwidth_kbps = 0` (the
-//! default) leaves the path completely unthrottled — [`TokenBucket::acquire`]
+//! default) leaves the path completely unthrottled — [`crate::bandwidth::TokenBucket::acquire`]
 //! short-circuits immediately with zero state mutation.
 //!
 //! ## Mechanism
@@ -14,7 +14,7 @@
 //! The push loops call `set_rate_kbps` on each item to honour hot-reloaded
 //! config changes at runtime.
 //!
-//! Returned delays are capped at [`MAX_PACE_SECS`] seconds so a single large
+//! Returned delays are capped at [`crate::bandwidth::MAX_PACE_SECS`] seconds so a single large
 //! payload at a very low limit cannot stall the push loop for minutes.
 //!
 //! ## Thread safety

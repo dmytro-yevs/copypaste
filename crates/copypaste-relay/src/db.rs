@@ -342,7 +342,7 @@ impl Db {
         Ok(())
     }
 
-    /// Idempotent / monotonic variant of [`set_next_sync_id`]: advances the
+    /// Idempotent / monotonic variant of [`Self::set_next_sync_id`]: advances the
     /// counter to `next` only if `next` is greater than the current value
     /// (`MAX(current, next)`). Used by the deferred-write retry path
     /// (CopyPaste-crh3.70) where items may be retried out of insertion order:

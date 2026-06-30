@@ -24,7 +24,7 @@
 //!
 //! Channel binding (S3): after PAKE completes, each side mixes the RFC 5705 TLS
 //! exporter for *this* TLS session into the PAKE key
-//! ([`SessionKey::bind_to_tls_channel`]) and the two ends exchange
+//! ([`crate::pake::SessionKey::bind_to_tls_channel`]) and the two ends exchange
 //! role-separated confirmation tags ([`crate::pake::channel_confirmation_tag`]),
 //! compared in constant time. This binds pairing authenticity to the specific
 //! bootstrap TLS session: a relay/MitM that bridges PAKE over two separate TLS

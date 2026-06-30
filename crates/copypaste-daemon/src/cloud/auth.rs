@@ -11,7 +11,7 @@ use super::config::{redact_email, CloudConfig, CloudError};
 /// Resolve the bearer token for Supabase REST requests, using an explicit
 /// [`AuthClient`] so the caller can reuse the same client (and its session
 /// store) for the refresh-token grant later. On a successful password sign-in
-/// the resulting [`Session`] (incl. refresh token) is saved into `client`'s
+/// the resulting [`copypaste_supabase::Session`] (incl. refresh token) is saved into `client`'s
 /// store by `AuthClient::sign_in`.
 ///
 /// Credentials are resolved by [`CloudConfig::from_env`] (env vars first, then

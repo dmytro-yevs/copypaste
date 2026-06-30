@@ -27,7 +27,7 @@ pub enum CopypasteError {
     #[error("P2P pairing failed: {reason}")]
     P2pError { reason: String },
     /// v0.3 (OI-7): a Rust panic was caught at the FFI boundary by
-    /// [`panic_boundary::catch_result`]. Carries the panic message so Kotlin
+    /// `panic_boundary::catch_result`. Carries the panic message so Kotlin
     /// can log/surface it instead of seeing a JVM-killing abort.
     ///
     /// NOTE: the field is named `reason` (not `message`) on purpose — a UniFFI

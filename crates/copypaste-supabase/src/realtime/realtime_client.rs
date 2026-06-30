@@ -3,12 +3,12 @@
 //! Handles:
 //! - [`RealtimeClient`]: top-level client; spawns the connection loop
 //! - [`ClientHandle`]: shutdown + status handle with RAII Drop guard
-//! - [`RunningGuard`]: RAII flag-clear on task exit
-//! - [`connection_loop`]: outer reconnect + backoff loop
-//! - [`run_session`]: single WS session (connect → join → heartbeat + recv)
-//! - [`handle_message`]: per-frame dispatcher
-//! - [`dispatch_event`]: Phoenix event router (REPLY/ERROR/CLOSE/POSTGRES_CHANGES)
-//! - [`build_join_payload`]: `phx_join` payload (event:"*", mandatory user_id filter)
+//! - `RunningGuard`: RAII flag-clear on task exit
+//! - `connection_loop`: outer reconnect + backoff loop
+//! - `run_session`: single WS session (connect → join → heartbeat + recv)
+//! - `handle_message`: per-frame dispatcher
+//! - `dispatch_event`: Phoenix event router (REPLY/ERROR/CLOSE/POSTGRES_CHANGES)
+//! - `build_join_payload`: `phx_join` payload (event:"*", mandatory user_id filter)
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;

@@ -43,7 +43,7 @@ pub struct CloudConfig {
     pub anon_key: String,
     /// GoTrue account email for the `authenticated`-scope password grant.
     /// `None` falls back to anon-key-only operation (which the project's
-    /// RLS policies reject — see [`resolve_bearer`]).
+    /// RLS policies reject — see `resolve_bearer_with_client`).
     pub email: Option<String>,
     /// GoTrue account password. Never logged.
     pub password: Option<String>,

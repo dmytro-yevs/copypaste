@@ -172,7 +172,7 @@ pub fn sync_badge_recent_ms() -> i64 {
 /// Compute the canonical Android sync-badge state string.
 ///
 /// Returns one of: `"synced"`, `"syncing"`, `"idle"`, `"offline"`, `"error"`.
-/// These are the same wire values as [`IpcSyncBadgeState`] in Kotlin, so the
+/// These are the same wire values as `IpcSyncBadgeState` in Kotlin, so the
 /// caller can pass the result directly to `IpcSyncBadgeState.fromIpcString`.
 ///
 /// # Parameters
