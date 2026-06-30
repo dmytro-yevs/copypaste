@@ -48,9 +48,10 @@ class CpColorsTwoAxisTest {
         assertEquals(Color(0xFF5B49E0), AccentColor.INDIGO.base(isDark = false))
         assertEquals(Color.White, AccentColor.INDIGO.on(isDark = true))
         // teal — dark on-accent is the deep #06302C; light on-accent is the deep
-        // #052824 (CopyPaste-eud9 WCAG AA fix — white was 3.34:1 on the light base).
+        // #042722 (CopyPaste-eud9 WCAG AA fix, value-aligned with web tokens.css
+        // --on-accent for cross-platform parity — white was 3.34:1 on the light base).
         assertEquals(Color(0xFF06302C), AccentColor.TEAL.on(isDark = true))
-        assertEquals(Color(0xFF052824), AccentColor.TEAL.on(isDark = false))
+        assertEquals(Color(0xFF042722), AccentColor.TEAL.on(isDark = false))
         // variant (accent-2) for tinted surfaces.
         assertEquals(Color(0xFF9C8FFF), AccentColor.INDIGO.variant)
     }

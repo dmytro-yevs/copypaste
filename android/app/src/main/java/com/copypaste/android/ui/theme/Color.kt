@@ -60,9 +60,9 @@ val LightColors = CpColors(
 // CopyPaste-eud9 / §3.5 DEVIATION: the styleguide claimed "light deepens hues to
 // keep AA", but 5/12 on-accent cells shipped below WCAG AA (4.5:1). Corrected
 // (verified ratios in parens) so every filled-accent label passes AA:
-//   • dark  blue  → onDark  #06182F (4.84, was white 3.68)
-//   • dark  rose  → onDark  #2A0712 (5.15, was white 3.58)
-//   • light teal  → onLight #052824 (4.71, was white 3.34)
+//   • dark  blue  → onDark  #08152C (4.95, was white 3.68; value-aligned with web tokens.css)
+//   • dark  rose  → onDark  #240812 (5.24, was white 3.58; value-aligned with web)
+//   • light teal  → onLight #042722 (4.77, was white 3.34; value-aligned with web)
 //   • light green → onLight #062A12 (5.05, was white 3.08)
 //   • light amber → onLight #2A1B05 (5.15, was white 3.24)
 // (matches the parallel tokens.css --on-accent correction for cross-platform parity.)
