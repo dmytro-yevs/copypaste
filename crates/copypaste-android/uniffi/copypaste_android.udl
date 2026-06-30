@@ -102,8 +102,25 @@ namespace copypaste_android {
   /// Derive the 32-byte shared sync key from `passphrase` (Argon2id).
   /// Deterministic: same passphrase → same key on every device.
   /// Returns raw 32-byte key material. Caller MUST NOT persist to disk.
+  ///
+  /// This is the LEGACY v1 (global-salt) derivation. It stays the default so
+  /// existing Kotlin callers and all existing cloud/relay ciphertexts are
+  /// unchanged. For the v2 per-account-salt key, call
+  /// `derive_cloud_sync_key_for_account` (CopyPaste-jdq5).
   [Throws=CopypasteError]
   sequence<u8> derive_cloud_sync_key(string passphrase);
+
+  /// Derive the 32-byte **v2 per-account-salt** sync key (CopyPaste-jdq5).
+  ///
+  /// `account_id` is the stable Supabase account identity
+  /// (`"<project_ref>|<user_id>"`) both devices of an account agree on. Mixing
+  /// it into the Argon2id salt defeats cross-user precompute while keeping the
+  /// derivation deterministic across the account's devices. ADDITIVE: existing
+  /// callers keep using the v1 `derive_cloud_sync_key` above; Kotlin should call
+  /// THIS once it can supply the Supabase account id, so macOS<->Android cloud
+  /// interop holds after the v2 write cutover.
+  [Throws=CopypasteError]
+  sequence<u8> derive_cloud_sync_key_for_account(string passphrase, string account_id);
 
   /// Encrypt `plaintext` with the sync key, bound to `item_id` via AAD.
   /// Returns raw bytes: nonce[24] || ciphertext_with_tag (NOT base64).

@@ -892,6 +892,42 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         }
         std::sync::Arc::new(tokio::sync::Mutex::new(restored))
     };
+    // CopyPaste-jdq5: the SEPARATE v2 per-account-salt cloud key slot. This is
+    // used ONLY by the cloud (Supabase) push/poll/ws path — never by relay, P2P,
+    // or Android-relay (which all stay on the v1 `cloud_sync_key` above). It is
+    // restored from its own persistent file on restart, exactly mirroring the v1
+    // restore, so dual-key read dispatch (try v2 then v1) survives a daemon
+    // restart without the passphrase being re-entered. `None` until a passphrase
+    // is set WHILE a Supabase account id is known (see `set_sync_passphrase`).
+    #[cfg(feature = "cloud-sync")]
+    let cloud_sync_key_v2: std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>> = {
+        #[cfg(target_os = "macos")]
+        let restored_v2: Option<copypaste_core::SyncKey> = if crate::keychain::keychain_bypassed() {
+            None
+        } else {
+            match crate::keychain::signing::choose_key_backend() {
+                crate::keychain::signing::KeyBackend::File => {
+                    match crate::keychain::file_store::load_cloud_sync_key_v2() {
+                        Ok(Some(bytes)) => Some(copypaste_core::SyncKey::from_bytes(bytes)),
+                        Ok(None) => None,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "could not restore v2 cloud-sync key from file store");
+                            None
+                        }
+                    }
+                }
+                // Keychain path: not auto-restored here (reading would risk a
+                // prompt); the v2 key is re-established via `set_sync_passphrase`.
+                crate::keychain::signing::KeyBackend::Keychain => None,
+            }
+        };
+        #[cfg(not(target_os = "macos"))]
+        let restored_v2: Option<copypaste_core::SyncKey> = None;
+        if restored_v2.is_some() {
+            tracing::info!("restored v2 per-account cloud-sync key from persistent store");
+        }
+        std::sync::Arc::new(tokio::sync::Mutex::new(restored_v2))
+    };
     #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     let cloud_last_sync_ms: std::sync::Arc<std::sync::atomic::AtomicI64> =
         std::sync::Arc::new(std::sync::atomic::AtomicI64::new(0));
@@ -1066,6 +1102,10 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
         #[cfg(feature = "cloud-sync")]
         {
             server = server.with_cloud_account_id_slot(cloud_account_id_slot.clone());
+            // CopyPaste-jdq5: share the v2 cloud key slot so `set_sync_passphrase`
+            // (and rotate/revoke) can install the freshly-derived v2 key into the
+            // SAME Mutex the cloud loops read for dual-key dispatch.
+            server = server.with_cloud_sync_key_v2(cloud_sync_key_v2.clone());
         }
         // CopyPaste-1jms.22: wire the shared in-flight flag so get_sync_status
         // can emit SyncBadgeState::Syncing while a sync round-trip is active.
@@ -1537,6 +1577,9 @@ pub async fn run_with_quit_flag(quit_flag: Arc<AtomicBool>) -> anyhow::Result<()
                 db.clone(),
                 rx,
                 cloud_sync_key.clone(),
+                // CopyPaste-jdq5: the v2 per-account cloud key slot — used only by
+                // the cloud loops for dual-key read + (flag-gated) v2 writes.
+                cloud_sync_key_v2.clone(),
                 cloud_last_sync_ms.clone(),
                 local_key_arc.clone(),
                 cloud_signed_in.clone(),

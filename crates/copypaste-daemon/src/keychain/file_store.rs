@@ -51,6 +51,18 @@ const KEY_FILE_NAME: &str = "device_secret.key";
 /// Filename of the cloud-sync passphrase-derived key inside the app data dir.
 const CLOUD_SYNC_FILE_NAME: &str = "cloud_sync.key";
 
+/// Filename of the **v2 per-account-salt** cloud-sync key (CopyPaste-jdq5).
+///
+/// Sibling of [`CLOUD_SYNC_FILE_NAME`]; holds the 32-byte v2 key derived via
+/// `derive_sync_key_for_account(passphrase, account_id)`. Persisted separately so
+/// a restart can restore BOTH the v1 (relay + read-fallback) and v2 (cloud-write
+/// + preferred-read) keys for dual-key read dispatch without the passphrase.
+#[cfg_attr(
+    not(feature = "cloud-sync"),
+    allow(dead_code, reason = "only used by the cloud-sync v2 persist/restore path")
+)]
+const CLOUD_SYNC_V2_FILE_NAME: &str = "cloud_sync_v2.key";
+
 /// Resolve the app data dir for key files, honouring `COPYPASTE_KEY_FILE_PATH`
 /// for tests. When the override is set it points at a *file*, and its parent
 /// directory is used as the data dir so sibling key files (cloud-sync) land
@@ -87,6 +99,15 @@ fn cloud_sync_file_path() -> Result<PathBuf, KeychainError> {
     Ok(data_dir_for_keys()?.join(CLOUD_SYNC_FILE_NAME))
 }
 
+/// Path to the v2 per-account-salt cloud-sync key file (CopyPaste-jdq5).
+#[cfg_attr(
+    not(feature = "cloud-sync"),
+    allow(dead_code, reason = "only used by the cloud-sync v2 persist/restore path")
+)]
+fn cloud_sync_v2_file_path() -> Result<PathBuf, KeychainError> {
+    Ok(data_dir_for_keys()?.join(CLOUD_SYNC_V2_FILE_NAME))
+}
+
 /// Persist the 32-byte cloud-sync (passphrase-derived) key to a `0600` file.
 ///
 /// Used instead of the Keychain on ad-hoc / unsigned installs so that setting
@@ -104,6 +125,35 @@ pub fn store_cloud_sync_key(secret: &[u8; 32]) -> Result<(), KeychainError> {
 /// wrapper is dropped here, wiping the intermediate copy from the stack.
 pub fn load_cloud_sync_key() -> Result<Option<[u8; 32]>, KeychainError> {
     Ok(read_secret(&cloud_sync_file_path()?)?.map(|z| *z))
+}
+
+/// Persist the 32-byte **v2 per-account-salt** cloud-sync key to a `0600` file
+/// (CopyPaste-jdq5). Mirrors [`store_cloud_sync_key`] exactly but writes the
+/// sibling [`CLOUD_SYNC_V2_FILE_NAME`] so the v1 and v2 keys coexist.
+#[cfg(feature = "cloud-sync")]
+pub fn store_cloud_sync_key_v2(secret: &[u8; 32]) -> Result<(), KeychainError> {
+    let path = cloud_sync_v2_file_path()?;
+    write_secret_atomic_to(&path, CLOUD_SYNC_V2_FILE_NAME, secret)
+}
+
+/// Load the persisted v2 per-account-salt cloud-sync key, or `None` if no v2 key
+/// was ever derived (e.g. the passphrase was set before a Supabase account was
+/// available). Mirrors [`load_cloud_sync_key`].
+#[cfg(feature = "cloud-sync")]
+pub fn load_cloud_sync_key_v2() -> Result<Option<[u8; 32]>, KeychainError> {
+    Ok(read_secret(&cloud_sync_v2_file_path()?)?.map(|z| *z))
+}
+
+/// Delete the persisted v2 cloud-sync key file (used when the v2 key is cleared,
+/// e.g. on sign-out). Missing file is not an error. Mirrors [`delete_stored`].
+#[cfg(feature = "cloud-sync")]
+pub fn delete_cloud_sync_key_v2() -> Result<(), KeychainError> {
+    let path = cloud_sync_v2_file_path()?;
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(KeychainError::Io(e)),
+    }
 }
 
 /// Load the device keypair from the `0600` key file, creating + persisting a
@@ -490,6 +540,55 @@ mod tests {
             &original_secret[..],
             "the persisted key must still equal the originally-seeded secret"
         );
+    }
+
+    /// CopyPaste-jdq5: the v2 per-account cloud key persists to its OWN sibling
+    /// file and round-trips independently of the v1 cloud key — proving a restart
+    /// can restore BOTH slots for dual-key read dispatch. Also verifies the v2
+    /// file is absent until written (so a daemon that never derived v2 simply
+    /// loads `None` and stays on v1) and that delete removes it.
+    #[cfg(feature = "cloud-sync")]
+    #[test]
+    fn cloud_sync_key_v2_round_trips_and_is_independent_of_v1() {
+        let _env = KeyFileEnv::new();
+        // Nothing persisted yet.
+        assert_eq!(
+            load_cloud_sync_key_v2().expect("load v2 (absent)"),
+            None,
+            "no v2 key until one is derived"
+        );
+
+        let v1_secret = [0x11u8; 32];
+        let v2_secret = [0x22u8; 32];
+        store_cloud_sync_key(&v1_secret).expect("store v1");
+        store_cloud_sync_key_v2(&v2_secret).expect("store v2");
+
+        // Each slot reloads its OWN bytes — they never alias.
+        assert_eq!(
+            load_cloud_sync_key().expect("load v1"),
+            Some(v1_secret),
+            "v1 slot must reload the v1 bytes"
+        );
+        assert_eq!(
+            load_cloud_sync_key_v2().expect("load v2"),
+            Some(v2_secret),
+            "v2 slot must reload the v2 bytes (restart-surviving dual-key read)"
+        );
+
+        // Deleting v2 must NOT disturb v1.
+        delete_cloud_sync_key_v2().expect("delete v2");
+        assert_eq!(
+            load_cloud_sync_key_v2().expect("load v2 after delete"),
+            None,
+            "v2 must be gone after delete"
+        );
+        assert_eq!(
+            load_cloud_sync_key().expect("load v1 after v2 delete"),
+            Some(v1_secret),
+            "deleting v2 must leave the v1 key intact"
+        );
+        // Deleting a missing v2 file is a benign no-op.
+        delete_cloud_sync_key_v2().expect("delete missing v2 is ok");
     }
 
     /// When the key file is ABSENT and no legacy Keychain key is adoptable (the

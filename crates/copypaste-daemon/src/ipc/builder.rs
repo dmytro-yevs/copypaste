@@ -195,6 +195,19 @@ impl IpcServer {
         self
     }
 
+    /// Wire the shared **v2 per-account-salt** cloud key slot (CopyPaste-jdq5).
+    ///
+    /// The daemon creates this `Arc<Mutex<Option<SyncKey>>>` (restoring any
+    /// persisted v2 key) BEFORE spawning both the IPC server and `start_cloud`,
+    /// then passes the SAME `Arc` to both so a `set_sync_passphrase` IPC call
+    /// installs the freshly-derived v2 key into the exact slot the cloud loops
+    /// read for dual-key dispatch.
+    #[cfg(feature = "cloud-sync")]
+    pub fn with_cloud_sync_key_v2(mut self, sync_key_v2: Arc<Mutex<Option<SyncKey>>>) -> Self {
+        self.sync_key_v2 = sync_key_v2;
+        self
+    }
+
     /// Wire the canonical Supabase account-identity slot (CopyPaste-1jms.34).
     ///
     /// The caller creates a shared `Arc<Mutex<Option<String>>>` BEFORE spawning
@@ -264,6 +277,11 @@ impl IpcServer {
             self_write_change_count: Arc::new(std::sync::atomic::AtomicI64::new(-1)),
             #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             sync_key: Arc::new(Mutex::new(None)),
+            // CopyPaste-jdq5: v2 per-account cloud key slot — populated by
+            // `set_sync_passphrase` when a Supabase account id is known, wired to
+            // the cloud loops via `with_cloud_sync_key_v2`.
+            #[cfg(feature = "cloud-sync")]
+            sync_key_v2: Arc::new(Mutex::new(None)),
             #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]

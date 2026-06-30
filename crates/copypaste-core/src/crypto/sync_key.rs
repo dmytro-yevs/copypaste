@@ -513,6 +513,57 @@ pub fn decrypt_from_cloud(
         .map_err(|_| SyncKeyError::DecryptFailed)
 }
 
+/// Decrypt a cloud blob by trying each candidate key in order, returning the
+/// plaintext from the FIRST key that authenticates.
+///
+/// This is the restart-surviving **dual-key read dispatch** primitive for the
+/// cloud (Supabase) download path: after the v2 per-account-salt cutover, a row
+/// may have been written under either the **v2** key (new writes) or the legacy
+/// **v1** key (pre-cutover data). The reader cannot tell which from the blob
+/// (the wire format `nonce || ciphertext` is byte-identical for both schemes and
+/// carries no version discriminator), so it trial-decrypts: pass the candidates
+/// in `[v2, v1]` order and the XChaCha20-Poly1305 auth tag rejects every wrong
+/// key, so only the key the row was actually encrypted under succeeds.
+///
+/// Trial decryption is sound because the AEAD tag makes a wrong-key attempt
+/// indistinguishable from a tampered blob — there is no padding/format oracle to
+/// leak which key matched. The cost is one extra (failed) AEAD verification per
+/// pre-cutover row, which is negligible next to the network round-trip.
+///
+/// Returns `BlobTooShort` if the blob is shorter than the nonce (checked once,
+/// before any key is tried), `DecryptFailed` if `keys` is empty or NONE of the
+/// candidates authenticate, or the recovered plaintext on the first success.
+///
+/// # Security
+/// - Never reveals WHICH key matched via the return type — callers that need to
+///   know (e.g. to decide whether to re-write under v2) must observe it
+///   out-of-band; the public contract is plaintext-or-`DecryptFailed`.
+/// - Each candidate is tried with the identical AAD `(item_id, schema v5)`.
+pub fn decrypt_from_cloud_trying(
+    keys: &[&SyncKey],
+    item_id: &str,
+    blob: &[u8],
+) -> Result<Vec<u8>, SyncKeyError> {
+    // Length is independent of the key, so check it once up front rather than
+    // per-candidate; a too-short blob is a structural error, not a wrong key.
+    if blob.len() < NONCE_SIZE {
+        return Err(SyncKeyError::BlobTooShort(blob.len()));
+    }
+    for key in keys {
+        match decrypt_from_cloud(key, item_id, blob) {
+            Ok(plaintext) => return Ok(plaintext),
+            // Wrong key for THIS candidate — try the next. We deliberately do not
+            // short-circuit on the first failure: a v1 row fails the v2 candidate
+            // and must still be offered the v1 candidate.
+            Err(SyncKeyError::DecryptFailed) => continue,
+            // BlobTooShort cannot occur here (length checked above); propagate any
+            // other (currently unreachable) error variant rather than masking it.
+            Err(other) => return Err(other),
+        }
+    }
+    Err(SyncKeyError::DecryptFailed)
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -991,5 +1042,122 @@ mod tests {
     fn derivation_version_constants() {
         assert_eq!(SYNC_KEY_DERIVATION_VERSION_V1, 1);
         assert_eq!(SYNC_KEY_DERIVATION_VERSION_V2, 2);
+    }
+
+    // ── CopyPaste-jdq5: dual-key read dispatch (decrypt_from_cloud_trying) ─────
+
+    /// A blob written under the v2 key must be recovered when the candidate list
+    /// is `[v2, v1]` — the post-cutover happy path.
+    #[test]
+    fn trying_recovers_v2_blob_with_v2_then_v1() {
+        let v1 = derive_sync_key(PASS).expect("v1");
+        let v2 = derive_sync_key_for_account(PASS, ACCOUNT_A).expect("v2");
+        let item_id = "item-trying-v2";
+        let plaintext = b"written under v2 per-account salt";
+        let blob = encrypt_for_cloud(&v2, item_id, plaintext).expect("encrypt v2");
+        let recovered =
+            decrypt_from_cloud_trying(&[&v2, &v1], item_id, &blob).expect("v2 candidate decrypts");
+        assert_eq!(recovered, plaintext);
+    }
+
+    /// A LEGACY v1 blob must still be recovered when the candidate list is
+    /// `[v2, v1]` — this is the zero-data-loss back-compat guarantee: existing
+    /// pre-cutover cloud rows keep decrypting after v2 is introduced. The v2
+    /// candidate is tried first and fails (auth-tag mismatch); the v1 candidate
+    /// then succeeds.
+    #[test]
+    fn trying_recovers_v1_blob_via_fallback() {
+        let v1 = derive_sync_key(PASS).expect("v1");
+        let v2 = derive_sync_key_for_account(PASS, ACCOUNT_A).expect("v2");
+        let item_id = "item-trying-v1-legacy";
+        let plaintext = b"legacy row written before the v2 cutover";
+        // Encrypt under v1 (as a pre-cutover daemon would have).
+        let blob = encrypt_for_cloud(&v1, item_id, plaintext).expect("encrypt v1");
+        // Reader offers [v2, v1]: v2 fails, v1 wins.
+        let recovered =
+            decrypt_from_cloud_trying(&[&v2, &v1], item_id, &blob).expect("v1 fallback decrypts");
+        assert_eq!(recovered, plaintext);
+    }
+
+    /// A single-candidate list `[v1]` (the un-cutover default: no v2 key present)
+    /// behaves exactly like `decrypt_from_cloud` for a v1 blob.
+    #[test]
+    fn trying_single_v1_candidate_matches_plain_decrypt() {
+        let v1 = derive_sync_key(PASS).expect("v1");
+        let item_id = "item-trying-single";
+        let plaintext = b"only the v1 key is configured";
+        let blob = encrypt_for_cloud(&v1, item_id, plaintext).expect("encrypt v1");
+        let recovered =
+            decrypt_from_cloud_trying(&[&v1], item_id, &blob).expect("single candidate decrypts");
+        assert_eq!(recovered, plaintext);
+    }
+
+    /// When NONE of the candidates match (wrong passphrase entirely), the result
+    /// is `DecryptFailed` — never a panic, never a partial plaintext.
+    #[test]
+    fn trying_all_wrong_keys_returns_decrypt_failed() {
+        let real = derive_sync_key(PASS).expect("real");
+        let wrong_a = derive_sync_key("totally-different-pass-a").expect("wrong a");
+        let wrong_b = derive_sync_key_for_account("totally-different-pass-b", ACCOUNT_B)
+            .expect("wrong b");
+        let item_id = "item-trying-none";
+        let blob = encrypt_for_cloud(&real, item_id, b"secret").expect("encrypt");
+        assert!(matches!(
+            decrypt_from_cloud_trying(&[&wrong_a, &wrong_b], item_id, &blob),
+            Err(SyncKeyError::DecryptFailed)
+        ));
+    }
+
+    /// An empty candidate list yields `DecryptFailed` (nothing to try), not a
+    /// panic.
+    #[test]
+    fn trying_empty_candidates_returns_decrypt_failed() {
+        let v1 = derive_sync_key(PASS).expect("v1");
+        let blob = encrypt_for_cloud(&v1, "x", b"data").expect("encrypt");
+        let no_keys: [&SyncKey; 0] = [];
+        assert!(matches!(
+            decrypt_from_cloud_trying(&no_keys, "x", &blob),
+            Err(SyncKeyError::DecryptFailed)
+        ));
+    }
+
+    /// A too-short blob is reported as `BlobTooShort` (checked once, before any
+    /// candidate is tried) rather than collapsing into `DecryptFailed`.
+    #[test]
+    fn trying_short_blob_returns_blob_too_short() {
+        let v1 = derive_sync_key(PASS).expect("v1");
+        let short = [0u8; 5];
+        assert!(matches!(
+            decrypt_from_cloud_trying(&[&v1], "x", &short),
+            Err(SyncKeyError::BlobTooShort(5))
+        ));
+    }
+
+    /// Restart simulation: a v1 blob written by a "previous run" must still
+    /// decrypt when BOTH key slots are reloaded from persisted bytes (via
+    /// `from_bytes`, the exact path the daemon uses to restore Keychain/file-store
+    /// key material across a restart) and offered as `[v2, v1]`.
+    #[test]
+    fn trying_survives_restart_reload_of_both_slots() {
+        let item_id = "item-restart-v1";
+        let plaintext = b"persisted under v1 before the daemon restarted";
+        // "Before restart": derive v1, encrypt a row.
+        let blob = {
+            let v1 = derive_sync_key(PASS).expect("v1 pre-restart");
+            encrypt_for_cloud(&v1, item_id, plaintext).expect("encrypt v1")
+        };
+        // "After restart": the daemon reloads the persisted key BYTES (no
+        // passphrase available) for both the v1 and v2 slots and reconstructs
+        // SyncKeys via from_bytes.
+        let v1_bytes = *derive_sync_key(PASS).expect("v1 bytes").as_bytes();
+        let v2_bytes = *derive_sync_key_for_account(PASS, ACCOUNT_A)
+            .expect("v2 bytes")
+            .as_bytes();
+        let v1_reloaded = SyncKey::from_bytes(v1_bytes);
+        let v2_reloaded = SyncKey::from_bytes(v2_bytes);
+        let recovered =
+            decrypt_from_cloud_trying(&[&v2_reloaded, &v1_reloaded], item_id, &blob)
+                .expect("reloaded slots decrypt the legacy v1 row");
+        assert_eq!(recovered, plaintext);
     }
 }

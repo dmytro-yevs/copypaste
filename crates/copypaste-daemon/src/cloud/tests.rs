@@ -862,6 +862,182 @@ fn cloud_row(id: &str, sync_key: &SyncKey, plaintext: &[u8], wall_time: i64) -> 
     })
 }
 
+/// **CopyPaste-jdq5** — dual-key read dispatch through the REAL `poll_once`.
+///
+/// Proves the zero-data-loss back-compat guarantee end-to-end: when the download
+/// path is handed the `[v2 || v1]` candidate buffer, a row written under the
+/// LEGACY v1 key (a pre-cutover cloud row) still decrypts and lands locally, and
+/// a row written under the NEW v2 per-account key also decrypts. Only the key the
+/// row was encrypted under authenticates — the other candidate's AEAD attempt
+/// fails silently — so a mixed v1/v2 cloud history reads correctly with no schema
+/// version column.
+#[tokio::test]
+async fn poll_dual_key_decrypts_both_v1_legacy_and_v2_rows() {
+    use mockito::Matcher;
+
+    let passphrase = "correct horse battery staple";
+    let account_id = "proj_abc|00000000-0000-0000-0000-0000000000aa";
+    let v1 = copypaste_core::derive_sync_key(passphrase).expect("v1");
+    let v2 = copypaste_core::derive_sync_key_for_account(passphrase, account_id).expect("v2");
+
+    // A legacy row (encrypted under v1) and a newer row (encrypted under v2).
+    let v1_row = cloud_row(
+        "11111111-1111-1111-1111-111111111111",
+        &v1,
+        b"legacy v1 row",
+        1000,
+    );
+    let v2_row = cloud_row(
+        "22222222-2222-2222-2222-222222222222",
+        &v2,
+        b"new v2 row",
+        2000,
+    );
+
+    let _m = mockito::mock("GET", "/rest/v1/clipboard_items")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(serde_json::to_string(&vec![v1_row, v2_row]).unwrap())
+        .expect(1)
+        .create();
+
+    let cfg = test_cfg();
+    let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+    let client = reqwest::Client::new();
+    let db = Arc::new(Mutex::new(
+        copypaste_core::Database::open_in_memory().expect("in-mem db"),
+    ));
+    let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
+    let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+    let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let auth = test_auth(&cfg);
+
+    // The dual-key read candidate buffer: v2 first, then v1 (concatenated
+    // 32-byte keys), exactly as `snapshot_cloud_read_key_bytes` produces.
+    let mut key_bytes = Vec::with_capacity(64);
+    key_bytes.extend_from_slice(v2.as_bytes());
+    key_bytes.extend_from_slice(v1.as_bytes());
+
+    let (_wm, batch_len) = poll_once(
+        &client,
+        &cfg,
+        &bearer,
+        &db,
+        &local_key,
+        &last_sync_ms,
+        &signed_in,
+        &auth,
+        &key_bytes,
+        PollCursor::default(),
+        500_000_000,
+    )
+    .await;
+
+    assert_eq!(batch_len, 2, "both rows must be fetched");
+    let g = db.lock().await;
+    let count: i64 = g
+        .conn()
+        .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        count, 2,
+        "both the legacy v1 row and the v2 row must decrypt and be stored (dual-key read)"
+    );
+}
+
+/// **CopyPaste-jdq5** — a SINGLE v1 candidate (the un-cutover default: no v2 key
+/// installed) behaves exactly as before: a v1 row decrypts. This pins that the
+/// concatenated-candidate reinterpretation of `poll_once`'s `key_bytes` is a pure
+/// superset — one 32-byte key is just one candidate.
+#[tokio::test]
+async fn poll_single_v1_candidate_still_decrypts() {
+    use mockito::Matcher;
+
+    let v1 = copypaste_core::derive_sync_key("correct horse battery staple").expect("v1");
+    let row = cloud_row(
+        "33333333-3333-3333-3333-333333333333",
+        &v1,
+        b"v1 only",
+        1500,
+    );
+    let _m = mockito::mock("GET", "/rest/v1/clipboard_items")
+        .match_query(Matcher::Any)
+        .with_status(200)
+        .with_header("content-type", "application/json")
+        .with_body(serde_json::to_string(&vec![row]).unwrap())
+        .expect(1)
+        .create();
+
+    let cfg = test_cfg();
+    let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
+    let client = reqwest::Client::new();
+    let db = Arc::new(Mutex::new(
+        copypaste_core::Database::open_in_memory().expect("in-mem db"),
+    ));
+    let local_key = Arc::new(zeroize::Zeroizing::new([7u8; 32]));
+    let last_sync_ms = Arc::new(std::sync::atomic::AtomicI64::new(0));
+    let signed_in = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let auth = test_auth(&cfg);
+    // A single 32-byte candidate (no v2 key present).
+    let key_bytes = v1.as_bytes().to_vec();
+
+    let (_wm, _len) = poll_once(
+        &client,
+        &cfg,
+        &bearer,
+        &db,
+        &local_key,
+        &last_sync_ms,
+        &signed_in,
+        &auth,
+        &key_bytes,
+        PollCursor::default(),
+        500_000_000,
+    )
+    .await;
+
+    let g = db.lock().await;
+    let count: i64 = g
+        .conn()
+        .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(count, 1, "single-candidate v1 read must still decrypt the row");
+}
+
+/// **CopyPaste-jdq5** — the v2 cloud-write opt-in gate parses truthy env values
+/// and defaults OFF, so a fresh install never writes v2 (preserving Android /
+/// un-upgraded-peer interop) until an operator deliberately enables it.
+#[test]
+fn cloud_v2_writes_flag_defaults_off_and_parses_truthy() {
+    let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let original = std::env::var_os("COPYPASTE_CLOUD_KEY_V2_WRITES");
+    // SAFETY: serialised via TEST_ENV_LOCK.
+    unsafe {
+        std::env::remove_var("COPYPASTE_CLOUD_KEY_V2_WRITES");
+    }
+    assert!(!cloud_v2_writes_enabled(), "must default OFF when unset");
+    for truthy in ["1", "true", "TRUE", "yes", "On"] {
+        unsafe {
+            std::env::set_var("COPYPASTE_CLOUD_KEY_V2_WRITES", truthy);
+        }
+        assert!(cloud_v2_writes_enabled(), "{truthy:?} must enable v2 writes");
+    }
+    for falsy in ["0", "false", "no", "off", "", "bogus"] {
+        unsafe {
+            std::env::set_var("COPYPASTE_CLOUD_KEY_V2_WRITES", falsy);
+        }
+        assert!(!cloud_v2_writes_enabled(), "{falsy:?} must NOT enable v2 writes");
+    }
+    // Restore.
+    unsafe {
+        match original {
+            Some(v) => std::env::set_var("COPYPASTE_CLOUD_KEY_V2_WRITES", v),
+            None => std::env::remove_var("COPYPASTE_CLOUD_KEY_V2_WRITES"),
+        }
+    }
+}
+
 /// **BUG 1** — after ingesting a row with `wall_time=T`, the NEXT poll must
 /// carry `wall_time=gt.T`, and a row at-or-below the watermark must NOT be
 /// re-requested or re-inserted.
@@ -1393,6 +1569,8 @@ async fn start_cloud_auth_failure_sets_signed_in_false() {
         db,
         rx,
         sync_key,
+        // CopyPaste-jdq5: v2 per-account cloud key slot (None here).
+        Arc::new(Mutex::new(None)),
         last_sync_ms,
         local_key,
         signed_in.clone(),

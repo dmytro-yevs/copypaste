@@ -65,6 +65,9 @@ pub(crate) const MUTATION_QUEUE_DRAIN_INTERVAL: Duration = Duration::from_secs(1
 pub(super) async fn prepare_and_enqueue_item(
     item: ClipboardItem,
     sync_key: &Arc<Mutex<Option<SyncKey>>>,
+    // CopyPaste-jdq5: v2 per-account cloud key slot. The WRITE key is v2 when
+    // `COPYPASTE_CLOUD_KEY_V2_WRITES` is set AND a v2 key is installed, else v1.
+    sync_key_v2: &Arc<Mutex<Option<SyncKey>>>,
     local_key: &Arc<zeroize::Zeroizing<[u8; 32]>>,
     retry_queue: &mut VecDeque<(ClipboardItem, Option<String>)>,
     warned_no_key: &mut bool,
@@ -120,10 +123,12 @@ pub(super) async fn prepare_and_enqueue_item(
             return false;
         }
     };
-    // Re-encrypt for cloud under the current sync key.
+    // Re-encrypt for cloud under the current WRITE key (CopyPaste-jdq5: v2 when
+    // enabled + installed, else v1). The bytes are reconstructed into a SyncKey
+    // and dropped (zeroized) at the end of this scope.
     let payload_ct_b64 = {
-        let key_guard = sync_key.lock().await;
-        match &*key_guard {
+        let write_key = super::snapshot_cloud_write_key_bytes(sync_key, sync_key_v2).await;
+        match write_key {
             None => {
                 if !*warned_no_key {
                     tracing::warn!(
@@ -134,7 +139,8 @@ pub(super) async fn prepare_and_enqueue_item(
                 }
                 return false;
             }
-            Some(key) => {
+            Some((key_bytes, _ver)) => {
+                let key = SyncKey::from_bytes(key_bytes);
                 let cloud_plaintext = match wrap_and_check_cloud_upload_plaintext(&item, plaintext)
                 {
                     Ok(p) => p,
@@ -143,7 +149,7 @@ pub(super) async fn prepare_and_enqueue_item(
                         return false;
                     }
                 };
-                match encrypt_for_cloud(key, &item.item_id, &cloud_plaintext) {
+                match encrypt_for_cloud(&key, &item.item_id, &cloud_plaintext) {
                     Ok(blob) => {
                         use base64::Engine as _;
                         base64::engine::general_purpose::STANDARD.encode(&blob)
@@ -192,6 +198,8 @@ pub(super) async fn push_loop(
     mut rx: tokio::sync::broadcast::Receiver<ClipboardItem>,
     shutdown: Arc<tokio::sync::Notify>,
     sync_key: Arc<Mutex<Option<SyncKey>>>,
+    // CopyPaste-jdq5: v2 per-account cloud key slot for flag-gated v2 writes.
+    sync_key_v2: Arc<Mutex<Option<SyncKey>>>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     db: Arc<Mutex<Database>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
@@ -238,10 +246,13 @@ pub(super) async fn push_loop(
     // (see `prev_key_present` below), so the "start daemon, then enter
     // passphrase" flow no longer strands the existing history.
     let key_present_at_start = {
-        let key_snapshot: Option<Vec<u8>> = {
-            let guard = sync_key.lock().await;
-            guard.as_ref().map(|k| k.as_bytes().to_vec())
-        };
+        // CopyPaste-jdq5: sweep + re-encrypt the startup backlog under the WRITE
+        // key (v2 when enabled + installed, else v1) so existing history uploads
+        // under the same scheme new captures will use.
+        let key_snapshot: Option<[u8; 32]> =
+            super::snapshot_cloud_write_key_bytes(&sync_key, &sync_key_v2)
+                .await
+                .map(|(bytes, _ver)| bytes);
         match key_snapshot {
             Some(key_bytes) => {
                 run_backlog_sweep(&db, &local_key, &key_bytes, &mut retry_queue).await;
@@ -288,10 +299,10 @@ pub(super) async fn push_loop(
         // Without this, history captured before the passphrase was set never
         // uploads until each item is re-copied. We snapshot the key bytes under
         // the lock, then release it before the (awaiting) sweep.
-        let key_now: Option<Vec<u8>> = {
-            let guard = sync_key.lock().await;
-            guard.as_ref().map(|k| k.as_bytes().to_vec())
-        };
+        let key_now: Option<[u8; 32]> =
+            super::snapshot_cloud_write_key_bytes(&sync_key, &sync_key_v2)
+                .await
+                .map(|(bytes, _ver)| bytes);
         let key_present_now = key_now.is_some();
         if key_present_now && !prev_key_present {
             if let Some(key_bytes) = key_now.as_ref() {
@@ -428,6 +439,7 @@ pub(super) async fn push_loop(
                                     prepare_and_enqueue_item(
                                         incoming,
                                         &sync_key,
+                                        &sync_key_v2,
                                         &local_key,
                                         &mut retry_queue,
                                         &mut warned_no_key,
@@ -459,6 +471,7 @@ pub(super) async fn push_loop(
                                         prepare_and_enqueue_item(
                                             incoming,
                                             &sync_key,
+                                            &sync_key_v2,
                                             &local_key,
                                             &mut retry_queue,
                                             &mut warned_no_key,
@@ -516,6 +529,7 @@ pub(super) async fn push_loop(
                         let enqueued = prepare_and_enqueue_item(
                             item,
                             &sync_key,
+                            &sync_key_v2,
                             &local_key,
                             &mut retry_queue,
                             &mut warned_no_key,
@@ -869,6 +883,7 @@ mod tests {
     #[tokio::test]
     async fn cloud_push_skips_sensitive_item() {
         let sync_key = Arc::new(Mutex::new(None));
+        let sync_key_v2 = Arc::new(Mutex::new(None));
         let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
         let mut queue = VecDeque::new();
         let mut warned = false;
@@ -879,8 +894,15 @@ mod tests {
         // before the deleted fast-path).
         item.deleted = true;
 
-        let enqueued =
-            prepare_and_enqueue_item(item, &sync_key, &local_key, &mut queue, &mut warned).await;
+        let enqueued = prepare_and_enqueue_item(
+            item,
+            &sync_key,
+            &sync_key_v2,
+            &local_key,
+            &mut queue,
+            &mut warned,
+        )
+        .await;
 
         assert!(!enqueued, "sensitive item must not be enqueued");
         assert!(
@@ -897,6 +919,7 @@ mod tests {
     #[tokio::test]
     async fn cloud_push_enqueues_non_sensitive_tombstone() {
         let sync_key = Arc::new(Mutex::new(None));
+        let sync_key_v2 = Arc::new(Mutex::new(None));
         let local_key = Arc::new(zeroize::Zeroizing::new([0u8; 32]));
         let mut queue = VecDeque::new();
         let mut warned = false;
@@ -905,8 +928,15 @@ mod tests {
         item.is_sensitive = false;
         item.deleted = true;
 
-        let enqueued =
-            prepare_and_enqueue_item(item, &sync_key, &local_key, &mut queue, &mut warned).await;
+        let enqueued = prepare_and_enqueue_item(
+            item,
+            &sync_key,
+            &sync_key_v2,
+            &local_key,
+            &mut queue,
+            &mut warned,
+        )
+        .await;
 
         assert!(enqueued, "non-sensitive tombstone must be enqueued");
         assert_eq!(queue.len(), 1, "tombstone must enter the retry queue");

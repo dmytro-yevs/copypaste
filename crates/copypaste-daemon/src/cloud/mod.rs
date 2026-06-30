@@ -74,6 +74,83 @@ pub(crate) use push::{
     MUTATION_QUEUE_DRAIN_INTERVAL, PUSH_RETRY_QUEUE_CAP,
 };
 
+// ── CopyPaste-jdq5: v2 cloud-write opt-in gate ──────────────────────────────────
+
+/// Environment flag that opts NEW cloud (Supabase) writes into the **v2
+/// per-account-salt** key. Default OFF.
+///
+/// Reading (downloads) ALWAYS tries v2-then-v1 regardless of this flag — that is
+/// pure forward-compatibility and cannot break anything. WRITING under v2,
+/// however, makes a row unreadable by any peer that does not yet derive v2
+/// (notably Android, whose Kotlin layer has no Supabase account id until its FFI
+/// is updated, and any un-upgraded macOS device). CopyPaste-jdq5's acceptance
+/// explicitly requires macOS<->Android interop to be preserved, so v2 writes stay
+/// OFF until an operator confirms the whole fleet derives v2 and flips this flag.
+/// This realises the standard "deploy readers before writers" format migration.
+const CLOUD_V2_WRITES_ENV: &str = "COPYPASTE_CLOUD_KEY_V2_WRITES";
+
+/// Returns `true` when new cloud writes should use the v2 per-account key.
+///
+/// Honours the truthy values `1` / `true` / `yes` / `on` (case-insensitive) so
+/// the flag is forgiving to set; anything else (including unset) is `false`.
+pub(crate) fn cloud_v2_writes_enabled() -> bool {
+    std::env::var(CLOUD_V2_WRITES_ENV)
+        .map(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            matches!(v.as_str(), "1" | "true" | "yes" | "on")
+        })
+        .unwrap_or(false)
+}
+
+/// Snapshot the ordered cloud **READ** key candidates as a flat byte buffer of
+/// concatenated 32-byte keys: the v2 per-account key FIRST (when present), then
+/// the v1 key (when present). The download path passes this to `poll_once` /
+/// trial-decrypts it so a row written under EITHER scheme is recovered (v2 for
+/// post-cutover rows, v1 for legacy rows) — the AEAD auth tag rejects the wrong
+/// key, so order only affects which is tried first, never correctness.
+///
+/// Each lock is taken and released independently (never both at once) and the
+/// returned bytes are the caller's responsibility to zeroize.
+pub(crate) async fn snapshot_cloud_read_key_bytes(
+    sync_key: &std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>>,
+    sync_key_v2: &std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>>,
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(64);
+    {
+        let g = sync_key_v2.lock().await;
+        if let Some(k) = g.as_ref() {
+            out.extend_from_slice(k.as_bytes());
+        }
+    }
+    {
+        let g = sync_key.lock().await;
+        if let Some(k) = g.as_ref() {
+            out.extend_from_slice(k.as_bytes());
+        }
+    }
+    out
+}
+
+/// Snapshot the cloud **WRITE** key: the v2 per-account key when v2 writes are
+/// enabled (`COPYPASTE_CLOUD_KEY_V2_WRITES`) AND a v2 key is installed, otherwise
+/// the v1 key. Returns `None` only when NO key is set (no passphrase), which the
+/// caller treats as "skip upload". The returned `u32` is the derivation version
+/// (1 or 2) for logging only — never the key bytes.
+pub(crate) async fn snapshot_cloud_write_key_bytes(
+    sync_key: &std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>>,
+    sync_key_v2: &std::sync::Arc<tokio::sync::Mutex<Option<copypaste_core::SyncKey>>>,
+) -> Option<([u8; 32], u32)> {
+    if cloud_v2_writes_enabled() {
+        let g = sync_key_v2.lock().await;
+        if let Some(k) = g.as_ref() {
+            return Some((*k.as_bytes(), copypaste_core::SYNC_KEY_DERIVATION_VERSION_V2));
+        }
+    }
+    let g = sync_key.lock().await;
+    g.as_ref()
+        .map(|k| (*k.as_bytes(), copypaste_core::SYNC_KEY_DERIVATION_VERSION_V1))
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

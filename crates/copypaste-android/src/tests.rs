@@ -539,6 +539,57 @@ fn derive_cloud_sync_key_different_passphrases_differ() {
     assert_ne!(k1, k2, "different passphrases must yield different keys");
 }
 
+/// CopyPaste-jdq5: the v2 per-account FFI is deterministic per (passphrase,
+/// account), differs from the v1 key, and differs across accounts — the
+/// cross-user-precompute defence. A blob encrypted with the v2 key round-trips
+/// through the existing `cloud_encrypt`/`cloud_decrypt` (identical AEAD format).
+#[test]
+fn derive_cloud_sync_key_for_account_v2_properties() {
+    let pass = "correct horse battery staple";
+    let acct_a = "proj_abc|00000000-0000-0000-0000-0000000000aa".to_string();
+    let acct_b = "proj_abc|00000000-0000-0000-0000-0000000000bb".to_string();
+
+    let v2_a1 = derive_cloud_sync_key_for_account(pass.into(), acct_a.clone()).expect("v2 a1");
+    let v2_a2 = derive_cloud_sync_key_for_account(pass.into(), acct_a.clone()).expect("v2 a2");
+    assert_eq!(v2_a1, v2_a2, "same (passphrase, account) must be deterministic");
+    assert_eq!(v2_a1.len(), 32);
+
+    let v2_b = derive_cloud_sync_key_for_account(pass.into(), acct_b).expect("v2 b");
+    assert_ne!(
+        v2_a1, v2_b,
+        "different accounts must derive different keys (defeats cross-user precompute)"
+    );
+
+    let v1 = derive_cloud_sync_key(pass.into()).expect("v1");
+    assert_ne!(v1, v2_a1, "v2 must differ from the legacy v1 key");
+
+    // The v2 key works with the existing cloud AEAD FFI unchanged.
+    let blob = cloud_encrypt("acct-item".into(), b"v2 payload", &v2_a1).expect("encrypt");
+    let recovered = cloud_decrypt("acct-item".into(), &blob, &v2_a1).expect("decrypt");
+    assert_eq!(recovered, b"v2 payload");
+}
+
+/// CopyPaste-jdq5: the v2 FFI enforces the same passphrase floor and rejects an
+/// empty account id (which would collapse the per-account salt).
+#[test]
+fn derive_cloud_sync_key_for_account_rejects_bad_input() {
+    let acct = "proj|user".to_string();
+    assert!(
+        matches!(
+            derive_cloud_sync_key_for_account("short".into(), acct.clone()),
+            Err(CopypasteError::DecryptionFailed { .. })
+        ),
+        "too-short passphrase must be rejected"
+    );
+    assert!(
+        matches!(
+            derive_cloud_sync_key_for_account("correct horse battery staple".into(), "   ".into()),
+            Err(CopypasteError::DecryptionFailed { .. })
+        ),
+        "blank account id must be rejected"
+    );
+}
+
 /// cloud_encrypt + cloud_decrypt must round-trip the plaintext.
 #[test]
 fn cloud_encrypt_decrypt_roundtrip() {

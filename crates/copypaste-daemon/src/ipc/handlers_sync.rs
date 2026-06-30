@@ -221,22 +221,15 @@ impl IpcServer {
                     }
                 };
 
-                // Derive the sync key via Argon2id (this is intentionally slow —
-                // one-time cost on passphrase entry, not per-item).
+                // Derive the v1 (global-salt) sync key via Argon2id (intentionally
+                // slow — one-time cost on passphrase entry, not per-item).
                 //
-                // CopyPaste-wg4w: derive via the account-aware entry point. The
-                // Supabase account id (available in `self.cloud_account_id`) is
-                // intentionally passed as `None` here so the SHARED sync key stays
-                // on the legacy v1 derivation. A safe flip to the v2 per-account
-                // salt is NOT yet possible because this single key slot is also
-                // reused by relay sync (and the relay inbox id is HKDF of it); on
-                // restart the daemon reloads only the key BYTES (not the
-                // passphrase), so a v1 read-fallback for existing blobs cannot be
-                // re-derived; and Android peers still derive v1 (no account id in
-                // Kotlin). The cutover (restart-surviving dual-key read-dispatch /
-                // cloud-only key slot + Android account-id wiring + relay inbox
-                // migration) is tracked separately. `derive_sync_key_versioned(_,
-                // None)` is byte-identical to the previous `derive_sync_key`.
+                // CopyPaste-jdq5: the v1 key remains the SHARED key for relay /
+                // P2P / cloud-read-fallback — it is byte-identical to the previous
+                // `derive_sync_key`, so relay inbox addressing and all existing
+                // ciphertexts are unchanged. The account-aware v2 per-account-salt
+                // key is derived SEPARATELY below (`refresh_cloud_v2_key`) into a
+                // dedicated cloud-only slot, so the relay key never changes.
                 let new_key = match derive_sync_key_versioned(&passphrase, None) {
                     Ok(k) => k,
                     Err(e) => {
@@ -247,9 +240,14 @@ impl IpcServer {
 
                 // Persist via the SAME backend the device key uses (0600 file
                 // store on unsigned installs, Keychain otherwise) and swap the
-                // live slot so the cloud loops pick it up immediately. The key
-                // bytes are never logged.
+                // live slot so the cloud loops pick it up immediately. This also
+                // clears any stale v2 key. The key bytes are never logged.
                 self.persist_and_install_sync_key(new_key).await;
+                // CopyPaste-jdq5: derive + install the v2 per-account cloud key
+                // when a Supabase account id is known. No-op (stays on v1) when not
+                // signed in yet — the cutover then happens on the next passphrase
+                // entry while signed in.
+                self.refresh_cloud_v2_key(&passphrase).await;
                 tracing::info!("set_sync_passphrase: sync key updated");
                 Response::ok(req.id, serde_json::json!({"ok": true}))
             }
@@ -319,6 +317,11 @@ impl IpcServer {
                 let new_key_bytes: [u8; 32] = *new_key.as_bytes();
 
                 self.persist_and_install_sync_key(new_key).await;
+                // CopyPaste-jdq5: re-derive the v2 per-account cloud key under the
+                // NEW passphrase (cloud-sync only; `persist_and_install_sync_key`
+                // already cleared the stale v2).
+                #[cfg(feature = "cloud-sync")]
+                self.refresh_cloud_v2_key(&passphrase).await;
                 tracing::info!(
                     "rotate_sync_key: sync key rotated; relay inbox id will diverge and the old \
                      key can no longer decrypt new cloud items"
@@ -519,6 +522,10 @@ impl IpcServer {
                 // ── Rotate the sync key (cuts off cloud/relay for the revoked
                 // device; remaining devices must re-provision). ──
                 self.persist_and_install_sync_key(new_key).await;
+                // CopyPaste-jdq5: re-derive the v2 per-account cloud key under the
+                // NEW passphrase (cloud-sync only).
+                #[cfg(feature = "cloud-sync")]
+                self.refresh_cloud_v2_key(&passphrase).await;
                 tracing::info!(
                     "revoke_and_rotate: revoked peer and rotated sync key; remaining devices must \
                      re-provision to keep syncing"

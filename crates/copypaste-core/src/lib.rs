@@ -23,8 +23,8 @@ pub use relay::{derive_relay_inbox_id, derive_relay_public_key, derive_relay_reg
 // comments referenced them. Re-export removed; use `encrypt_item_with_aad` /
 // `decrypt_item_with_aad` for all new call sites.
 pub use crypto::{
-    decrypt_from_cloud, derive_storage_key_v1, derive_storage_key_v2, derive_sync_key,
-    derive_sync_key_for_account, derive_sync_key_v2, derive_sync_key_versioned,
+    decrypt_from_cloud, decrypt_from_cloud_trying, derive_storage_key_v1, derive_storage_key_v2,
+    derive_sync_key, derive_sync_key_for_account, derive_sync_key_v2, derive_sync_key_versioned,
     derive_telemetry_key_v2, derive_v2, encrypt_for_cloud, strip_deeplink, DeviceKeypair, KeyError,
     PairingPayload, PairingQrError, PairingToken, QrProvisioning, SyncKey, SyncKeyError,
     ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_SYNC_SALT, ARGON2_T_COST, CLOUD_AAD_SCHEMA_VERSION,

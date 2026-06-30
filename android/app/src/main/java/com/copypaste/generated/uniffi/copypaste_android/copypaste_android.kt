@@ -800,6 +800,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -846,6 +848,8 @@ internal interface UniffiLib : Library {
     fun uniffi_copypaste_android_fn_func_default_config(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_derive_cloud_sync_key(`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    fun uniffi_copypaste_android_fn_func_derive_cloud_sync_key_for_account(`passphrase`: RustBuffer.ByValue,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_detect_sensitive_spans(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1069,6 +1073,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_derive_cloud_sync_key(
     ): Short
+    fun uniffi_copypaste_android_checksum_func_derive_cloud_sync_key_for_account(
+    ): Short
     fun uniffi_copypaste_android_checksum_func_detect_sensitive_spans(
     ): Short
     fun uniffi_copypaste_android_checksum_func_encrypt_text(
@@ -1210,6 +1216,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_derive_cloud_sync_key() != 34994.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_copypaste_android_checksum_func_derive_cloud_sync_key_for_account() != 20663.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_detect_sensitive_spans() != 30416.toShort()) {
@@ -3433,12 +3442,38 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
          * Derive the 32-byte shared sync key from `passphrase` (Argon2id).
          * Deterministic: same passphrase → same key on every device.
          * Returns raw 32-byte key material. Caller MUST NOT persist to disk.
+         *
+         * This is the LEGACY v1 (global-salt) derivation. It stays the default so
+         * existing Kotlin callers and all existing cloud/relay ciphertexts are
+         * unchanged. For the v2 per-account-salt key, call
+         * `derive_cloud_sync_key_for_account` (CopyPaste-jdq5).
          */
     @Throws(CopypasteException::class) fun `deriveCloudSyncKey`(`passphrase`: kotlin.String): List<kotlin.UByte> {
             return FfiConverterSequenceUByte.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_derive_cloud_sync_key(
         FfiConverterString.lower(`passphrase`),_status)
+}
+    )
+    }
+    
+
+        /**
+         * Derive the 32-byte **v2 per-account-salt** sync key (CopyPaste-jdq5).
+         *
+         * `account_id` is the stable Supabase account identity
+         * (`"<project_ref>|<user_id>"`) both devices of an account agree on. Mixing
+         * it into the Argon2id salt defeats cross-user precompute while keeping the
+         * derivation deterministic across the account's devices. ADDITIVE: existing
+         * callers keep using the v1 `derive_cloud_sync_key` above; Kotlin should call
+         * THIS once it can supply the Supabase account id, so macOS<->Android cloud
+         * interop holds after the v2 write cutover.
+         */
+    @Throws(CopypasteException::class) fun `deriveCloudSyncKeyForAccount`(`passphrase`: kotlin.String, `accountId`: kotlin.String): List<kotlin.UByte> {
+            return FfiConverterSequenceUByte.lift(
+    uniffiRustCallWithError(CopypasteException) { _status ->
+    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_derive_cloud_sync_key_for_account(
+        FfiConverterString.lower(`passphrase`),FfiConverterString.lower(`accountId`),_status)
 }
     )
     }

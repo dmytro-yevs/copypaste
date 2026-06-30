@@ -5,8 +5,8 @@ use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::storage::items::soft_delete_item;
 use copypaste_core::{
-    decrypt_from_cloud, exists_item_by_item_id, get_item_by_item_id, insert_item, insert_tombstone,
-    prune_to_cap, Database, SyncKey,
+    decrypt_from_cloud_trying, exists_item_by_item_id, get_item_by_item_id, insert_item,
+    insert_tombstone, prune_to_cap, Database, SyncKey,
 };
 use copypaste_supabase::protocol::ChangeType;
 use copypaste_supabase::{RealtimeClient, RealtimeConfig};
@@ -40,6 +40,8 @@ pub(super) async fn ws_ingest_loop(
     bearer: Arc<RwLock<String>>,
     db: Arc<Mutex<Database>>,
     sync_key: Arc<Mutex<Option<SyncKey>>>,
+    // CopyPaste-jdq5: v2 per-account cloud key slot for dual-key read dispatch.
+    sync_key_v2: Arc<Mutex<Option<SyncKey>>>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     shutdown: Arc<tokio::sync::Notify>,
@@ -55,13 +57,13 @@ pub(super) async fn ws_ingest_loop(
     sync_in_flight: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
     loop {
-        // Snapshot the current sync key.  If absent, back off and retry —
-        // the WS events can't be decrypted without it anyway.
-        let key_snapshot: Option<Vec<u8>> = {
-            let guard = sync_key.lock().await;
-            guard.as_ref().map(|k| k.as_bytes().to_vec())
-        };
-        if key_snapshot.is_none() {
+        // Snapshot the current sync keys. If absent, back off and retry — the WS
+        // events can't be decrypted without one anyway.
+        //
+        // CopyPaste-jdq5: snapshot the ORDERED read candidates (v2 then v1) as a
+        // flat buffer of concatenated 32-byte keys for dual-key read dispatch.
+        let key_bytes = super::snapshot_cloud_read_key_bytes(&sync_key, &sync_key_v2).await;
+        if key_bytes.is_empty() {
             tracing::debug!("ws_ingest_loop: no sync passphrase set — waiting 30 s before retry");
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_secs(30)) => {}
@@ -72,7 +74,6 @@ pub(super) async fn ws_ingest_loop(
             }
             continue;
         }
-        let key_bytes = key_snapshot.expect("checked above");
 
         // [P0 audit fix] Refresh config.user_jwt from the shared bearer before
         // building the client so this reconnect uses the most-recent token.
@@ -301,8 +302,17 @@ pub(super) async fn ws_ingest_loop(
                                     String::new()
                                 });
 
-                            let mut key_arr = [0u8; 32];
-                            key_arr.copy_from_slice(&key_bytes);
+                            // CopyPaste-jdq5: split the flat read-candidate buffer
+                            // into owned 32-byte arrays (v2 then v1) so they move
+                            // into the blocking closure for trial decryption.
+                            let key_candidates: Vec<[u8; 32]> = key_bytes
+                                .chunks_exact(32)
+                                .map(|c| {
+                                    let mut a = [0u8; 32];
+                                    a.copy_from_slice(c);
+                                    a
+                                })
+                                .collect();
 
                             // Read the live byte cap out of the shared config and
                             // drop the std RwLock guard before the spawn_blocking
@@ -325,6 +335,20 @@ pub(super) async fn ws_ingest_loop(
                             // Decrypt + re-encrypt + insert on the blocking pool.
                             let result = tokio::task::spawn_blocking(move || {
                                 let db_guard = db_arc.blocking_lock();
+
+                                // CopyPaste-jdq5: reconstruct the candidate
+                                // SyncKeys (v2 then v1) for dual-key read dispatch.
+                                // Wrap the raw arrays in `Zeroizing` so they are
+                                // scrubbed on EVERY closure exit path (the many
+                                // early `return`s below no longer need a manual
+                                // zeroize); the `SyncKey`s themselves are
+                                // `ZeroizeOnDrop`.
+                                let key_candidates = zeroize::Zeroizing::new(key_candidates);
+                                let cand_keys: Vec<SyncKey> = key_candidates
+                                    .iter()
+                                    .map(|b| SyncKey::from_bytes(*b))
+                                    .collect();
+                                let cand_refs: Vec<&SyncKey> = cand_keys.iter().collect();
 
                                 // LWW dedup: skip if item already present with
                                 // equal-or-newer lamport_ts.
@@ -359,14 +383,12 @@ pub(super) async fn ws_ingest_loop(
                                     );
                                     if !wins {
                                         // Local wins LWW — skip.
-                                        zeroize::Zeroize::zeroize(&mut key_arr);
                                         return false;
                                     }
                                     Some(local.id.clone())
                                 } else {
                                     match exists_item_by_item_id(&db_guard, &item_id_owned) {
                                         Ok(true) => {
-                                            zeroize::Zeroize::zeroize(&mut key_arr);
                                             return false;
                                         }
                                         Ok(false) => None,
@@ -387,7 +409,6 @@ pub(super) async fn ws_ingest_loop(
                                 // tombstone (deleted=1, content wiped) with the remote
                                 // lamport/wall_time, exactly matching the P2P path.
                                 if ws_deleted {
-                                    zeroize::Zeroize::zeroize(&mut key_arr);
                                     if let Some(local_pk) = preserved_pk.as_ref() {
                                         match soft_delete_item(
                                             &db_guard,
@@ -442,7 +463,7 @@ pub(super) async fn ws_ingest_loop(
                                     return false;
                                 }
 
-                                // Decrypt with sync key.
+                                // Decrypt with the sync key (dual-key dispatch).
                                 // `blob_opt` is always `Some` here — tombstones were
                                 // handled above and `blob_opt` is `None` only for
                                 // deleted rows (guarded by `ws_deleted`).
@@ -453,13 +474,13 @@ pub(super) async fn ws_ingest_loop(
                                             "ws_ingest_loop: no blob for non-tombstone \
                                              id={id_owned}; skipping"
                                         );
-                                        zeroize::Zeroize::zeroize(&mut key_arr);
                                         return false;
                                     }
                                 };
-                                let tmp_key = SyncKey::from_bytes(key_arr);
+                                // CopyPaste-jdq5: try v2 then v1 so a post-cutover
+                                // row and a legacy row both decrypt.
                                 let plaintext =
-                                    match decrypt_from_cloud(&tmp_key, &item_id_owned, &blob) {
+                                    match decrypt_from_cloud_trying(&cand_refs, &item_id_owned, &blob) {
                                         Ok(p) => p,
                                         Err(e) => {
                                             tracing::warn!(

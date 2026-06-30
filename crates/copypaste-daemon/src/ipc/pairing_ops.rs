@@ -483,6 +483,114 @@ impl IpcServer {
         // Store in shared state so push/poll loops pick it up immediately
         // (they hold an Arc to the same Mutex).
         *self.sync_key.lock().await = Some(new_key);
+
+        // CopyPaste-jdq5: the v1 cloud/relay key just changed, so ANY previously
+        // derived v2 per-account key is now potentially stale (it was derived from
+        // a DIFFERENT passphrase or for a different key generation). Clear the v2
+        // slot AND delete its persisted copy here so a stale v2 can never be used
+        // to encrypt a new cloud row or be reloaded on restart. The passphrase
+        // entry handlers (`set_sync_passphrase` / `rotate_sync_key` /
+        // `revoke_and_rotate`) re-derive a fresh v2 immediately after this call
+        // via `refresh_cloud_v2_key`; pairing-provisioned (session-derived) keys
+        // intentionally leave v2 cleared (the per-account salt scheme applies only
+        // to passphrase-derived keys).
+        #[cfg(feature = "cloud-sync")]
+        {
+            *self.sync_key_v2.lock().await = None;
+            // Persistence is macOS-only (mirrors the v1 persist path, which gates
+            // the file-store / Keychain backend on macOS). On other platforms the
+            // v2 key was never written to disk, so there is nothing to delete.
+            #[cfg(target_os = "macos")]
+            if !crate::keychain::keychain_bypassed() {
+                if let Err(e) = tokio::task::spawn_blocking(
+                    crate::keychain::file_store::delete_cloud_sync_key_v2,
+                )
+                .await
+                {
+                    tracing::warn!("persist_and_install_sync_key: v2 key delete task panicked: {e}");
+                }
+            }
+        }
+    }
+
+    /// CopyPaste-jdq5: derive and install the **v2 per-account-salt** cloud key
+    /// from `passphrase`, IF a Supabase account id is currently known.
+    ///
+    /// Called by the passphrase-entry handlers AFTER
+    /// [`persist_and_install_sync_key`] (which clears any stale v2). When a
+    /// Supabase account id is available (`self.cloud_account_id` is `Some`), this
+    /// derives `derive_sync_key_for_account(passphrase, account_id)`, persists the
+    /// bytes alongside the v1 key (so they survive a restart for dual-key read
+    /// dispatch), and installs them into the shared `sync_key_v2` slot the cloud
+    /// loops read. When no account id is known yet (passphrase set before sign-in)
+    /// the v2 slot is left empty and cloud writes/read-fallback stay on v1; the
+    /// cutover then happens the next time the passphrase is entered while signed
+    /// in. The key bytes are NEVER logged.
+    ///
+    /// A persist failure is logged and swallowed (the key is still installed
+    /// in-memory for this session), matching `persist_and_install_sync_key`.
+    #[cfg(feature = "cloud-sync")]
+    pub(crate) async fn refresh_cloud_v2_key(&self, passphrase: &str) {
+        let account_id: Option<String> = self
+            .cloud_account_id
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let Some(account_id) = account_id else {
+            tracing::debug!(
+                "refresh_cloud_v2_key: no Supabase account id known yet — leaving the v2 \
+                 cloud key unset (cloud writes/read-fallback stay on v1 until a passphrase \
+                 is entered while signed in)"
+            );
+            return;
+        };
+
+        let v2_key = match copypaste_core::derive_sync_key_for_account(passphrase, &account_id) {
+            Ok(k) => k,
+            Err(e) => {
+                tracing::warn!("refresh_cloud_v2_key: v2 key derivation failed: {e}");
+                return;
+            }
+        };
+
+        // Persist the v2 bytes to the SAME backend the v1 key uses so a restart
+        // can restore both for dual-key read dispatch. macOS-only, mirroring the
+        // v1 persist path exactly (the file-store / Keychain backend selection
+        // lives in the macOS-only `keychain::signing` module); on other platforms
+        // the v2 key is in-memory only for this session, just like v1.
+        #[cfg(target_os = "macos")]
+        if !crate::keychain::keychain_bypassed() {
+            match crate::keychain::signing::choose_key_backend() {
+                crate::keychain::signing::KeyBackend::File => {
+                    if let Err(e) =
+                        crate::keychain::file_store::store_cloud_sync_key_v2(v2_key.as_bytes())
+                    {
+                        tracing::warn!(
+                            "refresh_cloud_v2_key: file-store persist failed ({e}); v2 key is \
+                             active in-memory only until daemon restart"
+                        );
+                    }
+                }
+                crate::keychain::signing::KeyBackend::Keychain => {
+                    if let Err(e) = crate::keychain::set_generic_password_locked_down(
+                        crate::keychain::SERVICE,
+                        crate::keychain::CLOUD_SYNC_V2_ACCOUNT,
+                        v2_key.as_bytes(),
+                    ) {
+                        tracing::warn!(
+                            "refresh_cloud_v2_key: keychain persist failed ({e}); v2 key is \
+                             active in-memory only until daemon restart"
+                        );
+                    }
+                }
+            }
+        }
+
+        *self.sync_key_v2.lock().await = Some(v2_key);
+        tracing::info!(
+            "refresh_cloud_v2_key: installed v2 per-account cloud key (cloud reads now try \
+             v2 then v1; v2 writes require COPYPASTE_CLOUD_KEY_V2_WRITES)"
+        );
     }
 
     /// `cloud-sync`-disabled stub: nothing to apply.

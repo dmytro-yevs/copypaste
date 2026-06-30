@@ -556,6 +556,16 @@ pub struct IpcServer {
     /// with the cloud push/poll loops via `Arc<Mutex<Option<SyncKey>>>`.
     #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
     pub sync_key: Arc<Mutex<Option<SyncKey>>>,
+    /// Shared **v2 per-account-salt** cloud sync key (CopyPaste-jdq5).
+    ///
+    /// `None` until a passphrase is set WHILE a Supabase account id is known
+    /// (`derive_sync_key_for_account`). Used ONLY by the cloud (Supabase) loops
+    /// for dual-key read dispatch (try v2 then the v1 `sync_key`) and, when the
+    /// `COPYPASTE_CLOUD_KEY_V2_WRITES` flag is set, for new cloud writes. Relay /
+    /// P2P never read this slot — they stay on the v1 `sync_key` above so relay
+    /// inbox addressing and paired-peer interop are unchanged.
+    #[cfg(feature = "cloud-sync")]
+    pub sync_key_v2: Arc<Mutex<Option<SyncKey>>>,
     /// Monotonic timestamp (ms since UNIX epoch) of the last successful cloud
     /// sync round-trip. `0` means never synced. Shared with cloud loops so
     /// `get_sync_status` returns a live value.

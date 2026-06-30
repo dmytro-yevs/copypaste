@@ -6,7 +6,10 @@
 
 // Brings `Engine::encode` into scope for `relay_public_key_b64` (STANDARD base64).
 use base64::Engine as _;
-use copypaste_core::{decrypt_from_cloud, derive_sync_key, encrypt_for_cloud, SyncKeyError};
+use copypaste_core::{
+    decrypt_from_cloud, derive_sync_key, derive_sync_key_for_account, encrypt_for_cloud,
+    SyncKeyError,
+};
 use zeroize::Zeroizing;
 
 use crate::{panic_boundary, CopypasteError};
@@ -70,38 +73,85 @@ pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteErr
                 ),
             });
         }
-        // CopyPaste-wg4w: Android has no Supabase account id available in the
-        // Kotlin layer (see ffi_pairing: supabase_account_id is None), so this is
-        // the documented no-account LEGACY (v1) fallback. Threading a per-account
-        // salt here would require adding an account-id parameter through the
-        // UniFFI surface and the Kotlin callers — tracked with the daemon cutover.
-        let key = derive_sync_key(&passphrase).map_err(|e| match e {
-            // Propagate any Argon2 runtime message rather than discarding it.
-            SyncKeyError::Argon2Params(msg) | SyncKeyError::Argon2Hash(msg) => {
-                CopypasteError::DecryptionFailed { reason: msg }
-            }
-            // Core pre-checked length above, but handle PassphraseTooShort
-            // explicitly so the reason is never swallowed into EncryptionFailed.
-            SyncKeyError::PassphraseTooShort(n) => CopypasteError::DecryptionFailed {
-                reason: format!(
-                    "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters \
-                     (got {n})",
-                ),
-            },
-            // These encryption/decryption variants should not arise from key
-            // derivation alone; surface them with a reason string.
-            SyncKeyError::EncryptFailed(msg) => CopypasteError::DecryptionFailed {
-                reason: format!("cloud encrypt failed during key derivation: {msg}"),
-            },
-            SyncKeyError::DecryptFailed => CopypasteError::DecryptionFailed {
-                reason: "cloud decrypt failed during key derivation".into(),
-            },
-            SyncKeyError::BlobTooShort(n) => CopypasteError::DecryptionFailed {
-                reason: format!("blob too short during key derivation: {n} bytes"),
-            },
-        })?;
+        // LEGACY v1 (global-salt) derivation — kept as the default so existing
+        // ciphertexts and callers are unchanged. See
+        // `derive_cloud_sync_key_for_account` for the v2 per-account scheme.
+        let key = derive_sync_key(&passphrase).map_err(map_derive_err)?;
         Ok(key.as_bytes().to_vec())
     })
+}
+
+/// Derive the 32-byte **v2 per-account-salt** sync key (CopyPaste-jdq5).
+///
+/// ADDITIVE companion to [`derive_cloud_sync_key`]: it mixes the stable Supabase
+/// `account_id` (`"<project_ref>|<user_id>"`) into the Argon2id salt via the core
+/// `derive_sync_key_for_account`, so two devices of the same account derive the
+/// IDENTICAL key (cloud sync still works) while an attacker cannot reuse one
+/// Argon2id precompute across accounts. The byte/AEAD format is identical to v1,
+/// so the existing `cloud_encrypt` / `cloud_decrypt` FFI take the result
+/// unchanged. Kotlin should call this once it can supply the account id, so
+/// macOS<->Android cloud interop survives the daemon's v2 write cutover.
+///
+/// # SECURITY NOTE — returned `Vec<u8>` crosses the FFI boundary unzeroized.
+/// Same contract as [`derive_cloud_sync_key`]: the Kotlin layer MUST zero the
+/// returned `ByteArray` after use.
+///
+/// Errors mirror [`derive_cloud_sync_key`] (notably `DecryptionFailed` when the
+/// passphrase is shorter than `MIN_PASSPHRASE_LEN`).
+pub fn derive_cloud_sync_key_for_account(
+    passphrase: String,
+    account_id: String,
+) -> Result<Vec<u8>, CopypasteError> {
+    panic_boundary::catch_result(|| {
+        let char_count = passphrase.chars().count();
+        if char_count < MIN_PASSPHRASE_LEN {
+            return Err(CopypasteError::DecryptionFailed {
+                reason: format!(
+                    "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters \
+                     (got {char_count})",
+                ),
+            });
+        }
+        // An empty account id would collapse the per-account salt back toward a
+        // shared value; reject it so a misconfigured caller fails loudly rather
+        // than deriving a key that does not match the daemon's v2 key.
+        if account_id.trim().is_empty() {
+            return Err(CopypasteError::DecryptionFailed {
+                reason: "account_id must not be empty for the v2 per-account key derivation".into(),
+            });
+        }
+        let key = derive_sync_key_for_account(&passphrase, &account_id).map_err(map_derive_err)?;
+        Ok(key.as_bytes().to_vec())
+    })
+}
+
+/// Map a core [`SyncKeyError`] from a key-derivation call to the FFI error type,
+/// preserving the human-readable reason. Shared by the v1 and v2 derivation FFI.
+fn map_derive_err(e: SyncKeyError) -> CopypasteError {
+    match e {
+        // Propagate any Argon2 runtime message rather than discarding it.
+        SyncKeyError::Argon2Params(msg) | SyncKeyError::Argon2Hash(msg) => {
+            CopypasteError::DecryptionFailed { reason: msg }
+        }
+        // Core pre-checked length above, but handle PassphraseTooShort
+        // explicitly so the reason is never swallowed into EncryptionFailed.
+        SyncKeyError::PassphraseTooShort(n) => CopypasteError::DecryptionFailed {
+            reason: format!(
+                "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters (got {n})",
+            ),
+        },
+        // These encryption/decryption variants should not arise from key
+        // derivation alone; surface them with a reason string.
+        SyncKeyError::EncryptFailed(msg) => CopypasteError::DecryptionFailed {
+            reason: format!("cloud encrypt failed during key derivation: {msg}"),
+        },
+        SyncKeyError::DecryptFailed => CopypasteError::DecryptionFailed {
+            reason: "cloud decrypt failed during key derivation".into(),
+        },
+        SyncKeyError::BlobTooShort(n) => CopypasteError::DecryptionFailed {
+            reason: format!("blob too short during key derivation: {n} bytes"),
+        },
+    }
 }
 
 /// Encrypt `plaintext` for cloud storage.

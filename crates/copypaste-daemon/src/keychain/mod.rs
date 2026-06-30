@@ -37,6 +37,19 @@ pub(crate) const ACCOUNT: &str = "device-secret-key";
 /// Stored under the same service as the device key but a distinct account
 /// so they are never confused.
 pub(crate) const CLOUD_SYNC_ACCOUNT: &str = "cloud-sync-key";
+/// Keychain account key for the **v2 per-account-salt** cloud sync key bytes
+/// (CopyPaste-jdq5). Distinct from [`CLOUD_SYNC_ACCOUNT`] (which always holds the
+/// legacy v1 global-salt key used by relay + as the cloud read fallback) so the
+/// two derivations are persisted side-by-side and a daemon restart can restore
+/// BOTH for dual-key read dispatch without re-entering the passphrase.
+#[cfg_attr(
+    not(feature = "cloud-sync"),
+    allow(
+        dead_code,
+        reason = "only read by the cloud-sync v2 persist/restore path"
+    )
+)]
+pub(crate) const CLOUD_SYNC_V2_ACCOUNT: &str = "cloud-sync-key-v2";
 /// Keychain account key for the Supabase GoTrue account password.
 /// Stored under `SERVICE` so all CopyPaste secrets live in one service.
 /// Migration: if absent from Keychain, callers fall back to config.json.
