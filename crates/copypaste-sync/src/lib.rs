@@ -70,6 +70,14 @@ pub mod metrics;
 pub mod protocol;
 
 // Convenience re-exports.
+//
+// CopyPaste-crh3.92: `SyncEngine` and `LamportClock` are NOT consumed by any
+// production binary — the daemon drives sync through `crate::sync_orch`, not this
+// HELLO/HAVE/WANT/ITEMS/DONE session engine. They are intentionally retained as
+// `pub` because the session-protocol conformance tests (engine.rs / clock.rs and
+// the protocol round-trip tests) exercise them as the executable specification of
+// the wire handshake. Treat them as a tested reference implementation, not dead
+// code: do not delete them when pruning unused exports.
 pub use clock::LamportClock;
 pub use engine::{PeerState, SyncEngine, SyncError, SyncResult};
 pub use inbox::{SyncInboxForwarder, SyncInboxSender};
