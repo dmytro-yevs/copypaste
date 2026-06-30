@@ -224,11 +224,17 @@ mod tests {
         b.acquire(1_000_000); // tokens = 0
                               // Drop to 8 kbps = 1000 bytes/sec.
         b.set_rate_kbps(8);
-        // 1 kB at 1000 bytes/sec → 1 second delay.
-        let delay = b.acquire(1_000);
+        // 1 kB at 1000 bytes/sec → ~1 s delay.  Assert in µs with a jitter
+        // margin instead of `as_secs() >= 1`: the bucket legitimately refills
+        // tokens for wall-clock time elapsed since `new()`, so under a loaded
+        // parallel test run a few ms of scheduling jitter can shave the delay to
+        // ~0.999 s, which integer-second truncation reports as 0 and fails a
+        // zero-tolerance `>= 1`. 990 ms still proves the new (slow) rate is in
+        // effect — at the old 8000 kbps rate the same 1 kB would pace at ~1 ms.
+        let us = b.acquire(1_000).as_micros() as u64;
         assert!(
-            delay.as_secs() >= 1,
-            "after rate drop to 8 kbps, 1 kB should take >=1 s; got {delay:?}"
+            us >= 990_000,
+            "after rate drop to 8 kbps, 1 kB should take ~1 s; got {us} µs"
         );
     }
 }
