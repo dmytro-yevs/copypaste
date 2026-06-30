@@ -81,7 +81,12 @@ pub(crate) fn dispatch<R: CommandRunner, F: FsOps>(
 
 #[cfg(test)]
 mod tests {
-    use super::platform::{friendly_launchctl_error, unsupported_platform};
+    use super::platform::unsupported_platform;
+    // `friendly_launchctl_error` is exercised only by the macOS launchctl tests
+    // below; gate the import so non-macOS targets (Linux CI) don't flag it unused
+    // under -D warnings.
+    #[cfg(target_os = "macos")]
+    use super::platform::friendly_launchctl_error;
     use super::runner::CommandOutput;
     use super::*;
     use std::collections::HashSet;

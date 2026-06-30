@@ -20,15 +20,24 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
 
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::UnixStream;
-use tokio::sync::Mutex;
-
-use copypaste_core::Database;
-use copypaste_daemon::ipc::IpcServer;
 use copypaste_daemon::sync_in_flight::SyncInFlightGuard;
+
+// The following imports are used ONLY by the cloud-sync-gated `badge_state_ipc`
+// module below (the live IPC badge tests). Gate them so `--no-default-features`
+// (cloud-sync off) doesn't flag them as unused imports under -D warnings.
+#[cfg(feature = "cloud-sync")]
+use copypaste_core::Database;
+#[cfg(feature = "cloud-sync")]
+use copypaste_daemon::ipc::IpcServer;
+#[cfg(feature = "cloud-sync")]
+use std::time::{Duration, Instant};
+#[cfg(feature = "cloud-sync")]
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+#[cfg(feature = "cloud-sync")]
+use tokio::net::UnixStream;
+#[cfg(feature = "cloud-sync")]
+use tokio::sync::Mutex;
 
 // ── RAII guard unit tests ─────────────────────────────────────────────────────
 // These tests are NOT gated on cloud-sync: the guard struct has no feature dep.
