@@ -423,8 +423,7 @@ pub(super) async fn peer_connector_loop(
                         // to the peer so it can refresh its stale pairing-time
                         // snapshot. `try_send` is non-blocking and fire-and-forget.
                         {
-                            let meta =
-                                crate::device_meta::get_cached(crate::ipc::BUILD_VERSION);
+                            let meta = crate::device_meta::get_cached(crate::ipc::BUILD_VERSION);
                             let own_public_ip =
                                 public_ip_cache.try_read().ok().and_then(|g| g.clone());
                             let frame = PeerFrame::Control(ControlMsg::DeviceInfo {

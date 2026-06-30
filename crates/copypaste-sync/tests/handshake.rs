@@ -234,7 +234,10 @@ async fn both_sides_have_identical_state_yields_done_immediately() {
         peer_send(
             &mut peer_side,
             &Message::Have {
-                items: vec![(shared_for_peer.item_id.to_string(), shared_for_peer.lamport_ts)],
+                items: vec![(
+                    shared_for_peer.item_id.to_string(),
+                    shared_for_peer.lamport_ts,
+                )],
             },
         )
         .await;

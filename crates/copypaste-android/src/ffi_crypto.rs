@@ -46,7 +46,11 @@ pub fn encrypt_text(
         // Mirror the dispatch table in decrypt_item_by_version (copypaste-core).
         let aad = match key_version {
             1 => build_item_aad(&ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION),
-            2 => build_item_aad_v2(&ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, u32::from(key_version)),
+            2 => build_item_aad_v2(
+                &ItemId::from(item_id.as_str()),
+                AAD_SCHEMA_VERSION_V4,
+                u32::from(key_version),
+            ),
             _ => return Err(CopypasteError::EncryptionFailed),
         };
         let (nonce, ciphertext) = encrypt_item_with_aad(bytes, &key_arr, &aad)
@@ -90,7 +94,11 @@ pub fn decrypt_text(
         // Mirror the dispatch table in decrypt_item_by_version (copypaste-core).
         let aad = match key_version {
             1 => build_item_aad(&ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION),
-            2 => build_item_aad_v2(&ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, u32::from(key_version)),
+            2 => build_item_aad_v2(
+                &ItemId::from(item_id.as_str()),
+                AAD_SCHEMA_VERSION_V4,
+                u32::from(key_version),
+            ),
             v => {
                 return Err(CopypasteError::DecryptionFailed {
                     reason: format!("unknown key_version: {v}"),

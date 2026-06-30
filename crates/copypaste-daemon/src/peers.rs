@@ -1018,7 +1018,10 @@ mod tests {
             Some("203.0.113.42"),
         )
         .expect("update_peer_device_info must not error on repeat");
-        assert!(!changed2, "second call with same metadata must return false");
+        assert!(
+            !changed2,
+            "second call with same metadata must return false"
+        );
     }
 
     /// `update_peer_device_info` on an unknown fingerprint is a no-op (Ok(false)).
@@ -1028,16 +1031,13 @@ mod tests {
         let path = dir.path().join("peers.json");
         save_peers(&path, &[make_device("aa:bb:cc:dd", "Alice")]).unwrap();
 
-        let changed = update_peer_device_info(
-            &path,
-            "deadbeef",
-            Some("Mac mini"),
-            None,
-            None,
-            None,
-        )
-        .expect("update_peer_device_info must not error on no-match");
-        assert!(!changed, "no-match must return false without modifying the file");
+        let changed =
+            update_peer_device_info(&path, "deadbeef", Some("Mac mini"), None, None, None)
+                .expect("update_peer_device_info must not error on no-match");
+        assert!(
+            !changed,
+            "no-match must return false without modifying the file"
+        );
 
         let loaded = load_peers(&path);
         assert_eq!(loaded[0].model, None, "unmatched peer must be unmodified");
@@ -1061,19 +1061,35 @@ mod tests {
         let changed = update_peer_device_info(
             &path,
             "aa:bb:cc:dd",
-            None,             // do not overwrite model
-            None,             // do not overwrite os_version
-            Some("1.0.0"),   // update app_version
-            None,             // do not overwrite public_ip
+            None,          // do not overwrite model
+            None,          // do not overwrite os_version
+            Some("1.0.0"), // update app_version
+            None,          // do not overwrite public_ip
         )
         .unwrap();
         assert!(changed, "app_version changed → must return true");
 
         let loaded = load_peers(&path);
-        assert_eq!(loaded[0].model.as_deref(), Some("Mac mini"), "model must be preserved");
-        assert_eq!(loaded[0].os_version.as_deref(), Some("macOS 14.0"), "os_version must be preserved");
-        assert_eq!(loaded[0].app_version.as_deref(), Some("1.0.0"), "app_version must be updated");
-        assert_eq!(loaded[0].public_ip.as_deref(), Some("1.2.3.4"), "public_ip must be preserved");
+        assert_eq!(
+            loaded[0].model.as_deref(),
+            Some("Mac mini"),
+            "model must be preserved"
+        );
+        assert_eq!(
+            loaded[0].os_version.as_deref(),
+            Some("macOS 14.0"),
+            "os_version must be preserved"
+        );
+        assert_eq!(
+            loaded[0].app_version.as_deref(),
+            Some("1.0.0"),
+            "app_version must be updated"
+        );
+        assert_eq!(
+            loaded[0].public_ip.as_deref(),
+            Some("1.2.3.4"),
+            "public_ip must be preserved"
+        );
     }
 
     // ─── CopyPaste-yw2k: supabase_account_id field ──────────────────────────

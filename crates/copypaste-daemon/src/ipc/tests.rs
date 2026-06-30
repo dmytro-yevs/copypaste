@@ -1,4 +1,3 @@
-
 use super::*;
 use copypaste_core::Database;
 use tempfile::tempdir;
@@ -4264,7 +4263,11 @@ async fn export_limit_returns_most_recent_n_oldest_first() {
         for i in 0..TOTAL {
             let plaintext = format!("item-{i}").into_bytes();
             let item_id = uuid::Uuid::new_v4().to_string();
-            let aad = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
+            let aad = build_item_aad_v2(
+                &copypaste_core::ItemId::from(item_id.as_str()),
+                AAD_SCHEMA_VERSION_V4,
+                2,
+            );
             let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &v2_key, &aad).unwrap();
             // Use a distinct wall_time per item (base 1000 + i ms).
             let wall_time = 1_000_000i64 + i as i64;
@@ -4384,7 +4387,11 @@ async fn export_excludes_sensitive_by_default_and_includes_with_flag() {
         for (i, is_sensitive) in [(0i64, false), (1i64, true)] {
             let plaintext = format!("item-sens-{i}").into_bytes();
             let item_id = uuid::Uuid::new_v4().to_string();
-            let aad = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
+            let aad = build_item_aad_v2(
+                &copypaste_core::ItemId::from(item_id.as_str()),
+                AAD_SCHEMA_VERSION_V4,
+                2,
+            );
             let (nonce, ciphertext) = encrypt_item_with_aad(&plaintext, &v2_key, &aad).unwrap();
             let wall_time = 2_000_000i64 + i;
             guard

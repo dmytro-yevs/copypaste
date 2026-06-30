@@ -1,4 +1,3 @@
-
 use super::*;
 use crate::storage::db::Database;
 use rusqlite::params;
@@ -1337,8 +1336,14 @@ fn fetch_text_previews_batch_returns_map_for_present_ids() {
     let ids = [a.id.as_str(), b.id.as_str(), c.id.as_str()];
     let map = fetch_text_previews_batch(&db, &ids).unwrap();
 
-    assert_eq!(map.get(a.id.as_str()).map(String::as_str), Some("alpha snippet"));
-    assert_eq!(map.get(b.id.as_str()).map(String::as_str), Some("beta snippet"));
+    assert_eq!(
+        map.get(a.id.as_str()).map(String::as_str),
+        Some("alpha snippet")
+    );
+    assert_eq!(
+        map.get(b.id.as_str()).map(String::as_str),
+        Some("beta snippet")
+    );
     assert!(
         !map.contains_key(c.id.as_str()),
         "id with no FTS entry must be absent from the batch map"

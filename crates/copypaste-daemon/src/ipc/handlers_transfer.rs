@@ -201,7 +201,8 @@ impl IpcServer {
                         //
                         // lamport_ts = 0 is a deliberate "imported, unknown
                         // origin" sentinel; sync will reassign on first push.
-                        let item_id = copypaste_core::ItemId::from(uuid::Uuid::new_v4().to_string());
+                        let item_id =
+                            copypaste_core::ItemId::from(uuid::Uuid::new_v4().to_string());
                         let aad = copypaste_core::build_item_aad_v2(
                             &item_id,
                             copypaste_core::AAD_SCHEMA_VERSION_V4,

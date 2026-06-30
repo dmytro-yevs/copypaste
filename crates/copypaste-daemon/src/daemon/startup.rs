@@ -597,7 +597,10 @@ mod tests {
     ) -> (String, String) {
         let row_id = uuid::Uuid::new_v4().to_string();
         let item_id = uuid::Uuid::new_v4().to_string();
-        let aad = build_item_aad(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION);
+        let aad = build_item_aad(
+            &copypaste_core::ItemId::from(item_id.as_str()),
+            AAD_SCHEMA_VERSION,
+        );
         let (nonce, ciphertext) = encrypt_item_with_aad(plaintext, v1_key, &aad).expect("encrypt");
         db.conn()
             .execute(
@@ -736,7 +739,11 @@ mod tests {
         let item_id = uuid::Uuid::new_v4().to_string();
         let row_id = uuid::Uuid::new_v4().to_string();
         let v2_key = derive_v2(&seed);
-        let aad_v2 = copypaste_core::build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
+        let aad_v2 = copypaste_core::build_item_aad_v2(
+            &copypaste_core::ItemId::from(item_id.as_str()),
+            AAD_SCHEMA_VERSION_V4,
+            2,
+        );
         let (nonce, ciphertext) =
             encrypt_item_with_aad(plaintext, &v2_key, &aad_v2).expect("encrypt v2");
         db.conn()

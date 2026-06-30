@@ -8,8 +8,7 @@ use std::sync::Arc;
 use copypaste_core::{
     build_item_aad_v2, decrypt_from_cloud, decrypt_item_by_version, derive_v2,
     encode_image_with_limit, encrypt_for_cloud, encrypt_item_with_aad, ClipboardItem, ItemId,
-    SyncKey,
-    V1Key, V2Key, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+    SyncKey, V1Key, V2Key, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
 };
 // c7fp: encrypt_chunks / IMAGE_CHUNK_SIZE / ImageMeta are only used in
 // `rewrap_inbound_blob` and `read_png_dimensions` which are macOS-only
@@ -597,7 +596,11 @@ pub(super) fn rekey_inbound(
 
     // Re-encrypt under this device's local v2 key + v4 AAD so the stored row is
     // readable by the production read path (`decrypt_item_by_version` at v2).
-    let aad = build_item_aad_v2(&ItemId::from(wire.item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
+    let aad = build_item_aad_v2(
+        &ItemId::from(wire.item_id.as_str()),
+        AAD_SCHEMA_VERSION_V4,
+        2,
+    );
     let (nonce, ciphertext) = match encrypt_item_with_aad(&plaintext, &crypto.v2_key, &aad) {
         Ok(out) => out,
         Err(e) => {

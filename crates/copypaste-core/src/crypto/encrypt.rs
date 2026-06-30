@@ -427,8 +427,14 @@ mod tests {
         let v2_key = [0x66u8; 32];
         let nonce = [0u8; NONCE_SIZE];
         let ct = b"garbage";
-        let result =
-            decrypt_item_by_version(255, V1Key(&v1_key), V2Key(&v2_key), &"item-x".into(), &nonce, ct);
+        let result = decrypt_item_by_version(
+            255,
+            V1Key(&v1_key),
+            V2Key(&v2_key),
+            &"item-x".into(),
+            &nonce,
+            ct,
+        );
         assert!(
             matches!(result, Err(EncryptError::UnknownKeyVersion(255))),
             "key_version=255 must return UnknownKeyVersion(255), got {:?}",
@@ -442,8 +448,14 @@ mod tests {
         let v1_key = [0x77u8; 32];
         let v2_key = [0x88u8; 32];
         let nonce = [0u8; NONCE_SIZE];
-        let result =
-            decrypt_item_by_version(0, V1Key(&v1_key), V2Key(&v2_key), &"item-y".into(), &nonce, b"ct");
+        let result = decrypt_item_by_version(
+            0,
+            V1Key(&v1_key),
+            V2Key(&v2_key),
+            &"item-y".into(),
+            &nonce,
+            b"ct",
+        );
         assert!(matches!(result, Err(EncryptError::UnknownKeyVersion(0))));
     }
 

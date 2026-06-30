@@ -470,8 +470,8 @@ mod tests {
     #[test]
     fn wire_round_trip_preserves_key_version_so_receiver_can_decrypt() {
         use copypaste_core::{
-            build_item_aad_v2, decrypt_item_by_version, derive_v2, encrypt_item_with_aad,
-            ItemId, AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
+            build_item_aad_v2, decrypt_item_by_version, derive_v2, encrypt_item_with_aad, ItemId,
+            AAD_SCHEMA_VERSION_V4, NONCE_SIZE,
         };
 
         // The device's v1 storage seed (stands in for `load_local_key()`).

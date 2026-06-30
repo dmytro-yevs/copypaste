@@ -707,10 +707,7 @@ mod tests {
             "serialised DeviceInfo must carry the snake_case tag: {json}"
         );
         let decoded: PeerFrame = serde_json::from_str(&json).expect("must deserialize");
-        assert_eq!(
-            decoded, frame,
-            "DeviceInfo must survive a JSON round-trip"
-        );
+        assert_eq!(decoded, frame, "DeviceInfo must survive a JSON round-trip");
     }
 
     /// `ControlMsg::DeviceInfo` with all-`None` fields must also round-trip.

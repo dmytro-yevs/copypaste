@@ -33,6 +33,7 @@ pub use fts::{
     compute_content_hash, fetch_text_preview, fetch_text_previews_batch, get_device_names,
     search_items, search_items_filtered, upsert_fts, MAX_PREVIEW_BYTES,
 };
+pub use ids::{ItemId, RowId};
 pub use insert::{
     backfill_origin_device_id, get_key_version, insert_item, insert_item_with_fts, insert_tombstone,
 };
@@ -42,7 +43,6 @@ pub use query::{
     get_item_by_id, get_item_by_item_id, get_page, get_page_meta, get_page_pinned_first,
     get_page_pinned_first_lamport, DecryptedPage,
 };
-pub use ids::{ItemId, RowId};
 pub use types::{next_lamport_ts, ClipboardItem, ItemsError};
 
 // Test-only re-exports of private helpers accessed from tests.rs.

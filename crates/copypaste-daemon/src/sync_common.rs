@@ -25,8 +25,7 @@
 use copypaste_core::{
     build_item_aad_v2, decrypt_item_by_version, derive_v2, encrypt_item_with_aad,
     is_sensitive_for_autowipe, ClipboardItem, Database, ItemId, V1Key, V2Key,
-    AAD_SCHEMA_VERSION_V4,
-    ITEM_KEY_VERSION_CURRENT,
+    AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 
 // ── Cloud file-identity envelope (BUG C1) ──────────────────────────────────────

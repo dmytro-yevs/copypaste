@@ -581,7 +581,11 @@ pub(crate) fn encrypt_text_for_storage(
     item_id: &str,
 ) -> Result<([u8; copypaste_core::NONCE_SIZE], Vec<u8>), copypaste_core::EncryptError> {
     let v2_key = derive_v2(local_key);
-    let aad = build_item_aad_v2(&ItemId::from(item_id), AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT_U32);
+    let aad = build_item_aad_v2(
+        &ItemId::from(item_id),
+        AAD_SCHEMA_VERSION_V4,
+        ITEM_KEY_VERSION_CURRENT_U32,
+    );
     encrypt_item_with_aad(plaintext, &v2_key, &aad)
 }
 

@@ -257,7 +257,11 @@ mod tests {
         // SENDER A: item is stored encrypted under A's v2 local key (exactly as
         // a freshly-captured text item is).
         let a_v2 = derive_v2(&seed_a);
-        let aad_a = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
+        let aad_a = build_item_aad_v2(
+            &copypaste_core::ItemId::from(item_id.as_str()),
+            AAD_SCHEMA_VERSION_V4,
+            2,
+        );
         let (nonce_a, ct_a) =
             encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
 
@@ -626,7 +630,11 @@ mod tests {
         let item_id = "fanout-716-item".to_string();
         let plaintext = b"the shared secret content for 3-device test";
         let a_v2 = derive_v2(&seed_a);
-        let aad_a = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
+        let aad_a = build_item_aad_v2(
+            &copypaste_core::ItemId::from(item_id.as_str()),
+            AAD_SCHEMA_VERSION_V4,
+            2,
+        );
         let (nonce_a, ct_a) =
             encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
 
@@ -758,7 +766,11 @@ mod tests {
         let item_id = "catchup-716-item".to_string();
         let plaintext = b"catchup per-peer key test";
         let a_v2 = derive_v2(&seed_a);
-        let aad_a = build_item_aad_v2(&copypaste_core::ItemId::from(item_id.as_str()), AAD_SCHEMA_VERSION_V4, 2);
+        let aad_a = build_item_aad_v2(
+            &copypaste_core::ItemId::from(item_id.as_str()),
+            AAD_SCHEMA_VERSION_V4,
+            2,
+        );
         let (nonce_a, ct_a) =
             encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
 
