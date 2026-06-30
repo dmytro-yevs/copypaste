@@ -289,6 +289,19 @@ jobs:
     name: Android instrumented tests (AVD)
     runs-on: macos-latest
     needs: build-android-ndk
+    # NON-BLOCKING (CopyPaste-k1l0): the managed AVD does not boot on any runner
+    # currently available to this repo. GitHub's macos-latest is arm64, where the
+    # emulator process launches but `adb` never attaches (HVF/accel limitation) —
+    # both the x86_64 and arm64-v8a system images time out with
+    # "Timeout waiting for emulator to boot". The build-android-ndk job emits an
+    # arm64-v8a .so only, so the documented reliable path (ubuntu-latest + KVM +
+    # x86_64 AVD) additionally needs an x86_64 .so build. Until that migration
+    # (CopyPaste-k1l0) lands, this job runs for visibility but MUST NOT block the
+    # workflow: a perma-red required check is worse than a documented soft one,
+    # and it would mask real regressions in the hard Android gates (lint, .so
+    # build, JVM unit tests). The instrumented suite is therefore deferred, not
+    # silently passing — see CopyPaste-k1l0.
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
