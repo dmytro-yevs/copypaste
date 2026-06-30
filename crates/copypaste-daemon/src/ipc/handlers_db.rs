@@ -85,6 +85,28 @@ impl IpcServer {
                 let join = tokio::task::spawn_blocking(move || {
                     let mut guard = db_arc.blocking_lock();
 
+                    // CopyPaste-2lc9 (belt #2): checkpoint the OLD connection
+                    // before we swap it out. Flushing outstanding WAL frames to
+                    // the main file minimises the window during which a stale
+                    // WAL file can survive the delete in step 2 and be replayed
+                    // onto the fresh DB created in step 3 — which would trigger
+                    // the "duplicate column name: content_hash" race inside
+                    // `apply_migrations`. A failed checkpoint is non-fatal: the
+                    // WAL file is still deleted below; the checkpoint only
+                    // tightens the race window, it does not eliminate the
+                    // `wal_checkpoint(TRUNCATE)` call at the top of
+                    // `apply_migrations` (which is the authoritative fix).
+                    if let Err(e) = guard
+                        .conn()
+                        .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+                    {
+                        tracing::warn!(
+                            error = %e,
+                            "reset_database: wal_checkpoint(TRUNCATE) on old \
+                             handle failed; WAL will still be removed in step 2"
+                        );
+                    }
+
                     // 1. Close the current connection. Swapping in a throwaway
                     //    in-memory DB drops the old `Database` (and its open
                     //    file handles / WAL) so the files can be removed cleanly.

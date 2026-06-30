@@ -323,6 +323,26 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     // (e.g. the migration unit tests). Keep it equal to the shipping default so
     // those callers behave as before; tuned callers override it post-migration.
     conn.execute_batch("PRAGMA journal_mode=WAL;")?;
+    // CopyPaste-2lc9: force the WAL to be fully applied (checkpointed) BEFORE we
+    // read `user_version` or call `column_exists`. The race: `column_exists` is
+    // evaluated at SCRIPT-BUILD time. If a stale WAL is lazily replayed by SQLite
+    // between the `column_exists` call (which returned false) and the subsequent
+    // `execute_batch` call (which runs the ALTER inside BEGIN…COMMIT), the column
+    // will already exist when the ALTER runs → "duplicate column name: content_hash".
+    //
+    // `wal_checkpoint(TRUNCATE)` flushes all committed WAL frames into the main
+    // database file and truncates the WAL. After this point, `pragma_table_info`
+    // (used by `column_exists`) and `PRAGMA user_version` observe the
+    // post-checkpoint state — there is no remaining opportunity for a lagged WAL
+    // replay to introduce new columns mid-script.
+    //
+    // Safety: this is a no-op on a fresh/empty database (no WAL file) and on
+    // in-memory databases (WAL mode is silently downgraded to MEMORY journal by
+    // SQLite, so the pragma runs but does nothing). A busy checkpoint (other
+    // readers holding frames) does not return an error — SQLite returns partial
+    // progress and we proceed; the column_exists guard remains the authoritative
+    // backstop for that edge case.
+    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
     conn.execute_batch(&format!(
         "PRAGMA cache_size=-{};",
         i64::from(crate::config::SQLITE_CACHE_MB) * 1024
@@ -1414,5 +1434,93 @@ mod tests {
             "EXPLAIN QUERY PLAN must not be a bare unindexed full-table scan, \
              got plan: {plan:?} (CopyPaste-89rd)"
         );
+    }
+
+    /// CopyPaste-2lc9: regression for the WAL-replay duplicate-column race.
+    ///
+    /// Scenario: Connection A writes a v1 schema with `content_hash` already
+    /// added to a REAL FILE database (simulating the WAL state left by a
+    /// previous migration or crash) and drops WITHOUT checkpointing. Connection
+    /// B opens the same file and calls `apply_migrations`.
+    ///
+    /// Before the fix: if the WAL was lazily applied between `column_exists`
+    /// returning false and `execute_batch` running the BEGIN…COMMIT script, the
+    /// ALTER TABLE would fail with "duplicate column name: content_hash".
+    ///
+    /// After the fix: `PRAGMA wal_checkpoint(TRUNCATE)` at the top of
+    /// `apply_migrations` flushes any outstanding WAL frames into the main
+    /// database file BEFORE `column_exists` runs, making the guard
+    /// authoritative. Regardless of WAL state, `column_exists` always sees the
+    /// complete post-checkpoint schema.
+    ///
+    /// Note: the true concurrent race (another writer commits `content_hash` to
+    /// the WAL between `column_exists` and `execute_batch`) cannot be triggered
+    /// deterministically in a single-threaded test. This test validates the
+    /// file-DB code path of the guard and documents the scenario; the
+    /// wal_checkpoint fix is the authoritative defence against the CI-observed
+    /// intermittent failure.
+    #[test]
+    fn wal_replay_does_not_cause_duplicate_column() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("wal_race.db");
+
+        // ── Connection A: write v1 schema + content_hash to a WAL-mode
+        // file DB, then drop WITHOUT checkpointing. This leaves committed WAL
+        // frames containing the schema on disk, visible to the next reader.
+        {
+            let conn_a = Connection::open(&path).expect("open conn_a");
+            conn_a
+                .execute_batch("PRAGMA journal_mode=WAL;")
+                .expect("WAL mode");
+            conn_a.execute_batch(V1_SCHEMA_SQL).expect("v1 schema");
+            conn_a
+                .execute_batch("ALTER TABLE clipboard_items ADD COLUMN content_hash TEXT;")
+                .expect("pre-add content_hash");
+            conn_a
+                .execute_batch("PRAGMA user_version = 1;")
+                .expect("set user_version=1");
+            // conn_a is dropped here WITHOUT calling wal_checkpoint — the WAL
+            // frames remain on disk exactly as a background writer would leave
+            // them in the reset_database race scenario.
+        }
+
+        // ── Connection B: opens the same file. The WAL file is still present
+        // (not checkpointed). `apply_migrations` must succeed:
+        //   1. `PRAGMA wal_checkpoint(TRUNCATE)` at the top flushes the WAL.
+        //   2. `column_exists` now sees `content_hash` → skips the ALTER.
+        //   3. The migration script runs without "duplicate column name".
+        {
+            let conn_b = Connection::open(&path).expect("open conn_b");
+            let result = apply_migrations(&conn_b);
+            assert!(
+                result.is_ok(),
+                "apply_migrations must succeed when WAL contains pre-existing \
+                 content_hash (CopyPaste-2lc9): {result:?}"
+            );
+
+            // Must reach the current schema version.
+            let version: i64 = conn_b
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(
+                version, SCHEMA_VERSION,
+                "must reach SCHEMA_VERSION after migration on file DB with WAL"
+            );
+
+            // content_hash must appear exactly once — no duplicate from the race.
+            let mut stmt = conn_b
+                .prepare("PRAGMA table_info(clipboard_items)")
+                .unwrap();
+            let count = stmt
+                .query_map([], |r| r.get::<_, String>(1))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .filter(|name| name == "content_hash")
+                .count();
+            assert_eq!(
+                count, 1,
+                "content_hash must appear exactly once (no duplicate from WAL race)"
+            );
+        }
     }
 }
