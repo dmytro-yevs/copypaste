@@ -233,6 +233,7 @@ function main() {
     "--pressed",    // computed overlay
     "--selected",   // computed from accent
     "--scrim",      // modal backdrop — not in CpColors
+    "--focus-ring", // focus affordance (box-shadow), not a colour field
     "--sh1", "--sh2", "--sh3",  // shadows
     "--f-ui", "--f-mono",       // fonts
     "--r-chip", "--r-pill", "--r-ctl", "--r-input", "--r-card", "--r-window",
