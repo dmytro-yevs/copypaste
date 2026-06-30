@@ -143,12 +143,19 @@ pub(crate) async fn snapshot_cloud_write_key_bytes(
     if cloud_v2_writes_enabled() {
         let g = sync_key_v2.lock().await;
         if let Some(k) = g.as_ref() {
-            return Some((*k.as_bytes(), copypaste_core::SYNC_KEY_DERIVATION_VERSION_V2));
+            return Some((
+                *k.as_bytes(),
+                copypaste_core::SYNC_KEY_DERIVATION_VERSION_V2,
+            ));
         }
     }
     let g = sync_key.lock().await;
-    g.as_ref()
-        .map(|k| (*k.as_bytes(), copypaste_core::SYNC_KEY_DERIVATION_VERSION_V1))
+    g.as_ref().map(|k| {
+        (
+            *k.as_bytes(),
+            copypaste_core::SYNC_KEY_DERIVATION_VERSION_V1,
+        )
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

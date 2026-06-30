@@ -59,7 +59,10 @@ const CLOUD_SYNC_FILE_NAME: &str = "cloud_sync.key";
 /// + preferred-read) keys for dual-key read dispatch without the passphrase.
 #[cfg_attr(
     not(feature = "cloud-sync"),
-    allow(dead_code, reason = "only used by the cloud-sync v2 persist/restore path")
+    allow(
+        dead_code,
+        reason = "only used by the cloud-sync v2 persist/restore path"
+    )
 )]
 const CLOUD_SYNC_V2_FILE_NAME: &str = "cloud_sync_v2.key";
 
@@ -102,7 +105,10 @@ fn cloud_sync_file_path() -> Result<PathBuf, KeychainError> {
 /// Path to the v2 per-account-salt cloud-sync key file (CopyPaste-jdq5).
 #[cfg_attr(
     not(feature = "cloud-sync"),
-    allow(dead_code, reason = "only used by the cloud-sync v2 persist/restore path")
+    allow(
+        dead_code,
+        reason = "only used by the cloud-sync v2 persist/restore path"
+    )
 )]
 fn cloud_sync_v2_file_path() -> Result<PathBuf, KeychainError> {
     Ok(data_dir_for_keys()?.join(CLOUD_SYNC_V2_FILE_NAME))

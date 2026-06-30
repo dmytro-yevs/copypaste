@@ -1002,7 +1002,10 @@ async fn poll_single_v1_candidate_still_decrypts() {
         .conn()
         .query_row("SELECT COUNT(1) FROM clipboard_items", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(count, 1, "single-candidate v1 read must still decrypt the row");
+    assert_eq!(
+        count, 1,
+        "single-candidate v1 read must still decrypt the row"
+    );
 }
 
 /// **CopyPaste-jdq5** — the v2 cloud-write opt-in gate parses truthy env values
@@ -1010,7 +1013,9 @@ async fn poll_single_v1_candidate_still_decrypts() {
 /// un-upgraded-peer interop) until an operator deliberately enables it.
 #[test]
 fn cloud_v2_writes_flag_defaults_off_and_parses_truthy() {
-    let _guard = crate::TEST_ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    let _guard = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
     let original = std::env::var_os("COPYPASTE_CLOUD_KEY_V2_WRITES");
     // SAFETY: serialised via TEST_ENV_LOCK.
     unsafe {
@@ -1021,13 +1026,19 @@ fn cloud_v2_writes_flag_defaults_off_and_parses_truthy() {
         unsafe {
             std::env::set_var("COPYPASTE_CLOUD_KEY_V2_WRITES", truthy);
         }
-        assert!(cloud_v2_writes_enabled(), "{truthy:?} must enable v2 writes");
+        assert!(
+            cloud_v2_writes_enabled(),
+            "{truthy:?} must enable v2 writes"
+        );
     }
     for falsy in ["0", "false", "no", "off", "", "bogus"] {
         unsafe {
             std::env::set_var("COPYPASTE_CLOUD_KEY_V2_WRITES", falsy);
         }
-        assert!(!cloud_v2_writes_enabled(), "{falsy:?} must NOT enable v2 writes");
+        assert!(
+            !cloud_v2_writes_enabled(),
+            "{falsy:?} must NOT enable v2 writes"
+        );
     }
     // Restore.
     unsafe {

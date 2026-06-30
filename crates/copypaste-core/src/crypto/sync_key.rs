@@ -1098,8 +1098,8 @@ mod tests {
     fn trying_all_wrong_keys_returns_decrypt_failed() {
         let real = derive_sync_key(PASS).expect("real");
         let wrong_a = derive_sync_key("totally-different-pass-a").expect("wrong a");
-        let wrong_b = derive_sync_key_for_account("totally-different-pass-b", ACCOUNT_B)
-            .expect("wrong b");
+        let wrong_b =
+            derive_sync_key_for_account("totally-different-pass-b", ACCOUNT_B).expect("wrong b");
         let item_id = "item-trying-none";
         let blob = encrypt_for_cloud(&real, item_id, b"secret").expect("encrypt");
         assert!(matches!(
@@ -1155,9 +1155,8 @@ mod tests {
             .as_bytes();
         let v1_reloaded = SyncKey::from_bytes(v1_bytes);
         let v2_reloaded = SyncKey::from_bytes(v2_bytes);
-        let recovered =
-            decrypt_from_cloud_trying(&[&v2_reloaded, &v1_reloaded], item_id, &blob)
-                .expect("reloaded slots decrypt the legacy v1 row");
+        let recovered = decrypt_from_cloud_trying(&[&v2_reloaded, &v1_reloaded], item_id, &blob)
+            .expect("reloaded slots decrypt the legacy v1 row");
         assert_eq!(recovered, plaintext);
     }
 }

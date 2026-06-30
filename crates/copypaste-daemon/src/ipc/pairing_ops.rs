@@ -507,7 +507,9 @@ impl IpcServer {
                 )
                 .await
                 {
-                    tracing::warn!("persist_and_install_sync_key: v2 key delete task panicked: {e}");
+                    tracing::warn!(
+                        "persist_and_install_sync_key: v2 key delete task panicked: {e}"
+                    );
                 }
             }
         }

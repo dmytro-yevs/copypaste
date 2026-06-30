@@ -551,7 +551,10 @@ fn derive_cloud_sync_key_for_account_v2_properties() {
 
     let v2_a1 = derive_cloud_sync_key_for_account(pass.into(), acct_a.clone()).expect("v2 a1");
     let v2_a2 = derive_cloud_sync_key_for_account(pass.into(), acct_a.clone()).expect("v2 a2");
-    assert_eq!(v2_a1, v2_a2, "same (passphrase, account) must be deterministic");
+    assert_eq!(
+        v2_a1, v2_a2,
+        "same (passphrase, account) must be deterministic"
+    );
     assert_eq!(v2_a1.len(), 32);
 
     let v2_b = derive_cloud_sync_key_for_account(pass.into(), acct_b).expect("v2 b");
