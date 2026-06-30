@@ -175,21 +175,25 @@ class SyncManager(
         private val syncKeyLock = Any()
 
         /**
-         * Return the derived sync key for [passphrase], deriving (and caching)
-         * on a miss. Returns null if derivation throws. Hands back a defensive
-         * copy so callers cannot mutate the cached key.
+         * Return the derived sync key for ([passphrase], [accountId]), deriving
+         * (and caching) on a miss. The cache is keyed by BOTH the passphrase and
+         * the account id, since the single per-account derivation mixes the
+         * account id into the Argon2id salt — a different account yields a
+         * different key for the same passphrase. Returns null if derivation
+         * throws. Hands back a defensive copy so callers cannot mutate the cache.
          */
-        private fun derivedSyncKey(passphrase: String): ByteArray? {
-            cachedSyncKey?.let { (pw, key) -> if (pw == passphrase) return key.copyOf() }
+        private fun derivedSyncKey(passphrase: String, accountId: String): ByteArray? {
+            val cacheKey = "$accountId\n$passphrase"
+            cachedSyncKey?.let { (k, key) -> if (k == cacheKey) return key.copyOf() }
             return synchronized(syncKeyLock) {
-                cachedSyncKey?.let { (pw, key) -> if (pw == passphrase) return@synchronized key.copyOf() }
+                cachedSyncKey?.let { (k, key) -> if (k == cacheKey) return@synchronized key.copyOf() }
                 val derived = try {
-                    derive_cloud_sync_key(passphrase)
+                    derive_cloud_sync_key(passphrase, accountId)
                 } catch (e: Exception) {
                     Log.w(TAG, "sync key derivation failed: ${e.message}")
                     return@synchronized null
                 }
-                cachedSyncKey = passphrase to derived
+                cachedSyncKey = cacheKey to derived
                 derived.copyOf()
             }
         }
@@ -215,7 +219,33 @@ class SyncManager(
             settings.cloudSyncKeyDirect?.let { return it.copyOf() }
             val passphrase = settings.cloudSyncPassphrase
             if (passphrase.isBlank()) return null
-            return derivedSyncKey(passphrase)
+            // The single per-account derivation REQUIRES the Supabase account id.
+            // It is captured into Settings.supabaseUserId on a successful sign-in
+            // (see resolveSyncContext) and may also be read from the live cached
+            // JWT. Without it we cannot derive a key the daemon would reproduce, so
+            // skip rather than fall back to an account-free key.
+            val accountId = currentAccountId(settings) ?: run {
+                Log.w(
+                    TAG,
+                    "resolveCloudSyncKey: no Supabase account id yet (sign in first) — " +
+                        "cannot derive the per-account cloud sync key",
+                )
+                return null
+            }
+            return derivedSyncKey(passphrase, accountId)
+        }
+
+        /**
+         * Compute the stable `"<project_ref>|<user_id>"` account id for the
+         * per-account key derivation, or null when no Supabase user id is known
+         * (never signed in). Prefers the live cached JWT's `sub`, falling back to
+         * the value persisted in Settings on the last sign-in.
+         */
+        private fun currentAccountId(settings: Settings): String? {
+            val userId = cachedJwt?.token?.let { supabaseUserIdFromJwt(it) }
+                ?: settings.supabaseUserId.takeIf { it.isNotBlank() }
+                ?: return null
+            return supabaseAccountId(settings.supabaseUrl, userId)
         }
 
         // ── JWT session cache ─────────────────────────────────────────────────
@@ -1180,17 +1210,14 @@ class SyncManager(
 
         val client = SupabaseClient(s.supabaseUrl, s.supabaseAnonKey)
 
-        // Prefer the QR-provisioned direct key; else cached Argon2id-derived key
-        // (re-derived only on passphrase change). Returns null when no key is
-        // available at all → abort. See resolveCloudSyncKey.
-        val syncKeyBytes = resolveCloudSyncKey(s) ?: run {
-            Log.w(TAG, "resolveSyncContext: no cloud sync key (no direct key, no passphrase)")
-            return@withContext null
-        }
-
         // M8 + JWT-cache: a sign-in failure must NOT fall back to the anon key
         // (RLS bypass). cachedOrFreshBearer reuses the cached JWT while valid
         // (no GoTrue POST per call) and re-signs only on cache miss or near-expiry.
+        //
+        // We resolve the bearer FIRST (before the sync key) so the GoTrue JWT —
+        // and therefore the Supabase user id that feeds the per-account key salt —
+        // is available when resolveCloudSyncKey derives the key. Capturing the
+        // user id here also persists it for the direct-call sync paths.
         val bearer = if (s.hasSupabaseCredentials) {
             cachedOrFreshBearer(client, s.supabaseUrl, s.supabaseEmail, s.supabasePassword) ?: run {
                 Log.w(TAG, "resolveSyncContext: sign-in failed — aborting (no anon-key RLS bypass)")
@@ -1198,6 +1225,19 @@ class SyncManager(
             }
         } else {
             s.supabaseAnonKey
+        }
+        // Persist the GoTrue user id (JWT `sub`) so the per-account key derivation
+        // has a stable account id across restarts and the direct-call sync paths.
+        supabaseUserIdFromJwt(bearer)?.let { uid ->
+            if (uid != s.supabaseUserId) s.supabaseUserId = uid
+        }
+
+        // Prefer the QR-provisioned direct key; else cached Argon2id-derived key
+        // (re-derived only on passphrase/account change). Returns null when no key
+        // is available at all → abort. See resolveCloudSyncKey.
+        val syncKeyBytes = resolveCloudSyncKey(s) ?: run {
+            Log.w(TAG, "resolveSyncContext: no cloud sync key (no direct key, no derivable passphrase)")
+            return@withContext null
         }
 
         SyncContext(client = client, syncKey = syncKeyBytes, bearer = bearer)

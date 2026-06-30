@@ -39,11 +39,9 @@ pub async fn start_cloud(
     config: CloudConfig,
     db: Arc<Mutex<Database>>,
     new_item_rx: tokio::sync::broadcast::Receiver<ClipboardItem>,
+    // The single per-account cloud sync key slot (shared with relay). When
+    // `None`, upload and download are skipped with a one-time `warn!`.
     sync_key: Arc<Mutex<Option<SyncKey>>>,
-    // CopyPaste-jdq5: the v2 per-account cloud key slot. Used ONLY by these cloud
-    // loops for dual-key read dispatch (try v2 then the v1 `sync_key`) and, when
-    // `COPYPASTE_CLOUD_KEY_V2_WRITES` is set, for new uploads. Relay never sees it.
-    sync_key_v2: Arc<Mutex<Option<SyncKey>>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
@@ -175,7 +173,6 @@ pub async fn start_cloud(
     let push_bearer = bearer.clone();
     let push_shutdown = shutdown.clone();
     let push_sync_key = sync_key.clone();
-    let push_sync_key_v2 = sync_key_v2.clone();
     let push_local_key = local_key.clone();
     let push_db = db.clone();
     let push_last_sync_ms = last_sync_ms.clone();
@@ -188,7 +185,6 @@ pub async fn start_cloud(
         new_item_rx,
         push_shutdown,
         push_sync_key,
-        push_sync_key_v2,
         push_local_key,
         push_db,
         push_last_sync_ms,
@@ -206,7 +202,6 @@ pub async fn start_cloud(
     let poll_bearer = bearer.clone();
     let poll_shutdown = shutdown.clone();
     let poll_sync_key = sync_key.clone();
-    let poll_sync_key_v2 = sync_key_v2.clone();
     let poll_local_key = local_key.clone();
     let poll_last_sync_ms = last_sync_ms.clone();
     let poll_signed_in = cloud_signed_in.clone();
@@ -223,7 +218,6 @@ pub async fn start_cloud(
         db.clone(),
         poll_shutdown,
         poll_sync_key,
-        poll_sync_key_v2,
         poll_local_key,
         poll_last_sync_ms,
         poll_signed_in,
@@ -264,7 +258,6 @@ pub async fn start_cloud(
     );
     let ws_bearer = bearer.clone();
     let ws_sync_key = sync_key.clone();
-    let ws_sync_key_v2 = sync_key_v2.clone();
     let ws_local_key = local_key.clone();
     let ws_db = db;
     let ws_last_sync_ms = last_sync_ms.clone();
@@ -275,7 +268,6 @@ pub async fn start_cloud(
         ws_bearer,
         ws_db,
         ws_sync_key,
-        ws_sync_key_v2,
         ws_local_key,
         ws_last_sync_ms,
         ws_shutdown,

@@ -282,7 +282,11 @@ async fn daemon_push_roundtrips_through_bytea_wire() {
     let cfg = cfg_for(&url);
     let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
 
-    let sync_key = derive_sync_key("daemon-push-passphrase").expect("derive sync key");
+    let sync_key = derive_sync_key(
+        "daemon-push-passphrase",
+        "proj_test|00000000-0000-0000-0000-000000000001",
+    )
+    .expect("derive sync key");
     let id = unique_id();
     let item_id = unique_id();
     let plaintext = b"daemon push -> bytea wire -> back";
@@ -370,7 +374,11 @@ async fn cross_client_contract_correct_decrypts_broken_fails() {
     let client = reqwest::Client::new();
     let cfg = cfg_for(&url);
 
-    let sync_key = derive_sync_key("cross-client-passphrase").expect("derive sync key");
+    let sync_key = derive_sync_key(
+        "cross-client-passphrase",
+        "proj_test|00000000-0000-0000-0000-000000000001",
+    )
+    .expect("derive sync key");
     let plaintext = b"cross-client payload from Android";
 
     // ── Correct cross-client row: stored as a proper bytea hex literal. ──
@@ -457,7 +465,11 @@ async fn poll_path_with_refresh_roundtrips() {
     let cfg = cfg_for(&url);
     let bearer = Arc::new(RwLock::new("anon-key-for-tests".to_owned()));
 
-    let sync_key = derive_sync_key("poll-path-passphrase").expect("derive sync key");
+    let sync_key = derive_sync_key(
+        "poll-path-passphrase",
+        "proj_test|00000000-0000-0000-0000-000000000001",
+    )
+    .expect("derive sync key");
     let id = unique_id();
     let item_id = unique_id();
     let plaintext = b"poll-path payload through fetch_remote_rows_with_refresh";

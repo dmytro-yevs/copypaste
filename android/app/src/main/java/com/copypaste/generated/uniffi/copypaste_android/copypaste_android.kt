@@ -800,8 +800,6 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
-
-
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -847,9 +845,7 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_default_config(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_derive_cloud_sync_key(`passphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_derive_cloud_sync_key_for_account(`passphrase`: RustBuffer.ByValue,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_derive_cloud_sync_key(`passphrase`: RustBuffer.ByValue,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_detect_sensitive_spans(`text`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -897,11 +893,11 @@ internal interface UniffiLib : Library {
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_resolve_stun_public_ip(uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
-    fun uniffi_copypaste_android_fn_func_revoke_device_and_rotate_key(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`newPassphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_revoke_device_and_rotate_key(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`newPassphrase`: RustBuffer.ByValue,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_revoke_device_audit(`dbPath`: RustBuffer.ByValue,`key`: RustBuffer.ByValue,`fingerprint`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
-    fun uniffi_copypaste_android_fn_func_rotate_sync_key(`newPassphrase`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    fun uniffi_copypaste_android_fn_func_rotate_sync_key(`newPassphrase`: RustBuffer.ByValue,`accountId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     fun uniffi_copypaste_android_fn_func_sensitive_capture_decision(`text`: RustBuffer.ByValue,`nowUnixMs`: Long,`sensitiveTtlSecs`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
@@ -1073,8 +1069,6 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_copypaste_android_checksum_func_derive_cloud_sync_key(
     ): Short
-    fun uniffi_copypaste_android_checksum_func_derive_cloud_sync_key_for_account(
-    ): Short
     fun uniffi_copypaste_android_checksum_func_detect_sensitive_spans(
     ): Short
     fun uniffi_copypaste_android_checksum_func_encrypt_text(
@@ -1215,10 +1209,7 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_default_config() != 9299.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_derive_cloud_sync_key() != 34994.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
-    if (lib.uniffi_copypaste_android_checksum_func_derive_cloud_sync_key_for_account() != 20663.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_derive_cloud_sync_key() != 24171.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_detect_sensitive_spans() != 30416.toShort()) {
@@ -1290,13 +1281,13 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
     if (lib.uniffi_copypaste_android_checksum_func_resolve_stun_public_ip() != 8780.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_revoke_device_and_rotate_key() != 11885.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_revoke_device_and_rotate_key() != 38538.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_revoke_device_audit() != 60588.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_copypaste_android_checksum_func_rotate_sync_key() != 28421.toShort()) {
+    if (lib.uniffi_copypaste_android_checksum_func_rotate_sync_key() != 65041.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_copypaste_android_checksum_func_sensitive_capture_decision() != 41929.toShort()) {
@@ -3439,40 +3430,21 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
     
 
         /**
-         * Derive the 32-byte shared sync key from `passphrase` (Argon2id).
-         * Deterministic: same passphrase → same key on every device.
-         * Returns raw 32-byte key material. Caller MUST NOT persist to disk.
+         * Derive the single per-account 32-byte sync key from `passphrase` and the
+         * stable Supabase `account_id` (`"<project_ref>|<user_id>"`) using Argon2id
+         * with the per-account salt. This is the ONLY cloud-sync key derivation —
+         * there is no global-salt variant.
          *
-         * This is the LEGACY v1 (global-salt) derivation. It stays the default so
-         * existing Kotlin callers and all existing cloud/relay ciphertexts are
-         * unchanged. For the v2 per-account-salt key, call
-         * `derive_cloud_sync_key_for_account` (CopyPaste-jdq5).
+         * Mixing the account id into the salt defeats cross-user precompute while
+         * keeping the derivation deterministic across the account's devices, so the
+         * key is byte-identical to the macOS daemon's (macOS<->Android interop holds).
+         * Deterministic: same passphrase + same account_id → same key on every device.
+         * Returns raw 32-byte key material. Caller MUST NOT persist to disk.
          */
-    @Throws(CopypasteException::class) fun `deriveCloudSyncKey`(`passphrase`: kotlin.String): List<kotlin.UByte> {
+    @Throws(CopypasteException::class) fun `deriveCloudSyncKey`(`passphrase`: kotlin.String, `accountId`: kotlin.String): List<kotlin.UByte> {
             return FfiConverterSequenceUByte.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_derive_cloud_sync_key(
-        FfiConverterString.lower(`passphrase`),_status)
-}
-    )
-    }
-    
-
-        /**
-         * Derive the 32-byte **v2 per-account-salt** sync key (CopyPaste-jdq5).
-         *
-         * `account_id` is the stable Supabase account identity
-         * (`"<project_ref>|<user_id>"`) both devices of an account agree on. Mixing
-         * it into the Argon2id salt defeats cross-user precompute while keeping the
-         * derivation deterministic across the account's devices. ADDITIVE: existing
-         * callers keep using the v1 `derive_cloud_sync_key` above; Kotlin should call
-         * THIS once it can supply the Supabase account id, so macOS<->Android cloud
-         * interop holds after the v2 write cutover.
-         */
-    @Throws(CopypasteException::class) fun `deriveCloudSyncKeyForAccount`(`passphrase`: kotlin.String, `accountId`: kotlin.String): List<kotlin.UByte> {
-            return FfiConverterSequenceUByte.lift(
-    uniffiRustCallWithError(CopypasteException) { _status ->
-    UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_derive_cloud_sync_key_for_account(
         FfiConverterString.lower(`passphrase`),FfiConverterString.lower(`accountId`),_status)
 }
     )
@@ -3809,17 +3781,19 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
 
         /**
          * Revoke a peer AND rotate the cloud sync key to `new_passphrase`.
+         * `account_id` is the stable Supabase account identity (`"<project_ref>|<user_id>"`)
+         * fed into the single per-account key derivation; it must be non-empty.
          * Returns the new 32-byte raw sync key. Kotlin MUST store in AndroidKeystore
-         * and zero the ByteArray after persisting. Passphrase must be ≥8 characters.
+         * and zero the ByteArray after persisting. Passphrase must be ≥12 characters.
          * With `android-uniffi-live` feature off, skips the DB write (stub mode);
          * Kotlin is responsible for calling `revoke_device_audit` separately in that case.
-         * Throws `DecryptionFailed` for a bad passphrase, `DatabaseError` on DB failure.
+         * Throws `DecryptionFailed` for a bad passphrase / blank account id, `DatabaseError` on DB failure.
          */
-    @Throws(CopypasteException::class) fun `revokeDeviceAndRotateKey`(`dbPath`: kotlin.String, `key`: List<kotlin.UByte>, `fingerprint`: kotlin.String, `name`: kotlin.String, `newPassphrase`: kotlin.String): List<kotlin.UByte> {
+    @Throws(CopypasteException::class) fun `revokeDeviceAndRotateKey`(`dbPath`: kotlin.String, `key`: List<kotlin.UByte>, `fingerprint`: kotlin.String, `name`: kotlin.String, `newPassphrase`: kotlin.String, `accountId`: kotlin.String): List<kotlin.UByte> {
             return FfiConverterSequenceUByte.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_revoke_device_and_rotate_key(
-        FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),FfiConverterString.lower(`fingerprint`),FfiConverterString.lower(`name`),FfiConverterString.lower(`newPassphrase`),_status)
+        FfiConverterString.lower(`dbPath`),FfiConverterSequenceUByte.lower(`key`),FfiConverterString.lower(`fingerprint`),FfiConverterString.lower(`name`),FfiConverterString.lower(`newPassphrase`),FfiConverterString.lower(`accountId`),_status)
 }
     )
     }
@@ -3844,15 +3818,17 @@ public object FfiConverterSequenceTypeSyncedItem: FfiConverterRustBuffer<List<Sy
 
         /**
          * Rotate the cloud sync key to `new_passphrase` WITHOUT revoking a peer.
+         * `account_id` is the stable Supabase account identity (`"<project_ref>|<user_id>"`)
+         * fed into the single per-account key derivation; it must be non-empty.
          * Returns the new 32-byte raw sync key. Kotlin MUST store in AndroidKeystore
-         * and zero the ByteArray after persisting. Passphrase must be ≥8 characters.
-         * Throws `DecryptionFailed` for a bad passphrase.
+         * and zero the ByteArray after persisting. Passphrase must be ≥12 characters.
+         * Throws `DecryptionFailed` for a bad passphrase / blank account id.
          */
-    @Throws(CopypasteException::class) fun `rotateSyncKey`(`newPassphrase`: kotlin.String): List<kotlin.UByte> {
+    @Throws(CopypasteException::class) fun `rotateSyncKey`(`newPassphrase`: kotlin.String, `accountId`: kotlin.String): List<kotlin.UByte> {
             return FfiConverterSequenceUByte.lift(
     uniffiRustCallWithError(CopypasteException) { _status ->
     UniffiLib.INSTANCE.uniffi_copypaste_android_fn_func_rotate_sync_key(
-        FfiConverterString.lower(`newPassphrase`),_status)
+        FfiConverterString.lower(`newPassphrase`),FfiConverterString.lower(`accountId`),_status)
 }
     )
     }

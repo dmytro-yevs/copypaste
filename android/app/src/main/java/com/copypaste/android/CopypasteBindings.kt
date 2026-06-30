@@ -733,23 +733,27 @@ fun classifyTextKind(text: String): String {
 // The SupabaseClient base64-encodes/decodes the blob for the `payload_ct` column.
 
 /**
- * Derive the 32-byte shared sync key from [passphrase] using Argon2id.
+ * Derive the 32-byte shared sync key from [passphrase] and the stable Supabase
+ * [accountId] (`"<project_ref>|<user_id>"`) using Argon2id with the per-account
+ * salt. This is the ONLY cloud-sync key derivation — there is no global-salt
+ * variant.
  *
- * Deterministic: the same passphrase on any device (Android or macOS)
- * produces the identical 32-byte key, enabling cross-device decryption.
+ * Deterministic: the same passphrase + same accountId on any device (Android or
+ * macOS) produces the identical 32-byte key, enabling cross-device decryption.
+ * Mixing the account id into the salt defeats cross-user precompute.
  *
  * The returned [ByteArray] should be used in-memory and NOT persisted to disk.
  *
- * Throws [CopypasteException.EncryptionFailed] if Argon2id fails.
- * Throws [IllegalStateException] if the native library is not loaded.
+ * Throws [CopypasteException.EncryptionFailed] if Argon2id fails or [accountId]
+ * is blank. Throws [IllegalStateException] if the native library is not loaded.
  */
 @Throws(CopypasteException::class, IllegalStateException::class)
-fun derive_cloud_sync_key(passphrase: String): ByteArray {
+fun derive_cloud_sync_key(passphrase: String, accountId: String): ByteArray {
     if (!isNativeLibraryLoaded) {
         throw IllegalStateException("copypaste_android native library not loaded; derive_cloud_sync_key is unavailable")
     }
     return try {
-        uniffi.copypaste_android.deriveCloudSyncKey(passphrase).toByteArray()
+        uniffi.copypaste_android.deriveCloudSyncKey(passphrase, accountId).toByteArray()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw e.toAppException { CopypasteException.EncryptionFailed(it ?: "derive_cloud_sync_key failed") }
     } catch (e: Exception) {
@@ -1285,6 +1289,7 @@ fun revokeDeviceAndRotateKey(
     fingerprint: String,
     name: String,
     newPassphrase: String,
+    accountId: String,
 ): ByteArray {
     // Fail-closed: do NOT return stub key material. A stub ByteArray(32) would be
     // silently accepted by callers and corrupt sync state on every other device.
@@ -1300,6 +1305,7 @@ fun revokeDeviceAndRotateKey(
             fingerprint = fingerprint,
             name = name,
             newPassphrase = newPassphrase,
+            accountId = accountId,
         ).toByteArray()
     } catch (e: uniffi.copypaste_android.CopypasteException) {
         throw e.toAppException { CopypasteException.DatabaseError(it ?: "revokeDeviceAndRotateKey failed") }

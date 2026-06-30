@@ -128,7 +128,11 @@ fn generate_and_selfcheck_golden_vectors() {
     // Key derivation is Argon2id — deterministic — so the passphrase→key map is
     // a golden value Kotlin must reproduce bit-for-bit.
     let passphrase = "conformance-shared-passphrase-✓";
-    let sync_key = derive_cloud_sync_key(passphrase.to_string()).expect("derive sync key");
+    // The single per-account derivation requires a stable account id; pin one so
+    // the passphrase + account → key mapping is a golden value Kotlin reproduces.
+    let account_id = "proj_conformance|00000000-0000-0000-0000-0000000000aa";
+    let sync_key = derive_cloud_sync_key(passphrase.to_string(), account_id.to_string())
+        .expect("derive sync key");
     assert_eq!(sync_key.len(), 32, "sync key must be 32 bytes");
 
     let mut cloud_vectors = Vec::new();
@@ -164,8 +168,9 @@ fn generate_and_selfcheck_golden_vectors() {
             "vectors": item_vectors,
         },
         "cloud_aead": {
-            "note": "derive_cloud_sync_key + cloud_encrypt/decrypt path. blob_hex = nonce[24]||ct.",
+            "note": "derive_cloud_sync_key(passphrase, account_id) + cloud_encrypt/decrypt path. blob_hex = nonce[24]||ct.",
             "passphrase_utf8": passphrase,
+            "account_id": account_id,
             "sync_key_hex": to_hex(&sync_key),
             "vectors": cloud_vectors,
         }
@@ -234,12 +239,14 @@ fn rust_recovers_committed_fixture() {
         );
     }
 
-    // Cloud path: re-derive the key from the passphrase (deterministic) and
-    // assert it matches the recorded key, then decrypt each blob.
+    // Cloud path: re-derive the key from the passphrase + account id
+    // (deterministic) and assert it matches the recorded key, then decrypt each
+    // blob.
     let cloud = &v["cloud_aead"];
     let passphrase = cloud["passphrase_utf8"].as_str().unwrap().to_string();
+    let account_id = cloud["account_id"].as_str().unwrap().to_string();
     let recorded_key_hex = cloud["sync_key_hex"].as_str().unwrap();
-    let derived = derive_cloud_sync_key(passphrase).expect("re-derive sync key");
+    let derived = derive_cloud_sync_key(passphrase, account_id).expect("re-derive sync key");
     assert_eq!(
         to_hex(&derived),
         recorded_key_hex,

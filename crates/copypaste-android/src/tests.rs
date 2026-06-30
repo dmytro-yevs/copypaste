@@ -522,71 +522,70 @@ fn sensitive_capture_decision_ttl_zero_no_expiry() {
 
 // ── Cloud sync crypto tests ──────────────────────────────────────────────
 
-/// derive_cloud_sync_key must be deterministic: same passphrase → same bytes.
+/// A fixed, non-empty account id for the cloud-sync FFI tests.
+const TEST_ACCOUNT_A: &str = "proj_abc|00000000-0000-0000-0000-0000000000aa";
+const TEST_ACCOUNT_B: &str = "proj_abc|00000000-0000-0000-0000-0000000000bb";
+
+/// derive_cloud_sync_key must be deterministic: same passphrase + account → same bytes.
 #[test]
 fn derive_cloud_sync_key_is_deterministic() {
-    let k1 = derive_cloud_sync_key("shared-passphrase".into()).expect("derive 1");
-    let k2 = derive_cloud_sync_key("shared-passphrase".into()).expect("derive 2");
-    assert_eq!(k1, k2, "same passphrase must produce identical key bytes");
+    let k1 =
+        derive_cloud_sync_key("shared-passphrase".into(), TEST_ACCOUNT_A.into()).expect("derive 1");
+    let k2 =
+        derive_cloud_sync_key("shared-passphrase".into(), TEST_ACCOUNT_A.into()).expect("derive 2");
+    assert_eq!(
+        k1, k2,
+        "same passphrase + account must produce identical key bytes"
+    );
     assert_eq!(k1.len(), 32, "key must be exactly 32 bytes");
 }
 
-/// Different passphrases must produce different keys.
+/// Different passphrases (same account) must produce different keys.
 #[test]
 fn derive_cloud_sync_key_different_passphrases_differ() {
-    let k1 = derive_cloud_sync_key("passphrase-alpha".into()).expect("derive 1");
-    let k2 = derive_cloud_sync_key("passphrase-beta".into()).expect("derive 2");
+    let k1 = derive_cloud_sync_key("passphrase-alpha-x".into(), TEST_ACCOUNT_A.into())
+        .expect("derive 1");
+    let k2 = derive_cloud_sync_key("passphrase-beta-xx".into(), TEST_ACCOUNT_A.into())
+        .expect("derive 2");
     assert_ne!(k1, k2, "different passphrases must yield different keys");
 }
 
-/// CopyPaste-jdq5: the v2 per-account FFI is deterministic per (passphrase,
-/// account), differs from the v1 key, and differs across accounts — the
-/// cross-user-precompute defence. A blob encrypted with the v2 key round-trips
-/// through the existing `cloud_encrypt`/`cloud_decrypt` (identical AEAD format).
+/// Different account ids (same passphrase) must derive different keys — the
+/// cross-user-precompute defence — and the key round-trips through the cloud AEAD.
 #[test]
-fn derive_cloud_sync_key_for_account_v2_properties() {
+fn derive_cloud_sync_key_per_account_properties() {
     let pass = "correct horse battery staple";
-    let acct_a = "proj_abc|00000000-0000-0000-0000-0000000000aa".to_string();
-    let acct_b = "proj_abc|00000000-0000-0000-0000-0000000000bb".to_string();
+    let a1 = derive_cloud_sync_key(pass.into(), TEST_ACCOUNT_A.into()).expect("a1");
+    let a2 = derive_cloud_sync_key(pass.into(), TEST_ACCOUNT_A.into()).expect("a2");
+    assert_eq!(a1, a2, "same (passphrase, account) must be deterministic");
+    assert_eq!(a1.len(), 32);
 
-    let v2_a1 = derive_cloud_sync_key_for_account(pass.into(), acct_a.clone()).expect("v2 a1");
-    let v2_a2 = derive_cloud_sync_key_for_account(pass.into(), acct_a.clone()).expect("v2 a2");
-    assert_eq!(
-        v2_a1, v2_a2,
-        "same (passphrase, account) must be deterministic"
-    );
-    assert_eq!(v2_a1.len(), 32);
-
-    let v2_b = derive_cloud_sync_key_for_account(pass.into(), acct_b).expect("v2 b");
+    let b = derive_cloud_sync_key(pass.into(), TEST_ACCOUNT_B.into()).expect("b");
     assert_ne!(
-        v2_a1, v2_b,
+        a1, b,
         "different accounts must derive different keys (defeats cross-user precompute)"
     );
 
-    let v1 = derive_cloud_sync_key(pass.into()).expect("v1");
-    assert_ne!(v1, v2_a1, "v2 must differ from the legacy v1 key");
-
-    // The v2 key works with the existing cloud AEAD FFI unchanged.
-    let blob = cloud_encrypt("acct-item".into(), b"v2 payload", &v2_a1).expect("encrypt");
-    let recovered = cloud_decrypt("acct-item".into(), &blob, &v2_a1).expect("decrypt");
-    assert_eq!(recovered, b"v2 payload");
+    // The per-account key works with the existing cloud AEAD FFI unchanged.
+    let blob = cloud_encrypt("acct-item".into(), b"payload", &a1).expect("encrypt");
+    let recovered = cloud_decrypt("acct-item".into(), &blob, &a1).expect("decrypt");
+    assert_eq!(recovered, b"payload");
 }
 
-/// CopyPaste-jdq5: the v2 FFI enforces the same passphrase floor and rejects an
-/// empty account id (which would collapse the per-account salt).
+/// The FFI enforces the passphrase floor and rejects an empty account id (which
+/// would collapse the per-account salt).
 #[test]
-fn derive_cloud_sync_key_for_account_rejects_bad_input() {
-    let acct = "proj|user".to_string();
+fn derive_cloud_sync_key_rejects_bad_input() {
     assert!(
         matches!(
-            derive_cloud_sync_key_for_account("short".into(), acct.clone()),
+            derive_cloud_sync_key("short".into(), TEST_ACCOUNT_A.into()),
             Err(CopypasteError::DecryptionFailed { .. })
         ),
         "too-short passphrase must be rejected"
     );
     assert!(
         matches!(
-            derive_cloud_sync_key_for_account("correct horse battery staple".into(), "   ".into()),
+            derive_cloud_sync_key("correct horse battery staple".into(), "   ".into()),
             Err(CopypasteError::DecryptionFailed { .. })
         ),
         "blank account id must be rejected"
@@ -596,7 +595,8 @@ fn derive_cloud_sync_key_for_account_rejects_bad_input() {
 /// cloud_encrypt + cloud_decrypt must round-trip the plaintext.
 #[test]
 fn cloud_encrypt_decrypt_roundtrip() {
-    let key = derive_cloud_sync_key("round-trip-passphrase".into()).expect("derive");
+    let key = derive_cloud_sync_key("round-trip-passphrase".into(), TEST_ACCOUNT_A.into())
+        .expect("derive");
     let item_id = "android-cloud-item-001".to_string();
     let plaintext = b"hello from android";
 
@@ -610,8 +610,10 @@ fn cloud_encrypt_decrypt_roundtrip() {
 fn cloud_decrypt_wrong_passphrase_fails() {
     // Passphrases must be >= MIN_PASSPHRASE_LEN (12); derive_sync_key rejects
     // shorter ones with PassphraseTooShort (surfaced here as EncryptionFailed).
-    let enc_key = derive_cloud_sync_key("correct-passphrase".into()).expect("derive enc");
-    let dec_key = derive_cloud_sync_key("wrong-passphrase".into()).expect("derive dec");
+    let enc_key = derive_cloud_sync_key("correct-passphrase".into(), TEST_ACCOUNT_A.into())
+        .expect("derive enc");
+    let dec_key = derive_cloud_sync_key("wrong-passphrase".into(), TEST_ACCOUNT_A.into())
+        .expect("derive dec");
     let blob = cloud_encrypt("item-x".into(), b"data", &enc_key).expect("encrypt");
     let result = cloud_decrypt("item-x".into(), &blob, &dec_key);
     assert!(
@@ -623,7 +625,7 @@ fn cloud_decrypt_wrong_passphrase_fails() {
 /// Wrong item_id (AAD mismatch) must cause DecryptionFailed.
 #[test]
 fn cloud_decrypt_wrong_item_id_fails() {
-    let key = derive_cloud_sync_key("aad-test-pass".into()).expect("derive");
+    let key = derive_cloud_sync_key("aad-test-pass".into(), TEST_ACCOUNT_A.into()).expect("derive");
     let blob = cloud_encrypt("item-correct".into(), b"payload", &key).expect("encrypt");
     let result = cloud_decrypt("item-wrong".into(), &blob, &key);
     assert!(
@@ -1552,7 +1554,8 @@ fn sync_with_peer_counts_skipped_legacy_frame() {
 /// Blob format: `nonce[24]` prepended, total length = 24 + plaintext + 16 (AEAD tag).
 #[test]
 fn cloud_encrypt_blob_format() {
-    let key = derive_cloud_sync_key("format-test-pass".into()).expect("derive");
+    let key =
+        derive_cloud_sync_key("format-test-pass".into(), TEST_ACCOUNT_A.into()).expect("derive");
     let plaintext = b"test blob format";
     let blob = cloud_encrypt("item-fmt".into(), plaintext, &key).expect("encrypt");
     assert_eq!(
@@ -1569,7 +1572,8 @@ fn cloud_encrypt_blob_format() {
 /// Android share the macOS daemon's relay inbox.
 #[test]
 fn relay_inbox_id_matches_core() {
-    let key = derive_cloud_sync_key("relay-inbox-match".into()).expect("derive");
+    let key =
+        derive_cloud_sync_key("relay-inbox-match".into(), TEST_ACCOUNT_A.into()).expect("derive");
     let key_arr: [u8; 32] = key.as_slice().try_into().expect("32-byte key");
     let ffi = relay_inbox_id(&key).expect("inbox id");
     assert_eq!(ffi, copypaste_core::derive_relay_inbox_id(&key_arr));
@@ -1581,7 +1585,8 @@ fn relay_inbox_id_matches_core() {
 /// `derive_relay_public_key`, matching the daemon's registration value.
 #[test]
 fn relay_public_key_b64_matches_core() {
-    let key = derive_cloud_sync_key("relay-pubkey-match".into()).expect("derive");
+    let key =
+        derive_cloud_sync_key("relay-pubkey-match".into(), TEST_ACCOUNT_A.into()).expect("derive");
     let key_arr: [u8; 32] = key.as_slice().try_into().expect("32-byte key");
     let ffi = relay_public_key_b64(&key).expect("pubkey b64");
     let expected = base64::engine::general_purpose::STANDARD
@@ -1731,8 +1736,8 @@ fn sync_with_peer_sends_file_item_with_file_name_and_mime() {
 /// mentions the cause — not `EncryptionFailed` which discards all info.
 #[test]
 fn derive_cloud_sync_key_empty_passphrase_surfaces_reason() {
-    let err =
-        derive_cloud_sync_key(String::new()).expect_err("empty passphrase must return an error");
+    let err = derive_cloud_sync_key(String::new(), TEST_ACCOUNT_A.into())
+        .expect_err("empty passphrase must return an error");
     match err {
         CopypasteError::DecryptionFailed { reason } => {
             assert!(
@@ -1788,7 +1793,8 @@ fn zeroizing_key_does_not_break_encrypt_decrypt() {
 /// that end-to-end round-trip is still correct.
 #[test]
 fn zeroizing_key_does_not_break_cloud_encrypt_decrypt() {
-    let key = derive_cloud_sync_key("zeroize-cloud-check".into()).expect("derive");
+    let key =
+        derive_cloud_sync_key("zeroize-cloud-check".into(), TEST_ACCOUNT_A.into()).expect("derive");
     let item_id = "zeroize-cloud-item".to_string();
     let plaintext = b"cloud zeroize path";
     let blob = cloud_encrypt(item_id.clone(), plaintext, &key).expect("encrypt");

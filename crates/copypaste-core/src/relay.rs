@@ -171,8 +171,15 @@ mod tests {
     use super::*;
     use crate::derive_sync_key;
 
+    /// A fixed, non-empty account id so the relay tests exercise the real
+    /// per-account derivation. The relay functions themselves take raw key
+    /// bytes, so the specific account only has to be stable within a test.
+    const TEST_ACCOUNT: &str = "proj_relay|00000000-0000-0000-0000-0000000000cc";
+
     fn key(pass: &str) -> [u8; 32] {
-        *derive_sync_key(pass).expect("derive_sync_key").as_bytes()
+        *derive_sync_key(pass, TEST_ACCOUNT)
+            .expect("derive_sync_key")
+            .as_bytes()
     }
 
     /// Same key → same inbox id (cross-device agreement).

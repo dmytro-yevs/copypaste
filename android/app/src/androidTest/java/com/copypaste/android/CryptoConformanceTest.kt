@@ -127,9 +127,10 @@ class CryptoConformanceTest {
     fun kotlinDerivesIdenticalSyncKey() {
         val cloud = loadFixture().getJSONObject("cloud_aead")
         val passphrase = cloud.getString("passphrase_utf8")
+        val accountId = cloud.getString("account_id")
         val expectedKey = hexToBytes(cloud.getString("sync_key_hex"))
 
-        val derived = deriveCloudSyncKey(passphrase).toByteArray()
+        val derived = deriveCloudSyncKey(passphrase, accountId).toByteArray()
         assertArrayEquals(
             "Kotlin Argon2id derivation diverged from Rust",
             expectedKey,

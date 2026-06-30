@@ -2914,6 +2914,48 @@ fn bare_server() -> IpcServer {
     )
 }
 
+/// The single per-account sync-key derivation REQUIRES a Supabase account id.
+/// `require_cloud_account_id` returns the id when one is set (signed in) and a
+/// clean error otherwise — the invariant `set_sync_passphrase` / `rotate_sync_key`
+/// / `revoke_and_rotate` rely on to refuse deriving an account-free key.
+#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+#[test]
+fn require_cloud_account_id_errors_without_account_and_ok_with() {
+    let server = bare_server();
+
+    // No account id set (not signed in) → clean error, not a fallback key.
+    let err = server
+        .require_cloud_account_id()
+        .expect_err("missing account id must be an error");
+    assert!(
+        err.contains("sign-in"),
+        "error must point the user at signing in, got: {err}"
+    );
+
+    // An empty account id is treated the same as absent.
+    *server
+        .cloud_account_id
+        .lock()
+        .unwrap_or_else(|p| p.into_inner()) = Some(String::new());
+    assert!(
+        server.require_cloud_account_id().is_err(),
+        "empty account id must also be rejected"
+    );
+
+    // A real account id (set by start_cloud after sign-in) resolves.
+    let acct = "proj_abc|00000000-0000-0000-0000-0000000000aa".to_string();
+    *server
+        .cloud_account_id
+        .lock()
+        .unwrap_or_else(|p| p.into_inner()) = Some(acct.clone());
+    assert_eq!(
+        server
+            .require_cloud_account_id()
+            .expect("present account id"),
+        acct
+    );
+}
+
 /// c4q2.17: `list` is now a not_implemented stub. The `too_large_to_sync`
 /// flag coverage lives in `history_page_reports_too_large_to_sync_per_item`.
 #[tokio::test]
@@ -6655,8 +6697,16 @@ fn rotate_sync_key_reencrypt_closure_crypto_roundtrip() {
     use base64::Engine as _;
     use copypaste_core::{decrypt_from_cloud, derive_sync_key, encrypt_for_cloud, SyncKey};
 
-    let old_key = derive_sync_key("old-passphrase-test-1").expect("derive old key");
-    let new_key = derive_sync_key("new-passphrase-test-2").expect("derive new key");
+    let old_key = derive_sync_key(
+        "old-passphrase-test-1",
+        "proj_test|00000000-0000-0000-0000-000000000001",
+    )
+    .expect("derive old key");
+    let new_key = derive_sync_key(
+        "new-passphrase-test-2",
+        "proj_test|00000000-0000-0000-0000-000000000001",
+    )
+    .expect("derive new key");
 
     let item_id = "item-uuid-deadbeef";
     let plaintext = b"secret clipboard content";

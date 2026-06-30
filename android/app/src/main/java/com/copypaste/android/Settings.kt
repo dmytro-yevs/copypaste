@@ -217,6 +217,17 @@ class Settings(context: Context) {
         set(v) = prefs.edit().putString("supabase_anon_key", v).apply()
 
     /**
+     * Supabase GoTrue user id (the JWT `sub` claim), captured after a successful
+     * sign-in. Combined with [supabaseUrl] via [supabaseAccountId] to form the
+     * stable per-account salt input for [derive_cloud_sync_key], so Android
+     * derives the SAME cloud sync key as the macOS daemon. Non-secret; blank until
+     * the first sign-in.
+     */
+    var supabaseUserId: String
+        get() = prefs.getString("supabase_user_id", "") ?: ""
+        set(v) = prefs.edit().putString("supabase_user_id", v).apply()
+
+    /**
      * Shared sync passphrase for cross-device encryption.
      *
      * This value is run through Argon2id (via the Rust FFI [derive_cloud_sync_key])

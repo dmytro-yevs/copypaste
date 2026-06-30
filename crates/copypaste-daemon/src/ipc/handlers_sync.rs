@@ -221,16 +221,22 @@ impl IpcServer {
                     }
                 };
 
-                // Derive the v1 (global-salt) sync key via Argon2id (intentionally
-                // slow — one-time cost on passphrase entry, not per-item).
-                //
-                // CopyPaste-jdq5: the v1 key remains the SHARED key for relay /
-                // P2P / cloud-read-fallback — it is byte-identical to the previous
-                // `derive_sync_key`, so relay inbox addressing and all existing
-                // ciphertexts are unchanged. The account-aware v2 per-account-salt
-                // key is derived SEPARATELY below (`refresh_cloud_v2_key`) into a
-                // dedicated cloud-only slot, so the relay key never changes.
-                let new_key = match derive_sync_key_versioned(&passphrase, None) {
+                // The single per-account sync key REQUIRES the Supabase account
+                // id: it is the salt input that makes the key per-account and
+                // defeats cross-user precompute. Cloud sync only runs when signed
+                // in, so the account id is present in the normal flow; if it is
+                // absent, fail cleanly rather than deriving a key no other device
+                // of the account can reproduce.
+                let account_id = match self.require_cloud_account_id() {
+                    Ok(id) => id,
+                    Err(msg) => return Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg),
+                };
+
+                // Derive the sync key via Argon2id with the per-account salt
+                // (intentionally slow — one-time cost on passphrase entry, not
+                // per-item). This single key is shared by the cloud (Supabase) and
+                // relay paths.
+                let new_key = match derive_sync_key(&passphrase, &account_id) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("set_sync_passphrase: key derivation failed: {e}");
@@ -240,14 +246,9 @@ impl IpcServer {
 
                 // Persist via the SAME backend the device key uses (0600 file
                 // store on unsigned installs, Keychain otherwise) and swap the
-                // live slot so the cloud loops pick it up immediately. This also
-                // clears any stale v2 key. The key bytes are never logged.
+                // live slot so the cloud + relay loops pick it up immediately.
+                // The key bytes are never logged.
                 self.persist_and_install_sync_key(new_key).await;
-                // CopyPaste-jdq5: derive + install the v2 per-account cloud key
-                // when a Supabase account id is known. No-op (stays on v1) when not
-                // signed in yet — the cutover then happens on the next passphrase
-                // entry while signed in.
-                self.refresh_cloud_v2_key(&passphrase).await;
                 tracing::info!("set_sync_passphrase: sync key updated");
                 Response::ok(req.id, serde_json::json!({"ok": true}))
             }
@@ -289,9 +290,13 @@ impl IpcServer {
                     }
                 };
 
-                // CopyPaste-wg4w: legacy v1 fallback (account id passed as None) —
-                // see the detailed rationale in the `set_sync_passphrase` handler.
-                let new_key = match derive_sync_key_versioned(&passphrase, None) {
+                // The single per-account sync key REQUIRES the Supabase account id
+                // (see `set_sync_passphrase`). Fail cleanly if absent.
+                let account_id = match self.require_cloud_account_id() {
+                    Ok(id) => id,
+                    Err(msg) => return Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg),
+                };
+                let new_key = match derive_sync_key(&passphrase, &account_id) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("rotate_sync_key: key derivation failed: {e}");
@@ -317,11 +322,6 @@ impl IpcServer {
                 let new_key_bytes: [u8; 32] = *new_key.as_bytes();
 
                 self.persist_and_install_sync_key(new_key).await;
-                // CopyPaste-jdq5: re-derive the v2 per-account cloud key under the
-                // NEW passphrase (cloud-sync only; `persist_and_install_sync_key`
-                // already cleared the stale v2).
-                #[cfg(feature = "cloud-sync")]
-                self.refresh_cloud_v2_key(&passphrase).await;
                 tracing::info!(
                     "rotate_sync_key: sync key rotated; relay inbox id will diverge and the old \
                      key can no longer decrypt new cloud items"
@@ -440,11 +440,15 @@ impl IpcServer {
                         )
                     }
                 };
-                // Derive the new key FIRST so a bad passphrase fails before we
-                // mutate any revocation state.
-                // CopyPaste-wg4w: legacy v1 fallback (account id passed as None) —
-                // see the detailed rationale in the `set_sync_passphrase` handler.
-                let new_key = match derive_sync_key_versioned(&passphrase, None) {
+                // Derive the new key FIRST so a bad passphrase / missing account
+                // fails before we mutate any revocation state. The single
+                // per-account sync key REQUIRES the Supabase account id (see
+                // `set_sync_passphrase`).
+                let account_id = match self.require_cloud_account_id() {
+                    Ok(id) => id,
+                    Err(msg) => return Response::err_with_code(req.id, ERR_CODE_AUTH_FAILED, msg),
+                };
+                let new_key = match derive_sync_key(&passphrase, &account_id) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("revoke_and_rotate: key derivation failed: {e}");
@@ -522,10 +526,6 @@ impl IpcServer {
                 // ── Rotate the sync key (cuts off cloud/relay for the revoked
                 // device; remaining devices must re-provision). ──
                 self.persist_and_install_sync_key(new_key).await;
-                // CopyPaste-jdq5: re-derive the v2 per-account cloud key under the
-                // NEW passphrase (cloud-sync only).
-                #[cfg(feature = "cloud-sync")]
-                self.refresh_cloud_v2_key(&passphrase).await;
                 tracing::info!(
                     "revoke_and_rotate: revoked peer and rotated sync key; remaining devices must \
                      re-provision to keep syncing"
@@ -687,6 +687,39 @@ impl IpcServer {
                 Response::not_implemented(req.id, "cloud-sync or relay-sync")
             }
             _ => self.dispatch_status(req).await,
+        }
+    }
+
+    /// Resolve the Supabase account id required by the single per-account sync-key
+    /// derivation, or an `Err(message)` the caller surfaces as a clean
+    /// `auth_failed` response.
+    ///
+    /// Invariant: the per-account salt that defeats cross-user precompute has no
+    /// meaning without a stable account id, so every passphrase-entry / rotation
+    /// path that DERIVES a key (`set_sync_passphrase`, `rotate_sync_key`,
+    /// `revoke_and_rotate`) must hold one. Cloud sync only runs when signed in, so
+    /// the account id (`copypaste_supabase::supabase_account_id`, set by
+    /// `start_cloud` after a bearer resolves) is present in the normal flow; this
+    /// returns a clear error instead of silently falling back to an account-free
+    /// key that no other device of the account could reproduce.
+    ///
+    /// (Pairing-provisioned devices receive the raw key bytes directly and never
+    /// call this — only the device that ENTERS the passphrase derives a key.)
+    #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+    pub(crate) fn require_cloud_account_id(&self) -> Result<String, String> {
+        let account_id = self
+            .cloud_account_id
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        match account_id {
+            Some(id) if !id.is_empty() => Ok(id),
+            _ => Err(
+                "cloud sync requires sign-in: sign into your Supabase account before \
+                      setting or rotating the sync passphrase (no account id is available for \
+                      the per-account key derivation)"
+                    .to_string(),
+            ),
         }
     }
 }

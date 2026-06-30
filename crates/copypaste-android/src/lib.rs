@@ -31,8 +31,8 @@ pub mod ffi_sensitive;
 pub mod ffi_system;
 
 pub use ffi_cloud_sync::{
-    cloud_decrypt, cloud_encrypt, derive_cloud_sync_key, derive_cloud_sync_key_for_account,
-    relay_inbox_id, relay_public_key_b64, relay_registration_pop,
+    cloud_decrypt, cloud_encrypt, derive_cloud_sync_key, relay_inbox_id, relay_public_key_b64,
+    relay_registration_pop,
 };
 pub use ffi_config::{
     appconfig_from_config, clamp_config, config_from_appconfig, default_config, Config,

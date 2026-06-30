@@ -147,7 +147,7 @@ As of ABI 18 the namespace exposes **55 functions** across the following categor
 
 | UDL function | Description |
 |---|---|
-| `derive_cloud_sync_key(passphrase)` → `sequence<u8>` | Argon2id KDF → 32-byte sync key |
+| `derive_cloud_sync_key(passphrase, account_id)` → `sequence<u8>` | Argon2id KDF (per-account salt) → 32-byte sync key |
 | `cloud_encrypt(item_id, plaintext, sync_key_bytes)` | AEAD encrypt for cross-device sync |
 | `cloud_decrypt(item_id, blob, sync_key_bytes)` | AEAD decrypt |
 | `relay_inbox_id(sync_key)` → `String` | Deterministic shared relay inbox UUID |

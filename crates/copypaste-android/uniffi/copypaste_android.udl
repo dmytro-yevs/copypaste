@@ -94,33 +94,23 @@ namespace copypaste_android {
   // ── Cloud sync crypto (cross-device SyncKey, schema v5) ──────────────────
   //
   // These match the macOS daemon's cloud.rs exactly:
-  //   KDF  : Argon2id (19 MiB / 2 passes / 1 lane, fixed domain salt)
+  //   KDF  : Argon2id (19 MiB / 2 passes / 1 lane, per-account salt)
   //   AEAD : XChaCha20-Poly1305, nonce[24] prepended to ciphertext
   //   AAD  : "{item_id}|5"   (CLOUD_AAD_SCHEMA_VERSION = 5)
   //   Wire : base64(nonce[24] || ciphertext_with_tag)  ← `payload_ct` column
 
-  /// Derive the 32-byte shared sync key from `passphrase` (Argon2id).
-  /// Deterministic: same passphrase → same key on every device.
+  /// Derive the single per-account 32-byte sync key from `passphrase` and the
+  /// stable Supabase `account_id` (`"<project_ref>|<user_id>"`) using Argon2id
+  /// with the per-account salt. This is the ONLY cloud-sync key derivation —
+  /// there is no global-salt variant.
+  ///
+  /// Mixing the account id into the salt defeats cross-user precompute while
+  /// keeping the derivation deterministic across the account's devices, so the
+  /// key is byte-identical to the macOS daemon's (macOS<->Android interop holds).
+  /// Deterministic: same passphrase + same account_id → same key on every device.
   /// Returns raw 32-byte key material. Caller MUST NOT persist to disk.
-  ///
-  /// This is the LEGACY v1 (global-salt) derivation. It stays the default so
-  /// existing Kotlin callers and all existing cloud/relay ciphertexts are
-  /// unchanged. For the v2 per-account-salt key, call
-  /// `derive_cloud_sync_key_for_account` (CopyPaste-jdq5).
   [Throws=CopypasteError]
-  sequence<u8> derive_cloud_sync_key(string passphrase);
-
-  /// Derive the 32-byte **v2 per-account-salt** sync key (CopyPaste-jdq5).
-  ///
-  /// `account_id` is the stable Supabase account identity
-  /// (`"<project_ref>|<user_id>"`) both devices of an account agree on. Mixing
-  /// it into the Argon2id salt defeats cross-user precompute while keeping the
-  /// derivation deterministic across the account's devices. ADDITIVE: existing
-  /// callers keep using the v1 `derive_cloud_sync_key` above; Kotlin should call
-  /// THIS once it can supply the Supabase account id, so macOS<->Android cloud
-  /// interop holds after the v2 write cutover.
-  [Throws=CopypasteError]
-  sequence<u8> derive_cloud_sync_key_for_account(string passphrase, string account_id);
+  sequence<u8> derive_cloud_sync_key(string passphrase, string account_id);
 
   /// Encrypt `plaintext` with the sync key, bound to `item_id` via AAD.
   /// Returns raw bytes: nonce[24] || ciphertext_with_tag (NOT base64).
@@ -247,20 +237,24 @@ namespace copypaste_android {
   // new key, old-key rejection) requires a live relay + Gradle pipeline.
 
   /// Revoke a peer AND rotate the cloud sync key to `new_passphrase`.
+  /// `account_id` is the stable Supabase account identity (`"<project_ref>|<user_id>"`)
+  /// fed into the single per-account key derivation; it must be non-empty.
   /// Returns the new 32-byte raw sync key. Kotlin MUST store in AndroidKeystore
-  /// and zero the ByteArray after persisting. Passphrase must be ≥8 characters.
+  /// and zero the ByteArray after persisting. Passphrase must be ≥12 characters.
   /// With `android-uniffi-live` feature off, skips the DB write (stub mode);
   /// Kotlin is responsible for calling `revoke_device_audit` separately in that case.
-  /// Throws `DecryptionFailed` for a bad passphrase, `DatabaseError` on DB failure.
+  /// Throws `DecryptionFailed` for a bad passphrase / blank account id, `DatabaseError` on DB failure.
   [Throws=CopypasteError]
-  sequence<u8> revoke_device_and_rotate_key(string db_path, [ByRef] sequence<u8> key, string fingerprint, string name, string new_passphrase);
+  sequence<u8> revoke_device_and_rotate_key(string db_path, [ByRef] sequence<u8> key, string fingerprint, string name, string new_passphrase, string account_id);
 
   /// Rotate the cloud sync key to `new_passphrase` WITHOUT revoking a peer.
+  /// `account_id` is the stable Supabase account identity (`"<project_ref>|<user_id>"`)
+  /// fed into the single per-account key derivation; it must be non-empty.
   /// Returns the new 32-byte raw sync key. Kotlin MUST store in AndroidKeystore
-  /// and zero the ByteArray after persisting. Passphrase must be ≥8 characters.
-  /// Throws `DecryptionFailed` for a bad passphrase.
+  /// and zero the ByteArray after persisting. Passphrase must be ≥12 characters.
+  /// Throws `DecryptionFailed` for a bad passphrase / blank account id.
   [Throws=CopypasteError]
-  sequence<u8> rotate_sync_key(string new_passphrase);
+  sequence<u8> rotate_sync_key(string new_passphrase, string account_id);
 
   // ── QR device pairing ─────────────────────────────────────────────────────
   // The QR code is a transport for the EXISTING PAKE pairing material — it is

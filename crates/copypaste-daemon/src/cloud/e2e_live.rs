@@ -209,7 +209,11 @@ async fn e2e_live_push_lands_in_supabase() {
 
     let tmp = tempfile::tempdir().unwrap();
     let (db_a, local_key_a) = open_temp_db(&tmp, "a.db");
-    let sync_key = derive_sync_key("correct-horse-battery-staple").unwrap();
+    let sync_key = derive_sync_key(
+        "correct-horse-battery-staple",
+        "proj_test|00000000-0000-0000-0000-000000000001",
+    )
+    .unwrap();
 
     // Build a local item the way the daemon stores a captured clipboard
     // entry, then re-encrypt for the cloud (product path).
@@ -269,7 +273,11 @@ async fn e2e_live_rls_isolation_between_users() {
     // Alice pushes one item via the real push pipeline.
     let tmp = tempfile::tempdir().unwrap();
     let (_db, local_key) = open_temp_db(&tmp, "alice.db");
-    let sync_key = derive_sync_key("alice-passphrase").unwrap();
+    let sync_key = derive_sync_key(
+        "alice-passphrase",
+        "proj_test|00000000-0000-0000-0000-000000000001",
+    )
+    .unwrap();
     let plaintext = b"alice-secret-clip";
     let item = local_item(&local_key, plaintext, "device-alice");
     let blob = encrypt_for_cloud(&sync_key, &item.item_id, plaintext).unwrap();
@@ -334,7 +342,11 @@ async fn e2e_live_round_trip_a_push_b_pull() {
     // have independent local SQLCipher keys (independent devices).
     let (db_a, local_key_a) = open_temp_db(&tmp, "a.db");
     let (db_b, local_key_b) = open_temp_db(&tmp, "b.db");
-    let sync_key = derive_sync_key("shared-cloud-passphrase").unwrap();
+    let sync_key = derive_sync_key(
+        "shared-cloud-passphrase",
+        "proj_test|00000000-0000-0000-0000-000000000001",
+    )
+    .unwrap();
 
     // A captures + pushes.
     let plaintext = b"round-trip-payload: A -> cloud -> B";

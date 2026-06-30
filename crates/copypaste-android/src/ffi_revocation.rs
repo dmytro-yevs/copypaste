@@ -79,11 +79,12 @@ pub fn revoke_device_and_rotate_key(
     fingerprint: String,
     name: String,
     new_passphrase: String,
+    account_id: String,
 ) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
         // STEP 1: Derive the new key FIRST so a bad passphrase fails before any
-        // revocation mutation (mirrors ipc.rs:4910-4918 "Derive the new key FIRST").
-        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase)?;
+        // revocation mutation (derive FIRST, mutate after).
+        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase, &account_id)?;
 
         // STEP 2: Revoke the peer audit row. `key` is the 32-byte device storage
         // key (distinct from the cloud sync key being rotated).
@@ -116,6 +117,7 @@ pub fn revoke_device_and_rotate_key(
     _fingerprint: String,
     _name: String,
     new_passphrase: String,
+    account_id: String,
 ) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
         // Validate the DB key shape (mirrors the live path's key check).
@@ -123,7 +125,7 @@ pub fn revoke_device_and_rotate_key(
             .try_into()
             .map_err(|_| CopypasteError::InvalidKeyLength)?;
         // Derive + return the new key; no DB I/O in stub mode.
-        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase)?;
+        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase, &account_id)?;
         Ok(new_key.as_bytes().to_vec())
     })
 }
@@ -139,21 +141,28 @@ pub fn revoke_device_and_rotate_key(
 ///
 /// # GRADLE-REQUIRED
 /// Full verification requires a live relay — see `revoke_device_and_rotate_key`.
-pub fn rotate_sync_key(new_passphrase: String) -> Result<Vec<u8>, CopypasteError> {
+pub fn rotate_sync_key(
+    new_passphrase: String,
+    account_id: String,
+) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
-        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase)?;
+        let new_key = derive_new_sync_key_from_passphrase(&new_passphrase, &account_id)?;
         Ok(new_key.as_bytes().to_vec())
     })
 }
 
-/// Internal helper: validate a passphrase length and derive a new SyncKey.
+/// Internal helper: validate a passphrase + account id and derive a new SyncKey.
 ///
 /// Shared by `revoke_device_and_rotate_key` and `rotate_sync_key` so the
 /// validation/error-mapping path is byte-for-byte identical on both call sites —
 /// the same pattern `derive_cloud_sync_key` uses. Mirrors the macOS
-/// `ipc.rs:4910-4918` "derive FIRST so a bad passphrase fails before mutation".
+/// `rotate_sync_key` "derive FIRST so a bad passphrase fails before mutation".
+///
+/// `account_id` is the stable Supabase account identity (`"<project_ref>|<user_id>"`);
+/// the single per-account derivation requires it, so an empty value is rejected.
 pub fn derive_new_sync_key_from_passphrase(
     passphrase: &str,
+    account_id: &str,
 ) -> Result<copypaste_core::SyncKey, CopypasteError> {
     let char_count = passphrase.chars().count();
     if char_count < MIN_PASSPHRASE_LEN {
@@ -164,15 +173,20 @@ pub fn derive_new_sync_key_from_passphrase(
             ),
         });
     }
-    // CopyPaste-wg4w: no Supabase account id is available in the Android Kotlin
-    // layer, so this is the documented no-account LEGACY (v1) fallback (same as
-    // `derive_cloud_sync_key`).
-    derive_sync_key(passphrase).map_err(|e| match e {
+    if account_id.trim().is_empty() {
+        return Err(CopypasteError::DecryptionFailed {
+            reason: "account_id must not be empty for the per-account key derivation".into(),
+        });
+    }
+    derive_sync_key(passphrase, account_id).map_err(|e| match e {
         SyncKeyError::PassphraseTooShort(n) => CopypasteError::DecryptionFailed {
             reason: format!(
                 "new passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters \
                  (got {n})",
             ),
+        },
+        SyncKeyError::EmptyAccountId => CopypasteError::DecryptionFailed {
+            reason: "account_id must not be empty for the per-account key derivation".into(),
         },
         SyncKeyError::Argon2Params(msg) | SyncKeyError::Argon2Hash(msg) => {
             CopypasteError::DecryptionFailed { reason: msg }

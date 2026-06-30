@@ -1,23 +1,24 @@
 {
   "cloud_aead": {
-    "note": "derive_cloud_sync_key + cloud_encrypt/decrypt path. blob_hex = nonce[24]||ct.",
+    "account_id": "proj_conformance|00000000-0000-0000-0000-0000000000aa",
+    "note": "derive_cloud_sync_key(passphrase, account_id) + cloud_encrypt/decrypt path. blob_hex = nonce[24]||ct.",
     "passphrase_utf8": "conformance-shared-passphrase-✓",
-    "sync_key_hex": "3335b72a2bcc4adaf3e1ed2d8e1e64a82eb08a05472d5b665be1ddeb640aff5b",
+    "sync_key_hex": "494343f891c10f66970ff77efcd1dbed74c175355699c5c1624be2312a269f08",
     "vectors": [
       {
-        "blob_hex": "31b9fcea5c6c2ebcf69a9a47fc35024c7055e05992667d9cd659640c3f8cb4c5e138c2be0025c7ab6516ac8d3404214aee6f129b734f0c9a9b9e6aa49f5de7a61d218d7a991e0d72",
+        "blob_hex": "03a2166cfd766ee6310138867d60ea19e913da9f3eaa8d20293613bb193bda59918227eac6879bd5f16cc7f1c151c11782f9b613bc1edf39425fb2d14682bb1bffac3fcf4e15d5ea",
         "item_id": "conformance-cloud-ascii",
         "label": "ascii",
         "plaintext_utf8": "hello cross-language conformance"
       },
       {
-        "blob_hex": "1919c14241952fd267ba1d0ab5cd4ec4128661d3c1a2375c2d26cd1ade0ec4ab46b0e4dd30975c51035648916de175eb37d0850f436743c73ddb35e0f007afaf031365b215d8fa2d356812a8875e5db2cca5fa0e1a31fa",
+        "blob_hex": "8160616c03e46eb961dec984d882b556c0fbcd9ac6df4b00ede7073478c0978c82e700b2cd156adf78f96d79cf8e944206bd4c23459e5221a5195f2373ea28d3f2f2700e11d06ff78f7a0cb5d704cd77d63cdb963aee9c",
         "item_id": "conformance-cloud-unicode",
         "label": "unicode",
         "plaintext_utf8": "café ☕ 日本語 🦀 — mixed BMP + astral"
       },
       {
-        "blob_hex": "edd3f52333fd853456006c0db20cdad22513e9de209e44af044323c48959b0a9ea2f12d92cce8c13",
+        "blob_hex": "bc90d4ea422ce672903b622359bb418d68c54570bfd0be0b794a38a45d1f5b6298e3c217386a82c4",
         "item_id": "conformance-cloud-empty",
         "label": "empty",
         "plaintext_utf8": ""
@@ -30,45 +31,31 @@
     "note": "encrypt_text/decrypt_text path. key_hex is the raw 32-byte device key.",
     "vectors": [
       {
-        "ciphertext_hex": "3912c05668a2bb74e29eb2cf36d51b06d87f32bec416e6a8914ab5000de6029fba0e21996d30da0f58e96805da5da87b",
+        "ciphertext_hex": "d6987a16e41b10881a40133a2e0be50fe422e66df8855e6e13a2bae908e7fb85652fd2db563eddef7a0422b776730379",
         "item_id": "conformance-item-ascii",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
         "key_version_u8": 2,
         "label": "ascii",
-        "nonce_hex": "94df04d1bab528a97f8499f91f0fb1171c5cce3a831c77c7",
+        "nonce_hex": "6cde238cd3a296128a0a219d80e34f26be829afbc3c3fd2b",
         "plaintext_utf8": "hello cross-language conformance"
       },
       {
-        "ciphertext_hex": "399278a07c1afc69fe49689519085196082c115f60b026ef00d39a7ce76e61f17e97d38fe13018282f734d7223ed5f5d2f98baec05c8b582d055361c8831e2",
+        "ciphertext_hex": "c4af35a9b2b1bab79a035f8ac9841d5434119afd0243a99c40ea77630b319a165493efb58d7182cf911f8d20e6b9efdb56c83a57c53f7f6d32f0bab35bc3af",
         "item_id": "conformance-item-unicode",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
         "key_version_u8": 2,
         "label": "unicode",
-        "nonce_hex": "51e1d96997ebd29511f22de4ed954adecf249a8f2d12f32c",
+        "nonce_hex": "a99421cecddc1044ddd5bdc64a979a1e0ad0c320321d2bed",
         "plaintext_utf8": "café ☕ 日本語 🦀 — mixed BMP + astral"
       },
       {
-        "ciphertext_hex": "8617ca51216b9fc033d9875a1a4beb56",
+        "ciphertext_hex": "3d0d646e6e07d173f9ff566ecb8a7116",
         "item_id": "conformance-item-empty",
         "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
         "key_version_u8": 2,
         "label": "empty",
-        "nonce_hex": "1ad6f2d9a22397ce5e587a7dd9f622c24c347c752dc5fc73",
+        "nonce_hex": "877e3584837ec0c53b5a31646d14d275df6ebc81fea25f55",
         "plaintext_utf8": ""
-      }
-    ]
-  },
-  "item_aead_v1_anchor": {
-    "note": "Static kv=1 anchor vectors — never regenerated. AAD format: '{item_id}|3' (build_item_aad, schema_version=3). Anchors the legacy v1 decrypt path so AAD drift or key-version dispatch bugs are caught.",
-    "vectors": [
-      {
-        "ciphertext_hex": "aae0c801fd744b0f75632a1ac155d9cd3124bab68dda35a6dad326fd8a8dccb3",
-        "item_id": "kv1-anchor-ascii",
-        "key_hex": "030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc",
-        "key_version_u8": 1,
-        "label": "kv1-ascii",
-        "nonce_hex": "a1a2a8f30e510820d2e35af0dae2a8b89628e9b9d7463573",
-        "plaintext_utf8": "hello kv1 anchor"
       }
     ]
   }

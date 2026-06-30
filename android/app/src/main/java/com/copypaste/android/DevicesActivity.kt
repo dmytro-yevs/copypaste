@@ -606,6 +606,16 @@ fun DevicesScreen(
                         scope.launch {
                             val result = withContext(Dispatchers.IO) {
                                 runCatching {
+                                    // The single per-account derivation needs the
+                                    // stable Supabase account id ("<project_ref>|<user_id>");
+                                    // captured into Settings on the last sign-in.
+                                    val userId = settings.supabaseUserId
+                                    if (userId.isBlank()) {
+                                        throw IllegalStateException(
+                                            "sign in to your Supabase account before rotating the sync passphrase",
+                                        )
+                                    }
+                                    val accountId = supabaseAccountId(settings.supabaseUrl, userId)
                                     // revokeDeviceAndRotateKey: derives new key FIRST
                                     // (bad passphrase → DecryptionFailed, no DB write),
                                     // then writes the audit record + removes the peer row.
@@ -616,6 +626,7 @@ fun DevicesScreen(
                                         fingerprint = t.fingerprint,
                                         name = t.displayName(),
                                         newPassphrase = passphrase,
+                                        accountId = accountId,
                                     )
                                     newKey
                                 }

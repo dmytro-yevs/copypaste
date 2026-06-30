@@ -6,10 +6,7 @@
 
 // Brings `Engine::encode` into scope for `relay_public_key_b64` (STANDARD base64).
 use base64::Engine as _;
-use copypaste_core::{
-    decrypt_from_cloud, derive_sync_key, derive_sync_key_for_account, encrypt_for_cloud,
-    SyncKeyError,
-};
+use copypaste_core::{decrypt_from_cloud, derive_sync_key, encrypt_for_cloud, SyncKeyError};
 use zeroize::Zeroizing;
 
 use crate::{panic_boundary, CopypasteError};
@@ -22,7 +19,8 @@ use crate::{panic_boundary, CopypasteError};
 // identical encrypted payloads.
 //
 // Key facts (MUST match cloud.rs):
-//   - KDF: Argon2id, 19 MiB / 2 passes / 1 lane, fixed domain salt
+//   - KDF: Argon2id, 19 MiB / 2 passes / 1 lane, per-account salt (HKDF over a
+//     fixed IKM + the Supabase account_id) — the single, only derivation
 //   - AEAD: XChaCha20-Poly1305, 24-byte random nonce prepended to ciphertext
 //   - AAD: "{item_id}|5"  (CLOUD_AAD_SCHEMA_VERSION = 5)
 //   - Blob wire format: base64(nonce[24] || ciphertext_with_tag)
@@ -41,11 +39,21 @@ use crate::{panic_boundary, CopypasteError};
 /// equal.
 pub(crate) const MIN_PASSPHRASE_LEN: usize = 12;
 
-/// Derive a 32-byte sync key from `passphrase` using Argon2id.
+/// Derive the single per-account 32-byte sync key from `passphrase` and the
+/// stable Supabase `account_id` (`"<project_ref>|<user_id>"`) using Argon2id with
+/// the per-account salt.
 ///
-/// Returns the raw 32-byte key material. The caller (Kotlin) should treat
-/// these bytes as a short-lived secret: derive once at passphrase entry,
-/// use, then zero the array. Do NOT persist to disk or SharedPreferences.
+/// This is the ONLY cloud-sync key derivation — there is no global-salt variant.
+/// Mixing the account id into the Argon2id salt (via the core HKDF) means two
+/// devices of the same account derive the IDENTICAL key (cloud sync works) while
+/// an attacker cannot reuse one Argon2id precompute across accounts. The
+/// byte/AEAD format is unchanged, so `cloud_encrypt` / `cloud_decrypt` take the
+/// result directly, and the value is byte-identical to the macOS daemon's key —
+/// macOS<->Android cloud interop holds.
+///
+/// Returns the raw 32-byte key material. The caller (Kotlin) should treat these
+/// bytes as a short-lived secret: derive once at passphrase entry, use, then
+/// zero the array. Do NOT persist to disk or SharedPreferences.
 ///
 /// # SECURITY NOTE — returned `Vec<u8>` crosses the FFI boundary unzeroized.
 /// UniFFI copies the bytes into a Kotlin `ByteArray`; the Kotlin layer MUST
@@ -53,12 +61,16 @@ pub(crate) const MIN_PASSPHRASE_LEN: usize = 12;
 /// so leaves raw key material on the JVM heap until GC.
 ///
 /// Errors:
-///   - `DecryptionFailed { reason }` — passphrase is shorter than
-///     `MIN_PASSPHRASE_LEN` bytes; `reason` carries the human-readable cause
-///     so the user (and logs) learn why, matching the macOS surface.
+///   - `DecryptionFailed { reason }` — the passphrase is shorter than
+///     `MIN_PASSPHRASE_LEN` characters, or `account_id` is empty; `reason`
+///     carries the human-readable cause so the user (and logs) learn why,
+///     matching the macOS surface.
 ///   - `EncryptionFailed` — Argon2 parameter or runtime failure (should not
 ///     occur with the hardcoded constants; surfaces as a non-panic error).
-pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteError> {
+pub fn derive_cloud_sync_key(
+    passphrase: String,
+    account_id: String,
+) -> Result<Vec<u8>, CopypasteError> {
     panic_boundary::catch_result(|| {
         // Guard on char count (Unicode scalar values), not byte length, to match
         // copypaste_core::derive_sync_key which uses passphrase.chars().count().
@@ -73,60 +85,21 @@ pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteErr
                 ),
             });
         }
-        // LEGACY v1 (global-salt) derivation — kept as the default so existing
-        // ciphertexts and callers are unchanged. See
-        // `derive_cloud_sync_key_for_account` for the v2 per-account scheme.
-        let key = derive_sync_key(&passphrase).map_err(map_derive_err)?;
-        Ok(key.as_bytes().to_vec())
-    })
-}
-
-/// Derive the 32-byte **v2 per-account-salt** sync key (CopyPaste-jdq5).
-///
-/// ADDITIVE companion to [`derive_cloud_sync_key`]: it mixes the stable Supabase
-/// `account_id` (`"<project_ref>|<user_id>"`) into the Argon2id salt via the core
-/// `derive_sync_key_for_account`, so two devices of the same account derive the
-/// IDENTICAL key (cloud sync still works) while an attacker cannot reuse one
-/// Argon2id precompute across accounts. The byte/AEAD format is identical to v1,
-/// so the existing `cloud_encrypt` / `cloud_decrypt` FFI take the result
-/// unchanged. Kotlin should call this once it can supply the account id, so
-/// macOS<->Android cloud interop survives the daemon's v2 write cutover.
-///
-/// # SECURITY NOTE — returned `Vec<u8>` crosses the FFI boundary unzeroized.
-/// Same contract as [`derive_cloud_sync_key`]: the Kotlin layer MUST zero the
-/// returned `ByteArray` after use.
-///
-/// Errors mirror [`derive_cloud_sync_key`] (notably `DecryptionFailed` when the
-/// passphrase is shorter than `MIN_PASSPHRASE_LEN`).
-pub fn derive_cloud_sync_key_for_account(
-    passphrase: String,
-    account_id: String,
-) -> Result<Vec<u8>, CopypasteError> {
-    panic_boundary::catch_result(|| {
-        let char_count = passphrase.chars().count();
-        if char_count < MIN_PASSPHRASE_LEN {
-            return Err(CopypasteError::DecryptionFailed {
-                reason: format!(
-                    "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters \
-                     (got {char_count})",
-                ),
-            });
-        }
         // An empty account id would collapse the per-account salt back toward a
         // shared value; reject it so a misconfigured caller fails loudly rather
-        // than deriving a key that does not match the daemon's v2 key.
+        // than deriving a key that does not match the daemon's key.
         if account_id.trim().is_empty() {
             return Err(CopypasteError::DecryptionFailed {
-                reason: "account_id must not be empty for the v2 per-account key derivation".into(),
+                reason: "account_id must not be empty for the per-account key derivation".into(),
             });
         }
-        let key = derive_sync_key_for_account(&passphrase, &account_id).map_err(map_derive_err)?;
+        let key = derive_sync_key(&passphrase, &account_id).map_err(map_derive_err)?;
         Ok(key.as_bytes().to_vec())
     })
 }
 
 /// Map a core [`SyncKeyError`] from a key-derivation call to the FFI error type,
-/// preserving the human-readable reason. Shared by the v1 and v2 derivation FFI.
+/// preserving the human-readable reason.
 fn map_derive_err(e: SyncKeyError) -> CopypasteError {
     match e {
         // Propagate any Argon2 runtime message rather than discarding it.
@@ -139,6 +112,10 @@ fn map_derive_err(e: SyncKeyError) -> CopypasteError {
             reason: format!(
                 "passphrase too short: must be at least {MIN_PASSPHRASE_LEN} characters (got {n})",
             ),
+        },
+        // Core pre-checked above, but surface a clear reason if it ever arises.
+        SyncKeyError::EmptyAccountId => CopypasteError::DecryptionFailed {
+            reason: "account_id must not be empty for the per-account key derivation".into(),
         },
         // These encryption/decryption variants should not arise from key
         // derivation alone; surface them with a reason string.

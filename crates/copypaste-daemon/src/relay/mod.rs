@@ -292,7 +292,11 @@ mod tests {
     use crate::sync_common::SYNC_HTTP_TIMEOUT;
 
     fn skey(p: &str) -> [u8; 32] {
-        *derive_sync_key(p).expect("derive").as_bytes()
+        // The relay takes raw key bytes; the per-account derivation just needs a
+        // stable, non-empty account id for the test.
+        *derive_sync_key(p, "proj_test|00000000-0000-0000-0000-000000000001")
+            .expect("derive")
+            .as_bytes()
     }
 
     fn test_client() -> reqwest::Client {

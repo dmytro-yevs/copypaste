@@ -5,8 +5,8 @@ use tokio::sync::{Mutex, RwLock};
 
 use copypaste_core::storage::items::soft_delete_item;
 use copypaste_core::{
-    decrypt_from_cloud_trying, exists_item_by_item_id, get_item_by_item_id, insert_item,
-    insert_tombstone, prune_to_cap, Database, SyncKey,
+    decrypt_from_cloud, exists_item_by_item_id, get_item_by_item_id, insert_item, insert_tombstone,
+    prune_to_cap, Database, SyncKey,
 };
 use copypaste_supabase::auth::AuthClient;
 use copypaste_sync::merge::{remote_wins, RemoteMeta};
@@ -186,8 +186,6 @@ pub(super) async fn realtime_loop(
     db: Arc<Mutex<Database>>,
     shutdown: Arc<tokio::sync::Notify>,
     sync_key: Arc<Mutex<Option<SyncKey>>>,
-    // CopyPaste-jdq5: v2 per-account cloud key slot for dual-key read dispatch.
-    sync_key_v2: Arc<Mutex<Option<SyncKey>>>,
     local_key: Arc<zeroize::Zeroizing<[u8; 32]>>,
     last_sync_ms: Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: Arc<std::sync::atomic::AtomicBool>,
@@ -318,16 +316,9 @@ pub(super) async fn realtime_loop(
                 }
 
 
-                // If no sync key is set, skip with a one-time warning.
-                //
-                // CopyPaste-jdq5: snapshot the ORDERED read candidates (v2 then
-                // v1) as a flat buffer of concatenated 32-byte keys. `poll_once`
-                // trial-decrypts each candidate, so a post-cutover v2 row and a
-                // legacy v1 row both decrypt. An empty buffer means no passphrase
-                // is set at all (neither slot populated).
-                let key_bytes =
-                    super::snapshot_cloud_read_key_bytes(&sync_key, &sync_key_v2).await;
-                if key_bytes.is_empty() {
+                // If no sync key is set, skip with a one-time warning. Otherwise
+                // snapshot the single per-account key bytes for this poll round.
+                let Some(key_bytes) = super::snapshot_cloud_key_bytes(&sync_key).await else {
                     if !warned_no_key {
                         tracing::warn!(
                             "cloud-sync poll: no sync passphrase set — \
@@ -336,7 +327,7 @@ pub(super) async fn realtime_loop(
                         warned_no_key = true;
                     }
                     continue;
-                }
+                };
                 warned_no_key = false;
 
                 // One poll round: fetch rows newer than `watermark`, ingest them,
@@ -457,7 +448,7 @@ pub(crate) async fn poll_once(
     last_sync_ms: &Arc<std::sync::atomic::AtomicI64>,
     cloud_signed_in: &Arc<std::sync::atomic::AtomicBool>,
     auth: &AuthClient,
-    key_bytes: &[u8],
+    key_bytes: &[u8; 32],
     cursor: PollCursor,
     // Retention limit threaded from `AppConfig` so a long-offline device
     // converges to the cap after backfill instead of materialising unbounded rows.
@@ -493,36 +484,19 @@ pub(crate) async fn poll_once(
     let batch_len = rows.len();
 
     // Decrypt + re-encrypt + insert in a blocking task so the async executor is
-    // not blocked by rusqlite IO. We snapshot the key bytes (non-secret from the
-    // perspective of the blocking thread, but never logged).
-    //
-    // CopyPaste-jdq5: `key_bytes` is a flat concatenation of one or more 32-byte
-    // candidate keys (v2 then v1) for dual-key read dispatch. A single 32-byte
-    // input (the common pre-cutover case, and every existing test) is just one
-    // candidate, so behaviour is unchanged. Split into owned 32-byte arrays here
-    // so they can move into the blocking closure and be zeroized after use.
+    // not blocked by rusqlite IO. We snapshot the single per-account key bytes
+    // (non-secret from the perspective of the blocking thread, but never logged)
+    // and move them into the closure to be zeroized after use.
     let db_arc = db.clone();
     let local_key_clone = local_key.clone();
-    let mut key_candidates: Vec<[u8; 32]> = key_bytes
-        .chunks_exact(32)
-        .map(|c| {
-            let mut a = [0u8; 32];
-            a.copy_from_slice(c);
-            a
-        })
-        .collect();
+    let mut sync_key_bytes: [u8; 32] = *key_bytes;
     let start_cursor = cursor.clone();
     let join = tokio::task::spawn_blocking(move || {
         let db_guard = db_arc.blocking_lock();
-        // Reconstruct the candidate SyncKeys once (not per row). `SyncKey` is
-        // `ZeroizeOnDrop`, so these are scrubbed when `cand_keys` drops at the end
-        // of the closure; the raw `key_candidates` arrays are zeroized explicitly
-        // below.
-        let cand_keys: Vec<SyncKey> = key_candidates
-            .iter()
-            .map(|b| SyncKey::from_bytes(*b))
-            .collect();
-        let cand_refs: Vec<&SyncKey> = cand_keys.iter().collect();
+        // Reconstruct the SyncKey once (not per row). `SyncKey` is
+        // `ZeroizeOnDrop`, so it is scrubbed when it drops at the end of the
+        // closure; the raw `sync_key_bytes` array is zeroized explicitly below.
+        let sync_key = SyncKey::from_bytes(sync_key_bytes);
         let mut synced = 0u32;
         // Highest `(wall_time, id)` observed in this batch — used to advance the
         // forward cursor even for rows that were de-duped or failed to decrypt,
@@ -681,14 +655,10 @@ pub(crate) async fn poll_once(
                 }
             };
 
-            // Decrypt with the sync key (AAD = item_id + schema v5).
-            // On failure: skip, warn, NEVER log the blob or key.
-            //
-            // CopyPaste-jdq5: dual-key read dispatch — try every candidate key
-            // (v2 then v1) so a post-cutover row and a legacy row both decrypt.
-            // Only the key the row was actually encrypted under authenticates; a
-            // total failure means a wrong passphrase or tampered blob.
-            let plaintext = match decrypt_from_cloud_trying(&cand_refs, item_id, &blob) {
+            // Decrypt with the single per-account sync key (AAD = item_id +
+            // schema v5). On failure: skip, warn, NEVER log the blob or key. A
+            // failure means a wrong passphrase/account or a tampered blob.
+            let plaintext = match decrypt_from_cloud(&sync_key, item_id, &blob) {
                 Ok(p) => p,
                 Err(e) => {
                     // Never log plaintext or the key.
@@ -807,11 +777,9 @@ pub(crate) async fn poll_once(
                 }
             }
         }
-        // Zero the snapshot key bytes before the closure exits. `cand_keys`
-        // (the SyncKeys) zeroize themselves on drop; scrub the raw arrays too.
-        for cand in key_candidates.iter_mut() {
-            zeroize::Zeroize::zeroize(cand);
-        }
+        // Zero the snapshot key bytes before the closure exits. `sync_key`
+        // (the SyncKey) zeroizes itself on drop; scrub the raw array too.
+        zeroize::Zeroize::zeroize(&mut sync_key_bytes);
         // ── Backfill safety: enforce local retention cap after ingest ─────────
         //
         // After writing all rows from this batch, prune oldest UNPINNED items so

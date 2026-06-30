@@ -38,6 +38,7 @@ class RevokeAndRotateKeyTest {
                 fingerprint = "aabbccdd",
                 name = "Test peer",
                 newPassphrase = "correct-horse-battery-staple",
+                accountId = "proj_test|00000000-0000-0000-0000-0000000000aa",
             )
             fail("Expected IllegalStateException when native library is not loaded")
         } catch (e: IllegalStateException) {

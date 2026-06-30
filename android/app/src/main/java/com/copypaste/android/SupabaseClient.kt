@@ -31,11 +31,68 @@ import java.net.URL
  * ```
  * val client = SupabaseClient("https://xyz.supabase.co", anonKey = "...")
  * val token  = client.signIn("user@example.com", "password") ?: anonKey
- * val syncKey = derive_cloud_sync_key("shared passphrase")
+ * val accountId = supabaseAccountId("https://xyz.supabase.co", supabaseUserIdFromJwt(token)!!)
+ * val syncKey = derive_cloud_sync_key("shared passphrase", accountId)
  * client.push(token, syncKey, item)
  * val rows   = client.poll(token, syncKey, sinceWallTime = 0L)
  * ```
  */
+
+/**
+ * Parse the Supabase project slug from a project URL, mirroring the macOS
+ * `copypaste_supabase::supabase_project_ref`. Standard cloud domains end in
+ * `.supabase.co`; returns `null` for anything else (self-hosted/localhost).
+ */
+fun supabaseProjectRef(url: String): String? {
+    val lower = url.lowercase()
+    val rest = when {
+        lower.startsWith("https://") -> lower.removePrefix("https://")
+        lower.startsWith("http://") -> lower.removePrefix("http://")
+        else -> return null
+    }
+    val host = rest.split('/', '?', '#').firstOrNull() ?: return null
+    val hostNoPort = host.split(':').firstOrNull() ?: return null
+    val slug = hostNoPort.removeSuffix(".supabase.co")
+    if (slug == hostNoPort) return null // suffix not present
+    if (slug.isEmpty() || slug.contains('.')) return null
+    return slug
+}
+
+/**
+ * Build the canonical account identity `"<project_ref>|<user_id>"`, byte-for-byte
+ * identical to the macOS `copypaste_supabase::supabase_account_id`. This is the
+ * stable per-account salt input for [derive_cloud_sync_key]; both devices of an
+ * account agree on it, so they derive the IDENTICAL key. Falls back to the
+ * trimmed/lowercased URL as the project component when the slug cannot be parsed
+ * (self-hosted), matching the daemon's fallback.
+ */
+fun supabaseAccountId(url: String, userId: String): String {
+    val project = supabaseProjectRef(url) ?: url.trimEnd('/').lowercase()
+    return "$project|$userId"
+}
+
+/**
+ * Extract the GoTrue user id (the JWT `sub` claim) from a Supabase access token.
+ *
+ * The token is `header.payload.signature`; we base64url-decode the payload and
+ * read `sub`. Returns `null` when the token is the anon key (not a JWT) or is
+ * malformed — callers then treat the account id as unavailable. The signature is
+ * NOT verified here: the JWT was just obtained from GoTrue over TLS, so the `sub`
+ * is trusted for the purpose of computing the (non-secret) account-id salt.
+ */
+fun supabaseUserIdFromJwt(jwt: String): String? {
+    val parts = jwt.split('.')
+    if (parts.size != 3) return null
+    return try {
+        val payloadBytes =
+            android.util.Base64.decode(parts[1], android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP)
+        val sub = JSONObject(String(payloadBytes, Charsets.UTF_8)).optString("sub")
+        sub.takeIf { it.isNotBlank() }
+    } catch (e: Exception) {
+        null
+    }
+}
+
 class SupabaseClient(
     private val supabaseUrl: String,
     private val anonKey: String,

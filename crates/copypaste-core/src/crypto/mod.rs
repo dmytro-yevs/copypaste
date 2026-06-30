@@ -13,8 +13,7 @@ pub use pairing_qr::{
     PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC, PAIRING_TOKEN_LEN,
 };
 pub use sync_key::{
-    decrypt_from_cloud, decrypt_from_cloud_trying, derive_sync_key, derive_sync_key_for_account,
-    derive_sync_key_versioned, encrypt_for_cloud, SyncKey, SyncKeyError, ARGON2_M_COST_KIB,
-    ARGON2_P_COST, ARGON2_SYNC_SALT, ARGON2_T_COST, CLOUD_AAD_SCHEMA_VERSION,
-    SYNC_KEY_DERIVATION_VERSION_V1, SYNC_KEY_DERIVATION_VERSION_V2,
+    decrypt_from_cloud, derive_sync_key, encrypt_for_cloud, SyncKey, SyncKeyError,
+    ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_T_COST, CLOUD_AAD_SCHEMA_VERSION, MIN_PASSPHRASE_LEN,
+    PER_ACCOUNT_SALT_IKM,
 };
