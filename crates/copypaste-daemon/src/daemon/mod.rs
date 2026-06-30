@@ -23,7 +23,11 @@ use std::time::Duration;
 pub(crate) mod capture;
 pub(crate) mod startup;
 
-pub(crate) use capture::{handle_tick, run_ttl_cleanup, FrontmostAppCache};
+pub(crate) use capture::{handle_tick, run_ttl_cleanup};
+// crh3.78: `FrontmostAppCache` is `#[cfg(target_os = "macos")]`; gate the
+// re-export to match so the non-macOS (Linux) build resolves (CI E0432).
+#[cfg(target_os = "macos")]
+pub(crate) use capture::FrontmostAppCache;
 pub(crate) use startup::{
     decide_db_startup, encrypted_db_exists, load_config, load_local_key_bounded,
     load_or_create_device_id, load_private_mode, persist_private_mode, run_degraded, sweep_keys,

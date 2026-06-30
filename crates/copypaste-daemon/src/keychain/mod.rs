@@ -80,7 +80,10 @@ pub fn read_supabase_password_from_keychain() -> Option<String> {
         // Clone out of the guard so the lock is released before returning.
         slot.lock()
             .ok()
-            .and_then(|g| g.as_deref().map(str::to_owned))
+            // crh3.80: the slot holds `Zeroizing<String>`, so `as_deref` yields
+            // `Option<&String>` (not `&str`). `str::to_owned` expects `&str`
+            // (E0631 on Linux), so clone explicitly via `ToString`.
+            .and_then(|g| g.as_deref().map(|s| s.to_string()))
     }
 }
 

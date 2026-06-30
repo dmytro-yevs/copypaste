@@ -1,6 +1,9 @@
 //! Clipboard/pasteboard helpers for the relay receive path, plus the Wi-Fi and
 //! auto-apply guards.
 
+// l07l: `Ordering` is only referenced from the macOS auto-apply store path;
+// allow it unused on non-macOS so -D warnings stays green.
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 use std::sync::{
     atomic::{AtomicI64, Ordering},
     Arc,

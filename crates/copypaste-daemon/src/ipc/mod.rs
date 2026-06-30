@@ -217,12 +217,21 @@ pub(crate) use socket::{
 pub(crate) use pasteboard::parse_file_meta;
 pub(crate) use pasteboard::parse_image_file_id;
 pub(crate) use pasteboard::parse_image_thumb_file_id;
+// ra15.1: the non-test callers of these two helpers live in the macOS-gated
+// paste-back path, but the helpers themselves are cross-platform and exercised
+// by inline tests on every platform. Allow them unused on the non-macOS lib
+// build so -D warnings stays green without breaking the Linux test build.
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub(crate) use pasteboard::paste_file_cache_dir;
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub(crate) use pasteboard::prune_old_paste_files;
 // Helpers used in impl IpcServer dispatch code (non-test):
-use pasteboard::{
-    lazy_backfill_thumbnail, map_content_type_to_uti, parse_image_thumb_dims, PasteboardError,
-};
+use pasteboard::{lazy_backfill_thumbnail, parse_image_thumb_dims, PasteboardError};
+// ra15.1: `map_content_type_to_uti` is `#[cfg(target_os = "macos")]` (its only
+// caller is the macOS paste-back path); gate the import to match so the
+// non-macOS (Linux) build resolves (CI E0432).
+#[cfg(target_os = "macos")]
+use pasteboard::map_content_type_to_uti;
 
 // ra15.1: dispatch handler groups + helper-method clusters extracted from the
 // original ipc god-module. mod.rs keeps the core types, shared consts/helpers,

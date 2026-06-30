@@ -11,6 +11,9 @@ use std::sync::atomic::AtomicI64;
 use std::sync::Arc;
 
 use copypaste_core::Database;
+// l07l: `warn` is only emitted from the macOS auto-apply path; allow it unused
+// on non-macOS so -D warnings stays green (`debug` is used unconditionally).
+#[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 use tracing::{debug, warn};
 
 /// Write decrypted plaintext for a synced item directly to NSPasteboard.

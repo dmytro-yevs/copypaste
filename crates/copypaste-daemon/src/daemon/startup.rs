@@ -8,6 +8,9 @@ use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 
 use super::DEGRADED_QUIT_POLL_INTERVAL_MS;
+// crh3.78: only the macOS `load_local_key_bounded` branch waits on this timeout;
+// gate the import so the non-macOS (Linux) build stays clean under -D warnings.
+#[cfg(target_os = "macos")]
 use super::KEYCHAIN_READ_TIMEOUT;
 
 /// Run the daemon in DEGRADED mode (acceptance criteria #1–#3).
