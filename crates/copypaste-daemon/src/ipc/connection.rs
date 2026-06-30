@@ -167,7 +167,14 @@ impl IpcServer {
         if let Some(parent) = socket_path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)?;
-                let _ = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700));
+                if let Err(e) =
+                    std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))
+                {
+                    tracing::warn!(
+                        path = %parent.display(),
+                        "failed to set socket directory permissions to 0700: {e}"
+                    );
+                }
             }
         }
 
