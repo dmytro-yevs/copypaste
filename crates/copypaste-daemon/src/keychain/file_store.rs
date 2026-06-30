@@ -35,7 +35,7 @@
 //! A genuinely **Developer-ID-signed** build has a STABLE designated
 //! requirement (a real `TeamIdentifier`), so its Keychain ACL survives updates
 //! and is strictly better — that build prefers the Keychain
-//! (see [`super::signing`]). The file store is only used when no stable code
+//! (see `super::signing`). The file store is only used when no stable code
 //! identity exists to protect.
 
 use std::io::Write;

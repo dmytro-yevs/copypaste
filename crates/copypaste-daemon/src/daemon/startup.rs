@@ -234,7 +234,7 @@ pub(crate) fn encrypted_db_exists(path: &std::path::Path) -> bool {
 /// Keychain GUI prompt (acceptance criterion #1).
 ///
 /// The blocking Security-framework read runs on a dedicated `std::thread`; we
-/// wait on a channel for at most [`KEYCHAIN_READ_TIMEOUT`]. On timeout we
+/// wait on a channel for at most `KEYCHAIN_READ_TIMEOUT`. On timeout we
 /// return [`KeyLoad::Locked`] and let the abandoned thread sit on the prompt
 /// (harmless — it dies with the process). The dev/test bypass
 /// (`COPYPASTE_EPHEMERAL_KEY`) short-circuits to a ready ephemeral key without
