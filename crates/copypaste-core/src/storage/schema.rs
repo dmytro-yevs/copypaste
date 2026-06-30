@@ -384,10 +384,46 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
 
     // --- Atomic migration block (architecture MEDIUM #15) ---
     //
-    // We build one SQL script that contains BEGIN, every needed step, the
-    // user_version bump, and COMMIT. SQLite will roll back automatically if
-    // any statement inside fails, leaving `user_version` at its previous
-    // value (verified by `apply_migrations_is_atomic_on_failure`).
+    // Build + execute in a bounded retry loop. A concurrent connection's
+    // WAL-replay can materialise a later-migration column (e.g. content_hash)
+    // AFTER our build-time `column_exists` probe returned false but BEFORE the
+    // queued ALTER runs, so execute_batch fails with "duplicate column name".
+    // SQLite rolls the transaction back, the racily-added column genuinely
+    // persists, and rebuilding the script re-evaluates `column_exists` — now
+    // true — so the offending ALTER is skipped and the retry converges. Bounded
+    // so a genuine schema bug still surfaces instead of looping. Each attempt is
+    // one self-contained BEGIN…COMMIT, so atomicity is preserved
+    // (apply_migrations_is_atomic_on_failure). (CopyPaste-lmlr / -2lc9)
+    for attempt in 0..3u8 {
+        let script = build_migration_script(conn, current_version)?;
+        match conn.execute_batch(&script) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt < 2 && is_duplicate_column_error(&e) => {
+                tracing::warn!(
+                    error = %e, attempt,
+                    "apply_migrations: duplicate-column race (concurrent WAL-replay); \
+                     rebuilding migration script and retrying"
+                );
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
+/// True when `e` is the SQLite "duplicate column name" error — an
+/// `ALTER TABLE … ADD COLUMN` whose column was materialised by a concurrent
+/// connection's WAL-replay between our `column_exists` probe and the ALTER
+/// (CopyPaste-lmlr / -2lc9 race class).
+fn is_duplicate_column_error(e: &rusqlite::Error) -> bool {
+    e.to_string().contains("duplicate column name")
+}
+
+/// Build the atomic migration SQL script (`BEGIN … COMMIT`) bringing a DB at
+/// `current_version` up to [`SCHEMA_VERSION`]. Pure string construction plus
+/// `column_exists` probes against `conn`; executing it is the caller's job so a
+/// duplicate-column race can be retried by rebuilding (see [`apply_migrations`]).
+fn build_migration_script(conn: &Connection, current_version: i64) -> Result<String, SchemaError> {
     let mut script = String::with_capacity(2048);
     script.push_str("BEGIN;\n");
 
@@ -579,12 +615,7 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
 
     script.push_str(&format!("PRAGMA user_version={};\n", SCHEMA_VERSION));
     script.push_str("COMMIT;\n");
-
-    // execute_batch runs everything; on error SQLite implicitly rolls back the
-    // open transaction, so we don't need an explicit ROLLBACK statement.
-    conn.execute_batch(&script)?;
-
-    Ok(())
+    Ok(script)
 }
 
 #[cfg(test)]
@@ -609,6 +640,33 @@ mod tests {
             }
             other => panic!("expected SchemaError::Downgrade, got {:?}", other),
         }
+    }
+
+    /// CopyPaste-lmlr: `is_duplicate_column_error` must recognise the SQLite
+    /// "duplicate column name" failure (the one the retry loop in
+    /// `apply_migrations` is allowed to recover from) and must NOT match an
+    /// unrelated error, so a genuine schema fault still propagates.
+    #[test]
+    fn is_duplicate_column_error_matches_only_duplicate_column() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE t (a INTEGER);").unwrap();
+        conn.execute_batch("ALTER TABLE t ADD COLUMN b TEXT;").unwrap();
+        // Re-adding the same column raises "duplicate column name: b".
+        let dup = conn
+            .execute_batch("ALTER TABLE t ADD COLUMN b TEXT;")
+            .unwrap_err();
+        assert!(
+            is_duplicate_column_error(&dup),
+            "must detect duplicate-column error, got: {dup}"
+        );
+        // An unrelated error (missing table) must NOT be treated as retryable.
+        let other = conn
+            .execute_batch("ALTER TABLE nope ADD COLUMN c TEXT;")
+            .unwrap_err();
+        assert!(
+            !is_duplicate_column_error(&other),
+            "must not match unrelated error: {other}"
+        );
     }
 
     /// CopyPaste-m45w: when `content_hash` already exists in the table but
