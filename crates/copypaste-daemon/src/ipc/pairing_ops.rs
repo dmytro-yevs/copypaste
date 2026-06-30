@@ -519,7 +519,7 @@ impl IpcServer {
     /// from `passphrase`, IF a Supabase account id is currently known.
     ///
     /// Called by the passphrase-entry handlers AFTER
-    /// [`persist_and_install_sync_key`] (which clears any stale v2). When a
+    /// [`Self::persist_and_install_sync_key`] (which clears any stale v2). When a
     /// Supabase account id is available (`self.cloud_account_id` is `Some`), this
     /// derives `derive_sync_key_for_account(passphrase, account_id)`, persists the
     /// bytes alongside the v1 key (so they survive a restart for dual-key read

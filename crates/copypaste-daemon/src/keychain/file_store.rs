@@ -135,7 +135,7 @@ pub fn load_cloud_sync_key() -> Result<Option<[u8; 32]>, KeychainError> {
 
 /// Persist the 32-byte **v2 per-account-salt** cloud-sync key to a `0600` file
 /// (CopyPaste-jdq5). Mirrors [`store_cloud_sync_key`] exactly but writes the
-/// sibling [`CLOUD_SYNC_V2_FILE_NAME`] so the v1 and v2 keys coexist.
+/// sibling `CLOUD_SYNC_V2_FILE_NAME` so the v1 and v2 keys coexist.
 #[cfg(feature = "cloud-sync")]
 pub fn store_cloud_sync_key_v2(secret: &[u8; 32]) -> Result<(), KeychainError> {
     let path = cloud_sync_v2_file_path()?;
