@@ -33,6 +33,53 @@ use tokio::sync::Mutex;
 
 const TEST_LOCAL_KEY: [u8; 32] = [0x77u8; 32];
 
+// ── RAII env-var guard (db_path isolation) ────────────────────────────────────
+//
+// `reset_database` resolves the on-disk DB via `crate::paths::db_path()`, which
+// honours `COPYPASTE_DB` and otherwise falls back to a PROCESS-GLOBAL
+// `$TMPDIR/CopyPaste/data/clipboard.db`. That fallback is SHARED across every
+// concurrently-running test binary, so a `reset_database` test that does not
+// pin `COPYPASTE_DB` races other processes on the same file while it
+// deletes / recreates / migrates it — manifesting as the intermittent
+// "duplicate column name: content_hash" / "SQLite error: locking protocol"
+// failures seen in the CI Matrix + Coverage jobs (CopyPaste-lmlr / -2lc9).
+// Pinning `COPYPASTE_DB` to a unique tempdir gives the test an isolated file.
+//
+// Each `[[test]]` entry is its own process, so a binary-local lock is enough.
+static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Pin `COPYPASTE_DB` to `db_file` for the guard's lifetime, restoring the
+/// previous value on drop. Holds [`ENV_LOCK`] so no other env-mutating test in
+/// this binary races the `set_var`.
+struct DbPathGuard {
+    saved: Option<std::ffi::OsString>,
+    #[allow(dead_code)] // held only to keep the mutex locked for the lifetime
+    lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl DbPathGuard {
+    fn pin(db_file: &std::path::Path) -> Self {
+        let lock = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let saved = std::env::var_os("COPYPASTE_DB");
+        // SAFETY: serialised via ENV_LOCK; no other thread in this binary
+        // mutates COPYPASTE_DB while the guard is alive.
+        unsafe { std::env::set_var("COPYPASTE_DB", db_file) };
+        Self { saved, lock }
+    }
+}
+
+impl Drop for DbPathGuard {
+    fn drop(&mut self) {
+        // SAFETY: ENV_LOCK is still held by `self.lock`.
+        unsafe {
+            match self.saved.take() {
+                Some(v) => std::env::set_var("COPYPASTE_DB", v),
+                None => std::env::remove_var("COPYPASTE_DB"),
+            }
+        }
+    }
+}
+
 async fn start_server() -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempdir().expect("tempdir");
     let sock = dir.path().join("export-import-test.sock");
@@ -378,6 +425,12 @@ async fn reset_database_requires_confirm() {
 /// `item_count == 0`.
 #[tokio::test]
 async fn reset_database_clears_items() {
+    // Isolate the on-disk db_path() to a private tempdir so this destructive
+    // reset cannot race other concurrent test processes on the shared global
+    // fallback path (CopyPaste-lmlr). Held for the whole test.
+    let db_dir = tempdir().expect("db tempdir");
+    let _db_path_guard = DbPathGuard::pin(&db_dir.path().join("clipboard.db"));
+
     let (_dir, sock) = start_server().await;
 
     // Populate with 3 items.

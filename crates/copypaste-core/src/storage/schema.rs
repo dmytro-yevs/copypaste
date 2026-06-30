@@ -338,11 +338,26 @@ pub fn apply_migrations(conn: &Connection) -> Result<(), SchemaError> {
     //
     // Safety: this is a no-op on a fresh/empty database (no WAL file) and on
     // in-memory databases (WAL mode is silently downgraded to MEMORY journal by
-    // SQLite, so the pragma runs but does nothing). A busy checkpoint (other
-    // readers holding frames) does not return an error — SQLite returns partial
-    // progress and we proceed; the column_exists guard remains the authoritative
-    // backstop for that edge case.
-    conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+    // SQLite, so the pragma runs but does nothing).
+    //
+    // This checkpoint is a DEFENSIVE BELT, never a correctness requirement: the
+    // `column_exists` guard on every ALTER is the authoritative backstop against
+    // WAL-replay. It is therefore NON-FATAL by design. Under heavy contention a
+    // WAL checkpoint can fail the file-locking protocol race with SQLITE_BUSY or
+    // SQLITE_PROTOCOL — and crucially `busy_timeout` does NOT cover SQLITE_PROTOCOL
+    // (the WAL-index lock has its own internal retry budget that exhausts under a
+    // slow/CPU-starved runner, e.g. coverage instrumentation: CopyPaste-2lc9
+    // observed reset_database aborting with "SQLite error: locking protocol" in
+    // the coverage job). Propagating that as a fatal SchemaError would fail the
+    // whole DB open for a belt that did not even need to run, so we log and
+    // continue — the column_exists guard still makes every migration step safe.
+    if let Err(e) = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);") {
+        tracing::warn!(
+            error = %e,
+            "apply_migrations: wal_checkpoint(TRUNCATE) failed (non-fatal); \
+             column_exists guards remain the authoritative WAL-replay backstop"
+        );
+    }
     conn.execute_batch(&format!(
         "PRAGMA cache_size=-{};",
         i64::from(crate::config::SQLITE_CACHE_MB) * 1024
