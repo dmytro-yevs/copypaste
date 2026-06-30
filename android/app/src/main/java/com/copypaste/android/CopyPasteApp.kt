@@ -64,6 +64,20 @@ class CopyPasteApp : Application() {
         // and terminates the process — a mismatched ABI silently corrupts crypto data, so
         // fail-fast is the only safe behaviour. Stub mode (.so absent) is a no-op.
         checkNativeAbiCompatibility()
+        // lxo6: surface the native-library failure as a persistent notification at startup.
+        // ClipboardRepository posts the same notification on each store failure, but only after
+        // the user captures an item. This path fires immediately so the user knows the app is
+        // non-functional even if no clipboard activity happens (e.g. after a bad install).
+        if (!isNativeLibraryLoaded) {
+            android.util.Log.e(
+                "CopyPasteApp",
+                "SECURITY: libcopypaste_android.so is unavailable — sensitive detection " +
+                    "and encrypted storage are disabled. No items will be captured or " +
+                    "stored until the app is reinstalled on a supported device. (lxo6)",
+                nativeLoadError,
+            )
+            NotificationHelper.notifyNativeUnavailable(this)
+        }
         NotificationHelper.createChannels(this)
         // Restore the Supabase background poll worker after a process restart
         // (WorkManager persists the request but we need to re-evaluate it on boot).

@@ -168,20 +168,44 @@ private fun uniffi.copypaste_android.CopypasteException.toAppException(
 // The generated bindings call System.loadLibrary via JNA's Native.load
 // (driven by findLibraryName). We attempt a direct loadLibrary here as a
 // fast gate so stub paths below can short-circuit without waiting for JNA.
+//
+// lxo6: nativeLoadError captures the UnsatisfiedLinkError thrown at load time
+// so callers (checkNativeAbiCompatibility, CopyPasteApp.onCreate) can log it at
+// ERROR level with a concrete cause and surface a user-facing notification at
+// startup rather than silently running in stub mode.
 // ---------------------------------------------------------------------------
 
-/** True when libcopypaste_android.so was successfully loaded at startup. */
-val isNativeLibraryLoaded: Boolean = run {
-    var loaded = false
-    try {
-        System.loadLibrary("copypaste_android")
-        loaded = true
-        Log.i(TAG, "Loaded copypaste_android native library")
-    } catch (e: UnsatisfiedLinkError) {
-        Log.w(TAG, "Native library copypaste_android not available — stub mode active. $e")
-    }
-    loaded
+/**
+ * The [UnsatisfiedLinkError] thrown when libcopypaste_android.so failed to load at
+ * startup, or null when the library loaded successfully.
+ *
+ * lxo6: Captured so [checkNativeAbiCompatibility] and [CopyPasteApp.onCreate] can
+ * log at ERROR with a concrete cause. Without this, the load failure is only visible
+ * as a WARN log and the user has no indication that security features are unavailable.
+ */
+val nativeLoadError: UnsatisfiedLinkError? = try {
+    System.loadLibrary("copypaste_android")
+    Log.i(TAG, "Loaded copypaste_android native library")
+    null
+} catch (e: UnsatisfiedLinkError) {
+    // lxo6: log at ERROR — the .so absence is a security-critical degradation, not a
+    // minor warning. Sensitive detection and AEAD encryption are unavailable.
+    // CopyPasteApp.onCreate surfaces this to the user via notifyNativeUnavailable.
+    Log.e(
+        TAG,
+        "SECURITY: libcopypaste_android.so failed to load — sensitive detection " +
+            "and encrypted storage are unavailable. The app will appear functional " +
+            "but no items will be captured or stored. (lxo6)",
+        e,
+    )
+    e
 }
+
+/**
+ * True when libcopypaste_android.so was successfully loaded at startup.
+ * Derived from [nativeLoadError]: loaded iff error is null.
+ */
+val isNativeLibraryLoaded: Boolean = nativeLoadError == null
 
 // ---------------------------------------------------------------------------
 // Public API — delegates to uniffi.copypaste_android.* generated bindings.
@@ -313,7 +337,11 @@ fun decryptTextBatch(
  */
 fun isSensitive(text: String): Boolean {
     if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "isSensitive: stub — returns false")
+        // lxo6: log at ERROR — without the native detector ALL content appears non-sensitive,
+        // defeating the security guarantees of the product. Storage is fail-closed
+        // (encryptText throws), but the silent false can confuse callers.
+        Log.e(TAG, "isSensitive: stub — native library unavailable; returning false " +
+            "(sensitive content WILL NOT be detected) (lxo6)")
         return false
     }
     return try {
@@ -429,7 +457,8 @@ fun applySpanMasking(text: String, spans: List<IntRange>): String {
 @Throws(CopypasteException::class)
 fun openDatabase(path: String, key: ByteArray): Long {
     if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "openDatabase: stub — returns -1")
+        // lxo6: log at ERROR — the encrypted database is unavailable; no items can be stored.
+        Log.e(TAG, "openDatabase: stub — native library unavailable; returning -1 (lxo6)")
         return -1L
     }
     return try {
@@ -552,7 +581,11 @@ fun sensitiveCaptureDecision(
     sensitiveTtlSecs: Long,
 ): uniffi.copypaste_android.SensitiveCaptureDecision {
     if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "sensitiveCaptureDecision: stub — returns non-sensitive")
+        // lxo6: log at ERROR — without the native detector all captures appear
+        // non-sensitive, defeating TTL-based auto-wipe. Storage is fail-closed
+        // (encryptText throws when .so is absent), so items are not actually persisted.
+        Log.e(TAG, "sensitiveCaptureDecision: stub — native library unavailable; " +
+            "returning non-sensitive decision (lxo6)")
         return uniffi.copypaste_android.SensitiveCaptureDecision(
             isSensitive = false,
             kind = null,
@@ -1014,7 +1047,15 @@ fun parsePairing(payload: String): uniffi.copypaste_android.ScannedPairing {
  */
 fun checkNativeAbiCompatibility() {
     if (!isNativeLibraryLoaded) {
-        Log.w(TAG, "checkNativeAbiCompatibility: native library not loaded — stub mode (no ABI check)")
+        // lxo6: log at ERROR — native absence is a security-critical event. Sensitive
+        // detection and AEAD encryption are unavailable. CopyPasteApp.onCreate is
+        // responsible for surfacing the user-facing notification.
+        Log.e(
+            TAG,
+            "SECURITY: checkNativeAbiCompatibility: native library not loaded — " +
+                "sensitive detection and AEAD encryption are unavailable (lxo6)",
+            nativeLoadError,
+        )
         return
     }
     try {
