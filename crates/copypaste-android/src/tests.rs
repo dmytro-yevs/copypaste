@@ -554,7 +554,7 @@ fn cloud_encrypt_decrypt_roundtrip() {
 /// Wrong passphrase must cause DecryptionFailed.
 #[test]
 fn cloud_decrypt_wrong_passphrase_fails() {
-    // Passphrases must be >= MIN_PASSPHRASE_LEN (8); derive_sync_key rejects
+    // Passphrases must be >= MIN_PASSPHRASE_LEN (12); derive_sync_key rejects
     // shorter ones with PassphraseTooShort (surfaced here as EncryptionFailed).
     let enc_key = derive_cloud_sync_key("correct-passphrase".into()).expect("derive enc");
     let dec_key = derive_cloud_sync_key("wrong-passphrase".into()).expect("derive dec");
@@ -569,7 +569,7 @@ fn cloud_decrypt_wrong_passphrase_fails() {
 /// Wrong item_id (AAD mismatch) must cause DecryptionFailed.
 #[test]
 fn cloud_decrypt_wrong_item_id_fails() {
-    let key = derive_cloud_sync_key("aad-test".into()).expect("derive");
+    let key = derive_cloud_sync_key("aad-test-pass".into()).expect("derive");
     let blob = cloud_encrypt("item-correct".into(), b"payload", &key).expect("encrypt");
     let result = cloud_decrypt("item-wrong".into(), &blob, &key);
     assert!(
@@ -1498,7 +1498,7 @@ fn sync_with_peer_counts_skipped_legacy_frame() {
 /// Blob format: `nonce[24]` prepended, total length = 24 + plaintext + 16 (AEAD tag).
 #[test]
 fn cloud_encrypt_blob_format() {
-    let key = derive_cloud_sync_key("format-test".into()).expect("derive");
+    let key = derive_cloud_sync_key("format-test-pass".into()).expect("derive");
     let plaintext = b"test blob format";
     let blob = cloud_encrypt("item-fmt".into(), plaintext, &key).expect("encrypt");
     assert_eq!(

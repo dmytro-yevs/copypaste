@@ -31,7 +31,12 @@ use crate::{panic_boundary, CopypasteError};
 /// passphrase would produce a weak key that an attacker could brute-force even
 /// against a memory-hard KDF. Matches the macOS daemon's UI-side enforcement
 /// so both platforms reject the same bad input with an informative error.
-pub(crate) const MIN_PASSPHRASE_LEN: usize = 8;
+///
+/// CopyPaste-wg4w: raised 8 -> 12 to match `copypaste_core::MIN_PASSPHRASE_LEN`.
+/// If this drifts below the core value, an 8-11 char passphrase would pass this
+/// pre-check and then be rejected by core as `PassphraseTooShort` — keep them
+/// equal.
+pub(crate) const MIN_PASSPHRASE_LEN: usize = 12;
 
 /// Derive a 32-byte sync key from `passphrase` using Argon2id.
 ///
@@ -65,6 +70,11 @@ pub fn derive_cloud_sync_key(passphrase: String) -> Result<Vec<u8>, CopypasteErr
                 ),
             });
         }
+        // CopyPaste-wg4w: Android has no Supabase account id available in the
+        // Kotlin layer (see ffi_pairing: supabase_account_id is None), so this is
+        // the documented no-account LEGACY (v1) fallback. Threading a per-account
+        // salt here would require adding an account-id parameter through the
+        // UniFFI surface and the Kotlin callers — tracked with the daemon cutover.
         let key = derive_sync_key(&passphrase).map_err(|e| match e {
             // Propagate any Argon2 runtime message rather than discarding it.
             SyncKeyError::Argon2Params(msg) | SyncKeyError::Argon2Hash(msg) => {

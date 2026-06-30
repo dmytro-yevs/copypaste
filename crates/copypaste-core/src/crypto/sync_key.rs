@@ -12,14 +12,40 @@
 //! KDF because it provides both side-channel resistance (data-independent
 //! memory access) and brute-force resistance (memory-hard).
 //!
-//! A **fixed domain-separation salt** (`ARGON2_SYNC_SALT`) is used instead of
-//! a per-user random salt. This is intentional: a random per-user salt would
-//! make key derivation non-deterministic across devices, breaking cross-device
-//! decryptability. The Argon2id work factor (memory cost + time cost) provides
-//! the brute-force resistance that a random salt would otherwise supply. The
-//! fixed salt's only role here is domain separation — it ensures that the same
-//! passphrase used in a different application or context produces a different
-//! key.
+//! ## Why the salt is per-account, not one global constant
+//!
+//! Argon2id's work factor raises the cost of *each individual* guess, but it
+//! does **not** stop an attacker from *amortising* one precomputed dictionary
+//! across many victims. With a single global salt (the legacy v1 scheme) an
+//! attacker who scrapes the untrusted cloud's E2E ciphertext corpus can run a
+//! passphrase dictionary through Argon2id **once** and try every resulting key
+//! against **every** user's blobs — a classic precompute / rainbow-table
+//! amortisation that a unique salt is specifically designed to defeat.
+//!
+//! A random per-user salt would defeat precompute but breaks cloud sync: two
+//! devices that only share a passphrase could not agree on the same key without
+//! transmitting and storing the salt. The resolution is a **deterministic
+//! per-account salt** (the v2 scheme): we mix a stable account identifier (the
+//! Supabase `user_id`, which both devices of an account already know) into the
+//! Argon2id salt via HKDF. This keeps derivation **deterministic across the two
+//! devices of the same account** (cloud sync still works) while making the salt
+//! **unique per account**, so an attacker must restart the entire memory-hard
+//! dictionary for every account — cross-user amortisation is gone.
+//!
+//! ## Versioning (back-compat)
+//!
+//! - **v1** — `Argon2id(passphrase, ARGON2_SYNC_SALT)` with the fixed global
+//!   salt. Retained as the documented fallback for code paths that have **no**
+//!   account id (relay-only / P2P / local) and to keep existing ciphertexts
+//!   decryptable. Exposed as [`derive_sync_key`].
+//! - **v2** — `Argon2id(passphrase, HKDF(account_id))` with a deterministic
+//!   per-account salt. Exposed as [`derive_sync_key_for_account`]. Defeats the
+//!   cross-user precompute above.
+//!
+//! [`derive_sync_key_versioned`] dispatches on `Option<account_id>`: `Some`
+//! selects v2, `None` falls back to the legacy v1 derivation. The legacy salt is
+//! still domain separation (a different application/context yields a different
+//! key) — but it is no longer claimed to substitute for a unique salt.
 //!
 //! # Cloud ciphertext domain separation
 //!
@@ -65,21 +91,21 @@ pub const ARGON2_T_COST: u32 = 2;
 /// embedded or WASM targets).
 pub const ARGON2_P_COST: u32 = 1;
 
-/// Fixed domain-separation salt for sync-key derivation.
+/// Global domain-separation salt for the **v1 (legacy)** sync-key derivation.
 ///
-/// This salt is IDENTICAL across all devices and is NOT secret. Its purpose
-/// is domain separation: the same passphrase typed into a different
-/// application (or a different `info` context) derives a different key. A
-/// random per-user salt is deliberately NOT used here because cross-device
-/// key agreement requires both sides to derive the SAME key from the same
-/// passphrase — a random salt would need to be transmitted and stored, which
-/// undermines the zero-server-trust threat model.
+/// This salt is IDENTICAL across all devices and is NOT secret. In the v1
+/// scheme it is the *only* salt, which means it provides domain separation but
+/// does NOT defeat cross-user precompute (see the module-level "Why the salt is
+/// per-account" section). v1 is retained for two reasons:
+///   1. Code paths with no account id (relay-only / P2P / local) need a
+///      deterministic, account-free salt — they fall back to this constant.
+///   2. Existing v1 ciphertexts must remain decryptable.
 ///
-/// Brute-force resistance is provided entirely by Argon2id's memory-hard
-/// work factor (see `ARGON2_M_COST_KIB` / `ARGON2_T_COST`). The fixed salt
-/// is NOT a shortcut around that protection.
+/// In the **v2** scheme this constant is reused as the HKDF input keying
+/// material (see [`derive_per_account_salt`]) so the per-account salt remains
+/// domain-separated from any other use of the same byte string.
 ///
-/// Changing this constant is a hard-fork of all existing cloud ciphertexts —
+/// Changing this constant is a hard-fork of all existing v1 cloud ciphertexts —
 /// every passphrase will derive a different key and existing blobs will
 /// become unreadable. This test pins the value:
 /// `ARGON2_SYNC_SALT == SHA-256(b"copypaste/cloud-sync-key/v1/argon2id-salt")`
@@ -88,6 +114,64 @@ pub const ARGON2_SYNC_SALT: &[u8; 32] = &[
     0xe1, 0xb5, 0x69, 0xc8, 0xe9, 0xd3, 0xc8, 0x22, 0xdf, 0x1c, 0xdf, 0x05, 0x09, 0x90, 0x4c, 0x07,
     0xe6, 0x13, 0x10, 0x60, 0x81, 0x43, 0x5d, 0x43, 0xa8, 0xd3, 0x3b, 0x63, 0x08, 0x00, 0x85, 0xbd,
 ];
+
+/// Sync-key derivation scheme versions.
+///
+/// These tag *which salt* fed Argon2id. They are NOT stored inside the cloud
+/// blob (the blob format is `nonce || ciphertext` and is byte-identical for
+/// both versions); they exist so callers and docs can name the scheme
+/// unambiguously and so a future migration can dispatch on them.
+///
+/// | version | salt | when used |
+/// |---------|------|-----------|
+/// | 1 | global `ARGON2_SYNC_SALT` | no account id available (relay/P2P/local) and all pre-migration data |
+/// | 2 | `HKDF(ARGON2_SYNC_SALT, account_id)` | a Supabase account id is available |
+pub const SYNC_KEY_DERIVATION_VERSION_V1: u32 = 1;
+
+/// See [`SYNC_KEY_DERIVATION_VERSION_V1`].
+pub const SYNC_KEY_DERIVATION_VERSION_V2: u32 = 2;
+
+/// HKDF `info` string for the v2 per-account Argon2id salt.
+///
+/// Purpose-separated (per the project's HKDF-info convention) so this salt can
+/// never collide with the relay-inbox / storage / telemetry HKDF derivations
+/// that share `sha2`/`hkdf`. The account id is appended to this prefix.
+const SYNC_SALT_INFO_V2: &[u8] = b"copypaste/cloud-sync-key/v2/per-account-salt|";
+
+/// Derive the **deterministic** per-account Argon2id salt for the v2 scheme.
+///
+/// `salt = HKDF-SHA256(ikm = ARGON2_SYNC_SALT, salt = None, info =
+/// SYNC_SALT_INFO_V2 || account_id)`.
+///
+/// Properties:
+/// - **Deterministic**: depends only on the (public) account id and the fixed
+///   IKM, so both devices of the same account derive the identical salt and
+///   therefore the identical sync key — cloud sync determinism is preserved.
+/// - **Per-account**: two different account ids yield independent salts, so an
+///   attacker cannot reuse one Argon2id precompute across accounts.
+///
+/// The account id is NOT secret (it is the Supabase `user_id`); it is mixed in
+/// purely as a *salt*, not as key material. Using HKDF rather than raw
+/// concatenation gives a fixed-length, well-distributed 32-byte salt regardless
+/// of the account id's length or structure.
+fn derive_per_account_salt(account_id: &str) -> [u8; 32] {
+    use hkdf::Hkdf;
+    use sha2::Sha256;
+
+    let hk = Hkdf::<Sha256>::new(None, ARGON2_SYNC_SALT);
+    let mut info = Vec::with_capacity(SYNC_SALT_INFO_V2.len() + account_id.len());
+    info.extend_from_slice(SYNC_SALT_INFO_V2);
+    info.extend_from_slice(account_id.as_bytes());
+
+    let mut salt = [0u8; 32];
+    // HKDF-SHA256 expand of 32 bytes (< 255*32) cannot fail; the only error
+    // variant is "output too long". Surfaced as an unreachable expect with a
+    // structural justification rather than propagated, matching the relay HKDF
+    // call sites in `relay.rs`.
+    hk.expand(&info, &mut salt)
+        .expect("HKDF-SHA256 expand of 32 bytes is always valid");
+    salt
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AAD schema version for cloud ciphertexts
@@ -193,13 +277,16 @@ impl SyncKey {
 // Errors
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Minimum passphrase length enforced by `derive_sync_key`.
+/// Minimum passphrase length enforced by all sync-key derivation entry points.
 ///
-/// A passphrase shorter than this is trivially brute-forceable even with
-/// Argon2id's memory-hard work factor. Eight characters is a conservative
-/// floor that blocks the worst cases (empty string, single char) without
-/// being onerous for real users.
-pub const MIN_PASSPHRASE_LEN: usize = 8;
+/// A passphrase shorter than this is brute-forceable even with Argon2id's
+/// memory-hard work factor, and a global salt previously let that brute force
+/// be amortised across users (see the module-level security section). Twelve
+/// characters raises the dictionary-attack floor materially (the OWASP/NIST
+/// guidance for human-chosen secrets) while staying enterable for a
+/// passphrase-style secret. Raising this only validates NEW passphrase entry;
+/// it does not invalidate already-derived stored keys.
+pub const MIN_PASSPHRASE_LEN: usize = 12;
 
 /// Errors returned by sync-key derivation and cloud encrypt/decrypt.
 #[derive(Debug, Error)]
@@ -239,25 +326,18 @@ pub enum SyncKeyError {
 // Public API
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Derive a 32-byte shared sync key from `passphrase` using Argon2id.
+/// Run Argon2id over `passphrase` with an explicit 32-byte `salt`.
 ///
-/// The derivation is **deterministic**: the same passphrase always produces
-/// the same key on every device. This is the cross-device agreement property
-/// required for cloud sync. See the module-level documentation for the
-/// security rationale for the fixed salt.
-///
-/// # Errors
-/// Returns `SyncKeyError::PassphraseTooShort` if `passphrase` is shorter than
-/// `MIN_PASSPHRASE_LEN` characters (prevents trivial brute force).
-/// Returns `SyncKeyError::Argon2Params` if the Argon2id parameter struct
-/// cannot be built (only possible if the hardcoded constants are invalid),
-/// or `SyncKeyError::Argon2Hash` if the hashing operation fails at runtime.
-pub fn derive_sync_key(passphrase: &str) -> Result<SyncKey, SyncKeyError> {
+/// Shared core of every public derivation entry point so the Argon2id
+/// parameters, the length guard, and the zeroize-on-drop handling are
+/// byte-identical regardless of which salt (v1 global or v2 per-account) is
+/// supplied. The salt is the ONLY difference between the schemes.
+fn derive_sync_key_with_salt(passphrase: &str, salt: &[u8; 32]) -> Result<SyncKey, SyncKeyError> {
     use argon2::{Algorithm, Argon2, Params, Version};
 
     // Fix [HIGH]: reject trivially short passphrases before hashing so the
     // IPC layer can surface a user-actionable error rather than silently
-    // accepting a 0- or 1-character passphrase that is brute-forceable.
+    // accepting a short, brute-forceable passphrase.
     if passphrase.chars().count() < MIN_PASSPHRASE_LEN {
         return Err(SyncKeyError::PassphraseTooShort(passphrase.chars().count()));
     }
@@ -272,10 +352,82 @@ pub fn derive_sync_key(passphrase: &str) -> Result<SyncKey, SyncKeyError> {
     // return owns its own copy and is itself ZeroizeOnDrop).
     let mut key_bytes = zeroize::Zeroizing::new([0u8; 32]);
     argon2
-        .hash_password_into(passphrase.as_bytes(), ARGON2_SYNC_SALT, &mut key_bytes[..])
+        .hash_password_into(passphrase.as_bytes(), salt, &mut key_bytes[..])
         .map_err(|e| SyncKeyError::Argon2Hash(e.to_string()))?;
 
     Ok(SyncKey(*key_bytes))
+}
+
+/// Derive the **v1 (legacy)** 32-byte shared sync key from `passphrase`.
+///
+/// Uses the fixed global [`ARGON2_SYNC_SALT`]. The derivation is
+/// **deterministic**: the same passphrase always produces the same key on every
+/// device. This is the cross-device agreement property required for cloud sync.
+///
+/// This is the documented fallback for code paths that have **no** account id
+/// (relay-only, P2P, or local) and the scheme under which all pre-migration
+/// ciphertexts were produced — so its output is intentionally byte-identical to
+/// the original implementation and MUST NOT change. When a Supabase account id
+/// is available, prefer [`derive_sync_key_for_account`] /
+/// [`derive_sync_key_versioned`], which defeat cross-user precompute.
+///
+/// # Errors
+/// Returns `SyncKeyError::PassphraseTooShort` if `passphrase` is shorter than
+/// `MIN_PASSPHRASE_LEN` characters (prevents trivial brute force).
+/// Returns `SyncKeyError::Argon2Params` if the Argon2id parameter struct
+/// cannot be built (only possible if the hardcoded constants are invalid),
+/// or `SyncKeyError::Argon2Hash` if the hashing operation fails at runtime.
+pub fn derive_sync_key(passphrase: &str) -> Result<SyncKey, SyncKeyError> {
+    derive_sync_key_with_salt(passphrase, ARGON2_SYNC_SALT)
+}
+
+/// Derive the **v2 (per-account)** 32-byte shared sync key from `passphrase`.
+///
+/// Feeds Argon2id a deterministic per-account salt derived from `account_id`
+/// (see [`derive_per_account_salt`]). Because the salt is unique per account,
+/// an attacker who scrapes the untrusted cloud's E2E ciphertext corpus cannot
+/// reuse a single Argon2id dictionary precompute across accounts. Because the
+/// salt is deterministic, both devices of the same account derive the identical
+/// key, so cloud sync still works.
+///
+/// `account_id` must be a STABLE identifier that BOTH devices of the account
+/// agree on (the canonical `copypaste_supabase::supabase_account_id`, i.e.
+/// `"<project_ref>|<user_id>"`). It is not secret — it is mixed in only as a
+/// salt — but it must be identical on both devices or they will not agree on a
+/// key.
+///
+/// # Errors
+/// Same as [`derive_sync_key`].
+pub fn derive_sync_key_for_account(
+    passphrase: &str,
+    account_id: &str,
+) -> Result<SyncKey, SyncKeyError> {
+    let salt = derive_per_account_salt(account_id);
+    derive_sync_key_with_salt(passphrase, &salt)
+}
+
+/// Derive a sync key, selecting the scheme by whether an account id is present.
+///
+/// This is the threading entry point for callers: pass the Supabase account id
+/// when one is configured, or `None` for relay-only / P2P / local / no-cloud
+/// paths.
+///
+/// - `Some(account_id)` → **v2** per-account salt ([`derive_sync_key_for_account`]).
+/// - `None` → **v1** legacy global salt ([`derive_sync_key`]). This fallback is
+///   explicit and deliberate, not accidental: a path with no account id has no
+///   stable per-account value to mix in, and must stay byte-compatible with
+///   relay/P2P peers and existing data.
+///
+/// # Errors
+/// Same as [`derive_sync_key`].
+pub fn derive_sync_key_versioned(
+    passphrase: &str,
+    account_id: Option<&str>,
+) -> Result<SyncKey, SyncKeyError> {
+    match account_id {
+        Some(id) => derive_sync_key_for_account(passphrase, id),
+        None => derive_sync_key(passphrase),
+    }
 }
 
 /// Encrypt `plaintext` for cloud storage using `key`, binding the ciphertext
@@ -428,7 +580,7 @@ mod tests {
     /// Empty plaintext must also round-trip correctly.
     #[test]
     fn cloud_roundtrip_empty_plaintext() {
-        let key = make_key("empty-test");
+        let key = make_key("empty-test-pad");
         let blob = encrypt_for_cloud(&key, "item-empty", b"").unwrap();
         let recovered = decrypt_from_cloud(&key, "item-empty", &blob).unwrap();
         assert_eq!(recovered, b"");
@@ -455,7 +607,7 @@ mod tests {
     /// Flipping a bit in the ciphertext body must cause auth-tag failure.
     #[test]
     fn tampered_ciphertext_fails() {
-        let key = make_key("tamper-test");
+        let key = make_key("tamper-test-pad");
         let mut blob = encrypt_for_cloud(&key, "item-tamper", b"important data").unwrap();
         // Flip a byte in the ciphertext portion (after the 24-byte nonce).
         blob[NONCE_SIZE] ^= 0xFF;
@@ -468,7 +620,7 @@ mod tests {
     /// Decrypting with a different item_id must fail (AAD mismatch).
     #[test]
     fn wrong_item_id_aad_fails() {
-        let key = make_key("aad-test");
+        let key = make_key("aad-test-pass");
         let blob = encrypt_for_cloud(&key, "item-correct", b"payload").unwrap();
         let result = decrypt_from_cloud(&key, "item-wrong", &blob);
         assert!(
@@ -483,7 +635,7 @@ mod tests {
     /// different nonces (and therefore different blobs).
     #[test]
     fn nonce_unique_across_two_encrypts() {
-        let key = make_key("nonce-test");
+        let key = make_key("nonce-test-pad");
         let item_id = "item-nonce";
         let plaintext = b"same plaintext";
 
@@ -506,7 +658,7 @@ mod tests {
     /// ciphertext+tag (plaintext.len() + 16).
     #[test]
     fn blob_format_nonce_then_ciphertext_plus_tag() {
-        let key = make_key("format-test");
+        let key = make_key("format-test-pad");
         let plaintext = b"format check";
         let blob = encrypt_for_cloud(&key, "item-fmt", plaintext).unwrap();
         // blob length must be nonce(24) + plaintext(N) + tag(16)
@@ -518,7 +670,7 @@ mod tests {
     /// A blob shorter than NONCE_SIZE must return BlobTooShort, not panic.
     #[test]
     fn blob_too_short_returns_error_not_panic() {
-        let key = make_key("short-test");
+        let key = make_key("short-test-pad");
         let short_blob = [0u8; 10];
         let result = decrypt_from_cloud(&key, "item-short", &short_blob);
         assert!(
@@ -607,10 +759,15 @@ mod tests {
     // ── passphrase length enforcement ────────────────────────────────────────
 
     /// Fix [HIGH]: passphrases shorter than MIN_PASSPHRASE_LEN must be rejected
-    /// with `PassphraseTooShort` before Argon2id even runs.
+    /// with `PassphraseTooShort` before Argon2id even runs. Includes an 11-char
+    /// case to pin the raised floor (MIN_PASSPHRASE_LEN == 12).
     #[test]
     fn short_passphrase_returns_passphrase_too_short() {
-        for short in &["", "a", "1234567"] {
+        for short in &["", "a", "1234567", "12345678901"] {
+            assert!(
+                short.chars().count() < MIN_PASSPHRASE_LEN,
+                "test fixture {short:?} must be shorter than the enforced minimum"
+            );
             let result = derive_sync_key(short);
             assert!(
                 matches!(result, Err(SyncKeyError::PassphraseTooShort(_))),
@@ -621,13 +778,28 @@ mod tests {
         }
     }
 
-    /// A passphrase of exactly MIN_PASSPHRASE_LEN characters must succeed.
+    /// The enforced minimum is 12 characters (raised from 8).
+    #[test]
+    fn min_passphrase_len_is_twelve() {
+        assert_eq!(MIN_PASSPHRASE_LEN, 12);
+    }
+
+    /// A passphrase of exactly MIN_PASSPHRASE_LEN characters must succeed, and
+    /// one character shorter must be rejected.
     #[test]
     fn passphrase_at_min_length_succeeds() {
-        // "12345678" is exactly 8 chars — must not return PassphraseTooShort.
+        // "123456789012" is exactly 12 chars — must not return PassphraseTooShort.
         assert!(
-            derive_sync_key("12345678").is_ok(),
+            derive_sync_key("123456789012").is_ok(),
             "passphrase of exactly {MIN_PASSPHRASE_LEN} chars must succeed"
+        );
+        // 11 chars — one short of the floor — must be rejected.
+        assert!(
+            matches!(
+                derive_sync_key("12345678901"),
+                Err(SyncKeyError::PassphraseTooShort(11))
+            ),
+            "passphrase one char below the floor must be rejected"
         );
     }
 
@@ -694,5 +866,130 @@ mod tests {
             !key.ct_eq_bytes(&different),
             "differing bytes must compare unequal"
         );
+    }
+
+    // ── CopyPaste-wg4w: v2 per-account salt (cross-user precompute defence) ───
+
+    const ACCOUNT_A: &str = "proj_abc|00000000-0000-0000-0000-0000000000aa";
+    const ACCOUNT_B: &str = "proj_abc|00000000-0000-0000-0000-0000000000bb";
+    const PASS: &str = "correct horse battery staple";
+
+    /// A v2 (per-account) key must round-trip through the cloud AEAD.
+    #[test]
+    fn v2_account_key_roundtrips() {
+        let key = derive_sync_key_for_account(PASS, ACCOUNT_A).expect("v2 derive");
+        let item_id = "item-v2-roundtrip";
+        let plaintext = b"v2 per-account ciphertext";
+        let blob = encrypt_for_cloud(&key, item_id, plaintext).expect("encrypt");
+        let recovered = decrypt_from_cloud(&key, item_id, &blob).expect("decrypt");
+        assert_eq!(recovered, plaintext);
+    }
+
+    /// A LEGACY (v1) blob must still decrypt with the v1 key after the migration
+    /// — back-compat for existing cloud data.
+    #[test]
+    fn legacy_v1_blob_still_decrypts() {
+        let key = derive_sync_key(PASS).expect("v1 derive");
+        let item_id = "item-v1-legacy";
+        let plaintext = b"blob written under the old global-salt scheme";
+        let blob = encrypt_for_cloud(&key, item_id, plaintext).expect("encrypt");
+        // Re-derive the v1 key independently (as a fresh daemon would) and decrypt.
+        let key_again = derive_sync_key(PASS).expect("v1 re-derive");
+        let recovered = decrypt_from_cloud(&key_again, item_id, &blob).expect("decrypt");
+        assert_eq!(recovered, plaintext);
+    }
+
+    /// Two DIFFERENT account ids with the SAME passphrase must derive DIFFERENT
+    /// keys — this is the property that defeats cross-user precompute.
+    #[test]
+    fn different_accounts_same_passphrase_derive_different_keys() {
+        let key_a = derive_sync_key_for_account(PASS, ACCOUNT_A).expect("derive A");
+        let key_b = derive_sync_key_for_account(PASS, ACCOUNT_B).expect("derive B");
+        assert_ne!(
+            key_a.as_bytes(),
+            key_b.as_bytes(),
+            "different accounts must not share a key (cross-user precompute would survive)"
+        );
+        // And a blob from account A must NOT decrypt under account B's key.
+        let blob = encrypt_for_cloud(&key_a, "x", b"secret").expect("encrypt");
+        assert!(
+            matches!(
+                decrypt_from_cloud(&key_b, "x", &blob),
+                Err(SyncKeyError::DecryptFailed)
+            ),
+            "account B's key must not decrypt account A's blob"
+        );
+    }
+
+    /// The SAME account id + SAME passphrase must derive the SAME key on every
+    /// call — cross-device determinism for cloud sync.
+    #[test]
+    fn same_account_same_passphrase_is_deterministic() {
+        let k1 = derive_sync_key_for_account(PASS, ACCOUNT_A).expect("derive 1");
+        let k2 = derive_sync_key_for_account(PASS, ACCOUNT_A).expect("derive 2");
+        assert_eq!(
+            k1.as_bytes(),
+            k2.as_bytes(),
+            "same account + passphrase must be deterministic across devices"
+        );
+    }
+
+    /// The no-account fallback must equal the legacy v1 key byte-for-byte, so
+    /// relay/P2P/local paths and existing data are completely unchanged.
+    #[test]
+    fn versioned_none_equals_legacy_v1() {
+        let legacy = derive_sync_key(PASS).expect("v1");
+        let fallback = derive_sync_key_versioned(PASS, None).expect("versioned None");
+        assert_eq!(
+            legacy.as_bytes(),
+            fallback.as_bytes(),
+            "derive_sync_key_versioned(_, None) must be byte-identical to derive_sync_key"
+        );
+    }
+
+    /// `derive_sync_key_versioned(_, Some(id))` must equal
+    /// `derive_sync_key_for_account(_, id)` (dispatcher selects v2).
+    #[test]
+    fn versioned_some_equals_for_account() {
+        let direct = derive_sync_key_for_account(PASS, ACCOUNT_A).expect("for_account");
+        let via = derive_sync_key_versioned(PASS, Some(ACCOUNT_A)).expect("versioned Some");
+        assert_eq!(direct.as_bytes(), via.as_bytes());
+    }
+
+    /// The v2 (per-account) key must DIFFER from the v1 (global-salt) key for the
+    /// same passphrase — proving the salt actually changed the derivation.
+    #[test]
+    fn v2_key_differs_from_v1_key() {
+        let v1 = derive_sync_key(PASS).expect("v1");
+        let v2 = derive_sync_key_for_account(PASS, ACCOUNT_A).expect("v2");
+        assert_ne!(v1.as_bytes(), v2.as_bytes());
+    }
+
+    /// The per-account salt itself must be deterministic and account-dependent.
+    #[test]
+    fn per_account_salt_is_deterministic_and_unique() {
+        let sa1 = derive_per_account_salt(ACCOUNT_A);
+        let sa2 = derive_per_account_salt(ACCOUNT_A);
+        let sb = derive_per_account_salt(ACCOUNT_B);
+        assert_eq!(sa1, sa2, "same account id must yield the same salt");
+        assert_ne!(sa1, sb, "different account ids must yield different salts");
+        // The per-account salt must not collapse to the global v1 salt.
+        assert_ne!(&sa1, ARGON2_SYNC_SALT.as_ref());
+    }
+
+    /// v2 derivation enforces the same passphrase-length floor as v1.
+    #[test]
+    fn v2_rejects_short_passphrase() {
+        assert!(matches!(
+            derive_sync_key_for_account("short", ACCOUNT_A),
+            Err(SyncKeyError::PassphraseTooShort(_))
+        ));
+    }
+
+    /// Derivation-version constants are stable (1 and 2).
+    #[test]
+    fn derivation_version_constants() {
+        assert_eq!(SYNC_KEY_DERIVATION_VERSION_V1, 1);
+        assert_eq!(SYNC_KEY_DERIVATION_VERSION_V2, 2);
     }
 }

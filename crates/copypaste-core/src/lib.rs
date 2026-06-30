@@ -24,11 +24,12 @@ pub use relay::{derive_relay_inbox_id, derive_relay_public_key, derive_relay_reg
 // `decrypt_item_with_aad` for all new call sites.
 pub use crypto::{
     decrypt_from_cloud, derive_storage_key_v1, derive_storage_key_v2, derive_sync_key,
-    derive_sync_key_v2, derive_telemetry_key_v2, derive_v2, encrypt_for_cloud, strip_deeplink,
-    DeviceKeypair, KeyError, PairingPayload, PairingQrError, PairingToken, QrProvisioning, SyncKey,
-    SyncKeyError, ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_SYNC_SALT, ARGON2_T_COST,
-    CLOUD_AAD_SCHEMA_VERSION, HKDF_VERSION, PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC,
-    PAIRING_TOKEN_LEN,
+    derive_sync_key_for_account, derive_sync_key_v2, derive_sync_key_versioned,
+    derive_telemetry_key_v2, derive_v2, encrypt_for_cloud, strip_deeplink, DeviceKeypair, KeyError,
+    PairingPayload, PairingQrError, PairingToken, QrProvisioning, SyncKey, SyncKeyError,
+    ARGON2_M_COST_KIB, ARGON2_P_COST, ARGON2_SYNC_SALT, ARGON2_T_COST, CLOUD_AAD_SCHEMA_VERSION,
+    HKDF_VERSION, PAIRING_DEEPLINK_PREFIX, PAIRING_QR_MAGIC, PAIRING_TOKEN_LEN,
+    SYNC_KEY_DERIVATION_VERSION_V1, SYNC_KEY_DERIVATION_VERSION_V2,
 };
 pub use file::{
     decode_file, decode_file_zeroizing, encode_file, FileError, FileMeta, FILE_CHUNK_SIZE,

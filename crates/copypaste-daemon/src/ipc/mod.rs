@@ -12,12 +12,14 @@ use anyhow::Context as _; // CopyPaste-crh3.90
                           // the import must match to avoid an unused-import warning (-D warnings).
 #[cfg(feature = "cloud-sync")]
 use copypaste_ipc::compute_sync_badge_state_with_inflight;
-// derive_sync_key / SyncKey are used by both cloud-sync (Supabase) and relay-sync.
-// `revoke_and_rotate` / `rotate_sync_key` derive a key from a passphrase;
-// `revoke_peer` uses `SyncKey::random()` for automatic no-passphrase rotation
-// (CopyPaste-gbo fix).
+// derive_sync_key_versioned / SyncKey are used by both cloud-sync (Supabase) and
+// relay-sync. `revoke_and_rotate` / `rotate_sync_key` derive a key from a
+// passphrase; `revoke_peer` uses `SyncKey::random()` for automatic no-passphrase
+// rotation (CopyPaste-gbo fix). CopyPaste-wg4w: the passphrase handlers call the
+// account-aware `derive_sync_key_versioned` so the per-account-salt seam exists
+// at the call site (currently passed `None` — see the handler comments).
 #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
-use copypaste_core::derive_sync_key;
+use copypaste_core::derive_sync_key_versioned;
 #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
 use copypaste_core::SyncKey;
 use copypaste_core::{

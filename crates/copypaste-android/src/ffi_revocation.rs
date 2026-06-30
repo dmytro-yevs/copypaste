@@ -164,6 +164,9 @@ pub fn derive_new_sync_key_from_passphrase(
             ),
         });
     }
+    // CopyPaste-wg4w: no Supabase account id is available in the Android Kotlin
+    // layer, so this is the documented no-account LEGACY (v1) fallback (same as
+    // `derive_cloud_sync_key`).
     derive_sync_key(passphrase).map_err(|e| match e {
         SyncKeyError::PassphraseTooShort(n) => CopypasteError::DecryptionFailed {
             reason: format!(

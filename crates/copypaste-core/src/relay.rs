@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn public_key_is_32_bytes() {
-        assert_eq!(derive_relay_public_key(&key("len-check")).len(), 32);
+        assert_eq!(derive_relay_public_key(&key("len-check-pass")).len(), 32);
     }
 
     /// Guard that RELAY_HKDF_SALT remains None (le8w).

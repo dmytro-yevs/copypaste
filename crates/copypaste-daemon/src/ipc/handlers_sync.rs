@@ -223,7 +223,21 @@ impl IpcServer {
 
                 // Derive the sync key via Argon2id (this is intentionally slow —
                 // one-time cost on passphrase entry, not per-item).
-                let new_key = match derive_sync_key(&passphrase) {
+                //
+                // CopyPaste-wg4w: derive via the account-aware entry point. The
+                // Supabase account id (available in `self.cloud_account_id`) is
+                // intentionally passed as `None` here so the SHARED sync key stays
+                // on the legacy v1 derivation. A safe flip to the v2 per-account
+                // salt is NOT yet possible because this single key slot is also
+                // reused by relay sync (and the relay inbox id is HKDF of it); on
+                // restart the daemon reloads only the key BYTES (not the
+                // passphrase), so a v1 read-fallback for existing blobs cannot be
+                // re-derived; and Android peers still derive v1 (no account id in
+                // Kotlin). The cutover (restart-surviving dual-key read-dispatch /
+                // cloud-only key slot + Android account-id wiring + relay inbox
+                // migration) is tracked separately. `derive_sync_key_versioned(_,
+                // None)` is byte-identical to the previous `derive_sync_key`.
+                let new_key = match derive_sync_key_versioned(&passphrase, None) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("set_sync_passphrase: key derivation failed: {e}");
@@ -277,7 +291,9 @@ impl IpcServer {
                     }
                 };
 
-                let new_key = match derive_sync_key(&passphrase) {
+                // CopyPaste-wg4w: legacy v1 fallback (account id passed as None) —
+                // see the detailed rationale in the `set_sync_passphrase` handler.
+                let new_key = match derive_sync_key_versioned(&passphrase, None) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("rotate_sync_key: key derivation failed: {e}");
@@ -423,7 +439,9 @@ impl IpcServer {
                 };
                 // Derive the new key FIRST so a bad passphrase fails before we
                 // mutate any revocation state.
-                let new_key = match derive_sync_key(&passphrase) {
+                // CopyPaste-wg4w: legacy v1 fallback (account id passed as None) —
+                // see the detailed rationale in the `set_sync_passphrase` handler.
+                let new_key = match derive_sync_key_versioned(&passphrase, None) {
                     Ok(k) => k,
                     Err(e) => {
                         tracing::warn!("revoke_and_rotate: key derivation failed: {e}");
