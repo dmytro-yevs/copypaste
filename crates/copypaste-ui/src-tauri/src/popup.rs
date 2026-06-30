@@ -1,6 +1,9 @@
 //! Popup window management — create, show, hide, position — plus macOS
 //! helpers for focus tracking, CGEventTap, and synthetic paste events.
 
+// `Mutex` backs only the macOS-only managed state (`PriorApp`/`TapActive`), so
+// gate the import to macOS — otherwise it is an unused import on Linux (-D warnings).
+#[cfg(target_os = "macos")]
 use std::sync::Mutex;
 use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
