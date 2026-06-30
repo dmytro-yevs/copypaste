@@ -787,7 +787,6 @@ impl IpcServer {
         // keeps its token-derived password; this only affects discovery.)
         let password = copypaste_p2p::DISCOVERY_PAIRING_PASSWORD.to_string();
         let (cert_der, key_der) = (cert.0.clone(), cert.1.clone());
-        let own_sync_addr = self.own_sync_addr();
         // B1: our own STUN-discovered global IP, read from the shared cache and
         // advertised in-band so the peer can show it. None if STUN unresolved or
         // collection is disabled. Reuses the daemon's single STUN source.
@@ -808,6 +807,11 @@ impl IpcServer {
         // "QR fully provisions all sync": advertise our Supabase/relay config +
         // derived sync key over the authenticated tunnel (None if unconfigured).
         let own_provisioning = self.build_local_provisioning().await;
+        // Read our own P2P sync-listener address late (after the ~2 s metadata
+        // collection above), not eagerly at the top of the handler, so a racing
+        // listener start has had time to populate the slot — mirrors the
+        // responder's empty-address fix. See the QR `pair_accept` path.
+        let own_sync_addr = self.own_sync_addr();
 
         let coordinator = Arc::clone(&self.pairing);
         // The confirm callback runs AFTER frame 9 (PAKE + channel binding), when
@@ -1145,9 +1149,6 @@ impl IpcServer {
         };
 
         let (cert_der, key_der) = (cert.0.clone(), cert.1.clone());
-        // Our own P2P sync-listener address, sent in-band so the responder can
-        // persist it for its Phase 3 connector.
-        let own_sync_addr = self.own_sync_addr();
         // B1: our own STUN-discovered global IP, advertised in-band so the peer
         // can show it. None if unresolved/disabled.
         let own_public_ip = self.cached_public_ip.read().await.clone();
@@ -1170,6 +1171,15 @@ impl IpcServer {
         // "QR fully provisions all sync": advertise our Supabase/relay config +
         // derived sync key over the authenticated tunnel (None if unconfigured).
         let own_provisioning = self.build_local_provisioning().await;
+        // Our own P2P sync-listener address, sent in-band so the responder can
+        // persist it for its Phase 3 connector. Read HERE (after the ~2 s
+        // `collect_own_peer_meta` window), not eagerly at the top of the handler,
+        // so a racing P2P-listener start has had maximum time to populate the
+        // slot — mirrors the responder's empty-address fix in
+        // `spawn_bootstrap_responder`. Reading early advertised an empty addr
+        // when the listener bound slightly after pairing began (flaky
+        // `pairing_persists_..._on_both_sides`: A recorded B with no address).
+        let own_sync_addr = self.own_sync_addr();
         match copypaste_p2p::bootstrap::run_initiator(
             addr,
             cert_der,
