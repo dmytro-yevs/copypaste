@@ -650,7 +650,8 @@ mod tests {
     fn is_duplicate_column_error_matches_only_duplicate_column() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE t (a INTEGER);").unwrap();
-        conn.execute_batch("ALTER TABLE t ADD COLUMN b TEXT;").unwrap();
+        conn.execute_batch("ALTER TABLE t ADD COLUMN b TEXT;")
+            .unwrap();
         // Re-adding the same column raises "duplicate column name: b".
         let dup = conn
             .execute_batch("ALTER TABLE t ADD COLUMN b TEXT;")
