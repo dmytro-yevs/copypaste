@@ -15,7 +15,11 @@ pub struct WindowsClipboardBackend;
 
 impl ClipboardBackend for WindowsClipboardBackend {
     fn next_change(&mut self) -> Option<ClipboardEvent> {
-        unimplemented!("Windows clipboard backend — Phase 5a")
+        // Windows is frozen (ADR-012). The trait returns Option, not Result, so
+        // a graceful error return is not possible here. Returning None signals
+        // "no event available" and avoids a panic; the caller's polling loop
+        // will simply see no clipboard changes on Windows rather than crashing.
+        None
     }
 }
 
@@ -36,14 +40,23 @@ impl KeystoreBackend for WindowsKeystoreBackend {
         _service: &str,
         _account: &str,
     ) -> Result<zeroize::Zeroizing<[u8; 32]>, DpapiError> {
-        unimplemented!("Windows DPAPI keystore — Phase 5a")
+        // Windows is frozen (ADR-012) — DPAPI implementation is not available.
+        Err(DpapiError::Failed(
+            "Windows is not supported (frozen, ADR-012)".to_string(),
+        ))
     }
 
     fn store(&self, _service: &str, _account: &str, _secret: &[u8; 32]) -> Result<(), DpapiError> {
-        unimplemented!("Windows DPAPI keystore store — Phase 5a (frozen, ADR-012)")
+        // Windows is frozen (ADR-012) — DPAPI implementation is not available.
+        Err(DpapiError::Failed(
+            "Windows is not supported (frozen, ADR-012)".to_string(),
+        ))
     }
 
     fn delete(&self, _service: &str, _account: &str) -> Result<(), DpapiError> {
-        unimplemented!("Windows DPAPI keystore delete — Phase 5a (frozen, ADR-012)")
+        // Windows is frozen (ADR-012) — DPAPI implementation is not available.
+        Err(DpapiError::Failed(
+            "Windows is not supported (frozen, ADR-012)".to_string(),
+        ))
     }
 }
