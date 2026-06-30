@@ -20,8 +20,7 @@ use crate::{panic_boundary, CopypasteError};
 #[cfg(feature = "android-uniffi-live")]
 use copypaste_core::{
     build_item_aad_v2, encrypt_item_with_aad, is_sensitive_for_autowipe, ItemId,
-    AAD_SCHEMA_VERSION_V4,
-    ITEM_KEY_VERSION_CURRENT,
+    AAD_SCHEMA_VERSION_V4, ITEM_KEY_VERSION_CURRENT,
 };
 
 // Database handle table. OnceLock is stable on Rust 1.70+ (our MSRV is 1.75).
@@ -336,7 +335,9 @@ fn store_clipboard_item_inner(
         })
     })?;
 
-    Ok(id)
+    // crh3.80: `id` is a `RowId` newtype; the UniFFI surface returns a plain
+    // String, so coerce through its `Deref<Target = str>`.
+    Ok(id.to_string())
 }
 
 /// Store a clipboard text item. Sensitive items are stored with
@@ -545,7 +546,8 @@ pub fn fts_search(
             Ok(items
                 .into_iter()
                 .map(|it| SearchResultItem {
-                    item_id: it.item_id,
+                    // crh3.80: ItemId newtype -> String for the UniFFI DTO.
+                    item_id: it.item_id.to_string(),
                     content_type: it.content_type,
                     lamport_ts: it.lamport_ts,
                     wall_time_ms: it.wall_time,
@@ -653,7 +655,8 @@ pub fn get_history_page(
             Ok(items
                 .into_iter()
                 .map(|it| HistoryItem {
-                    item_id: it.item_id,
+                    // crh3.80: ItemId newtype -> String for the UniFFI DTO.
+                    item_id: it.item_id.to_string(),
                     content_type: it.content_type,
                     lamport_ts: it.lamport_ts,
                     wall_time_ms: it.wall_time,
