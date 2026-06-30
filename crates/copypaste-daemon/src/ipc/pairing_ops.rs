@@ -80,6 +80,28 @@ impl IpcServer {
             .unwrap_or_else(|poisoned| poisoned.into_inner().clone().unwrap_or_default())
     }
 
+    /// Like [`own_sync_addr`] but waits (bounded by `timeout`) for the P2P sync
+    /// listener to populate the slot before returning. A pairing initiated
+    /// immediately after daemon startup can otherwise race the listener bind and
+    /// advertise an EMPTY address, leaving the peer with no reachable sync addr
+    /// (it then persists `address: null` and must fall back to unreliable
+    /// loopback mDNS). Reading late (after metadata collection) shrank that
+    /// window but did not close it on slow/loaded CI runners — hence the flaky
+    /// `pairing_persists_..._on_both_sides` failures. Polling the slot makes the
+    /// advertised address deterministic: it returns as soon as the listener
+    /// binds, and on timeout returns the (still-empty) string for the same
+    /// graceful mDNS-fallback degradation as before.
+    pub(crate) async fn await_own_sync_addr(&self, timeout: std::time::Duration) -> String {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let addr = self.own_sync_addr();
+            if !addr.is_empty() || tokio::time::Instant::now() >= deadline {
+                return addr;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+    }
+
     /// Collect THIS device's identity metadata for the in-band bootstrap
     /// metadata exchange (P2P Phase 4).
     ///
@@ -807,11 +829,12 @@ impl IpcServer {
         // "QR fully provisions all sync": advertise our Supabase/relay config +
         // derived sync key over the authenticated tunnel (None if unconfigured).
         let own_provisioning = self.build_local_provisioning().await;
-        // Read our own P2P sync-listener address late (after the ~2 s metadata
-        // collection above), not eagerly at the top of the handler, so a racing
-        // listener start has had time to populate the slot — mirrors the
-        // responder's empty-address fix. See the QR `pair_accept` path.
-        let own_sync_addr = self.own_sync_addr();
+        // Wait (bounded) for our own P2P sync-listener to bind so we never
+        // advertise an empty address. See the QR `pair_accept` path / the
+        // `await_own_sync_addr` doc. Resolves immediately once bound.
+        let own_sync_addr = self
+            .await_own_sync_addr(std::time::Duration::from_secs(5))
+            .await;
 
         let coordinator = Arc::clone(&self.pairing);
         // The confirm callback runs AFTER frame 9 (PAKE + channel binding), when
@@ -1026,12 +1049,24 @@ impl IpcServer {
             })
             .await
             .unwrap_or_default();
-            // Read own_sync_addr here, after metadata collection, to give the P2P
-            // listener the maximum window to have populated the slot.
-            let own_sync_addr = own_sync_addr_slot
-                .lock()
-                .map(|slot| slot.clone().unwrap_or_default())
-                .unwrap_or_else(|poisoned| poisoned.into_inner().clone().unwrap_or_default());
+            // Wait (bounded) for the P2P listener to populate the slot so the
+            // responder never advertises an empty address (mirrors the initiator's
+            // `await_own_sync_addr`; fixes flaky pairing_persists_..._on_both_sides
+            // on slow CI runners). Resolves immediately once bound; on timeout
+            // returns the still-empty string (graceful mDNS fallback).
+            let own_sync_addr = {
+                let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+                loop {
+                    let addr = own_sync_addr_slot
+                        .lock()
+                        .map(|slot| slot.clone().unwrap_or_default())
+                        .unwrap_or_else(|p| p.into_inner().clone().unwrap_or_default());
+                    if !addr.is_empty() || tokio::time::Instant::now() >= deadline {
+                        break addr;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+                }
+            };
             // Build our SyncProvisioning to advertise (None without cloud-sync).
             #[cfg(feature = "cloud-sync")]
             let own_provisioning = Self::build_local_provisioning_from(&sync_key).await;
@@ -1172,14 +1207,13 @@ impl IpcServer {
         // derived sync key over the authenticated tunnel (None if unconfigured).
         let own_provisioning = self.build_local_provisioning().await;
         // Our own P2P sync-listener address, sent in-band so the responder can
-        // persist it for its Phase 3 connector. Read HERE (after the ~2 s
-        // `collect_own_peer_meta` window), not eagerly at the top of the handler,
-        // so a racing P2P-listener start has had maximum time to populate the
-        // slot — mirrors the responder's empty-address fix in
-        // `spawn_bootstrap_responder`. Reading early advertised an empty addr
-        // when the listener bound slightly after pairing began (flaky
-        // `pairing_persists_..._on_both_sides`: A recorded B with no address).
-        let own_sync_addr = self.own_sync_addr();
+        // persist it for its Phase 3 connector. Wait (bounded) for the listener
+        // to bind so we never advertise an empty address when pairing is
+        // initiated right after startup (flaky `pairing_persists_..._on_both_sides`:
+        // A recorded B with no address). Resolves immediately once bound.
+        let own_sync_addr = self
+            .await_own_sync_addr(std::time::Duration::from_secs(5))
+            .await;
         match copypaste_p2p::bootstrap::run_initiator(
             addr,
             cert_der,
