@@ -87,3 +87,10 @@ rust_out
 /PLATFORM_GAP_REPORT.md
 /PRODUCT_COMPLETENESS_AUDIT.md
 /VERIFICATION_REPORT.md
+
+# graphify graph artifact (per-machine, regenerated)
+graphify-out/
+
+# Playwright visual-gate run outputs
+crates/copypaste-ui/playwright-report/
+crates/copypaste-ui/test-results/
