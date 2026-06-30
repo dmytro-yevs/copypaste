@@ -579,7 +579,11 @@ pub struct IpcServer {
     /// `None` when cloud-sync is off, not configured, or anon-key-only
     /// (no GoTrue session). Interior-mutable so it can be updated if the cloud
     /// loops are restarted at runtime without taking the entire IpcServer lock.
-    #[cfg(feature = "cloud-sync")]
+    ///
+    /// Always present (not cfg-gated): the in-band pairing path reads it
+    /// unconditionally to advertise the account id to the peer (it is simply
+    /// `None` without cloud-sync), so gating the field would break
+    /// `--no-default-features`.
     pub cloud_account_id: Arc<std::sync::Mutex<Option<String>>>,
     /// Broadcast sender for newly-ingested clipboard items, shared with the
     /// clipboard monitor and the sync orchestrator (P2P Phase 3).

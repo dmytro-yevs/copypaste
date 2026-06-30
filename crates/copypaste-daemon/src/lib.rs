@@ -64,8 +64,13 @@ pub mod cloud;
 pub mod relay;
 
 /// Shared sync pipeline helpers reused by both the Supabase ([`cloud`]) and
-/// relay ([`relay`]) paths. Gated on either feature.
-#[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
+/// relay ([`relay`]) paths.
+///
+/// Always compiled: although the cloud/relay envelope helpers are only *called*
+/// under those features, the P2P fanout path (`p2p::fanout`, always built) reuses
+/// the pure `should_skip_on_cellular` Wi-Fi/cellular helper from here. The module
+/// has no feature-gated dependencies (only `copypaste_core`/`base64`/`rusqlite`),
+/// so unconditional compilation is free and keeps `--no-default-features` building.
 pub mod sync_common;
 
 // v0.3: the menu-bar tray module moved to `copypaste-ui::tray_host`. The

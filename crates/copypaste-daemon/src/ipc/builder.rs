@@ -268,7 +268,6 @@ impl IpcServer {
             last_sync_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             #[cfg(any(feature = "cloud-sync", feature = "relay-sync"))]
             cloud_signed_in: Arc::new(AtomicBool::new(false)),
-            #[cfg(feature = "cloud-sync")]
             cloud_account_id: Arc::new(std::sync::Mutex::new(None)),
             new_item_tx: None,
             degraded_reason: Arc::new(std::sync::Mutex::new(None)),
