@@ -23,10 +23,25 @@ cask "copypaste" do
 
   app "CopyPaste.app"
 
-  # No postflight quarantine strip needed: the DMG is Developer-ID signed and
-  # notarized by Apple (release.yml: xcrun notarytool submit + xcrun stapler staple).
-  # Gatekeeper accepts a properly stapled notarization ticket without quarantine
-  # removal. xattr -cr on a notarized app would be incorrect and misleading.
+  # The release DMG is AD-HOC signed (no Apple Developer ID / notarization — the
+  # project has no Apple Developer account; release.yml falls back to ad-hoc when
+  # the signing secrets are absent). On modern macOS, Gatekeeper refuses to launch
+  # a quarantined hardened-runtime ad-hoc bundle: `open` fails with
+  # RBSRequestErrorDomain Code=5 / POSIX 163 "Launchd job spawn failed", surfaced
+  # to the user as "CopyPaste.app can't be opened."
+  #
+  # Strip the com.apple.quarantine xattr and re-apply an ad-hoc signature (which
+  # re-seals the bundle after the xattr change) on install/upgrade so the app
+  # launches WITHOUT a Developer account or any manual right-click-Open dance.
+  postflight do
+    app_path = "#{appdir}/CopyPaste.app"
+    system_command "/usr/bin/xattr",
+                   args: ["-dr", "com.apple.quarantine", app_path],
+                   print_stderr: false
+    system_command "/usr/bin/codesign",
+                   args: ["--force", "--deep", "--sign", "-", app_path],
+                   print_stderr: false
+  end
 
   uninstall_preflight do
     # Robustness for the "stuck state" left by an earlier broken upgrade.
@@ -61,8 +76,11 @@ cask "copypaste" do
   ]
 
   caveats <<~EOS
-    CopyPaste is signed with an Apple Developer ID certificate and notarized by
-    Apple. Gatekeeper will accept it without quarantine warnings.
+    CopyPaste is ad-hoc signed (not Apple-notarized). This cask removes the
+    Gatekeeper quarantine and re-signs the app locally on install so it opens
+    normally. If macOS still blocks it after a manual download, run:
+      xattr -dr com.apple.quarantine /Applications/CopyPaste.app
+      codesign --force --deep --sign - /Applications/CopyPaste.app
 
     The daemon is managed by the CopyPaste app (ADR-014): it starts automatically
     when you open the app and stops when you quit. No LaunchAgent is installed.
