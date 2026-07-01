@@ -23,12 +23,11 @@ export function ViewShell({
         <h1 className="vtitle" data-tauri-drag-region>
           {title}
         </h1>
-        {/* Actions slot left structurally as-is (no new wrapper layout rules):
-            ViewShell is shared by History/Devices/Settings/About/Logs, and
-            only LogView (this slice) populates it with a `.field` + buttons
-            cluster — a flex-row treatment here would also reflow the other
-            views' still-unwired action rows, which are out of scope. */}
-        <div>{actions}</div>
+        {/* Actions slot: flex row (`.vhead__actions`). A search `.field` inside
+            grows to fill; buttons trail to the right. Shared by History (toolbar),
+            Logs (filter + Refresh/Export) and Devices (Revoke all); empty for
+            About/Settings, which pass no actions. */}
+        {actions ? <div className="vhead__actions">{actions}</div> : null}
       </header>
 
       <div>

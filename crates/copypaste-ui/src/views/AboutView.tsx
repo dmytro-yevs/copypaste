@@ -109,7 +109,7 @@ export function AboutView() {
         {/* Feature list */}
         <div>
           <SectionHeader label="Features" />
-          <ul>
+          <ul className="about__features">
             {FEATURES.map((feature) => (
               <li key={feature}>
                 {feature}

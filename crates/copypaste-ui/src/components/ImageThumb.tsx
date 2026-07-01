@@ -215,12 +215,12 @@ export function ImageThumb({ id, maxHeight }: ImageThumbProps) {
     // SCRH-11: Still loading — render a skeleton placeholder that occupies the
     // reserved row height so the row doesn't visually collapse while the fetch is
     // in flight. Previously returned null which left a blank gap in the list.
-    return <span aria-label="Loading image…" aria-busy="true" />;
+    return <span className="thumb-ph" aria-label="Loading image…" aria-busy="true" />;
   }
 
   if (src === FETCH_FAILED) {
     // Fetch failed — render a small faint placeholder so the row isn't blank.
-    return <span aria-label="Image unavailable" title="Image unavailable" />;
+    return <span className="thumb-ph thumb-ph--err" aria-label="Image unavailable" title="Image unavailable" />;
   }
 
   return (

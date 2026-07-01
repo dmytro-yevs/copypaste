@@ -98,7 +98,22 @@
     padding: 12px 14px;
     border-bottom: var(--stroke-1) solid var(--divider);
   }
-  .vhead .field { flex: 1; }
+  /* Header actions slot (History toolbar, Logs filter+buttons, Devices Revoke).
+     Flex row; a search .field grows to fill, buttons trail to the right. */
+  .vhead__actions {
+    display: flex;
+    align-items: center;
+    gap: var(--s-4);
+    flex: 1;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+  .vhead .field,
+  .vhead__actions .field { flex: 1; min-width: 0; }
+  .vhead__actions .btn,
+  .vhead__actions .iconbtn,
+  .vhead__actions .select,
+  .vhead__actions .field-note { flex: none; }
   .vtitle { font-size: var(--fs-base); font-weight: var(--fw-strong); }
   .vsub { font-size: var(--fs-sm); color: var(--faint); font-family: var(--f-mono); }
 
@@ -224,6 +239,28 @@
   .about__grid dt { color: var(--dim); }
   .about__grid dd { color: var(--faint); font-family: var(--f-mono); }
   .about__links { display: flex; gap: var(--s-4); margin-top: var(--s-2); }
+  /* Feature list: left-aligned block centered within the (text-align:center)
+     .about column, so bullets line up in a column instead of ragged-centering. */
+  .about__features {
+    text-align: left;
+    display: inline-block;
+    margin: var(--s-2) auto 0;
+    padding: 0;
+    list-style: none;
+  }
+  .about__features li {
+    position: relative;
+    padding-left: var(--s-6);
+    color: var(--dim);
+    font-size: var(--fs-md);
+    line-height: 1.9;
+  }
+  .about__features li::before {
+    content: "•";
+    position: absolute;
+    left: var(--s-1);
+    color: var(--accent);
+  }
 
   /* --- Devices view header (device rows live in patterns) ------------------- */
   .dev-head {
@@ -235,4 +272,65 @@
     border-bottom: var(--stroke-1) solid var(--divider);
     flex-wrap: wrap;
   }
+  /* Sub-section header row (e.g. "Discovered on your network" + Refresh). */
+  .dev-subhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-4);
+  }
+
+  /* --- Popup window (quick-paste overlay) ----------------------------------
+     Its own window (popup.html); shares the design system via index.css. The
+     rows/list are the shared .row/.list patterns; this is the surrounding shell:
+     search bar, scrollable list region, and the keyboard-hint footer. */
+  .pop {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--chrome-bg);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-window);
+    overflow: hidden;
+  }
+  .pop__search {
+    display: flex;
+    align-items: center;
+    gap: var(--s-4);
+    padding: var(--s-5) var(--s-6);
+    border-bottom: var(--stroke-1) solid var(--divider);
+    flex: none;
+  }
+  .pop__search svg { font-size: var(--fs-lg); color: var(--faint); flex: none; }
+  .pop__search input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: var(--text);
+    font-size: var(--fs-lg);
+    font-family: inherit;
+  }
+  .pop__search input::placeholder { color: var(--faint); }
+  .pop__count {
+    flex: none;
+    font-size: var(--fs-sm);
+    color: var(--faint);
+    font-family: var(--f-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .pop__list { flex: 1; min-height: 0; overflow-y: auto; position: relative; }
+  .pop__foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-4);
+    padding: var(--s-4) var(--s-6);
+    border-top: var(--stroke-1) solid var(--divider);
+    font-size: var(--fs-xs);
+    color: var(--faint);
+    flex: none;
+  }
+  .pop__hint { display: flex; align-items: center; gap: var(--s-3); }
 }

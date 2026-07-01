@@ -41,16 +41,20 @@ export function RestartDaemonButton({
   }, [onRestarted]);
 
   return (
-    <div>
+    <div className="ctl">
       <button
         type="button"
+        className="btn btn--secondary sm"
         disabled={phase === "restarting"}
         onClick={() => void handleClick()}
       >
         {phase === "restarting" ? "Restarting…" : label}
       </button>
       {message !== null && (
-        <span role="status">
+        <span
+          role="status"
+          className={`field-note ${phase === "error" ? "field-note--err" : "field-note--ok"}`}
+        >
           {message}
         </span>
       )}

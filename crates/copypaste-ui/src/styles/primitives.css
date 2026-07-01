@@ -352,4 +352,19 @@
     color: var(--dim);
     flex: none;
   }
+
+  /* Native <select> control (e.g. History device filter) — themed to match .field. */
+  .select {
+    appearance: none;
+    background: var(--elevated);
+    border: var(--stroke-1) solid var(--border);
+    border-radius: var(--r-input);
+    color: var(--text);
+    font-size: var(--fs-125);
+    padding: var(--pad-field);
+    cursor: pointer;
+    transition: border-color var(--dur-fast) var(--ease);
+  }
+  .select:hover { border-color: var(--border-strong, var(--border)); }
+  .select:focus-visible { border-color: var(--accent); outline: none; }
 }

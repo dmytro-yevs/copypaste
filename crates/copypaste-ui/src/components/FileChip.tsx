@@ -155,14 +155,14 @@ export function FileChip({ id, filename, mime, sizeBytes, onCopied }: FileChipPr
 
       {/* Error message when Save As or Open fails */}
       {saveError !== null && (
-        <span>{saveError}</span>
+        <span className="field-note field-note--err">{saveError}</span>
       )}
       {openError !== null && (
-        <span>{openError}</span>
+        <span className="field-note field-note--err">{openError}</span>
       )}
 
       {/* Action buttons — bdac.20: ActionButton for consistent radius, focus ring, and disabled opacity. */}
-      <span>
+      <span className="ctl ctl--tight">
         {/* Open — write to temp file and open with OS default app (no save dialog) */}
         <ActionButton
           variant="secondary"

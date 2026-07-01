@@ -297,6 +297,7 @@ export function GeneralTab({
                   {bundleId}
                   <button
                     type="button"
+                    className="chip__x"
                     aria-label={`Remove ${bundleId}`}
                     disabled={offline}
                     onClick={() => void removeExcludedApp(bundleId)}

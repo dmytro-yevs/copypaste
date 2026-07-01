@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import { ArrowUpDown, FilePlus, Search } from "lucide-react";
 // h97m: listen for cross-view "history-refresh" events emitted after a
 // successful backup import so HistoryView re-fetches immediately.
 import { ViewShell } from "../components/ViewShell";
@@ -657,24 +657,42 @@ export function HistoryViewInner() {
 
   const actions = (
     <>
-      {/* D2: hidden file input + attach button */}
+      {/* Search bar (primary; grows to fill the header via `.vhead__actions .field`) */}
+      <div className="field">
+        <Search aria-hidden="true" />
+        <input
+          ref={searchRef}
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Filter…"
+        />
+      </div>
+
+      {/* D2: hidden file input (triggered via the attach button below) */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
+        hidden
         onChange={(e) => void handleFileInputChange(e)}
         aria-label="Add file to clipboard history"
         tabIndex={-1}
       />
       <button
         type="button"
+        className="iconbtn"
         title="Add file to clipboard history"
         aria-label="Add file"
         onClick={() => fileInputRef.current?.click()}
-      />
+      >
+        <FilePlus aria-hidden="true" />
+      </button>
+
       {/* Device filter dropdown — only shown when more than one device is present. */}
       {knownDeviceIds.length > 1 && (
         <select
+          className="select"
           value={deviceFilter}
           onChange={(e) => setDeviceFilter(e.target.value)}
           aria-label="Filter by device"
@@ -693,10 +711,12 @@ export function HistoryViewInner() {
       {knownDeviceIds.length > 1 && (
         <button
           type="button"
+          className="btn btn--secondary sm"
           title={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           aria-label={sortMode === "recency" ? "Sort by device" : "Sort by recency"}
           onClick={toggleSortMode}
         >
+          <ArrowUpDown aria-hidden="true" />
           {sortMode === "device" ? "By device" : "By time"}
         </button>
       )}
@@ -705,6 +725,7 @@ export function HistoryViewInner() {
           the loaded slice. Hidden until the first page resolves (totalCount null). */}
       {totalCount !== null && (
         <span
+          className="field-note"
           data-testid="history-total-badge"
           title="Total items in clipboard history"
         >
@@ -717,6 +738,7 @@ export function HistoryViewInner() {
       {totalCount !== null && totalCount > 0 && (
         <button
           type="button"
+          className="btn btn--danger sm"
           title="Clear all clipboard history"
           aria-label="Clear all"
           disabled={clearAllBusy}
@@ -725,17 +747,6 @@ export function HistoryViewInner() {
           Clear all
         </button>
       )}
-      {/* Search bar */}
-      <div className="field">
-        <Search aria-hidden="true" />
-        <input
-          ref={searchRef}
-          type="search"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Filter…"
-        />
-      </div>
     </>
   );
 
@@ -791,6 +802,8 @@ export function HistoryViewInner() {
                 Clicking the button opens the modal; the modal calls handleResetConfirmed
                 only after the user explicitly confirms. */}
             <button
+              type="button"
+              className="btn btn--danger sm"
               onClick={() => setResetConfirm(true)}
             >
               Reset database (erases local history)
@@ -1003,6 +1016,8 @@ export function HistoryViewInner() {
             &rdquo;
           </span>
           <button
+            type="button"
+            className="btn btn--secondary sm"
             onClick={handleUndo}
           >
             Undo

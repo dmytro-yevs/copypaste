@@ -454,4 +454,60 @@
   .kbd-capture { display: inline-flex; align-items: center; gap: var(--s-2); cursor: pointer; }
   /* Search-match highlight (popup HighlightedText). */
   .hl-match { background: color-mix(in srgb, var(--accent) 30%, transparent); color: var(--text); border-radius: var(--r-xs); }
+
+  /* --- QR pairing panel (DevicesView "Pair a new device") ------------------- */
+  .qr-panel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s-5);
+    padding: var(--s-7);
+    text-align: center;
+  }
+  .qr-wrap { position: relative; width: 150px; height: 150px; }
+  /* QR frame stays literal white so the code is always black-on-white to scan. */
+  .qr-frame {
+    width: 150px;
+    height: 150px;
+    background: #fff;
+    padding: 12px;
+    border-radius: var(--r-window);
+    box-shadow: var(--sh1);
+  }
+  .qr-frame svg,
+  .qr-frame img { width: 100%; height: 100%; display: block; }
+  .qr-reveal {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--r-window);
+    background: color-mix(in srgb, var(--panel) 55%, transparent);
+    backdrop-filter: blur(8px);
+    color: var(--text);
+    font-size: var(--fs-sm);
+    font-weight: var(--fw-semibold);
+    cursor: pointer;
+    transition: opacity var(--dur) var(--ease);
+  }
+  .qr-drain { width: 150px; height: 4px; background: var(--divider); border-radius: var(--r-pill); overflow: hidden; }
+  .qr-drain__fill { height: 100%; background: var(--accent); border-radius: var(--r-pill); transition: width 1s linear; }
+  .qr-meta { display: flex; flex-direction: column; align-items: center; gap: var(--s-3); }
+
+  /* Chip remove affordance (e.g. excluded-apps chips). */
+  .chip__x {
+    margin-left: var(--s-2);
+    color: var(--faint);
+    font-size: var(--fs-base);
+    line-height: 1;
+    cursor: pointer;
+    transition: color var(--dur-fast) var(--ease);
+  }
+  .chip__x:hover { color: var(--text); }
+  .chip__x:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Image thumb placeholders (loading / failed) — keep the row from collapsing. */
+  .thumb-ph { display: inline-block; width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--raised); }
+  .thumb-ph--err { background: transparent; border: var(--stroke-1) dashed var(--border); }
 }

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Search, Settings } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
@@ -314,6 +315,7 @@ export function Popup() {
 
   return (
     <div
+      className="pop"
       data-popup-root
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -322,7 +324,8 @@ export function Popup() {
       }}
     >
       {/* ── Search bar ─────────────────────────────────────────────────── */}
-      <div>
+      <div className="pop__search">
+        <Search aria-hidden="true" />
         <input
           ref={inputRef}
           type="text"
@@ -335,12 +338,12 @@ export function Popup() {
 
         {/* Right: N of M result count (right-aligned, tabular-nums) */}
         {!loading && filtered.length > 0 && (
-          <span>
+          <span className="pop__count">
             {showQuery ? `${Math.min(selectedIdx + 1, filtered.length)} of ${filtered.length}` : `${filtered.length}`}
           </span>
         )}
         {loading && (
-          <span>…</span>
+          <span className="pop__count">…</span>
         )}
       </div>
 
@@ -376,7 +379,7 @@ export function Popup() {
           />
         )
       ) : (
-        <div>
+        <div className="pop__list">
           {/* Glide highlight layer — tracks selectedIdx */}
           <GlideHighlight
             selectedIdx={selectedIdx}
@@ -387,6 +390,7 @@ export function Popup() {
             isScrolling={isScrolling}
           />
           <ul
+            className="list"
             ref={listRef}
             role="listbox"
             aria-label="Clipboard history"
@@ -423,26 +427,26 @@ export function Popup() {
       )}
 
       {/* ── Footer keycap pills ─────────────────────────────────────────── */}
-      <div>
-        <span>
-          <span>↑↓</span>
-          <span>navigate</span>
+      <div className="pop__foot">
+        <span className="pop__hint">
+          <span className="kbd">↑↓</span>
+          navigate
         </span>
-        <div>
-          <span>
-            <span>⏎</span>
-            <span>paste</span>
-            <span>·</span>
-            <span>Esc</span>
-            <span>close</span>
-          </span>
+        <span className="pop__hint">
+          <span className="kbd">⏎</span>
+          paste
+          <span className="kbd">Esc</span>
+          close
           <button
             type="button"
+            className="iconbtn"
             aria-label="Open settings"
             title="Open settings"
             onClick={() => void openSettings()}
-          />
-        </div>
+          >
+            <Settings aria-hidden="true" />
+          </button>
+        </span>
       </div>
     </div>
   );
