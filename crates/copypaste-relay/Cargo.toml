@@ -41,7 +41,7 @@ tower_governor = { version = "0.8", features = ["axum"] }
 # CopyPaste-pbre: global concurrency cap (ConcurrencyLimitLayer) so a burst of
 # in-flight requests cannot exhaust process memory / FDs. Already in the
 # dependency graph transitively via axum 0.8 and tower_governor 0.8.
-tower = { version = "0.4", features = ["limit"] }
+tower = { version = "0.5", features = ["limit"] }
 # Required to name RateLimitingMiddleware / QuantaInstant in spawn_governor_cleanup
 # bounds. Already in the dependency graph transitively via tower_governor 0.8.
 governor = "0.10"
@@ -52,7 +52,7 @@ tokio-stream = "0.1"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
-tower = { version = "0.4", features = ["util"] }
+tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 hyper = { version = "1", features = ["full"] }
 # getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.96. Pin removed 2026-06-14.

@@ -23,7 +23,7 @@ futures-util = "0.3"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std"] }
 # WebPKI root certificates for the default chain verifier used inside the
 # pinning verifier — same version family as tokio-tungstenite's implicit dep.
-webpki-roots = "0.26"
+webpki-roots = "1.0"
 # SHA-256 SPKI hash computation for cert pinning.
 sha2.workspace = true
 # Shared backoff scheduler (CopyPaste-nq31, re-homed CopyPaste-crh3.53):
@@ -41,6 +41,6 @@ tracing.workspace = true
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "rt", "macros", "time", "sync"] }
 # mockito 0.31 supports Rust 1.75 and doesn't require edition 2024 deps
-mockito = "0.31"
+mockito = "1.7"
 tokio-test = "0.4"
 serial_test = "3"

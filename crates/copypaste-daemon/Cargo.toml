@@ -97,12 +97,12 @@ libc = "0.2"
 # declaring it here makes the version explicit and avoids a semver surprise.
 plist = "1"
 objc2.workspace = true
-objc2-foundation = { version = "0.2", features = ["NSString", "NSData", "NSDictionary", "NSGeometry"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSData", "NSDictionary", "NSGeometry"] }
 # NSWorkspace + NSImage + NSBitmapImageRep + NSImageRep + NSGraphicsContext needed for
 # app-icon extraction (app_icon.rs).  NSGraphics supplies NSDeviceRGBColorSpace and the
 # colorSpaceName: init variant of NSBitmapImageRep.  NSImageRep is required for the
 # NSBitmapImageRep struct to be re-exported from the crate root.
-objc2-app-kit = { version = "0.2", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSImage", "NSBitmapImageRep", "NSImageRep", "NSGraphics", "NSGraphicsContext"] }
+objc2-app-kit = { version = "0.3", features = ["NSPasteboard", "NSPasteboardItem", "NSWorkspace", "NSImage", "NSBitmapImageRep", "NSImageRep", "NSGraphics", "NSGraphicsContext"] }
 security-framework.workspace = true
 # v0.3 Keychain ACL (THREAT-MODEL OI-4): security-framework 2.x does not bind
 # SecAccessCreate / SecTrustedApplicationCreateFromPath / SecKeychainItem*,
@@ -123,7 +123,7 @@ security-framework.workspace = true
 # a workspace dep at one version would force an untested API migration on either
 # the daemon (→0.10) or the UI (←0.9), so the intentional mismatch is retained.
 # Revisit when the ACL layer is next touched.
-core-foundation = "0.9"
+core-foundation = "0.10"
 core-foundation-sys = "0.8"
 security-framework-sys = "2"
 # (zeroize + subtle moved to the general [dependencies] table — they are used by
@@ -243,7 +243,7 @@ copypaste-p2p = { path = "../copypaste-p2p", features = ["test-helpers"] }
 # used by cloud.rs Wave 2.7 tests (401/429/transient retry paths). These
 # tests live under `#[cfg(all(test, feature = "cloud-sync"))]`, so this dep
 # is only pulled in when the feature is built.
-mockito = "0.31"
+mockito = "1.7"
 # Beta-bonus keychain tests — serialize Keychain Services access (process-global).
 # Cross-platform crate; gated at test level via `#[cfg(target_os = "macos")]`.
 serial_test = "3"

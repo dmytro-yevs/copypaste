@@ -23,7 +23,7 @@ copypaste-ipc = { path = "../copypaste-ipc" }
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std"] }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging"] }
 # Certificate generation: rcgen 0.12 works on Rust 1.65+
-rcgen = { version = "0.12", default-features = false, features = ["ring"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring"] }
 # Framed message transport
 tokio-util = { version = "0.7", features = ["codec"] }
 bytes = "1"
@@ -63,7 +63,7 @@ rand.workspace = true
 # OPAQUE KSF — Argon2 password hashing
 argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
 # generic-array — required by opaque-ke message types
-generic-array = "0.14"
+generic-array = "1.4"
 # HKDF for SessionKey -> XChaCha20 key derivation (ADR-001)
 hkdf = { workspace = true }
 # (serde/serde_json above also back the compact in-band device-metadata frame —
