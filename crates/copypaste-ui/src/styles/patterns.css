@@ -1,4 +1,268 @@
 @layer patterns {
-  /* LAYER 4 — PATTERNS. Populated in Slice 3 (rows, list, bulkbar, empty) and
-     Slice 4 (device rows). Composed from primitives + tokens. */
+  /* LAYER 4 — PATTERNS. Clipboard rows, list, group headers, bulk bar, and empty
+     state, ported from copypaste-design-reference.html Layer 4. Design constants
+     (color/background/border/radius/shadow/padding/gap/margin/duration) go through
+     tokens; state is expressed via classes/data-state driven by React. */
+
+  /* --- Clipboard row -------------------------------------------------------- */
+  .row {
+    display: flex;
+    align-items: center;
+    gap: var(--gap-row);
+    padding: var(--pad-row);
+    border-radius: var(--r-row);
+    position: relative;
+    max-height: 74px;
+    transition:
+      background var(--dur-fast) var(--ease),
+      max-height var(--dur) var(--ease),
+      opacity var(--dur) var(--ease),
+      padding var(--dur) var(--ease),
+      margin var(--dur) var(--ease);
+  }
+  .row:hover {
+    background: var(--hover);
+  }
+  .row.sel {
+    background: var(--selected);
+  }
+  .row.sel::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: var(--sel-bar-inset);
+    bottom: var(--sel-bar-inset);
+    width: var(--sel-bar-w);
+    border-radius: 0 var(--sel-bar-r) var(--sel-bar-r) 0;
+    background: var(--accent);
+  }
+  .row.copied {
+    animation: flash 0.65s var(--ease);
+  }
+  .row.filtered,
+  .row.removing {
+    max-height: 0;
+    opacity: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin-top: 0;
+    margin-bottom: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  @keyframes flash {
+    from {
+      background: color-mix(in srgb, var(--accent) 22%, transparent);
+    }
+    to {
+      background: transparent;
+    }
+  }
+
+  .row__body {
+    flex: 1;
+    min-width: 0;
+  }
+  .row__title {
+    font-size: var(--fs-base);
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row__title.mono {
+    font-family: var(--f-mono);
+    font-size: var(--fs-125);
+    letter-spacing: var(--ls-none);
+  }
+  .row__title .host {
+    font-weight: var(--fw-strong);
+  }
+  .row__title .rest {
+    color: var(--dim);
+  }
+  /* Sensitive mask (design.md Decision 9 / X6): VISUAL blur only. The real text
+     stays (aria-hidden in the DOM), so width is preserved and it's selectable. */
+  .row__title .mask {
+    filter: blur(var(--mask-blur));
+    background: color-mix(in srgb, var(--c-secret) 14%, transparent);
+    border-radius: var(--r-xs);
+    padding: 0 var(--s-2);
+    cursor: pointer;
+  }
+  .row__title .mask:hover {
+    filter: blur(var(--mask-blur)) brightness(1.1);
+  }
+
+  .row__meta {
+    font-size: var(--fs-sm);
+    color: var(--faint);
+    margin-top: var(--s-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .row__meta .ty {
+    color: var(--ct, var(--c-text));
+    font-weight: var(--fw-semibold);
+  }
+  .row__right {
+    display: flex;
+    align-items: center;
+    gap: var(--s-1);
+    flex: none;
+  }
+
+  /* --- Hover-revealed row actions (design.md Decision 13/X4) ----------------- */
+  .del {
+    opacity: 0;
+    transition: opacity var(--dur-fast) var(--ease);
+  }
+  .star-btn {
+    opacity: 0;
+    color: var(--faint);
+    transition:
+      opacity var(--dur-fast) var(--ease),
+      color var(--dur-fast) var(--ease);
+  }
+  .star-btn svg {
+    font-size: var(--fs-lg);
+  }
+  /* Visible on fine-pointer hover and on keyboard focus-within… */
+  .row:hover .del,
+  .row:hover .star-btn,
+  .row:focus-within .del,
+  .row:focus-within .star-btn {
+    opacity: 1;
+  }
+  /* …and always visible on coarse/touch pointers where hover cannot occur. */
+  @media (hover: none) {
+    .del,
+    .star-btn {
+      opacity: 1;
+    }
+  }
+  .row.pinned .star-btn {
+    opacity: 1;
+    color: var(--c-color);
+  }
+  .star-btn.on svg,
+  .row.pinned .star-btn svg {
+    fill: currentColor;
+  }
+  .star-btn.pop svg {
+    animation: pop 0.32s var(--ease);
+  }
+  @keyframes pop {
+    0% { transform: scale(1); }
+    45% { transform: scale(1.4); }
+    100% { transform: scale(1); }
+  }
+
+  /* --- Selection checkbox --------------------------------------------------- */
+  .chk {
+    display: none;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--r-chk);
+    border: var(--chk-bw) solid var(--mute);
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    font-size: var(--fs-xs);
+    transition: all var(--dur-fast) var(--ease);
+  }
+  .chk.on {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--on-accent);
+  }
+  .list.selecting .chk { display: flex; }
+  .list.selecting .row__right { display: none; }
+  .list.selecting .row { cursor: pointer; }
+
+  /* --- Group header + bulk bar + filters ------------------------------------ */
+  .grouphead {
+    font-family: var(--f-mono);
+    font-size: var(--fs-2xs);
+    font-weight: var(--fw-medium);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--faint);
+    padding: var(--pad-grouphead);
+    position: sticky;
+    top: 0;
+    background: var(--panel);
+    z-index: 2;
+    transition:
+      max-height var(--dur) var(--ease),
+      opacity var(--dur) var(--ease),
+      padding var(--dur) var(--ease);
+  }
+  .grouphead.filtered {
+    max-height: 0;
+    opacity: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  .bulkbar {
+    display: none;
+    align-items: center;
+    gap: var(--gap-row);
+    padding: var(--pad-bulkbar);
+  }
+  .bulkbar.show {
+    display: flex;
+    animation: slideDown var(--dur) var(--ease);
+  }
+  @keyframes slideDown {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+  }
+  .bulkbar__n {
+    font-size: var(--fs-125);
+    color: var(--dim);
+    font-weight: var(--fw-semibold);
+  }
+  .filters {
+    display: flex;
+    gap: var(--s-3);
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  /* --- Empty / offline / error hero (design.md — shared EmptyState) ---------- */
+  .empty {
+    min-height: 300px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: var(--s-2);
+    padding: var(--pad-empty);
+  }
+  .empty__ic {
+    width: 54px;
+    height: 54px;
+    border-radius: var(--r-empty-ic);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--elevated);
+    color: var(--faint);
+    font-size: var(--fs-2xl);
+    margin-bottom: var(--s-4);
+  }
+  .empty__t {
+    font-size: var(--fs-base);
+    font-weight: var(--fw-strong);
+    color: var(--dim);
+  }
+  .empty__s {
+    font-size: var(--fs-125);
+    color: var(--faint);
+    max-width: 280px;
+  }
 }

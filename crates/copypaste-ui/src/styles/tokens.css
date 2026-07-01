@@ -86,7 +86,7 @@
        The size scale covers the discrete sizes the reference primitives use so
        no component layer hardcodes a px font-size (design.md Decision 12/S5). */
     --fs-3xs:9.5px; --fs-2xs:10px; --fs-xs:11px; --fs-sm:11.5px; --fs-smd:12px;
-    --fs-md:13px; --fs-base:14px; --fs-lg:15px; --fs-xl:17px;
+    --fs-125:12.5px; --fs-md:13px; --fs-base:14px; --fs-lg:15px; --fs-xl:17px; --fs-2xl:24px;
     --fw-normal:450; --fw-medium:500; --fw-semibold:550; --fw-strong:600; --fw-bold:700;
     --lh-tight:1.2; --lh-normal:1.5;
     --ls-body:-.006em; --ls-tight:-.01em; --ls-none:0; --ls-wide:.05em; --ls-wider:.06em;
@@ -131,6 +131,15 @@
 
     /* Modal (shared Dialog primitive). */
     --modal-w:340px; --modal-w-wide:560px; --pad-modal:22px; --gap-modal-sub:18px;
+
+    /* Pattern metrics — clipboard rows, list, group headers, bulk bar, empty
+       state (slice 3). Off-scale design constants the patterns layer consumes. */
+    --gap-row:12px; --pad-row:9px 10px; --r-row:10px;
+    --sel-bar-w:3px; --sel-bar-r:3px; --sel-bar-inset:6px;
+    --r-chk:5px; --chk-bw:1.5px;
+    --r-empty-ic:16px; --pad-empty:30px;
+    --pad-grouphead:10px 10px 5px; --pad-bulkbar:8px 10px 10px;
+    --mask-blur:6px;
   }
 
   /* ===================================================================== *

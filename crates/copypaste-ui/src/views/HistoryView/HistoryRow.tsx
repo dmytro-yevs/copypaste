@@ -6,32 +6,15 @@
  * And helpers: parseUrl, parseFilename.
  */
 import React, { useEffect } from "react";
+import { AlertTriangle, Check, Eye, Pin, Trash2 } from "lucide-react";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
-import { isImageType, sourceAppLabel, type HistoryEntry } from "../../lib/ipc";
-import { applySpanMasking, maskPlaceholder, shouldMask } from "../../lib/masking";
-import { formatRelativeTime } from "../../lib/time";
+import { isImageType, type HistoryEntry } from "../../lib/ipc";
+import { applySpanMasking, shouldMask } from "../../lib/masking";
 import { ImageThumb } from "../../components/ImageThumb";
-import { FileChip } from "../../components/FileChip";
-import { DeviceBadge } from "../../components/DeviceBadge";
-
-// ---------------------------------------------------------------------------
-// Pin indicator (filled amber star — dm51: ★ styleguide §pin)
-// ---------------------------------------------------------------------------
-
-function PinIndicator() {
-  return <span aria-label="Pinned" />;
-}
-
-// ---------------------------------------------------------------------------
-// "Won't sync — too large" indicator (warning triangle)
-// ---------------------------------------------------------------------------
-// Mirrors PinIndicator's markup: a tiny currentColor SVG tinted with the same
-// amber badge-warning token. Shown on rows the daemon flagged as exceeding
-// the configured sync size cap — kept locally but not synced to other devices.
-
-function SyncBlockedIndicator() {
-  return <span aria-label="Too large to sync" />;
-}
+import { normalizeContentKind } from "../../lib/clip/normalizeContentKind";
+import { ContentTile } from "../../lib/clip/ContentTile";
+import { ClipMetadata } from "../../lib/clip/ClipMetadata";
+import { ClipPreview, MASKED_A11Y_LABEL } from "../../lib/clip/ClipPreview";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -124,7 +107,7 @@ export const HistoryRow = React.memo(function HistoryRow({
   previewSize: _previewSize,
   imageMaxHeight,
   maskSensitive,
-  showSensitiveWarnings,
+  showSensitiveWarnings: _showSensitiveWarnings,
   density: _density,
   ownDeviceId,
   onSelect,
@@ -159,33 +142,26 @@ export const HistoryRow = React.memo(function HistoryRow({
     return () => clearTimeout(t);
   }, [revealed]);
 
-  // Whether this row should be visually blurred right now.
+  // Whether this row should be visually blurred right now (X6 sensitive masking).
   const blurred = shouldMask(entry, maskSensitive) && !revealed;
+  const kind = normalizeContentKind(entry);
+  const mono = kind === "code" || kind === "json" || kind === "num" || kind === "color";
 
-  // DOM-safe preview: when the item is blurred (sensitive + not revealed), we
-  // MUST NOT put the real plaintext in the DOM — CSS blur is insufficient
-  // (screen readers, devtools, clipboard scanners all read text nodes).
-  // Render the placeholder instead; real text only appears after explicit reveal.
-  let preview: string;
-  if (blurred) {
-    // Placeholder in the DOM — real preview is never rendered until revealed.
-    preview = maskPlaceholder();
-  } else if (entry.is_sensitive) {
-    // Revealed: show the actual text (user explicitly clicked reveal).
-    preview = entry.preview || "•••••• (sensitive)";
-  } else if (maskSensitive && entry.sensitive_spans && entry.sensitive_spans.length > 0) {
-    // Redact only sensitive spans, show the rest.
-    preview = applySpanMasking(entry.preview, entry.sensitive_spans);
-  } else {
-    preview = entry.preview;
-  }
+  // Non-blurred display preview: partial span-redaction for items with
+  // sensitive_spans, else the raw preview. Fully-sensitive+masked rows go
+  // through ClipPreview (real text, blurred, aria-hidden — X6).
+  const displayPreview =
+    !entry.is_sensitive &&
+    maskSensitive &&
+    entry.sensitive_spans &&
+    entry.sensitive_spans.length > 0
+      ? applySpanMasking(entry.preview, entry.sensitive_spans)
+      : entry.preview;
 
-  // Row height is intentionally NOT driven by rowHeightFor — natural content
-  // height + density-aware padding avoids the hover layout-jump. rowHeightFor
-  // is only used by VirtualList for its offset math, not for DOM styling.
+  // URL rows: hostname bold + path dim (non-sensitive url kind only).
+  const urlParsed =
+    kind === "url" && !entry.is_sensitive ? parseUrl(entry.preview) : null;
 
-  // In selection mode, clicking the row toggles multi-select.
-  // Outside selection mode, clicking selects + copies (existing behavior).
   const handleRowClick = (e: React.MouseEvent) => {
     if (selectionMode) {
       onToggleMultiSelect(e);
@@ -195,14 +171,14 @@ export const HistoryRow = React.memo(function HistoryRow({
     }
   };
 
-  // Build a concise screen-reader label: type + first 80 chars of preview.
+  // Masked rows announce a placeholder, never the plaintext (fixes P0 A11Y-1).
   const kindLabel = isImage ? "image" : isFile ? "file" : entry.content_type;
-  // Do not leak sensitive text into the accessibility tree while blurred — the
-  // aria-label is plaintext-readable by AT and DOM inspectors. Mirror the visual
-  // blur: placeholder until the user explicitly reveals the row.
   const ariaRowLabel = blurred
-    ? `${kindLabel}: (sensitive content hidden)`
-    : `${kindLabel}: ${preview.slice(0, 80)}`;
+    ? MASKED_A11Y_LABEL
+    : `${kindLabel}: ${displayPreview.slice(0, 80)}`;
+
+  const rowClass =
+    "row" + (multiSelected ? " sel" : "") + (entry.pinned ? " pinned" : "");
 
   return (
     <div
@@ -210,6 +186,7 @@ export const HistoryRow = React.memo(function HistoryRow({
       role="option"
       aria-selected={multiSelected || selected}
       aria-label={ariaRowLabel}
+      className={rowClass}
       draggable={dragHandleProps !== undefined}
       onClick={handleRowClick}
       onMouseEnter={onMouseEnter}
@@ -219,161 +196,100 @@ export const HistoryRow = React.memo(function HistoryRow({
       onDrop={dragHandleProps?.onDrop}
       onDragEnd={dragHandleProps?.onDragEnd}
     >
-      {/* Drag handle — only on pinned rows, visible on hover.
-          CopyPaste-5917.21: added role/tabIndex/aria-label for keyboard/AT discoverability.
-          Full keyboard DnD (arrow keys) is out-of-scope here; the a11y attributes
-          make the handle visible in the accessibility tree and focusable for AT.
-          Reorder via keyboard is tracked as a follow-up (full arrow-key DnD). */}
-      {dragHandleProps !== undefined && (
-        <span
-          data-drag-handle
-          role="button"
-          tabIndex={0}
-          aria-label="Drag to reorder (mouse only)"
-          title="Drag to reorder"
-        />
-      )}
-
-      {/* Checkbox — always in flow (reserves 20px). Invisible at rest, fades in
-          on hover or when selection mode is active. Clicking it enters/toggles
-          multi-selection without propagating to the row-click copy handler. */}
+      {/* Selection checkbox (.chk) — shown by the list's `.selecting` mode. */}
       <span
+        className={multiSelected ? "chk on" : "chk"}
+        role="checkbox"
+        aria-checked={multiSelected}
+        aria-label={
+          entry.is_sensitive && maskSensitive
+            ? "Select (sensitive item)"
+            : `Select ${entry.preview.slice(0, 30)}`
+        }
+        tabIndex={selectionMode ? 0 : -1}
         onClick={(e) => {
           e.stopPropagation();
           onToggleMultiSelect(e);
         }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            e.stopPropagation();
+            onToggleMultiSelect(e as unknown as React.MouseEvent);
+          }
+        }}
       >
-        <input
-          type="checkbox"
-          checked={multiSelected}
-          onChange={() => {/* controlled via onClick above */}}
-          tabIndex={0}
-          aria-label={entry.is_sensitive && maskSensitive ? "Select (sensitive item)" : `Select ${entry.preview.slice(0, 30)}`}
-        />
+        <Check aria-hidden="true" />
       </span>
 
-      {/* Pin indicator (only on pinned rows) */}
-      {entry.pinned && (
-        <span>
-          <PinIndicator />
-        </span>
-      )}
+      {/* Content-type tile — thumbnail for images, glyph otherwise. */}
+      <ContentTile
+        kind={kind}
+        colorValue={kind === "color" && !entry.is_sensitive ? entry.preview : undefined}
+        thumb={isImage ? <ImageThumb id={entry.id} maxHeight={imageMaxHeight} /> : undefined}
+      />
 
-      {/* "Won't sync — too large" indicator (only on flagged rows) */}
-      {entry.too_large_to_sync && (
-        <span title="Too large to sync">
-          <SyncBlockedIndicator />
-        </span>
-      )}
-
-      {/* CopyPaste-5917.54: body wrapper — preview on top, .meta sub-row beneath. */}
-      <div>
-        {isImage ? (
-          // M1: Maccy parity — image rows show ONLY the thumbnail, no text title.
-          <span>
-            <ImageThumb id={entry.id} maxHeight={imageMaxHeight} />
-          </span>
-        ) : isFile ? (
-          // File rows: show a FileChip with filename parsed from the "[file: name]" preview.
-          <span>
-            <FileChip
-              id={entry.id}
-              filename={parseFilename(entry.preview)}
-              mime="application/octet-stream"
-            />
-          </span>
-        ) : (
-          // Text / URL rows.
-          // §5: for URL content, show hostname bold (text-ide-text) + path dim (text-ide-dim).
-          <span>
-            {blurred ? (
-              // Placeholder — the real plaintext is NOT in the DOM when blurred.
-              // `preview` is already set to maskPlaceholder() above, so no real
-              // content leaks to screen readers, devtools, or clipboard scanners.
-              // CSS blur is intentionally absent: blurring placeholder text is
-              // useless and would look odd. The click handler reveals real content.
-              // n9gp (PG-34): title reinforces "confirmation required" when
-              // showSensitiveWarnings is true; suppressed when false.
-              <span
-                title={showSensitiveWarnings ? "Click to reveal sensitive content" : undefined}
-                onClick={(e) => {
-                  e.stopPropagation(); // don't also trigger row copy
-                  setRevealed(true);
-                }}
-              >
-                {preview}
-              </span>
-            ) : (() => {
-              // §5: URL rows — parse hostname and show host bold + rest dim.
-              // Only when content_type is "url" (not on generic text that happens to look like a URL).
-              if (entry.content_type === "url" && !entry.is_sensitive) {
-                const parsed = parseUrl(preview);
-                if (parsed !== null) {
-                  return (
-                    <>
-                      <span>{parsed.host}</span>
-                      {parsed.rest && parsed.rest !== "/" && (
-                        <span>{parsed.rest}</span>
-                      )}
-                    </>
-                  );
-                }
-              }
-              return preview;
-            })()}
-          </span>
-        )}
-
-        {/* .meta sub-row: timestamp + device badge + app chip. */}
-        <div>
-          <span>
-            {formatRelativeTime(entry.wall_time, "long")}
-          </span>
-          {/* Origin-device badge */}
-          <DeviceBadge originId={entry.origin_device_id} ownId={ownDeviceId} originName={entry.origin_device_name} />
-          {/* Source-app label chip; only rendered when present */}
-          {entry.app_bundle_id && (() => {
-            const appLabel = sourceAppLabel(entry.app_bundle_id);
-            return appLabel ? (
-              <span title={entry.app_bundle_id ?? undefined}>
-                {appLabel}
-              </span>
-            ) : null;
-          })()}
-        </div>
-      </div>
-
-      {/* Right-side slot: action buttons (on hover only). */}
-      <div onClick={(e) => e.stopPropagation()}>
-        {/* Action buttons.
-            No "Copy" button: row-click copies instead. */}
-        {!selectionMode && (
-          <div>
-            {/* M10: Eye — show details modal */}
-            <button
-              aria-label="Preview"
-              title="Preview"
-              onClick={onPreview}
-            >
-              Preview
-            </button>
-            <button
-              aria-label={entry.pinned ? "Unpin" : "Pin"}
-              title={entry.pinned ? "Unpin" : "Pin"}
-              onClick={onPin}
-            >
-              {entry.pinned ? "Unpin" : "Pin"}
-            </button>
-            <button
-              aria-label="Delete"
-              title="Delete"
-              onClick={onDelete}
-            >
-              Delete
-            </button>
+      <div className="row__body">
+        {isImage ? null : isFile ? (
+          <div className="row__title">{parseFilename(entry.preview)}</div>
+        ) : blurred ? (
+          <ClipPreview entry={entry} masked onReveal={() => setRevealed(true)} mono={mono} />
+        ) : urlParsed ? (
+          <div className="row__title">
+            <span className="host">{urlParsed.host}</span>
+            {urlParsed.rest && urlParsed.rest !== "/" && (
+              <span className="rest">{urlParsed.rest}</span>
+            )}
           </div>
+        ) : (
+          <div className={mono ? "row__title mono" : "row__title"}>{displayPreview}</div>
         )}
+
+        <ClipMetadata entry={entry} ownDeviceId={ownDeviceId} />
       </div>
+
+      {/* Right-side actions — hover/focus-revealed (design.md Decision 13/X4). */}
+      {!selectionMode && (
+        <div className="row__right" onClick={(e) => e.stopPropagation()}>
+          {entry.too_large_to_sync && (
+            <span
+              className="iconbtn"
+              title="Too large to sync"
+              aria-label="Too large to sync"
+              style={{ color: "var(--warn)" }}
+            >
+              <AlertTriangle aria-hidden="true" />
+            </span>
+          )}
+          <button
+            type="button"
+            className={entry.pinned ? "iconbtn star-btn on" : "iconbtn star-btn"}
+            aria-label={entry.pinned ? "Unpin" : "Pin"}
+            title={entry.pinned ? "Unpin" : "Pin"}
+            onClick={onPin}
+          >
+            <Pin aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="iconbtn"
+            aria-label="Preview"
+            title="Preview"
+            onClick={onPreview}
+          >
+            <Eye aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="iconbtn danger del"
+            aria-label="Delete"
+            title="Delete"
+            onClick={onDelete}
+          >
+            <Trash2 aria-hidden="true" />
+          </button>
+        </div>
+      )}
     </div>
   );
 // Custom comparator: skip re-render when entry data, selection state, display
