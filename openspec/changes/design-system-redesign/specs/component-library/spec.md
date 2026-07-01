@@ -181,14 +181,21 @@ demo), using the shared disclosure-header primitive (`aria-expanded`/`aria-contr
 governed by the following state table — no device state SHALL render a destructive action that is
 invalid for that state:
 
-| Device state | Unpair | Revoke | Notes |
-|---|---|---|---|
-| Own device | not shown | not shown | no destructive footer |
-| Paired peer, online | shown | shown | equal-width danger buttons |
-| Paired peer, offline | shown | shown | Unpair is best-effort (peer may not receive notice); Revoke is unconditional; the distinction is surfaced via tooltip/label, not by hiding either action |
-| Discovered (unpaired) device | not shown | not shown | only a Pair affordance applies |
-| Pending action | disabled + spinner | disabled + spinner | the row's other destructive action is also disabled while one is in flight |
-| Failed action | re-enabled + inline error | re-enabled + inline error | no silent retry |
+The three real destructive actions (grounded in `copypaste-ipc`, preserved — NOT redefined by this
+change): **Unpair** = `unpair_peer`, **Revoke** = `revoke_peer`, **Revoke & rotate key** =
+`revoke_and_rotate` (passphrase ≥ 8). Only the danger styling, equal-width layout, and a uniform
+inline error presentation are new; the action set, their daemon semantics, the pending flag, and
+offline availability are existing behavior. What each action does at the daemon (incl. offline
+behavior / peer notification) is authoritative and out of scope here.
+
+| Device state | Unpair | Revoke | Revoke & rotate | Notes |
+|---|---|---|---|---|
+| Own device | not shown | not shown | not shown | no destructive footer |
+| Paired peer, online | shown | shown | shown (in Revoke dialog) | equal-width danger buttons |
+| Paired peer, offline | shown | shown | shown | availability UNCHANGED from today — the design does NOT newly gate any action on online state; daemon behavior is surfaced via label, not by hiding |
+| Discovered (unpaired) device | not shown | not shown | not shown | only a Pair affordance applies |
+| Pending action | disabled + spinner | disabled + spinner | disabled + spinner | the row's other destructive actions also disable while one is in flight (existing `revokeBusy`-style flag) |
+| Failed action | re-enabled + inline error (NEW presentation) | same | same | no silent retry; error text/behavior from the IPC error |
 
 The reference file's `.devcard`/`.dmeta` grid-card variant is documented here as an available
 primitive (for a possible future grid layout of `DevicesView`) but is **not** wired into

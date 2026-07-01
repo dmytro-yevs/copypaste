@@ -22,8 +22,11 @@ documentation SHALL state this consistently.
 
 #### Scenario: Gallery is not a reachable entry in the production ViewId type
 The production view registry SHALL be typed and implemented against `ProductionViewId` (excluding
-`"gallery"`); a separate `DevViewId = ProductionViewId | "gallery"` type SHALL be used only for the
-persisted `view` field and the DEV-gated dynamic-import branch described below.
+`"gallery"`). The store's `view` field is **in-memory only (NOT persisted)** and keeps the production
+union type; the gallery SHALL NOT be added to it and no `DevViewId` SHALL be introduced into the
+store. The gallery is a **dev-only navigation branch** (a `DEV && MOCK`-gated local flag or a
+`?view=gallery` URL check) handled OUTSIDE the production view registry via the DEV-gated
+dynamic-import branch described below.
 
 - **WHEN** `App.tsx`'s view registry (the `Record<ProductionViewId, …>` mapping view IDs to
   components) is inspected
@@ -35,11 +38,12 @@ persisted `view` field and the DEV-gated dynamic-import branch described below.
   `lib/ipc/transport.ts`'s existing `await import("../mockIpc")` pattern — rather than a static
   top-level import, so the gallery module is absent from the production dependency graph
 
-#### Scenario: Stale "gallery" view state in a production build recovers to a valid view
-- **WHEN** a production build loads persisted UI state whose `view` field is `"gallery"` (e.g.
-  carried over from a dev build sharing the same `localStorage`)
-- **THEN** the app treats `"gallery"` as an unknown view in a production context and falls back to
-  `"history"`, rather than attempting to render a module that was never bundled
+#### Scenario: An invalid in-memory/URL `view` value narrows to a valid view
+- **WHEN** a `view` value of `"gallery"` (or any unrecognized value) arrives in a production context
+  from code or a `?view=` URL param — note `view` is NOT persisted, so this is defensive input
+  narrowing, not recovery of a stored downgrade state
+- **THEN** the app treats it as unknown in production and falls back to `"history"`, rather than
+  attempting to render a module that was never bundled
 
 #### Scenario: Gallery exclusion from production is verified by both a string check and a chunk-graph check
 - **WHEN** the production build (`vite build`, `import.meta.env.DEV === false`) is inspected

@@ -99,10 +99,12 @@ window and the quick-paste popup window before their first meaningful paint.
 
 ### Requirement: A synchronous pre-paint bootstrap applies persisted theme/accent/translucency before first content paint
 The system SHALL apply the user's persisted `theme`, `accent`, and `translucency` preferences to
-`document.documentElement` via a synchronous inline script in both `index.html` and `popup.html`,
-executed before the React application renders any content, so no frame of the static default
-theme is ever visible to a user with a non-default persisted preference. A React effect SHALL
-keep the same attributes synchronized afterward for live changes.
+`document.documentElement` via a synchronous **external same-origin classic script**
+(`theme-bootstrap.js`, authorized by the app's `script-src 'self'` CSP — it MUST NOT be an inline
+`<script>`, which that CSP blocks) referenced by both `index.html` and `popup.html` before the
+React module entry, so no frame of the static default theme is ever visible to a user with a
+non-default persisted preference. The script MUST contain no `import`/`eval`/`Function`. A React
+effect SHALL keep the same attributes synchronized afterward for live changes.
 
 #### Scenario: Persisted non-default theme is present before content is visible
 - **WHEN** a user has persisted `theme: "light"`, `accent: "teal"`, `translucency: false` and
@@ -140,16 +142,26 @@ surfaces only (sidebar, popup container, modal scrim, toast, tab bar) while cont
   `prefers-reduced-transparency: reduce` and the WebView exposes that media feature
 - **THEN** every chrome surface renders solid regardless of the persisted `translucency` value
 
-### Requirement: Theme/accent/translucency changes propagate live across open windows
-The system SHALL propagate a theme, accent, or translucency change made in one window (typically
-Settings, in the main window) to any other already-open window (typically the quick-paste popup)
-without requiring that window to be closed and reopened.
+### Requirement: The popup reflects current preferences on open (required); live cross-window update is best-effort
+The system SHALL ensure the quick-paste popup applies the current persisted theme/accent/translucency
+**every time it opens** (next-open correctness — the release-gate requirement, verified in a packaged
+Tauri build because each WebView has a separate JS runtime and same-module/same-key does not by
+itself prove cross-WebView storage semantics). The system SHOULD additionally update an already-open
+popup live when a change is made in Settings, on a **best-effort** basis (via a Tauri
+`ui-prefs-changed` event, plus a `storage` event where the WebViews share a `localStorage`
+partition); a transient already-open popup that only corrects on its next open is acceptable and is
+NOT a failure. Live update MUST NOT be specified as a hard `SHALL` anywhere.
 
-#### Scenario: Popup reflects a Settings change while already open
-- **WHEN** the popup window is open and the user changes theme, accent, or translucency in
-  Settings in the main window
-- **THEN** the popup's `document.documentElement` dataset attributes update to the new values
-  while the popup remains open, without the user closing and reopening it
+#### Scenario: Popup shows current preferences when opened (required)
+- **WHEN** the user changes theme/accent/translucency in Settings and then opens (or reopens) the
+  popup, in a packaged Tauri build
+- **THEN** the popup renders with the current values
+
+#### Scenario: Already-open popup updates live where a channel exists (best-effort)
+- **WHEN** the popup is already open and a change is made in Settings, and a live channel
+  (`ui-prefs-changed` event, or `storage` event on a shared partition) reaches the popup
+- **THEN** the popup's dataset attributes update without reopening; if no live channel reaches it,
+  the popup instead corrects on its next open (acceptable, not a failure)
 
 ### Requirement: Persisted preferences are validated at runtime, per field, independently
 The system SHALL validate every enum or boolean preference field (`theme`, `accent`,
