@@ -43,7 +43,9 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       `copypaste-ui-prefs-v4` — NO version bump, NO migration chain, NO dual-write, NO downgrade
       handling (design.md Decision 10; back-compat out of scope). The existing
       `{ ...DEFAULT_PREFS, ...parsed }` merge supplies the new fields' defaults for older blobs.
-      Also split `ViewId` into `ProductionViewId`/`DevViewId` (design.md Decision 6, used from slice 6).
+      Do NOT add a `"gallery"` member to the store's `view` type — `view` stays the production union
+      and is in-memory only (NOT persisted). The gallery is a dev-only navigation branch handled
+      outside the production view registry (design.md Decision 6/B3); no `DevViewId` in the store.
 - [ ] 1.11 Add per-field runtime validation to the loader (design.md Decision 10): `theme`
       must be `"dark"`/`"light"` else default; `accent` must be one of the 6 known values else
       default; `translucency` must be `boolean` else default `true`; an invalid field never
@@ -53,31 +55,51 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       full `DEFAULT_PREFS`; unknown keys dropped; each new field individually invalid → that field
       defaults while other valid fields are kept; a blob predating the fields → fields default in;
       normal reload round-trips (design.md Decision 10).
-- [ ] 1.14 Add the synchronous pre-paint bootstrap `<script>` (not `type="module"`) to both
-      `index.html` and `popup.html`: reads `localStorage["copypaste-ui-prefs-v4"]` defensively
-      (try/catch, missing/malformed → defaults), validates each of `theme`/`accent`/
-      `translucency` independently, and sets `document.documentElement.dataset.theme`/`.accent`/
-      `.translucency` before any deferred/module script runs (design.md Decision 4/B1). Delete
-      the stale `data-palette`/`data-density`/`data-motion`/`data-contrast` attributes and their
-      comment trails from both HTML files.
-- [ ] 1.15 Verify the bootstrap script's compatibility with the app's Tauri CSP configuration
-      (same-origin inline script, no `eval`/`Function`, no external fetch) and record the
-      verification (design.md Decision 4).
+- [ ] 1.13 Add the pre-paint theme bootstrap as an **EXTERNAL same-origin classic script**
+      (NOT inline — the CSP is `script-src 'self'`, which blocks inline; design.md Decision 4/B1).
+      Author it at `crates/copypaste-ui/public/theme-bootstrap.js` (Vite emits `public/` verbatim to
+      a stable un-hashed path) and reference it from both `index.html` and `popup.html` with a
+      `<script src="…/theme-bootstrap.js"></script>` placed BEFORE the module entry (decide the exact
+      root-absolute `/theme-bootstrap.js` vs relative `./theme-bootstrap.js` form from the actual
+      packaged build — N2). It: reads `localStorage["copypaste-ui-prefs-v4"]` defensively (try/catch,
+      missing/malformed → defaults), validates `theme`/`accent`/`translucency` independently, and
+      sets `document.documentElement.dataset.theme`/`.accent`/`.translucency` before any module script
+      runs. It contains NO `import`/`eval`/`Function` (must stay a synchronous classic asset). Delete
+      the stale `data-palette`/`data-density`/`data-motion`/`data-contrast` attributes + comment
+      trails from both HTML files.
+- [ ] 1.14 Prevent bootstrap↔store DRIFT (N1): the key name (`copypaste-ui-prefs-v4`), the three
+      field defaults (`dark`/`indigo`/`true`), the allowed enum values, and the dataset mapping are
+      duplicated between `theme-bootstrap.js` and `store.ts`. Either generate `theme-bootstrap.js`
+      from a shared constants module at build time, OR add an exact parity test asserting key /
+      defaults / allowed-values / dataset-mapping match between the two. Both the bootstrap and the
+      store are tested against: malformed JSON, each field individually invalid, missing storage, and
+      a `localStorage` access exception.
+- [ ] 1.15 PACKAGED-Tauri verification (not only Vite dev — B1/N2/N5): in a packaged build, confirm
+      `theme-bootstrap.js` loads under the Tauri asset protocol (URL resolution correct for both
+      windows), applies `data-theme`/`data-accent`/`data-translucency` to `<html>` BEFORE first
+      content paint, and produces NO CSP violation. This is a first-class release-gate check, not a
+      dev-only assertion.
 - [ ] 1.16 In `src/App.tsx` and `src/popup/Popup.tsx` (or their `main.tsx`), add a `useEffect`
       that re-applies `prefs.theme`/`.accent`/`.translucency` to `<html>` on mount and on change
       (live updates after the bootstrap has already handled first paint).
-- [ ] 1.17 First VERIFY whether the main window and popup share one `localStorage` partition in
-      Tauri (design.md Decision 4/A5). Guaranteed behavior: the popup applies persisted prefs on
-      every open (reads `copypaste-ui-prefs-v4` at mount). On top of that, implement BEST-EFFORT
-      live sync ("updates as it can", not a hard gate): emit/listen for a Tauri `ui-prefs-changed`
-      event (the reliable channel if partitions are separate) and, where the partition is shared,
-      also a `storage` event listener. Acceptance: with the popup open, a Settings theme change
-      updates it live where a channel exists; in all cases the popup shows the correct theme after
-      reopening.
-- [ ] 1.18 Record the pre-change performance baseline (design.md Decision 15): popup
-      open→first-render latency and CSS+JS bundle size for the main and popup entry chunks. Pick
-      and record the acceptance threshold (regression cap / bundle-delta cap) alongside the
-      baseline numbers for slice 6 to gate against.
+- [ ] 1.17 Cross-window prefs (design.md Decision 4/A5 — required next-open, best-effort live).
+      REQUIRED (release gate, N3): verify in a PACKAGED Tauri build that after a Settings
+      theme/accent/translucency change, opening/recreating the popup shows the current values —
+      because each WebView has a separate JS runtime, "same Zustand module + same key" proves intent,
+      not cross-WebView storage semantics. If packaged next-open FAILS (separate localStorage
+      partitions), switch the popup to read prefs from an authoritative Tauri-side source (a Tauri
+      command / emitted state) instead of assuming localStorage sharing. BEST-EFFORT (SHOULD, not a
+      gate): live-update an already-open popup via a Tauri `ui-prefs-changed` event (+ `storage`
+      event where the partition is shared); if a live channel doesn't reach the popup it corrects on
+      next open.
+- [ ] 1.18 Record the pre-change performance baseline AND apply the pre-approved budget policy
+      (design.md Decision 15/M2 — methodology + thresholds are fixed NOW, not chosen after the
+      result). Method: popup open→first-render latency via a `performance.now()` mark around popup
+      mount, **10 runs, warm cache, report p50 and p95**; bundle size measured as **gzip** of the
+      main and popup entry chunks. Budget (release gate, slice 6): popup-open **p95 regression ≤ max(15%, +40ms)**
+      over baseline; **CSS gzip delta ≤ 20 KB** and **JS gzip delta ≤ 30 KB** per entry. Any
+      exception must be documented and justified in the slice-6 PR (approval = reviewer sign-off).
+      Record the concrete baseline numbers alongside.
 - [ ] 1.19 State the supported OS/WebView matrix (macOS 13+ / WKWebView Safari 16.2+) as a
       non-functional requirement; confirm no `color-mix()` fallback is needed (design.md
       Decision 14/S2).
@@ -191,12 +213,18 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       7/15/F6) — not wired into `DevicesView` and not shipped in production CSS.
 - [ ] 4.2 Wire `DeviceCard.tsx`'s `StatusDot`, `MetaRow`, `DeviceMetaGrid`, `FingerprintRow`,
       `ThisDeviceCard`, `PeerRow` to the `.devrow`/`.cfields` pattern.
-- [ ] 4.3 Implement the device action behavior/state table from design.md Decision 16 (C4)
-      exactly: own device (no destructive footer), paired peer online (Unpair + Revoke, equal
-      width), paired peer offline (both shown, Unpair best-effort/Revoke unconditional —
-      surfaced via tooltip/label, not by hiding), discovered device (neither action), pending
-      action (both disabled with spinner on that row), failed action (re-enabled + inline error,
-      no silent retry). Add tests asserting no state renders an invalid destructive action.
+- [ ] 4.3 Implement the device action behavior/state table from design.md Decision 16 (C4/M7/N4)
+      exactly, grounded in the REAL three IPC actions — **Unpair** (`unpair_peer`), **Revoke**
+      (`revoke_peer`), and **Revoke & rotate key** (`revoke_and_rotate`, passphrase ≥ 8) — preserving
+      daemon semantics (do NOT redefine what they do): own device (no destructive footer); paired
+      peer online (all three available; Revoke & rotate in the Revoke dialog); paired peer offline
+      (availability UNCHANGED from today — do not newly gate on online state); discovered device
+      (none); pending action (that row's destructive actions disabled with a spinner via the existing
+      `revokeBusy`-style flag); failed action (re-enabled + uniform inline error presentation [NEW
+      visual only], no silent retry — error text/behavior from the IPC error). Only danger styling,
+      equal-width layout, and the inline error presentation are new; the action set, semantics,
+      pending flag, and offline availability are preserved. Tests assert no state renders an invalid
+      destructive action and that offline does not newly disable any action.
 - [ ] 4.4 Wire `DevicesView/index.tsx` list container, header, and "Pair device" button to
       `.dev-head`/`.dev-hint`/`.dev-list`/`.btn--primary`.
 - [ ] 4.5 Wire `DiscoveredRow.tsx` to the same row pattern with its disabled/hint state for
@@ -246,20 +274,28 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
 - [ ] 5.14 Wire `ViewShell.tsx`'s draggable header region and title/actions slot.
 - [ ] 5.15 Wire `Toast.tsx` (`GlassToastItem`/`ToastContainer`) to `.toast` pattern with severity
       dot and an `aria-live` region (design.md Decision 13/X5).
-- [ ] 5.16 Verify the cross-window live theme-sync acceptance scenario end-to-end with the real
-      Settings Appearance controls (design.md Decision 4/A5): change Theme/Accent/Translucency
-      in Settings with the popup open, confirm the popup updates without reopening.
+- [ ] 5.16 Cross-window acceptance with the real Settings Appearance controls (design.md Decision
+      4/A5). REQUIRED (gate): change Theme/Accent/Translucency in Settings, then open/recreate the
+      popup and confirm it shows the current values (next-open correctness, verified in packaged
+      Tauri per 1.15/1.17). BEST-EFFORT (SHOULD, not a gate): with the popup already open, confirm it
+      updates live where the `ui-prefs-changed`/`storage` channel exists; a stale open popup that
+      corrects on next open is acceptable.
 
 ## Slice 6 — Gallery + automated visual/accessibility coverage
 
-- [ ] 6.1 Add `"gallery"` to `DevViewId` only (never to `ProductionViewId`); keep `App.tsx`'s view
-      registry a `Record<ProductionViewId, …>` with no gallery entry (design.md Decision 6/B2).
+- [ ] 6.1 Add the gallery as a **dev-only navigation branch outside the production view registry**
+      (design.md Decision 6/B3): do NOT add `"gallery"` to the store's `view` type and do NOT add a
+      `DevViewId` to the store — the production `view` union and `App.tsx`'s
+      `Record<ProductionViewId, …>` stay unchanged. Gallery selection lives in a dev-only state (e.g.
+      a `DEV && MOCK`-gated local flag or a `?view=gallery` URL check), never persisted.
 - [ ] 6.2 Implement the DEV-gated dynamic import in `App.tsx`: when
-      `import.meta.env.DEV && MOCK && view === "gallery"`, `await import("./views/GalleryView")`
-      — mirroring `lib/ipc/transport.ts`'s existing `await import("../mockIpc")` pattern exactly.
-- [ ] 6.3 Define stale-state recovery: if a production build ever has `"gallery"` persisted in
-      `view`, treat it as unknown and fall back to `"history"` rather than attempting to render
-      an unbundled module (design.md Decision 6).
+      `import.meta.env.DEV && MOCK` and the dev-only gallery branch is active,
+      `await import("./views/GalleryView")` — mirroring `lib/ipc/transport.ts`'s existing
+      `await import("../mockIpc")` pattern exactly.
+- [ ] 6.3 Defensive input narrowing (NOT persisted-state recovery — `view` is in-memory only,
+      design.md Decision 6/B3): guard against an invalid `view` value arriving from code or a
+      `?view=` URL param by treating any unknown/`"gallery"`-in-production value as `"history"`.
+      There is no persisted-`view` downgrade case to recover — do not add persistence to create one.
 - [ ] 6.4 In `Sidebar.tsx`, render the Gallery nav item only when `import.meta.env.DEV && MOCK`.
 - [ ] 6.5 Add `src/lib/fixtures/` typed fixture factories (e.g. `makeHistoryEntry`,
       `makeDevice`) shared by both `mockIpc.ts` and the gallery, with per-story override support
@@ -298,8 +334,9 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       gallery-exclusion check from 6.12; automated token-contrast checks (all 12 theme×accent
       combinations × normal/large text/non-text UI/focus indicators/on-accent/status
       surfaces/content-type metadata — design.md Decision 13/X1); and an accessibility scan using
-      whatever tool is already approved in the repo's toolchain (flag explicitly if none is
-      approved, rather than silently skipping).
+      **`@axe-core/playwright`** (added as a DEV dependency in this change — the concrete, non-optional
+      tool; design.md Decision 13/M1) run against the gallery + main/popup surfaces. The a11y gate is
+      NOT "run it if a tool happens to be installed" — the tool is specified here.
 - [ ] 6.14 Wire this suite into CI as a required gate for this change — not a stretch goal; update
       any existing "manual spot-check" task language elsewhere in the repo's CI config/docs that
       contradicts this.
@@ -309,6 +346,13 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
 - [ ] 6.16 Confirm zoom/text-scaling (200%), forced-colors fallback for the focus ring, and
       logical focus order pass across the gallery's critical-component subset (design.md
       Decision 13/X3/X5).
+- [ ] 6.17 PACKAGED-Tauri smoke/integration checks = the **product release gate** (design.md
+      Decision 13/N5; the browser `?mock=1` Playwright suite supplements but does NOT replace this).
+      In a packaged build, verify: app startup with no CSP violation and no fatal console/runtime
+      error; preferences load and apply; correct theme/accent/translucency on BOTH the main window
+      and the popup (incl. the packaged next-open cross-window check from 1.15/1.17); popup opens and
+      renders; IPC initializes; and modal keyboard/focus behavior works in the packaged WebView
+      (where behavior can differ from Chromium). Wire this as a required gate alongside 6.14.
 
 ## Cross-cutting cleanup (applies across slices; verify at the end of slice 6)
 
