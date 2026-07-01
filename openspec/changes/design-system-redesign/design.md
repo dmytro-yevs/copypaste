@@ -41,7 +41,7 @@ Existing infra we build on, unchanged:
   `role="dialog"`/`aria-modal="true"`/`aria-labelledby`, dismisses on backdrop click and on Escape.
   **None of this is new behavior to build — it already exists and already works.** See Decision 5.
 - `src/hooks/useSensitiveReveal.ts` already implements masked-content reveal + auto-re-mask on
-  window `blur` (SCRH-7). **Also not new** — see Decision 7.
+  window `blur` (SCRH-7). **Also not new** — see Decision 9.
 - `src/lib/ipc/types.ts`'s `HistoryEntry.kind` is `kind?: string` — an **open, optional** string,
   not a closed union of the 11 design-reference kinds. Any normalization/fallback logic must handle
   `undefined`, unknown, and future values. See Decision 8.
@@ -80,7 +80,7 @@ Existing infra we build on, unchanged:
 - Define and ship a Translucency toggle (default on) with clear on/off surface rules and platform
   fallback. See the persistence/translucency decision below.
 - Measure and gate popup latency and CSS/JS bundle-size deltas as acceptance criteria, not just
-  "should be fine." See Decision 14.
+  "should be fine." See Decision 15.
 - Make visual/contrast/keyboard/reduced-motion/production-exclusion checks an automated Playwright
   CI gate. Manual `?mock=1` browser walkthroughs remain useful but are exploratory, not the bar for
   "done." See Decision 13.
@@ -182,7 +182,7 @@ ARIA state).
 `translucency: boolean` (default `true`), persisted in the existing `UIPrefs` object at the current
 key `copypaste-ui-prefs-v4`. Both `index.html` and
 `popup.html` load a small **synchronous, same-origin EXTERNAL classic script**
-(`<script src="/theme-bootstrap.js"></script>` — a build-emitted `'self'` asset, **NOT an inline
+(`<script src="./theme-bootstrap.js"></script>` — a build-emitted `'self'` asset, **NOT an inline
 `<script>`**; see the CSP note below for why), placed **before** any `type="module"` app script so it
 runs before the first paint of app content. It:
 1. Reads `localStorage["copypaste-ui-prefs-v4"]` (falling back to defaults on missing/malformed
@@ -222,12 +222,17 @@ popup live where the channel exists.
 `script-src 'self'` (verified: no `'unsafe-inline'`, no nonce, no hash on `script-src`; only
 `style-src` carries `'unsafe-inline'`). An **inline** `<script>` is therefore **blocked** — `'self'`
 does not authorize inline scripts. The prior draft's claim that inline is CSP-compatible was wrong.
-Resolution: the bootstrap is an **external same-origin classic script** (`/theme-bootstrap.js`,
-authorized by `script-src 'self'`), authored as a tiny source file emitted by Vite to a stable
-`'self'` path and referenced before the module entry. We do **not** weaken CSP to `'unsafe-inline'`
+Resolution: the bootstrap is an **external same-origin classic script** at the **relative** path
+`./theme-bootstrap.js` (authorized by `script-src 'self'`), authored as a tiny source file at
+`crates/copypaste-ui/public/theme-bootstrap.js` (Vite emits `public/` verbatim to a stable un-hashed
+path) and referenced by both `index.html` and `popup.html` before the module entry. **The path is
+normatively RELATIVE (`./`), not root-absolute (`/`) — one contract, no ambiguity (resolves round-6
+B3):** relative resolution is safe under Tauri's packaged asset protocol (where the origin differs
+from Vite dev), and the packaged-Tauri smoke (below / task 1.15) is the proof that the URL resolves
+in BOTH windows. We do **not** weaken CSP to `'unsafe-inline'`
 just to avoid a theme flash. Verification is a **packaged-Tauri** test (not only a Vite dev-mode
 test), because dev and packaged builds enforce materially different CSP — the packaged app must load
-`/theme-bootstrap.js` and apply `data-theme`/`data-accent`/`data-translucency` before first paint
+`./theme-bootstrap.js` and apply `data-theme`/`data-accent`/`data-translucency` before first paint
 without a CSP violation in the packaged runtime.
 **Rationale (resolves B1):** a React `useEffect` runs after the browser paints, so a user with a
 persisted `light` theme would see one frame (or more, depending on hydration timing) of the static

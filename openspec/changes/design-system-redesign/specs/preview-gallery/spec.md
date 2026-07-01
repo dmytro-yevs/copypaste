@@ -94,13 +94,14 @@ interactive application copies simultaneously to achieve combination coverage.
   `DevicesView` does not use it, and this variant's CSS ships only in the gallery-only stylesheet,
   never in the production stylesheet
 
-### Requirement: Gallery covers long-text and all four documented empty states
+### Requirement: Gallery covers long-text and all 7 app empty-state contexts
 The gallery SHALL include, for every component whose layout depends on content length (row titles,
 meta lines, device names, banner messages), at least one example with unusually long text
 (overflow/ellipsis/wrap check) alongside a normal-length example, and at least one example of each
-of the four documented empty states (no history, no search results, no paired devices, and each of
-the popup's offline / starting-up / no-matches / nothing-copied-yet states) — all rendered through
-`EmptyState`'s one public component API.
+of the **7 current app empty-state contexts** — **2 History** (no items, no search results),
+**1 Devices** (no paired devices), and the **4 Popup** states (offline / starting-up / no-matches /
+nothing-copied-yet) — all rendered through `EmptyState`'s one public component API. ("4 states"
+refers to the Popup only.)
 
 #### Scenario: Long text does not break row layout
 - **WHEN** the gallery renders a history row whose preview text is significantly longer than the

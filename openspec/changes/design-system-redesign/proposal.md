@@ -52,7 +52,8 @@ running daemon.
   units) for all clip kinds, one `.devcard`/`.devrow` for own+peer devices, one `.btn` family for
   button-shaped controls (tabs/icon-buttons/chips/row-actions have their own allowed primitives per
   `design.md` Decision 3), one `.banner` for all 4 banner variants, one `.empty` for every empty
-  state (4 documented states — offline, starting-up, no-matches, nothing-copied-yet).
+  empty-state context — **7 total contexts**: History (no items, no search results), Devices (no
+  paired devices), and the 4 Popup states (offline, starting-up, no-matches, nothing-copied-yet).
 - Ship a **Translucency** toggle (default on) alongside Theme/Accent in `DisplayTab.tsx`, persisted
   in `UIPrefs` (additive field, no migration): on = chrome surfaces (sidebar, popup container, modal scrim, toast, tab bar) use
   `backdrop-filter`; content surfaces (cards, rows, fields) stay solid; off = every surface solid.

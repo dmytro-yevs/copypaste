@@ -65,9 +65,10 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       (NOT inline — the CSP is `script-src 'self'`, which blocks inline; design.md Decision 4/B1).
       Author it at `crates/copypaste-ui/public/theme-bootstrap.js` (Vite emits `public/` verbatim to
       a stable un-hashed path) and reference it from both `index.html` and `popup.html` with a
-      `<script src="…/theme-bootstrap.js"></script>` placed BEFORE the module entry (decide the exact
-      root-absolute `/theme-bootstrap.js` vs relative `./theme-bootstrap.js` form from the actual
-      packaged build — N2). It: reads `localStorage["copypaste-ui-prefs-v4"]` defensively (try/catch,
+      `<script src="./theme-bootstrap.js"></script>` placed BEFORE the module entry. Use the
+      **relative** `./theme-bootstrap.js` form (normative — one contract, not root-absolute `/`;
+      round-6 B3), which is safe under Tauri's packaged asset protocol; the packaged-Tauri smoke
+      (1.15) proves it resolves in BOTH windows. It: reads `localStorage["copypaste-ui-prefs-v4"]` defensively (try/catch,
       missing/malformed → defaults), validates `theme`/`accent`/`translucency` independently, and
       sets `document.documentElement.dataset.theme`/`.accent`/`.translucency` before any module script
       runs. It contains NO `import`/`eval`/`Function` (must stay a synchronous classic asset). Delete
