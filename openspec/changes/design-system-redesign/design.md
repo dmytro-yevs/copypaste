@@ -559,21 +559,33 @@ a stated cap (recorded the same way). These budgets are gated as acceptance crit
 selector in one shared stylesheet; that's an accepted trade-off (Decision 2's "one emitted
 stylesheet" goal) but its cost must be measured, not assumed acceptable.
 
-### 16. Device action semantics: explicit behavior/state tables (resolves C4)
-**Decision:** the device list defines behavior per state, so the redesign cannot visually offer an
-invalid destructive action:
+### 16. Device action semantics — grounded in the real IPC methods; presentation-only change (resolves C4/M7)
+**Decision:** the device list surfaces exactly the destructive actions the daemon/IPC **already**
+provides, and this redesign changes **presentation only** — it does **not** redefine what any action
+does. The real actions (verified in `copypaste-ipc`): **Unpair** = `unpair_peer` (remove the
+pairing); **Revoke** = `revoke_peer` (remove trust); **Revoke & rotate key** = `revoke_and_rotate`
+(revoke + rotate the sync key, requires a rotate passphrase ≥ 8 chars, returns `{revoked_at,
+rotated}`). The existing UI already exposes Revoke + Revoke-&-rotate via `RevokeConfirmDialog` with a
+`revokeBusy` pending flag. **What each action does at the daemon (incl. offline behavior and whether
+a peer is notified) is authoritative and out of scope to change here** — this table reflects current
+implementation; any question is answered by the IPC method, not by this design doc.
 
-| Device state | Unpair shown? | Revoke shown? | Notes |
-|---|---|---|---|
-| Own device (this device) | No | No | No destructive footer at all (unchanged from today). |
-| Paired peer, online | Yes | Yes | Equal-width danger buttons; Unpair = graceful mutual removal (peer is notified); Revoke = unilateral trust removal (peer is not asked, used when peer is lost/compromised). |
-| Paired peer, offline | Yes | Yes | Same two actions remain available; Unpair may not reach the peer to notify it (best-effort), Revoke never depends on reaching the peer — this distinction is surfaced in each button's tooltip/label, not by hiding either action. |
-| Discovered (unpaired) device | No | No | Only a "Pair" affordance; neither destructive action applies to a device with no trust relationship yet. |
-| Pending action (Unpair/Revoke in flight) | Disabled (spinner) | Disabled (spinner) | Both destructive buttons disable for the row while its own action is pending; the *other* action on the same row is also disabled during that window to avoid a second destructive call racing the first. |
-| Failed action | Re-enabled, error banner | Re-enabled, error banner | The failed action's button returns to its enabled state with an inline error state (`.srow__s`/banner) naming the failure; the row does not silently retry. |
+| Device state | Unpair | Revoke | Revoke & rotate | Notes |
+|---|---|---|---|---|
+| Own device | — | — | — | No destructive footer (unchanged). |
+| Paired peer, online | Available | Available | Available (in Revoke dialog; passphrase ≥ 8) | Danger styling; buttons call `unpair_peer` / `revoke_peer` / `revoke_and_rotate` exactly as today. |
+| Paired peer, offline | Available | Available | Available | Availability is **unchanged from today** — the design does NOT newly gate actions on online state; whether an action reaches an offline peer is daemon behavior, surfaced in labels, not by hiding buttons. |
+| Discovered (unpaired) | — | — | — | Only "Pair"; no trust relationship yet (unchanged). |
+| Action pending | Disabled + spinner | Disabled + spinner | Disabled + spinner | Existing `revokeBusy`-style flag; while one destructive action is in flight, the row's other destructive actions also disable to prevent a racing second call. |
+| Action failed | Re-enabled + inline error **(NEW presentation)** | same | same | Failed action returns to enabled with a uniform inline error message; no silent retry. Error text/behavior source = the IPC error, unchanged. |
 
-This table is the acceptance criterion for C4 — any state not in this table (e.g. a discovered
-device showing a danger button) is a bug.
+**Existing vs. changed:** the action set, their semantics, the pending flag, and offline availability
+are **existing** (preserved here, grounded in the IPC methods above — NOT redefined). **New in this
+redesign (presentation only):** consistent danger styling, equal-width action layout, and a uniform
+inline error-state presentation for a failed action. Any change to what unpair/revoke/rotate actually
+**do** is explicitly out of scope and requires daemon/domain-owner sign-off, not a design change.
+This table is the acceptance criterion for C4/M7 — a discovered device showing a danger button, or an
+action gated on online-state that today is not, is a bug.
 
 ## Component inventory
 
