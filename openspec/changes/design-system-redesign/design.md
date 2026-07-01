@@ -5,8 +5,12 @@ components were deliberately BARE-STRIPPED (CopyPaste-3sys/CopyPaste-h1n3) — e
 inline `style`, and icon was removed, leaving bare semantic HTML (`<div>`, `<button>`, `<span>`,
 `role`/`aria-*` intact). In the same demolition pass, the *entire* theming system was deleted:
 
-- `src/store.ts`'s `UIPrefs` (v4 schema) has **no `theme` or `accent` field at all** — the v3→v4
-  migration comment says old appearance fields were "removed", not renamed.
+- `src/store.ts`'s `UIPrefs` (v4 schema, `PREFS_KEY = "copypaste-ui-prefs-v4"`) has **no `theme`,
+  `accent`, or `translucency` field at all** — the v3→v4 migration comment says old appearance
+  fields were "removed", not renamed. `loadPrefs()` already does a whitelist-prune of unknown keys
+  (`knownKeys`) but merges parsed JSON into `UIPrefs` via a bare cast
+  (`{ ...DEFAULT_PREFS, ...parsed } as UIPrefs`) with **no per-field runtime validation** — a
+  malformed `theme: "system"` or `accent: "purple"` value would reach the DOM unchecked.
 - `index.html` still carries stale attributes from the prior "Liquid Glass" era —
   `data-theme="light" data-palette="graphite-mist" data-density="compact" data-motion="cinematic"
   data-contrast="balanced"` — none of which anything reads or writes anymore.
@@ -23,229 +27,628 @@ source (it documents the deleted Liquid-Glass system this change replaces).
 
 Existing infra we build on, unchanged:
 - `crates/copypaste-ui/src/lib/ipc/transport.ts` exports `MOCK: boolean` — true only in dev builds
-  when `?mock=1`/`VITE_MOCK=1` is set; tree-shaken out of production. This is the correct gate for
-  anything gallery/dev-only.
+  when `?mock=1`/`VITE_MOCK=1` is set. The `MOCK`/mock-invoke branch is behind an `import.meta.env.DEV`
+  guard and pulls `mockIpc.ts` in via a **dynamic** `await import("../mockIpc")`, not a static
+  import — this is the exact pattern the gallery must mirror (see Decision 6).
 - `vite.config.ts` already builds a **multi-page app** (`index.html` + `popup.html` as separate
   Rollup inputs) on a fixed dev port `1420`.
 - `package.json` already depends on `lucide-react@^1.18.0` — no new icon dependency needed.
-- Playwright visual tests already exist (`test:visual` / `test:visual:update`) — natural home for
-  gallery-driven screenshot regression, though wiring that is a stretch goal, not required scope.
+- `src/lib/useFocusTrap.ts` already implements a full modal focus-trap hook: captures the
+  previously-focused element, focuses the first focusable descendant (or the container) on mount,
+  traps Tab/Shift+Tab, delegates Escape to an optional `onEscape` callback, and restores focus to
+  the pre-open element on unmount. `src/components/ConfirmModal.tsx` already composes it
+  (`useFocusTrap(dialogRef)`), renders via `ReactDOM.createPortal` to `document.body`, sets
+  `role="dialog"`/`aria-modal="true"`/`aria-labelledby`, dismisses on backdrop click and on Escape.
+  **None of this is new behavior to build — it already exists and already works.** See Decision 5.
+- `src/hooks/useSensitiveReveal.ts` already implements masked-content reveal + auto-re-mask on
+  window `blur` (SCRH-7). **Also not new** — see Decision 7.
+- `src/lib/ipc/types.ts`'s `HistoryEntry.kind` is `kind?: string` — an **open, optional** string,
+  not a closed union of the 11 design-reference kinds. Any normalization/fallback logic must handle
+  `undefined`, unknown, and future values. See Decision 8.
+- Playwright visual tests already exist (`test:visual` / `test:visual:update`) — the natural home
+  for the automated gallery-driven verification this change now requires (Decision 13), not a
+  stretch goal.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Ship one CSS file (`src/index.css`), ITCSS-layered, that is the single styling mechanism for
-  both windows. No Tailwind, no CSS-in-JS, no per-component stylesheets.
-- Port the token architecture from `copypaste-design-reference.html` verbatim (same variable names,
-  same values) so the reference file and the shipped CSS can never silently drift.
-- Restore `theme`/`accent` (and optionally `translucency`) to `UIPrefs`, write them to
-  `data-theme`/`data-accent` on `<html>` in both windows, and rebuild the Appearance section of
-  Settings (`DisplayTab.tsx`) to expose exactly Theme + Accent (+ Translucency), per
-  STYLEGUIDE.md §2/§12.
+- Ship one **emitted** stylesheet built from multiple authored source files
+  (`src/styles/{reset,tokens,base,primitives,patterns,shell,utilities}.css`), using native CSS
+  cascade layers, imported by both windows. No Tailwind, no CSS-in-JS, no per-component
+  stylesheets. See Decision 2.
+- Port the token architecture from `copypaste-design-reference.html` into the `tokens` layer, kept
+  in exact name-**and**-value parity with the reference via an automated test (not a name-only
+  diff). See Decision 2 and Decision 11 (token parity).
+- Restore `theme`/`accent`/`translucency` to `UIPrefs` as **additive fields (no migration, no
+  back-compat)**, applied via a synchronous pre-paint bootstrap script in both `index.html` and
+  `popup.html` before first paint, kept live-synchronized by a React effect within each window, and
+  best-effort synchronized across windows (Settings → open popup — "updates as it can"). Rebuild the
+  Appearance section of `DisplayTab.tsx` to expose Theme + Accent + Translucency. See Decisions 4 and
+  10.
 - Re-skin every stripped component/view/popup file with token-driven CSS classes, restoring icons
-  and interaction states without touching component logic, props, or existing tests.
-- Enforce DRY: one canonical class/component per repeated pattern (`.row`, `.devcard`/`.devrow`,
-  `.btn`, `.banner`, `.empty`, `.chip`, `.toggle`, `.seg`, `.field`, `.modal`, `.tile`, `.kbd`, …),
-  matching the primitives cataloged in `copypaste-design-reference.html`'s Layer 3/4.
-- Ship a preview gallery reachable at `localhost:1420/?mock=1`, gated by the existing `MOCK` flag,
-  rendering every component in every state × both themes × all 6 accents.
-- Preserve 100% of existing `role`/`id`/`aria-*`/`data-testid` attributes; no regression to
-  keyboard focus order or screen-reader labels; WCAG AA contrast per STYLEGUIDE.md §3.3/§7.
+  and interaction states, using semantic reuse criteria (not a mechanical occurrence count) to
+  decide what becomes a shared primitive. See Decision 3.
+- Ship a preview gallery reachable at `localhost:1420/?mock=1`, DEV-dynamic-import-gated so it is
+  provably absent from the production module graph (not merely unreachable from navigation), using
+  a scoped theme wrapper rather than root mutation, structured for automated Playwright coverage.
+  See Decisions 6, 7 (gallery structure), and 13 (verification).
+- Preserve accessible behavior via **observable contracts** — correct role/name, resolved
+  labelled/described relationships, exposed state, keyboard behavior unchanged or improved, stable
+  test IDs only where they are an intentional contract — rather than requiring every `role`/`id`/
+  `aria-*` to remain on the literal same element. This also lets us **fix** the existing P0 gap
+  where masked sensitive content currently leaks plaintext into the accessible name. See Decision 7.
+- Define and ship a Translucency toggle (default on) with clear on/off surface rules and platform
+  fallback. See the persistence/translucency decision below.
+- Measure and gate popup latency and CSS/JS bundle-size deltas as acceptance criteria, not just
+  "should be fine." See Decision 14.
+- Make visual/contrast/keyboard/reduced-motion/production-exclusion checks an automated Playwright
+  CI gate. Manual `?mock=1` browser walkthroughs remain useful but are exploratory, not the bar for
+  "done." See Decision 13.
 
 **Non-Goals:**
 - Android/Compose parity (`copypaste-android`) — STYLEGUIDE.md §11 documents the target but it is
   explicitly a separate, later migration; out of scope here.
-- Any change to IPC contracts, daemon behavior, or `copypaste-core`/`copypaste-ipc` types.
-- New component *behavior* (state machines, data flow) — this change is purely presentational;
-  components keep their existing props/hooks/logic.
-- Automated visual-regression CI wiring (Playwright snapshot baselines) — nice-to-have, tracked as
-  a follow-up task, not required for this change to be considered done.
+- Any change to IPC contracts, daemon behavior, or `copypaste-core`/`copypaste-ipc` types (including
+  the eventual `source_bundle_id` field that would make source-app icons fully data-driven).
+- **Inventing new interaction behavior.** This change does not add new state machines or new
+  interaction models. It does, however, **wire already-existing behavior** into shared primitives
+  where today it is duplicated or partially applied — see the component inventory table below and
+  Decisions 5 (Dialog primitive) and 7 (sensitive-content contract) for exactly which behaviors
+  already exist unchanged, which are newly composed from existing hooks, and which are genuinely
+  new (there is exactly one genuinely new behavior: cross-window live theme sync, Decision 9,
+  because no two-window state channel exists today).
 - A generic Storybook-style tool — the gallery is a bespoke in-app view, not a new dependency.
+- Speculative component APIs with no current consumer (e.g. `devcard` grid variant, `devcard`
+  component itself) do not ship in production CSS ahead of a real caller — see Decision 15.
 
 ## Decisions
 
-### 1. Single `src/index.css`, ITCSS layers, imported by both entry points
-**Decision:** One stylesheet at `crates/copypaste-ui/src/index.css`, imported from both
-`src/main.tsx` (main window) and `src/popup/main.tsx` (popup), organized top-to-bottom as:
-`1-tokens` → `2-base` → `3-primitives` → `4-patterns` → `5-app-shell` → `6-utilities`. Sections are
-delimited by banner comments (mirroring the reference file's `LAYER N` comments) rather than split
-into separate files, to keep cascade order trivially correct with a single `<link>`/import and
-avoid import-order bugs across two HTML entry points.
-**Alternative considered:** per-component CSS Modules. Rejected — the design system is
-token/pattern-driven, not component-scoped (the same `.row` class serves 11 clip kinds); CSS
-Modules would fight the DRY requirement by encouraging duplication per component.
-**Alternative considered:** multiple physical files (`tokens.css`, `base.css`, …) per
-DESIGN-SYSTEM-v2.md's now-superseded layout. Rejected for *this* change — STYLEGUIDE.md §10 shows
-a single token block being dropped into one file, and the user directive is explicit: "Styling =
-plain CSS in `crates/copypaste-ui/src/index.css`". One file, internally layered, satisfies both.
+### 1. Delivery: six build-independent slices within this one OpenSpec change
+**Decision:** `tasks.md` is restructured into six slices, each of which compiles, has its own tests,
+and leaves the app in a shippable/usable state on its own:
+1. Tokens + cascade layers + pre-paint theme bootstrap + `UIPrefs` additive fields + validation.
+2. Typed React primitives + shared `Dialog`/disclosure accessibility foundations.
+3. History + Popup via shared clipboard-presentation units.
+4. Devices.
+5. Settings + sidebar + About + Logs + banners + toast.
+6. Gallery + automated visual/accessibility coverage.
+**Rationale:** the original single-pass task list made regressions hard to isolate and review
+surface unmanageable (staff review finding D1). Slicing by build-independence (rather than by
+file-type) means a reviewer can approve slice *N* without slice *N+1* existing yet, and a partial
+landing never leaves the app broken.
+**Alternative considered:** splitting into separate OpenSpec changes. Rejected — the six slices
+share one set of specs/decisions and reviewing them as one change with visible slice boundaries is
+lower overhead than cross-referencing six change proposals.
 
-### 2. Token values copied verbatim from `copypaste-design-reference.html`
-**Decision:** Every custom property (surfaces, lines, text, overlays, status, content-type,
-accents, spacing, radius, shadow, motion) is copied byte-for-byte from the reference file's Layer
-1 block (lines 10–54) into `index.css`'s tokens layer — including both `:root[data-theme="dark"]`
-and `:root[data-theme="light"]` blocks and all six `:root[data-accent="…"]` blocks plus the
-light-theme accent overrides. No renaming, no re-deriving values.
-**Rationale:** the reference file *is* the approved design; any transcription drift becomes a bug
-that's invisible until a specific theme×accent combination is viewed. Byte-identical copy makes
-the reference file itself the executable acceptance test.
-**Alternative considered:** re-derive tokens from `STYLEGUIDE.md`'s prose tables. Rejected as a
-primary source — the tables are consistent with the reference file today, but the HTML file is
-higher-fidelity (it's rendered, not transcribed) and is what the user named as "THE design system
-source of truth".
+### 2. CSS architecture: multiple source files, native cascade layers, one emitted stylesheet
+**Decision:** Author CSS as separate files under `crates/copypaste-ui/src/styles/`: `reset.css`,
+`tokens.css`, `base.css`, `primitives.css`, `patterns.css`, `shell.css`, `utilities.css`. A single
+entry (`src/styles/index.css`, imported by both `main.tsx` and `popup/main.tsx`) `@import`s them in
+order and declares `@layer reset, tokens, base, primitives, patterns, shell, utilities;` up front so
+cascade order is enforced by the browser's native layer ordering, not by import/file order alone.
+Each file's rules are wrapped in (or the file is entirely) its matching `@layer <name> { … }` block.
+Specificity policy (normative): selectors are low-specificity classes; state is expressed via
+`[data-*]`/ARIA attributes or native pseudo-classes, never via ID selectors or `!important`; no
+view-specific selector is allowed to escalate specificity above its owning layer (e.g. a
+`SettingsView`-only override must still live in the `patterns` layer, not stack a higher-specificity
+rule in `shell`). Gallery-only CSS (any selector that only the gallery renders, e.g. matrix-grid
+layout, forced-state helper classes) lives in its own `src/styles/gallery.css`, imported only by the
+DEV-gated gallery module (Decision 6) — it is never part of the production `styles/index.css` chain.
+**Rationale (resolves A1):** one authored file for tokens+base+primitives+patterns+shell+utilities
+becomes a merge-conflict hotspot with no ownership boundary and no dead-code-analysis boundary.
+Multiple files satisfy the actual constraint — "one network asset in production" — without forcing
+one physical file. Native `@layer` also removes the "banner comments as cascade order" fragility:
+misordered imports can no longer silently invert cascade priority.
+**Alternative considered:** one physical file with banner-comment sections (the original proposal).
+Rejected per the review: banner comments do not enforce order, and multiple contributors editing
+"one big file" is a known hotspot.
 
-### 3. Theme/accent state: restore to `UIPrefs`, write to `<html>` via a `useEffect`
-**Decision:** Add `theme: "dark" | "light"` and `accent: "indigo" | "blue" | "teal" | "green" |
-"amber" | "rose"` (default `"dark"` / `"indigo"`, matching the reference file's default) back to
-`UIPrefs` in `store.ts`, bump to a new persisted key (`copypaste-ui-prefs-v5`) with a migration
-that carries forward all v4 fields and defaults the two new ones. `App.tsx` and `Popup.tsx` each
-get a `useEffect` that sets `document.documentElement.dataset.theme` / `.dataset.accent` from
-`prefs.theme`/`prefs.accent` on mount and on change — mirroring STYLEGUIDE.md §10's `App.tsx`
-snippet. `index.html`/`popup.html` keep only a static `data-theme="dark"` attribute (for
-first-paint, before JS runs) and drop `data-palette`/`data-density`/`data-motion`/`data-contrast`
-entirely (STYLEGUIDE.md §12 "Definition of done").
-**Rationale:** `UIPrefs` is already the one persisted-preferences object read by both windows;
-reusing it avoids a second storage mechanism. A v5 bump (rather than mutating v4) keeps the
-existing whitelist-based migration pattern (`knownKeys` prune) working unchanged.
-**Alternative considered:** a separate `ThemeContext`/localStorage key just for
-theme/accent. Rejected — `UIPrefs` migration plumbing already exists and is exercised by tests;
-splitting state stores doubles the persistence surface for no benefit.
+### 3. DRY: semantic reuse criteria replace the mechanical "≥2 occurrences" rule
+**Decision:** Reuse a **component** (not just a class) when anatomy, semantics, interaction
+contract, accessibility contract, and supported variants all align across call sites. Reuse only
+**tokens/CSS primitives** when call sites align on presentation but differ in semantics, lifecycle,
+or interaction (e.g. two visually-similar rows that will diverge in future features). Behavior-heavy
+patterns — modal/dialog, toggle, segmented control, banner-with-actions, expandable disclosure row —
+always get a typed React primitive, never a CSS-class-only "shared look," because a class cannot
+guarantee keyboard/focus/ARIA behavior.
+**Rationale (resolves A2):** visual similarity at two call sites is not evidence of a shared
+contract (they may differ in semantics or future change direction); conversely a single call site
+can still need a typed primitive if it's behavior-heavy and will gain more call sites (e.g. the
+`Dialog` primitive is introduced even though today's dialogs already superficially share `.scrim`/
+`.modal` classes — the point is the *behavior* contract, not the class).
+**Allowed button-shaped primitives (resolves C3):** `.btn` family (primary/secondary/ghost/danger ×
+sm/block/disabled) for standalone actions; `.iconbtn` for icon-only actions; `.set-tab` for settings
+tabs (native `role="tab"`); a disclosure header (`aria-expanded`/`aria-controls`, no `.btn` styling)
+for expandable rows; `.chip` for filter/selection chips; row-action icon buttons for hover-revealed
+per-row actions. A raw `<button>` outside these primitives is not allowed, but forcing every one of
+these into the `.btn` family is exactly the over-generalization the review flagged — each has
+distinct anatomy and is documented as its own allowed primitive in `component-library` spec.
+**Naming/state contract (resolves C1):** component modifier classes (`.btn--small`, `.btn--danger`)
+for variants; native states where the platform provides them (`:disabled`, `[aria-selected="true"]`,
+`[aria-expanded="true"]`); explicit `data-state` attributes for states with no native equivalent
+(`[data-state="removing"]`, `[data-kind="secret"]`). Authority order, most-specific wins: React
+prop/state is the source of truth; ARIA attributes are derived from it; CSS reads ARIA/data
+attributes and never independently tracks state (no CSS-only toggle that can desync from the DOM's
+ARIA state).
 
-### 4. DRY component inventory — CSS classes map 1:1 to reference-file primitives
-**Decision:** Re-skinning does not invent new visual patterns; it maps each stripped
-component/view to the *existing* named class(es) in `copypaste-design-reference.html`:
-`Sidebar.tsx`→`.sb`/`.sb__item`, `HistoryRow.tsx`→`.row`/`.row__body`/`.row__title`/`.row__meta`/
-`.tile`, `DeviceCard.tsx` (`ThisDeviceCard`/`PeerRow`)→`.devcard`/`.dmeta` (desktop grid card
-variant) or `.devrow`/`.cfields` (the reference file's expandable-row variant used in its live app
-demo) — **the row/expandable variant is selected** because it is what the interactive `#app` demo
-actually ships (see Decision 4a), `SettingsRow.tsx`/`Panel.tsx`→`.srow`/`.set-grp`, `Toggle.tsx`→
-`.toggle`, `ConfirmModal.tsx`→`.modal`/`.scrim`, `EmptyState.tsx`→`.empty`, banners in `App.tsx`
-(`AccessibilityBanner`, mismatch/stale banners)→`.banner banner--{warn|err|info|ok}`,
-`PopupRow.tsx`→condensed `.row` variant used in `#mobile`/popup mock-ups. Each CSS class is defined
-once in the patterns layer and reused by every component that needs it — never duplicated per
-component file.
+### 4. Theme/accent/translucency: pre-paint bootstrap + additive `UIPrefs` fields + best-effort cross-window sync
+**Decision:** `UIPrefs` gains three **additive** fields (no version bump — Decision 10):
+`theme: "dark" | "light"` (default `"dark"`),
+`accent: "indigo" | "blue" | "teal" | "green" | "amber" | "rose"` (default `"indigo"`), and
+`translucency: boolean` (default `true`), persisted in the existing `UIPrefs` object at the current
+key `copypaste-ui-prefs-v4`. Both `index.html` and
+`popup.html` inline a small **synchronous** `<script>` (not `type="module"`, runs before any
+deferred/module script and before the first paint of app content) that:
+1. Reads `localStorage["copypaste-ui-prefs-v4"]` (falling back to defaults on missing/malformed
+   JSON — a defensive read only; the React store is the authoritative loader on mount).
+2. Validates `theme`/`accent`/`translucency` against their known enum/boolean values individually;
+   an invalid value for one field falls back to that field's default without discarding the others.
+3. Sets `document.documentElement.dataset.theme`, `.dataset.accent`, and
+   `document.documentElement.dataset.translucency` (`"on"`/`"off"`) synchronously.
+4. Is wrapped in `try/catch` so a `localStorage` access failure (private browsing, disabled storage)
+   falls back to defaults rather than throwing before app code runs.
+`App.tsx` and `Popup.tsx` each keep a `useEffect` that re-applies the same three `dataset.*` writes
+whenever `prefs.theme`/`prefs.accent`/`prefs.translucency` change, so the bootstrap only owns
+first-paint correctness and the effect owns live updates within its own window.
+**Cross-window sync (resolves A5) — best-effort, not a hard gate (user directive: the real app must
+be correct; the theme "updates as it can"):** the **guaranteed** behavior is that the popup applies
+the persisted theme/accent/translucency **every time it opens** (it reads the same prefs at mount) —
+so the popup is never wrong for more than the lifetime of one already-open session. Live propagation
+to an *already-open* popup is best-effort on top of that: the writer emits a Tauri
+`emit("ui-prefs-changed", …)` and, where the two windows share a `localStorage` partition, the
+`storage` event also fires; each window's listener re-applies the bootstrap logic. **Open question to
+settle in slice 1, not assumed:** whether Tauri's two `WebviewWindow`s actually share one
+`localStorage` partition. If they do NOT, (a) the `storage` event won't cross windows and the Tauri
+event is the sole live channel, and (b) more importantly the popup must still read the *same*
+persisted prefs on open — slice 1 verifies the popup gets the user's theme at open time and picks
+the Tauri-event channel accordingly. If neither live channel reaches an open popup, it simply
+corrects on its next open; that is acceptable per the directive. Best-effort acceptance: change theme
+in Settings with the popup open and observe it update live where the channel exists; in all cases the
+popup shows the correct theme after reopening.
+**CSP compatibility (resolves part of B1):** the bootstrap script is a same-origin inline script
+with no `eval`/`Function` usage and no external network access, compatible with Tauri's default CSP
+(`script-src 'self'` plus the existing `'unsafe-inline'`/nonce configuration already required for
+Vite's dev-mode module scripts); it performs no DOM mutation beyond the three `dataset.*` writes on
+`<html>`, so it does not need additional CSP relaxation beyond what the dev/build pipeline already
+requires. This is verified as an explicit task (slice 1), not assumed.
+**Rationale (resolves B1):** a React `useEffect` runs after the browser paints, so a user with a
+persisted `light` theme would see one frame (or more, depending on hydration timing) of the static
+dark theme baked into `index.html`/`popup.html` before the effect corrects it — a visible flash and
+a spec contradiction (`design-tokens` spec already required pre-paint application). The inline
+script removes that gap by applying the real preference before any content is visible.
+**Alternative considered:** a `<meta>`-driven or CSS-only "no-flash" trick (e.g. `visibility:hidden`
+until a class is added). Rejected — it still requires the same synchronous read/validate/write logic
+and adds an extra visibility toggle to get right cross-browser; the inline script is simpler and
+directly sets the attributes the CSS already keys off.
 
-**4a. Device list uses `.devrow` (expandable row), not `.devcard` (grid card).**
-The reference file demonstrates *both* shapes: `.devcard` in the component gallery section (a
-static card spec) and `.devrow`/`.cfields` in the *live, interactive* `#app` demo and the mobile
-mirror — expandable rows, "tap any field to copy". Since `DevicesView.tsx` today renders a linear
-list (not a grid) and `DeviceCard.tsx` already exports `ThisDeviceCard`/`PeerRow` as list items
-(not a `dev-grid`), the `.devrow` pattern is the better fit and is what actually ships in the
-reference's working prototype. `.devcard`/`.dmeta` tokens remain documented in the
-`component-library` spec as an available primitive (for any future grid layout) but are not wired
-into `DevicesView` by this change.
+### 5. Shared `Dialog` primitive composes existing focus-trap/portal behavior — not new scope
+**Decision:** `ConfirmModal`, `SasPairingModal`, `RevokeConfirmDialog`, and `DetailsModal` all
+compose one `Dialog` primitive (`src/lib/dialog/Dialog.tsx`) with this contract:
+- Portal to `document.body` (as `ConfirmModal` already does via `ReactDOM.createPortal`).
+- `role="dialog"` + `aria-modal="true"`, with caller-supplied `aria-labelledby`/`aria-describedby`
+  ids wired to the title/body elements (as `ConfirmModal` already does).
+- Initial focus: the first focusable descendant, falling back to the container itself with
+  `tabindex="-1"` (exactly `useFocusTrap`'s existing behavior — unchanged).
+- Focus trap: Tab/Shift+Tab cycle within the dialog (exactly `useFocusTrap`'s existing behavior).
+- Escape-to-dismiss and backdrop-click-to-dismiss, configurable per dialog (destructive dialogs may
+  disable backdrop-dismiss if the design calls for an explicit choice; `ConfirmModal` today enables
+  both).
+- Focus restoration: refocus the trigger element on close (exactly `useFocusTrap`'s existing
+  cleanup behavior — unchanged).
+- Scroll lock on the underlying view while open (new: not currently implemented; added to the
+  primitive so all four dialogs get it uniformly instead of each hand-rolling it or omitting it).
+**What is existing vs. newly wired (resolves B3/C2):** focus trap, initial focus, Tab cycling,
+Escape dismissal, and focus restoration **already exist** in `useFocusTrap.ts` and are **already
+composed** by `ConfirmModal`. This change does not invent that behavior; it (a) extracts the
+`role`/`aria-modal`/portal/backdrop-dismiss wiring that today lives inline in `ConfirmModal` into a
+reusable `Dialog` primitive so `SasPairingModal`/`RevokeConfirmDialog`/`DetailsModal` compose the
+same contract instead of re-implementing subsets of it, and (b) adds scroll-lock, which is genuinely
+new. The design.md non-goal "no new component behavior" from the prior draft is corrected here:
+scroll-lock is the one small new behavior; everything else is (re)wiring of existing hooks.
 
-### 5. Preview gallery: a 6th `ViewId`, gated by the existing `MOCK` export, not a new route/page
-**Decision:** Add `"gallery"` to `ViewId` in `store.ts` and a `GalleryView` component under
-`src/views/GalleryView/`. `Sidebar.tsx` renders the Gallery nav item only when
-`import.meta.env.DEV && MOCK` is true (the same flag `lib/ipc/transport.ts` already exports and
-tree-shakes from production). This makes the gallery reachable at exactly
-`localhost:1420/?mock=1` (click "Gallery" in the sidebar) with zero new Vite entry points, zero new
-routing library, and a guarantee it never ships to end users (dead code eliminated exactly like
-`mockIpc.ts` already is).
-**Alternative considered:** a new HTML entry point (`gallery.html`) alongside `index.html`/
-`popup.html`. Rejected — the task explicitly says the gallery must be viewable "via the existing
-preview infra (localhost:1420/?mock=1)", i.e. the *same* main-window URL, not a third page; a new
-entry point would also need its own theme/accent wiring duplicated a third time.
-**Alternative considered:** a floating theme/accent switcher control overlaid on the gallery only.
-Rejected — the gallery must show *every* theme × accent combination simultaneously (per the task's
-explicit requirement), so it renders repeated sections per combination rather than relying on a
-single live toggle; a small live toggle is still included at the top for spot-checking interaction
-states (hover/active/focus) without needing 12 fully-interactive copies.
+### 6. Preview gallery: DEV-only dynamic import, not a reachable production `ViewId`
+**Decision:** Split `ViewId` into `ProductionViewId = "history" | "devices" | "settings" | "about" |
+"logs"` (unchanged today) and `DevViewId = ProductionViewId | "gallery"`. `App.tsx`'s view registry
+stays a `Record<ProductionViewId, …>` — the gallery is **never** a static entry in it. Instead, when
+`import.meta.env.DEV && MOCK` is true and the current view is `"gallery"`, `App.tsx` renders a
+component obtained via `const { GalleryView } = await import("./views/GalleryView")` (a dynamic
+import, mirroring `transport.ts`'s existing `await import("../mockIpc")` pattern exactly), gated
+behind the same `DEV`/`MOCK` check that already tree-shakes `mockIpc.ts` out of production. The
+persisted `view` field in the Zustand store is typed as `DevViewId` at the type level, but
+`setView("gallery")` is a no-op (falls back to `"history"`) unless `import.meta.env.DEV && MOCK` —
+this defines the stale-state recovery behavior: if a production build somehow has `"gallery"`
+persisted (e.g. a user downgraded from a dev build sharing the same `localStorage`), the app treats
+it as unknown and resets to `"history"` rather than attempting to render a module that was never
+bundled.
+**Verification beyond a string match (resolves B2):** in addition to the existing bundle-content
+string assertion (task 8.7's `rg` check), the build verification also inspects the emitted Rollup
+chunk graph (`vite build --mode production` then reading the generated manifest/chunk list) to
+confirm no chunk is reachable from the production entry that contains the gallery module's file
+path — a unique-string grep alone can pass by accident (e.g. if the string also appears in an
+unrelated comment) and can't prove *reachability* is actually severed.
+**Alternative considered:** keep `"gallery"` in the single production `ViewId` and hide the nav
+item. Rejected per the review — hiding a nav item controls reachability from the UI, not
+whether `GalleryView` and its fixtures are still statically imported into the production module
+graph by `App.tsx`'s `Record<ViewId, …>`.
 
-### 6. Icons: `lucide-react`, sized explicitly, matching the reference file's glyph set
-**Decision:** Re-introduce icons via `lucide-react` (already a dependency), choosing components
-whose default outline matches the inline SVGs hand-drawn in the reference file (search, chevron,
-pin, trash, settings-gear, shield/lock for secrets, link, mail, code braces, file, image, etc.).
-Every `<Icon>` usage gets an explicit `size`/CSS box per STYLEGUIDE.md §8 ("every inline icon has a
-fixed size") to avoid the documented "SVG balloons to intrinsic 300×150" bug class.
-**Alternative considered:** hand-copy the reference file's raw inline `<svg>` markup instead of
-`lucide-react` components. Rejected — `lucide-react` is already installed and is the icon set
-STYLEGUIDE.md §8 names explicitly ("the matching set... `lucide-react` on web"); using the library
-gives consistent stroke-width/viewBox for free and avoids maintaining ~40 hand-copied SVG strings.
+### 7. Gallery structure, fixtures, and forced-state testability
+**Decision:** The gallery is organized as: (a) canonical component/state sections (one section per
+primitive/pattern, each showing its documented states inline), (b) a local theme/accent/translucency
+switcher (component state only, not `setPrefs` — see the "gallery never writes real prefs"
+requirement, unchanged from the prior draft) that live-updates the whole gallery without navigating
+away, and (c) a compact, separate "token/critical-component matrix" section that renders the full
+12 theme×accent combinations only for a small set of critical components (button, card, focus ring,
+status banner) — not by rendering twelve complete interactive app copies (resolves G2). Every
+section has a deterministic `id` (e.g. `#gallery-buttons`, `#gallery-history-row`) for stable
+deep-linking from automated tests.
+**Forced-state testability (resolves G1):** native pseudo-states (`:hover`, `:active`,
+`:focus-visible`) cannot be persistently rendered as static examples. The gallery uses **both**
+mechanisms: (1) debug-only forced-state classes/attributes (e.g. `data-force-state="hover"`) with a
+CSS parity test asserting the forced-state selector produces the same computed styles as the real
+pseudo-class, and (2) Playwright interaction screenshots (`hover()`, mouse-down, keyboard focus) for
+the automated visual suite (Decision 13) — "hover-capable" alone is not an acceptance criterion.
+**Shared fixtures (resolves G3):** gallery sample data and mock-IPC sample data are both produced by
+the same typed fixture factories (e.g. `makeHistoryEntry(overrides)`, `makeDevice(overrides)`) under
+`src/lib/fixtures/`, with per-story overrides for gallery-specific states (long text, secret,
+unknown kind). These factories (and any secret-looking sample values they produce) are DEV-only and
+excluded from the production bundle by the same dynamic-import gate as the gallery itself — the
+production build's chunk-graph check (Decision 6) also covers the fixtures module.
+**Gallery isolation (resolves A6):** the gallery renders inside a scoped
+`.theme-scope[data-theme][data-accent][data-translucency]` wrapper, not by mutating `<html>`. This
+requires the `design-tokens` token layer's selectors to resolve on **both** `:root[data-theme=…]`
+and `.theme-scope[data-theme=…]` (and likewise for `data-accent`/`data-translucency`) — the tokens
+layer is written so every themed custom-property block is scoped to `:is(:root, .theme-scope)`
+rather than `:root` alone, so a nested wrapper can render a different theme/accent than the real
+app without touching `<html>` or needing cleanup-on-unmount logic.
+**Devcard (resolves F6):** `.devcard`/`.dmeta` (the grid-card device variant not used by
+`DevicesView`, see Decision 12 device-shape note) is documented only in the `component-library` spec
+and rendered only in the gallery's reference section behind `gallery.css` (Decision 2) — it does not
+ship in the production stylesheet, and no production component references it, avoiding a
+speculative API under the DRY mandate.
+
+### 8. Clipboard content-kind normalization is shared between History and Popup
+**Decision:** Introduce shared units under `src/lib/clip/` used by **both** `HistoryRow` and
+`PopupRow`, which remain separate layout wrappers (different row heights/anatomy) composed from:
+- `normalizeContentKind(entry: HistoryEntry): NormalizedKind` — handles case-insensitive matching,
+  known aliases, precedence (`kind` wins over `content_type` when both are present and disagree,
+  since `kind` is the daemon's refined text-kind classification per its doc comment; `content_type`
+  is used only when `kind` is absent), the `PATH`/`FILE` → shared `file` token mapping and
+  `PHONE`/`NUMBER` → shared `num` token mapping, and a `"unknown"` fallback for any value (including
+  `undefined`, since `HistoryEntry.kind` is `kind?: string`, not a closed union) that isn't
+  recognized. An entry whose `content_type` indicates an image MIME type but whose `kind` is absent
+  or contradictory normalizes to `"image"` (MIME type wins for the image case specifically, since
+  it's the more reliable signal when `kind` disagrees).
+- A typed `KIND_PRESENTATION: Record<NormalizedKind, { token: string; Icon: LucideIcon; label:
+  string }>` map, including an explicit `unknown` entry (generic file-glyph icon, `--dim` token,
+  label "Unknown").
+- `ContentTile` — renders the glyph/swatch/thumbnail for a normalized kind.
+- `ClipPreview` — renders the single-line preview, including the sensitive-masked state (Decision 9
+  below defines exactly what masking does and does not hide).
+- `ClipMetadata` — renders the `kind · sourceApp · relTime · originDevice` meta line, including the
+  source-app fallback (see the source-app data contract note below).
+**Tests:** unit tests for `normalizeContentKind()` cover an unknown string, `undefined`, a future
+hypothetical kind value, `PATH`/`FILE` and `PHONE`/`NUMBER` aliasing, and the image-MIME-with-absent-kind
+case.
+**Source-app icon data contract (resolves C5):** today's `HistoryEntry` has no source-app icon
+field at all (daemon `source_bundle_id` does not exist yet — explicitly out of scope, see
+Non-Goals). `ClipMetadata` therefore always renders the **generic fallback** (a type-glyph, not a
+per-app icon) for the source-app slot in this change; the slot's layout space is reserved on every
+row unconditionally (not conditionally per row) so that a future daemon change wiring a real icon
+requires no second layout pass. The fallback glyph carries an accessible label of the source app
+name text already available today (`entry.sourceApp` or equivalent existing field), not a generic
+"unknown app" string, so screen readers still get the real app name even without an icon.
+**Rationale (resolves A3/A4):** `HistoryRow`/`PopupRow` sharing only the `.row` CSS class today
+would leave kind→icon/token/label mapping, secret masking, and source-app fallback duplicated in
+two files, guaranteed to drift. Centralizing the mapping (not the layout) keeps the two rows free to
+have genuinely different anatomy while removing the actual duplication risk.
+**Gallery coverage:** the gallery demonstrates all 11 design-reference kinds (text/url/email/
+phone/code/json/number/color/path/file/secret) plus one `"unknown"` example; each gallery example is
+annotated with whether that kind is currently backend-reachable (i.e., whether the daemon's `kind`
+enum in `copypaste-core`/`copypaste-ipc` actually emits it today) so gallery-only kinds are visibly
+labeled as design-canvas-only, not implied to be live.
+
+### 9. Sensitive content: visual-blur-only masking, explicit security contract
+**Decision:** Masking sensitive clipboard content is **visual blur only** — a CSS-level
+presentation state, not a data-redaction mechanism. Explicitly, while masked:
+- **Copy/paste works identically to a normal item.** The copy action reads from the item's
+  in-memory/IPC data (the same path a normal item's copy uses), never from the visually-blurred DOM
+  text, so masking never degrades or blocks the core clipboard-manager function.
+- **The accessible name is masked** — this is a genuine fix, not merely a preserved behavior: today
+  a masked row's `aria-label`/accessible text can still expose the plaintext even though the pixels
+  are blurred (P0 gap, `A11Y-1`). After this change, the accessible name for a masked, unrevealed
+  secret is a placeholder (e.g. "Sensitive item, hidden — activate to reveal"), never the plaintext,
+  until the user reveals it (at which point the accessible name updates to the real content,
+  matching the now-visible pixels). **Mechanism** (so this coexists with "selection unrestricted"
+  below): the real text node stays in the DOM (so it remains selectable) but is marked
+  `aria-hidden="true"`, and the row container carries an explicit `aria-label` holding the
+  placeholder while masked / the real value once revealed. The accessible *name* therefore comes
+  from the container's `aria-label`, not the hidden text node — masking the name without removing the
+  selectable text.
+- **No length masking.** The blurred span occupies the item's real rendered width — this is an
+  intentional, accepted trade-off: it leaks approximate content length/shape, in exchange for stable
+  row layout (a fixed-width mask would either truncate long secrets misleadingly or force
+  variable-height rows). This trade-off is explicit product/security guidance from this decision, not
+  an oversight.
+- **Text selection is unrestricted** while masked — the user can select/copy the underlying text via
+  normal browser selection even before clicking "reveal," consistent with "masking is presentational,
+  not a security boundary against a user who already has clipboard access to their own history."
+- **Auto-re-mask on window blur** — already implemented in `useSensitiveReveal` (window `blur` event
+  resets `revealed` to `false`); this change does not alter that behavior.
+- **Optional reveal timeout** — a new, opt-in behavior: after N seconds of being revealed with no
+  further interaction, the item re-masks automatically (in addition to the existing blur-triggered
+  re-mask), configurable via an existing-pattern `UIPrefs` boolean/number pair, defaulting off (the
+  blur-based re-mask is the primary safeguard; the timeout is a defense-in-depth option, not
+  required for every user).
+**Rationale (resolves X6):** the prior draft left "does masking leak information" as an implicit
+assumption. This decision makes the security posture explicit and testable: DOM inspection,
+screenshots, and browser selection can all reveal the underlying value while masked — that is
+accepted, because copy/paste (the actual sensitive operation) is unaffected, and the alternative
+(hiding the value from the DOM entirely) would break "click to reveal" without a data round-trip.
+The one hard requirement carried over unchanged from the prior draft is that the value is never
+copied from the visually-masked DOM text (which could contain a truncated/placeholder string) — it
+is always copied from the real item data.
+
+### 10. Persistence: additive fields on the existing prefs object — no migration, no back-compat
+**Decision (per user directive — backward compatibility is explicitly NOT required; previous
+versions are not supported):** `theme`, `accent`, and `translucency` are added as **additive
+fields** to the existing `UIPrefs` object at its **current** key `copypaste-ui-prefs-v4`. There is
+**no version bump, no legacy-key migration chain, no dual-write, and no downgrade handling.** The
+existing `loadPrefs()` whitelist-merge-with-defaults (`{ ...DEFAULT_PREFS, ...parsed }`) already
+supplies the three new fields' defaults for any stored blob that predates them, so an older stored
+prefs object simply gains the new fields at their defaults on next load — there is nothing to
+migrate. Stale appearance keys from the deleted Liquid-Glass era are already dropped by the existing
+`knownKeys` whitelist and stay dropped. (Keeping the current key rather than bumping to a new one is
+deliberate: with no back-compat requirement, a version bump would only add migration code for no
+benefit.)
+**Runtime validation (robustness only, NOT migration):** `loadPrefs()` validates the three new
+fields per-field so a corrupt stored value can never reach the DOM, each defaulting independently
+without discarding the others: `theme` must be `"dark"|"light"` (else `"dark"`), `accent` one of the
+six accent values (else `"indigo"`), `translucency` a boolean (else `true`). Tests: malformed JSON →
+full `DEFAULT_PREFS`; unknown keys → dropped; each new field individually invalid → that field
+defaults while the others are kept; normal reload round-trips. **No migration-path tests — there is
+no migration.**
+**Downgrade / rollback:** out of scope by directive. The only rollback concern is a `git revert` of
+this change's code, which needs no data handling. If a stored blob is ever read by unrelated code
+that doesn't know the new fields, the whitelist-merge simply ignores them — no corruption.
+
+### 11. Token source of truth: exact name-and-value parity test
+**Decision:** In addition to copying token values from `copypaste-design-reference.html` verbatim
+into `src/styles/tokens.css` (unchanged from the prior draft's approach), add an automated test that
+parses both files' token blocks and asserts **every custom property name resolves to the identical
+value** in both files — not merely that the same set of names exists in both. The test fails loudly
+on any future edit to either file that isn't mirrored in the other.
+**Rationale (resolves S4):** a name-only diff (e.g. "both files define `--accent`") cannot catch a
+value drifting in one file and not the other, which is exactly the silent-drift risk copying verbatim
+was meant to prevent. The prior draft's claim that the two files "can never silently drift" was true
+only if some executable check enforces it — this decision adds that check rather than relying on
+manual verbatim-copy discipline alone.
+
+### 12. Non-token CSS values: split pixel policy; typography and layout tokens
+**Decision (resolves S1):** "No hardcoded pixel/color/duration values outside tokens" applies to
+**design constants** (anything a designer would specify once — spacing, radii, shadow, focus-ring
+width/offset, hairline width, icon sizes, control heights) — these MUST be tokens, and new explicit
+tokens are added for focus-ring width/offset (`--focus-ring-width`, `--focus-ring-offset`), hairline
+width (`--hairline`), icon sizes (`--icon-sm/md/lg`), and control heights (`--ctl-h-sm/md/lg`).
+It does **not** apply to **runtime-computed geometry** — virtualized-list item offsets, the popup
+row's dynamically measured height, the glide-highlight overlay's computed `top`/`left`/`width`, and
+the settings tab-bar's measured underline position — these are legitimately expressed as inline
+`style`/CSS custom properties set from JS, because their value is not known until layout/measurement
+time. Structural values (`0`, percentages, fractions, `transform: translate(...)` expressed in
+`%`/`px` derived from measurement) are allowed either way.
+**Typography/layout (resolves S5):** the `tokens` layer adds a typography scale (font stack(s),
+weight scale, line-height scale, letter-spacing scale) and text-scaling support (relative units so OS
+text-size settings and 200% zoom reflow correctly, tested explicitly — see the `preview-gallery`/
+`component-library` a11y requirements), plus layout constraints: minimum main-window dimensions,
+minimum/fixed popup width, and documented behavior for long/localized text (a test case using a
+string ~40% longer than the English source string, representative of German/Finnish-style
+expansion, confirms rows/labels/buttons reflow or truncate without breaking layout).
+
+### 13. Verification: automated Playwright suite is a required CI gate
+**Decision:** The following automated Playwright coverage is a **required** gate for this change,
+not a stretch goal or manual-only check: main window and popup in both dark and light theme, the
+accent/on-accent contrast matrix (critical-component subset, Decision 7), modal keyboard/focus
+behavior (trap, Escape, backdrop, restore-on-close), `prefers-reduced-motion: reduce` (no visible
+animation), long-text overflow (ellipsis, no row-height growth), production gallery-exclusion
+(chunk-graph check, Decision 6), automated token-contrast checks (Decision "X1" below), and an
+accessibility scan using whatever tool is already approved in the repo's toolchain (if none is
+already approved, this is flagged rather than silently skipped). Manual `?mock=1` walkthroughs
+(`ui-verifier`-style) remain valuable as **exploratory** verification but are not, by themselves,
+the completion bar — `tasks.md` slice 6 aligns with this (the former "spot-check only" language for
+tasks 10.x is removed; see the rewritten task list).
+**Automated contrast checks (resolves X1):** a script/test computes contrast ratios for all 12
+theme×accent combinations across: normal text, large text, non-text UI boundaries/controls, focus
+indicators, on-accent text/icons, status surfaces (ok/info/warn/err), and content-type metadata
+tokens — against WCAG AA thresholds — and fails the build if any combination is under threshold.
+Manual visual inspection is no longer the primary evidence for the AA-contrast claim.
+**Focus-visible requirements (resolves X3):** in addition to the existing "2px ring" requirement,
+add: minimum 3:1 contrast between the focus ring and every adjacent surface it can appear against
+(tested across the contrast-check combinations above); no clipping by `overflow: hidden` in rows,
+modals, tabs, or the popup (verified by the Playwright suite's keyboard-navigation pass;
+scrollIntoView / overflow rules adjusted if clipping is found); a `forced-colors` media-query
+fallback (`forced-color-adjust`/system colors) so the ring remains visible under Windows High
+Contrast-style forced-colors modes where supported by the target WebView; logical (DOM-order) focus
+order verified by the same pass; and focus restoration after modal close (already covered by
+`useFocusTrap`, Decision 5).
+**Hover-revealed actions (resolves X4):** row actions (pin/delete) are visible on fine-pointer
+`:hover` and on `:focus-within` (so keyboard users tabbing into a row see the same controls appear);
+on coarse/touch pointers (no hover capability, detected via `(hover: none)` media feature) the
+actions render always-visible rather than relying on a hover that can't occur; in selection mode the
+hover actions are replaced by the row checkbox (existing behavior, Decision 3's naming section);
+screen-reader users reach the actions via normal DOM/tab order regardless of visual hover state.
+Controls are never focusable while visually hidden (a control hidden via `visibility`/`opacity` with
+no hover/focus-within trigger is also `tabindex="-1"` or removed from the tab order, avoiding
+"invisible but tabbable" traps).
+**Additional a11y acceptance (resolves X5):** 200% zoom/OS text-scaling reflow (Decision 12); no
+required two-dimensional scrolling at that zoom level for primary content; minimum target sizes per
+platform guidance, with a documented desktop-pointer exception where a control is intentionally
+denser than the mobile-target minimum (e.g. compact popup rows) — the exception is named per
+control, not blanket-applied; `aria-expanded`/`aria-controls` on every device-row disclosure header;
+tab semantics (`role="tab"`/`role="tablist"`, arrow-key navigation) for `.set-tab`/segmented
+controls; `aria-live` regions for toast and status-banner content; reduced motion verified per
+animation (not just the three duration tokens — Decision below); and sensitive-content
+announcements that describe state ("hidden, activate to reveal" / "revealed") without ever including
+the secret value itself while masked (Decision 9).
+**Existing-attribute invariant restated (resolves X2):** rather than "every `role`/`id`/`aria-*`
+stays on the same element," the acceptance contract is: accessible role and name remain correct (or
+are corrected, as with the sensitive-masking fix); labelled/described relationships resolve to real
+elements; state (`aria-expanded`, `aria-selected`, etc.) is exposed accurately; keyboard behavior is
+unchanged or improved; and `data-testid`s used by the existing test suite remain stable only where
+they are an intentional, documented contract (not incidentally, on every element).
+**Reduced-motion audit scope (resolves S3):** the audit disables `animation-duration`,
+`animation-iteration-count`, and `transition-duration` (via the existing collapsed-duration-token
+approach) **and** additionally covers: native smooth scrolling (`scroll-behavior: auto` under
+reduced motion, at the element/`html` level, not left at `smooth`), any hardcoded keyframe
+`animation-duration` that doesn't reference a duration token (audited and fixed to reference one),
+and CSS `transform`-based transitions that might not be gated by the three named duration tokens
+(e.g. the glide-highlight overlay, tab-bar underline) — each such case is enumerated and confirmed
+to no-op under `prefers-reduced-motion: reduce` rather than assuming the three tokens alone cover
+every animated property in the stylesheet.
+
+### 14. Minimum platform: macOS 13+ (WKWebView/Safari 16.2) — `color-mix()` needs no fallback
+**Decision:** The supported OS/WebView matrix for this change is macOS 13 (Ventura) and later,
+which ships WKWebView backed by Safari 16.2+ engine — `color-mix(in srgb, …)` has been supported
+natively since Safari 16.2. This is stated as a non-functional requirement (supported platform
+matrix) rather than left implicit; no `color-mix()` fallback (e.g. precomputed static color
+fallback layer) is required for this change. Linux daemon-only builds have no UI surface affected by
+this change. Windows is frozen per `ADR-012` and out of scope.
+**Rationale (resolves S2):** the prior draft assumed `color-mix()` "just works" without stating what
+"works" is scoped to; stating the floor explicitly turns an assumption into a verifiable non-goal
+for fallback work.
+
+### 15. Performance budgets: measured baseline, not an unstated assumption
+**Decision:** Before slice 3 (History/Popup) lands, measure and record the current (pre-change)
+baseline for: popup open→first-render latency (via the existing Playwright/manual timing harness or
+a new lightweight `performance.now()` instrumentation point around popup mount) and total CSS+JS
+bundle size for both the main window and popup entry chunks. Acceptance criteria for the completed
+change: popup open/render latency does not regress beyond a stated threshold (10% or a fixed ms
+budget, whichever is looser — exact number recorded alongside the measured baseline in slice 1's
+task output, not invented here without a baseline in hand) and CSS+JS bundle size delta stays under
+a stated cap (recorded the same way). These budgets are gated as acceptance criteria for slice 6
+(final verification), not aspirational.
+**Rationale (resolves A7):** the review correctly notes the popup pays for every main-window
+selector in one shared stylesheet; that's an accepted trade-off (Decision 2's "one emitted
+stylesheet" goal) but its cost must be measured, not assumed acceptable.
+
+### 16. Device action semantics: explicit behavior/state tables (resolves C4)
+**Decision:** the device list defines behavior per state, so the redesign cannot visually offer an
+invalid destructive action:
+
+| Device state | Unpair shown? | Revoke shown? | Notes |
+|---|---|---|---|
+| Own device (this device) | No | No | No destructive footer at all (unchanged from today). |
+| Paired peer, online | Yes | Yes | Equal-width danger buttons; Unpair = graceful mutual removal (peer is notified); Revoke = unilateral trust removal (peer is not asked, used when peer is lost/compromised). |
+| Paired peer, offline | Yes | Yes | Same two actions remain available; Unpair may not reach the peer to notify it (best-effort), Revoke never depends on reaching the peer — this distinction is surfaced in each button's tooltip/label, not by hiding either action. |
+| Discovered (unpaired) device | No | No | Only a "Pair" affordance; neither destructive action applies to a device with no trust relationship yet. |
+| Pending action (Unpair/Revoke in flight) | Disabled (spinner) | Disabled (spinner) | Both destructive buttons disable for the row while its own action is pending; the *other* action on the same row is also disabled during that window to avoid a second destructive call racing the first. |
+| Failed action | Re-enabled, error banner | Re-enabled, error banner | The failed action's button returns to its enabled state with an inline error state (`.srow__s`/banner) naming the failure; the row does not silently retry. |
+
+This table is the acceptance criterion for C4 — any state not in this table (e.g. a discovered
+device showing a danger button) is a bug.
+
+## Component inventory
+
+Resolves D2 — replaces the blanket "every file under components/views/popup" impact declaration
+with a per-component classification. `U` = unchanged behavior, class-only styling; `P` = composed
+from a new shared primitive; `B` = behavior changed (see decision cited); `D` = deprecated/removed;
+`G` = gallery-only.
+
+| Component | Class | Notes |
+|---|---|---|
+| `ActionButton.tsx` | P | Emits `.btn`/`.btn--<variant>` (Decision 3). |
+| `Toggle.tsx` | P | `.toggle`/`.off` primitive. |
+| `SectionHeader.tsx`, `Panel.tsx`, `SettingsRow.tsx`, `SliderRow.tsx` | U | Class-only restyle. |
+| `SyncStatusChip.tsx`, `DeviceBadge.tsx`, `FileChip.tsx` | U | Class-only restyle onto `.chip`/`.badge`/`.tpill`. |
+| `HistoryRow.tsx` | P | Composes `ContentTile`/`ClipPreview`/`ClipMetadata` (Decision 8). |
+| `PopupRow.tsx` | P | Same shared units, condensed layout wrapper (Decision 8). |
+| `HistoryView/VirtualList.tsx` | U | Class-only; runtime-computed geometry stays inline style (Decision 12). |
+| `BulkActionBar.tsx` | U | Class-only. |
+| `EmptyState.tsx` | U | Class-only; 4 documented states (offline/starting-up/no-matches/nothing-copied). |
+| `DetailsModal.tsx` | P | Composes `Dialog` primitive (Decision 5). |
+| `ConfirmModal.tsx` | P | Composes `Dialog` primitive; existing focus-trap/portal behavior unchanged. |
+| `SasPairingModal.tsx` | P | Composes `Dialog` primitive. |
+| `RevokeConfirmDialog.tsx` | P | Composes `Dialog` primitive. |
+| `DeviceCard.tsx` (`ThisDeviceCard`/`PeerRow`) | B | `.devrow`/`.cfields`; action-availability logic per Decision 16's table is new/changed. |
+| `DiscoveredRow.tsx` | U | Class-only; no destructive actions (Decision 16). |
+| `TabBar.tsx` | B | Adds `role="tab"`/`role="tablist"`/arrow-key nav (Decision 13, X5). |
+| `Sidebar.tsx` | B | Adds Gallery item gated on `DEV && MOCK` (Decision 6). |
+| `AboutView.tsx`, `LogView.tsx` | U | Class-only. |
+| `App.tsx`'s banners, `AccessibilityBanner.tsx`, `StatusBanners.tsx`, `CloudAccountMismatchBanner.tsx` | U | Class-only onto `.banner`. |
+| `ErrorBoundary.tsx` | U | Class-only onto `.empty`-style block. |
+| `ViewShell.tsx` | U | Class-only. |
+| `Toast.tsx` | B | Adds `aria-live` region (Decision 13, X5). |
+| `GlideHighlight.tsx` | U | Class-only; runtime-computed geometry stays inline style/CSS var (Decision 12). |
+| `HighlightedText.tsx` | U | Class-only. |
+| `DisplayTab.tsx` | B | Rebuilds Appearance section: Theme + Accent + Translucency, bound to `UIPrefs`. |
+| `store.ts` | B | `UIPrefs` additive fields + per-field validation (no migration), `ProductionViewId`/`DevViewId` split (Decisions 6, 10). |
+| `index.html`, `popup.html` | B | Pre-paint bootstrap script added (Decision 4). |
+| `GalleryView/*` (new) | G | DEV-only, dynamic-import gated (Decision 6). |
+| Shared fixture factories (new) | G | DEV-only, shared with `mockIpc.ts` (Decision 7). |
+| `Dialog` primitive (new) | P | Composed by all four modal components (Decision 5). |
+| `normalizeContentKind()`/`ContentTile`/`ClipPreview`/`ClipMetadata` (new) | P | Shared by `HistoryRow`/`PopupRow` (Decision 8). |
+| `.devcard`/`.dmeta` (grid variant) | G | Documented, gallery-only; no production consumer (Decision 7/15 in Non-Goals). |
 
 ## Risks / Trade-offs
 
-- **[Risk] Token transcription drift between the reference HTML and `index.css`.**
-  → Mitigation: copy-paste the token blocks verbatim (Decision 2); the `component-library`/
-  `design-tokens` specs require a task that diffs variable *names* between the two files as part of
-  verification.
-- **[Risk] Restoring `theme`/`accent` to `UIPrefs` touches the shared prefs migration chain (v1→v4
-  already has 3 legacy-key migration branches) — a bug here could corrupt existing users'
-  settings.** → Mitigation: additive-only change (v4→v5 keeps the same whitelist-prune pattern,
-  only adds two keys with defaults); existing prefs tests must stay green; no field is removed or
-  renamed.
-- **[Risk] `.devrow`/`.cfields` selection (Decision 4a) means `.devcard`/`dev-grid` from the
-  reference file's gallery section is spec'd but never rendered in the real app** — a future
-  redesign of `DevicesView` into a grid would need to re-derive wiring. → Mitigation: document both
-  shapes in `component-library` spec explicitly so the unused primitive isn't lost; gallery view
-  renders both variants for visual reference even though `DevicesView` only uses one.
-- **[Risk] Popup window is a separate, frameless, always-on-top surface — restoring shadows/blur
-  (`--sh3`, translucency) could hurt paste-latency perf if not GPU-cheap.** → Mitigation: keep
-  `backdrop-filter`/`box-shadow` usage identical to the reference file (already tuned for a
-  compact popup) and avoid adding new blur surfaces beyond what STYLEGUIDE.md §9.13 specifies.
-- **[Risk] Reduced-motion / a11y regressions when re-adding animation (row insert/remove, toast,
-  spinner, pulse dot).** → Mitigation: the reference file's `@media (prefers-reduced-motion:
-  reduce)` block (collapsing all `--dur*` tokens to `0ms`) is copied verbatim as part of the tokens
-  layer; this is non-optional per STYLEGUIDE.md §6.
-- **[Trade-off] No automated visual-regression baseline is required for this change**, even though
-  Playwright visual tests exist in the repo. → Accepted: manual `?mock=1` browser verification
-  (tasks.md) is the bar for this change; wiring gallery-driven Playwright snapshots is filed as
-  follow-up, not blocking.
+- **[Risk] Token transcription drift between the reference HTML and the app's `tokens.css`.**
+  → Mitigation: verbatim copy plus the automated name-and-value parity test (Decision 11).
+- **[Risk] Adding `theme`/`accent`/`translucency` to `UIPrefs` could let a corrupt stored value
+  reach the DOM.** → Mitigation: per-field runtime validation defaulting each field independently
+  (Decision 10) plus tests for malformed JSON and each field invalid. No migration chain is touched
+  (additive fields only, no back-compat), so the legacy-migration corruption risk does not apply.
+- **[Risk] `.devrow`/`.cfields` selection (Decision "device shape", carried from the prior draft)
+  means `.devcard`/`dev-grid` is spec'd but never rendered in the real app** — a future redesign of
+  `DevicesView` into a grid would need to re-derive wiring. → Mitigation: documented in the component
+  inventory as gallery-only (`G`), not silently dropped.
+- **[Risk] Popup window pays CSS cost for every main-window selector via one emitted stylesheet.**
+  → Mitigation: measured performance budget, Decision 15, not an unstated assumption.
+- **[Risk] Reduced-motion / a11y regressions when re-adding animation.** → Mitigation: the audited,
+  enumerated scope in Decision 13 (not just the three duration tokens).
+- **[Risk] Cross-window live theme sync (Decision 4) is genuinely new state-sync code — the one
+  piece of this change that is not "restyling already-existing behavior."** → Mitigation: two
+  mechanisms (storage event + Tauri emit) so either window topology (shared or partitioned
+  `localStorage`) is covered, plus an explicit two-window acceptance test.
+- **[Trade-off] Sensitive-content masking accepts length/shape leakage and DOM/selection
+  inspectability while masked**, in exchange for stable layout and unblocked copy/paste. → Accepted
+  and stated explicitly, Decision 9 — not an oversight.
+- **[Trade-off] Downgrading past this change's release resets Theme/Accent/Translucency to
+  defaults.** → Accepted and documented in the release notes, Decision 10 — not claimed to be
+  zero-cost.
 
 ## Migration Plan
 
-1. Land `index.css` (tokens → base → primitives) with **no component changes yet** — verify the
-   app still builds/renders (unstyled, since no component references the new classes yet).
-2. Restore `theme`/`accent` to `UIPrefs` + `<html>` wiring in both windows; verify persisted prefs
-   migrate cleanly from v4.
-3. Re-skin components bottom-up: shared primitives first (`ActionButton`, `Toggle`, `EmptyState`,
-   `SectionHeader`, `Panel`, chips/badges), then per-surface (Sidebar → History → Devices →
-   Settings tabs → About/Logs → popup), so later steps can compose already-styled primitives.
-4. Build the gallery view last, once every primitive/pattern class exists, so it has something real
-   to render (not a placeholder).
-5. Manually verify every surface + the gallery at `localhost:1420/?mock=1` in both themes and a
-   sample of accents (full 6×2 matrix for the gallery itself, spot-check for individual views).
-6. No rollback complexity: this is additive CSS + restored state fields; reverting is a plain
-   `git revert` of the change's commits with no data migration to undo (v5 prefs key is additive).
+1. **Slice 1** — land `src/styles/{reset,tokens,base}.css` with cascade layers, the pre-paint
+   bootstrap script, and the `UIPrefs` additive fields + per-field validation. Verify: app still
+   builds/renders (mostly unstyled beyond base/reset, since primitives/patterns land in slice 2+);
+   existing stored prefs gain the new fields at defaults (no migration); invalid stored values
+   default per-field; bootstrap-before-paint test passes; the popup reads the same persisted prefs
+   at open (cross-window channel settled — Decision 4); performance baseline recorded (Decision 15).
+2. **Slice 2** — land `primitives.css` plus the typed React primitives (`ActionButton`, `Toggle`,
+   `Dialog`, disclosure header) and their a11y foundations. Verify: primitives render correctly in
+   the (still gallery-less) app; `Dialog` a11y contract tests pass (focus trap/restore/Escape/
+   backdrop, reusing `useFocusTrap`'s existing test coverage plus new scroll-lock tests).
+3. **Slice 3** — land `patterns.css` for History + Popup, the shared clipboard-presentation units
+   (Decision 8), and the sensitive-masking contract (Decision 9). Verify: all 11 kinds + unknown
+   render correctly in both row layouts; masking a11y fix (accessible name) verified; History/Popup
+   remain independently usable.
+4. **Slice 4** — land Devices, wiring the behavior/state table (Decision 16). Verify: no state
+   renders an invalid destructive action; pairing/revoke modals compose `Dialog`.
+5. **Slice 5** — land Settings (incl. the rebuilt `DisplayTab.tsx` Appearance section: Theme/Accent/
+   Translucency), Sidebar, About, Logs, banners, and Toast. Verify: cross-window live theme sync
+   (Decision 4) works with Settings open in one window and the popup in another.
+6. **Slice 6** — land the gallery (DEV-dynamic-import gated, Decision 6/7) and the automated
+   Playwright suite (Decision 13). Verify: production build's chunk-graph check confirms gallery
+   absence; full automated suite green; performance budgets (Decision 15) met against the slice-1
+   baseline.
+Each slice's PR/commit keeps the app in a buildable, runnable state (resolves D3) — screenshot
+evidence is captured per slice, a minimum-window-size and popup smoke check is run per slice, and
+any prefs validation-fallback is logged (console warning when a stored field is invalid and defaults)
+so a real-world bad-value path is observable rather than silent.
 
 ## Open Questions
 
-1. **Translucency toggle** — STYLEGUIDE.md §2 lists it as an *optional* remaining boolean, and
-   DESIGN-SYSTEM-v2.md (superseded) had a fuller glass/solid dual-surface system. Should this
-   change ship a working Translucency toggle (frosted `backdrop-filter` on/off), or defer it and
-   ship only Theme + Accent in `DisplayTab.tsx`? Needs a user decision before `tasks.md`
-   implementation of `DisplayTab.tsx` locks the field list.
-2. **Content-type detection coverage** — the reference file's `.row` demo covers 11 kinds
-   (`text/url/email/phone/code/json/number/color/path/file/secret`). Does the current
-   `HistoryEntry.kind` enum in `copypaste-core`/`copypaste-ipc` cover all 11, or should the gallery
-   only demonstrate the kinds the backend actually emits today? Affects gallery scope and whether
-   `PHONE`/`NUMBER` tile styling is reachable in the real app vs. gallery-only.
-  3. **Source-app icon** (mentioned in the superseded DESIGN-SYSTEM-v2.md §4 as blocked on daemon
-   `source_bundle_id`) — out of scope here since it needs daemon data, but should the row anatomy
-   reserve visual space for it now (empty slot) so a future daemon change doesn't force a second
-   layout pass? Recommend: yes, reserve the slot, ship type-glyph fallback only — flag for user
-   confirmation.
-4. **Gallery persistence** — should the theme/accent choices made while browsing the gallery leak
-   into the user's real `UIPrefs` (since it's the same store), or should the gallery use fully
-   local component state so browsing all 12 combinations doesn't change the user's actual saved
-   preference? Recommend local state scoped to the gallery view; flagging for confirmation since it
-   changes the gallery's implementation shape (task estimate).
-
-## Resolved Decisions (user, 2026-07-01)
-
-1. **Translucency — SHIP the toggle.** The heavy Liquid-Glass system stays removed, but the
-   controlled translucency set from the design sources IS in scope: base `--scrim` +
-   `.scrim { backdrop-filter: blur(2px) }` on modals, blur-masked sensitive data (both baseline,
-   always on), and an **optional "Translucency" (frosted surfaces on/off) toggle** in
-   `DisplayTab.tsx` per STYLEGUIDE.md §2, defaulting to on. (User confirmed they want the glass
-   effect that the styleguide specifies; final nod pending their file review.)
-2. **Content-type coverage — gallery demonstrates ALL 11 kinds** (text/url/email/phone/code/json/
-   number/color/path/file/secret) as the design canvas. During implementation, verify which kinds
-   the real `HistoryEntry.kind` enum emits today and annotate gallery-only kinds; no styling is
-   gated on backend reachability.
-3. **Source-app icon — reserve the slot + fallback.** The row/popup-row anatomy reserves visual
-   space for a source-app icon and renders it when available; when the source app / icon is
-   unavailable, show a **fallback** (type-glyph / generic app placeholder) so the layout is stable
-   and no second layout pass is needed when daemon `source_bundle_id` lands.
-4. **Gallery state — LOCAL only.** The gallery's theme×accent switcher uses local React state
-   (data-theme/data-accent on the gallery wrapper); it never writes the user's real `UIPrefs`.
+None remaining. All nine items the user resolved, plus the additional review findings this document
+self-resolves, are captured as normative Decisions above (see Decisions 1–16). Any residual
+uncertainty (e.g. the exact numeric performance-budget thresholds in Decision 15, which depend on a
+baseline measurement not yet taken) is called out inline in its own Decision rather than left in a
+separate Open Questions section, and is tracked as a task in `tasks.md` slice 1/6 rather than a
+blocking question for the user.

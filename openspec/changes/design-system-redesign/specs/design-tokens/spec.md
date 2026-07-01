@@ -60,9 +60,11 @@ The system SHALL define fixed, non-themed scale tokens — spacing (`--s-1`…`-
 declare a hardcoded pixel, color, or duration value that duplicates one of these tokens.
 
 #### Scenario: No magic numbers in component CSS
-- **WHEN** any CSS rule in `src/index.css`'s primitives/patterns/app-shell/utilities layers sets a
+- **WHEN** any CSS rule in `src/styles/primitives.css`, `patterns.css`, `shell.css`, or
+  `utilities.css` (the `@layer primitives`/`patterns`/`shell`/`utilities` source files) sets a
   `color`, `background`, `border-color`, `border-radius`, `box-shadow`, `padding`, `gap`, `margin`,
-  or `transition-duration` property
+  or `transition-duration` property for a design constant (not runtime-computed geometry, see the
+  design-constant-vs-runtime-geometry requirement below)
 - **THEN** the value is a `var(--…)` reference (or a `color-mix(in srgb, var(--…) N%, …)`
   expression) — not a literal hex color or a literal px/ms value
 
@@ -71,6 +73,13 @@ declare a hardcoded pixel, color, or duration value that duplicates one of these
 - **THEN** `--dur-fast`, `--dur`, and `--dur-theme` all resolve to `0ms`, and animations gated by
   those tokens (row insert/remove, toast, spinner pulse, selection glide, online-dot pulse) do not
   visibly animate
+
+#### Scenario: Reduced motion also disables native smooth scrolling and non-token animation
+- **WHEN** the user's OS has `prefers-reduced-motion: reduce` set
+- **THEN** `scroll-behavior` resolves to `auto` (not `smooth`) at every scrollable element/`<html>`
+  itself, and any keyframe `animation-duration`, `animation-iteration-count`, or
+  `transition-duration` that does not reference a duration token is also confirmed to no-op —
+  the audit is not limited to the three named duration tokens
 
 ### Requirement: Theme and accent are persisted user preferences
 The system SHALL persist the user's chosen `theme` and `accent` in the same preferences store used
@@ -82,8 +91,152 @@ window and the quick-paste popup window before their first meaningful paint.
 - **THEN** both the main window and the popup open with `data-theme="light"` and
   `data-accent="teal"` already applied
 
-#### Scenario: Existing preferences migrate without data loss
-- **WHEN** a user upgrades from a build whose persisted preferences predate the `theme`/`accent`
-  fields
-- **THEN** all previously-saved preference values are retained unchanged, and `theme`/`accent` are
-  initialized to their documented defaults (`dark` / `indigo`)
+#### Scenario: Preferences predating the new fields gain them at defaults (no migration)
+- **WHEN** a stored preferences blob predates the `theme`/`accent`/`translucency` fields
+- **THEN** all previously-saved preference values are retained unchanged, and the new fields are
+  supplied at their documented defaults (`dark` / `indigo` / `true`) by the existing
+  whitelist-merge-with-defaults — no migration step runs
+
+### Requirement: A synchronous pre-paint bootstrap applies persisted theme/accent/translucency before first content paint
+The system SHALL apply the user's persisted `theme`, `accent`, and `translucency` preferences to
+`document.documentElement` via a synchronous inline script in both `index.html` and `popup.html`,
+executed before the React application renders any content, so no frame of the static default
+theme is ever visible to a user with a non-default persisted preference. A React effect SHALL
+keep the same attributes synchronized afterward for live changes.
+
+#### Scenario: Persisted non-default theme is present before content is visible
+- **WHEN** a user has persisted `theme: "light"`, `accent: "teal"`, `translucency: false` and
+  opens either window
+- **THEN** `document.documentElement.dataset.theme === "light"`,
+  `document.documentElement.dataset.accent === "teal"`, and
+  `document.documentElement.dataset.translucency === "off"` are all true before the first
+  application content becomes visible, not merely after a React effect runs post-paint
+
+#### Scenario: Missing, malformed, or unsupported persisted values fall back independently
+- **WHEN** the persisted preferences value for `theme`, `accent`, or `translucency` is missing,
+  is not one of the documented enum/boolean values, or the stored JSON itself fails to parse
+- **THEN** each affected field falls back to its own documented default (`dark` / `indigo` /
+  `true`) independently of the other fields, and the bootstrap script does not throw or block
+  app startup
+
+### Requirement: Translucency is a persisted, validated axis with a defined fallback
+The system SHALL define `translucency: boolean` (default `true`) in `UIPrefs`, represented on the
+DOM as `data-translucency="on"|"off"` on `document.documentElement` (and, for the gallery's scoped
+preview wrapper, on `.theme-scope`), with `true`/`on` applying `backdrop-filter` frosting to chrome
+surfaces only (sidebar, popup container, modal scrim, toast, tab bar) while content surfaces
+(cards, rows, fields) remain solid, and `false`/`off` rendering every surface solid.
+
+#### Scenario: Translucency on frosts chrome surfaces only
+- **WHEN** `data-translucency="on"` is active
+- **THEN** the sidebar, popup container, modal scrim, toast, and tab bar render with
+  `backdrop-filter` frosting, while cards, list rows, and form fields render fully solid
+
+#### Scenario: Translucency off renders every surface solid
+- **WHEN** the user disables the Translucency toggle in Settings
+- **THEN** `data-translucency="off"` is set and no surface in the app applies `backdrop-filter`
+
+#### Scenario: Unsupported or reduced-transparency environments fall back to solid
+- **WHEN** the runtime WebView does not support `backdrop-filter`, or the OS reports
+  `prefers-reduced-transparency: reduce` and the WebView exposes that media feature
+- **THEN** every chrome surface renders solid regardless of the persisted `translucency` value
+
+### Requirement: Theme/accent/translucency changes propagate live across open windows
+The system SHALL propagate a theme, accent, or translucency change made in one window (typically
+Settings, in the main window) to any other already-open window (typically the quick-paste popup)
+without requiring that window to be closed and reopened.
+
+#### Scenario: Popup reflects a Settings change while already open
+- **WHEN** the popup window is open and the user changes theme, accent, or translucency in
+  Settings in the main window
+- **THEN** the popup's `document.documentElement` dataset attributes update to the new values
+  while the popup remains open, without the user closing and reopening it
+
+### Requirement: Persisted preferences are validated at runtime, per field, independently
+The system SHALL validate every enum or boolean preference field (`theme`, `accent`,
+`translucency`) individually when loading persisted preferences, defaulting only the invalid
+field(s) while retaining every other valid field's stored value.
+
+#### Scenario: One invalid field does not discard other valid fields
+- **WHEN** persisted preferences contain a valid `accent` value but an unrecognized `theme` value
+  (e.g. `"system"`)
+- **THEN** the loaded preferences use the documented default for `theme` (`"dark"`) while
+  preserving the stored, valid `accent` value unchanged
+
+#### Scenario: Malformed JSON falls back to full defaults
+- **WHEN** the persisted preferences value at the active storage key is not valid JSON
+- **THEN** all preferences load as `DEFAULT_PREFS`, and the failure is logged rather than thrown
+  to the caller
+
+#### Scenario: Unknown keys are dropped
+- **WHEN** persisted preferences contain a key that is not part of the current `UIPrefs` schema
+- **THEN** that key is silently dropped from the loaded preferences and never re-persisted
+
+### Requirement: No versioned-key migration or downgrade handling (additive fields only)
+The system SHALL add `theme`/`accent`/`translucency` as additive fields on the existing `UIPrefs`
+object at its current key (`copypaste-ui-prefs-v4`) with NO version bump, NO legacy-key migration
+chain, NO dual-write, and NO downgrade handling — backward compatibility is explicitly out of scope
+(user directive). A stored blob predating the fields simply gains them at their defaults via the
+existing whitelist-merge-with-defaults on next load.
+
+#### Scenario: No migration code path exists
+- **WHEN** preferences are loaded, whatever their stored shape
+- **THEN** they are read from the single current key and merged over defaults; there is no
+  version-detection or legacy-key-forwarding branch, and no separate `-v5` key is ever written
+
+### Requirement: Supported OS/WebView matrix is stated as a non-functional requirement
+The system SHALL state macOS 13 (Ventura) or later — WKWebView backed by Safari 16.2+ — as the
+minimum supported platform for this design system, and SHALL rely on native `color-mix()` support
+without requiring a fallback rendering path for unsupported engines.
+
+#### Scenario: color-mix() is used without a fallback layer
+- **WHEN** any token or component rule uses `color-mix(in srgb, …)`
+- **THEN** no fallback static-color rule is required to precede it, because the minimum supported
+  WebView (Safari 16.2+ on macOS 13+) supports `color-mix()` natively
+
+### Requirement: Design tokens and the reference file are kept in exact name-and-value parity
+The system SHALL provide an automated check that every custom property defined in
+`copypaste-design-reference.html`'s token block resolves to the identical value in
+`crates/copypaste-ui/src/styles/tokens.css`, for both themes and all accent variants.
+
+#### Scenario: A value drift in either file fails the check
+- **WHEN** a token's value differs between the reference file and `tokens.css` for the same
+  theme/accent combination, even if both files define a property of the same name
+- **THEN** the parity check fails, distinguishing this from a name-only diff that would miss the
+  value mismatch
+
+### Requirement: Design-constant values are tokenized; runtime-computed geometry may remain inline
+The system SHALL express every design-constant value (spacing, radius, shadow, focus-ring
+width/offset, hairline width, icon sizes, control heights) as a token, while permitting
+runtime-computed geometry (virtualized-list item positions, the popup row's measured height, the
+glide-highlight overlay's computed position, the settings tab-bar's measured underline position)
+to be expressed as inline styles or CSS custom properties set from JavaScript, since their values
+are not known until layout/measurement time.
+
+#### Scenario: A hardcoded design constant outside the tokens layer is a defect
+- **WHEN** any authored CSS rule outside `tokens.css` sets a focus-ring width/offset, hairline
+  width, icon size, or control height as a literal value instead of `var(--…)`
+- **THEN** this is flagged as a token-policy violation
+
+#### Scenario: Runtime-computed geometry is exempt from the no-hardcoded-pixel rule
+- **WHEN** a virtualized list, the popup row, the glide-highlight overlay, or the settings
+  tab-bar indicator sets an inline `style` or CSS custom property from a JavaScript-computed
+  measurement
+- **THEN** this is not a token-policy violation, because the value is inherently
+  runtime-dependent and cannot be expressed as a static design token
+
+### Requirement: Typography and layout tokens support text scaling and localization
+The system SHALL define a typography scale (font stack(s), weight scale, line-height scale,
+letter-spacing scale) using relative units where applicable, plus layout-constraint tokens for
+minimum main-window dimensions and popup width, sufficient to support OS-level text scaling, 200%
+browser zoom, and text-length variation from localization.
+
+#### Scenario: 200% zoom reflows without breaking layout
+- **WHEN** the browser zoom level is set to 200% or the OS text-scaling setting is increased
+- **THEN** typography-driven surfaces reflow (wrap, truncate, or resize) using the relative-unit
+  typography scale, without requiring two-dimensional scrolling for primary content
+
+#### Scenario: A longer, localization-representative string does not break row layout
+- **WHEN** a label or preview string approximately 40% longer than its English source string
+  (representative of common European-language expansion) is rendered in place of the original
+- **THEN** the containing row, label, or button reflows or truncates according to its documented
+  overflow behavior without visually breaking the layout
