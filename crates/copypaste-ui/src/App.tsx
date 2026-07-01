@@ -68,6 +68,15 @@ const VIEWS: Record<ViewId, { Component: ComponentType; label: string }> = {
   logs: { Component: LogView, label: "Logs" },
 };
 
+// Dev-only component gallery activation (design.md Decision 6). NOT a production
+// ViewId and NOT in the store — a `?view=gallery` URL check, gated by
+// import.meta.env.DEV so Vite dead-code-eliminates the dynamic import (and the
+// gallery chunk) from production builds. Open it at `?mock=1&view=gallery`.
+function galleryActive(): boolean {
+  if (!import.meta.env.DEV || typeof window === "undefined") return false;
+  return new URLSearchParams(window.location.search).get("view") === "gallery";
+}
+
 export default function App() {
   const view = useUI((s) => s.view);
   const setView = useUI((s) => s.setView);
@@ -82,6 +91,17 @@ export default function App() {
   useEffect(() => {
     applyAppearanceToRoot(document.documentElement, { theme, accent, translucency });
   }, [theme, accent, translucency]);
+
+  // Dev-only gallery branch (design.md Decision 6). Dynamic-imported behind the
+  // DEV gate so it is tree-shaken from production (mirrors transport.ts's mockIpc
+  // import). The gallery lives OUTSIDE the production view registry above.
+  const galleryOn = galleryActive();
+  const [GalleryComp, setGalleryComp] = useState<ComponentType | null>(null);
+  useEffect(() => {
+    if (import.meta.env.DEV && galleryOn && GalleryComp === null) {
+      void import("./views/GalleryView").then((m) => setGalleryComp(() => m.GalleryView));
+    }
+  }, [galleryOn, GalleryComp]);
 
   // The popup window emits "open-settings" (after showing this main window) when
   // the user clicks its footer gear. Navigate to the Settings view in response.
@@ -261,6 +281,13 @@ export default function App() {
       // Fire-and-forget.
     }
   };
+
+  // Dev-only: render the gallery instead of the app when ?view=gallery is set.
+  // Guarded by import.meta.env.DEV so this whole branch (and the dynamic import
+  // above) is eliminated from production bundles.
+  if (import.meta.env.DEV && galleryOn) {
+    return GalleryComp ? <GalleryComp /> : <div className="empty">Loading gallery…</div>;
+  }
 
   return (
     <ErrorBoundary>

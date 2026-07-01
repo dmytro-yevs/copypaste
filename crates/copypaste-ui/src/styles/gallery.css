@@ -1,0 +1,55 @@
+/* Gallery-only CSS (design.md Decision 2/6). Imported ONLY by the DEV-gated
+   GalleryView module — never part of the production styles/index.css chain, so
+   these selectors never ship in the production stylesheet. Not wrapped in an
+   authored @layer: the gallery is a dev tool, not part of the app cascade. */
+
+.gallery {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  padding: var(--s-9);
+  overflow-y: auto;
+}
+.gallery__title {
+  font-size: var(--fs-xl);
+  font-weight: var(--fw-bold);
+  margin-bottom: var(--s-8);
+}
+.gallery__switcher {
+  display: flex;
+  gap: var(--s-6);
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: var(--s-9);
+  padding-bottom: var(--s-7);
+  border-bottom: var(--hairline) solid var(--divider);
+}
+.gallery section {
+  margin-block: var(--s-9);
+}
+.gallery h2 {
+  font-size: var(--fs-lg);
+  font-weight: var(--fw-semibold);
+  color: var(--dim);
+  margin-bottom: var(--s-6);
+}
+.gallery__row {
+  display: flex;
+  gap: var(--s-5);
+  flex-wrap: wrap;
+  align-items: center;
+}
+.gallery__swatches {
+  display: flex;
+  gap: var(--s-3);
+}
+.gallery__swatch {
+  width: var(--icon-lg);
+  height: var(--icon-lg);
+  border-radius: 50%;
+  border: var(--stroke-2) solid transparent;
+  cursor: pointer;
+}
+.gallery__swatch[aria-pressed="true"] {
+  border-color: var(--text);
+}

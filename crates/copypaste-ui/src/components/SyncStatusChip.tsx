@@ -308,8 +308,17 @@ export function SyncStatusChip() {
 
   const tooltip = buildTooltip(info);
 
+  // Runtime state → status token (the token itself is a design constant; the
+  // choice is state-driven, so it is set as an inline CSS-var-backed value).
+  const dotColor = isConnectedState(info.state)
+    ? "var(--ok)"
+    : info.state === "offline" || info.state === "error"
+      ? "var(--err)"
+      : "var(--faint)";
+
   return (
     <div
+      className="chip"
       title={tooltip}
       aria-label={`Sync: ${info.state}. ${tooltip}`}
     >
@@ -322,6 +331,8 @@ export function SyncStatusChip() {
           brief overlap at connect-time, online-pulse (forwards) takes visual
           precedence then ends, leaving syncing-dot if still syncing. */}
       <span
+        className="dot"
+        style={{ background: dotColor }}
         data-pulsing={pulsing}
         onAnimationEnd={() => setPulsing(false)}
       />

@@ -8,6 +8,7 @@
  * state) so it survives unmount/remount cycles across modal opens.
  */
 import { useState, useRef, useEffect } from "react";
+import { X } from "lucide-react";
 import { useSensitiveReveal } from "../../hooks/useSensitiveReveal";
 import { api, isImageType, sourceAppLabel, type HistoryEntry } from "../../lib/ipc";
 import { shouldMask, maskPlaceholder } from "../../lib/masking";
@@ -150,7 +151,9 @@ export function DetailsModal({
             className="iconbtn"
             aria-label="Close"
             onClick={onClose}
-          />
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
         </div>
 
         {/* Body */}

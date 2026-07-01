@@ -121,7 +121,7 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
 
 ## Slice 2 — Typed primitives + shared Dialog/disclosure a11y foundations
 
-- [ ] 2.1 Add the `@layer primitives` CSS section in `primitives.css`: `.btn` (+
+- [x] 2.1 Add the `@layer primitives` CSS section in `primitives.css`: `.btn` (+
       `--primary/--secondary/--ghost/--danger`, `.sm`, `.block`, `:disabled`), `.iconbtn` (+
       `.danger`), `.toggle` (+ `.off`), `.seg`, `.field`, `.chip` (+ `.on`, `.chip--ct`), `.tpill`
       (+ `--p2p/--cloud/--this`), `.badge` (+ `--verified/--count`), `.tile` (+
@@ -129,46 +129,46 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       `.spinner`, `.kbd` — using the allowed-button-primitives list from design.md Decision 3
       (C3): `.btn` family is for standalone actions only, not tabs/icon-buttons/disclosure
       headers/chips/row-actions, each of which is its own documented primitive.
-- [ ] 2.2 Wire `ActionButton.tsx` to emit `.btn .btn--<variant>` (+ `.sm` for `size="sm"`); keep
+- [x] 2.2 Wire `ActionButton.tsx` to emit `.btn .btn--<variant>` (+ `.sm` for `size="sm"`); keep
       all existing props/behavior unchanged.
-- [ ] 2.3 Wire `Toggle.tsx` to the `.toggle`/`.off` classes and its knob `<span>`.
+- [x] 2.3 Wire `Toggle.tsx` to the `.toggle`/`.off` classes and its knob `<span>`.
 - [ ] 2.4 Wire `SectionHeader.tsx`, `Panel.tsx`, `SettingsRow.tsx`, `SliderRow.tsx` to their
       corresponding patterns (`.set-grp__h`, `.card`/panel surface, `.srow`, slider track/thumb).
-- [ ] 2.5 Wire `SyncStatusChip.tsx`, `DeviceBadge.tsx`, `FileChip.tsx` to `.chip`/`.badge`/
+- [x] 2.5 Wire `SyncStatusChip.tsx`, `DeviceBadge.tsx`, `FileChip.tsx` to `.chip`/`.badge`/
       `.tpill` primitives as appropriate to each one's semantics.
 - [ ] 2.6 Restore icons via `lucide-react` (the single normative icon source; inline SVG only as
       a documented fallback when no suitable Lucide icon exists — design.md Decision "icons"/F2)
       with explicit sizes (`--icon-sm/md/lg`) in every component touched in this section; verify
       no `<svg>` renders without an explicit width/height.
-- [ ] 2.7 Build the shared `Dialog` primitive (`src/lib/dialog/Dialog.tsx`) composing the
+- [x] 2.7 Build the shared `Dialog` primitive (`src/lib/dialog/Dialog.tsx`) composing the
       existing `useFocusTrap` hook: portal to `document.body`, `role="dialog"`/
       `aria-modal="true"`, caller-supplied `aria-labelledby`/`aria-describedby`, initial focus +
       focus trap + Escape + backdrop-dismiss (configurable) + focus restoration (all via
       `useFocusTrap`, unchanged), plus new scroll-lock on the underlying view while open
       (design.md Decision 5 — the one genuinely new behavior in this primitive).
-- [ ] 2.7a Pre-migration behavior recording (round-5 M5 — fill the design.md Decision 5 matrix's
+- [x] 2.7a Pre-migration behavior recording (round-5 M5 — fill the design.md Decision 5 matrix's
       "verify current" cells BEFORE refactoring, so consolidation is provably behavior-preserving):
       read each of `ConfirmModal`, `SasPairingModal`, `RevokeConfirmDialog`, `DetailsModal` and record
       its CURRENT portal strategy, Escape handling, backdrop-dismiss policy, initial-focus target,
       pending/async-close behavior, and any existing scroll-lock. This is a checklist artifact, not an
       inference — the migration tasks below must preserve each recorded behavior.
-- [ ] 2.8 Migrate `ConfirmModal.tsx` to compose `Dialog` (behavior-preserving refactor — its
+- [x] 2.8 Migrate `ConfirmModal.tsx` to compose `Dialog` (behavior-preserving refactor — its
       existing focus-trap/portal/backdrop/Escape behavior is unchanged, only the shared wrapper
       changes).
-- [ ] 2.9 Migrate `SasPairingModal.tsx`, `RevokeConfirmDialog.tsx`, and `DetailsModal.tsx` to
+- [x] 2.9 Migrate `SasPairingModal.tsx`, `RevokeConfirmDialog.tsx`, and `DetailsModal.tsx` to
       compose `Dialog` (design.md component inventory: `B`/`P` — behavior consolidated onto the
       shared contract).
-- [ ] 2.10 Add a typed disclosure-header primitive (`aria-expanded`/`aria-controls`, no `.btn`
+- [x] 2.10 Add a typed disclosure-header primitive (`aria-expanded`/`aria-controls`, no `.btn`
       styling) for expandable rows, used by Devices in slice 4 and documented in
       `component-library` spec (design.md Decision 3).
-- [ ] 2.11 Add `.set-tab`/tab-list a11y foundations: `role="tablist"`/`role="tab"`, arrow-key
+- [x] 2.11 Add `.set-tab`/tab-list a11y foundations: `role="tablist"`/`role="tab"`, arrow-key
       navigation, wired later into `TabBar.tsx` in slice 5.
-- [ ] 2.12 Add Dialog a11y tests: initial focus lands on the first focusable element (or the
+- [x] 2.12 Add Dialog a11y tests: initial focus lands on the first focusable element (or the
       container fallback), Tab/Shift+Tab cycle correctly, Escape and backdrop-click dismiss,
       focus restores to the trigger element on close, and scroll-lock engages/releases correctly.
       Also assert the shared scroll-lock is **reference-counted** (two stacked dialogs; closing the
       inner one does NOT restore body scroll while the outer is still open — design.md Decision 5/M5).
-- [ ] 2.13 Land a MINIMAL dev-only gallery shell now (design.md Decision 7/S2), not deferred to
+- [x] 2.13 Land a MINIMAL dev-only gallery shell now (design.md Decision 7/S2), not deferred to
       slice 6: the DEV+MOCK gallery route/branch (dynamic-import, dev-only nav — per 6.1/6.2) plus
       stories for the slice-2 primitives (buttons, toggle, segmented, field, chips, Dialog) and the
       production-exclusion chunk-graph check (6.12) wired early. Each later slice (3–5) then ADDS its

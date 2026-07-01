@@ -42,8 +42,11 @@ export interface DeviceBadgeProps {
 export function DeviceBadge({ originId, ownId, originName }: DeviceBadgeProps) {
   const label = deviceLabel(originId, ownId, originName);
   if (!label) return null;
+  // Origin-device identity chip. Own device is marked via data-own for an
+  // optional accent treatment; remote devices render the neutral chip.
+  const isOwn = ownId !== "" && originId === ownId;
   return (
-    <span title={originId}>
+    <span className="chip" data-own={isOwn || undefined} title={originId}>
       {label}
     </span>
   );
