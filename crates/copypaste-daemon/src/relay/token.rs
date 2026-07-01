@@ -200,3 +200,236 @@ pub(super) fn write_token_0600(path: &std::path::Path, content: &str) -> std::io
     std::fs::rename(&tmp, path)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Token encryption tests ────────────────────────────────────────────────
+
+    /// Round-trip: encrypt then decrypt recovers the original token.
+    #[test]
+    fn token_encrypt_decrypt_roundtrip() {
+        let key = zeroize::Zeroizing::new([0xABu8; 32]);
+        let token = "test-auth-token-abc123-deadbeef";
+        let device_id = "device-roundtrip-uuid";
+        let encoded = encrypt_relay_token(token, &key, device_id).expect("encrypt");
+        let recovered =
+            decrypt_relay_token(&encoded, &key, device_id).expect("decrypt returned None");
+        assert_eq!(recovered, token);
+    }
+
+    /// Two encryptions of the same token produce DIFFERENT base64 blobs (nonce
+    /// uniqueness via OsRng) so the file content changes on every re-store.
+    #[test]
+    fn token_encrypt_nonce_is_unique_across_writes() {
+        let key = zeroize::Zeroizing::new([0xCDu8; 32]);
+        let token = "same-token-every-time";
+        let device_id = "device-nonce-uuid";
+        let enc1 = encrypt_relay_token(token, &key, device_id).expect("enc1");
+        let enc2 = encrypt_relay_token(token, &key, device_id).expect("enc2");
+        // The blobs must differ (nonce changes, so the entire base64 string differs).
+        assert_ne!(enc1, enc2, "each encryption must use a fresh random nonce");
+    }
+
+    /// Wrong key → decrypt returns None (AEAD auth tag failure, not a panic).
+    #[test]
+    fn token_decrypt_wrong_key_returns_none() {
+        let key_a = zeroize::Zeroizing::new([0x11u8; 32]);
+        let key_b = zeroize::Zeroizing::new([0x22u8; 32]);
+        let device_id = "device-wrongkey-uuid";
+        let encoded = encrypt_relay_token("secret-token", &key_a, device_id).expect("encrypt");
+        let result = decrypt_relay_token(&encoded, &key_b, device_id);
+        assert!(
+            result.is_none(),
+            "wrong key must yield None, not a recovered token"
+        );
+    }
+
+    /// Tampered ciphertext → decrypt returns None (not a panic).
+    #[test]
+    fn token_decrypt_tampered_ciphertext_returns_none() {
+        let key = zeroize::Zeroizing::new([0x33u8; 32]);
+        let device_id = "device-tamper-uuid";
+        let mut blob = base64::engine::general_purpose::STANDARD
+            .decode(encrypt_relay_token("my-token", &key, device_id).expect("enc"))
+            .expect("b64");
+        // Flip a bit in the ciphertext portion (after the 24-byte nonce).
+        if let Some(b) = blob.get_mut(NONCE_SIZE) {
+            *b ^= 0xFF;
+        }
+        let tampered = base64::engine::general_purpose::STANDARD.encode(&blob);
+        assert!(decrypt_relay_token(&tampered, &key, device_id).is_none());
+    }
+
+    /// CopyPaste-qvtg.4: a token encrypted for device_id "A" must fail to decrypt
+    /// under device_id "B" with the same local_key. This is the primary regression
+    /// guard for the device-id AAD binding.
+    #[test]
+    fn token_encrypted_for_device_a_fails_under_device_b() {
+        let key = zeroize::Zeroizing::new([0x44u8; 32]);
+        let device_id_a = "device-uuid-aaaa-1111-2222-333333333333";
+        let device_id_b = "device-uuid-bbbb-4444-5555-666666666666";
+        let token = "my-relay-auth-token-xyz";
+
+        let encoded = encrypt_relay_token(token, &key, device_id_a).expect("encrypt for A");
+
+        // Must succeed under device A.
+        let recovered =
+            decrypt_relay_token(&encoded, &key, device_id_a).expect("same device must decrypt");
+        assert_eq!(recovered, token, "device A can recover its own token");
+
+        // Must fail under device B even though the key is identical.
+        let result_b = decrypt_relay_token(&encoded, &key, device_id_b);
+        assert!(
+            result_b.is_none(),
+            "token encrypted for device A must NOT decrypt under device B's id \
+             (AEAD tag covers the device_id in the AAD)"
+        );
+    }
+
+    /// CopyPaste-qvtg.2: a token file that does NOT authenticate under AEAD
+    /// (legacy plaintext, corrupt, or attacker-planted) must be REJECTED —
+    /// `load_cached_token` returns `None` and never the raw file bytes — while a
+    /// properly AEAD-encrypted token is still accepted. This closes the
+    /// write-then-use TOCTOU where a local attacker plants a controlled token.
+    #[test]
+    fn load_cached_token_rejects_non_aead_token() {
+        let _lock = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let dir = tempfile::tempdir().expect("tmpdir");
+        // try_app_support_dir() resolves under HOME on macOS / XDG_DATA_HOME on
+        // Linux; set both so token_path() lands inside the tempdir.
+        let prev_home = std::env::var_os("HOME");
+        let prev_xdg = std::env::var_os("XDG_DATA_HOME");
+        unsafe {
+            std::env::set_var("HOME", dir.path());
+            std::env::set_var("XDG_DATA_HOME", dir.path());
+        }
+
+        let key = zeroize::Zeroizing::new([0x55u8; 32]);
+        let device_id = "device-load-test-uuid";
+        let token_file = token_path().expect("token path resolves");
+        if let Some(parent) = token_file.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir");
+        }
+
+        // 1) Legacy plaintext / attacker-planted token → rejected, never returned.
+        std::fs::write(&token_file, b"attacker-planted-token-xyz\n").expect("write");
+        assert!(
+            load_cached_token(&key, device_id).is_none(),
+            "non-AEAD token must be rejected (None), never returned as the bearer"
+        );
+
+        // 2) A properly AEAD-encrypted token → accepted and round-trips.
+        let enc =
+            encrypt_relay_token("real-encrypted-token-123", &key, device_id).expect("encrypt");
+        write_token_0600(&token_file, &enc).expect("write encrypted");
+        assert_eq!(
+            load_cached_token(&key, device_id).as_deref(),
+            Some("real-encrypted-token-123"),
+            "a valid AEAD token must still load"
+        );
+
+        // 3) Token encrypted for a DIFFERENT device_id → rejected (qvtg.4 binding).
+        let enc_other =
+            encrypt_relay_token("other-device-token", &key, "other-device-uuid").expect("encrypt");
+        write_token_0600(&token_file, &enc_other).expect("write other");
+        assert!(
+            load_cached_token(&key, device_id).is_none(),
+            "token written for another device_id must be rejected for this device"
+        );
+
+        // Restore env.
+        unsafe {
+            match prev_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+            match prev_xdg {
+                Some(v) => std::env::set_var("XDG_DATA_HOME", v),
+                None => std::env::remove_var("XDG_DATA_HOME"),
+            }
+        }
+    }
+
+    /// Empty file → load returns None (no fallback to empty token).
+    #[test]
+    fn load_cached_token_empty_file_returns_none() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let token_file = dir.path().join(RELAY_TOKEN_FILE);
+        std::fs::write(&token_file, b"   \n").expect("write");
+
+        let key = zeroize::Zeroizing::new([0x77u8; 32]);
+        let device_id = "device-empty-test-uuid";
+        let raw = std::fs::read_to_string(&token_file).expect("read");
+        let trimmed = raw.trim();
+        // Empty / whitespace-only file → treated as absent.
+        assert!(trimmed.is_empty());
+        // Simulates the `if trimmed.is_empty() { return None; }` guard.
+        assert!(if trimmed.is_empty() {
+            None::<String>
+        } else {
+            decrypt_relay_token(trimmed, &key, device_id)
+        }
+        .is_none());
+    }
+
+    // ── BUG 1 (CopyPaste-2yuo): write_token_0600 permissions ─────────────────
+
+    /// write_token_0600 must produce a file with exactly mode 0600.
+    ///
+    /// This is the contract test: the file must be 0600 regardless of the
+    /// process umask. The old `File::create()` + `set_permissions()` approach
+    /// created the temp file with the umask-modified mode (typically 0644) for a
+    /// brief window before chmod. The fix uses `OpenOptionsExt::mode(0o600)` so
+    /// the file is 0600 from the first open(2) call.
+    ///
+    /// Note: a race-condition reproducer cannot be written as a pure unit test
+    /// without threading primitives; this test verifies the postcondition contract.
+    #[cfg(unix)]
+    #[test]
+    fn write_token_0600_perms_are_exactly_0600() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("relay_token_perms_test");
+        write_token_0600(&path, "test-token-for-perms-check").expect("write ok");
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "token file must be mode 0600, got {:o}", mode);
+    }
+
+    /// write_token_0600 must produce a 0600 file even when the process umask is
+    /// 0000 (which makes File::create produce world-readable 0666 files).
+    ///
+    /// This is the failing test for the race: with the old implementation
+    /// `File::create` creates the temp file at mode 0666 (umask=0) for a brief
+    /// window. The test cannot observe that window directly, but it documents
+    /// the invariant that `mode(0o600)` via OpenOptionsExt is immune to umask.
+    ///
+    /// The umask is process-wide; this test uses `#[serial]` to avoid
+    /// interference with other tests.
+    #[cfg(unix)]
+    #[test]
+    #[serial_test::serial]
+    fn write_token_0600_immune_to_permissive_umask() {
+        // Temporarily set umask to 0 so File::create would produce 0666.
+        // A correct implementation using OpenOptions::mode(0o600) must still
+        // produce 0600 because the explicit mode overrides umask for the
+        // bits we care about (0600 ∩ 0777 = 0600, unaffected by umask~0777).
+        let old_umask = unsafe { libc::umask(0) };
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("relay_token_umask_test");
+        let result = write_token_0600(&path, "tok-umask-test");
+        // Restore umask before any assertion so a panic doesn't leave it broken.
+        unsafe { libc::umask(old_umask) };
+        result.expect("write ok");
+        use std::os::unix::fs::PermissionsExt as _;
+        let mode = std::fs::metadata(&path).expect("stat").permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "token file must be 0600 even with umask=0000 (world-open), got {:o}",
+            mode
+        );
+    }
+}

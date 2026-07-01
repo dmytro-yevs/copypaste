@@ -207,7 +207,13 @@ pub(super) fn relay_apply_to_pasteboard(
 
 #[cfg(test)]
 mod tests {
-    use super::relay_should_skip_wifi;
+    use super::{
+        relay_fetch_auto_apply_candidate, relay_should_auto_apply, relay_should_skip_wifi,
+    };
+    use crate::relay::receive::ingest_page_blocking;
+    use crate::relay::testutil::{make_pull_item, open_mem_db, skey};
+    use crate::relay::watermark::Watermark;
+    use copypaste_core::SyncKey;
 
     /// Parity contract: relay_should_skip_wifi must agree with
     /// sync_common::should_skip_on_cellular on all four (bool, bool) inputs
@@ -224,5 +230,143 @@ mod tests {
                  should_skip_on_cellular({wifi_only}, {on_wifi})"
             );
         }
+    }
+
+    // ── WiFi / auto-apply guard tests ─────────────────────────────────────────
+
+    /// relay_should_skip_wifi: returns true iff sync_on_wifi_only=true AND not on wifi.
+    #[test]
+    fn wifi_guard_skips_when_setting_on_and_not_on_wifi() {
+        assert!(
+            relay_should_skip_wifi(true, false),
+            "must skip: setting=true, wifi=false"
+        );
+    }
+
+    #[test]
+    fn wifi_guard_allows_when_setting_off() {
+        assert!(
+            !relay_should_skip_wifi(false, false),
+            "must not skip: setting=false even if no wifi"
+        );
+        assert!(
+            !relay_should_skip_wifi(false, true),
+            "must not skip: setting=false, on wifi"
+        );
+    }
+
+    #[test]
+    fn wifi_guard_allows_when_on_wifi_and_setting_on() {
+        assert!(
+            !relay_should_skip_wifi(true, true),
+            "must not skip: setting=true but on wifi"
+        );
+    }
+
+    /// relay_should_auto_apply: mirrors the auto_apply_synced_clip flag.
+    #[test]
+    fn auto_apply_guard_respects_flag() {
+        assert!(
+            relay_should_auto_apply(true),
+            "auto_apply=true → should auto-apply"
+        );
+        assert!(
+            !relay_should_auto_apply(false),
+            "auto_apply=false → must not auto-apply"
+        );
+    }
+
+    /// derive_relay_inbox_id determinism (daemon-side sanity; core also tests it).
+    #[test]
+    fn inbox_id_is_deterministic() {
+        use copypaste_core::derive_relay_inbox_id;
+        let k = skey("relay-determinism-pass");
+        assert_eq!(derive_relay_inbox_id(&k), derive_relay_inbox_id(&k));
+    }
+
+    // ── BUG 2b (CopyPaste-7ub): auto_apply_synced_clip relay path ─────────────
+
+    /// relay_fetch_auto_apply_candidate returns the freshest stored item's
+    /// (wall_time, plaintext, content_type) when the DB has at least one
+    /// non-deleted, non-sensitive, text item. Returns None on empty DB.
+    ///
+    /// This is the test for the new helper that feeds the pasteboard write path.
+    /// FAILS before implementation because `relay_fetch_auto_apply_candidate`
+    /// does not exist yet.
+    #[test]
+    fn relay_fetch_auto_apply_candidate_returns_freshest_text_item() {
+        let db = open_mem_db();
+        let local_key = zeroize::Zeroizing::new([0xAAu8; 32]);
+        let sync_bytes = skey("relay-auto-apply-candidate-pass");
+        let sync_key = SyncKey::from_bytes(sync_bytes);
+        let g = db.blocking_lock();
+
+        // Empty DB → no candidate.
+        assert!(
+            relay_fetch_auto_apply_candidate(&g, &local_key).is_none(),
+            "empty DB must yield no candidate"
+        );
+
+        // Insert one item via ingest_page_blocking.
+        let item_id = "aac-item-1";
+        let plaintext_in = b"hello auto-apply";
+        let pull = make_pull_item(1, item_id, plaintext_in, &sync_key, 5, 1000);
+        let (_wm, stored) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&pull),
+            Watermark::default(),
+            u64::MAX,
+        );
+        assert_eq!(stored, 1, "first item must be stored");
+
+        // Now fetch the candidate.
+        let cand = relay_fetch_auto_apply_candidate(&g, &local_key)
+            .expect("must return candidate after insert");
+        assert_eq!(cand.content_type, "text", "content_type must be text");
+        assert_eq!(
+            cand.plaintext, plaintext_in,
+            "candidate plaintext must match original"
+        );
+        assert_eq!(cand.wall_time, 1000, "wall_time must match the item");
+    }
+
+    /// When auto_apply_enabled=false, relay_should_auto_apply gates the write.
+    /// When auto_apply_enabled=true, the candidate is fetched and written.
+    /// This test verifies the gate and candidate fetching work end-to-end
+    /// (pasteboard write is macOS-only and not directly testable in a unit test).
+    #[test]
+    fn relay_auto_apply_gate_and_candidate_integration() {
+        let db = open_mem_db();
+        let local_key = zeroize::Zeroizing::new([0xCCu8; 32]);
+        let sync_bytes = skey("relay-auto-apply-gate-pass");
+        let sync_key = SyncKey::from_bytes(sync_bytes);
+        let g = db.blocking_lock();
+
+        let pull = make_pull_item(1, "gate-item-1", b"test payload", &sync_key, 3, 500);
+        let (_wm, stored) = ingest_page_blocking(
+            &g,
+            &local_key,
+            &sync_bytes,
+            std::slice::from_ref(&pull),
+            Watermark::default(),
+            u64::MAX,
+        );
+        assert_eq!(stored, 1);
+
+        // auto_apply=false: must not attempt pasteboard write.
+        assert!(
+            !relay_should_auto_apply(false),
+            "flag=false → must not auto-apply"
+        );
+
+        // auto_apply=true: gate passes, candidate must be available.
+        assert!(relay_should_auto_apply(true), "flag=true → gate passes");
+        let cand = relay_fetch_auto_apply_candidate(&g, &local_key);
+        assert!(
+            cand.is_some(),
+            "auto_apply=true path: candidate must be available after ingest"
+        );
     }
 }

@@ -15,12 +15,14 @@ use copypaste_core::{
 // until a future settings surface exposes the consent toggle. Calling
 // `report_and_log` at recoverable-error sites means the infrastructure is wired
 // and consent-gating is correct, so enabling it later is a one-line change.
-use copypaste_telemetry::{report_and_log, OsTag, ReportConsent, ReportableError};
+use copypaste_telemetry::{report_and_log, OsTag, ReportableError};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+mod bootstrap;
 pub(crate) mod capture;
+mod monitor_loop;
 pub(crate) mod startup;
 
 pub(crate) use capture::{handle_tick, run_ttl_cleanup};
@@ -33,6 +35,24 @@ pub(crate) use startup::{
     load_or_create_device_id, load_private_mode, persist_private_mode, run_degraded, sweep_keys,
     DbStartupPlan, KeyLoad,
 };
+
+// CopyPaste-vp63.12: one-shot bootstrap tasks (telemetry reporter, Keychain
+// ACL rotation, v4/poison-row sweeps, DeviceMeta cache warm, startup TTL
+// purge) and device-name resolution, extracted from this file.
+// `resolve_device_name` is re-exported at the `daemon` root (not just
+// `pub(crate)` inside `bootstrap`) because `ipc::handlers_pairing_qr` calls
+// `crate::daemon::resolve_device_name` directly.
+pub(crate) use bootstrap::resolve_device_name;
+#[cfg(target_os = "macos")]
+use bootstrap::rotate_keychain_acl_best_effort;
+use bootstrap::{
+    init_reporter, run_poison_row_sweep, run_startup_ttl_purge, run_v4_migration_sweep,
+    warm_device_meta_cache,
+};
+
+// CopyPaste-vp63.12: the steady-state clipboard monitor loop, extracted from
+// this file (lowest-risk extraction — already took explicit args).
+use monitor_loop::run_monitor_loop;
 
 /// Upper bound on the synchronous Keychain read that fetches the SQLCipher
 /// device key at startup.
@@ -48,13 +68,6 @@ pub(crate) use startup::{
 /// holds only a clone of nothing and is reaped when the process exits.
 pub(super) const KEYCHAIN_READ_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// How often the sensitive-item TTL cleanup runs (milliseconds). Used in both
-/// the macOS and non-macOS monitor loops to avoid magic literals.
-const SENSITIVE_CLEANUP_INTERVAL_MS: u64 = 5_000;
-
-/// How often the general expires_at TTL cleanup runs (milliseconds).
-const GENERAL_CLEANUP_INTERVAL_MS: u64 = 60_000;
-
 /// How often the degraded-mode loop re-checks the quit flag (milliseconds).
 /// 1 s is responsive enough for human perception while burning ~4× less CPU
 /// than the old 250 ms value.
@@ -62,7 +75,6 @@ pub(super) const DEGRADED_QUIT_POLL_INTERVAL_MS: u64 = 1_000;
 
 use std::sync::RwLock;
 use tokio::sync::{broadcast, mpsc, Mutex};
-use tokio::time::interval;
 // D1: CancellationToken for coordinated graceful shutdown across all tasks.
 use tokio_util::sync::CancellationToken;
 
@@ -71,511 +83,11 @@ use tokio_util::sync::CancellationToken;
 // re-import it here for the local `sync_orch::run` call below.
 use crate::sync_orch;
 
-/// Resolve a human-readable device name for P2P advertisements and QR pairing.
-///
-/// On macOS uses `scutil --get ComputerName` (the user-visible name, e.g.
-/// "Dmytro's MacBook Air") as the primary source, which is the same path used
-/// by `DeviceMeta::collect()` for the QR-pairing PeerMeta.  Falls back to the
-/// `HOSTNAME` env var (Unix), then `COMPUTERNAME` (Windows), then the `hostname`
-/// binary, and finally the literal `"CopyPaste"` only when all else fails.
-///
-/// This is the single source of truth for the P2P mDNS registration, the QR
-/// payload `device_name` field, and the relay identity — every advertising path
-/// calls this function so all peers see the same consistent name.
-pub(crate) fn resolve_device_name() -> String {
-    crate::device_meta::collect_device_name().unwrap_or_else(|| "CopyPaste".to_string())
-}
-
 /// Run the daemon until `Ctrl+C` / `SIGTERM` is received.
 ///
 /// This is the entry point used on non-macOS platforms and in tests.
 pub async fn run() -> anyhow::Result<()> {
     run_with_quit_flag(Arc::new(AtomicBool::new(false))).await
-}
-
-/// CopyPaste-9fb6: initialise the telemetry reporter.  The default is
-/// `Disabled` — no events leave the device until the user opts in via the
-/// settings UI (a future PR).  The reporter is passed into error-handling
-/// sites in the daemon lifecycle so wiring is complete and adding consent is a
-/// one-line change.  When `COPYPASTE_SENTRY_DSN` is not set (OSS builds, CI)
-/// this always returns a `NoopReporter`.
-fn init_reporter() -> Box<dyn copypaste_telemetry::ErrorReporter> {
-    match option_env!("COPYPASTE_SENTRY_DSN") {
-        Some(dsn) => copypaste_telemetry::init_with_dsn(ReportConsent::Disabled, dsn)
-            .unwrap_or_else(|e| {
-                tracing::warn!(error = %e, "telemetry init failed; using no-op reporter");
-                copypaste_telemetry::init(ReportConsent::Disabled)
-            }),
-        None => copypaste_telemetry::init(ReportConsent::Disabled),
-    }
-}
-
-/// v0.3 (THREAT-MODEL OI-4): upgrade the Keychain entry's ACL on first launch
-/// after install/upgrade.  Idempotent + best-effort — a failure here (e.g. user
-/// denied a Keychain prompt) must not block the daemon because the entry is
-/// still usable, just with the legacy unrestricted ACL.  The next launch retries
-/// automatically.
-///
-/// Only runs when the Keychain backend is actually in use. On ad-hoc / unsigned
-/// installs the key lives in the 0600 file store (see `keychain::file_store`)
-/// and there is no Keychain ACL to rotate — calling the rotation there would
-/// read/delete/recreate a Keychain item and raise the very login-password prompt
-/// this whole change exists to eliminate.
-///
-/// CHICKEN-AND-EGG (acceptance criterion #4): after a reinstall the binary's
-/// code signature changes and the Keychain ACL no longer trusts it, so
-/// `rotate_acl_to_current_install` ITSELF calls `get_generic_password` first to
-/// read the secret it would re-store — the very read that now prompts / is
-/// denied. It therefore cannot re-establish trust without the access it is trying
-/// to repair. We keep it best-effort here (it succeeds on the benign
-/// install-moved case) and rely on the DEGRADED startup path as the safety net
-/// for the untrusted-binary case. Real recovery is a one-time user re-grant of
-/// the Keychain prompt on a subsequent launch, after which this rotation pins
-/// the new binary so later launches stay quiet.
-#[cfg(target_os = "macos")]
-fn rotate_keychain_acl_best_effort() {
-    if crate::keychain::signing::choose_key_backend()
-        == crate::keychain::signing::KeyBackend::Keychain
-    {
-        match crate::keychain::acl::rotate_acl_to_current_install() {
-            Ok(true) => tracing::info!("Keychain ACL rotated to current install"),
-            Ok(false) => tracing::debug!("Keychain ACL already current"),
-            Err(e) => tracing::warn!(
-                error = %e,
-                "Keychain ACL rotation failed — entry still usable with legacy ACL"
-            ),
-        }
-    }
-}
-
-/// v4 key-version migration sweep — runs once at startup (resumable).
-///
-/// The sweep rotates any remaining `key_version = 1` rows to `key_version = 2`.
-/// It is synchronous (rusqlite), so we offload it to a blocking thread via
-/// `spawn_blocking` and await the result before continuing. On error we WARN and
-/// continue — a partially-swept DB is still usable; new writes keep being
-/// rejected by the migration gate until the sweep eventually completes on a
-/// future restart.
-async fn run_v4_migration_sweep(
-    db: &Arc<Mutex<Database>>,
-    local_key_arc: &Arc<zeroize::Zeroizing<[u8; 32]>>,
-    reporter: &dyn copypaste_telemetry::ErrorReporter,
-) {
-    // Escape hatch for installs that are ALREADY stuck on a prior build:
-    // an install whose only remaining `key_version = 1` rows are
-    // permanently unrotatable (auth tag mismatch) left the gate armed
-    // forever on older daemons, rejecting every capture with
-    // `MigrationInProgress`. Setting COPYPASTE_FORCE_MIGRATION_COMPLETE=1
-    // force-clears the gate before the sweep runs so new captures resume
-    // immediately. Mirrors COPYPASTE_NO_AUTO_MIGRATE. The corrupt rows are
-    // left untouched (they were already unreadable).
-    let force_complete = std::env::var_os("COPYPASTE_FORCE_MIGRATION_COMPLETE").is_some();
-    // Opt-in destructive purge of the permanently-undecryptable
-    // `key_version = 1` rows (auth-tag mismatch — never rotatable). Off by
-    // default: we never delete user data without an explicit flag. When
-    // unset we only WARN with the count + this guidance (see below).
-    let purge_dead = std::env::var_os("COPYPASTE_PURGE_DEAD_V1_ROWS").is_some();
-    // Derive both sweep keys from the seed the same way the read path does
-    // (see `sweep_keys`). The seed is the value stored in the Keychain /
-    // returned by `load_local_key()`, which is ALREADY the v1 storage key
-    // (`DeviceKeypair::local_enc_key`).
-    let seed: [u8; 32] = ***local_key_arc;
-    let (v1_key, v2_key) = sweep_keys(&seed);
-    let sweep_db = db.clone();
-    match tokio::task::spawn_blocking(move || {
-        // Acquire the lock inside the blocking thread so the async
-        // executor is not blocked while we hold it.
-        let guard = sweep_db.blocking_lock();
-        if force_complete {
-            guard.force_migration_complete()?;
-        }
-        let rotated = guard.migration_v4_sweep_resumable(&v1_key, &v2_key)?;
-        guard.force_complete_if_no_v1_rows()?;
-        // One-time repair: image/file rows that were encrypted with the v1
-        // key but mistakenly stamped key_version=2 by the pre-fix writer.
-        // Idempotent: repaired rows fail the v1-decrypt probe on subsequent
-        // runs and are silently skipped.
-        let repaired = guard.repair_mislabeled_kv2_blob_rows(&v1_key, &v2_key)?;
-        // After the sweep, surface any rows that stayed at key_version=1 —
-        // these are permanently undecryptable legacy ciphertexts (auth-tag
-        // mismatch) and are dead weight. Purge only if explicitly opted in.
-        let dead = guard.count_dead_v1_rows()?;
-        let purged = if dead > 0 && purge_dead {
-            guard.purge_dead_v1_rows()?
-        } else {
-            0
-        };
-        Ok::<(usize, usize, usize, usize), copypaste_core::DbError>((
-            rotated, repaired, dead, purged,
-        ))
-    })
-    .await
-    {
-        Ok(Ok((rotated, repaired, dead, purged))) => {
-            tracing::info!(rotated, "v4 key-version migration sweep complete");
-            if repaired > 0 {
-                tracing::info!(
-                    repaired,
-                    "v4 migration: repaired {repaired} mislabeled kv2 blob row(s) \
-                     (were encrypted with v1 key but stamped key_version=2)"
-                );
-            }
-            if purged > 0 {
-                tracing::warn!(
-                    purged,
-                    "v4 migration: purged {purged} permanently-undecryptable \
-                     key_version=1 row(s) (COPYPASTE_PURGE_DEAD_V1_ROWS=1)"
-                );
-            } else if dead > 0 {
-                // One-time actionable WARN: these rows can never be
-                // decrypted or rotated. Tell the user how to remove them.
-                tracing::warn!(
-                    dead,
-                    "v4 migration: {dead} legacy key_version=1 row(s) are \
-                     permanently undecryptable (auth-tag mismatch — re-keyed \
-                     device or lost key generation) and cannot be rotated. \
-                     They are dead weight in the database. To purge them, \
-                     restart the daemon once with COPYPASTE_PURGE_DEAD_V1_ROWS=1."
-                );
-            }
-        }
-        Ok(Err(e)) => {
-            tracing::warn!(error = %e, "v4 migration sweep failed — writes remain gated until next restart");
-            // CopyPaste-9fb6: report this recoverable failure to the
-            // telemetry backend (no-op while consent is Disabled).
-            report_and_log(
-                reporter,
-                ReportableError::new(
-                    env!("CARGO_PKG_NAME"),
-                    env!("CARGO_PKG_VERSION"),
-                    "db.v4_migration_sweep_failed",
-                    OsTag::current(),
-                ),
-            );
-        }
-        Err(join_err) => {
-            tracing::warn!(error = %join_err, "v4 migration sweep task panicked");
-        }
-    }
-}
-
-/// One-time startup sweep: delete poison rows created before the inbound-merge
-/// guard was added (CopyPaste-jww / CopyPaste-5y4). A poison row is a text item
-/// where content IS NOT NULL AND content_nonce IS NULL, or a file/image item
-/// where content IS NOT NULL AND content_nonce IS NULL AND blob_ref IS NULL. The
-/// peer re-sends these items on the next catch-up cycle. Idempotent.
-async fn run_poison_row_sweep(db: &Arc<Mutex<Database>>) {
-    let sweep_db = db.clone();
-    match tokio::task::spawn_blocking(move || {
-        let guard = sweep_db.blocking_lock();
-        crate::sync_orch::sweep_poison_rows(&guard)
-    })
-    .await
-    {
-        Ok(Ok(swept)) => {
-            if swept > 0 {
-                tracing::warn!(
-                    swept,
-                    "startup: swept {swept} poison row(s) created before \
-                     the inbound-merge guard (CopyPaste-jww/5y4) — \
-                     peers will re-send them on next connect"
-                );
-            } else {
-                tracing::debug!("startup: no poison rows found (clean)");
-            }
-        }
-        Ok(Err(e)) => {
-            tracing::warn!(error = %e, "startup: poison row sweep failed (non-fatal)");
-        }
-        Err(join_err) => {
-            tracing::warn!(error = %join_err, "startup: poison row sweep task panicked");
-        }
-    }
-}
-
-/// CopyPaste-bps: warm the DeviceMeta cache ONCE at startup, before the IPC
-/// server is constructed. `DeviceMeta::collect` spawns child processes
-/// (`scutil`, `sysctl`, `sw_vers`) that together can take up to ~6 s on a cold
-/// macOS system. By running them here on a blocking thread we pay the cost
-/// exactly once; all subsequent calls to `collect_own_peer_meta` and
-/// `get_own_device_info` are instant cache reads (OnceLock — wait-free after the
-/// first write).
-async fn warm_device_meta_cache() {
-    match tokio::task::spawn_blocking(|| crate::device_meta::warm_cache(env!("CARGO_PKG_VERSION")))
-        .await
-    {
-        Ok(()) => tracing::debug!("device_meta: startup cache warmed"),
-        Err(e) => tracing::warn!(
-            error = %e,
-            "device_meta: startup cache warm task panicked — \
-             per-request collection will be used as fallback"
-        ),
-    }
-}
-
-/// P2 (ugv7) — startup TTL purge: run the same TTL cleanup the tick loop
-/// performs, ONCE, right after the database is opened and BEFORE the IPC socket
-/// is bound. Without this, expired sensitive items remain readable and
-/// searchable during the sub-second window between DB open and the first tick.
-/// Reuses `run_ttl_cleanup` exactly as the tick loop does, passing
-/// `do_sensitive = sensitive_ttl_ms.is_some()` and `do_general = true`.
-async fn run_startup_ttl_purge(db: &Arc<Mutex<Database>>, config: &AppConfig) {
-    let startup_sensitive_ttl_ms = if config.sensitive_ttl_secs == 0 {
-        None
-    } else {
-        Some(config.sensitive_ttl_secs as i64 * 1000)
-    };
-    run_ttl_cleanup(
-        db,
-        startup_sensitive_ttl_ms.unwrap_or(0),
-        startup_sensitive_ttl_ms.is_some(), // do_sensitive
-        true,                               // do_general: always purge expired items at startup
-    )
-    .await;
-    tracing::debug!("startup TTL purge complete (before IPC socket bind)");
-}
-
-/// Run the clipboard monitor poll/cleanup loop until shutdown.
-///
-/// This owns the daemon's steady-state lifecycle: the poll ticker, the periodic
-/// sensitive/general TTL cleanups, hot-reload of poll interval + size gates from
-/// the live config, and signal/quit-flag handling. It returns once `Ctrl+C`,
-/// `SIGTERM`, or the tray `quit_flag` triggers shutdown — after cancelling
-/// `shutdown_token` so the caller can drain the remaining subsystem tasks.
-///
-/// EXACT-BEHAVIOUR NOTE: the macOS and non-macOS branches differ only in that
-/// macOS also checks the tray `quit_flag` at the top of each loop iteration and
-/// threads a `FrontmostAppCache` into `handle_tick`. Both are preserved verbatim.
-// crh3.78: this is the daemon's steady-state lifecycle loop extracted verbatim
-// from `run_with_quit_flag`. Each argument is a distinct, already-constructed
-// shared handle the loop needs (db, key, monitor, channels, config, shutdown);
-// bundling them into a context struct would add indirection without reducing the
-// genuine fan-in, so an explicit allow is clearer than a wrapper type here.
-#[allow(clippy::too_many_arguments)]
-#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
-async fn run_monitor_loop(
-    mut monitor: ClipboardMonitor,
-    db: Arc<Mutex<Database>>,
-    local_key_arc: Arc<zeroize::Zeroizing<[u8; 32]>>,
-    private_mode: Arc<AtomicBool>,
-    new_item_tx: broadcast::Sender<ClipboardItem>,
-    local_device_id: String,
-    core_config_arc: Arc<RwLock<AppConfig>>,
-    config: AppConfig,
-    quit_flag: Arc<AtomicBool>,
-    shutdown_token: CancellationToken,
-) -> anyhow::Result<()> {
-    // at2m: ticker is `mut` so we can recreate it when poll_interval_ms changes
-    // at runtime via set_config.  The current interval value is tracked in
-    // `current_poll_ms`; when live_config diverges we replace the interval.
-    let mut current_poll_ms = config.poll_interval_ms;
-    let mut ticker = interval(Duration::from_millis(current_poll_ms));
-    let mut cleanup_ticks: u64 = 0;
-    // Sensitive TTL cleanup runs every 5 seconds; track elapsed ticks separately.
-    let mut sensitive_cleanup_ticks: u64 = 0;
-
-    tracing::info!("clipboard monitor started");
-    tracing::info!(
-        "sensitive auto-wipe TTL: {}s, checked every 5s",
-        config.sensitive_ttl_secs,
-    );
-
-    #[cfg(target_os = "macos")]
-    {
-        use tokio::signal::unix::{signal, SignalKind};
-        let mut sigterm = signal(SignalKind::terminate())?;
-        // CopyPaste-44rq.33: one cache instance shared across all ticks so
-        // lsappinfo is forked at most once per FRONTMOST_APP_CACHE_TTL_SECS.
-        let mut frontmost_cache = FrontmostAppCache::new();
-        loop {
-            // Check tray quit flag before blocking on select
-            if quit_flag.load(Ordering::Relaxed) {
-                tracing::info!("quit flag set, shutting down daemon");
-                // D3: ensure all tasks receive the cancellation signal even
-                // when the tray host (not a signal) triggers shutdown.
-                shutdown_token.cancel();
-                break;
-            }
-            tokio::select! {
-                _ = ticker.tick() => {
-                    // Hot-reload: snapshot the current live config on every tick
-                    // so limit/feature changes from set_config take effect without
-                    // a daemon restart (excluded_app_bundle_ids, paste_as_plain_text,
-                    // sensitive_ttl_secs, etc.).
-                    let live_config = core_config_arc
-                        .read()
-                        .map(|g| g.clone())
-                        .unwrap_or_else(|_| config.clone());
-                    // at2m: hot-reload the poll interval when set_config changes it.
-                    // Recreating the interval resets its internal deadline to "now",
-                    // which is safe: at worst we poll once immediately on the next
-                    // select! iteration.  Reset cleanup_ticks to avoid a spurious
-                    // early TTL run after a potentially large interval change.
-                    if live_config.poll_interval_ms != current_poll_ms {
-                        tracing::info!(
-                            old_ms = current_poll_ms,
-                            new_ms = live_config.poll_interval_ms,
-                            "clipboard: poll_interval_ms changed — recreating interval timer"
-                        );
-                        current_poll_ms = live_config.poll_interval_ms;
-                        ticker = interval(Duration::from_millis(current_poll_ms));
-                    }
-                    // P2: guard sensitive_ttl_secs == 0 → "disabled". When the
-                    // user sets ttl to 0 (no auto-wipe), sensitive_ttl_ms would be
-                    // 0, making threshold = now_ms - 0 = now_ms which deletes ALL
-                    // sensitive items on every tick. Skip the cleanup entirely when
-                    // ttl is 0 to honour the "disabled" intent.
-                    let sensitive_ttl_ms = if live_config.sensitive_ttl_secs == 0 {
-                        None
-                    } else {
-                        Some(live_config.sensitive_ttl_secs as i64 * 1000)
-                    };
-                    // Hot-reload the monitor's READ gate from the live config so
-                    // raising/lowering the text/image/file cap via set_config
-                    // takes effect without a restart (cheap: three field writes per tick).
-                    monitor.set_max_text_bytes(live_config.max_text_size_bytes);
-                    monitor.set_max_image_bytes(
-                        usize::try_from(live_config.max_image_size_bytes).unwrap_or(usize::MAX),
-                    );
-                    monitor.set_max_file_bytes(
-                        usize::try_from(live_config.max_file_size_bytes).unwrap_or(usize::MAX),
-                    );
-                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id, &mut frontmost_cache).await;
-                    cleanup_ticks += 1;
-                    sensitive_cleanup_ticks += 1;
-
-                    // Sensitive item TTL: run every SENSITIVE_CLEANUP_INTERVAL_MS.
-                    // Integer-divide gives 0 when poll_interval > interval; clamp
-                    // to 1 so cleanup runs at most once per tick in that case.
-                    let do_sensitive = sensitive_ttl_ms.is_some()
-                        && sensitive_cleanup_ticks
-                            >= (SENSITIVE_CLEANUP_INTERVAL_MS
-                                / current_poll_ms.max(1))
-                            .max(1);
-                    if do_sensitive {
-                        sensitive_cleanup_ticks = 0;
-                    }
-                    // General expires_at TTL: run every GENERAL_CLEANUP_INTERVAL_MS.
-                    let do_general =
-                        cleanup_ticks >= (GENERAL_CLEANUP_INTERVAL_MS / current_poll_ms.max(1)).max(1);
-                    if do_general {
-                        cleanup_ticks = 0;
-                    }
-                    // daemon-core L1: the deletes are synchronous rusqlite. Run
-                    // them on a blocking thread (like the IPC path) so the async
-                    // executor is never blocked while the DB lock is held.
-                    run_ttl_cleanup(&db, sensitive_ttl_ms.unwrap_or(0), do_sensitive, do_general).await;
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("SIGINT received, shutting down");
-                    quit_flag.store(true, Ordering::Relaxed);
-                    // D3: broadcast shutdown to all tasks.
-                    shutdown_token.cancel();
-                    break;
-                }
-                _ = sigterm.recv() => {
-                    tracing::info!("SIGTERM received, shutting down");
-                    quit_flag.store(true, Ordering::Relaxed);
-                    // D3: broadcast shutdown to all tasks.
-                    shutdown_token.cancel();
-                    break;
-                }
-            }
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        // SIGTERM handling on non-macOS — previously only SIGINT was wired,
-        // so launchd/systemd sending SIGTERM would terminate the process
-        // without running our cleanup branch (sock file removal, log flush).
-        // SIGTERM future: a real terminate-signal stream on unix, a never-resolving
-        // future elsewhere. Boxed + always-defined so the select! branch below needs
-        // NO in-macro #[cfg] attribute — tokio 1.52's select! macro rejects attributes
-        // on branches ("no rules expected `}`", CopyPaste-l07l).
-        let mut sigterm_fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = {
-            #[cfg(unix)]
-            {
-                use tokio::signal::unix::{signal, SignalKind};
-                let mut sig = signal(SignalKind::terminate())?;
-                Box::pin(async move {
-                    sig.recv().await;
-                })
-            }
-            #[cfg(not(unix))]
-            {
-                Box::pin(std::future::pending::<()>())
-            }
-        };
-        loop {
-            tokio::select! {
-                _ = ticker.tick() => {
-                    let live_config = core_config_arc
-                        .read()
-                        .map(|g| g.clone())
-                        .unwrap_or_else(|_| config.clone());
-                    // at2m: hot-reload the poll interval when set_config changes it.
-                    if live_config.poll_interval_ms != current_poll_ms {
-                        tracing::info!(
-                            old_ms = current_poll_ms,
-                            new_ms = live_config.poll_interval_ms,
-                            "clipboard: poll_interval_ms changed — recreating interval timer"
-                        );
-                        current_poll_ms = live_config.poll_interval_ms;
-                        ticker = interval(Duration::from_millis(current_poll_ms));
-                    }
-                    let sensitive_ttl_ms = if live_config.sensitive_ttl_secs == 0 {
-                        None
-                    } else {
-                        Some(live_config.sensitive_ttl_secs as i64 * 1000)
-                    };
-                    // Hot-reload the monitor's READ gate from the live config so
-                    // raising/lowering the text/image/file cap via set_config
-                    // takes effect without a restart (cheap: three field writes per tick).
-                    monitor.set_max_text_bytes(live_config.max_text_size_bytes);
-                    monitor.set_max_image_bytes(
-                        usize::try_from(live_config.max_image_size_bytes).unwrap_or(usize::MAX),
-                    );
-                    monitor.set_max_file_bytes(
-                        usize::try_from(live_config.max_file_size_bytes).unwrap_or(usize::MAX),
-                    );
-                    handle_tick(&mut monitor, &db, &local_key_arc, &live_config, &private_mode, &new_item_tx, &local_device_id).await;
-                    cleanup_ticks += 1;
-                    sensitive_cleanup_ticks += 1;
-
-                    // Sensitive item TTL: run every SENSITIVE_CLEANUP_INTERVAL_MS.
-                    let do_sensitive = sensitive_ttl_ms.is_some()
-                        && sensitive_cleanup_ticks
-                            >= (SENSITIVE_CLEANUP_INTERVAL_MS
-                                / current_poll_ms.max(1))
-                            .max(1);
-                    if do_sensitive {
-                        sensitive_cleanup_ticks = 0;
-                    }
-                    // General expires_at TTL: run every GENERAL_CLEANUP_INTERVAL_MS.
-                    let do_general =
-                        cleanup_ticks >= (GENERAL_CLEANUP_INTERVAL_MS / current_poll_ms.max(1)).max(1);
-                    if do_general {
-                        cleanup_ticks = 0;
-                    }
-                    // daemon-core L1: offload the synchronous rusqlite deletes.
-                    run_ttl_cleanup(&db, sensitive_ttl_ms.unwrap_or(0), do_sensitive, do_general).await;
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    tracing::info!("SIGINT received, shutting down");
-                    // D3: broadcast shutdown to all tasks.
-                    shutdown_token.cancel();
-                    break;
-                }
-                _ = &mut sigterm_fut => {
-                    tracing::info!("SIGTERM received, shutting down");
-                    // D3: broadcast shutdown to all tasks.
-                    shutdown_token.cancel();
-                    break;
-                }
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Run the daemon until `Ctrl+C`, `SIGTERM`, or `quit_flag` is set.
@@ -1766,43 +1278,7 @@ use AAD_SCHEMA_VERSION_V4 as _;
 #[allow(unused_imports)]
 use ITEM_KEY_VERSION_CURRENT as _;
 
-#[cfg(test)]
-mod lifecycle_tests {
-    use super::*;
-
-    // crh3.78: regression guard for the lifecycle helpers extracted from the
-    // `run_with_quit_flag` god-function. These pin the extracted symbols'
-    // existence and their behaviour-preserving contracts (no panic, no error
-    // on the empty-DB startup paths).
-
-    #[test]
-    fn init_reporter_returns_usable_reporter() {
-        // With no COPYPASTE_SENTRY_DSN baked in (OSS/CI builds) this returns a
-        // NoopReporter; report_and_log must be a safe no-op.
-        let reporter = init_reporter();
-        report_and_log(
-            &*reporter,
-            ReportableError::new(
-                env!("CARGO_PKG_NAME"),
-                env!("CARGO_PKG_VERSION"),
-                "test.init_reporter",
-                OsTag::current(),
-            ),
-        );
-    }
-
-    #[tokio::test]
-    async fn startup_ttl_purge_is_noop_on_empty_db() {
-        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
-        let config = AppConfig::default();
-        // Must complete without panicking on an empty database.
-        run_startup_ttl_purge(&db, &config).await;
-    }
-
-    #[tokio::test]
-    async fn poison_row_sweep_is_noop_on_empty_db() {
-        let db = Arc::new(Mutex::new(Database::open_in_memory().expect("open db")));
-        // No poison rows in a fresh DB → sweep completes cleanly.
-        run_poison_row_sweep(&db).await;
-    }
-}
+// CopyPaste-vp63.12: `lifecycle_tests` (init_reporter_returns_usable_reporter,
+// startup_ttl_purge_is_noop_on_empty_db, poison_row_sweep_is_noop_on_empty_db)
+// moved to `bootstrap.rs` alongside the functions they pin
+// (init_reporter/run_startup_ttl_purge/run_poison_row_sweep now live there).

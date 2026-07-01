@@ -126,3 +126,32 @@ pub(super) fn load_initial_token(
 ) -> Option<String> {
     load_cached_token(local_key, device_id)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::relay::testutil::{skey, test_client};
+
+    /// register parses a 201 + auth_token. Uses the mockito 0.31 global server
+    /// (`mockito::mock` + `mockito::server_url`), so it is `#[serial]`.
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn register_parses_201_auth_token() {
+        use copypaste_core::derive_relay_inbox_id;
+        let k = skey("register-test-pass");
+        let inbox = derive_relay_inbox_id(&k);
+        let m = mockito::mock("POST", "/devices")
+            .with_status(201)
+            .with_header("content-type", "application/json")
+            .with_body(format!(
+                r#"{{"device_id":"{inbox}","auth_token":"deadbeefdeadbeefdeadbeefdeadbeef","expires_at":"2027-01-01T00:00:00Z"}}"#
+            ))
+            .create();
+
+        let token = register(&test_client(), &mockito::server_url(), &k, "test-device")
+            .await
+            .expect("register ok");
+        assert_eq!(token, "deadbeefdeadbeefdeadbeefdeadbeef");
+        m.assert();
+    }
+}

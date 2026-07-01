@@ -161,4 +161,92 @@ mod tests {
             "sensitive item must be omitted from the catch-up set: {ids:?}"
         );
     }
+
+    /// CopyPaste-716: catchup_items must use the connecting peer's pairwise
+    /// key, not the first peer's key. With 2+ peers, the catch-up set for peer
+    /// C must decrypt under K_AC only, not K_AB.
+    ///
+    /// This is the equivalent catch-up path test for the fanout fix covered by
+    /// `sync_orch::rekey::tests::three_device_fanout_uses_per_peer_key_not_first_peer_key`.
+    /// Relocated here (ADR-017, CopyPaste-vp63.3) from the former flat
+    /// `sync_orch/mod.rs` test module.
+    #[tokio::test]
+    async fn catchup_items_uses_per_peer_key_not_first_peer_key() {
+        use base64::Engine as _;
+        use copypaste_core::{
+            build_item_aad_v2, decrypt_from_cloud, derive_v2, encrypt_item_with_aad, insert_item,
+            AAD_SCHEMA_VERSION_V4,
+        };
+        use tempfile::tempdir;
+
+        let seed_a = [0x11u8; 32];
+        let k_ab: [u8; 32] = [0x33u8; 32];
+        let k_ac: [u8; 32] = [0x44u8; 32];
+        let k_ab_b64 = base64::engine::general_purpose::STANDARD.encode(k_ab);
+        let k_ac_b64 = base64::engine::general_purpose::STANDARD.encode(k_ac);
+        let fp_b = "bb:bb";
+        let fp_c = "cc:cc";
+
+        let dir_a = tempdir().unwrap();
+        let peers_a = dir_a.path().join("peers.json");
+        std::fs::write(
+            &peers_a,
+            format!(
+                r#"[
+                    {{"fingerprint":"{fp_b}","added_at":1,"address":"127.0.0.1:9","sync_key_b64":"{k_ab_b64}"}},
+                    {{"fingerprint":"{fp_c}","added_at":1,"address":"127.0.0.1:8","sync_key_b64":"{k_ac_b64}"}}
+                ]"#
+            ),
+        )
+        .unwrap();
+        let crypto_a = SyncCrypto::new(seed_a, peers_a);
+
+        // Insert one text item into the DB encrypted under A's v2 key.
+        let db = Database::open_in_memory().expect("in-memory DB");
+        let item_id = "catchup-716-item".to_string();
+        let plaintext = b"catchup per-peer key test";
+        let a_v2 = derive_v2(&seed_a);
+        let aad_a = build_item_aad_v2(
+            &copypaste_core::ItemId::from(item_id.as_str()),
+            AAD_SCHEMA_VERSION_V4,
+            2,
+        );
+        let (nonce_a, ct_a) =
+            encrypt_item_with_aad(plaintext, &a_v2, &aad_a).expect("A local encrypt");
+
+        let mut local = copypaste_core::ClipboardItem::new_text(ct_a, nonce_a.to_vec(), 1);
+        local.item_id = item_id.clone().into();
+        insert_item(&db, &local).unwrap();
+
+        // Catch-up for peer B: items must be encrypted under K_AB.
+        let items_for_b = catchup_items(&db, "device-A", &crypto_a, fp_b);
+        assert_eq!(items_for_b.len(), 1, "catch-up for B must contain our item");
+        let blob_b = items_for_b[0].content.as_ref().unwrap().clone();
+        let key_b = copypaste_core::SyncKey::from_bytes(k_ab);
+        let dec_b = decrypt_from_cloud(&key_b, &item_id, &blob_b)
+            .expect("B's catch-up blob must decrypt under K_AB");
+        assert_eq!(
+            dec_b, plaintext,
+            "B recovers original plaintext from catch-up"
+        );
+
+        // Catch-up for peer C: items must be encrypted under K_AC.
+        let items_for_c = catchup_items(&db, "device-A", &crypto_a, fp_c);
+        assert_eq!(items_for_c.len(), 1, "catch-up for C must contain our item");
+        let blob_c = items_for_c[0].content.as_ref().unwrap().clone();
+        let key_c = copypaste_core::SyncKey::from_bytes(k_ac);
+        let dec_c = decrypt_from_cloud(&key_c, &item_id, &blob_c)
+            .expect("C's catch-up blob must decrypt under K_AC");
+        assert_eq!(
+            dec_c, plaintext,
+            "C recovers original plaintext from catch-up"
+        );
+
+        // Key isolation: C's catch-up blob must NOT decrypt under K_AB.
+        assert!(
+            decrypt_from_cloud(&key_b, &item_id, &blob_c).is_err(),
+            "C's catch-up blob (K_AC) must not decrypt under K_AB — \
+             this would be the CopyPaste-716 bug if it succeeded"
+        );
+    }
 }

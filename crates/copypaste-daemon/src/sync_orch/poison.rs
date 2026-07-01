@@ -94,3 +94,79 @@ pub fn sweep_poison_rows(db: &Database) -> Result<usize, anyhow::Error> {
     }
     Ok(n)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// e5oe: sweep_poison_rows must also delete the matching clipboard_fts row(s)
+    /// in the same transaction so no orphaned searchable plaintext accumulates.
+    #[test]
+    fn sweep_poison_rows_removes_fts_orphan() {
+        use copypaste_core::{insert_item_with_fts, Database};
+
+        let db = Database::open_in_memory().expect("in-memory DB");
+
+        // Insert a text item WITH an FTS row, then corrupt it into a poison row
+        // by clearing content_nonce (simulates a sync-key-wrapped blob that was
+        // stored before the nonce was applied — exactly the pattern sweep detects).
+        let item = copypaste_core::ClipboardItem {
+            id: "poison-id".to_string().into(),
+            item_id: "poison-item-id".to_string().into(),
+            content_type: "text".to_string(),
+            content: Some(b"ciphertext without nonce".to_vec()),
+            content_nonce: Some(vec![0u8; 24]), // valid on insert …
+            blob_ref: None,
+            is_sensitive: false,
+            is_synced: true,
+            lamport_ts: 1,
+            wall_time: 1_700_000_000_000,
+            expires_at: None,
+            app_bundle_id: None,
+            content_hash: None,
+            origin_device_id: "remote".to_string(),
+            key_version: 2,
+            pinned: false,
+            pin_order: None,
+            thumb: None,
+            deleted: false,
+        };
+        insert_item_with_fts(&db, &item, "secret content text").expect("insert");
+
+        // Manually NULL-out the nonce to turn this into a poison row.
+        db.conn()
+            .execute(
+                "UPDATE clipboard_items SET content_nonce = NULL WHERE id = ?1",
+                rusqlite::params!["poison-id"],
+            )
+            .expect("corrupt nonce");
+
+        // FTS row must be present before the sweep.
+        let fts_before: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                rusqlite::params!["poison-id"],
+                |r| r.get(0),
+            )
+            .expect("fts count before");
+        assert_eq!(fts_before, 1, "FTS row must exist before sweep");
+
+        let swept = sweep_poison_rows(&db).expect("sweep");
+        assert_eq!(swept, 1, "exactly one poison row must be swept");
+
+        // After the sweep the FTS row must also be gone (e5oe fix).
+        let fts_after: i64 = db
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM clipboard_fts WHERE id = ?1",
+                rusqlite::params!["poison-id"],
+                |r| r.get(0),
+            )
+            .expect("fts count after");
+        assert_eq!(
+            fts_after, 0,
+            "sweep_poison_rows must delete the FTS row to prevent orphaned searchable plaintext (e5oe)"
+        );
+    }
+}
