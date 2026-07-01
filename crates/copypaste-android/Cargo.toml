@@ -40,8 +40,8 @@ copypaste-sync = { path = "../copypaste-sync" }
 # async bootstrap pairing. Multi-thread RT is required because the loopback
 # bootstrap test (and real pairing) drives concurrent TLS read/write tasks.
 tokio = { workspace = true }
-uniffi = { version = "0.27", features = ["bindgen", "cli"] }
-thiserror = "1"
+uniffi = { version = "0.32", features = ["bindgen", "cli"] }
+thiserror = "2"
 # Stack-local key copies are wrapped in Zeroizing so they are scrubbed on
 # scope exit, matching the project's "no lingering key material" convention.
 zeroize.workspace = true
@@ -85,7 +85,7 @@ tracing.workspace = true
 rusqlite = { version = "0.32", features = ["bundled-sqlcipher-vendored-openssl", "backup"] }
 
 [build-dependencies]
-uniffi = { version = "0.27", features = ["build"] }
+uniffi = { version = "0.32", features = ["build"] }
 
 [dev-dependencies]
 # getrandom 0.4 (pulled by tempfile ≥3.14) requires Rust 1.85; safe at MSRV 1.96. Pin removed 2026-06-14.
