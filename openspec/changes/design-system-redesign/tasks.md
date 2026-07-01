@@ -148,6 +148,15 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
 - [ ] 2.12 Add Dialog a11y tests: initial focus lands on the first focusable element (or the
       container fallback), Tab/Shift+Tab cycle correctly, Escape and backdrop-click dismiss,
       focus restores to the trigger element on close, and scroll-lock engages/releases correctly.
+      Also assert the shared scroll-lock is **reference-counted** (two stacked dialogs; closing the
+      inner one does NOT restore body scroll while the outer is still open — design.md Decision 5/M5).
+- [ ] 2.13 Land a MINIMAL dev-only gallery shell now (design.md Decision 7/S2), not deferred to
+      slice 6: the DEV+MOCK gallery route/branch (dynamic-import, dev-only nav — per 6.1/6.2) plus
+      stories for the slice-2 primitives (buttons, toggle, segmented, field, chips, Dialog) and the
+      production-exclusion chunk-graph check (6.12) wired early. Each later slice (3–5) then ADDS its
+      stories, so every component gains visual/regression coverage as it lands rather than only at
+      slice 6. Keep it intentionally minimal — deterministic rendering/inspection of the real shared
+      components, NOT a parallel browser product or Storybook replacement.
 
 ## Slice 3 — History + Popup via shared clipboard-presentation units
 
@@ -324,7 +333,10 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       built `dist/` output for the gallery view's unique string content, and (b) inspect the
       emitted Rollup chunk graph/manifest to confirm no production-entry-reachable chunk contains
       the gallery module's file path (design.md Decision 6/B2) — the string check alone is not
-      sufficient.
+      sufficient. Also assert the emitted CSS topology from the ACTUAL Vite build (design.md
+      Decision 2/M6): production main+popup entries share **one** emitted stylesheet, and any
+      gallery-only CSS appears only in the dev-gated gallery chunk, never in a production entry —
+      source `@import` order alone does not guarantee the emitted chunk topology.
 - [ ] 6.13 Write the automated Playwright suite (design.md Decision 13/G4/G5), replacing the
       "manual verification only" posture: main window and popup in dark and light theme; the
       accent/on-accent contrast matrix for the critical-component subset; modal keyboard/focus

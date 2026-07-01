@@ -90,13 +90,17 @@ Existing infra we build on, unchanged:
   explicitly a separate, later migration; out of scope here.
 - Any change to IPC contracts, daemon behavior, or `copypaste-core`/`copypaste-ipc` types (including
   the eventual `source_bundle_id` field that would make source-app icons fully data-driven).
-- **Inventing new interaction behavior.** This change does not add new state machines or new
-  interaction models. It does, however, **wire already-existing behavior** into shared primitives
-  where today it is duplicated or partially applied — see the component inventory table below and
-  Decisions 5 (Dialog primitive) and 7 (sensitive-content contract) for exactly which behaviors
-  already exist unchanged, which are newly composed from existing hooks, and which are genuinely
-  new (there is exactly one genuinely new behavior: cross-window live theme sync, Decision 9,
-  because no two-window state channel exists today).
+- **Inventing large new interaction models.** This change adds no new state machines. Most behavior
+  is **existing** and merely (re)wired into shared primitives (see the component inventory + Decisions
+  5 and 9). It does, however, **add or standardize several genuinely new behaviors** (corrected
+  inventory, resolves M4/M5): (1) modal **scroll-lock** — new, and it MUST be stack-safe/
+  reference-counted (Decision 5); (2) **best-effort cross-window theme sync** (Decision 4); (3) **tab
+  arrow-key navigation** for segmented/tab controls, if not already present (Decision 13/X5); (4) a
+  typed **disclosure-header keyboard contract** (`aria-expanded`/`aria-controls`) for expandable rows
+  (Decision 3); (5) a **uniform inline device-action error presentation** (Decision 16 — presentation
+  only, semantics unchanged); (6) the **masked-sensitive accessible-name fix** (Decision 9 — new
+  correct behavior replacing a P0 leak). These are intentional and are called out so the risk
+  analysis is honest — not minimized as "one small change."
 - A generic Storybook-style tool — the gallery is a bespoke in-app view, not a new dependency.
 - Speculative component APIs with no current consumer (e.g. `devcard` grid variant, `devcard`
   component itself) do not ship in production CSS ahead of a real caller — see Decision 15.
@@ -258,8 +262,24 @@ composed** by `ConfirmModal`. This change does not invent that behavior; it (a) 
 `role`/`aria-modal`/portal/backdrop-dismiss wiring that today lives inline in `ConfirmModal` into a
 reusable `Dialog` primitive so `SasPairingModal`/`RevokeConfirmDialog`/`DetailsModal` compose the
 same contract instead of re-implementing subsets of it, and (b) adds scroll-lock, which is genuinely
-new. The design.md non-goal "no new component behavior" from the prior draft is corrected here:
-scroll-lock is the one small new behavior; everything else is (re)wiring of existing hooks.
+new. **Scroll-lock is genuinely new and MUST be stack-safe / reference-counted** — a shared counter
+so nested/stacked dialogs don't let one dialog's cleanup restore `body` overflow while another
+overlay is still open. Everything else in the Dialog primitive is (re)wiring of existing hooks; the
+full list of genuinely-new behaviors across the change is in Goals/Non-Goals (resolves M4).
+
+**Per-dialog compatibility matrix (resolves M5)** — capture current-vs-target BEFORE extracting the
+primitive, so consolidation is behavior-preserving:
+
+| Dialog | Portal | Escape | Backdrop dismiss | Initial focus | Pending/async close | Scroll-lock |
+|---|---|---|---|---|---|---|
+| `ConfirmModal` | `createPortal(body)` (existing) | yes (existing) | yes (existing) | first focusable (existing) | n/a | target: shared ref-counted |
+| `SasPairingModal` | verify current | verify | verify | verify | pairing in flight → verify current | target: shared ref-counted |
+| `RevokeConfirmDialog` | verify current | yes (5917.9) | verify | verify | `revokeBusy` pending (existing) | target: shared ref-counted |
+| `DetailsModal` | verify current | verify | verify | verify | n/a | target: shared ref-counted |
+
+"verify current" = read the file and record actual behavior before migration; the target column is
+the unified `Dialog` contract. No dialog's observable behavior may regress (Escape/backdrop/focus
+restoration/pending) — only the implementation is shared.
 
 ### 6. Preview gallery: DEV-only dynamic import, not a reachable production `ViewId`
 **Decision:** Split `ViewId` into `ProductionViewId = "history" | "devices" | "settings" | "about" |
@@ -393,11 +413,18 @@ presentation state, not a data-redaction mechanism. Explicitly, while masked:
   not a security boundary against a user who already has clipboard access to their own history."
 - **Auto-re-mask on window blur** — already implemented in `useSensitiveReveal` (window `blur` event
   resets `revealed` to `false`); this change does not alter that behavior.
-- **Optional reveal timeout** — a new, opt-in behavior: after N seconds of being revealed with no
-  further interaction, the item re-masks automatically (in addition to the existing blur-triggered
-  re-mask), configurable via an existing-pattern `UIPrefs` boolean/number pair, defaulting off (the
-  blur-based re-mask is the primary safeguard; the timeout is a defense-in-depth option, not
-  required for every user).
+- **Optional reveal timeout — full contract (kept per user directive, fully specified, resolves M3):**
+  a new opt-in `UIPrefs` field `sensitiveRevealTimeoutSec: number` (additive field, same no-migration
+  rules as Decision 10). **Allowed values:** integer `0`–`300`; **default `0` = disabled** (the
+  blur-based re-mask remains the primary safeguard; the timeout is defense-in-depth). **Validation:**
+  non-number / out-of-range → clamp to `[0,300]` (or default `0` if not a finite number), per the
+  Decision-10 per-field validation. **Settings UI:** a labeled control in `DisplayTab.tsx`'s Privacy
+  group (a slider or number field, `0` shown as "Off"). **Timer lifecycle:** when `> 0` and an item
+  is revealed, start a per-item timer; **reset it on any interaction with that item** (hover, focus,
+  scroll into the item); on expiry, re-mask that item; **clear on unmount, on manual re-mask, and on
+  the existing window-blur re-mask** (whichever comes first). **Multi-item:** each revealed item owns
+  an **independent** timer — revealing item B does not reset item A's timer, and re-masking is
+  per-item, not global.
 **Rationale (resolves X6):** the prior draft left "does masking leak information" as an implicit
 assumption. This decision makes the security posture explicit and testable: DOM inspection,
 screenshots, and browser selection can all reveal the underlying value while masked — that is
