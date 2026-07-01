@@ -113,7 +113,9 @@ spec tracker even though the underlying app code already exists.)
   features and ship in production. Only the **preview-gallery view and the shared typed fixture
   factories** (used by both mock IPC and the gallery) are DEV-gated (dynamic-import) so they never
   reach the production module graph.
-- **Dependencies**: none added — plain CSS only, no Tailwind, no CSS-in-JS, no new npm packages.
+- **Dependencies**: exactly **ONE** new dependency, and it is **DEV/test-only** —
+  `@axe-core/playwright` (used by the a11y gate; never shipped in the app bundle). No runtime/
+  production packages, no Tailwind, no CSS-in-JS; styling is plain CSS only.
 - **Systems**: desktop main window (`index.html`) and quick-paste popup (`popup.html`); no changes
   to `copypaste-daemon`, IPC contracts, or the Android app (parity is a documented follow-up in
   STYLEGUIDE.md §11 but out of scope for this change). The packaged desktop product target is

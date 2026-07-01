@@ -282,8 +282,12 @@ the unified `Dialog` contract. No dialog's observable behavior may regress (Esca
 restoration/pending) — only the implementation is shared.
 
 ### 6. Preview gallery: DEV-only dynamic import, not a reachable production `ViewId`
-**Decision:** Split `ViewId` into `ProductionViewId = "history" | "devices" | "settings" | "about" |
-"logs"` (unchanged today) and `DevViewId = ProductionViewId | "gallery"`. `App.tsx`'s view registry
+**Decision:** `ProductionViewId = "history" | "devices" | "settings" | "about" | "logs"` **remains
+the store's and app's view type, unchanged**. The gallery is **NOT** added to the store's `view`,
+and **no `DevViewId` is introduced into `store.ts`** (no exported `DevViewId`, no `"gallery"` member
+in the store union). Gallery selection is a **local, non-store dev-only navigation state**
+(a `DEV && MOCK`-gated local flag / `GallerySelection` inside `App.tsx`, or a `?view=gallery` URL
+check) — it never becomes first-class app state. `App.tsx`'s view registry
 stays a `Record<ProductionViewId, …>` — the gallery is **never** a static entry in it. Instead, when
 `import.meta.env.DEV && MOCK` is true and the current view is `"gallery"`, `App.tsx` renders a
 component obtained via `const { GalleryView } = await import("./views/GalleryView")` (a dynamic
@@ -496,8 +500,11 @@ accent/on-accent contrast matrix (critical-component subset, Decision 7), modal 
 behavior (trap, Escape, backdrop, restore-on-close), `prefers-reduced-motion: reduce` (no visible
 animation), long-text overflow (ellipsis, no row-height growth), production gallery-exclusion
 (chunk-graph check, Decision 6), automated token-contrast checks (Decision "X1" below), and an
-accessibility scan using whatever tool is already approved in the repo's toolchain (if none is
-already approved, this is flagged rather than silently skipped). Manual `?mock=1` walkthroughs
+accessibility scan using **`@axe-core/playwright`** — the concrete, non-optional tool this change
+adds as the **single new DEV dependency** (test-only, never shipped; recorded under Impact /
+Dependencies). It is NOT "whatever tool is already approved" — the tool is named here so the gate is
+real. (Critical keyboard/focus behavior additionally needs packaged-WebView coverage per the
+packaged-Tauri gate below, since browser and Tauri behavior can differ.) Manual `?mock=1` walkthroughs
 (`ui-verifier`-style) remain valuable as **exploratory** verification but are not, by themselves,
 the completion bar — `tasks.md` slice 6 aligns with this (the former "spot-check only" language for
 tasks 10.x is removed; see the rewritten task list).
@@ -577,11 +584,12 @@ for fallback work.
 baseline for: popup open→first-render latency (via the existing Playwright/manual timing harness or
 a new lightweight `performance.now()` instrumentation point around popup mount) and total CSS+JS
 bundle size for both the main window and popup entry chunks. Acceptance criteria for the completed
-change: popup open/render latency does not regress beyond a stated threshold (10% or a fixed ms
-budget, whichever is looser — exact number recorded alongside the measured baseline in slice 1's
-task output, not invented here without a baseline in hand) and CSS+JS bundle size delta stays under
-a stated cap (recorded the same way). These budgets are gated as acceptance criteria for slice 6
-(final verification), not aspirational.
+change (thresholds FIXED NOW, matching `tasks.md` 1.18 — not deferred to baseline): popup-open
+**p95 regression ≤ max(15%, +40ms)** over baseline (measured p50/p95 across **10 warm runs** via a
+`performance.now()` mark around popup mount); **CSS gzip delta ≤ 20 KB** and **JS gzip delta ≤ 30 KB**
+per entry. Only the baseline *numbers* are recorded in slice 1; the acceptance *thresholds* above are
+fixed here. Any exception requires documented reviewer sign-off in the slice-6 PR. These budgets are
+gated as acceptance criteria for slice 6 (final verification), not aspirational.
 **Rationale (resolves A7):** the review correctly notes the popup pays for every main-window
 selector in one shared stylesheet; that's an accepted trade-off (Decision 2's "one emitted
 stylesheet" goal) but its cost must be measured, not assumed acceptable.
@@ -648,7 +656,7 @@ from a new shared primitive; `B` = behavior changed (see decision cited); `D` = 
 | `GlideHighlight.tsx` | U | Class-only; runtime-computed geometry stays inline style/CSS var (Decision 12). |
 | `HighlightedText.tsx` | U | Class-only. |
 | `DisplayTab.tsx` | B | Rebuilds Appearance section: Theme + Accent + Translucency, bound to `UIPrefs`. |
-| `store.ts` | B | `UIPrefs` additive fields + per-field validation (no migration), `ProductionViewId`/`DevViewId` split (Decisions 6, 10). |
+| `store.ts` | B | `UIPrefs` additive fields + per-field validation (no migration). `view` stays `ProductionViewId` (in-memory, NO `DevViewId`, no `"gallery"`) — gallery is a local dev-only nav branch (Decisions 6, 10). |
 | `index.html`, `popup.html` | B | Pre-paint bootstrap script added (Decision 4). |
 | `GalleryView/*` (new) | G | DEV-only, dynamic-import gated (Decision 6). |
 | Shared fixture factories (new) | G | DEV-only, shared with `mockIpc.ts` (Decision 7). |
@@ -716,8 +724,7 @@ so a real-world bad-value path is observable rather than silent.
 ## Open Questions
 
 None remaining. All nine items the user resolved, plus the additional review findings this document
-self-resolves, are captured as normative Decisions above (see Decisions 1–16). Any residual
-uncertainty (e.g. the exact numeric performance-budget thresholds in Decision 15, which depend on a
-baseline measurement not yet taken) is called out inline in its own Decision rather than left in a
-separate Open Questions section, and is tracked as a task in `tasks.md` slice 1/6 rather than a
-blocking question for the user.
+self-resolves, are captured as normative Decisions above (see Decisions 1–16). The performance
+acceptance **thresholds are fixed** (Decision 15: p95 ≤ max(15%, +40ms), CSS gzip ≤ 20 KB, JS gzip ≤
+30 KB); only the pre-change baseline *numbers* remain to be measured in slice 1 — that is a task, not
+an open threshold question. Nothing here is left as a blocking open question for the user.

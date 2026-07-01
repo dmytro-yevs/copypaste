@@ -242,8 +242,9 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       digit pills) patterns.
 - [ ] 4.7 Wire `RevokeConfirmDialog.tsx` (already `Dialog`-composed, slice 2) with danger confirm
       styling, naming the specific device.
-- [ ] 4.8 Wire the Unpair/Revoke footer to equal-width `.btn.btn--danger` per device row, per the
-      Decision 16 table.
+- [ ] 4.8 Wire the destructive action entry points per Decision 16 (N4/M1): **Unpair** and **Revoke**
+      as equal-width `.btn.btn--danger` row buttons, with **Revoke & rotate key** available inside the
+      Revoke dialog (`RevokeConfirmDialog`, passphrase ≥ 8) — do NOT drop the third action.
 - [ ] 4.9 Wire Devices' empty state ("No devices paired") to `.empty` with the accent-tinted icon
       variant.
 - [ ] 4.10 Transport shown by `.tpill` chip only, never by row background/border color; add a
@@ -364,7 +365,13 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       error; preferences load and apply; correct theme/accent/translucency on BOTH the main window
       and the popup (incl. the packaged next-open cross-window check from 1.15/1.17); popup opens and
       renders; IPC initializes; and modal keyboard/focus behavior works in the packaged WebView
-      (where behavior can differ from Chromium). Wire this as a required gate alongside 6.14.
+      (where behavior can differ from Chromium). **Operationalize it (round-4 M5), don't just declare
+      it:** slice 6 adds a concrete `pnpm test:tauri-smoke` script in `crates/copypaste-ui/package.json`
+      that runs `pnpm tauri build` (or reuses the artifact), launches the packaged app, and asserts the
+      checks above (Tauri/WebDriver or launch-and-probe harness), plus a **macOS CI job** (the only
+      runner with Tauri build/entitlement capability) running it as a REQUIRED release gate. The
+      existing `scripts/smoke_test.sh` covers daemon/e2e on a release build; this new script is the
+      packaged-UI smoke. Browser Playwright (6.13/6.14) remains supplemental.
 
 ## Cross-cutting cleanup (applies across slices; verify at the end of slice 6)
 
