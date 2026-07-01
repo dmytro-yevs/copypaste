@@ -139,12 +139,16 @@ class FgsDiscoveryPortPollTest {
     // ── Source-scan: startFgsDiscovery must contain the port=0 guard ──────────
 
     /**
-     * Structural guard: [ClipboardService.startFgsDiscovery] must have a
+     * Structural guard: [P2pListenerController.startFgsDiscovery] must have a
      * `syncPort == 0` (or `port == 0`) early-return so a zero port is NEVER
      * forwarded to [startDiscovery].
      *
      * This catches the j2vf regression pattern (the guard being removed) even
      * when the pure helper tests above pass.
+     *
+     * CopyPaste-vp63.32: `startFgsDiscovery` was extracted verbatim from
+     * [ClipboardService] into [P2pListenerController] — this test now scans
+     * the new home of the method.
      */
     @Test
     fun `startFgsDiscovery contains the syncPort equals 0 guard`() {
@@ -163,12 +167,12 @@ class FgsDiscoveryPortPollTest {
         requireNotNull(moduleRoot) { "Could not locate module root from $anchor" }
         val source = java.io.File(
             moduleRoot,
-            "src/main/java/com/copypaste/android/ClipboardService.kt",
+            "src/main/java/com/copypaste/android/P2pListenerController.kt",
         ).readText()
 
         // Extract the startFgsDiscovery body.
         val fgsBody = source
-            .substringAfter("private fun startFgsDiscovery()")
+            .substringAfter("fun startFgsDiscovery()")
             .substringBefore("/**") // ends at the next KDoc block
 
         assertTrue(
@@ -181,6 +185,9 @@ class FgsDiscoveryPortPollTest {
     /**
      * Structural guard: the port-poll loop must use exponential backoff,
      * not a fixed sleep, so it responds quickly when the listener binds promptly.
+     *
+     * CopyPaste-vp63.32: scans [P2pListenerController.kt] (extracted home of
+     * `startFgsDiscovery`), not [ClipboardService.kt].
      */
     @Test
     fun `startFgsDiscovery uses exponential backoff in port-poll loop`() {
@@ -199,11 +206,11 @@ class FgsDiscoveryPortPollTest {
         requireNotNull(moduleRoot) { "Could not locate module root from $anchor" }
         val source = java.io.File(
             moduleRoot,
-            "src/main/java/com/copypaste/android/ClipboardService.kt",
+            "src/main/java/com/copypaste/android/P2pListenerController.kt",
         ).readText()
 
         val fgsBody = source
-            .substringAfter("private fun startFgsDiscovery()")
+            .substringAfter("fun startFgsDiscovery()")
             .substringBefore("/**")
 
         assertTrue(
