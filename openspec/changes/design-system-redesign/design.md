@@ -450,6 +450,14 @@ migrate. Stale appearance keys from the deleted Liquid-Glass era are already dro
 `knownKeys` whitelist and stay dropped. (Keeping the current key rather than bumping to a new one is
 deliberate: with no back-compat requirement, a version bump would only add migration code for no
 benefit.)
+**Existing legacy migration is REMOVED (explicit user decision, resolves round-5 B2):** `store.ts`
+today reads `copypaste-ui-prefs-v3`/`v2`/`v1` and forwards them to v4. Per the "no back-compat /
+don't care about previous versions" directive, **these v1/v2/v3 legacy-key migration branches are
+deleted** in this change. **Accepted impact, stated up front:** a user whose prefs are still under an
+old v1–v3 key (never re-saved under v4) loses ALL their UI prefs (not just appearance) — they reset
+to defaults. This is intentional cleanup, not an oversight; it is called out as its own task so an
+implementer removes the branches deliberately rather than by inference. The `v4` key itself remains
+the single current key.
 **Runtime validation (robustness only, NOT migration):** `loadPrefs()` validates the three new
 fields per-field so a corrupt stored value can never reach the DOM, each defaulting independently
 without discarding the others: `theme` must be `"dark"|"light"` (else `"dark"`), `accent` one of the

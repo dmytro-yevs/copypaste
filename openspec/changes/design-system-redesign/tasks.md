@@ -46,6 +46,12 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       Do NOT add a `"gallery"` member to the store's `view` type — `view` stays the production union
       and is in-memory only (NOT persisted). The gallery is a dev-only navigation branch handled
       outside the production view registry (design.md Decision 6/B3); no `DevViewId` in the store.
+- [ ] 1.10a REMOVE the existing legacy prefs migration branches in `store.ts` (reads of
+      `copypaste-ui-prefs-v3`/`v2`/`v1` that forward to v4) as an EXPLICIT part of the no-back-compat
+      policy (design.md Decision 10/round-5 B2). **Accepted, documented impact:** a user whose prefs
+      are still under an old v1–v3 key (never re-saved under v4) loses ALL UI prefs (not only
+      appearance) → reset to defaults. This is intentional cleanup — do it deliberately, not by
+      inference. The `v4` key remains the single current key.
 - [ ] 1.11 Add per-field runtime validation to the loader (design.md Decision 10): `theme`
       must be `"dark"`/`"light"` else default; `accent` must be one of the 6 known values else
       default; `translucency` must be `boolean` else default `true`; an invalid field never
@@ -78,7 +84,12 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       `theme-bootstrap.js` loads under the Tauri asset protocol (URL resolution correct for both
       windows), applies `data-theme`/`data-accent`/`data-translucency` to `<html>` BEFORE first
       content paint, and produces NO CSP violation. This is a first-class release-gate check, not a
-      dev-only assertion.
+      dev-only assertion. **Testable ordering mechanism (round-5 M1):** the bootstrap sets
+      `document.documentElement.dataset.themeBootstrapped = "1"` immediately; the React module
+      entry asserts that marker was ALREADY present at startup (proving script order without needing
+      pixel-level paint timing); and the packaged smoke also asserts no stale static
+      `data-palette`/`data-density`/`data-motion`/`data-contrast` attributes remain in the shipped
+      HTML.
 - [ ] 1.16 In `src/App.tsx` and `src/popup/Popup.tsx` (or their `main.tsx`), add a `useEffect`
       that re-applies `prefs.theme`/`.accent`/`.translucency` to `<html>` on mount and on change
       (live updates after the bootstrap has already handled first paint).
@@ -134,6 +145,12 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       focus trap + Escape + backdrop-dismiss (configurable) + focus restoration (all via
       `useFocusTrap`, unchanged), plus new scroll-lock on the underlying view while open
       (design.md Decision 5 — the one genuinely new behavior in this primitive).
+- [ ] 2.7a Pre-migration behavior recording (round-5 M5 — fill the design.md Decision 5 matrix's
+      "verify current" cells BEFORE refactoring, so consolidation is provably behavior-preserving):
+      read each of `ConfirmModal`, `SasPairingModal`, `RevokeConfirmDialog`, `DetailsModal` and record
+      its CURRENT portal strategy, Escape handling, backdrop-dismiss policy, initial-focus target,
+      pending/async-close behavior, and any existing scroll-lock. This is a checklist artifact, not an
+      inference — the migration tasks below must preserve each recorded behavior.
 - [ ] 2.8 Migrate `ConfirmModal.tsx` to compose `Dialog` (behavior-preserving refactor — its
       existing focus-trap/portal/backdrop/Escape behavior is unchanged, only the shared wrapper
       changes).
@@ -310,6 +327,10 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
 - [ ] 6.5 Add `src/lib/fixtures/` typed fixture factories (e.g. `makeHistoryEntry`,
       `makeDevice`) shared by both `mockIpc.ts` and the gallery, with per-story override support
       (design.md Decision 7/G3); ensure these are DEV-only and excluded from production.
+      **Import-boundary rule (round-5 M2):** production code MUST NOT import from `src/lib/fixtures/**`
+      — only `src/lib/mockIpc.ts` and `src/views/GalleryView/**` may import it (both already DEV/MOCK
+      dynamic-import-gated). Enforce with BOTH the production chunk-graph check (6.12) AND an
+      `rg`/lint rule failing on any `src/lib/fixtures` import outside those two allowed consumers.
 - [ ] 6.6 Build gallery sections for every primitive: buttons (all variants/sizes/disabled/
       pending), icon buttons, toggle, segmented control, field, chips/badges/pills, tiles (all 11
       kinds + unknown) — each section with a deterministic `id` for deep-linking (design.md
@@ -335,9 +356,11 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       emitted Rollup chunk graph/manifest to confirm no production-entry-reachable chunk contains
       the gallery module's file path (design.md Decision 6/B2) — the string check alone is not
       sufficient. Also assert the emitted CSS topology from the ACTUAL Vite build (design.md
-      Decision 2/M6): production main+popup entries share **one** emitted stylesheet, and any
-      gallery-only CSS appears only in the dev-gated gallery chunk, never in a production entry —
-      source `@import` order alone does not guarantee the emitted chunk topology.
+      Decision 2/M6): the production main+popup entries emit **one shared project-authored CSS asset**,
+      and **no second project-authored production CSS asset exists unless justified by a documented
+      Vite/Rollup output constraint** (round-5 M3 — since CSS extraction can vary by chunking, acceptance
+      is phrased against the ACTUAL build output, not the source `@import` order); gallery-only CSS
+      appears only in the dev-gated gallery chunk, never in a production entry.
 - [ ] 6.13 Write the automated Playwright suite (design.md Decision 13/G4/G5), replacing the
       "manual verification only" posture: main window and popup in dark and light theme; the
       accent/on-accent contrast matrix for the critical-component subset; modal keyboard/focus
@@ -371,7 +394,10 @@ boundaries match the `design-tokens` / `component-library` / `preview-gallery` c
       checks above (Tauri/WebDriver or launch-and-probe harness), plus a **macOS CI job** (the only
       runner with Tauri build/entitlement capability) running it as a REQUIRED release gate. The
       existing `scripts/smoke_test.sh` covers daemon/e2e on a release build; this new script is the
-      packaged-UI smoke. Browser Playwright (6.13/6.14) remains supplemental.
+      packaged-UI smoke. Browser Playwright (6.13/6.14) remains supplemental. **Release scope
+      (round-5 M4):** release CI for this change validates **macOS only**; any generated non-macOS
+      (Windows/Linux) Tauri UI artifacts are NOT treated as release artifacts (this change does not
+      touch packaging; the `bundle.targets: "all"` mismatch is tracked in `CopyPaste-4w1a`).
 
 ## Cross-cutting cleanup (applies across slices; verify at the end of slice 6)
 

@@ -185,15 +185,24 @@ field(s) while retaining every other valid field's stored value.
 
 ### Requirement: No versioned-key migration or downgrade handling (additive fields only)
 The system SHALL add `theme`/`accent`/`translucency` as additive fields on the existing `UIPrefs`
-object at its current key (`copypaste-ui-prefs-v4`) with NO version bump, NO legacy-key migration
-chain, NO dual-write, and NO downgrade handling — backward compatibility is explicitly out of scope
-(user directive). A stored blob predating the fields simply gains them at their defaults via the
-existing whitelist-merge-with-defaults on next load.
+object at its current key (`copypaste-ui-prefs-v4`) with NO version bump, NO new migration chain, NO
+dual-write, and NO downgrade handling — backward compatibility is explicitly out of scope (user
+directive). A stored blob predating the fields simply gains them at their defaults via the existing
+whitelist-merge-with-defaults on next load. Additionally, the system SHALL **remove the existing
+legacy v1/v2/v3→v4 migration branches** from `store.ts` as an explicit part of the no-back-compat
+policy; the accepted, documented impact is that a user whose prefs remain under an old v1–v3 key
+(never re-saved under v4) has ALL their UI prefs reset to defaults.
 
-#### Scenario: No migration code path exists
+#### Scenario: No migration code path exists (legacy branches removed)
 - **WHEN** preferences are loaded, whatever their stored shape
-- **THEN** they are read from the single current key and merged over defaults; there is no
-  version-detection or legacy-key-forwarding branch, and no separate `-v5` key is ever written
+- **THEN** they are read from the single current `v4` key and merged over defaults; there is no
+  version-detection or legacy-key-forwarding branch (the former v1/v2/v3 branches are deleted), and
+  no new versioned key is ever written
+
+#### Scenario: A user still on an old v1–v3 key resets to defaults
+- **WHEN** a user's prefs exist only under a legacy `v1`/`v2`/`v3` key and were never re-saved to v4
+- **THEN** after this change the app does not read that legacy key; all UI prefs load as
+  `DEFAULT_PREFS` (accepted no-back-compat impact)
 
 ### Requirement: Supported OS/WebView matrix is stated as a non-functional requirement
 The system SHALL state macOS 13 (Ventura) or later — WKWebView backed by Safari 16.2+ — as the
