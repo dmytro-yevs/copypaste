@@ -76,7 +76,7 @@ Existing infra we build on, unchanged:
   labelled/described relationships, exposed state, keyboard behavior unchanged or improved, stable
   test IDs only where they are an intentional contract — rather than requiring every `role`/`id`/
   `aria-*` to remain on the literal same element. This also lets us **fix** the existing P0 gap
-  where masked sensitive content currently leaks plaintext into the accessible name. See Decision 7.
+  where masked sensitive content currently leaks plaintext into the accessible name. See Decision 9.
 - Define and ship a Translucency toggle (default on) with clear on/off surface rules and platform
   fallback. See the persistence/translucency decision below.
 - Measure and gate popup latency and CSS/JS bundle-size deltas as acceptance criteria, not just
@@ -647,12 +647,12 @@ from a new shared primitive; `B` = behavior changed (see decision cited); `D` = 
 | `PopupRow.tsx` | P | Same shared units, condensed layout wrapper (Decision 8). |
 | `HistoryView/VirtualList.tsx` | U | Class-only; runtime-computed geometry stays inline style (Decision 12). |
 | `BulkActionBar.tsx` | U | Class-only. |
-| `EmptyState.tsx` | U | Class-only; 4 documented states (offline/starting-up/no-matches/nothing-copied). |
+| `EmptyState.tsx` | U | Class-only; ONE component API used across **7 app empty-state contexts**: **2 History** (no items, no search results), **1 Devices** (no devices paired), **4 Popup** (offline, starting-up, no matches, nothing copied yet). The "4 states" refers to the Popup only — all 7 contexts share `EmptyState`'s props. |
 | `DetailsModal.tsx` | P | Composes `Dialog` primitive (Decision 5). |
 | `ConfirmModal.tsx` | P | Composes `Dialog` primitive; existing focus-trap/portal behavior unchanged. |
 | `SasPairingModal.tsx` | P | Composes `Dialog` primitive. |
 | `RevokeConfirmDialog.tsx` | P | Composes `Dialog` primitive. |
-| `DeviceCard.tsx` (`ThisDeviceCard`/`PeerRow`) | B | `.devrow`/`.cfields`; action-availability logic per Decision 16's table is new/changed. |
+| `DeviceCard.tsx` (`ThisDeviceCard`/`PeerRow`) | B | `.devrow`/`.cfields`; **IPC/action semantics and action availability are PRESERVED** (unpair/revoke/revoke_and_rotate, offline availability unchanged) — only presentation (danger styling, equal-width layout) and the uniform inline error-state wiring change (Decision 16). No business-logic change. |
 | `DiscoveredRow.tsx` | U | Class-only; no destructive actions (Decision 16). |
 | `TabBar.tsx` | B | Adds `role="tab"`/`role="tablist"`/arrow-key nav (Decision 13, X5). |
 | `Sidebar.tsx` | B | Adds Gallery item gated on `DEV && MOCK` (Decision 6). |
@@ -678,8 +678,10 @@ from a new shared primitive; `B` = behavior changed (see decision cited); `D` = 
   → Mitigation: verbatim copy plus the automated name-and-value parity test (Decision 11).
 - **[Risk] Adding `theme`/`accent`/`translucency` to `UIPrefs` could let a corrupt stored value
   reach the DOM.** → Mitigation: per-field runtime validation defaulting each field independently
-  (Decision 10) plus tests for malformed JSON and each field invalid. No migration chain is touched
-  (additive fields only, no back-compat), so the legacy-migration corruption risk does not apply.
+  (Decision 10) plus tests for malformed JSON and each field invalid. No NEW migration chain is added
+  (the new fields are additive with defaults); the existing v1/v2/v3→v4 legacy migration branches are
+  intentionally **removed** (Decision 10/B2), so a user still on an old v1–v3 key resets to defaults —
+  a documented, accepted no-back-compat impact, not a corruption bug.
 - **[Risk] `.devrow`/`.cfields` selection (Decision "device shape", carried from the prior draft)
   means `.devcard`/`dev-grid` is spec'd but never rendered in the real app** — a future redesign of
   `DevicesView` into a grid would need to re-derive wiring. → Mitigation: documented in the component
@@ -709,7 +711,9 @@ from a new shared primitive; `B` = behavior changed (see decision cited); `D` = 
    at open (cross-window channel settled — Decision 4); performance baseline recorded (Decision 15).
 2. **Slice 2** — land `primitives.css` plus the typed React primitives (`ActionButton`, `Toggle`,
    `Dialog`, disclosure header) and their a11y foundations. Verify: primitives render correctly in
-   the (still gallery-less) app; `Dialog` a11y contract tests pass (focus trap/restore/Escape/
+   the app — which now also gains the **minimal DEV+MOCK gallery shell** (primitive stories + the
+   early production-exclusion chunk-graph check, task 2.13/S2), so components are visually
+   inspectable from slice 2 on; `Dialog` a11y contract tests pass (focus trap/restore/Escape/
    backdrop, reusing `useFocusTrap`'s existing test coverage plus new scroll-lock tests).
 3. **Slice 3** — land `patterns.css` for History + Popup, the shared clipboard-presentation units
    (Decision 8), and the sensitive-masking contract (Decision 9). Verify: all 11 kinds + unknown
